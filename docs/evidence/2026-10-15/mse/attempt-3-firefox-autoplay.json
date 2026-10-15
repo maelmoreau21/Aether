@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-15T13:24:26.619Z",
+  "channel": "firefox",
+  "os": "10.0.26300",
+  "hashesBefore": {
+    "representative/representative.mkv": "a8ecf7ff37fadaf5e62c994cbc4985906999143eab2cf02ac2242993892fc3cc",
+    "representative/representative.mp4": "70222167e1c24959cc589fc6db042d1d0a63a8d72125bd4304cc9fdbae4d8587",
+    "representative/representative-en.mkv": "2e71c27674a205a70cf05e34d9f60c84c0178aab6edd76339512365cd034d697",
+    "representative/representative-en.mp4": "609a9100ba1f1fcc62b9cfe2ea6a5e1d25404a186ab8564103910f8f61ae3bf4"
+  },
+  "resourceMeasurement": "NT: browser process tree CPU/RSS not instrumented",
+  "scope": "MSE minimal; no DASH engine; Video.js and Shaka NT",
+  "browser": "155.0.1",
+  "driver": "0.37.1",
+  "result": {
+    "errors": [],
+    "events": [],
+    "failure": "Error: Timeout audio context resume",
+    "passed": false,
+    "physical10bit": "NT",
+    "physical51": "NT",
+    "stage": "audio context",
+    "subtitles": [],
+    "switches": []
+  },
+  "hashesAfter": {
+    "representative/representative.mkv": "a8ecf7ff37fadaf5e62c994cbc4985906999143eab2cf02ac2242993892fc3cc",
+    "representative/representative.mp4": "70222167e1c24959cc589fc6db042d1d0a63a8d72125bd4304cc9fdbae4d8587",
+    "representative/representative-en.mkv": "2e71c27674a205a70cf05e34d9f60c84c0178aab6edd76339512365cd034d697",
+    "representative/representative-en.mp4": "609a9100ba1f1fcc62b9cfe2ea6a5e1d25404a186ab8564103910f8f61ae3bf4"
+  },
+  "originalsUnchanged": true
+}

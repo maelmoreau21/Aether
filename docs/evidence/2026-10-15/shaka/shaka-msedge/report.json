@@ -1,0 +1,3541 @@
+{
+  "date": "2026-10-15T13:53:51.465Z",
+  "channel": "msedge",
+  "engine": "shaka",
+  "os": "10.0.26300",
+  "headless": true,
+  "hashesBefore": {
+    "representative/representative.mkv": "a8ecf7ff37fadaf5e62c994cbc4985906999143eab2cf02ac2242993892fc3cc",
+    "representative/representative.mp4": "70222167e1c24959cc589fc6db042d1d0a63a8d72125bd4304cc9fdbae4d8587",
+    "mse/verified/video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "mse/verified/audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "mse/verified/audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+    "dash/video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "dash/audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "dash/audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e"
+  },
+  "method": "common FFT8192/RMS1024; 3 stable samples; 3 rounds x6 switches; A/V marker tolerance200ms; physical output NT",
+  "browser": "155.0.4283.45",
+  "driver": "Playwright 1.62.1",
+  "initial": {
+    "initial": {
+      "signal": [
+        {
+          "rms": 0.010567637138796087,
+          "hz": 439.453125
+        },
+        {
+          "rms": 0.010712081401092985,
+          "hz": 550.78125
+        },
+        {
+          "rms": 0.010544702501253198,
+          "hz": 662.109375
+        },
+        {
+          "rms": 0.011073321898919382,
+          "hz": 82.03125
+        },
+        {
+          "rms": 0.010622118304843773,
+          "hz": 767.578125
+        },
+        {
+          "rms": 0.010636343132108157,
+          "hz": 878.90625
+        }
+      ],
+      "pixels": {
+        "brightness": 123.32754629629618,
+        "colors": 207
+      },
+      "src": "",
+      "version": "v5.2.13",
+      "videoDimensions": [
+        320,
+        180
+      ]
+    },
+    "defaultAudioTracks": [
+      {
+        "active": true,
+        "language": "fr",
+        "label": null,
+        "mimeType": "audio/mp4",
+        "codecs": "opus",
+        "primary": true,
+        "roles": [
+          "main"
+        ],
+        "channelsCount": 6,
+        "audioSamplingRate": 48000,
+        "spatialAudio": false,
+        "originalLanguage": "fr"
+      },
+      {
+        "active": false,
+        "language": "en",
+        "label": null,
+        "mimeType": "audio/mp4",
+        "codecs": "opus",
+        "primary": false,
+        "roles": [
+          "alternate"
+        ],
+        "channelsCount": 2,
+        "audioSamplingRate": 48000,
+        "spatialAudio": false,
+        "originalLanguage": "en"
+      }
+    ],
+    "defaultTextTracks": [
+      {
+        "id": 4,
+        "active": false,
+        "type": "text",
+        "bandwidth": 117,
+        "language": "fr",
+        "label": "FR COMPLET",
+        "kind": "subtitle",
+        "mimeType": "text/vtt",
+        "codecs": null,
+        "primary": false,
+        "roles": [
+          "subtitle"
+        ],
+        "forced": false,
+        "originalTextId": "fr-full",
+        "originalLanguage": "fr"
+      },
+      {
+        "id": 5,
+        "active": true,
+        "type": "text",
+        "bandwidth": 111,
+        "language": "fr",
+        "label": "FR FORCE",
+        "kind": "subtitle",
+        "mimeType": "text/vtt",
+        "codecs": null,
+        "primary": false,
+        "roles": [
+          "forced-subtitle"
+        ],
+        "forced": true,
+        "originalTextId": "fr-forced",
+        "originalLanguage": "fr"
+      },
+      {
+        "id": 6,
+        "active": false,
+        "type": "text",
+        "bandwidth": 109,
+        "language": "en",
+        "label": "EN FULL",
+        "kind": "subtitle",
+        "mimeType": "text/vtt",
+        "codecs": null,
+        "primary": false,
+        "roles": [
+          "subtitle"
+        ],
+        "forced": false,
+        "originalTextId": "en-full",
+        "originalLanguage": "en"
+      }
+    ]
+  },
+  "defaultSubtitle": [
+    "FR FORCE CUE 2"
+  ],
+  "resources": {
+    "file": "resources.jsonl",
+    "browserRootPid": 9620,
+    "serverPid": 15976,
+    "scope": "warm playback/seek/switch; observer concurrent, overhead recorded; sum WorkingSet may double count shared pages"
+  },
+  "result": {
+    "engine": "shaka",
+    "passed": true,
+    "switches": [
+      {
+        "round": 1,
+        "language": "en",
+        "mode": "playing",
+        "ui": {
+          "language": "en",
+          "apiMs": 0.5,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 143.19999999925494,
+        "resumeToSignalMs": null,
+        "pausePreserved": null,
+        "sourceUnchanged": true,
+        "selectedLanguage": "en",
+        "signal": [
+          {
+            "rms": 0.010609706063944228,
+            "hz": 990.234375
+          },
+          {
+            "rms": 0.010639887874663169,
+            "hz": 1101.5625
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          }
+        ],
+        "sampledSilenceTotalMs": 20.200000001117587,
+        "maxSampledSilenceRunMs": 20.200000001117587,
+        "maxPollMs": 19.700000001117587,
+        "maxVideoCallbackGapMs": 49.69999999999982,
+        "videoFramesDuring": 3,
+        "videoPtsProgress": 0.08399999999999996,
+        "positionAdvance": 0.23899999999999993,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 2844.39999999851,
+            "time": 0.34
+          },
+          {
+            "event": "seeking",
+            "at": 2846.39999999851,
+            "time": 0.339
+          },
+          {
+            "event": "buffering",
+            "at": 2846.5,
+            "time": 0.339,
+            "buffering": true
+          },
+          {
+            "event": "waiting",
+            "at": 2846.699999999255,
+            "time": 0.339
+          },
+          {
+            "event": "seeked",
+            "at": 2873.199999999255,
+            "time": 0.339
+          },
+          {
+            "event": "buffering",
+            "at": 2873.2999999988824,
+            "time": 0.339,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 2873.2999999988824,
+            "time": 0.339
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": true,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 1,
+        "language": "fr",
+        "mode": "playing",
+        "ui": {
+          "language": "fr",
+          "apiMs": 0.30000000074505806,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 149.40000000037253,
+        "resumeToSignalMs": null,
+        "pausePreserved": null,
+        "sourceUnchanged": true,
+        "selectedLanguage": "fr",
+        "signal": [
+          {
+            "rms": 0.010614524352192126,
+            "hz": 439.453125
+          },
+          {
+            "rms": 0.010658178880774503,
+            "hz": 550.78125
+          },
+          {
+            "rms": 0.01065349128215514,
+            "hz": 662.109375
+          },
+          {
+            "rms": 0.010263647948055987,
+            "hz": 82.03125
+          },
+          {
+            "rms": 0.010625783567792702,
+            "hz": 767.578125
+          },
+          {
+            "rms": 0.01054777293399919,
+            "hz": 878.90625
+          }
+        ],
+        "sampledSilenceTotalMs": 15.099999999627471,
+        "maxSampledSilenceRunMs": 15.099999999627471,
+        "maxPollMs": 16.5,
+        "maxVideoCallbackGapMs": 50,
+        "videoFramesDuring": 4,
+        "videoPtsProgress": 0.08400000000000007,
+        "positionAdvance": 0.261081,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 3115.199999999255,
+            "time": 0.579
+          },
+          {
+            "event": "seeking",
+            "at": 3119.5,
+            "time": 0.583544
+          },
+          {
+            "event": "buffering",
+            "at": 3119.7999999988824,
+            "time": 0.583544,
+            "buffering": true
+          },
+          {
+            "event": "waiting",
+            "at": 3119.7999999988824,
+            "time": 0.583544
+          },
+          {
+            "event": "seeked",
+            "at": 3155.2999999988824,
+            "time": 0.594211
+          },
+          {
+            "event": "buffering",
+            "at": 3155.39999999851,
+            "time": 0.594211,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 3155.39999999851,
+            "time": 0.594211
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": true,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 1,
+        "language": "en",
+        "mode": "paused",
+        "ui": {
+          "language": "en",
+          "apiMs": 0.3999999985098839,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 174.2000000011176,
+        "resumeToSignalMs": 64.80000000074506,
+        "pausePreserved": true,
+        "sourceUnchanged": true,
+        "selectedLanguage": "en",
+        "signal": [
+          {
+            "rms": 0.010680667869944219,
+            "hz": 990.234375
+          },
+          {
+            "rms": 0.010672709376935739,
+            "hz": 1101.5625
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          }
+        ],
+        "sampledSilenceTotalMs": 100.40000000037253,
+        "maxSampledSilenceRunMs": 100.40000000037253,
+        "maxPollMs": 16.40000000037253,
+        "maxVideoCallbackGapMs": 116.70000000000027,
+        "videoFramesDuring": 3,
+        "videoPtsProgress": 0.08400000000000007,
+        "positionAdvance": 0.18833299999999986,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 3403.39999999851,
+            "time": 0.842211
+          },
+          {
+            "event": "pause",
+            "at": 3403.7999999988824,
+            "time": 0.842211
+          },
+          {
+            "event": "seeking",
+            "at": 3404.5,
+            "time": 0.841211
+          },
+          {
+            "event": "buffering",
+            "at": 3404.7999999988824,
+            "time": 0.841211,
+            "buffering": true
+          },
+          {
+            "event": "seeked",
+            "at": 3430.5999999996275,
+            "time": 0.841211
+          },
+          {
+            "event": "buffering",
+            "at": 3430.699999999255,
+            "time": 0.841211,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 3513.0999999996275,
+            "time": 0.841211
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": null,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 1,
+        "language": "fr",
+        "mode": "paused",
+        "ui": {
+          "language": "fr",
+          "apiMs": 0.40000000037252903,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 172.80000000074506,
+        "resumeToSignalMs": 66.80000000074506,
+        "pausePreserved": true,
+        "sourceUnchanged": true,
+        "selectedLanguage": "fr",
+        "signal": [
+          {
+            "rms": 0.01066216013986511,
+            "hz": 439.453125
+          },
+          {
+            "rms": 0.010576666678079615,
+            "hz": 550.78125
+          },
+          {
+            "rms": 0.010670689553627375,
+            "hz": 662.109375
+          },
+          {
+            "rms": 0.010938820873074774,
+            "hz": 82.03125
+          },
+          {
+            "rms": 0.010613257284953607,
+            "hz": 767.578125
+          },
+          {
+            "rms": 0.010465188257645506,
+            "hz": 878.90625
+          }
+        ],
+        "sampledSilenceTotalMs": 91.30000000074506,
+        "maxSampledSilenceRunMs": 91.30000000074506,
+        "maxPollMs": 14.599999999627471,
+        "maxVideoCallbackGapMs": 83.5,
+        "videoFramesDuring": 3,
+        "videoPtsProgress": 0.040999999999999925,
+        "positionAdvance": 0.19874100000000006,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 3709.39999999851,
+            "time": 1.030544
+          },
+          {
+            "event": "seeking",
+            "at": 3710.5,
+            "time": 1.029544
+          },
+          {
+            "event": "buffering",
+            "at": 3710.5999999996275,
+            "time": 1.029544,
+            "buffering": true
+          },
+          {
+            "event": "seeked",
+            "at": 3795.699999999255,
+            "time": 1.029544
+          },
+          {
+            "event": "buffering",
+            "at": 3795.7999999988824,
+            "time": 1.029544,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 3815.699999999255,
+            "time": 1.029544
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": null,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 1,
+        "language": "en",
+        "mode": "after-seek",
+        "ui": {
+          "language": "en",
+          "apiMs": 0.5,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 211,
+        "resumeToSignalMs": null,
+        "pausePreserved": null,
+        "sourceUnchanged": true,
+        "selectedLanguage": "en",
+        "signal": [
+          {
+            "rms": 0.010616433389060724,
+            "hz": 990.234375
+          },
+          {
+            "rms": 0.010657424125715895,
+            "hz": 1101.5625
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          }
+        ],
+        "sampledSilenceTotalMs": 110,
+        "maxSampledSilenceRunMs": 110,
+        "maxPollMs": 16.300000000745058,
+        "maxVideoCallbackGapMs": 166.46199999999953,
+        "videoFramesDuring": 3,
+        "videoPtsProgress": 0.08300000000000018,
+        "positionAdvance": 0.20955800000000036,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 4138.799999998882,
+            "time": 3.309513
+          },
+          {
+            "event": "seeking",
+            "at": 4144,
+            "time": 3.310333
+          },
+          {
+            "event": "buffering",
+            "at": 4144.199999999255,
+            "time": 3.310333,
+            "buffering": true
+          },
+          {
+            "event": "waiting",
+            "at": 4144.199999999255,
+            "time": 3.310333
+          },
+          {
+            "event": "seeked",
+            "at": 4271.5,
+            "time": 3.310333
+          },
+          {
+            "event": "buffering",
+            "at": 4271.5,
+            "time": 3.310333,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 4271.5,
+            "time": 3.310333
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": true,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 1,
+        "language": "fr",
+        "mode": "after-seek",
+        "ui": {
+          "language": "fr",
+          "apiMs": 0.30000000074505806,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 163.40000000037253,
+        "resumeToSignalMs": null,
+        "pausePreserved": null,
+        "sourceUnchanged": true,
+        "selectedLanguage": "fr",
+        "signal": [
+          {
+            "rms": 0.010601698187917747,
+            "hz": 439.453125
+          },
+          {
+            "rms": 0.010562466904394463,
+            "hz": 550.78125
+          },
+          {
+            "rms": 0.010608730276216047,
+            "hz": 662.109375
+          },
+          {
+            "rms": 0.010749180851964055,
+            "hz": 82.03125
+          },
+          {
+            "rms": 0.010630451741770746,
+            "hz": 767.578125
+          },
+          {
+            "rms": 0.01056927236965238,
+            "hz": 878.90625
+          }
+        ],
+        "sampledSilenceTotalMs": 60.40000000037253,
+        "maxSampledSilenceRunMs": 60.40000000037253,
+        "maxPollMs": 15,
+        "maxVideoCallbackGapMs": 83.19999999999982,
+        "videoFramesDuring": 3,
+        "videoPtsProgress": 0.08300000000000018,
+        "positionAdvance": 0.20966700000000005,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 5024,
+            "time": 3.300667
+          },
+          {
+            "event": "seeking",
+            "at": 5025.89999999851,
+            "time": 3.299667
+          },
+          {
+            "event": "buffering",
+            "at": 5026.0999999996275,
+            "time": 3.299667,
+            "buffering": true
+          },
+          {
+            "event": "waiting",
+            "at": 5026.0999999996275,
+            "time": 3.299667
+          },
+          {
+            "event": "seeked",
+            "at": 5103.199999999255,
+            "time": 3.299667
+          },
+          {
+            "event": "buffering",
+            "at": 5103.5,
+            "time": 3.299667,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 5103.5,
+            "time": 3.299667
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": true,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 2,
+        "language": "en",
+        "mode": "playing",
+        "ui": {
+          "language": "en",
+          "apiMs": 0.5,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 154.69999999925494,
+        "resumeToSignalMs": null,
+        "pausePreserved": null,
+        "sourceUnchanged": true,
+        "selectedLanguage": "en",
+        "signal": [
+          {
+            "rms": 0.010550063195042253,
+            "hz": 990.234375
+          },
+          {
+            "rms": 0.010624725534721867,
+            "hz": 1101.5625
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          }
+        ],
+        "sampledSilenceTotalMs": 31.799999998882413,
+        "maxSampledSilenceRunMs": 31.799999998882413,
+        "maxPollMs": 16.699999999254942,
+        "maxVideoCallbackGapMs": 50,
+        "videoFramesDuring": 4,
+        "videoPtsProgress": 0.125,
+        "positionAdvance": 0.226402,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 5806.5999999996275,
+            "time": 0.329333
+          },
+          {
+            "event": "seeking",
+            "at": 5808.299999998882,
+            "time": 0.328333
+          },
+          {
+            "event": "buffering",
+            "at": 5808.39999999851,
+            "time": 0.328333,
+            "buffering": true
+          },
+          {
+            "event": "waiting",
+            "at": 5808.39999999851,
+            "time": 0.328333
+          },
+          {
+            "event": "seeked",
+            "at": 5864.5,
+            "time": 0.328333
+          },
+          {
+            "event": "buffering",
+            "at": 5864.5999999996275,
+            "time": 0.328333,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 5864.699999999255,
+            "time": 0.328333
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": true,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 2,
+        "language": "fr",
+        "mode": "playing",
+        "ui": {
+          "language": "fr",
+          "apiMs": 0.5,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 140.2000000011176,
+        "resumeToSignalMs": null,
+        "pausePreserved": null,
+        "sourceUnchanged": true,
+        "selectedLanguage": "fr",
+        "signal": [
+          {
+            "rms": 0.010635186692445803,
+            "hz": 439.453125
+          },
+          {
+            "rms": 0.010637075783929001,
+            "hz": 550.78125
+          },
+          {
+            "rms": 0.010612194007792052,
+            "hz": 662.109375
+          },
+          {
+            "rms": 0.01096522429079094,
+            "hz": 82.03125
+          },
+          {
+            "rms": 0.010684614115158945,
+            "hz": 767.578125
+          },
+          {
+            "rms": 0.010581460766506103,
+            "hz": 878.90625
+          }
+        ],
+        "sampledSilenceTotalMs": 30.799999998882413,
+        "maxSampledSilenceRunMs": 30.799999998882413,
+        "maxPollMs": 15.699999999254942,
+        "maxVideoCallbackGapMs": 66.30000000000018,
+        "videoFramesDuring": 2,
+        "videoPtsProgress": 0.04200000000000004,
+        "positionAdvance": 0.236892,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 6093.699999999255,
+            "time": 0.557666
+          },
+          {
+            "event": "seeking",
+            "at": 6098.199999999255,
+            "time": 0.556666
+          },
+          {
+            "event": "buffering",
+            "at": 6098.5,
+            "time": 0.556666,
+            "buffering": true
+          },
+          {
+            "event": "waiting",
+            "at": 6098.5999999996275,
+            "time": 0.556666
+          },
+          {
+            "event": "seeked",
+            "at": 6137.799999998882,
+            "time": 0.556666
+          },
+          {
+            "event": "buffering",
+            "at": 6137.89999999851,
+            "time": 0.556666,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 6137.89999999851,
+            "time": 0.556666
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": true,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 2,
+        "language": "en",
+        "mode": "paused",
+        "ui": {
+          "language": "en",
+          "apiMs": 0.3999999985098839,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 182.60000000149012,
+        "resumeToSignalMs": 72,
+        "pausePreserved": true,
+        "sourceUnchanged": true,
+        "selectedLanguage": "en",
+        "signal": [
+          {
+            "rms": 0.010591671429231083,
+            "hz": 990.234375
+          },
+          {
+            "rms": 0.010639952073979903,
+            "hz": 1101.5625
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          }
+        ],
+        "sampledSilenceTotalMs": 98.40000000037253,
+        "maxSampledSilenceRunMs": 98.40000000037253,
+        "maxPollMs": 16.299999998882413,
+        "maxVideoCallbackGapMs": 83.40000000000055,
+        "videoFramesDuring": 2,
+        "videoPtsProgress": 0.040999999999999925,
+        "positionAdvance": 0.19900000000000007,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 6374.0999999996275,
+            "time": 0.796666
+          },
+          {
+            "event": "pause",
+            "at": 6374.799999998882,
+            "time": 0.796666
+          },
+          {
+            "event": "seeking",
+            "at": 6376,
+            "time": 0.795666
+          },
+          {
+            "event": "buffering",
+            "at": 6376.0999999996275,
+            "time": 0.795666,
+            "buffering": true
+          },
+          {
+            "event": "seeked",
+            "at": 6418.299999998882,
+            "time": 0.795666
+          },
+          {
+            "event": "buffering",
+            "at": 6418.39999999851,
+            "time": 0.795666,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 6486.0999999996275,
+            "time": 0.795666
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": null,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 2,
+        "language": "fr",
+        "mode": "paused",
+        "ui": {
+          "language": "fr",
+          "apiMs": 0.5,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 179.39999999850988,
+        "resumeToSignalMs": 64.29999999888241,
+        "pausePreserved": true,
+        "sourceUnchanged": true,
+        "selectedLanguage": "fr",
+        "signal": [
+          {
+            "rms": 0.010531418878596314,
+            "hz": 439.453125
+          },
+          {
+            "rms": 0.010557719404395568,
+            "hz": 550.78125
+          },
+          {
+            "rms": 0.010598113459605723,
+            "hz": 662.109375
+          },
+          {
+            "rms": 0.011022665420451435,
+            "hz": 82.03125
+          },
+          {
+            "rms": 0.010681214324520153,
+            "hz": 767.578125
+          },
+          {
+            "rms": 0.010681429936782345,
+            "hz": 878.90625
+          }
+        ],
+        "sampledSilenceTotalMs": 110.59999999962747,
+        "maxSampledSilenceRunMs": 110.59999999962747,
+        "maxPollMs": 18.5,
+        "maxVideoCallbackGapMs": 99.9960000000001,
+        "videoFramesDuring": 4,
+        "videoPtsProgress": 0.04200000000000004,
+        "positionAdvance": 0.19099999999999995,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 6691.5999999996275,
+            "time": 0.995666
+          },
+          {
+            "event": "seeking",
+            "at": 6692.89999999851,
+            "time": 0.994666
+          },
+          {
+            "event": "buffering",
+            "at": 6693.199999999255,
+            "time": 0.994666,
+            "buffering": true
+          },
+          {
+            "event": "seeked",
+            "at": 6798.5999999996275,
+            "time": 0.994666
+          },
+          {
+            "event": "buffering",
+            "at": 6798.699999999255,
+            "time": 0.994666,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 6806.699999999255,
+            "time": 0.994666
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": null,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 2,
+        "language": "en",
+        "mode": "after-seek",
+        "ui": {
+          "language": "en",
+          "apiMs": 0.30000000074505806,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 159.80000000074506,
+        "resumeToSignalMs": null,
+        "pausePreserved": null,
+        "sourceUnchanged": true,
+        "selectedLanguage": "en",
+        "signal": [
+          {
+            "rms": 0.010613322185209906,
+            "hz": 990.234375
+          },
+          {
+            "rms": 0.010638645615239785,
+            "hz": 1101.5625
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          }
+        ],
+        "sampledSilenceTotalMs": 29.5,
+        "maxSampledSilenceRunMs": 29.5,
+        "maxPollMs": 15.199999999254942,
+        "maxVideoCallbackGapMs": 66.30000000000018,
+        "videoFramesDuring": 4,
+        "videoPtsProgress": 0.125,
+        "positionAdvance": 0.240008,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 7107.0999999996275,
+            "time": 3.311333
+          },
+          {
+            "event": "seeking",
+            "at": 7109.5,
+            "time": 3.319341
+          },
+          {
+            "event": "buffering",
+            "at": 7109.5999999996275,
+            "time": 3.319341,
+            "buffering": true
+          },
+          {
+            "event": "waiting",
+            "at": 7109.699999999255,
+            "time": 3.319341
+          },
+          {
+            "event": "seeked",
+            "at": 7162,
+            "time": 3.319341
+          },
+          {
+            "event": "buffering",
+            "at": 7162.199999999255,
+            "time": 3.319341,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 7162.199999999255,
+            "time": 3.319341
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": true,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 2,
+        "language": "fr",
+        "mode": "after-seek",
+        "ui": {
+          "language": "fr",
+          "apiMs": 0.40000000037252903,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 156.09999999962747,
+        "resumeToSignalMs": null,
+        "pausePreserved": null,
+        "sourceUnchanged": true,
+        "selectedLanguage": "fr",
+        "signal": [
+          {
+            "rms": 0.010692316309668291,
+            "hz": 439.453125
+          },
+          {
+            "rms": 0.010689860916696005,
+            "hz": 550.78125
+          },
+          {
+            "rms": 0.010666949937417505,
+            "hz": 662.109375
+          },
+          {
+            "rms": 0.010732758173664531,
+            "hz": 82.03125
+          },
+          {
+            "rms": 0.010599356155837672,
+            "hz": 767.578125
+          },
+          {
+            "rms": 0.01052267131998844,
+            "hz": 878.90625
+          }
+        ],
+        "sampledSilenceTotalMs": 42,
+        "maxSampledSilenceRunMs": 42,
+        "maxPollMs": 15.600000001490116,
+        "maxVideoCallbackGapMs": 116.5640000000003,
+        "videoFramesDuring": 2,
+        "videoPtsProgress": 0.041999999999999815,
+        "positionAdvance": 0.2203330000000001,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 7941.699999999255,
+            "time": 3.311333
+          },
+          {
+            "event": "seeking",
+            "at": 7945.5999999996275,
+            "time": 3.310333
+          },
+          {
+            "event": "buffering",
+            "at": 7945.699999999255,
+            "time": 3.310333,
+            "buffering": true
+          },
+          {
+            "event": "waiting",
+            "at": 7945.699999999255,
+            "time": 3.310333
+          },
+          {
+            "event": "seeked",
+            "at": 8005.5999999996275,
+            "time": 3.310333
+          },
+          {
+            "event": "buffering",
+            "at": 8005.699999999255,
+            "time": 3.310333,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 8005.699999999255,
+            "time": 3.310333
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": true,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 3,
+        "language": "en",
+        "mode": "playing",
+        "ui": {
+          "language": "en",
+          "apiMs": 0.10000000149011612,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 148.19999999925494,
+        "resumeToSignalMs": null,
+        "pausePreserved": null,
+        "sourceUnchanged": true,
+        "selectedLanguage": "en",
+        "signal": [
+          {
+            "rms": 0.01061647133708472,
+            "hz": 990.234375
+          },
+          {
+            "rms": 0.010645759074537584,
+            "hz": 1101.5625
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          }
+        ],
+        "sampledSilenceTotalMs": 11.099999999627471,
+        "maxSampledSilenceRunMs": 11.099999999627471,
+        "maxPollMs": 12.599999999627471,
+        "maxVideoCallbackGapMs": 49.8020000000015,
+        "videoFramesDuring": 4,
+        "videoPtsProgress": 0.125,
+        "positionAdvance": 0.24857100000000004,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 8754.099999999627,
+            "time": 0.350667
+          },
+          {
+            "event": "seeking",
+            "at": 8755.5,
+            "time": 0.349667
+          },
+          {
+            "event": "buffering",
+            "at": 8755.699999999255,
+            "time": 0.349667,
+            "buffering": true
+          },
+          {
+            "event": "waiting",
+            "at": 8755.799999998882,
+            "time": 0.349667
+          },
+          {
+            "event": "seeked",
+            "at": 8788.39999999851,
+            "time": 0.358266
+          },
+          {
+            "event": "buffering",
+            "at": 8788.5,
+            "time": 0.358297,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 8788.5,
+            "time": 0.358363
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": true,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 3,
+        "language": "fr",
+        "mode": "playing",
+        "ui": {
+          "language": "fr",
+          "apiMs": 0.30000000074505806,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 139.7999999988824,
+        "resumeToSignalMs": null,
+        "pausePreserved": null,
+        "sourceUnchanged": true,
+        "selectedLanguage": "fr",
+        "signal": [
+          {
+            "rms": 0.0106812622252715,
+            "hz": 439.453125
+          },
+          {
+            "rms": 0.010692853527374736,
+            "hz": 550.78125
+          },
+          {
+            "rms": 0.01063406166244127,
+            "hz": 662.109375
+          },
+          {
+            "rms": 0.010598197614402659,
+            "hz": 82.03125
+          },
+          {
+            "rms": 0.010578000334804799,
+            "hz": 767.578125
+          },
+          {
+            "rms": 0.010546290677540067,
+            "hz": 878.90625
+          }
+        ],
+        "sampledSilenceTotalMs": 13.900000000372529,
+        "maxSampledSilenceRunMs": 13.900000000372529,
+        "maxPollMs": 13.900000000372529,
+        "maxVideoCallbackGapMs": 50.06600000000071,
+        "videoFramesDuring": 5,
+        "videoPtsProgress": 0.08299999999999996,
+        "positionAdvance": 0.228109,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 9033.699999999255,
+            "time": 0.600334
+          },
+          {
+            "event": "seeking",
+            "at": 9037,
+            "time": 0.599334
+          },
+          {
+            "event": "buffering",
+            "at": 9037.099999999627,
+            "time": 0.599334,
+            "buffering": true
+          },
+          {
+            "event": "waiting",
+            "at": 9037.099999999627,
+            "time": 0.599334
+          },
+          {
+            "event": "seeked",
+            "at": 9071.699999999255,
+            "time": 0.599334
+          },
+          {
+            "event": "buffering",
+            "at": 9071.799999998882,
+            "time": 0.599334,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 9071.89999999851,
+            "time": 0.599334
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": true,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 3,
+        "language": "en",
+        "mode": "paused",
+        "ui": {
+          "language": "en",
+          "apiMs": 0.3999999985098839,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 191.5,
+        "resumeToSignalMs": 81.09999999962747,
+        "pausePreserved": true,
+        "sourceUnchanged": true,
+        "selectedLanguage": "en",
+        "signal": [
+          {
+            "rms": 0.01060777301995593,
+            "hz": 990.234375
+          },
+          {
+            "rms": 0.010662118261632283,
+            "hz": 1101.5625
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          }
+        ],
+        "sampledSilenceTotalMs": 91.5,
+        "maxSampledSilenceRunMs": 91.5,
+        "maxPollMs": 16.199999999254942,
+        "maxVideoCallbackGapMs": 66.69800000000032,
+        "videoFramesDuring": 4,
+        "videoPtsProgress": 0.08400000000000007,
+        "positionAdvance": 0.20966700000000005,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 9305.89999999851,
+            "time": 0.828667
+          },
+          {
+            "event": "pause",
+            "at": 9306.39999999851,
+            "time": 0.828667
+          },
+          {
+            "event": "seeking",
+            "at": 9307.39999999851,
+            "time": 0.827667
+          },
+          {
+            "event": "buffering",
+            "at": 9307.699999999255,
+            "time": 0.827667,
+            "buffering": true
+          },
+          {
+            "event": "seeked",
+            "at": 9378.299999998882,
+            "time": 0.827667
+          },
+          {
+            "event": "buffering",
+            "at": 9378.39999999851,
+            "time": 0.827667,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 9419.199999999255,
+            "time": 0.836739
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": null,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 3,
+        "language": "fr",
+        "mode": "paused",
+        "ui": {
+          "language": "fr",
+          "apiMs": 0.2999999988824129,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 176.90000000037253,
+        "resumeToSignalMs": 66.69999999925494,
+        "pausePreserved": true,
+        "sourceUnchanged": true,
+        "selectedLanguage": "fr",
+        "signal": [
+          {
+            "rms": 0.01061433107641688,
+            "hz": 439.453125
+          },
+          {
+            "rms": 0.010542310385526416,
+            "hz": 550.78125
+          },
+          {
+            "rms": 0.010630799460557972,
+            "hz": 662.109375
+          },
+          {
+            "rms": 0.010165835450944497,
+            "hz": 82.03125
+          },
+          {
+            "rms": 0.010575088103328672,
+            "hz": 767.578125
+          },
+          {
+            "rms": 0.01055669523525401,
+            "hz": 878.90625
+          }
+        ],
+        "sampledSilenceTotalMs": 86,
+        "maxSampledSilenceRunMs": 86,
+        "maxPollMs": 15.299999998882413,
+        "maxVideoCallbackGapMs": 83.5,
+        "videoFramesDuring": 4,
+        "videoPtsProgress": 0.125,
+        "positionAdvance": 0.19698099999999985,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 9626.799999998882,
+            "time": 1.038334
+          },
+          {
+            "event": "seeking",
+            "at": 9627.699999999255,
+            "time": 1.037334
+          },
+          {
+            "event": "buffering",
+            "at": 9627.89999999851,
+            "time": 1.037334,
+            "buffering": true
+          },
+          {
+            "event": "seeked",
+            "at": 9661.89999999851,
+            "time": 1.037334
+          },
+          {
+            "event": "buffering",
+            "at": 9662,
+            "time": 1.037334,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 9738.599999999627,
+            "time": 1.046242
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": null,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 3,
+        "language": "en",
+        "mode": "after-seek",
+        "ui": {
+          "language": "en",
+          "apiMs": 0.30000000074505806,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 147.7000000011176,
+        "resumeToSignalMs": null,
+        "pausePreserved": null,
+        "sourceUnchanged": true,
+        "selectedLanguage": "en",
+        "signal": [
+          {
+            "rms": 0.010601511569035984,
+            "hz": 990.234375
+          },
+          {
+            "rms": 0.01065659196982141,
+            "hz": 1101.5625
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          },
+          {
+            "rms": 0,
+            "hz": 5.859375
+          }
+        ],
+        "sampledSilenceTotalMs": 19.800000000745058,
+        "maxSampledSilenceRunMs": 19.800000000745058,
+        "maxPollMs": 15.199999999254942,
+        "maxVideoCallbackGapMs": 49.96599999999853,
+        "videoFramesDuring": 3,
+        "videoPtsProgress": 0.08300000000000018,
+        "positionAdvance": 0.23899999999999988,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 10006.099999999627,
+            "time": 3.298
+          },
+          {
+            "event": "seeking",
+            "at": 10008,
+            "time": 3.297
+          },
+          {
+            "event": "buffering",
+            "at": 10008.199999999255,
+            "time": 3.297,
+            "buffering": true
+          },
+          {
+            "event": "waiting",
+            "at": 10008.199999999255,
+            "time": 3.297
+          },
+          {
+            "event": "seeked",
+            "at": 10046.5,
+            "time": 3.297
+          },
+          {
+            "event": "buffering",
+            "at": 10046.599999999627,
+            "time": 3.297,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 10046.599999999627,
+            "time": 3.297
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": true,
+        "manualSubtitlePreserved": true
+      },
+      {
+        "round": 3,
+        "language": "fr",
+        "mode": "after-seek",
+        "ui": {
+          "language": "fr",
+          "apiMs": 0.30000000074505806,
+          "sourceUnchanged": true,
+          "safeMargin": 0
+        },
+        "requestToSignalMs": 161.80000000074506,
+        "resumeToSignalMs": null,
+        "pausePreserved": null,
+        "sourceUnchanged": true,
+        "selectedLanguage": "fr",
+        "signal": [
+          {
+            "rms": 0.010584938070607335,
+            "hz": 439.453125
+          },
+          {
+            "rms": 0.010662709338422567,
+            "hz": 550.78125
+          },
+          {
+            "rms": 0.01064344326890978,
+            "hz": 662.109375
+          },
+          {
+            "rms": 0.010305275524964488,
+            "hz": 82.03125
+          },
+          {
+            "rms": 0.010617544766836927,
+            "hz": 767.578125
+          },
+          {
+            "rms": 0.010538069170269317,
+            "hz": 878.90625
+          }
+        ],
+        "sampledSilenceTotalMs": 50,
+        "maxSampledSilenceRunMs": 50,
+        "maxPollMs": 14.699999999254942,
+        "maxVideoCallbackGapMs": 99.90000000000146,
+        "videoFramesDuring": 2,
+        "videoPtsProgress": 0.041999999999999815,
+        "positionAdvance": 0.2202029999999997,
+        "events": [
+          {
+            "event": "variantchanged",
+            "at": 10808.699999999255,
+            "time": 3.306512
+          },
+          {
+            "event": "seeking",
+            "at": 10812.5,
+            "time": 3.307667
+          },
+          {
+            "event": "buffering",
+            "at": 10812.699999999255,
+            "time": 3.307667,
+            "buffering": true
+          },
+          {
+            "event": "waiting",
+            "at": 10812.89999999851,
+            "time": 3.307667
+          },
+          {
+            "event": "seeked",
+            "at": 10873.799999998882,
+            "time": 3.307667
+          },
+          {
+            "event": "buffering",
+            "at": 10873.89999999851,
+            "time": 3.307667,
+            "buffering": false
+          },
+          {
+            "event": "playing",
+            "at": 10874,
+            "time": 3.307667
+          }
+        ],
+        "passed": true,
+        "videoContinuityObserved": true,
+        "manualSubtitlePreserved": true
+      }
+    ],
+    "markers": [
+      {
+        "target": 6,
+        "language": "en",
+        "round": 1,
+        "video": {
+          "at": 4915.9,
+          "pts": 6
+        },
+        "audio": {
+          "at": 4931.5999999996275,
+          "mediaTime": 6.018667
+        },
+        "mediaClockSkewSeconds": 0.018666999999999767,
+        "wallCallbackSkewMs": 15.699999999627835,
+        "maxPollMs": 28.90000000037253,
+        "passed": true
+      },
+      {
+        "target": 9,
+        "language": "fr",
+        "round": 1,
+        "video": {
+          "at": 5732.7,
+          "pts": 9
+        },
+        "audio": {
+          "at": 5747.0999999996275,
+          "mediaTime": 9.020926
+        },
+        "mediaClockSkewSeconds": 0.020925999999999334,
+        "wallCallbackSkewMs": 14.399999999627653,
+        "maxPollMs": 20.09999999962747,
+        "passed": true
+      },
+      {
+        "target": 6,
+        "language": "en",
+        "round": 2,
+        "video": {
+          "at": 7815.9,
+          "pts": 6
+        },
+        "audio": {
+          "at": 7829.39999999851,
+          "mediaTime": 6.010667
+        },
+        "mediaClockSkewSeconds": 0.01066699999999976,
+        "wallCallbackSkewMs": 13.499999998510248,
+        "maxPollMs": 21,
+        "passed": true
+      },
+      {
+        "target": 9,
+        "language": "fr",
+        "round": 2,
+        "audio": {
+          "at": 8666.39999999851,
+          "mediaTime": 9.020336
+        },
+        "video": {
+          "at": 8666.1,
+          "pts": 9
+        },
+        "mediaClockSkewSeconds": 0.020336000000000354,
+        "wallCallbackSkewMs": 0.2999999985095201,
+        "maxPollMs": 19.40000000037253,
+        "passed": true
+      },
+      {
+        "target": 6,
+        "language": "en",
+        "round": 3,
+        "video": {
+          "at": 10716.3,
+          "pts": 6
+        },
+        "audio": {
+          "at": 10720.699999999255,
+          "mediaTime": 6.008
+        },
+        "mediaClockSkewSeconds": 0.008000000000000007,
+        "wallCallbackSkewMs": 4.3999999992556695,
+        "maxPollMs": 20.5,
+        "passed": true
+      },
+      {
+        "target": 9,
+        "language": "fr",
+        "round": 3,
+        "video": {
+          "at": 11532.6,
+          "pts": 9
+        },
+        "audio": {
+          "at": 11536,
+          "mediaTime": 9.019361
+        },
+        "mediaClockSkewSeconds": 0.01936099999999996,
+        "wallCallbackSkewMs": 3.399999999999636,
+        "maxPollMs": 19.700000001117587,
+        "passed": true
+      }
+    ],
+    "seeks": [
+      {
+        "requested": 4.25,
+        "observed": 4.279333,
+        "language": "fr",
+        "selectedAudio": "fr"
+      },
+      {
+        "requested": 0.3,
+        "observed": 0.332,
+        "language": "fr",
+        "selectedAudio": "fr"
+      },
+      {
+        "requested": 3.25,
+        "observed": 3.300667,
+        "language": "fr",
+        "selectedAudio": "fr"
+      },
+      {
+        "requested": 3.25,
+        "observed": 3.300667,
+        "language": "en",
+        "selectedAudio": "en"
+      },
+      {
+        "requested": 0.3,
+        "observed": 0.329333,
+        "language": "fr",
+        "selectedAudio": "fr"
+      },
+      {
+        "requested": 3.25,
+        "observed": 3.311333,
+        "language": "fr",
+        "selectedAudio": "fr"
+      },
+      {
+        "requested": 3.25,
+        "observed": 3.300667,
+        "language": "en",
+        "selectedAudio": "en"
+      },
+      {
+        "requested": 0.3,
+        "observed": 0.350667,
+        "language": "fr",
+        "selectedAudio": "fr"
+      },
+      {
+        "requested": 3.25,
+        "observed": 3.298,
+        "language": "fr",
+        "selectedAudio": "fr"
+      },
+      {
+        "requested": 3.25,
+        "observed": 3.298,
+        "language": "en",
+        "selectedAudio": "en"
+      }
+    ],
+    "subtitles": [
+      {
+        "key": "fr-full",
+        "activeCues": [
+          "FR COMPLET CUE 2"
+        ],
+        "selected": [
+          {
+            "id": 4,
+            "active": true,
+            "type": "text",
+            "bandwidth": 117,
+            "language": "fr",
+            "label": "FR COMPLET",
+            "kind": "subtitle",
+            "mimeType": "text/vtt",
+            "codecs": null,
+            "primary": false,
+            "roles": [
+              "subtitle"
+            ],
+            "forced": false,
+            "originalTextId": "fr-full",
+            "originalLanguage": "fr"
+          }
+        ],
+        "passed": true
+      },
+      {
+        "key": "fr-forced",
+        "activeCues": [
+          "FR FORCE CUE 2"
+        ],
+        "selected": [
+          {
+            "id": 5,
+            "active": true,
+            "type": "text",
+            "bandwidth": 111,
+            "language": "fr",
+            "label": "FR FORCE",
+            "kind": "subtitle",
+            "mimeType": "text/vtt",
+            "codecs": null,
+            "primary": false,
+            "roles": [
+              "forced-subtitle"
+            ],
+            "forced": true,
+            "originalTextId": "fr-forced",
+            "originalLanguage": "fr"
+          }
+        ],
+        "passed": true
+      },
+      {
+        "key": "en-full",
+        "activeCues": [
+          "EN FULL CUE 2"
+        ],
+        "selected": [
+          {
+            "id": 6,
+            "active": true,
+            "type": "text",
+            "bandwidth": 109,
+            "language": "en",
+            "label": "EN FULL",
+            "kind": "subtitle",
+            "mimeType": "text/vtt",
+            "codecs": null,
+            "primary": false,
+            "roles": [
+              "subtitle"
+            ],
+            "forced": false,
+            "originalTextId": "en-full",
+            "originalLanguage": "en"
+          }
+        ],
+        "passed": true
+      },
+      {
+        "key": "off",
+        "activeCues": [],
+        "selected": [],
+        "passed": true
+      }
+    ],
+    "errors": [],
+    "physicalMultichannel": "NT",
+    "physical10bit": "NT",
+    "initial": {
+      "signal": [
+        {
+          "rms": 0.010567637138796087,
+          "hz": 439.453125
+        },
+        {
+          "rms": 0.010712081401092985,
+          "hz": 550.78125
+        },
+        {
+          "rms": 0.010544702501253198,
+          "hz": 662.109375
+        },
+        {
+          "rms": 0.011073321898919382,
+          "hz": 82.03125
+        },
+        {
+          "rms": 0.010622118304843773,
+          "hz": 767.578125
+        },
+        {
+          "rms": 0.010636343132108157,
+          "hz": 878.90625
+        }
+      ],
+      "pixels": {
+        "brightness": 123.32754629629618,
+        "colors": 207
+      },
+      "src": "",
+      "version": "v5.2.13",
+      "videoDimensions": [
+        320,
+        180
+      ]
+    },
+    "defaultFrench": true,
+    "defaultAudioTracks": [
+      {
+        "active": true,
+        "language": "fr",
+        "label": null,
+        "mimeType": "audio/mp4",
+        "codecs": "opus",
+        "primary": true,
+        "roles": [
+          "main"
+        ],
+        "channelsCount": 6,
+        "audioSamplingRate": 48000,
+        "spatialAudio": false,
+        "originalLanguage": "fr"
+      },
+      {
+        "active": false,
+        "language": "en",
+        "label": null,
+        "mimeType": "audio/mp4",
+        "codecs": "opus",
+        "primary": false,
+        "roles": [
+          "alternate"
+        ],
+        "channelsCount": 2,
+        "audioSamplingRate": 48000,
+        "spatialAudio": false,
+        "originalLanguage": "en"
+      }
+    ],
+    "defaultTextTracks": [
+      {
+        "id": 4,
+        "active": false,
+        "type": "text",
+        "bandwidth": 117,
+        "language": "fr",
+        "label": "FR COMPLET",
+        "kind": "subtitle",
+        "mimeType": "text/vtt",
+        "codecs": null,
+        "primary": false,
+        "roles": [
+          "subtitle"
+        ],
+        "forced": false,
+        "originalTextId": "fr-full",
+        "originalLanguage": "fr"
+      },
+      {
+        "id": 5,
+        "active": true,
+        "type": "text",
+        "bandwidth": 111,
+        "language": "fr",
+        "label": "FR FORCE",
+        "kind": "subtitle",
+        "mimeType": "text/vtt",
+        "codecs": null,
+        "primary": false,
+        "roles": [
+          "forced-subtitle"
+        ],
+        "forced": true,
+        "originalTextId": "fr-forced",
+        "originalLanguage": "fr"
+      },
+      {
+        "id": 6,
+        "active": false,
+        "type": "text",
+        "bandwidth": 109,
+        "language": "en",
+        "label": "EN FULL",
+        "kind": "subtitle",
+        "mimeType": "text/vtt",
+        "codecs": null,
+        "primary": false,
+        "roles": [
+          "subtitle"
+        ],
+        "forced": false,
+        "originalTextId": "en-full",
+        "originalLanguage": "en"
+      }
+    ],
+    "defaultForcedFrench": true,
+    "actualLoadMode": 2,
+    "baselineVideoGapMs": 66.59999999999991,
+    "manualSubtitleRequested": "en",
+    "events": [
+      {
+        "event": "emptied",
+        "at": 300.2999999988824,
+        "time": 0
+      },
+      {
+        "event": "buffering",
+        "at": 306.59999999962747,
+        "time": 0,
+        "buffering": true
+      },
+      {
+        "event": "buffering",
+        "at": 346.19999999925494,
+        "time": 0,
+        "buffering": true
+      },
+      {
+        "event": "loadedmetadata",
+        "at": 376.09999999962747,
+        "time": 0
+      },
+      {
+        "event": "buffering",
+        "at": 458,
+        "time": 0,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 866.5,
+        "time": 0
+      },
+      {
+        "event": "pause",
+        "at": 1318.7999999988824,
+        "time": 4.25
+      },
+      {
+        "event": "seeking",
+        "at": 1319,
+        "time": 4.25
+      },
+      {
+        "event": "buffering",
+        "at": 1319.5,
+        "time": 4.25,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 1336.3999999985099,
+        "time": 4.25
+      },
+      {
+        "event": "buffering",
+        "at": 1336.699999999255,
+        "time": 4.25,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 1347.3999999985099,
+        "time": 4.25
+      },
+      {
+        "event": "textchanged",
+        "at": 1455,
+        "time": 4.359333
+      },
+      {
+        "event": "pause",
+        "at": 2782.5,
+        "time": 0.3
+      },
+      {
+        "event": "seeking",
+        "at": 2782.699999999255,
+        "time": 0.3
+      },
+      {
+        "event": "buffering",
+        "at": 2782.7999999988824,
+        "time": 0.3,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 2791.39999999851,
+        "time": 0.3
+      },
+      {
+        "event": "buffering",
+        "at": 2791.5999999996275,
+        "time": 0.3,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 2801.2999999988824,
+        "time": 0.3
+      },
+      {
+        "event": "variantchanged",
+        "at": 2844.39999999851,
+        "time": 0.34
+      },
+      {
+        "event": "seeking",
+        "at": 2846.39999999851,
+        "time": 0.339
+      },
+      {
+        "event": "buffering",
+        "at": 2846.5,
+        "time": 0.339,
+        "buffering": true
+      },
+      {
+        "event": "waiting",
+        "at": 2846.699999999255,
+        "time": 0.339
+      },
+      {
+        "event": "seeked",
+        "at": 2873.199999999255,
+        "time": 0.339
+      },
+      {
+        "event": "buffering",
+        "at": 2873.2999999988824,
+        "time": 0.339,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 2873.2999999988824,
+        "time": 0.339
+      },
+      {
+        "event": "variantchanged",
+        "at": 3115.199999999255,
+        "time": 0.579
+      },
+      {
+        "event": "seeking",
+        "at": 3119.5,
+        "time": 0.583544
+      },
+      {
+        "event": "buffering",
+        "at": 3119.7999999988824,
+        "time": 0.583544,
+        "buffering": true
+      },
+      {
+        "event": "waiting",
+        "at": 3119.7999999988824,
+        "time": 0.583544
+      },
+      {
+        "event": "seeked",
+        "at": 3155.2999999988824,
+        "time": 0.594211
+      },
+      {
+        "event": "buffering",
+        "at": 3155.39999999851,
+        "time": 0.594211,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 3155.39999999851,
+        "time": 0.594211
+      },
+      {
+        "event": "variantchanged",
+        "at": 3403.39999999851,
+        "time": 0.842211
+      },
+      {
+        "event": "pause",
+        "at": 3403.7999999988824,
+        "time": 0.842211
+      },
+      {
+        "event": "seeking",
+        "at": 3404.5,
+        "time": 0.841211
+      },
+      {
+        "event": "buffering",
+        "at": 3404.7999999988824,
+        "time": 0.841211,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 3430.5999999996275,
+        "time": 0.841211
+      },
+      {
+        "event": "buffering",
+        "at": 3430.699999999255,
+        "time": 0.841211,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 3513.0999999996275,
+        "time": 0.841211
+      },
+      {
+        "event": "pause",
+        "at": 3705.5,
+        "time": 1.030544
+      },
+      {
+        "event": "variantchanged",
+        "at": 3709.39999999851,
+        "time": 1.030544
+      },
+      {
+        "event": "seeking",
+        "at": 3710.5,
+        "time": 1.029544
+      },
+      {
+        "event": "buffering",
+        "at": 3710.5999999996275,
+        "time": 1.029544,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 3795.699999999255,
+        "time": 1.029544
+      },
+      {
+        "event": "buffering",
+        "at": 3795.7999999988824,
+        "time": 1.029544,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 3815.699999999255,
+        "time": 1.029544
+      },
+      {
+        "event": "pause",
+        "at": 4012.5,
+        "time": 1.229362
+      },
+      {
+        "event": "seeking",
+        "at": 4022.699999999255,
+        "time": 3.25
+      },
+      {
+        "event": "buffering",
+        "at": 4023,
+        "time": 3.25,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 4069.699999999255,
+        "time": 3.25
+      },
+      {
+        "event": "buffering",
+        "at": 4069.7999999988824,
+        "time": 3.25,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 4083.7999999988824,
+        "time": 3.25
+      },
+      {
+        "event": "variantchanged",
+        "at": 4138.799999998882,
+        "time": 3.309513
+      },
+      {
+        "event": "seeking",
+        "at": 4144,
+        "time": 3.310333
+      },
+      {
+        "event": "buffering",
+        "at": 4144.199999999255,
+        "time": 3.310333,
+        "buffering": true
+      },
+      {
+        "event": "waiting",
+        "at": 4144.199999999255,
+        "time": 3.310333
+      },
+      {
+        "event": "seeked",
+        "at": 4271.5,
+        "time": 3.310333
+      },
+      {
+        "event": "buffering",
+        "at": 4271.5,
+        "time": 3.310333,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 4271.5,
+        "time": 3.310333
+      },
+      {
+        "event": "pause",
+        "at": 4490,
+        "time": 5.6
+      },
+      {
+        "event": "seeking",
+        "at": 4490.0999999996275,
+        "time": 5.6
+      },
+      {
+        "event": "buffering",
+        "at": 4490.699999999255,
+        "time": 5.6,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 4506.0999999996275,
+        "time": 5.6
+      },
+      {
+        "event": "buffering",
+        "at": 4506.199999999255,
+        "time": 5.6,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 4515.39999999851,
+        "time": 5.6
+      },
+      {
+        "event": "pause",
+        "at": 4939,
+        "time": 3.25
+      },
+      {
+        "event": "seeking",
+        "at": 4939.0999999996275,
+        "time": 3.25
+      },
+      {
+        "event": "buffering",
+        "at": 4939.199999999255,
+        "time": 3.25,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 4954.5,
+        "time": 3.25
+      },
+      {
+        "event": "buffering",
+        "at": 4954.699999999255,
+        "time": 3.25,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 4969.39999999851,
+        "time": 3.25
+      },
+      {
+        "event": "variantchanged",
+        "at": 5024,
+        "time": 3.300667
+      },
+      {
+        "event": "seeking",
+        "at": 5025.89999999851,
+        "time": 3.299667
+      },
+      {
+        "event": "buffering",
+        "at": 5026.0999999996275,
+        "time": 3.299667,
+        "buffering": true
+      },
+      {
+        "event": "waiting",
+        "at": 5026.0999999996275,
+        "time": 3.299667
+      },
+      {
+        "event": "seeked",
+        "at": 5103.199999999255,
+        "time": 3.299667
+      },
+      {
+        "event": "buffering",
+        "at": 5103.5,
+        "time": 3.299667,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 5103.5,
+        "time": 3.299667
+      },
+      {
+        "event": "pause",
+        "at": 5319.199999999255,
+        "time": 8.6
+      },
+      {
+        "event": "seeking",
+        "at": 5319.699999999255,
+        "time": 8.6
+      },
+      {
+        "event": "buffering",
+        "at": 5319.799999998882,
+        "time": 8.6,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 5327.0999999996275,
+        "time": 8.6
+      },
+      {
+        "event": "buffering",
+        "at": 5327.199999999255,
+        "time": 8.6,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 5338.5,
+        "time": 8.60877
+      },
+      {
+        "event": "pause",
+        "at": 5754.299999998882,
+        "time": 0.3
+      },
+      {
+        "event": "seeking",
+        "at": 5754.5999999996275,
+        "time": 0.3
+      },
+      {
+        "event": "buffering",
+        "at": 5754.699999999255,
+        "time": 0.3,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 5761.799999998882,
+        "time": 0.3
+      },
+      {
+        "event": "buffering",
+        "at": 5761.799999998882,
+        "time": 0.3,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 5770.5,
+        "time": 0.3
+      },
+      {
+        "event": "variantchanged",
+        "at": 5806.5999999996275,
+        "time": 0.329333
+      },
+      {
+        "event": "seeking",
+        "at": 5808.299999998882,
+        "time": 0.328333
+      },
+      {
+        "event": "buffering",
+        "at": 5808.39999999851,
+        "time": 0.328333,
+        "buffering": true
+      },
+      {
+        "event": "waiting",
+        "at": 5808.39999999851,
+        "time": 0.328333
+      },
+      {
+        "event": "seeked",
+        "at": 5864.5,
+        "time": 0.328333
+      },
+      {
+        "event": "buffering",
+        "at": 5864.5999999996275,
+        "time": 0.328333,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 5864.699999999255,
+        "time": 0.328333
+      },
+      {
+        "event": "variantchanged",
+        "at": 6093.699999999255,
+        "time": 0.557666
+      },
+      {
+        "event": "seeking",
+        "at": 6098.199999999255,
+        "time": 0.556666
+      },
+      {
+        "event": "buffering",
+        "at": 6098.5,
+        "time": 0.556666,
+        "buffering": true
+      },
+      {
+        "event": "waiting",
+        "at": 6098.5999999996275,
+        "time": 0.556666
+      },
+      {
+        "event": "seeked",
+        "at": 6137.799999998882,
+        "time": 0.556666
+      },
+      {
+        "event": "buffering",
+        "at": 6137.89999999851,
+        "time": 0.556666,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 6137.89999999851,
+        "time": 0.556666
+      },
+      {
+        "event": "variantchanged",
+        "at": 6374.0999999996275,
+        "time": 0.796666
+      },
+      {
+        "event": "pause",
+        "at": 6374.799999998882,
+        "time": 0.796666
+      },
+      {
+        "event": "seeking",
+        "at": 6376,
+        "time": 0.795666
+      },
+      {
+        "event": "buffering",
+        "at": 6376.0999999996275,
+        "time": 0.795666,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 6418.299999998882,
+        "time": 0.795666
+      },
+      {
+        "event": "buffering",
+        "at": 6418.39999999851,
+        "time": 0.795666,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 6486.0999999996275,
+        "time": 0.795666
+      },
+      {
+        "event": "pause",
+        "at": 6687.89999999851,
+        "time": 0.995666
+      },
+      {
+        "event": "variantchanged",
+        "at": 6691.5999999996275,
+        "time": 0.995666
+      },
+      {
+        "event": "seeking",
+        "at": 6692.89999999851,
+        "time": 0.994666
+      },
+      {
+        "event": "buffering",
+        "at": 6693.199999999255,
+        "time": 0.994666,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 6798.5999999996275,
+        "time": 0.994666
+      },
+      {
+        "event": "buffering",
+        "at": 6798.699999999255,
+        "time": 0.994666,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 6806.699999999255,
+        "time": 0.994666
+      },
+      {
+        "event": "pause",
+        "at": 6997.699999999255,
+        "time": 1.186666
+      },
+      {
+        "event": "seeking",
+        "at": 7003.199999999255,
+        "time": 3.25
+      },
+      {
+        "event": "buffering",
+        "at": 7003.39999999851,
+        "time": 3.25,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 7041.39999999851,
+        "time": 3.25
+      },
+      {
+        "event": "buffering",
+        "at": 7041.5999999996275,
+        "time": 3.25,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 7044.5999999996275,
+        "time": 3.25
+      },
+      {
+        "event": "variantchanged",
+        "at": 7107.0999999996275,
+        "time": 3.311333
+      },
+      {
+        "event": "seeking",
+        "at": 7109.5,
+        "time": 3.319341
+      },
+      {
+        "event": "buffering",
+        "at": 7109.5999999996275,
+        "time": 3.319341,
+        "buffering": true
+      },
+      {
+        "event": "waiting",
+        "at": 7109.699999999255,
+        "time": 3.319341
+      },
+      {
+        "event": "seeked",
+        "at": 7162,
+        "time": 3.319341
+      },
+      {
+        "event": "buffering",
+        "at": 7162.199999999255,
+        "time": 3.319341,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 7162.199999999255,
+        "time": 3.319341
+      },
+      {
+        "event": "pause",
+        "at": 7401.0999999996275,
+        "time": 5.6
+      },
+      {
+        "event": "seeking",
+        "at": 7401.39999999851,
+        "time": 5.6
+      },
+      {
+        "event": "buffering",
+        "at": 7401.5999999996275,
+        "time": 5.6,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 7425.199999999255,
+        "time": 5.6
+      },
+      {
+        "event": "buffering",
+        "at": 7425.299999998882,
+        "time": 5.6,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 7425.39999999851,
+        "time": 5.6
+      },
+      {
+        "event": "pause",
+        "at": 7837.799999998882,
+        "time": 3.25
+      },
+      {
+        "event": "seeking",
+        "at": 7838,
+        "time": 3.25
+      },
+      {
+        "event": "buffering",
+        "at": 7838.0999999996275,
+        "time": 3.25,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 7870.299999998882,
+        "time": 3.25
+      },
+      {
+        "event": "buffering",
+        "at": 7870.5,
+        "time": 3.25,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 7882,
+        "time": 3.25
+      },
+      {
+        "event": "variantchanged",
+        "at": 7941.699999999255,
+        "time": 3.311333
+      },
+      {
+        "event": "seeking",
+        "at": 7945.5999999996275,
+        "time": 3.310333
+      },
+      {
+        "event": "buffering",
+        "at": 7945.699999999255,
+        "time": 3.310333,
+        "buffering": true
+      },
+      {
+        "event": "waiting",
+        "at": 7945.699999999255,
+        "time": 3.310333
+      },
+      {
+        "event": "seeked",
+        "at": 8005.5999999996275,
+        "time": 3.310333
+      },
+      {
+        "event": "buffering",
+        "at": 8005.699999999255,
+        "time": 3.310333,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 8005.699999999255,
+        "time": 3.310333
+      },
+      {
+        "event": "pause",
+        "at": 8229.299999998882,
+        "time": 8.6
+      },
+      {
+        "event": "seeking",
+        "at": 8229.5,
+        "time": 8.6
+      },
+      {
+        "event": "buffering",
+        "at": 8229.699999999255,
+        "time": 8.6,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 8243,
+        "time": 8.6
+      },
+      {
+        "event": "buffering",
+        "at": 8243,
+        "time": 8.6,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 8254.199999999255,
+        "time": 8.6
+      },
+      {
+        "event": "pause",
+        "at": 8686.5,
+        "time": 0.3
+      },
+      {
+        "event": "seeking",
+        "at": 8686.799999998882,
+        "time": 0.3
+      },
+      {
+        "event": "buffering",
+        "at": 8687,
+        "time": 0.3,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 8699.099999999627,
+        "time": 0.3
+      },
+      {
+        "event": "buffering",
+        "at": 8699.199999999255,
+        "time": 0.3,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 8700,
+        "time": 0.3
+      },
+      {
+        "event": "variantchanged",
+        "at": 8754.099999999627,
+        "time": 0.350667
+      },
+      {
+        "event": "seeking",
+        "at": 8755.5,
+        "time": 0.349667
+      },
+      {
+        "event": "buffering",
+        "at": 8755.699999999255,
+        "time": 0.349667,
+        "buffering": true
+      },
+      {
+        "event": "waiting",
+        "at": 8755.799999998882,
+        "time": 0.349667
+      },
+      {
+        "event": "seeked",
+        "at": 8788.39999999851,
+        "time": 0.358266
+      },
+      {
+        "event": "buffering",
+        "at": 8788.5,
+        "time": 0.358297,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 8788.5,
+        "time": 0.358363
+      },
+      {
+        "event": "variantchanged",
+        "at": 9033.699999999255,
+        "time": 0.600334
+      },
+      {
+        "event": "seeking",
+        "at": 9037,
+        "time": 0.599334
+      },
+      {
+        "event": "buffering",
+        "at": 9037.099999999627,
+        "time": 0.599334,
+        "buffering": true
+      },
+      {
+        "event": "waiting",
+        "at": 9037.099999999627,
+        "time": 0.599334
+      },
+      {
+        "event": "seeked",
+        "at": 9071.699999999255,
+        "time": 0.599334
+      },
+      {
+        "event": "buffering",
+        "at": 9071.799999998882,
+        "time": 0.599334,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 9071.89999999851,
+        "time": 0.599334
+      },
+      {
+        "event": "variantchanged",
+        "at": 9305.89999999851,
+        "time": 0.828667
+      },
+      {
+        "event": "pause",
+        "at": 9306.39999999851,
+        "time": 0.828667
+      },
+      {
+        "event": "seeking",
+        "at": 9307.39999999851,
+        "time": 0.827667
+      },
+      {
+        "event": "buffering",
+        "at": 9307.699999999255,
+        "time": 0.827667,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 9378.299999998882,
+        "time": 0.827667
+      },
+      {
+        "event": "buffering",
+        "at": 9378.39999999851,
+        "time": 0.827667,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 9419.199999999255,
+        "time": 0.836739
+      },
+      {
+        "event": "pause",
+        "at": 9623.299999998882,
+        "time": 1.038334
+      },
+      {
+        "event": "variantchanged",
+        "at": 9626.799999998882,
+        "time": 1.038334
+      },
+      {
+        "event": "seeking",
+        "at": 9627.699999999255,
+        "time": 1.037334
+      },
+      {
+        "event": "buffering",
+        "at": 9627.89999999851,
+        "time": 1.037334,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 9661.89999999851,
+        "time": 1.037334
+      },
+      {
+        "event": "buffering",
+        "at": 9662,
+        "time": 1.037334,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 9738.599999999627,
+        "time": 1.046242
+      },
+      {
+        "event": "pause",
+        "at": 9929.599999999627,
+        "time": 1.235375
+      },
+      {
+        "event": "seeking",
+        "at": 9933.599999999627,
+        "time": 3.25
+      },
+      {
+        "event": "buffering",
+        "at": 9933.799999998882,
+        "time": 3.25,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 9949.699999999255,
+        "time": 3.25
+      },
+      {
+        "event": "buffering",
+        "at": 9949.89999999851,
+        "time": 3.25,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 9957.299999998882,
+        "time": 3.25
+      },
+      {
+        "event": "variantchanged",
+        "at": 10006.099999999627,
+        "time": 3.298
+      },
+      {
+        "event": "seeking",
+        "at": 10008,
+        "time": 3.297
+      },
+      {
+        "event": "buffering",
+        "at": 10008.199999999255,
+        "time": 3.297,
+        "buffering": true
+      },
+      {
+        "event": "waiting",
+        "at": 10008.199999999255,
+        "time": 3.297
+      },
+      {
+        "event": "seeked",
+        "at": 10046.5,
+        "time": 3.297
+      },
+      {
+        "event": "buffering",
+        "at": 10046.599999999627,
+        "time": 3.297,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 10046.599999999627,
+        "time": 3.297
+      },
+      {
+        "event": "pause",
+        "at": 10290.199999999255,
+        "time": 5.6
+      },
+      {
+        "event": "seeking",
+        "at": 10290.39999999851,
+        "time": 5.6
+      },
+      {
+        "event": "buffering",
+        "at": 10290.599999999627,
+        "time": 5.6,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 10311.5,
+        "time": 5.6
+      },
+      {
+        "event": "buffering",
+        "at": 10311.599999999627,
+        "time": 5.6,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 10315.5,
+        "time": 5.6
+      },
+      {
+        "event": "pause",
+        "at": 10728.099999999627,
+        "time": 3.25
+      },
+      {
+        "event": "seeking",
+        "at": 10728.299999998882,
+        "time": 3.25
+      },
+      {
+        "event": "buffering",
+        "at": 10728.39999999851,
+        "time": 3.25,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 10746.5,
+        "time": 3.25
+      },
+      {
+        "event": "buffering",
+        "at": 10746.599999999627,
+        "time": 3.25,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 10752.5,
+        "time": 3.25
+      },
+      {
+        "event": "variantchanged",
+        "at": 10808.699999999255,
+        "time": 3.306512
+      },
+      {
+        "event": "seeking",
+        "at": 10812.5,
+        "time": 3.307667
+      },
+      {
+        "event": "buffering",
+        "at": 10812.699999999255,
+        "time": 3.307667,
+        "buffering": true
+      },
+      {
+        "event": "waiting",
+        "at": 10812.89999999851,
+        "time": 3.307667
+      },
+      {
+        "event": "seeked",
+        "at": 10873.799999998882,
+        "time": 3.307667
+      },
+      {
+        "event": "buffering",
+        "at": 10873.89999999851,
+        "time": 3.307667,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 10874,
+        "time": 3.307667
+      },
+      {
+        "event": "pause",
+        "at": 11104.39999999851,
+        "time": 8.6
+      },
+      {
+        "event": "seeking",
+        "at": 11104.699999999255,
+        "time": 8.6
+      },
+      {
+        "event": "buffering",
+        "at": 11105,
+        "time": 8.6,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 11113.099999999627,
+        "time": 8.6
+      },
+      {
+        "event": "buffering",
+        "at": 11113.299999998882,
+        "time": 8.6,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 11121.299999998882,
+        "time": 8.6
+      },
+      {
+        "event": "pause",
+        "at": 11542.299999998882,
+        "time": 4.25
+      },
+      {
+        "event": "seeking",
+        "at": 11542.39999999851,
+        "time": 4.25
+      },
+      {
+        "event": "buffering",
+        "at": 11542.5,
+        "time": 4.25,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 11549.599999999627,
+        "time": 4.25
+      },
+      {
+        "event": "buffering",
+        "at": 11549.699999999255,
+        "time": 4.25,
+        "buffering": false
+      },
+      {
+        "event": "textchanged",
+        "at": 11552.5,
+        "time": 4.25
+      },
+      {
+        "event": "seeking",
+        "at": 11653.699999999255,
+        "time": 4.25
+      },
+      {
+        "event": "buffering",
+        "at": 11653.89999999851,
+        "time": 4.25,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 11659,
+        "time": 4.25
+      },
+      {
+        "event": "buffering",
+        "at": 11659.099999999627,
+        "time": 4.25,
+        "buffering": false
+      },
+      {
+        "event": "textchanged",
+        "at": 11666.89999999851,
+        "time": 4.25
+      },
+      {
+        "event": "seeking",
+        "at": 11779.39999999851,
+        "time": 4.25
+      },
+      {
+        "event": "buffering",
+        "at": 11779.5,
+        "time": 4.25,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 11785.699999999255,
+        "time": 4.25
+      },
+      {
+        "event": "buffering",
+        "at": 11785.799999998882,
+        "time": 4.25,
+        "buffering": false
+      },
+      {
+        "event": "textchanged",
+        "at": 11790.599999999627,
+        "time": 4.25
+      },
+      {
+        "event": "seeking",
+        "at": 11884.299999998882,
+        "time": 4.25
+      },
+      {
+        "event": "buffering",
+        "at": 11884.39999999851,
+        "time": 4.25,
+        "buffering": true
+      },
+      {
+        "event": "seeked",
+        "at": 11891.39999999851,
+        "time": 4.25
+      },
+      {
+        "event": "buffering",
+        "at": 11891.5,
+        "time": 4.25,
+        "buffering": false
+      },
+      {
+        "event": "textchanged",
+        "at": 11897.099999999627,
+        "time": 4.25
+      }
+    ],
+    "finalConfig": {
+      "preferredAudio": [
+        {
+          "language": "fr"
+        }
+      ],
+      "preferredText": [
+        {
+          "language": "fr",
+          "forced": true
+        }
+      ],
+      "accessibility": {
+        "handleForcedSubtitlesAutomatically": false,
+        "speechToText": {
+          "enabled": false,
+          "maxTextLength": 140,
+          "processLocally": false,
+          "languagesToTranslate": []
+        }
+      },
+      "abr": false
+    },
+    "frames": 250
+  },
+  "hashesAfter": {
+    "representative/representative.mkv": "a8ecf7ff37fadaf5e62c994cbc4985906999143eab2cf02ac2242993892fc3cc",
+    "representative/representative.mp4": "70222167e1c24959cc589fc6db042d1d0a63a8d72125bd4304cc9fdbae4d8587",
+    "mse/verified/video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "mse/verified/audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "mse/verified/audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+    "dash/video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "dash/audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "dash/audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e"
+  },
+  "originalsUnchanged": true
+}

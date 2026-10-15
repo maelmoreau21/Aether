@@ -1,0 +1,1482 @@
+{
+  "generated_utc": "2026-10-15T13:21:10.601737+00:00",
+  "source": "tests\\fixtures\\generated\\representative\\representative.mkv",
+  "commands": [
+    {
+      "argv": [
+        "ffmpeg",
+        "-version"
+      ],
+      "elapsed_ms": 63.892500000292785,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffprobe",
+        "-version"
+      ],
+      "elapsed_ms": 64.34019999960583,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_streams",
+        "-show_format",
+        "-show_data",
+        "-show_data_hash",
+        "sha256",
+        "-of",
+        "json",
+        "tests\\fixtures\\generated\\representative\\representative.mkv"
+      ],
+      "elapsed_ms": 75.73260000026494,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_packets",
+        "-show_data_hash",
+        "sha256",
+        "-show_entries",
+        "packet=stream_index,pts_time,dts_time,duration_time,data_hash",
+        "-of",
+        "json",
+        "tests\\fixtures\\generated\\representative\\representative.mkv"
+      ],
+      "elapsed_ms": 112.46470000060071,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-n",
+        "-copyts",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative.mkv",
+        "-map",
+        "0:v:0",
+        "-c",
+        "copy",
+        "-avoid_negative_ts",
+        "disabled",
+        "-movflags",
+        "+frag_keyframe+empty_moov+default_base_moof",
+        "-frag_duration",
+        "2000000",
+        "tests\\fixtures\\generated\\mse\\verified\\video.mp4"
+      ],
+      "elapsed_ms": 98.5649000003832,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_streams",
+        "-show_format",
+        "-show_data",
+        "-show_data_hash",
+        "sha256",
+        "-of",
+        "json",
+        "tests\\fixtures\\generated\\mse\\verified\\video.mp4"
+      ],
+      "elapsed_ms": 62.83050000001822,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_packets",
+        "-show_data_hash",
+        "sha256",
+        "-show_entries",
+        "packet=stream_index,pts_time,dts_time,duration_time,data_hash",
+        "-of",
+        "json",
+        "tests\\fixtures\\generated\\mse\\verified\\video.mp4"
+      ],
+      "elapsed_ms": 77.67190000049595,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\mse\\verified\\video.mp4",
+        "-map",
+        "0",
+        "-f",
+        "null",
+        "-"
+      ],
+      "elapsed_ms": 157.69080000063695,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-n",
+        "-copyts",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative.mkv",
+        "-map",
+        "0:a:0",
+        "-c",
+        "copy",
+        "-avoid_negative_ts",
+        "disabled",
+        "-movflags",
+        "+frag_keyframe+empty_moov+default_base_moof",
+        "-frag_duration",
+        "2000000",
+        "tests\\fixtures\\generated\\mse\\verified\\audio-fr.mp4"
+      ],
+      "elapsed_ms": 95.78899999996793,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_streams",
+        "-show_format",
+        "-show_data",
+        "-show_data_hash",
+        "sha256",
+        "-of",
+        "json",
+        "tests\\fixtures\\generated\\mse\\verified\\audio-fr.mp4"
+      ],
+      "elapsed_ms": 71.79240000004938,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_packets",
+        "-show_data_hash",
+        "sha256",
+        "-show_entries",
+        "packet=stream_index,pts_time,dts_time,duration_time,data_hash",
+        "-of",
+        "json",
+        "tests\\fixtures\\generated\\mse\\verified\\audio-fr.mp4"
+      ],
+      "elapsed_ms": 84.82869999988907,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\mse\\verified\\audio-fr.mp4",
+        "-map",
+        "0",
+        "-f",
+        "null",
+        "-"
+      ],
+      "elapsed_ms": 214.03149999969173,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-n",
+        "-copyts",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative.mkv",
+        "-map",
+        "0:a:1",
+        "-c",
+        "copy",
+        "-avoid_negative_ts",
+        "disabled",
+        "-movflags",
+        "+frag_keyframe+empty_moov+default_base_moof",
+        "-frag_duration",
+        "2000000",
+        "tests\\fixtures\\generated\\mse\\verified\\audio-en.mp4"
+      ],
+      "elapsed_ms": 84.89680000002409,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_streams",
+        "-show_format",
+        "-show_data",
+        "-show_data_hash",
+        "sha256",
+        "-of",
+        "json",
+        "tests\\fixtures\\generated\\mse\\verified\\audio-en.mp4"
+      ],
+      "elapsed_ms": 68.17810000029567,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_packets",
+        "-show_data_hash",
+        "sha256",
+        "-show_entries",
+        "packet=stream_index,pts_time,dts_time,duration_time,data_hash",
+        "-of",
+        "json",
+        "tests\\fixtures\\generated\\mse\\verified\\audio-en.mp4"
+      ],
+      "elapsed_ms": 92.79669999978069,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\mse\\verified\\audio-en.mp4",
+        "-map",
+        "0",
+        "-f",
+        "null",
+        "-"
+      ],
+      "elapsed_ms": 104.4235999997909,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-n",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative.mkv",
+        "-map",
+        "0:s:0",
+        "-c:s",
+        "webvtt",
+        "tests\\fixtures\\generated\\mse\\verified\\fr-full.vtt"
+      ],
+      "elapsed_ms": 89.95090000007622,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-n",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative.mkv",
+        "-map",
+        "0:s:1",
+        "-c:s",
+        "webvtt",
+        "tests\\fixtures\\generated\\mse\\verified\\fr-forced.vtt"
+      ],
+      "elapsed_ms": 73.89560000046913,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-n",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative.mkv",
+        "-map",
+        "0:s:2",
+        "-c:s",
+        "webvtt",
+        "tests\\fixtures\\generated\\mse\\verified\\en-full.vtt"
+      ],
+      "elapsed_ms": 76.87029999942752,
+      "exit_code": 0,
+      "stderr": ""
+    }
+  ],
+  "original_sha256_before": {
+    "tests\\fixtures\\generated\\av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66",
+    "tests\\fixtures\\generated\\av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "tests\\fixtures\\generated\\av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "tests\\fixtures\\generated\\av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mkv-en.mkv": "998ec6848bbf6560c13ea3a54a67a05f4b44adb89af18701aa6a2b5da6f395b8",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mkv-fr.mkv": "d89e09fa8ccbd6f247e639fe6c64f72af2c8f7b758b1525152111dc82c67ad36",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mp4-en.mp4": "139eb56a003d1285170e49535ac3200e06669901ad3b5fb980c74fe2da339963",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mp4-fr.mp4": "0ecab0d50950ca110d6a4c80fd17036945fbbc4096d00cbb81a29c2da2b726a3",
+    "tests\\fixtures\\generated\\mse\\audio-en-init.mp4": "00438d36a6f0bf30739c406b9230463c2fef0953429449a2fe791578d3aad48f",
+    "tests\\fixtures\\generated\\mse\\audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+    "tests\\fixtures\\generated\\mse\\audio-fr-init.mp4": "35429b16b5cb972164242de4a8a0b8427f37ff7ec81e0737706cd6973d9a282b",
+    "tests\\fixtures\\generated\\mse\\audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "tests\\fixtures\\generated\\mse\\video-init.mp4": "993d47ed7ea67968a3c5587fc439e23d72b2043fa25a5e3325c84a4dc002a86c",
+    "tests\\fixtures\\generated\\mse\\video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "tests\\fixtures\\generated\\representative\\en-full.srt": "447dbde569f236ff431304aba57632ba631a8d3041693dcb3f8477f972b92e44",
+    "tests\\fixtures\\generated\\representative\\fr-forced.srt": "d44983aba02d9b70856674294b79b7b1fcfa1f879cf595193658e2795ce85e25",
+    "tests\\fixtures\\generated\\representative\\fr-full.srt": "49b431cf26d6c048bac9d701fcad1c18ed071ebe7648d18357a2feb605a90213",
+    "tests\\fixtures\\generated\\representative\\representative-en.mkv": "2e71c27674a205a70cf05e34d9f60c84c0178aab6edd76339512365cd034d697",
+    "tests\\fixtures\\generated\\representative\\representative-en.mp4": "609a9100ba1f1fcc62b9cfe2ea6a5e1d25404a186ab8564103910f8f61ae3bf4",
+    "tests\\fixtures\\generated\\representative\\representative.mkv": "a8ecf7ff37fadaf5e62c994cbc4985906999143eab2cf02ac2242993892fc3cc",
+    "tests\\fixtures\\generated\\representative\\representative.mp4": "70222167e1c24959cc589fc6db042d1d0a63a8d72125bd4304cc9fdbae4d8587"
+  },
+  "limits": [
+    "Packaging verified offline only; MSE append/playback must be tested separately.",
+    "WebVTT is explicit subtitle conversion/extraction, not integrated subtitle playback.",
+    "Fragmented files contain the complete 12-second sample; not a film-scale buffering design."
+  ],
+  "ffmpeg": "ffmpeg version 9.0.2-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+  "ffprobe": "ffprobe version 9.0.2-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+  "source_probe": {
+    "streams": [
+      {
+        "index": 0,
+        "codec_name": "av1",
+        "codec_long_name": "Alliance for Open Media AV1",
+        "profile": "Main",
+        "codec_type": "video",
+        "codec_tag_string": "[0][0][0][0]",
+        "codec_tag": "0x0000",
+        "mime_codec_string": "av01.0.00M.10.0.110.02.02.01.0",
+        "width": 320,
+        "height": 180,
+        "coded_width": 320,
+        "coded_height": 180,
+        "has_b_frames": 0,
+        "sample_aspect_ratio": "1:1",
+        "display_aspect_ratio": "16:9",
+        "pix_fmt": "yuv420p10le",
+        "level": 0,
+        "color_range": "tv",
+        "color_space": "bt709",
+        "field_order": "progressive",
+        "r_frame_rate": "24/1",
+        "avg_frame_rate": "24/1",
+        "time_base": "1/1000",
+        "start_pts": 0,
+        "start_time": "0.000000",
+        "extradata": "\n00000000: 8100 4c00 0a0e 0000 0004 3cfe ccda f950  ..L.......<....P\n00000010: 2020 1040                                  .@\n",
+        "extradata_size": 20,
+        "extradata_hash": "SHA256:8364c1654f1616237d834e54288be44ea4aa26df7bf4723055bfa711ae5c49d3",
+        "disposition": {
+          "default": 0,
+          "dub": 0,
+          "original": 0,
+          "comment": 0,
+          "lyrics": 0,
+          "karaoke": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "visual_impaired": 0,
+          "clean_effects": 0,
+          "attached_pic": 0,
+          "timed_thumbnails": 0,
+          "non_diegetic": 0,
+          "captions": 0,
+          "descriptions": 0,
+          "metadata": 0,
+          "dependent": 0,
+          "still_image": 0,
+          "multilayer": 0
+        },
+        "tags": {
+          "ENCODER": "Lavc63.1.102 libaom-av1",
+          "DURATION": "00:00:12.000000000"
+        }
+      },
+      {
+        "index": 1,
+        "codec_name": "opus",
+        "codec_long_name": "Opus (Opus Interactive Audio Codec)",
+        "codec_type": "audio",
+        "codec_tag_string": "[0][0][0][0]",
+        "codec_tag": "0x0000",
+        "mime_codec_string": "opus",
+        "sample_fmt": "fltp",
+        "sample_rate": "48000",
+        "channels": 6,
+        "channel_layout": "5.1",
+        "bits_per_sample": 0,
+        "initial_padding": 312,
+        "r_frame_rate": "0/0",
+        "avg_frame_rate": "0/0",
+        "time_base": "1/1000",
+        "start_pts": 0,
+        "start_time": "0.000000",
+        "extradata": "\n00000000: 4f70 7573 4865 6164 0106 3801 80bb 0000  OpusHead..8.....\n00000010: 0000 0104 0200 0401 0203 05              ...........\n",
+        "extradata_size": 27,
+        "extradata_hash": "SHA256:abfdad27f1038d32ec058f2f3d64dfb8d83bde84e6bf1a8d72e4b2a8c7c0b23f",
+        "disposition": {
+          "default": 1,
+          "dub": 0,
+          "original": 0,
+          "comment": 0,
+          "lyrics": 0,
+          "karaoke": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "visual_impaired": 0,
+          "clean_effects": 0,
+          "attached_pic": 0,
+          "timed_thumbnails": 0,
+          "non_diegetic": 0,
+          "captions": 0,
+          "descriptions": 0,
+          "metadata": 0,
+          "dependent": 0,
+          "still_image": 0,
+          "multilayer": 0
+        },
+        "tags": {
+          "language": "fra",
+          "title": "FR 5.1 channels",
+          "ENCODER": "Lavc63.1.102 libopus",
+          "DURATION": "00:00:12.008000000"
+        }
+      },
+      {
+        "index": 2,
+        "codec_name": "opus",
+        "codec_long_name": "Opus (Opus Interactive Audio Codec)",
+        "codec_type": "audio",
+        "codec_tag_string": "[0][0][0][0]",
+        "codec_tag": "0x0000",
+        "mime_codec_string": "opus",
+        "sample_fmt": "fltp",
+        "sample_rate": "48000",
+        "channels": 2,
+        "channel_layout": "stereo",
+        "bits_per_sample": 0,
+        "initial_padding": 312,
+        "r_frame_rate": "0/0",
+        "avg_frame_rate": "0/0",
+        "time_base": "1/1000",
+        "start_pts": 0,
+        "start_time": "0.000000",
+        "extradata": "\n00000000: 4f70 7573 4865 6164 0102 3801 80bb 0000  OpusHead..8.....\n00000010: 0000 00                                  ...\n",
+        "extradata_size": 19,
+        "extradata_hash": "SHA256:e1ca6670203e4713d51d3768e199ca5bf1f8e3740a28a2d378feafdf8b6429c6",
+        "disposition": {
+          "default": 0,
+          "dub": 0,
+          "original": 0,
+          "comment": 0,
+          "lyrics": 0,
+          "karaoke": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "visual_impaired": 0,
+          "clean_effects": 0,
+          "attached_pic": 0,
+          "timed_thumbnails": 0,
+          "non_diegetic": 0,
+          "captions": 0,
+          "descriptions": 0,
+          "metadata": 0,
+          "dependent": 0,
+          "still_image": 0,
+          "multilayer": 0
+        },
+        "tags": {
+          "language": "eng",
+          "title": "EN stereo channels",
+          "ENCODER": "Lavc63.1.102 libopus",
+          "DURATION": "00:00:12.008000000"
+        }
+      },
+      {
+        "index": 3,
+        "codec_name": "subrip",
+        "codec_long_name": "SubRip subtitle",
+        "codec_type": "subtitle",
+        "codec_tag_string": "[0][0][0][0]",
+        "codec_tag": "0x0000",
+        "r_frame_rate": "0/0",
+        "avg_frame_rate": "0/0",
+        "time_base": "1/1000",
+        "start_pts": 0,
+        "start_time": "0.000000",
+        "duration_ts": 12008,
+        "duration": "12.008000",
+        "extradata": "\n",
+        "disposition": {
+          "default": 0,
+          "dub": 0,
+          "original": 0,
+          "comment": 0,
+          "lyrics": 0,
+          "karaoke": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "visual_impaired": 0,
+          "clean_effects": 0,
+          "attached_pic": 0,
+          "timed_thumbnails": 0,
+          "non_diegetic": 0,
+          "captions": 0,
+          "descriptions": 0,
+          "metadata": 0,
+          "dependent": 0,
+          "still_image": 0,
+          "multilayer": 0
+        },
+        "tags": {
+          "language": "fra",
+          "title": "FR complet",
+          "ENCODER": "Lavc63.1.102 srt",
+          "DURATION": "00:00:09.500000000"
+        }
+      },
+      {
+        "index": 4,
+        "codec_name": "subrip",
+        "codec_long_name": "SubRip subtitle",
+        "codec_type": "subtitle",
+        "codec_tag_string": "[0][0][0][0]",
+        "codec_tag": "0x0000",
+        "r_frame_rate": "0/0",
+        "avg_frame_rate": "0/0",
+        "time_base": "1/1000",
+        "start_pts": 0,
+        "start_time": "0.000000",
+        "duration_ts": 12008,
+        "duration": "12.008000",
+        "extradata": "\n",
+        "disposition": {
+          "default": 0,
+          "dub": 0,
+          "original": 0,
+          "comment": 0,
+          "lyrics": 0,
+          "karaoke": 0,
+          "forced": 1,
+          "hearing_impaired": 0,
+          "visual_impaired": 0,
+          "clean_effects": 0,
+          "attached_pic": 0,
+          "timed_thumbnails": 0,
+          "non_diegetic": 0,
+          "captions": 0,
+          "descriptions": 0,
+          "metadata": 0,
+          "dependent": 0,
+          "still_image": 0,
+          "multilayer": 0
+        },
+        "tags": {
+          "language": "fra",
+          "title": "FR forced",
+          "ENCODER": "Lavc63.1.102 srt",
+          "DURATION": "00:00:09.500000000"
+        }
+      },
+      {
+        "index": 5,
+        "codec_name": "subrip",
+        "codec_long_name": "SubRip subtitle",
+        "codec_type": "subtitle",
+        "codec_tag_string": "[0][0][0][0]",
+        "codec_tag": "0x0000",
+        "r_frame_rate": "0/0",
+        "avg_frame_rate": "0/0",
+        "time_base": "1/1000",
+        "start_pts": 0,
+        "start_time": "0.000000",
+        "duration_ts": 12008,
+        "duration": "12.008000",
+        "extradata": "\n",
+        "disposition": {
+          "default": 0,
+          "dub": 0,
+          "original": 0,
+          "comment": 0,
+          "lyrics": 0,
+          "karaoke": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "visual_impaired": 0,
+          "clean_effects": 0,
+          "attached_pic": 0,
+          "timed_thumbnails": 0,
+          "non_diegetic": 0,
+          "captions": 0,
+          "descriptions": 0,
+          "metadata": 0,
+          "dependent": 0,
+          "still_image": 0,
+          "multilayer": 0
+        },
+        "tags": {
+          "language": "eng",
+          "title": "EN full",
+          "ENCODER": "Lavc63.1.102 srt",
+          "DURATION": "00:00:09.500000000"
+        }
+      }
+    ],
+    "format": {
+      "filename": "tests\\fixtures\\generated\\representative\\representative.mkv",
+      "nb_streams": 6,
+      "nb_programs": 0,
+      "nb_stream_groups": 0,
+      "format_name": "matroska,webm",
+      "format_long_name": "Matroska / WebM",
+      "start_time": "0.000000",
+      "duration": "12.008000",
+      "size": "762049",
+      "bit_rate": "507694",
+      "probe_score": 100,
+      "tags": {
+        "ENCODER": "Lavf63.1.102"
+      }
+    }
+  },
+  "streams": [
+    {
+      "name": "video",
+      "file": "video.mp4",
+      "init": "video-init.mp4",
+      "media": "video-media.m4s",
+      "mime": "video/mp4; codecs=\"av01.0.00M.10\"",
+      "codec": "av01.0.00M.10",
+      "sha256": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+      "bytes": 144641,
+      "source_stream_index": 0,
+      "packet_count": 288,
+      "all_packet_payloads_identical": true,
+      "codec_init_identical": true,
+      "timestamps": {
+        "pts_time": {
+          "compared_packets": 288,
+          "min_delta_s": 0,
+          "max_delta_s": 0
+        },
+        "dts_time": {
+          "compared_packets": 288,
+          "min_delta_s": 0,
+          "max_delta_s": 0
+        },
+        "duration_time": {
+          "compared_packets": 288,
+          "min_delta_s": 0,
+          "max_delta_s": 0.0010000000000000009
+        }
+      },
+      "first_source_packet": {
+        "stream_index": 0,
+        "pts_time": "0.000000",
+        "dts_time": "0.000000",
+        "duration_time": "0.041000",
+        "data_hash": "SHA256:a6f7c2ffc9f1f29954059cdd2f369fe2958447fa2e0190fd44e539e74ec4c913"
+      },
+      "first_output_packet": {
+        "stream_index": 0,
+        "pts_time": "0.000000",
+        "dts_time": "0.000000",
+        "duration_time": "0.042000",
+        "data_hash": "SHA256:a6f7c2ffc9f1f29954059cdd2f369fe2958447fa2e0190fd44e539e74ec4c913"
+      },
+      "source_time_base": "1/1000",
+      "output_time_base": "1/16000",
+      "probe": {
+        "streams": [
+          {
+            "index": 0,
+            "codec_name": "av1",
+            "codec_long_name": "Alliance for Open Media AV1",
+            "profile": "Main",
+            "codec_type": "video",
+            "codec_tag_string": "av01",
+            "codec_tag": "0x31307661",
+            "mime_codec_string": "av01.0.00M.10.0.110.02.02.01.0",
+            "width": 320,
+            "height": 180,
+            "coded_width": 320,
+            "coded_height": 180,
+            "has_b_frames": 0,
+            "sample_aspect_ratio": "1:1",
+            "display_aspect_ratio": "16:9",
+            "pix_fmt": "yuv420p10le",
+            "level": 0,
+            "color_range": "tv",
+            "color_space": "bt709",
+            "field_order": "progressive",
+            "id": "0x1",
+            "r_frame_rate": "24/1",
+            "avg_frame_rate": "288000/11999",
+            "time_base": "1/16000",
+            "start_pts": 0,
+            "start_time": "0.000000",
+            "duration_ts": 191984,
+            "duration": "11.999000",
+            "bit_rate": "93745",
+            "extradata": "\n00000000: 8100 4c00 0a0e 0000 0004 3cfe ccda f950  ..L.......<....P\n00000010: 2020 1040                                  .@\n",
+            "extradata_size": 20,
+            "extradata_hash": "SHA256:8364c1654f1616237d834e54288be44ea4aa26df7bf4723055bfa711ae5c49d3",
+            "disposition": {
+              "default": 1,
+              "dub": 0,
+              "original": 0,
+              "comment": 0,
+              "lyrics": 0,
+              "karaoke": 0,
+              "forced": 0,
+              "hearing_impaired": 0,
+              "visual_impaired": 0,
+              "clean_effects": 0,
+              "attached_pic": 0,
+              "timed_thumbnails": 0,
+              "non_diegetic": 0,
+              "captions": 0,
+              "descriptions": 0,
+              "metadata": 0,
+              "dependent": 0,
+              "still_image": 0,
+              "multilayer": 0
+            },
+            "tags": {
+              "language": "und",
+              "handler_name": "VideoHandler",
+              "encoder": "Lavc63.1.102 libaom-av1"
+            }
+          }
+        ],
+        "format": {
+          "filename": "tests\\fixtures\\generated\\mse\\verified\\video.mp4",
+          "nb_streams": 1,
+          "nb_programs": 0,
+          "nb_stream_groups": 0,
+          "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+          "format_long_name": "QuickTime / MOV",
+          "start_time": "0.000000",
+          "duration": "11.999000",
+          "size": "144641",
+          "bit_rate": "96435",
+          "probe_score": 100,
+          "tags": {
+            "major_brand": "iso5",
+            "minor_version": "512",
+            "compatible_brands": "iso5iso6av01mp41",
+            "encoder": "Lavf63.1.102"
+          }
+        }
+      },
+      "top_level_boxes": [
+        {
+          "type": "ftyp",
+          "offset": 0,
+          "size": 32
+        },
+        {
+          "type": "moov",
+          "offset": 32,
+          "size": 734
+        },
+        {
+          "type": "moof",
+          "offset": 766,
+          "size": 488
+        },
+        {
+          "type": "mdat",
+          "offset": 1254,
+          "size": 23674
+        },
+        {
+          "type": "moof",
+          "offset": 24928,
+          "size": 488
+        },
+        {
+          "type": "mdat",
+          "offset": 25416,
+          "size": 28939
+        },
+        {
+          "type": "moof",
+          "offset": 54355,
+          "size": 488
+        },
+        {
+          "type": "mdat",
+          "offset": 54843,
+          "size": 23934
+        },
+        {
+          "type": "moof",
+          "offset": 78777,
+          "size": 208
+        },
+        {
+          "type": "mdat",
+          "offset": 78985,
+          "size": 306
+        },
+        {
+          "type": "moof",
+          "offset": 79291,
+          "size": 488
+        },
+        {
+          "type": "mdat",
+          "offset": 79779,
+          "size": 26933
+        },
+        {
+          "type": "moof",
+          "offset": 106712,
+          "size": 488
+        },
+        {
+          "type": "mdat",
+          "offset": 107200,
+          "size": 18260
+        },
+        {
+          "type": "moof",
+          "offset": 125460,
+          "size": 384
+        },
+        {
+          "type": "mdat",
+          "offset": 125844,
+          "size": 18616
+        },
+        {
+          "type": "mfra",
+          "offset": 144460,
+          "size": 181
+        }
+      ],
+      "decode": "passed",
+      "init_sha256": "993d47ed7ea67968a3c5587fc439e23d72b2043fa25a5e3325c84a4dc002a86c",
+      "media_sha256": "71056bd35b80ffbdcec60f2184b898a32d4441ac64308d4e8b6c8c33879f15ea"
+    },
+    {
+      "name": "audio-fr",
+      "file": "audio-fr.mp4",
+      "init": "audio-fr-init.mp4",
+      "media": "audio-fr-media.m4s",
+      "mime": "audio/mp4; codecs=\"opus\"",
+      "codec": "opus",
+      "sha256": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+      "bytes": 394436,
+      "source_stream_index": 1,
+      "packet_count": 601,
+      "all_packet_payloads_identical": true,
+      "codec_init_identical": true,
+      "timestamps": {
+        "pts_time": {
+          "compared_packets": 601,
+          "min_delta_s": 0.006999999999999673,
+          "max_delta_s": 0.0070000000000014495
+        },
+        "dts_time": {
+          "compared_packets": 601,
+          "min_delta_s": 0.006999999999999673,
+          "max_delta_s": 0.0070000000000014495
+        },
+        "duration_time": {
+          "compared_packets": 601,
+          "min_delta_s": 0,
+          "max_delta_s": 0.0010000000000000009
+        }
+      },
+      "first_source_packet": {
+        "stream_index": 1,
+        "pts_time": "-0.007000",
+        "dts_time": "-0.007000",
+        "duration_time": "0.020000",
+        "data_hash": "SHA256:5dd2927739888fca15ebdd9140e79ebbf35d04013c7bef09866c295d621eb436",
+        "side_data_list": [
+          {
+            "side_data_type": "Skip Samples",
+            "skip_samples": 312,
+            "discard_padding": 0,
+            "skip_reason": 0,
+            "discard_reason": 0
+          }
+        ]
+      },
+      "first_output_packet": {
+        "stream_index": 0,
+        "pts_time": "0.000000",
+        "dts_time": "0.000000",
+        "duration_time": "0.021000",
+        "data_hash": "SHA256:5dd2927739888fca15ebdd9140e79ebbf35d04013c7bef09866c295d621eb436"
+      },
+      "source_time_base": "1/1000",
+      "output_time_base": "1/48000",
+      "probe": {
+        "streams": [
+          {
+            "index": 0,
+            "codec_name": "opus",
+            "codec_long_name": "Opus (Opus Interactive Audio Codec)",
+            "codec_type": "audio",
+            "codec_tag_string": "Opus",
+            "codec_tag": "0x7375704f",
+            "mime_codec_string": "opus",
+            "sample_fmt": "fltp",
+            "sample_rate": "48000",
+            "channels": 6,
+            "channel_layout": "5.1",
+            "bits_per_sample": 0,
+            "initial_padding": 312,
+            "id": "0x1",
+            "r_frame_rate": "0/0",
+            "avg_frame_rate": "0/0",
+            "time_base": "1/48000",
+            "start_pts": 0,
+            "start_time": "0.000000",
+            "duration_ts": 576384,
+            "duration": "12.008000",
+            "bit_rate": "259818",
+            "extradata": "\n00000000: 4f70 7573 4865 6164 0106 3801 80bb 0000  OpusHead..8.....\n00000010: 0000 0104 0200 0401 0203 05              ...........\n",
+            "extradata_size": 27,
+            "extradata_hash": "SHA256:abfdad27f1038d32ec058f2f3d64dfb8d83bde84e6bf1a8d72e4b2a8c7c0b23f",
+            "disposition": {
+              "default": 1,
+              "dub": 0,
+              "original": 0,
+              "comment": 0,
+              "lyrics": 0,
+              "karaoke": 0,
+              "forced": 0,
+              "hearing_impaired": 0,
+              "visual_impaired": 0,
+              "clean_effects": 0,
+              "attached_pic": 0,
+              "timed_thumbnails": 0,
+              "non_diegetic": 0,
+              "captions": 0,
+              "descriptions": 0,
+              "metadata": 0,
+              "dependent": 0,
+              "still_image": 0,
+              "multilayer": 0
+            },
+            "tags": {
+              "language": "fra",
+              "handler_name": "SoundHandler",
+              "name": "FR 5.1 channels"
+            }
+          }
+        ],
+        "format": {
+          "filename": "tests\\fixtures\\generated\\mse\\verified\\audio-fr.mp4",
+          "nb_streams": 1,
+          "nb_programs": 0,
+          "nb_stream_groups": 0,
+          "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+          "format_long_name": "QuickTime / MOV",
+          "start_time": "0.000000",
+          "duration": "12.008000",
+          "size": "394436",
+          "bit_rate": "262782",
+          "probe_score": 100,
+          "tags": {
+            "major_brand": "iso5",
+            "minor_version": "512",
+            "compatible_brands": "iso5iso6mp41",
+            "encoder": "Lavf63.1.102"
+          }
+        }
+      },
+      "top_level_boxes": [
+        {
+          "type": "ftyp",
+          "offset": 0,
+          "size": 28
+        },
+        {
+          "type": "moov",
+          "offset": 28,
+          "size": 684
+        },
+        {
+          "type": "moof",
+          "offset": 712,
+          "size": 900
+        },
+        {
+          "type": "mdat",
+          "offset": 1612,
+          "size": 57732
+        },
+        {
+          "type": "moof",
+          "offset": 59344,
+          "size": 500
+        },
+        {
+          "type": "mdat",
+          "offset": 59844,
+          "size": 62221
+        },
+        {
+          "type": "moof",
+          "offset": 122065,
+          "size": 500
+        },
+        {
+          "type": "mdat",
+          "offset": 122565,
+          "size": 60931
+        },
+        {
+          "type": "moof",
+          "offset": 183496,
+          "size": 500
+        },
+        {
+          "type": "mdat",
+          "offset": 183996,
+          "size": 69524
+        },
+        {
+          "type": "moof",
+          "offset": 253520,
+          "size": 500
+        },
+        {
+          "type": "mdat",
+          "offset": 254020,
+          "size": 72031
+        },
+        {
+          "type": "moof",
+          "offset": 326051,
+          "size": 500
+        },
+        {
+          "type": "mdat",
+          "offset": 326551,
+          "size": 66654
+        },
+        {
+          "type": "moof",
+          "offset": 393205,
+          "size": 100
+        },
+        {
+          "type": "mdat",
+          "offset": 393305,
+          "size": 950
+        },
+        {
+          "type": "mfra",
+          "offset": 394255,
+          "size": 181
+        }
+      ],
+      "decode": "passed",
+      "init_sha256": "35429b16b5cb972164242de4a8a0b8427f37ff7ec81e0737706cd6973d9a282b",
+      "media_sha256": "4298d5d7d0b2fe47b7b594ec05c938ee28bc3f223479fcf24553d949397871ca"
+    },
+    {
+      "name": "audio-en",
+      "file": "audio-en.mp4",
+      "init": "audio-en-init.mp4",
+      "media": "audio-en-media.m4s",
+      "mime": "audio/mp4; codecs=\"opus\"",
+      "codec": "opus",
+      "sha256": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+      "bytes": 222850,
+      "source_stream_index": 2,
+      "packet_count": 601,
+      "all_packet_payloads_identical": true,
+      "codec_init_identical": true,
+      "timestamps": {
+        "pts_time": {
+          "compared_packets": 601,
+          "min_delta_s": 0.006999999999999673,
+          "max_delta_s": 0.0070000000000014495
+        },
+        "dts_time": {
+          "compared_packets": 601,
+          "min_delta_s": 0.006999999999999673,
+          "max_delta_s": 0.0070000000000014495
+        },
+        "duration_time": {
+          "compared_packets": 601,
+          "min_delta_s": 0,
+          "max_delta_s": 0.0010000000000000009
+        }
+      },
+      "first_source_packet": {
+        "stream_index": 2,
+        "pts_time": "-0.007000",
+        "dts_time": "-0.007000",
+        "duration_time": "0.020000",
+        "data_hash": "SHA256:43e35b5db9a263b082785031facec740495cb02747cdab11590368107506ea0f",
+        "side_data_list": [
+          {
+            "side_data_type": "Skip Samples",
+            "skip_samples": 312,
+            "discard_padding": 0,
+            "skip_reason": 0,
+            "discard_reason": 0
+          }
+        ]
+      },
+      "first_output_packet": {
+        "stream_index": 0,
+        "pts_time": "0.000000",
+        "dts_time": "0.000000",
+        "duration_time": "0.021000",
+        "data_hash": "SHA256:43e35b5db9a263b082785031facec740495cb02747cdab11590368107506ea0f"
+      },
+      "source_time_base": "1/1000",
+      "output_time_base": "1/48000",
+      "probe": {
+        "streams": [
+          {
+            "index": 0,
+            "codec_name": "opus",
+            "codec_long_name": "Opus (Opus Interactive Audio Codec)",
+            "codec_type": "audio",
+            "codec_tag_string": "Opus",
+            "codec_tag": "0x7375704f",
+            "mime_codec_string": "opus",
+            "sample_fmt": "fltp",
+            "sample_rate": "48000",
+            "channels": 2,
+            "channel_layout": "stereo",
+            "bits_per_sample": 0,
+            "initial_padding": 312,
+            "id": "0x1",
+            "r_frame_rate": "0/0",
+            "avg_frame_rate": "0/0",
+            "time_base": "1/48000",
+            "start_pts": 0,
+            "start_time": "0.000000",
+            "duration_ts": 576384,
+            "duration": "12.008000",
+            "bit_rate": "145507",
+            "extradata": "\n00000000: 4f70 7573 4865 6164 0102 3801 80bb 0000  OpusHead..8.....\n00000010: 0000 00                                  ...\n",
+            "extradata_size": 19,
+            "extradata_hash": "SHA256:e1ca6670203e4713d51d3768e199ca5bf1f8e3740a28a2d378feafdf8b6429c6",
+            "disposition": {
+              "default": 1,
+              "dub": 0,
+              "original": 0,
+              "comment": 0,
+              "lyrics": 0,
+              "karaoke": 0,
+              "forced": 0,
+              "hearing_impaired": 0,
+              "visual_impaired": 0,
+              "clean_effects": 0,
+              "attached_pic": 0,
+              "timed_thumbnails": 0,
+              "non_diegetic": 0,
+              "captions": 0,
+              "descriptions": 0,
+              "metadata": 0,
+              "dependent": 0,
+              "still_image": 0,
+              "multilayer": 0
+            },
+            "tags": {
+              "language": "eng",
+              "handler_name": "SoundHandler",
+              "name": "EN stereo channels"
+            }
+          }
+        ],
+        "format": {
+          "filename": "tests\\fixtures\\generated\\mse\\verified\\audio-en.mp4",
+          "nb_streams": 1,
+          "nb_programs": 0,
+          "nb_stream_groups": 0,
+          "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+          "format_long_name": "QuickTime / MOV",
+          "start_time": "0.000000",
+          "duration": "12.008000",
+          "size": "222850",
+          "bit_rate": "148467",
+          "probe_score": 100,
+          "tags": {
+            "major_brand": "iso5",
+            "minor_version": "512",
+            "compatible_brands": "iso5iso6mp41",
+            "encoder": "Lavf63.1.102"
+          }
+        }
+      },
+      "top_level_boxes": [
+        {
+          "type": "ftyp",
+          "offset": 0,
+          "size": 28
+        },
+        {
+          "type": "moov",
+          "offset": 28,
+          "size": 679
+        },
+        {
+          "type": "moof",
+          "offset": 707,
+          "size": 900
+        },
+        {
+          "type": "mdat",
+          "offset": 1607,
+          "size": 35960
+        },
+        {
+          "type": "moof",
+          "offset": 37567,
+          "size": 500
+        },
+        {
+          "type": "mdat",
+          "offset": 38067,
+          "size": 36736
+        },
+        {
+          "type": "moof",
+          "offset": 74803,
+          "size": 500
+        },
+        {
+          "type": "mdat",
+          "offset": 75303,
+          "size": 35908
+        },
+        {
+          "type": "moof",
+          "offset": 111211,
+          "size": 500
+        },
+        {
+          "type": "mdat",
+          "offset": 111711,
+          "size": 36736
+        },
+        {
+          "type": "moof",
+          "offset": 148447,
+          "size": 500
+        },
+        {
+          "type": "mdat",
+          "offset": 148947,
+          "size": 36736
+        },
+        {
+          "type": "moof",
+          "offset": 185683,
+          "size": 500
+        },
+        {
+          "type": "mdat",
+          "offset": 186183,
+          "size": 35908
+        },
+        {
+          "type": "moof",
+          "offset": 222091,
+          "size": 100
+        },
+        {
+          "type": "mdat",
+          "offset": 222191,
+          "size": 478
+        },
+        {
+          "type": "mfra",
+          "offset": 222669,
+          "size": 181
+        }
+      ],
+      "decode": "passed",
+      "init_sha256": "00438d36a6f0bf30739c406b9230463c2fef0953429449a2fe791578d3aad48f",
+      "media_sha256": "bde48f2095fd5c616a9dea9b1c1abe0b60f2d62cbc7653c9e280e0f0c3b1cc5e"
+    }
+  ],
+  "subtitles": [
+    {
+      "file": "fr-full.vtt",
+      "mime": "text/vtt",
+      "language": "fr",
+      "forced": false,
+      "sha256": "a9fdc3b61adfee639dd7dcf99ffb8ba66f88af9c5abb9e48cd1f0b06ab830b7d",
+      "cues": [
+        {
+          "start_seconds": 2,
+          "end_seconds": 2.5,
+          "text": "FR COMPLET CUE 1"
+        },
+        {
+          "start_seconds": 4,
+          "end_seconds": 5,
+          "text": "FR COMPLET CUE 2"
+        },
+        {
+          "start_seconds": 6,
+          "end_seconds": 6.5,
+          "text": "FR COMPLET CUE 3"
+        },
+        {
+          "start_seconds": 9,
+          "end_seconds": 9.5,
+          "text": "FR COMPLET CUE 4"
+        }
+      ],
+      "timing_and_text_identical": true,
+      "conversion": "embedded SubRip to external WebVTT; not bitcopy"
+    },
+    {
+      "file": "fr-forced.vtt",
+      "mime": "text/vtt",
+      "language": "fr",
+      "forced": true,
+      "sha256": "9b3835734daad2e8dedc63f6e0973b9368b320bec4660113fef40de7935bbc80",
+      "cues": [
+        {
+          "start_seconds": 2,
+          "end_seconds": 2.5,
+          "text": "FR FORCE CUE 1"
+        },
+        {
+          "start_seconds": 4,
+          "end_seconds": 5,
+          "text": "FR FORCE CUE 2"
+        },
+        {
+          "start_seconds": 6,
+          "end_seconds": 6.5,
+          "text": "FR FORCE CUE 3"
+        },
+        {
+          "start_seconds": 9,
+          "end_seconds": 9.5,
+          "text": "FR FORCE CUE 4"
+        }
+      ],
+      "timing_and_text_identical": true,
+      "conversion": "embedded SubRip to external WebVTT; not bitcopy"
+    },
+    {
+      "file": "en-full.vtt",
+      "mime": "text/vtt",
+      "language": "en",
+      "forced": false,
+      "sha256": "74ee2e670c98df732720386714aa7a55b7a36cd259b095f8f433a9a98e9ade60",
+      "cues": [
+        {
+          "start_seconds": 2,
+          "end_seconds": 2.5,
+          "text": "EN FULL CUE 1"
+        },
+        {
+          "start_seconds": 4,
+          "end_seconds": 5,
+          "text": "EN FULL CUE 2"
+        },
+        {
+          "start_seconds": 6,
+          "end_seconds": 6.5,
+          "text": "EN FULL CUE 3"
+        },
+        {
+          "start_seconds": 9,
+          "end_seconds": 9.5,
+          "text": "EN FULL CUE 4"
+        }
+      ],
+      "timing_and_text_identical": true,
+      "conversion": "embedded SubRip to external WebVTT; not bitcopy"
+    }
+  ],
+  "passed": true,
+  "original_sha256_after": {
+    "tests\\fixtures\\generated\\av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66",
+    "tests\\fixtures\\generated\\av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "tests\\fixtures\\generated\\av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "tests\\fixtures\\generated\\av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mkv-en.mkv": "998ec6848bbf6560c13ea3a54a67a05f4b44adb89af18701aa6a2b5da6f395b8",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mkv-fr.mkv": "d89e09fa8ccbd6f247e639fe6c64f72af2c8f7b758b1525152111dc82c67ad36",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mp4-en.mp4": "139eb56a003d1285170e49535ac3200e06669901ad3b5fb980c74fe2da339963",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mp4-fr.mp4": "0ecab0d50950ca110d6a4c80fd17036945fbbc4096d00cbb81a29c2da2b726a3",
+    "tests\\fixtures\\generated\\mse\\audio-en-init.mp4": "00438d36a6f0bf30739c406b9230463c2fef0953429449a2fe791578d3aad48f",
+    "tests\\fixtures\\generated\\mse\\audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+    "tests\\fixtures\\generated\\mse\\audio-fr-init.mp4": "35429b16b5cb972164242de4a8a0b8427f37ff7ec81e0737706cd6973d9a282b",
+    "tests\\fixtures\\generated\\mse\\audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "tests\\fixtures\\generated\\mse\\video-init.mp4": "993d47ed7ea67968a3c5587fc439e23d72b2043fa25a5e3325c84a4dc002a86c",
+    "tests\\fixtures\\generated\\mse\\video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "tests\\fixtures\\generated\\representative\\en-full.srt": "447dbde569f236ff431304aba57632ba631a8d3041693dcb3f8477f972b92e44",
+    "tests\\fixtures\\generated\\representative\\fr-forced.srt": "d44983aba02d9b70856674294b79b7b1fcfa1f879cf595193658e2795ce85e25",
+    "tests\\fixtures\\generated\\representative\\fr-full.srt": "49b431cf26d6c048bac9d701fcad1c18ed071ebe7648d18357a2feb605a90213",
+    "tests\\fixtures\\generated\\representative\\representative-en.mkv": "2e71c27674a205a70cf05e34d9f60c84c0178aab6edd76339512365cd034d697",
+    "tests\\fixtures\\generated\\representative\\representative-en.mp4": "609a9100ba1f1fcc62b9cfe2ea6a5e1d25404a186ab8564103910f8f61ae3bf4",
+    "tests\\fixtures\\generated\\representative\\representative.mkv": "a8ecf7ff37fadaf5e62c994cbc4985906999143eab2cf02ac2242993892fc3cc",
+    "tests\\fixtures\\generated\\representative\\representative.mp4": "70222167e1c24959cc589fc6db042d1d0a63a8d72125bd4304cc9fdbae4d8587"
+  },
+  "originals_unchanged": true,
+  "total_ms": 1880.133399999977,
+  "report_enrichment": "Added SHA256 of existing split initialization/media bytes after verification; media unchanged."
+}

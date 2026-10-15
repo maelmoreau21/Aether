@@ -1,0 +1,9 @@
+<!doctype html><html lang="fr"><meta charset="utf-8"><title>Expérience Shaka P0C</title>
+<h1>Shaka DASH — AV1/Opus sans réencodage</h1>
+<p>Fixture synthétique 12 s. Les canaux décodés ne prouvent pas une sortie physique multicanal.</p>
+<video id="video" width="640" controls></video>
+<button id="start">Préparer Shaka</button><button id="fr">FR 5.1</button><button id="en">EN stéréo</button>
+<label>Sous-titres <select id="subtitles"><option value="off">Désactivés</option><option value="fr-full">FR complet</option><option value="fr-forced">FR forcés</option><option value="en-full">EN</option></select></label>
+<p id="status" role="status">Non démarré</p>
+<label><input id="seek-recovery" type="checkbox">Récupération seek expérimentale : purge audio et vidéo, interruptions possibles</label>
+<script src="/api/v1/experiment/shaka/shaka-player.compiled.js"></script><script src="/audio-seek-policy.js"></script><script src="/shaka.js"></script></html>

@@ -1,0 +1,545 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "file": "representative.mkv",
+      "subtitle_ordinal": 0,
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative.mkv",
+        "-map",
+        "0:s:0",
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-"
+      ],
+      "cues": [
+        {
+          "start": 2.0,
+          "end": 2.5,
+          "text": "FR COMPLET CUE 1"
+        },
+        {
+          "start": 4.0,
+          "end": 5.0,
+          "text": "FR COMPLET CUE 2"
+        },
+        {
+          "start": 6.0,
+          "end": 6.5,
+          "text": "FR COMPLET CUE 3"
+        },
+        {
+          "start": 9.0,
+          "end": 9.5,
+          "text": "FR COMPLET CUE 4"
+        }
+      ],
+      "timing_tolerance_seconds": 0.02,
+      "passed": true,
+      "browser_rendering": "not-proven"
+    },
+    {
+      "file": "representative.mkv",
+      "subtitle_ordinal": 1,
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative.mkv",
+        "-map",
+        "0:s:1",
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-"
+      ],
+      "cues": [
+        {
+          "start": 2.0,
+          "end": 2.5,
+          "text": "FR FORCE CUE 1"
+        },
+        {
+          "start": 4.0,
+          "end": 5.0,
+          "text": "FR FORCE CUE 2"
+        },
+        {
+          "start": 6.0,
+          "end": 6.5,
+          "text": "FR FORCE CUE 3"
+        },
+        {
+          "start": 9.0,
+          "end": 9.5,
+          "text": "FR FORCE CUE 4"
+        }
+      ],
+      "timing_tolerance_seconds": 0.02,
+      "passed": true,
+      "browser_rendering": "not-proven"
+    },
+    {
+      "file": "representative.mkv",
+      "subtitle_ordinal": 2,
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative.mkv",
+        "-map",
+        "0:s:2",
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-"
+      ],
+      "cues": [
+        {
+          "start": 2.0,
+          "end": 2.5,
+          "text": "EN FULL CUE 1"
+        },
+        {
+          "start": 4.0,
+          "end": 5.0,
+          "text": "EN FULL CUE 2"
+        },
+        {
+          "start": 6.0,
+          "end": 6.5,
+          "text": "EN FULL CUE 3"
+        },
+        {
+          "start": 9.0,
+          "end": 9.5,
+          "text": "EN FULL CUE 4"
+        }
+      ],
+      "timing_tolerance_seconds": 0.02,
+      "passed": true,
+      "browser_rendering": "not-proven"
+    },
+    {
+      "file": "representative.mp4",
+      "subtitle_ordinal": 0,
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative.mp4",
+        "-map",
+        "0:s:0",
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-"
+      ],
+      "cues": [
+        {
+          "start": 2.0,
+          "end": 2.5,
+          "text": "FR COMPLET CUE 1"
+        },
+        {
+          "start": 4.0,
+          "end": 5.0,
+          "text": "FR COMPLET CUE 2"
+        },
+        {
+          "start": 6.0,
+          "end": 6.5,
+          "text": "FR COMPLET CUE 3"
+        },
+        {
+          "start": 9.0,
+          "end": 9.5,
+          "text": "FR COMPLET CUE 4"
+        }
+      ],
+      "timing_tolerance_seconds": 0.02,
+      "passed": true,
+      "browser_rendering": "not-proven"
+    },
+    {
+      "file": "representative.mp4",
+      "subtitle_ordinal": 1,
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative.mp4",
+        "-map",
+        "0:s:1",
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-"
+      ],
+      "cues": [
+        {
+          "start": 2.0,
+          "end": 2.5,
+          "text": "FR FORCE CUE 1"
+        },
+        {
+          "start": 4.0,
+          "end": 5.0,
+          "text": "FR FORCE CUE 2"
+        },
+        {
+          "start": 6.0,
+          "end": 6.5,
+          "text": "FR FORCE CUE 3"
+        },
+        {
+          "start": 9.0,
+          "end": 9.5,
+          "text": "FR FORCE CUE 4"
+        }
+      ],
+      "timing_tolerance_seconds": 0.02,
+      "passed": true,
+      "browser_rendering": "not-proven"
+    },
+    {
+      "file": "representative.mp4",
+      "subtitle_ordinal": 2,
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative.mp4",
+        "-map",
+        "0:s:2",
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-"
+      ],
+      "cues": [
+        {
+          "start": 2.0,
+          "end": 2.5,
+          "text": "EN FULL CUE 1"
+        },
+        {
+          "start": 4.0,
+          "end": 5.0,
+          "text": "EN FULL CUE 2"
+        },
+        {
+          "start": 6.0,
+          "end": 6.5,
+          "text": "EN FULL CUE 3"
+        },
+        {
+          "start": 9.0,
+          "end": 9.5,
+          "text": "EN FULL CUE 4"
+        }
+      ],
+      "timing_tolerance_seconds": 0.02,
+      "passed": true,
+      "browser_rendering": "not-proven"
+    },
+    {
+      "file": "representative-en.mkv",
+      "subtitle_ordinal": 0,
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative-en.mkv",
+        "-map",
+        "0:s:0",
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-"
+      ],
+      "cues": [
+        {
+          "start": 2.0,
+          "end": 2.5,
+          "text": "FR COMPLET CUE 1"
+        },
+        {
+          "start": 4.0,
+          "end": 5.0,
+          "text": "FR COMPLET CUE 2"
+        },
+        {
+          "start": 6.0,
+          "end": 6.5,
+          "text": "FR COMPLET CUE 3"
+        },
+        {
+          "start": 9.0,
+          "end": 9.5,
+          "text": "FR COMPLET CUE 4"
+        }
+      ],
+      "timing_tolerance_seconds": 0.02,
+      "passed": true,
+      "browser_rendering": "not-proven"
+    },
+    {
+      "file": "representative-en.mkv",
+      "subtitle_ordinal": 1,
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative-en.mkv",
+        "-map",
+        "0:s:1",
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-"
+      ],
+      "cues": [
+        {
+          "start": 2.0,
+          "end": 2.5,
+          "text": "FR FORCE CUE 1"
+        },
+        {
+          "start": 4.0,
+          "end": 5.0,
+          "text": "FR FORCE CUE 2"
+        },
+        {
+          "start": 6.0,
+          "end": 6.5,
+          "text": "FR FORCE CUE 3"
+        },
+        {
+          "start": 9.0,
+          "end": 9.5,
+          "text": "FR FORCE CUE 4"
+        }
+      ],
+      "timing_tolerance_seconds": 0.02,
+      "passed": true,
+      "browser_rendering": "not-proven"
+    },
+    {
+      "file": "representative-en.mkv",
+      "subtitle_ordinal": 2,
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative-en.mkv",
+        "-map",
+        "0:s:2",
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-"
+      ],
+      "cues": [
+        {
+          "start": 2.0,
+          "end": 2.5,
+          "text": "EN FULL CUE 1"
+        },
+        {
+          "start": 4.0,
+          "end": 5.0,
+          "text": "EN FULL CUE 2"
+        },
+        {
+          "start": 6.0,
+          "end": 6.5,
+          "text": "EN FULL CUE 3"
+        },
+        {
+          "start": 9.0,
+          "end": 9.5,
+          "text": "EN FULL CUE 4"
+        }
+      ],
+      "timing_tolerance_seconds": 0.02,
+      "passed": true,
+      "browser_rendering": "not-proven"
+    },
+    {
+      "file": "representative-en.mp4",
+      "subtitle_ordinal": 0,
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative-en.mp4",
+        "-map",
+        "0:s:0",
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-"
+      ],
+      "cues": [
+        {
+          "start": 2.0,
+          "end": 2.5,
+          "text": "FR COMPLET CUE 1"
+        },
+        {
+          "start": 4.0,
+          "end": 5.0,
+          "text": "FR COMPLET CUE 2"
+        },
+        {
+          "start": 6.0,
+          "end": 6.5,
+          "text": "FR COMPLET CUE 3"
+        },
+        {
+          "start": 9.0,
+          "end": 9.5,
+          "text": "FR COMPLET CUE 4"
+        }
+      ],
+      "timing_tolerance_seconds": 0.02,
+      "passed": true,
+      "browser_rendering": "not-proven"
+    },
+    {
+      "file": "representative-en.mp4",
+      "subtitle_ordinal": 1,
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative-en.mp4",
+        "-map",
+        "0:s:1",
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-"
+      ],
+      "cues": [
+        {
+          "start": 2.0,
+          "end": 2.5,
+          "text": "FR FORCE CUE 1"
+        },
+        {
+          "start": 4.0,
+          "end": 5.0,
+          "text": "FR FORCE CUE 2"
+        },
+        {
+          "start": 6.0,
+          "end": 6.5,
+          "text": "FR FORCE CUE 3"
+        },
+        {
+          "start": 9.0,
+          "end": 9.5,
+          "text": "FR FORCE CUE 4"
+        }
+      ],
+      "timing_tolerance_seconds": 0.02,
+      "passed": true,
+      "browser_rendering": "not-proven"
+    },
+    {
+      "file": "representative-en.mp4",
+      "subtitle_ordinal": 2,
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        "tests\\fixtures\\generated\\representative\\representative-en.mp4",
+        "-map",
+        "0:s:2",
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-"
+      ],
+      "cues": [
+        {
+          "start": 2.0,
+          "end": 2.5,
+          "text": "EN FULL CUE 1"
+        },
+        {
+          "start": 4.0,
+          "end": 5.0,
+          "text": "EN FULL CUE 2"
+        },
+        {
+          "start": 6.0,
+          "end": 6.5,
+          "text": "EN FULL CUE 3"
+        },
+        {
+          "start": 9.0,
+          "end": 9.5,
+          "text": "EN FULL CUE 4"
+        }
+      ],
+      "timing_tolerance_seconds": 0.02,
+      "passed": true,
+      "browser_rendering": "not-proven"
+    }
+  ]
+}

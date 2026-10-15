@@ -1,0 +1,1019 @@
+{
+  "date": "2026-10-15T12:57:03.884Z",
+  "channel": "msedge",
+  "headless": true,
+  "os": {
+    "platform": "win32",
+    "release": "10.0.26300",
+    "arch": "x64"
+  },
+  "scenario": "representative",
+  "settings": "default browser features; no experimental audioTracks flags/preferences",
+  "hashesBefore": {
+    "av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66",
+    "language-remux/av1-opus-mkv-fr.mkv": "d89e09fa8ccbd6f247e639fe6c64f72af2c8f7b758b1525152111dc82c67ad36",
+    "language-remux/av1-opus-mkv-en.mkv": "998ec6848bbf6560c13ea3a54a67a05f4b44adb89af18701aa6a2b5da6f395b8",
+    "language-remux/av1-opus-mp4-fr.mp4": "0ecab0d50950ca110d6a4c80fd17036945fbbc4096d00cbb81a29c2da2b726a3",
+    "language-remux/av1-opus-mp4-en.mp4": "139eb56a003d1285170e49535ac3200e06669901ad3b5fb980c74fe2da339963",
+    "representative/representative.mkv": "a8ecf7ff37fadaf5e62c994cbc4985906999143eab2cf02ac2242993892fc3cc",
+    "representative/representative.mp4": "70222167e1c24959cc589fc6db042d1d0a63a8d72125bd4304cc9fdbae4d8587",
+    "representative/representative-en.mkv": "2e71c27674a205a70cf05e34d9f60c84c0178aab6edd76339512365cd034d697",
+    "representative/representative-en.mp4": "609a9100ba1f1fcc62b9cfe2ea6a5e1d25404a186ab8564103910f8f61ae3bf4"
+  },
+  "results": [
+    {
+      "id": "fixture-representative-mkv",
+      "method": "multi-track-native-url",
+      "expected": {
+        "expected_audio_language": "fr",
+        "expected_audio_channels": 6,
+        "method": "multi-track-native-url"
+      },
+      "passed": true,
+      "physical51": "not-tested",
+      "display10bit": "not-tested",
+      "scope": "Native decoded pixels, PCM, coarse marker timing and seek; channel graph and subtitle capabilities reported separately",
+      "markerChecks": [
+        {
+          "label": "initial",
+          "expectedOnset": 2,
+          "video": {
+            "mediaTime": 2,
+            "wallMs": 2854.9,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 2.020973,
+            "wallMs": 2905.4000000003725,
+            "rms": 0.10704810213632371
+          },
+          "maxPollGapMs": 22.700000000186265,
+          "audioVideoMediaClockSkewSeconds": 0.02097300000000013,
+          "audioVideoCallbackSkewMs": 50.50000000037244,
+          "passed": true
+        },
+        {
+          "label": "forward-seek",
+          "expectedOnset": 6,
+          "video": {
+            "mediaTime": 6,
+            "wallMs": 4188.1,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 6.010298,
+            "wallMs": 4193.5999999996275,
+            "rms": 0.07765396973708966
+          },
+          "maxPollGapMs": 16.90000000037253,
+          "audioVideoMediaClockSkewSeconds": 0.010297999999999696,
+          "audioVideoCallbackSkewMs": 5.499999999627107,
+          "passed": true
+        },
+        {
+          "label": "backward-seek",
+          "expectedOnset": 2,
+          "video": {
+            "mediaTime": 2,
+            "wallMs": 5221.332,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 2.02,
+            "wallMs": 5236.9000000003725,
+            "rms": 0.10104014275410445
+          },
+          "maxPollGapMs": 21.299999999813735,
+          "audioVideoMediaClockSkewSeconds": 0.020000000000000018,
+          "audioVideoCallbackSkewMs": 15.568000000372194,
+          "passed": true
+        },
+        {
+          "label": "late-forward-seek",
+          "expectedOnset": 9,
+          "video": {
+            "mediaTime": 9,
+            "wallMs": 6162.9,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 9.02,
+            "wallMs": 6207.4000000003725,
+            "rms": 0.10068072986161918
+          },
+          "maxPollGapMs": 16.700000000186265,
+          "audioVideoMediaClockSkewSeconds": 0.019999999999999574,
+          "audioVideoCallbackSkewMs": 44.50000000037289,
+          "passed": true
+        }
+      ],
+      "seekChecks": [
+        {
+          "before": 2.65049,
+          "target": 5.7,
+          "restored": 5.7,
+          "pausedBefore": true,
+          "pausedAfter": true,
+          "passed": true
+        },
+        {
+          "before": 6.66,
+          "target": 1.7,
+          "restored": 1.708,
+          "pausedBefore": false,
+          "pausedAfter": false,
+          "passed": true
+        },
+        {
+          "before": 2.66,
+          "target": 8.7,
+          "restored": 8.708033,
+          "pausedBefore": false,
+          "pausedAfter": false,
+          "passed": true
+        },
+        {
+          "before": 12.008,
+          "target": 4.25,
+          "restored": 4.25,
+          "pausedBefore": true,
+          "pausedAfter": true,
+          "passed": true
+        }
+      ],
+      "subtitleChecks": [],
+      "duration": 12.008,
+      "dimensions": [
+        320,
+        180
+      ],
+      "nativeAudioTracks": null,
+      "audioContext": {
+        "sampleRate": 48000,
+        "baseLatency": 0.01,
+        "outputLatency": 0,
+        "destinationChannels": 2,
+        "destinationMaxChannels": 2
+      },
+      "channelGraph": [
+        {
+          "index": 0,
+          "rms": 0.010674262738659608,
+          "hz": 439.453125
+        },
+        {
+          "index": 1,
+          "rms": 0.010617758878351069,
+          "hz": 550.78125
+        },
+        {
+          "index": 2,
+          "rms": 0.010595563123255864,
+          "hz": 662.109375
+        },
+        {
+          "index": 3,
+          "rms": 0.010557060072302171,
+          "hz": 82.03125
+        },
+        {
+          "index": 4,
+          "rms": 0.010641348501981276,
+          "hz": 767.578125
+        },
+        {
+          "index": 5,
+          "rms": 0.010554592377643616,
+          "hz": 878.90625
+        }
+      ],
+      "channelGraphMatchesExpected": true,
+      "decodedAudioPresent": true,
+      "markerMeasurement": {
+        "pollTargetMs": 10,
+        "rmsSamples": 1024,
+        "windowMs": 21.333333333333332,
+        "audioThreshold": 0.03202278821597882,
+        "acceptedCoarseSkewSeconds": 0.2,
+        "physicalSynchronization": "not-tested"
+      },
+      "pauseStable": true,
+      "afterSeekChannels": [
+        {
+          "index": 0,
+          "rms": 0.01069784449215252,
+          "hz": 439.453125
+        },
+        {
+          "index": 1,
+          "rms": 0.010687893921218982,
+          "hz": 550.78125
+        },
+        {
+          "index": 2,
+          "rms": 0.010590435331187725,
+          "hz": 662.109375
+        },
+        {
+          "index": 3,
+          "rms": 0.01059057160304907,
+          "hz": 82.03125
+        },
+        {
+          "index": 4,
+          "rms": 0.010667743468223875,
+          "hz": 767.578125
+        },
+        {
+          "index": 5,
+          "rms": 0.010687321775736343,
+          "hz": 878.90625
+        }
+      ],
+      "decodedFrames": 235,
+      "ended": true,
+      "nativeTextTracks": [],
+      "nativeSubtitleSelection": "unavailable",
+      "subtitleUiDisabled": true
+    },
+    {
+      "id": "fixture-representative-mp4",
+      "method": "multi-track-native-url",
+      "expected": {
+        "expected_audio_language": "fr",
+        "expected_audio_channels": 6,
+        "method": "multi-track-native-url"
+      },
+      "passed": true,
+      "physical51": "not-tested",
+      "display10bit": "not-tested",
+      "scope": "Native decoded pixels, PCM, coarse marker timing and seek; channel graph and subtitle capabilities reported separately",
+      "markerChecks": [
+        {
+          "label": "initial",
+          "expectedOnset": 2,
+          "video": {
+            "mediaTime": 2,
+            "wallMs": 11479.4,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 2.010667,
+            "wallMs": 11515.5,
+            "rms": 0.09708130591078308
+          },
+          "maxPollGapMs": 27.5,
+          "audioVideoMediaClockSkewSeconds": 0.010667000000000204,
+          "audioVideoCallbackSkewMs": 36.100000000000364,
+          "passed": true
+        },
+        {
+          "label": "forward-seek",
+          "expectedOnset": 6,
+          "video": {
+            "mediaTime": 6,
+            "wallMs": 12779.9,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 6.009333,
+            "wallMs": 12787.400000000373,
+            "rms": 0.06625824413239292
+          },
+          "maxPollGapMs": 21.200000000186265,
+          "audioVideoMediaClockSkewSeconds": 0.009332999999999814,
+          "audioVideoCallbackSkewMs": 7.500000000372893,
+          "passed": true
+        },
+        {
+          "label": "backward-seek",
+          "expectedOnset": 2,
+          "video": {
+            "mediaTime": 2,
+            "wallMs": 13796.9,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 2.001333,
+            "wallMs": 13797.200000000186,
+            "rms": 0.06627054796894688
+          },
+          "maxPollGapMs": 18.40000000037253,
+          "audioVideoMediaClockSkewSeconds": 0.0013329999999998066,
+          "audioVideoCallbackSkewMs": 0.3000000001866283,
+          "passed": true
+        },
+        {
+          "label": "late-forward-seek",
+          "expectedOnset": 9,
+          "video": {
+            "mediaTime": 9,
+            "wallMs": 14779.866,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 9.019551,
+            "wallMs": 14795.200000000186,
+            "rms": 0.10068071132019879
+          },
+          "maxPollGapMs": 21,
+          "audioVideoMediaClockSkewSeconds": 0.019550999999999874,
+          "audioVideoCallbackSkewMs": 15.334000000186279,
+          "passed": true
+        }
+      ],
+      "seekChecks": [
+        {
+          "before": 2.650667,
+          "target": 5.7,
+          "restored": 5.7,
+          "pausedBefore": true,
+          "pausedAfter": true,
+          "passed": true
+        },
+        {
+          "before": 6.66,
+          "target": 1.7,
+          "restored": 1.710667,
+          "pausedBefore": false,
+          "pausedAfter": false,
+          "passed": true
+        },
+        {
+          "before": 2.65874,
+          "target": 8.7,
+          "restored": 8.710667,
+          "pausedBefore": false,
+          "pausedAfter": false,
+          "passed": true
+        },
+        {
+          "before": 12.001,
+          "target": 4.25,
+          "restored": 4.25,
+          "pausedBefore": true,
+          "pausedAfter": true,
+          "passed": true
+        }
+      ],
+      "subtitleChecks": [],
+      "duration": 12.001,
+      "dimensions": [
+        320,
+        180
+      ],
+      "nativeAudioTracks": null,
+      "audioContext": {
+        "sampleRate": 48000,
+        "baseLatency": 0.01,
+        "outputLatency": 0.048,
+        "destinationChannels": 2,
+        "destinationMaxChannels": 2
+      },
+      "channelGraph": [
+        {
+          "index": 0,
+          "rms": 0.010595073719105385,
+          "hz": 439.453125
+        },
+        {
+          "index": 1,
+          "rms": 0.01059900324336866,
+          "hz": 550.78125
+        },
+        {
+          "index": 2,
+          "rms": 0.01061334091759446,
+          "hz": 662.109375
+        },
+        {
+          "index": 3,
+          "rms": 0.010927869320443736,
+          "hz": 82.03125
+        },
+        {
+          "index": 4,
+          "rms": 0.010621164067685712,
+          "hz": 767.578125
+        },
+        {
+          "index": 5,
+          "rms": 0.010554518256868218,
+          "hz": 878.90625
+        }
+      ],
+      "channelGraphMatchesExpected": true,
+      "decodedAudioPresent": true,
+      "markerMeasurement": {
+        "pollTargetMs": 10,
+        "rmsSamples": 1024,
+        "windowMs": 21.333333333333332,
+        "audioThreshold": 0.031785221157316156,
+        "acceptedCoarseSkewSeconds": 0.2,
+        "physicalSynchronization": "not-tested"
+      },
+      "pauseStable": true,
+      "afterSeekChannels": [
+        {
+          "index": 0,
+          "rms": 0.010570074638108537,
+          "hz": 439.453125
+        },
+        {
+          "index": 1,
+          "rms": 0.010591292910930597,
+          "hz": 550.78125
+        },
+        {
+          "index": 2,
+          "rms": 0.010600719387702764,
+          "hz": 662.109375
+        },
+        {
+          "index": 3,
+          "rms": 0.010476068194106474,
+          "hz": 82.03125
+        },
+        {
+          "index": 4,
+          "rms": 0.010638517621265843,
+          "hz": 767.578125
+        },
+        {
+          "index": 5,
+          "rms": 0.010668956271535097,
+          "hz": 878.90625
+        }
+      ],
+      "decodedFrames": 236,
+      "ended": true,
+      "nativeTextTracks": [],
+      "nativeSubtitleSelection": "unavailable",
+      "subtitleUiDisabled": true
+    },
+    {
+      "id": "fixture-representative-mkv-en",
+      "method": "prepared-en-remux-native-url",
+      "expected": {
+        "expected_audio_language": "en",
+        "expected_audio_channels": 2,
+        "method": "prepared-en-remux-native-url"
+      },
+      "passed": true,
+      "physical51": "not-tested",
+      "display10bit": "not-tested",
+      "scope": "Native decoded pixels, PCM, coarse marker timing and seek; channel graph and subtitle capabilities reported separately",
+      "markerChecks": [
+        {
+          "label": "initial",
+          "expectedOnset": 2,
+          "video": {
+            "mediaTime": 2,
+            "wallMs": 20029.3,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 2.005925,
+            "wallMs": 20033.200000000186,
+            "rms": 0.0658351834968533
+          },
+          "maxPollGapMs": 21.100000000558794,
+          "audioVideoMediaClockSkewSeconds": 0.005924999999999958,
+          "audioVideoCallbackSkewMs": 3.900000000186992,
+          "passed": true
+        },
+        {
+          "label": "forward-seek",
+          "expectedOnset": 6,
+          "video": {
+            "mediaTime": 6,
+            "wallMs": 21246.232,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 6.009333,
+            "wallMs": 21281.200000000186,
+            "rms": 0.06667178101847997
+          },
+          "maxPollGapMs": 20.299999999813735,
+          "audioVideoMediaClockSkewSeconds": 0.009332999999999814,
+          "audioVideoCallbackSkewMs": 34.968000000186294,
+          "passed": true
+        },
+        {
+          "label": "backward-seek",
+          "expectedOnset": 2,
+          "video": {
+            "mediaTime": 2,
+            "wallMs": 22271.1,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 2.02,
+            "wallMs": 22305.400000000373,
+            "rms": 0.10035273624251607
+          },
+          "maxPollGapMs": 22.200000000186265,
+          "audioVideoMediaClockSkewSeconds": 0.020000000000000018,
+          "audioVideoCallbackSkewMs": 34.300000000373984,
+          "passed": true
+        },
+        {
+          "label": "late-forward-seek",
+          "expectedOnset": 9,
+          "video": {
+            "mediaTime": 9,
+            "wallMs": 23254.6,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 9.009333,
+            "wallMs": 23290,
+            "rms": 0.06667178208142978
+          },
+          "maxPollGapMs": 16.90000000037253,
+          "audioVideoMediaClockSkewSeconds": 0.009332999999999814,
+          "audioVideoCallbackSkewMs": 35.400000000001455,
+          "passed": true
+        }
+      ],
+      "seekChecks": [
+        {
+          "before": 2.658667,
+          "target": 5.7,
+          "restored": 5.7,
+          "pausedBefore": true,
+          "pausedAfter": true,
+          "passed": true
+        },
+        {
+          "before": 6.66,
+          "target": 1.7,
+          "restored": 1.707019,
+          "pausedBefore": false,
+          "pausedAfter": false,
+          "passed": true
+        },
+        {
+          "before": 2.668,
+          "target": 8.7,
+          "restored": 8.7,
+          "pausedBefore": false,
+          "pausedAfter": false,
+          "passed": true
+        },
+        {
+          "before": 12.008,
+          "target": 4.25,
+          "restored": 4.25,
+          "pausedBefore": true,
+          "pausedAfter": true,
+          "passed": true
+        }
+      ],
+      "subtitleChecks": [],
+      "duration": 12.008,
+      "dimensions": [
+        320,
+        180
+      ],
+      "nativeAudioTracks": null,
+      "audioContext": {
+        "sampleRate": 48000,
+        "baseLatency": 0.01,
+        "outputLatency": 0.04,
+        "destinationChannels": 2,
+        "destinationMaxChannels": 2
+      },
+      "channelGraph": [
+        {
+          "index": 0,
+          "rms": 0.010575063791492985,
+          "hz": 990.234375
+        },
+        {
+          "index": 1,
+          "rms": 0.010652087570083213,
+          "hz": 1101.5625
+        },
+        {
+          "index": 2,
+          "rms": 0,
+          "hz": 0
+        },
+        {
+          "index": 3,
+          "rms": 0,
+          "hz": 0
+        },
+        {
+          "index": 4,
+          "rms": 0,
+          "hz": 0
+        },
+        {
+          "index": 5,
+          "rms": 0,
+          "hz": 0
+        }
+      ],
+      "channelGraphMatchesExpected": true,
+      "decodedAudioPresent": true,
+      "markerMeasurement": {
+        "pollTargetMs": 10,
+        "rmsSamples": 1024,
+        "windowMs": 21.333333333333332,
+        "audioThreshold": 0.031725191374478955,
+        "acceptedCoarseSkewSeconds": 0.2,
+        "physicalSynchronization": "not-tested"
+      },
+      "pauseStable": true,
+      "afterSeekChannels": [
+        {
+          "index": 0,
+          "rms": 0.010587532402248374,
+          "hz": 990.234375
+        },
+        {
+          "index": 1,
+          "rms": 0.010663850152621189,
+          "hz": 1101.5625
+        },
+        {
+          "index": 2,
+          "rms": 0,
+          "hz": 0
+        },
+        {
+          "index": 3,
+          "rms": 0,
+          "hz": 0
+        },
+        {
+          "index": 4,
+          "rms": 0,
+          "hz": 0
+        },
+        {
+          "index": 5,
+          "rms": 0,
+          "hz": 0
+        }
+      ],
+      "decodedFrames": 236,
+      "ended": true,
+      "nativeTextTracks": [],
+      "nativeSubtitleSelection": "unavailable",
+      "subtitleUiDisabled": true
+    },
+    {
+      "id": "fixture-representative-mp4-en",
+      "method": "prepared-en-remux-native-url",
+      "expected": {
+        "expected_audio_language": "en",
+        "expected_audio_channels": 2,
+        "method": "prepared-en-remux-native-url"
+      },
+      "passed": true,
+      "physical51": "not-tested",
+      "display10bit": "not-tested",
+      "scope": "Native decoded pixels, PCM, coarse marker timing and seek; channel graph and subtitle capabilities reported separately",
+      "markerChecks": [
+        {
+          "label": "initial",
+          "expectedOnset": 2,
+          "video": {
+            "mediaTime": 2,
+            "wallMs": 28554.5,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 1.99911,
+            "wallMs": 28555,
+            "rms": 0.061753287113093906
+          },
+          "maxPollGapMs": 27.399999999441206,
+          "audioVideoMediaClockSkewSeconds": -0.0008900000000000574,
+          "audioVideoCallbackSkewMs": 0.5,
+          "passed": true
+        },
+        {
+          "label": "forward-seek",
+          "expectedOnset": 6,
+          "video": {
+            "mediaTime": 6,
+            "wallMs": 29820.9,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 6.009333,
+            "wallMs": 29838.099999999627,
+            "rms": 0.06667178101847997
+          },
+          "maxPollGapMs": 27,
+          "audioVideoMediaClockSkewSeconds": 0.009332999999999814,
+          "audioVideoCallbackSkewMs": 17.199999999626016,
+          "passed": true
+        },
+        {
+          "label": "backward-seek",
+          "expectedOnset": 2,
+          "video": {
+            "mediaTime": 2,
+            "wallMs": 30804.2,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 2.007553,
+            "wallMs": 30833.5,
+            "rms": 0.09276997735725177
+          },
+          "maxPollGapMs": 20.799999999813735,
+          "audioVideoMediaClockSkewSeconds": 0.007553000000000143,
+          "audioVideoCallbackSkewMs": 29.299999999999272,
+          "passed": true
+        },
+        {
+          "label": "late-forward-seek",
+          "expectedOnset": 9,
+          "video": {
+            "mediaTime": 9,
+            "wallMs": 31813,
+            "brightness": 254
+          },
+          "audio": {
+            "mediaClock": 9.02,
+            "wallMs": 31831.099999999627,
+            "rms": 0.10002564510423824
+          },
+          "maxPollGapMs": 19,
+          "audioVideoMediaClockSkewSeconds": 0.019999999999999574,
+          "audioVideoCallbackSkewMs": 18.09999999962747,
+          "passed": true
+        }
+      ],
+      "seekChecks": [
+        {
+          "before": 2.658667,
+          "target": 5.7,
+          "restored": 5.7,
+          "pausedBefore": true,
+          "pausedAfter": true,
+          "passed": true
+        },
+        {
+          "before": 6.66,
+          "target": 1.7,
+          "restored": 1.717204,
+          "pausedBefore": false,
+          "pausedAfter": false,
+          "passed": true
+        },
+        {
+          "before": 2.66,
+          "target": 8.7,
+          "restored": 8.710667,
+          "pausedBefore": false,
+          "pausedAfter": false,
+          "passed": true
+        },
+        {
+          "before": 12.001,
+          "target": 4.25,
+          "restored": 4.25,
+          "pausedBefore": true,
+          "pausedAfter": true,
+          "passed": true
+        }
+      ],
+      "subtitleChecks": [],
+      "duration": 12.001,
+      "dimensions": [
+        320,
+        180
+      ],
+      "nativeAudioTracks": null,
+      "audioContext": {
+        "sampleRate": 48000,
+        "baseLatency": 0.01,
+        "outputLatency": 0.04,
+        "destinationChannels": 2,
+        "destinationMaxChannels": 2
+      },
+      "channelGraph": [
+        {
+          "index": 0,
+          "rms": 0.010612871756835783,
+          "hz": 990.234375
+        },
+        {
+          "index": 1,
+          "rms": 0.010662442663330718,
+          "hz": 1101.5625
+        },
+        {
+          "index": 2,
+          "rms": 0,
+          "hz": 0
+        },
+        {
+          "index": 3,
+          "rms": 0,
+          "hz": 0
+        },
+        {
+          "index": 4,
+          "rms": 0,
+          "hz": 0
+        },
+        {
+          "index": 5,
+          "rms": 0,
+          "hz": 0
+        }
+      ],
+      "channelGraphMatchesExpected": true,
+      "decodedAudioPresent": true,
+      "markerMeasurement": {
+        "pollTargetMs": 10,
+        "rmsSamples": 1024,
+        "windowMs": 21.333333333333332,
+        "audioThreshold": 0.031838615270507346,
+        "acceptedCoarseSkewSeconds": 0.2,
+        "physicalSynchronization": "not-tested"
+      },
+      "pauseStable": true,
+      "afterSeekChannels": [
+        {
+          "index": 0,
+          "rms": 0.010593633910888979,
+          "hz": 990.234375
+        },
+        {
+          "index": 1,
+          "rms": 0.01066499320586582,
+          "hz": 1101.5625
+        },
+        {
+          "index": 2,
+          "rms": 0,
+          "hz": 0
+        },
+        {
+          "index": 3,
+          "rms": 0,
+          "hz": 0
+        },
+        {
+          "index": 4,
+          "rms": 0,
+          "hz": 0
+        },
+        {
+          "index": 5,
+          "rms": 0,
+          "hz": 0
+        }
+      ],
+      "decodedFrames": 235,
+      "ended": true,
+      "nativeTextTracks": [],
+      "nativeSubtitleSelection": "unavailable",
+      "subtitleUiDisabled": true
+    }
+  ],
+  "limits": "Decoded pixels and PCM only; human listening and physical display NT. Remux files are played by native URL; no MSE append.",
+  "browser": "155.0.4283.45",
+  "driver": "Playwright 1.62.1",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+  "missing": {
+    "httpStatus": 404,
+    "code": 4,
+    "message": "MEDIA_ELEMENT_ERROR: Format error",
+    "displayed": "Échec navigateur : 4 MEDIA_ELEMENT_ERROR: Format error"
+  },
+  "responses": [
+    {
+      "url": "/api/v1/assets/fixture-representative-mkv/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0cc48.19ae59fc-ba0c1\"",
+        "content-range": "bytes 0-762048/762049",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "762049",
+        "date": "Thu, 15 Oct 2026 12:57:05 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 12:51:20 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-representative-mp4/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0cc48.23287f58-bb2ae\"",
+        "content-range": "bytes 0-766637/766638",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "766638",
+        "date": "Thu, 15 Oct 2026 12:57:14 GMT",
+        "content-type": "video/mp4",
+        "last-modified": "Thu, 15 Oct 2026 12:51:20 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-representative-mkv-en/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0cc48.2907852c-59a17\"",
+        "content-range": "bytes 0-367126/367127",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "367127",
+        "date": "Thu, 15 Oct 2026 12:57:23 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 12:51:20 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-representative-mp4-en/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0cc48.2f0fd6e0-5a77e\"",
+        "content-range": "bytes 0-370557/370558",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "370558",
+        "date": "Thu, 15 Oct 2026 12:57:31 GMT",
+        "content-type": "video/mp4",
+        "last-modified": "Thu, 15 Oct 2026 12:51:20 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-representative-mp4-en/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0cc48.2f0fd6e0-5a77e\"",
+        "content-range": "bytes 131072-370557/370558",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "239486",
+        "date": "Thu, 15 Oct 2026 12:57:32 GMT",
+        "content-type": "video/mp4",
+        "last-modified": "Thu, 15 Oct 2026 12:51:20 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/missing/content",
+      "status": 404,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "content-length": "25",
+        "date": "Thu, 15 Oct 2026 12:57:40 GMT",
+        "content-type": "application/json",
+        "x-content-type-options": "nosniff"
+      }
+    },
+    {
+      "url": "/api/v1/assets/missing/content",
+      "status": 404,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "content-length": "25",
+        "date": "Thu, 15 Oct 2026 12:57:40 GMT",
+        "content-type": "application/json",
+        "x-content-type-options": "nosniff"
+      }
+    }
+  ],
+  "hashesAfter": {
+    "av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66",
+    "language-remux/av1-opus-mkv-fr.mkv": "d89e09fa8ccbd6f247e639fe6c64f72af2c8f7b758b1525152111dc82c67ad36",
+    "language-remux/av1-opus-mkv-en.mkv": "998ec6848bbf6560c13ea3a54a67a05f4b44adb89af18701aa6a2b5da6f395b8",
+    "language-remux/av1-opus-mp4-fr.mp4": "0ecab0d50950ca110d6a4c80fd17036945fbbc4096d00cbb81a29c2da2b726a3",
+    "language-remux/av1-opus-mp4-en.mp4": "139eb56a003d1285170e49535ac3200e06669901ad3b5fb980c74fe2da339963",
+    "representative/representative.mkv": "a8ecf7ff37fadaf5e62c994cbc4985906999143eab2cf02ac2242993892fc3cc",
+    "representative/representative.mp4": "70222167e1c24959cc589fc6db042d1d0a63a8d72125bd4304cc9fdbae4d8587",
+    "representative/representative-en.mkv": "2e71c27674a205a70cf05e34d9f60c84c0178aab6edd76339512365cd034d697",
+    "representative/representative-en.mp4": "609a9100ba1f1fcc62b9cfe2ea6a5e1d25404a186ab8564103910f8f61ae3bf4"
+  },
+  "originalsUnchanged": true
+}

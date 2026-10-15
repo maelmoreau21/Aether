@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="fr"><meta charset="utf-8"><title>Expérience MSE P0C</title>
+<h1>MSE : vidéo commune, audio FR/EN</h1>
+<p>Fixtures synthétiques 12 s. Copie AV1/Opus ; graphe audio, aucune preuve de sortie physique 5.1.</p>
+<video id="video" controls width="640">
+<track src="/api/v1/experiment/mse/fr-full.vtt" kind="subtitles" srclang="fr" label="FR complet">
+<track src="/api/v1/experiment/mse/fr-forced.vtt" kind="subtitles" srclang="fr" label="FR forcés">
+<track src="/api/v1/experiment/mse/en-full.vtt" kind="subtitles" srclang="en" label="EN">
+</video>
+<button id="start">Préparer MSE</button>
+<button id="fr">FR 5.1</button><button id="en">EN stéréo</button>
+<p id="status" role="status">Non démarré</p>
+<script src="/mse.js"></script></html>

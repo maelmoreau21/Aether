@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+  # Requis pour rustsec/audit-check si publication d'annotations
+  checks: write
+  issues: write
+
+jobs:
+  # =========================================================================
+  # 1. Vérifications et tests Rust (Core & Node)
+  # =========================================================================
+  rust:
+    name: Rust (Format, Clippy, Tests)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Installer la toolchain Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache des dépendances Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Installer FFmpeg (génération des fixtures synthétiques)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
+        shell: pwsh
+        run: ./scripts/generate-fixtures.ps1
+
+      - name: Préparer le remux linguistique (pistes FR/EN)
+        shell: pwsh
+        run: ./scripts/prepare-language-remux.ps1
+
+      - name: Générer les fixtures représentatives (10-bit / 5.1)
+        run: python3 scripts/generate-representative-fixtures.py
+
+      - name: Préparer les segments MSE
+        run: python3 scripts/prepare-mse.py
+
+      - name: Préparer les manifestes DASH
+        run: python3 scripts/prepare-dash.py
+
+      - name: Valider les métriques de comparaison des lecteurs
+        run: node scripts/player-comparison-stats.test.cjs
+
+      - name: Valider les statistiques de marge de sécurité
+        run: node scripts/safe-margin-stats.test.cjs
+
+      - name: Valider la récupération audio bornée
+        run: node --test scripts/audio-seek-policy.test.cjs
+
+      - name: Vérifier le formatage (cargo fmt)
+        run: cargo fmt --check
+
+      - name: Analyse statique stricte (cargo clippy)
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Exécuter les tests (cargo test)
+        run: cargo test --locked
+
+  # =========================================================================
+  # 2. Audit de sécurité des dépendances Rust
+  # =========================================================================
+  security-audit:
+    name: Audit de sécurité (cargo audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Lancer l'audit de sécurité RustSec
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # =========================================================================
+  # 3. Vérifications et tests Frontend (SvelteKit)
+  # Ce job s'exécutera automatiquement dès que apps/web sera initialisé.
+  # =========================================================================
+  frontend:
+    name: Frontend SvelteKit
+    runs-on: ubuntu-latest
+    # Ne s'exécute que si le frontend apps/web existe dans le dépôt
+    if: hashFiles('apps/web/package.json') != ''
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Installer les dépendances npm
+        run: npm ci
+
+      - name: Audit de sécurité des dépendances npm
+        run: npm audit --audit-level=high
+
+      - name: Vérification TypeScript & Svelte (svelte-check)
+        run: npm run check
+
+      - name: Linting (ESLint / Prettier)
+        run: npm run lint
+
+      - name: Tests unitaires frontend (Vitest / Playwright)
+        run: npm test

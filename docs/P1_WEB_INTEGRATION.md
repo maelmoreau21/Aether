@@ -120,3 +120,8 @@ cinématographique décrite dans UI_DIRECTION.md. Logique média conservée,
 CSP img-src self pour les images locales. Six parcours MKV/MP4 sur trois
 navigateurs après refonte ; Firefox validé à 1× seulement, vitesse FR 5.1à 1,5×
 reste ouverte. Six viewports 360–1920 px, cartes et pannes testés.
+
+## Lecteur immersif
+
+Le parcours courant ouvre un dialog plein écran avec contrôles Svelte superposés,
+plus de lecteur intégré à la page. Moteur/API/fixtures conservés. Voir IMMERSIVE_PLAYER.md.

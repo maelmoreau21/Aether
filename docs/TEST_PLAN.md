@@ -287,3 +287,62 @@ Core/audio/VTT et tentative audio unique. Pas de comparaison de lecteurs.
 Même runner P1, Chrome/Edge à 1,5× et Firefox via MEDIA_TEST_SPEED=1.
 Layout enrichi :360/390/768/1280/1440/1920,  images/CSP/clavier, carte MP4.
 Résultats et limites : UI_DIRECTION.md ; preuves evidence/2026-10-15/p1-ui-v1/.
+
+### Lecteur immersif P1
+
+Scénarios browser-immersive.cjs et browser-immersive-firefox.cjs : plein écran réel,
+repli refusé, menus, clavier, tactile simulé, masquage et nettoyage. Les runners P1
+existants pilotent désormais les contrôles superposés ; leurs assertions média
+sont conservées. Commandes et limites : IMMERSIVE_PLAYER.md.
+
+## Premier catalogue P1 — validation locale du 15 octobre 2026
+
+`cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings` et
+`cargo test --locked` réussissent : 15 tests Rust, nouveaux contrats et anciens
+tests conservés. Svelte/TypeScript check 0 erreur/0 avertissement, lint, 8 tests
+Vitest et build passent après les ajustements UI. `browser-p1.cjs` adapté à la
+fiche du film réussit les deux parcours MKV/MP4 sous Chrome 155.0.8059.40,
+avec pixels/PCM et hashes vérifiés ; assertions média conservées.
+
+Les scripts P1/immersive utilisent maintenant
+`/app/films/?work=fixture-film`, attendent les choix de version et conservent
+pixels/PCM, FR/EN, pause/seek, WebVTT, erreurs et hashes. Le contrôle de l'ancien
+décor de présentation est remplacé par celui des versions disponibles.
+`browser-catalog.cjs` réussit sous Windows Chrome headless aux viewports
+390/768/1440 px : navigation et accès directs, fiches, série/saison/épisode puis
+lecture MP4, recherche vide, catalogue vide injecté, erreur 503 puis réessai,
+fiche 404, pagination simulée de 72 œuvres avec 24 cartes maximum.
+État de chargement et refus d'afficher un épisode comme film via `work`
+détourné vérifiés dans la dernière relance. Captures
+Accueil/Films/Séries desktop/mobile inspectées. `browser-p1-layout.cjs` passe
+360/390/768/1280/1440/1920 px sans débordement/CSP ; audio404 (une tentative),
+VTT404 et Core503 explicites. `browser-immersive.cjs` passe plein écran réel et
+refus simulé, menus/clavier et tactile simulé390×844/844×390.
+Preuves `evidence/2026-10-15/catalogue/` (report.json, regression, layout,
+immersive). Détails dans CATALOGUE_P1.md ; aucun nouveau résultat Edge/Firefox.
+
+Pas de relance des expériences codecs P0. Authentification/SQLite/scanner et
+bibliothèques personnelles restent absents ; aucun test de fixture ne prouve
+leur sécurité, ni la fluidité à grande échelle ou sur mobile physique.
+
+
+## Navigation et menu profil — vérification du 15 octobre 2026
+
+Commandes exécutées depuis la racine : npm run check --prefix apps/web,
+npm run lint --prefix apps/web, npm test --prefix apps/web,
+npm run build --prefix apps/web. Résultats : check0/0, lint/build réussis,
+8 tests Vitest passent. Backend inchangé : pas de relance Rust pour cet ajustement.
+
+Avec NODE_PATH pointant sur apps/web/node_modules et serveur local actif :
+node scripts/browser-profile.cjs ; puis browser-catalog.cjs et
+browser-immersive.cjs avec MEDIA_REPORT_DIR distincts. Les trois passent.
+Chrome155.0.8059.40 / Windows10.0.26300 headless : profil en360/390/768/1440px,
+4liens principaux sans Paramètres, loupe SVG, Profil désactivé, Paramètres
+fonctionnel, Entrée/Espace/Tab/Échap, focus restauré, second clic sur avatar,
+clic extérieur et tactile simulé. Menu contenu dans la fenêtre, aucune erreur
+JS/CSP ni débordement ; captures après fin d'animation inspectées.
+
+Non-régression catalogue (390/768/1440px) et lecteur immersif (fullscreen,
+menus, clavier, audio/texte/source, retour/nettoyage, tactile simulé) réussie.
+Preuves : evidence/2026-10-15/profile-navigation/ et sous-dossiers catalogue/
+et immersive/. Aucun nouveau résultat Edge/Firefox/Safari/mobile physique.

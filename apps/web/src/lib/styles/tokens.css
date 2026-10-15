@@ -23,7 +23,7 @@
   --page-gutter: clamp(20px, 5vw, 80px);
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 32px; }
+html { scroll-behavior: smooth; scroll-padding-top: 32px; scroll-padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
 body { margin: 0; background: var(--color-canvas); color: var(--color-text); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
 button, input, select { font: inherit; }
 button, a, input, select { -webkit-tap-highlight-color: transparent; }

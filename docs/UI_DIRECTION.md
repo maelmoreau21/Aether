@@ -74,3 +74,23 @@ de film long, de déploiement NAS ou de mesure de charge.
 Prochain petit jalon visuel : recueillir un retour sur cette composition et ses
 proportions avant de l'étendre à d'autres écrans. L'admin local/SQLite et les
 bibliothèques réelles restent des étapes P1 distinctes, non ajoutées ici.
+
+## Évolution du lecteur
+
+Le lecteur encadré décrit historiquement ci-dessus est remplacé par la surface
+immersive documentée dans IMMERSIVE_PLAYER.md. La direction de l’accueil demeure.
+
+
+## Navigation et accès personnel (15 octobre 2026)
+
+Accueil / Films / Séries / Recherche restent dans la navigation principale.
+La recherche associe une vraie loupe SVG à son libellé, y compris sur mobile.
+Les paramètres sont déplacés dans le menu profil en haut à droite, avec avatar
+améthyste de repli. « Aucun profil configuré » et « Profil · Bientôt » ne
+prétendent pas fournir un compte réel ; aucune entrée de déconnexion factice.
+
+ProfileMenu utilise un popover natif auto, la navigation Tab et le retour de focus
+sur Échap. Clic extérieur, nouveau clic sur l'avatar et navigation le ferment.
+Les couleurs, rayons et états d'interaction réutilisent les tokens existants ;
+aucune dépendance ni modification du lecteur. Captures desktop/mobile et
+résultats vérifiés dans evidence/2026-10-15/profile-navigation/.

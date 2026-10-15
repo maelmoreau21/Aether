@@ -41,6 +41,7 @@
   }
   function wake() { visible = true; armIdle(); }
   $effect(() => { armIdle(); return () => clearTimeout(idle); });
+  $effect(() => { if (opened && !visible) surface?.focus(); });
   function fail(message: string) {
     if (!opened) return;
     engine?.pause(); error = message; busy = false; sync(); wake();
@@ -80,6 +81,7 @@
     active = media; opened = true; busy = true; error = ''; notice = ''; menu = null;
     keyboardPinned = false; visible = true; document.body.classList.add('immersive-open');
     dialog.showModal();
+    surface?.focus();
     // Requested synchronously from the opening user gesture, before any network await.
     requestFullscreen();
     engine = createPlayer(video, message => { if (current === generation) fail(message); });
@@ -87,14 +89,20 @@
   }
   export function close() {
     if (!opened) return;
-    opened = false; generation++; clearTimeout(idle); menu = null;
+    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null;
+    const returnTarget = opener;
+    const restoreNavigation = () => {
+      if (opened || generation !== closedGeneration) return;
+      window.scrollTo({ top: scrollPosition, behavior: 'instant' });
+      returnTarget?.focus({ preventScroll: true });
+    };
     engine?.destroy(); engine = undefined;
     video.querySelectorAll('track').forEach(track => track.remove());
-    if (document.fullscreenElement === surface) void document.exitFullscreen().catch(() => {});
+    const leavingFullscreen = document.fullscreenElement === surface ? document.exitFullscreen().catch(() => {}) : Promise.resolve();
     if (dialog.open) dialog.close();
     document.body.classList.remove('immersive-open');
-    window.scrollTo({ top: scrollPosition, behavior: 'instant' });
-    opener?.focus({ preventScroll: true });
+    restoreNavigation();
+    void leavingFullscreen.then(() => requestAnimationFrame(restoreNavigation));
     busy = false; error = ''; paused = true;
   }
   function requestFullscreen() {
@@ -145,6 +153,10 @@
       else toggleFullscreen();
     }
   }
+  function windowKeyboard(event: KeyboardEvent) {
+    if (!opened || event.defaultPrevented) return;
+    keyboard(event);
+  }
   function cancel(event: Event) { event.preventDefault(); if (menu) controls?.closeMenu(); else close(); }
   onMount(() => {
     const change = () => { fullscreen = document.fullscreenElement === surface; wake(); };
@@ -153,13 +165,15 @@
   });
 </script>
 
+<svelte:window onkeydown={windowKeyboard} />
+
 <dialog id="player" bind:this={dialog} class="immersive-dialog" aria-label="Lecteur immersif" oncancel={cancel} onclose={close}>
   <!-- The media shell owns focus and shortcuts; the controls do not know the playback implementation. -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydown={keyboard}
-    onpointermove={event => { if (event.pointerType !== 'touch') wake(); }} onpointerdown={() => keyboardPinned = false}>
+  <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = true; wake(); }} onkeydown={keyboard}
+    onpointermove={event => { if (event.pointerType !== 'touch') wake(); }} onpointerdown={() => { keyboardPinned = false; surface?.focus(); }}>
     <video bind:this={video} playsinline preload="metadata" ontimeupdate={sync} ondurationchange={sync} onplay={sync} onpause={sync} onended={sync}><track kind="captions" /></video>
-    <button class="video-interaction" tabindex="-1" aria-label="Afficher ou masquer les commandes" onclick={() => { if (!paused && !menu && !error) { visible = !visible; if (visible) armIdle(); } else wake(); }}></button>
+    <button class="video-interaction" tabindex="-1" aria-label="Afficher ou masquer les commandes" onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
       <button class="return" aria-label="Retour à l’accueil" onclick={close}><Icon name="back" size={24} /></button>
       <div class="title"><span>{active?.title ?? 'Votre séance'}</span><small>LECTURE LOCALE · MIRE SYNTHÉTIQUE</small></div>
@@ -179,9 +193,9 @@
   .player-shell { width: 100%; height: 100%; position: relative; background: #000; outline: 0; overflow: hidden; }.player-shell:fullscreen { width: 100vw; height: 100dvh; }.inactive { cursor: none; }.inactive :global(*) { cursor: none; }
   video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }.video-interaction { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: transparent; }
   .top-bar { display: flex; position: absolute; inset: 0 0 auto; align-items: center; gap: 18px; z-index: 3; padding: max(24px,env(safe-area-inset-top)) max(32px,env(safe-area-inset-right)) 70px max(26px,env(safe-area-inset-left)); background: linear-gradient(#000b,transparent); transition: opacity .2s ease; }.concealed { opacity: 0; pointer-events: none; }
-  .return { display: grid; place-items: center; width: 48px; height: 48px; border: 0; border-radius: 50%; background: #ffffff09; color: white; }.return:hover { background: #ffffff20; }.title>span { display: block; font-size: 16px; font-weight: 500; letter-spacing: -.02em; }.title small { display: block; margin-top: 8px; font-size: 8px; letter-spacing: .14em; color: #c4bacf; }
+  .return { display: grid; place-items: center; width: 48px; height: 48px; border: 0; border-radius: 50%; background: #ffffff09; color: white; }.return:hover { background: #ffffff20; }.title>span { display: block; font-size: 16px; font-weight: 500; letter-spacing: -.02em; }.title small { display: block; margin-top: 6px; font-size: 10px; letter-spacing: .12em; color: #c4bacf; }
   .loading { position: absolute; inset: 40% 10% auto; display: flex; flex-direction: column; align-items: center; gap: 18px; pointer-events: none; color: #e6daff; font-size: 12px; text-shadow: 0 2px 5px #000; }.loader { border: 2px solid #ffffff30; border-top-color: var(--color-accent); width: 32px; height: 32px; border-radius: 50%; animation: spin 1s linear infinite; }@keyframes spin { to { transform: rotate(360deg); } }
   .player-error { position: absolute; z-index: 5; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(420px,calc(100% - 40px)); padding: 24px; background: #1b1420f5; border-radius: 12px; text-align: center; color: #edc4d2; }.player-error strong { display: block; margin: 12px 0; }.player-error p { font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }.player-error button { border: 0; border-radius: 5px; background: #eae1fa; color: #24172c; padding: 12px 16px; margin-top: 8px; font-size: 12px; }
   .fullscreen-notice { position: absolute; top: max(90px,env(safe-area-inset-top)); left: 32px; color: #c0b6cb; font-size: 10px; z-index: 3; pointer-events: none; text-shadow: 0 1px 4px black; }
-  @media(max-width:700px) { .top-bar { padding: max(12px,env(safe-area-inset-top)) 14px 45px; gap: 12px; }.return { width: 44px; height: 44px; }.title>span { font-size: 13px; }.title small { font-size: 6px; }.fullscreen-notice { left: 20px; top: 78px; font-size: 9px; max-width: calc(100% - 40px); } }
+  @media(max-width:700px) { .top-bar { padding: max(12px,env(safe-area-inset-top)) 14px 45px; gap: 12px; }.return { width: 44px; height: 44px; }.title>span { font-size: 13px; }.title small { font-size: 10px; margin-top: 4px; }.fullscreen-notice { left: 20px; top: 78px; font-size: 9px; max-width: calc(100% - 40px); } }
 </style>

@@ -1,6 +1,7 @@
 //! Local fixture-only P0 bench and first P1 web integration. No product authentication.
 #[path = "../../shared/src/brand.rs"]
 mod brand;
+mod catalog;
 mod demo;
 pub mod media;
 pub mod node;
@@ -24,6 +25,8 @@ pub fn app(inventory: node::Inventory, port: u16) -> Router {
         .nest_service("/app", tower_http::services::ServeDir::new("apps/web/build").append_index_html_on_directories(true))
         .route("/api/v1/config", get(|| async { Json(serde_json::json!({"name": brand::DEFAULT_NAME, "mode":"localhost-fixtures"})) }))
         .route("/api/v1/demo/media", get(demo::media))
+        .route("/api/v1/catalog", get(catalog::list))
+        .route("/api/v1/catalog/{id}", get(catalog::detail))
         .route("/api/v1/demo/subtitles/{name}", get(node::demo_subtitle))
         .route("/mse", get(|| async { Html(include_str!("mse.html")) }))
         .route("/shaka", get(|| async { Html(include_str!("shaka.html")) }))

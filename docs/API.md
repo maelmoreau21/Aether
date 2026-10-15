@@ -115,3 +115,42 @@ GET/HEAD /api/v1/demo/subtitles/{name} : fr-full.vtt/fr-forced.vtt/en-full.vtt,
 text/vtt UTF8, autres noms404. Ressource préparée absente404. POST405, origine
 tierce403. Ce contrat localhost sans authentification ne permet aucune bibliothèque
 réelle. Voir P1_WEB_INTEGRATION.md pour tests et limites.
+
+## P1 — Catalogue de fixtures (15 octobre 2026)
+
+Contrat ajouté, toujours sans authentification et limité à localhost :
+
+| Méthode et route | Contrat |
+| --- | --- |
+| GET `/api/v1/catalog` | `{items,total,offset,limit,mode,notice}` ; œuvres `film` et `series` uniquement dans la liste |
+| GET `/api/v1/catalog/{id}` | Fiche Work, `editions` et `seasons` ; épisode accessible par son ID explicite |
+
+Liste : `kind=film|series` facultatif ; `q` facultatif (200 octets maximum),
+recherche de sous-chaîne insensible à la casse après trim ;
+`sort=title-asc|title-desc` (défaut ascendant), `offset` entier positif ou nul
+(défaut 0), `limit=1..100` (défaut 24). Paramètre inconnu, valeur invalide ou
+requête non décodable : 400 JSON `error=invalid_catalog_query`.
+Liste sans fixture préparée : 200, `items=[]`, `total=0` et notice explicite.
+Fiche inconnue ou fixtures absentes : 404 JSON `error=unknown_work`.
+POST refusé par le routage (405) ; les protections Host/Origin/cross-site restent
+applicables (403). Aucun chemin physique dans ce contrat.
+
+Work : `id,kind,title,year,description,libraryId,synthetic`, avec compteurs
+`seasonCount,episodeCount` lorsqu'applicables. `year=null` sur les fixtures.
+Une fiche de série expose `seasons:[{id,number,title,episodes}]` ; chaque épisode
+porte sa propre identité Work, son numéro et ses éditions. Une édition contient
+`id,label,versions` ; une version `id,label,sources` ; une source
+`id,assetIds,playbackMediaId`. `playbackMediaId` référence le descripteur existant
+de `/api/v1/demo/media`, qui fournit URLs et Tracks. Aucun endpoint de session
+autorisée, scan ou création de bibliothèque n'est ajouté.
+
+`fixture-film` associe explicitement MKV et MP4 ; `fixture-series` regroupe une
+saison et `fixture-episode-1` réutilisant la même mire. Ces IDs sont fixes,
+pas issus d'une base, d'une fusion de titres ou d'un fournisseur de métadonnées.
+Voir `CATALOGUE_P1.md` pour les parcours, tests et prérequis de sécurité.
+
+Validation locale : suite Rust 15 tests réussis ; parcours du catalogue sous
+Chrome 155.0.8059.40 Windows headless, états vides injectés, 503/réessai, fiche
+404 et pagination simulée 72 œuvres bornée à 24 cartes vérifiés.
+Preuves `evidence/2026-10-15/catalogue/`. Ces essais ne valident pas un scanner,
+une persistance SQLite ou les droits d'accès d'un futur catalogue personnel.

@@ -55,6 +55,9 @@ jobs:
       - name: Préparer les manifestes DASH
         run: python3 scripts/prepare-dash.py
 
+      - name: Prepare P1 fixture sources
+        run: python3 scripts/prepare-p1.py
+
       - name: Valider les métriques de comparaison des lecteurs
         run: node scripts/player-comparison-stats.test.cjs
 
@@ -95,8 +98,6 @@ jobs:
   frontend:
     name: Frontend SvelteKit
     runs-on: ubuntu-latest
-    # Ne s'exécute que si le frontend apps/web existe dans le dépôt
-    if: hashFiles('apps/web/package.json') != ''
     defaults:
       run:
         working-directory: apps/web
@@ -107,7 +108,7 @@ jobs:
       - name: Installer Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: "npm"
           cache-dependency-path: apps/web/package-lock.json
 
@@ -125,3 +126,6 @@ jobs:
 
       - name: Tests unitaires frontend (Vitest / Playwright)
         run: npm test
+
+      - name: Build statique servi par Rust
+        run: npm run build

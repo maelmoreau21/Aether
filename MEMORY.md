@@ -1,6 +1,6 @@
 # MEMORY.md — État et décisions Aether
 
-> **Date de la décision : 15 octobre 2026. État : banc P0, remux FR/EN et profils AV1 10 bits/Opus 5.1 testés localement ; P0A/P0B/P0C restent partiels.** Toute future IA doit vérifier le dépôt avant de déclarer quoi que ce soit terminé.
+> **Date de la décision : 15 octobre 2026. État : première intégration P1 locale et direction visuelle v1 réalisées ; lecture de fixtures testée, P0 exhaustif et P1 autonome restent incomplets.** Toute future IA doit vérifier le dépôt avant de déclarer quoi que ce soit terminé.
 
 ## 1. Vision actée
 
@@ -62,8 +62,8 @@
 | Domaine | Décision | État |
 |---|---|---|
 | Backend | Rust édition 2024 + Axum/Tokio/Tower | Banc local P0 codé et testé ; Core produit non développé |
-| Frontend | Svelte 5 + SvelteKit + TypeScript strict | Choisi, non codé |
-| Lecteur | Comparer Video.js 10 / Shaka Player | **POC obligatoire** |
+| Frontend | Svelte 5 + SvelteKit + TypeScript strict | Build statique servi par Rust, écran local P1 et direction visuelle v1 testés |
+| Lecteur | HTML5 natif + remux par langue, provisoire | Décision utilisateur P1 ; comparaisons suspendues, interface Player légère conservée |
 | DB MVP | SQLx + SQLite | Choisi, non codé |
 | DB cluster | PostgreSQL partagé, migration explicite | Futur uniquement |
 | Cache/coordination | Local d'abord, Valkey éventuel | Futur si besoin |
@@ -107,12 +107,13 @@ Pas de rôle invité, pas de cluster, pas de moteur de recommandation, pas de tr
 
 ## 9. Prochain pas recommandé à l'IA
 
-AV1 10 bits SDR, FR Opus 5.1/EN stéréo et sous-titres intégrés sont maintenant
-testés sur les petites fixtures : décodage A/V positif, sélection interne et
-rendu texte non validés. Suite proposée seulement dans
-`docs/PLAYER_COMPARISON_EXPERIMENT.md` : MSE minimal, Video.js et Shaka sur les
-mêmes sources, sans choix prématuré. Ne pas lancer cette expérience séparée
-automatiquement. Écoute physique 5.1 et affichage 10 bits restent NT.
+La décision utilisateur du 15 octobre autorise P1 et suspend les comparaisons
+approfondies de lecteurs. La dernière intervention vise la direction visuelle,
+pas de nouvelles fonctions serveur. Examiner docs/UI_DIRECTION.md et les
+preuves P1 avant d'élargir l'UI. Recueillir le retour utilisateur sur cette
+première composition. Ensuite seulement, jalon séparé pour admin local/SQLite,
+puis bibliothèques ro avec autorisations serveur. Pas de médias personnels
+exposés par ce prototype localhost sans authentification.
 
 ## 10. Jalon réel du 15 octobre 2026 — premier banc P0
 
@@ -278,7 +279,7 @@ automatiquement. Écoute physique 5.1 et affichage 10 bits restent NT.
   audio remplacé sans load/src ni seek forcé. Buffer audio complet 12 s remplacé
   pour conserver la langue après seek arrière ; pas un scheduler de film long.
 - scripts/prepare-mse.py : remux -c copy, 288 AV1/601 FR/601 EN paquets et init
-  identiques, décodage réussi ; MKV source AV1 Main10/FR Opus5.1/EN stéréo.
+  identiques, décodage réussi ; MKV source AV1 Main10/FR Opus 5.1/EN stéréo.
   Originaux intacts. PTS/DTS audio +7 ms, durée quantifiée jusqu'à 1 ms,
   timebases conservées dans rapport ; aucune identité temporelle prétendue.
 - Chrome 155.0.8059.40, Edge 155.0.4283.45, Firefox 155.0.1 Windows headless :
@@ -327,7 +328,7 @@ automatiquement. Écoute physique 5.1 et affichage 10 bits restent NT.
   APIs versionnées selectAudioTrack(track,0), preferredAudio/preferredText,
   NativeTextDisplayer(player), selectTextTrack(track|null). ABR désactivé,
   handleForcedSubtitlesAutomatically=false pour respecter le choix texte manuel.
-- Chrome155.0.8059.40, Edge155.0.4283.45, Firefox155.0.1 Windows10.0.26300
+- Chrome 155.0.8059.40, Edge 155.0.4283.45, Firefox 155.0.1 Windows 10.0.26300
   headless : 108 changements (18×6couples), 36marqueurs A/V et choix manuels
   conservés après seek. FR et FRforced par défaut Shaka, EN manuel prioritaire ;
   12captures Shaka inspectées, FR complet/forced/EN/off corrects.
@@ -355,7 +356,7 @@ automatiquement. Écoute physique 5.1 et affichage 10 bits restent NT.
   de sélection ; tester marge audio non nulle et clips longs avant décision.
   MSE inchangé conservé ; Video.js reste prochain jalon distinct, aucunP1.
 - docs/P0C_SHAKA_EXPERIMENT.md, STREAMING_COMPATIBILITY et preuves
-  docs/evidence/2026-10-15/shaka/. Mono/7.1, physique5.1/10bits, réseau dégradé,
+  docs/evidence/2026-10-15/shaka/. Mono/7.1, physique 5.1 / 10 bits, réseau dégradé,
   segments corrompus, endurance et NAS NT. Aucun push/publication.
 
 ## 16. P0C — safeMargin, protocole et pilote (2026-10-15)
@@ -410,8 +411,8 @@ Preuves : docs/evidence/2026-10-15/safe-margin/.
 
 ## Vérification courte de la resélection audio (2026-10-15)
 
-Six essais ciblés FR→EN, safeMargin0,5, Chrome155.0.8059.40,
-Edge155.0.4283.45 et Firefox155.0.1. Script scripts/verify-audio-seek.cjs.
+Six essais ciblés FR→EN, safeMargin0,5, Chrome 155.0.8059.40,
+Edge 155.0.4283.45 et Firefox 155.0.1. Script scripts/verify-audio-seek.cjs.
 Sans attente500ms après seek1,25s, le contrôle initial trouve déjà le signalEN
 après retour0,5s sur les trois navigateurs : cela ne prouve aucune correction.
 Avec la même attente500ms que la matrice précédente, le défaut est reproduit
@@ -451,8 +452,8 @@ La source versionnée player.js/switchVariant_ confirme force=true pour la
 variante déjà active si clearBuffer=true, contrairement à selectAudioTrack.
 Le nettoyage concerne aussi la vidéo : ce n'est PAS une invalidation audio seule.
 
-Six essais, FR→EN et EN→FR sur Chrome155.0.8059.40, Edge155.0.4283.45,
-Firefox155.0.1 : défaut préalable reproduit6/6 après changement marge0,5 et
+Six essais, FR→EN et EN→FR sur Chrome 155.0.8059.40, Edge 155.0.4283.45,
+Firefox 155.0.1 : défaut préalable reproduit6/6 après changement marge0,5 et
 seekarrière ; nettoyage forcé puis bonne langue réellement décodée6/6.
 FFT trois observations consécutives, six/deux voies, confirmation après700ms.
 URL vidéo conservée, frames vidéo à nouveau présentées,37 originaux intacts
@@ -518,3 +519,39 @@ puis répétitions séquentielles et seeks avant/arrière dans une même présen
 Ni solution définitive, ni P1, ni Video.js validés.
 
 Validation finale Node : 10 tests politique + 2 suites statistiques =12/12, exit0. Syntaxe des cinq scripts modifiés vérifiée. Le dernier ajustement distinguant audioId/marge0 est couvert unitairement ; pas de nouvelle matrice navigateur après cet ajustement.
+
+## 2026-10-15 — P1 local puis première refonte visuelle
+
+- Décision utilisateur : HTML5 natif et copies par langue provisoires ; petites
+  interruptions/rechargement acceptés, comparaisons Shaka/MSE/Video.js suspendues.
+  Expériences conservées ; aucune récupération instable activée par l'écran P1.
+- Première intégration apps/web Svelte 5.57.2 / SvelteKit 3.1.0 / TypeScript strict et build
+  statique sous /app/, servi par Axum existant. Pas de Node permanent. API démo
+  sources/pistes, quatre copies AV1 10 bits / Opus FR 6 canaux et EN 2 canaux, VTT P0 réutilisés.
+  Préparation hors lecture bornée, paquets et originaux SHA256 inchangés.
+  Pas de compte, DB, vraie bibliothèque, multi-Node ou plugin implémenté.
+- Le premier écran fonctionnel est remplacé à la demande de l'utilisateur :
+  noir encre/blanc chaud/améthyste, hero cinématographique original, marque SVG
+  existante conservée, vraies cartes de sélection MKV/MP4, lecteur intégré,
+  panneau de séance et contrôles discrets. Le paysage est une illustration
+  déclarée, pas une vidéo/œuvre promise dans le catalogue.
+- Fondations : tokens.css global, Button/Field/Badge/Icon/MediaCard ; styles
+  hover/focus/active/disabled, clavier, mobile et mouvement réduit. Aucune nouvelle
+  dépendance UI. NativePlayer et logique de lecture/audio/sous-titres inchangés.
+  Seul ajustement serveur de cette refonte : CSP img-src self pour les images locales.
+- Vérifications après refonte : check Svelte/TS : 0 erreur et 0 avertissement, lint,
+  5 tests Vitest, build, npm audit : 0 vulnérabilité ; Rust fmt/clippy strict et 10 tests
+  intégration passent (9 P0 conservés). Browser P1 MKV/MP4 sur Chrome/Edge/Firefox :
+  pixels/PCM réels, FR/EN pause/lecture, position/volume/vitesse, seek EN,
+  VTT/off/choix manuel, fin et erreur404 réussis ; hashes médias/VTT inchangés.
+- Firefox est validé à 1× seulement : retour FR 5.1 à 1,5× sans PCM attendu observé
+  avant refonte, cause non établie, pas corrigée dans le jalon visuel. Ne pas
+  annoncer de compatibilité universelle ou d'expérience technique achevée.
+- Layout Chrome 360/390/768/1280/1440/1920 px : pas de débordement/erreur CSP,
+  focus clavier et images vérifiés ; carte MP4→vraie source, erreurs Core503,
+  VTT404 et audio404, tentative audio unique. Captures desktop/mobile inspectées.
+- Preuves docs/evidence/2026-10-15/p1-ui-v1/, direction docs/UI_DIRECTION.md,
+  parcours/commandes docs/P1_WEB_INTEGRATION.md. CI distante, vraie sortie
+  physique 5.1 / 10 bits, films longs, NAS, Safari/mobile réel restent non vérifiés.
+- Première direction visuelle concrète, pas une expérience finie. Ne pas étendre
+  automatiquement tous les écrans ; prochain petit jalon : retour sur cette base.

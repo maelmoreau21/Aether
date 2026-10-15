@@ -53,3 +53,21 @@ mêmes protections locales que MSE. Aucun assouplissement CSP ni URL entrante.
 Le MPD local est généré de données synthétiques de confiance ; ce banc n'est
 pas un service d'ingestion de manifestes hostiles. Sampler Windows ne journalise
 ni lignes de commande ni chemins de processus : PID/date/CPU/working set seulement.
+
+## P1 — intégration de fixtures uniquement
+
+/app sert le build statique local SvelteKit depuis apps/web/build. Mêmes gardes
+Host/Origin/Fetch-Site et loopback que P0 ; aucune bibliothèque réelle ni auth.
+Sources identifiées côté serveur, quatre fichiers mono-audio AV1/Opus, contrôle
+codecs/langues/profil au démarrage, pas d'entrée de chemin depuis le navigateur.
+Préparation hors serveur dans p1, quota documenté dans P1_WEB_INTEGRATION.md.
+Le bootstrap Web est externalisé pour script-src self ; seul le style fixe de
+svelte-announcer est autorisé par hash (style-src-attr unsafe-hashes SHA256),
+aucun unsafe-inline général. Aucune récupération audio automatique activée.
+Timeout terminal de chargement/seek/play et watchdog de blocage, retry explicite.
+Les protections d'authentification décrites plus haut restent à développer avant
+accès à de vraies bibliothèques.
+
+La refonte visuelle P1 ajoute img-src self à la CSP pour l'illustration originale
+et les SVG locaux. Aucune image tierce/data, aucun script distant ni
+assouplissement d'origine ajouté. Tests de violations CSP après refonte réussis.

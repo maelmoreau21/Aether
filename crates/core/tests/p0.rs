@@ -536,3 +536,121 @@ async fn large_file_is_not_buffered_in_full() {
     assert!(frame.len() <= 65_536);
     drop(res);
 }
+#[tokio::test]
+async fn demo_contract_and_read_only_sources() {
+    let app = router().await;
+    let response = app
+        .clone()
+        .oneshot(
+            request("GET", "/api/v1/demo/media")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let items = json["media"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "Run scripts/prepare-p1.py");
+    assert!(!String::from_utf8_lossy(&bytes).contains("filename"));
+    for item in items {
+        assert_eq!(item["sources"].as_array().unwrap().len(), 2);
+        for source in item["sources"].as_array().unwrap() {
+            let tracks = source["tracks"].as_array().unwrap();
+            assert_eq!(tracks.len(), 2);
+            assert_eq!(tracks[0]["pix_fmt"], "yuv420p10le");
+            assert_eq!(tracks[1]["codec_name"], "opus");
+            assert_eq!(
+                tracks[1]["tags"]["language"],
+                if source["language"] == "fr" {
+                    "fra"
+                } else {
+                    "eng"
+                }
+            );
+            assert_eq!(
+                tracks[1]["channels"],
+                if source["language"] == "fr" { 6 } else { 2 }
+            );
+            let url = source["url"].as_str().unwrap();
+            let response = app
+                .clone()
+                .oneshot(
+                    request("GET", url)
+                        .header("range", "bytes=0-15")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+            assert_eq!(
+                response
+                    .into_body()
+                    .collect()
+                    .await
+                    .unwrap()
+                    .to_bytes()
+                    .len(),
+                16
+            );
+            let response = app
+                .clone()
+                .oneshot(
+                    request("HEAD", url)
+                        .header("range", "bytes=999999999-")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        }
+    }
+    for name in ["fr-full.vtt", "fr-forced.vtt", "en-full.vtt"] {
+        let response = app
+            .clone()
+            .oneshot(
+                request("GET", &format!("/api/v1/demo/subtitles/{name}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()["content-type"],
+            "text/vtt; charset=utf-8"
+        );
+    }
+    for (method, uri, status) in [
+        (
+            "GET",
+            "/api/v1/demo/subtitles/video.mp4",
+            StatusCode::NOT_FOUND,
+        ),
+        ("POST", "/api/v1/demo/media", StatusCode::METHOD_NOT_ALLOWED),
+    ] {
+        assert_eq!(
+            app.clone()
+                .oneshot(request(method, uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+                .status(),
+            status
+        );
+    }
+    assert_eq!(
+        app.oneshot(
+            request("GET", "/api/v1/demo/media")
+                .header("origin", "https://example.com")
+                .body(Body::empty())
+                .unwrap()
+        )
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+}

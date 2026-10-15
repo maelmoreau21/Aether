@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener =
         tokio::net::TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await?;
     let port = listener.local_addr()?.port();
-    println!("Local P0 bench: http://127.0.0.1:{port} (synthetic fixtures only)");
+    println!("Local fixtures: http://127.0.0.1:{port}/app/ (P1) ; / (P0 bench)");
     axum::serve(listener, app(inventory, port))
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;

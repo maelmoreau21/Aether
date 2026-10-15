@@ -1,4 +1,7 @@
-//! Local P0 bench only. No product authentication or public library server.
+//! Local fixture-only P0 bench and first P1 web integration. No product authentication.
+#[path = "../../shared/src/brand.rs"]
+mod brand;
+mod demo;
 pub mod media;
 pub mod node;
 
@@ -18,6 +21,10 @@ pub fn app(inventory: node::Inventory, port: u16) -> Router {
     let host = format!("127.0.0.1:{port}");
     Router::new()
         .route("/", get(|| async { Html(include_str!("bench.html")) }))
+        .nest_service("/app", tower_http::services::ServeDir::new("apps/web/build").append_index_html_on_directories(true))
+        .route("/api/v1/config", get(|| async { Json(serde_json::json!({"name": brand::DEFAULT_NAME, "mode":"localhost-fixtures"})) }))
+        .route("/api/v1/demo/media", get(demo::media))
+        .route("/api/v1/demo/subtitles/{name}", get(node::demo_subtitle))
         .route("/mse", get(|| async { Html(include_str!("mse.html")) }))
         .route("/shaka", get(|| async { Html(include_str!("shaka.html")) }))
         .route("/audio-seek-policy.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("audio-seek-policy.js")) }))
@@ -44,7 +51,7 @@ pub fn app(inventory: node::Inventory, port: u16) -> Router {
         }))
         .layer(SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
-        .layer(SetResponseHeaderLayer::overriding(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; script-src 'self'; media-src 'self' blob:; connect-src 'self'; style-src 'self'; frame-ancestors 'none'")))
+        .layer(SetResponseHeaderLayer::overriding(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; script-src 'self'; img-src 'self'; media-src 'self' blob:; connect-src 'self'; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; frame-ancestors 'none'")))
         .route("/bench.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("bench.js")) }))
 }
 

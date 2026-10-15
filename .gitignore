@@ -1,0 +1,9 @@
+/target/
+/tests/fixtures/generated/
+/artifacts/
+/node_modules/
+
+
+/apps/web/node_modules/
+/apps/web/.svelte-kit/
+/apps/web/build/

@@ -1,0 +1,38 @@
+[
+  {
+    "c": "chrome",
+    "browser": "155.0.8059.40",
+    "passed": true,
+    "latency": "431,7–450,1",
+    "paused": "544,8–549,5",
+    "silence": "0–30,6",
+    "video": "50,3–66,8",
+    "baseline": "75",
+    "maxPoll": 25.299999999813735,
+    "rgb": 198
+  },
+  {
+    "c": "msedge",
+    "browser": "155.0.4283.45",
+    "passed": true,
+    "latency": "424–447,8",
+    "paused": "545,4–563,6",
+    "silence": "0–20,8",
+    "video": "50,3–66,7",
+    "baseline": "66,6",
+    "maxPoll": 21.300000000745058,
+    "rgb": 198
+  },
+  {
+    "c": "firefox",
+    "browser": "155.0.1",
+    "passed": true,
+    "latency": "377–1205",
+    "paused": "1305–1327",
+    "silence": "0–51",
+    "video": "46,1–53,4",
+    "baseline": "45,3",
+    "maxPoll": 56,
+    "rgb": 156
+  }
+]

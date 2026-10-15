@@ -1,0 +1,313 @@
+{
+  "date": "2026-10-15T12:15:06.584Z",
+  "channel": "firefox",
+  "headless": true,
+  "os": {
+    "platform": "win32",
+    "release": "10.0.26300",
+    "arch": "x64"
+  },
+  "settings": "default browser features; no experimental audioTracks flags/preferences",
+  "hashesBefore": {
+    "av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66"
+  },
+  "results": [
+    {
+      "afterSeekAudio": {
+        "dominantHz": 439.453125,
+        "rms": 0.0883685855494847,
+        "sampleRate": 48000
+      },
+      "audioSelection": {
+        "reason": "HTMLMediaElement.audioTracks not exposed with default settings",
+        "status": "unavailable",
+        "tracks": null
+      },
+      "canPlayType": "maybe",
+      "decodedFrames": 30,
+      "dimensions": [
+        320,
+        180
+      ],
+      "distinctColors": 3997,
+      "duration": 8.007999,
+      "ended": true,
+      "events": [
+        {
+          "event": "playing",
+          "time": 0
+        },
+        {
+          "event": "pause",
+          "time": 0.712
+        },
+        {
+          "event": "seeking",
+          "time": 4
+        },
+        {
+          "event": "seeked",
+          "time": 4
+        },
+        {
+          "event": "playing",
+          "time": 4
+        },
+        {
+          "event": "pause",
+          "time": 8.007999
+        },
+        {
+          "event": "ended",
+          "time": 8.007999
+        }
+      ],
+      "id": "fixture-mkv",
+      "initialAudio": {
+        "dominantHz": 439.453125,
+        "rms": 0.0882780903375144,
+        "sampleRate": 48000
+      },
+      "method": "html5-native-url",
+      "mime": "video/x-matroska",
+      "mse": {
+        "actualAppend": "not-tested",
+        "available": true,
+        "isTypeSupported": false,
+        "type": "video/x-matroska; codecs=\"av01.0.00M.08,opus\""
+      },
+      "nativeAudioTracks": null,
+      "passed": true,
+      "pauseStable": true,
+      "seekTime": 4
+    },
+    {
+      "afterSeekAudio": {
+        "dominantHz": 439.453125,
+        "rms": 0.08833468188528903,
+        "sampleRate": 48000
+      },
+      "audioSelection": {
+        "reason": "HTMLMediaElement.audioTracks not exposed with default settings",
+        "status": "unavailable",
+        "tracks": null
+      },
+      "canPlayType": "maybe",
+      "decodedFrames": 29,
+      "dimensions": [
+        320,
+        180
+      ],
+      "distinctColors": 3997,
+      "duration": 8.000999,
+      "ended": true,
+      "events": [
+        {
+          "event": "playing",
+          "time": 0
+        },
+        {
+          "event": "pause",
+          "time": 0.712
+        },
+        {
+          "event": "seeking",
+          "time": 4
+        },
+        {
+          "event": "seeked",
+          "time": 4
+        },
+        {
+          "event": "playing",
+          "time": 4
+        },
+        {
+          "event": "pause",
+          "time": 8.013999
+        },
+        {
+          "event": "ended",
+          "time": 8.013999
+        }
+      ],
+      "id": "fixture-mp4",
+      "initialAudio": {
+        "dominantHz": 439.453125,
+        "rms": 0.08828402258459357,
+        "sampleRate": 48000
+      },
+      "method": "html5-native-url",
+      "mime": "video/mp4",
+      "mse": {
+        "actualAppend": "not-tested",
+        "available": true,
+        "isTypeSupported": true,
+        "type": "video/mp4; codecs=\"av01.0.00M.08,opus\""
+      },
+      "nativeAudioTracks": null,
+      "passed": true,
+      "pauseStable": true,
+      "seekTime": 4
+    },
+    {
+      "afterSeekAudio": {
+        "dominantHz": 439.453125,
+        "rms": 0.08827938550708339,
+        "sampleRate": 48000
+      },
+      "audioSelection": {
+        "reason": "HTMLMediaElement.audioTracks not exposed with default settings",
+        "status": "unavailable",
+        "tracks": null
+      },
+      "canPlayType": "maybe",
+      "decodedFrames": 30,
+      "dimensions": [
+        320,
+        180
+      ],
+      "distinctColors": 3997,
+      "duration": 8.007999,
+      "ended": true,
+      "events": [
+        {
+          "event": "playing",
+          "time": 0
+        },
+        {
+          "event": "pause",
+          "time": 0.72
+        },
+        {
+          "event": "seeking",
+          "time": 4
+        },
+        {
+          "event": "seeked",
+          "time": 4
+        },
+        {
+          "event": "playing",
+          "time": 4
+        },
+        {
+          "event": "pause",
+          "time": 8.007999
+        },
+        {
+          "event": "ended",
+          "time": 8.007999
+        }
+      ],
+      "id": "fixture-webm",
+      "initialAudio": {
+        "dominantHz": 439.453125,
+        "rms": 0.08835065195685181,
+        "sampleRate": 48000
+      },
+      "method": "html5-native-url",
+      "mime": "video/webm",
+      "mse": {
+        "actualAppend": "not-tested",
+        "available": true,
+        "isTypeSupported": true,
+        "type": "video/webm; codecs=\"av01.0.00M.08,opus\""
+      },
+      "nativeAudioTracks": null,
+      "passed": true,
+      "pauseStable": true,
+      "seekTime": 4
+    },
+    {
+      "afterSeekAudio": {
+        "dominantHz": 439.453125,
+        "rms": 0.08827934281894587,
+        "sampleRate": 48000
+      },
+      "audioSelection": {
+        "reason": "HTMLMediaElement.audioTracks not exposed with default settings",
+        "status": "unavailable",
+        "tracks": null
+      },
+      "canPlayType": "maybe",
+      "decodedFrames": 30,
+      "dimensions": [
+        320,
+        180
+      ],
+      "distinctColors": 3997,
+      "duration": 8.006,
+      "ended": true,
+      "events": [
+        {
+          "event": "playing",
+          "time": 0
+        },
+        {
+          "event": "pause",
+          "time": 0.72
+        },
+        {
+          "event": "seeking",
+          "time": 4
+        },
+        {
+          "event": "seeked",
+          "time": 4
+        },
+        {
+          "event": "playing",
+          "time": 4
+        },
+        {
+          "event": "pause",
+          "time": 8.021
+        },
+        {
+          "event": "ended",
+          "time": 8.021
+        }
+      ],
+      "id": "fixture-fmp4",
+      "initialAudio": {
+        "dominantHz": 439.453125,
+        "rms": 0.08836642310673724,
+        "sampleRate": 48000
+      },
+      "method": "html5-native-url",
+      "mime": "video/mp4",
+      "mse": {
+        "actualAppend": "not-tested",
+        "available": true,
+        "isTypeSupported": true,
+        "type": "video/mp4; codecs=\"av01.0.00M.08,opus\""
+      },
+      "nativeAudioTracks": null,
+      "passed": true,
+      "pauseStable": true,
+      "seekTime": 4
+    }
+  ],
+  "limits": "Decoded pixels and PCM only; human listening and physical display NT. Remux files are played by native URL; no MSE append.",
+  "browser": "155.0.1",
+  "driver": "0.37.1",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0",
+  "missing": {
+    "code": 4,
+    "displayed": "Échec navigateur : 4 404: Not Found",
+    "httpStatus": 404,
+    "message": "404: Not Found"
+  },
+  "responses": null,
+  "hashesAfter": {
+    "av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66"
+  },
+  "originalsUnchanged": true
+}

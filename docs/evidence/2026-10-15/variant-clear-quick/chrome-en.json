@@ -1,0 +1,320 @@
+{
+  "date": "2026-10-15T17:45:20.973Z",
+  "channel": "chrome",
+  "from": "en",
+  "to": "fr",
+  "method": "variant-clear",
+  "scope": "Single switch margin0.5; backward seek; explicit public recovery API; not automatic or a stability benchmark",
+  "before": {
+    "tests\\fixtures\\generated\\av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66",
+    "tests\\fixtures\\generated\\av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "tests\\fixtures\\generated\\av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "tests\\fixtures\\generated\\av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mkv-en.mkv": "998ec6848bbf6560c13ea3a54a67a05f4b44adb89af18701aa6a2b5da6f395b8",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mkv-fr.mkv": "d89e09fa8ccbd6f247e639fe6c64f72af2c8f7b758b1525152111dc82c67ad36",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mp4-en.mp4": "139eb56a003d1285170e49535ac3200e06669901ad3b5fb980c74fe2da339963",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mp4-fr.mp4": "0ecab0d50950ca110d6a4c80fd17036945fbbc4096d00cbb81a29c2da2b726a3",
+    "tests\\fixtures\\generated\\mse\\audio-en-init.mp4": "00438d36a6f0bf30739c406b9230463c2fef0953429449a2fe791578d3aad48f",
+    "tests\\fixtures\\generated\\mse\\audio-en-media.m4s": "bde48f2095fd5c616a9dea9b1c1abe0b60f2d62cbc7653c9e280e0f0c3b1cc5e",
+    "tests\\fixtures\\generated\\mse\\audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+    "tests\\fixtures\\generated\\mse\\audio-fr-init.mp4": "35429b16b5cb972164242de4a8a0b8427f37ff7ec81e0737706cd6973d9a282b",
+    "tests\\fixtures\\generated\\mse\\audio-fr-media.m4s": "4298d5d7d0b2fe47b7b594ec05c938ee28bc3f223479fcf24553d949397871ca",
+    "tests\\fixtures\\generated\\mse\\audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "tests\\fixtures\\generated\\mse\\fr-full.vtt": "a9fdc3b61adfee639dd7dcf99ffb8ba66f88af9c5abb9e48cd1f0b06ab830b7d",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-en-init.mp4": "00438d36a6f0bf30739c406b9230463c2fef0953429449a2fe791578d3aad48f",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-en-media.m4s": "bde48f2095fd5c616a9dea9b1c1abe0b60f2d62cbc7653c9e280e0f0c3b1cc5e",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-fr-init.mp4": "35429b16b5cb972164242de4a8a0b8427f37ff7ec81e0737706cd6973d9a282b",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-fr-media.m4s": "4298d5d7d0b2fe47b7b594ec05c938ee28bc3f223479fcf24553d949397871ca",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "tests\\fixtures\\generated\\mse\\verified\\en-full.vtt": "74ee2e670c98df732720386714aa7a55b7a36cd259b095f8f433a9a98e9ade60",
+    "tests\\fixtures\\generated\\mse\\verified\\fr-forced.vtt": "9b3835734daad2e8dedc63f6e0973b9368b320bec4660113fef40de7935bbc80",
+    "tests\\fixtures\\generated\\mse\\verified\\fr-full.vtt": "a9fdc3b61adfee639dd7dcf99ffb8ba66f88af9c5abb9e48cd1f0b06ab830b7d",
+    "tests\\fixtures\\generated\\mse\\verified\\video-init.mp4": "993d47ed7ea67968a3c5587fc439e23d72b2043fa25a5e3325c84a4dc002a86c",
+    "tests\\fixtures\\generated\\mse\\verified\\video-media.m4s": "71056bd35b80ffbdcec60f2184b898a32d4441ac64308d4e8b6c8c33879f15ea",
+    "tests\\fixtures\\generated\\mse\\verified\\video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "tests\\fixtures\\generated\\mse\\video-init.mp4": "993d47ed7ea67968a3c5587fc439e23d72b2043fa25a5e3325c84a4dc002a86c",
+    "tests\\fixtures\\generated\\mse\\video-media.m4s": "71056bd35b80ffbdcec60f2184b898a32d4441ac64308d4e8b6c8c33879f15ea",
+    "tests\\fixtures\\generated\\mse\\video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "tests\\fixtures\\generated\\representative\\en-full.srt": "447dbde569f236ff431304aba57632ba631a8d3041693dcb3f8477f972b92e44",
+    "tests\\fixtures\\generated\\representative\\fr-forced.srt": "d44983aba02d9b70856674294b79b7b1fcfa1f879cf595193658e2795ce85e25",
+    "tests\\fixtures\\generated\\representative\\fr-full.srt": "49b431cf26d6c048bac9d701fcad1c18ed071ebe7648d18357a2feb605a90213",
+    "tests\\fixtures\\generated\\representative\\representative-en.mkv": "2e71c27674a205a70cf05e34d9f60c84c0178aab6edd76339512365cd034d697",
+    "tests\\fixtures\\generated\\representative\\representative-en.mp4": "609a9100ba1f1fcc62b9cfe2ea6a5e1d25404a186ab8564103910f8f61ae3bf4",
+    "tests\\fixtures\\generated\\representative\\representative.mkv": "a8ecf7ff37fadaf5e62c994cbc4985906999143eab2cf02ac2242993892fc3cc",
+    "tests\\fixtures\\generated\\representative\\representative.mp4": "70222167e1c24959cc589fc6db042d1d0a63a8d72125bd4304cc9fdbae4d8587"
+  },
+  "browser": "155.0.8059.40",
+  "switch": {
+    "round": 1,
+    "language": "fr",
+    "mode": "playing",
+    "ui": {
+      "language": "fr",
+      "apiMs": 0.599999999627471,
+      "sourceUnchanged": true,
+      "safeMargin": 0.5
+    },
+    "requestToSignalMs": 537.7999999998137,
+    "resumeToSignalMs": null,
+    "pausePreserved": null,
+    "sourceUnchanged": true,
+    "selectedLanguage": "fr",
+    "signal": [
+      {
+        "rms": 0.010535879851578668,
+        "hz": 439.453125
+      },
+      {
+        "rms": 0.010663689760621176,
+        "hz": 550.78125
+      },
+      {
+        "rms": 0.010592264852301395,
+        "hz": 662.109375
+      },
+      {
+        "rms": 0.010349763480789377,
+        "hz": 82.03125
+      },
+      {
+        "rms": 0.010644548676511302,
+        "hz": 767.578125
+      },
+      {
+        "rms": 0.010661779576108588,
+        "hz": 878.90625
+      }
+    ],
+    "sampledSilenceTotalMs": 0,
+    "maxSampledSilenceRunMs": 0,
+    "maxPollMs": 75.29999999981374,
+    "maxVideoCallbackGapMs": 116.5,
+    "videoFramesDuring": 19,
+    "videoPtsProgress": 0.9589999999999999,
+    "positionAdvance": 1.081129,
+    "events": [
+      {
+        "event": "variantchanged",
+        "at": 3610.4000000003725,
+        "time": 1.908458
+      }
+    ],
+    "passed": true,
+    "safeMargin": 0.5,
+    "postSignalObservationMs": 500,
+    "buffersBefore": {
+      "total": [
+        {
+          "start": 0,
+          "end": 10.001
+        }
+      ],
+      "audio": [
+        {
+          "start": 0,
+          "end": 10.001
+        }
+      ],
+      "video": [
+        {
+          "start": 0,
+          "end": 11.999
+        }
+      ],
+      "text": [
+        {
+          "start": 0,
+          "end": 12.008
+        }
+      ]
+    },
+    "buffersAfter": {
+      "total": [
+        {
+          "start": 0,
+          "end": 12.008
+        }
+      ],
+      "audio": [
+        {
+          "start": 0,
+          "end": 12.008
+        }
+      ],
+      "video": [
+        {
+          "start": 0,
+          "end": 11.999
+        }
+      ],
+      "text": [
+        {
+          "start": 0,
+          "end": 12.008
+        }
+      ]
+    },
+    "videoQuality": {
+      "droppedFramesDelta": 0,
+      "totalFramesDelta": 25
+    },
+    "callbackPresentedCounterSkips": 5,
+    "videoContinuityObserved": true,
+    "manualSubtitlePreserved": true
+  },
+  "backwardSeek": {
+    "position": 0.948,
+    "expectedLanguage": "fr",
+    "previousLanguage": "en",
+    "selectedLanguage": "fr",
+    "signal": [
+      {
+        "rms": 0.010550762996654032,
+        "hz": 990.234375
+      },
+      {
+        "rms": 0.010654313583187728,
+        "hz": 1101.5625
+      },
+      {
+        "rms": 0,
+        "hz": 5.859375
+      },
+      {
+        "rms": 0,
+        "hz": 5.859375
+      },
+      {
+        "rms": 0,
+        "hz": 5.859375
+      },
+      {
+        "rms": 0,
+        "hz": 5.859375
+      }
+    ],
+    "expectedSignal": false,
+    "previousSignal": false,
+    "matchesSelectedLanguage": false
+  },
+  "reselection": {
+    "selectedLanguage": "fr",
+    "signal": [
+      {
+        "rms": 0.01055135172117129,
+        "hz": 439.453125
+      },
+      {
+        "rms": 0.010634572978435092,
+        "hz": 550.78125
+      },
+      {
+        "rms": 0.010593681290471366,
+        "hz": 662.109375
+      },
+      {
+        "rms": 0.010466103909483956,
+        "hz": 82.03125
+      },
+      {
+        "rms": 0.01064371265622145,
+        "hz": 767.578125
+      },
+      {
+        "rms": 0.010653251704397657,
+        "hz": 878.90625
+      }
+    ],
+    "requestToCorrectSignalMs": 778.2000000001863,
+    "sourceUnchanged": true,
+    "restoredSelectedLanguage": true,
+    "positionAdvance": 0.8166670000000001,
+    "events": [
+      {
+        "event": "waiting",
+        "at": 5476.4000000003725,
+        "time": 0.961
+      },
+      {
+        "event": "buffering",
+        "at": 5476.9000000003725,
+        "time": 0.961,
+        "buffering": true
+      },
+      {
+        "event": "seeking",
+        "at": 5493,
+        "time": 0.959
+      },
+      {
+        "event": "waiting",
+        "at": 5493.4000000003725,
+        "time": 0.959
+      },
+      {
+        "event": "seeking",
+        "at": 5533.9000000003725,
+        "time": 0.959
+      },
+      {
+        "event": "seeked",
+        "at": 6143.299999999814,
+        "time": 0.959
+      },
+      {
+        "event": "buffering",
+        "at": 6143.5,
+        "time": 0.959,
+        "buffering": false
+      },
+      {
+        "event": "playing",
+        "at": 6143.5,
+        "time": 0.959
+      }
+    ],
+    "videoFramesDelta": 24,
+    "droppedVideoFramesDelta": 0
+  },
+  "after": {
+    "tests\\fixtures\\generated\\av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66",
+    "tests\\fixtures\\generated\\av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "tests\\fixtures\\generated\\av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "tests\\fixtures\\generated\\av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mkv-en.mkv": "998ec6848bbf6560c13ea3a54a67a05f4b44adb89af18701aa6a2b5da6f395b8",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mkv-fr.mkv": "d89e09fa8ccbd6f247e639fe6c64f72af2c8f7b758b1525152111dc82c67ad36",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mp4-en.mp4": "139eb56a003d1285170e49535ac3200e06669901ad3b5fb980c74fe2da339963",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mp4-fr.mp4": "0ecab0d50950ca110d6a4c80fd17036945fbbc4096d00cbb81a29c2da2b726a3",
+    "tests\\fixtures\\generated\\mse\\audio-en-init.mp4": "00438d36a6f0bf30739c406b9230463c2fef0953429449a2fe791578d3aad48f",
+    "tests\\fixtures\\generated\\mse\\audio-en-media.m4s": "bde48f2095fd5c616a9dea9b1c1abe0b60f2d62cbc7653c9e280e0f0c3b1cc5e",
+    "tests\\fixtures\\generated\\mse\\audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+    "tests\\fixtures\\generated\\mse\\audio-fr-init.mp4": "35429b16b5cb972164242de4a8a0b8427f37ff7ec81e0737706cd6973d9a282b",
+    "tests\\fixtures\\generated\\mse\\audio-fr-media.m4s": "4298d5d7d0b2fe47b7b594ec05c938ee28bc3f223479fcf24553d949397871ca",
+    "tests\\fixtures\\generated\\mse\\audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "tests\\fixtures\\generated\\mse\\fr-full.vtt": "a9fdc3b61adfee639dd7dcf99ffb8ba66f88af9c5abb9e48cd1f0b06ab830b7d",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-en-init.mp4": "00438d36a6f0bf30739c406b9230463c2fef0953429449a2fe791578d3aad48f",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-en-media.m4s": "bde48f2095fd5c616a9dea9b1c1abe0b60f2d62cbc7653c9e280e0f0c3b1cc5e",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-fr-init.mp4": "35429b16b5cb972164242de4a8a0b8427f37ff7ec81e0737706cd6973d9a282b",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-fr-media.m4s": "4298d5d7d0b2fe47b7b594ec05c938ee28bc3f223479fcf24553d949397871ca",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "tests\\fixtures\\generated\\mse\\verified\\en-full.vtt": "74ee2e670c98df732720386714aa7a55b7a36cd259b095f8f433a9a98e9ade60",
+    "tests\\fixtures\\generated\\mse\\verified\\fr-forced.vtt": "9b3835734daad2e8dedc63f6e0973b9368b320bec4660113fef40de7935bbc80",
+    "tests\\fixtures\\generated\\mse\\verified\\fr-full.vtt": "a9fdc3b61adfee639dd7dcf99ffb8ba66f88af9c5abb9e48cd1f0b06ab830b7d",
+    "tests\\fixtures\\generated\\mse\\verified\\video-init.mp4": "993d47ed7ea67968a3c5587fc439e23d72b2043fa25a5e3325c84a4dc002a86c",
+    "tests\\fixtures\\generated\\mse\\verified\\video-media.m4s": "71056bd35b80ffbdcec60f2184b898a32d4441ac64308d4e8b6c8c33879f15ea",
+    "tests\\fixtures\\generated\\mse\\verified\\video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "tests\\fixtures\\generated\\mse\\video-init.mp4": "993d47ed7ea67968a3c5587fc439e23d72b2043fa25a5e3325c84a4dc002a86c",
+    "tests\\fixtures\\generated\\mse\\video-media.m4s": "71056bd35b80ffbdcec60f2184b898a32d4441ac64308d4e8b6c8c33879f15ea",
+    "tests\\fixtures\\generated\\mse\\video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "tests\\fixtures\\generated\\representative\\en-full.srt": "447dbde569f236ff431304aba57632ba631a8d3041693dcb3f8477f972b92e44",
+    "tests\\fixtures\\generated\\representative\\fr-forced.srt": "d44983aba02d9b70856674294b79b7b1fcfa1f879cf595193658e2795ce85e25",
+    "tests\\fixtures\\generated\\representative\\fr-full.srt": "49b431cf26d6c048bac9d701fcad1c18ed071ebe7648d18357a2feb605a90213",
+    "tests\\fixtures\\generated\\representative\\representative-en.mkv": "2e71c27674a205a70cf05e34d9f60c84c0178aab6edd76339512365cd034d697",
+    "tests\\fixtures\\generated\\representative\\representative-en.mp4": "609a9100ba1f1fcc62b9cfe2ea6a5e1d25404a186ab8564103910f8f61ae3bf4",
+    "tests\\fixtures\\generated\\representative\\representative.mkv": "a8ecf7ff37fadaf5e62c994cbc4985906999143eab2cf02ac2242993892fc3cc",
+    "tests\\fixtures\\generated\\representative\\representative.mp4": "70222167e1c24959cc589fc6db042d1d0a63a8d72125bd4304cc9fdbae4d8587"
+  },
+  "originalsUnchanged": true
+}

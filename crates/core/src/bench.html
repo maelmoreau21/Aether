@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Banc P0 AV1 / Opus</title>
+<h1>Banc P0 AV1 / Opus</h1>
+<p>Fixtures synthétiques locales. Lecture native expérimentale, sans transcodage. Aucun résultat de compatibilité présumé.</p>
+<label for="asset">Source</label> <select id="asset"></select> <button id="load">Charger</button>
+<video id="video" width="640" controls preload="metadata"></video>
+<p><label for="audio">Audio natif</label> <select id="audio" disabled></select></p>
+<p id="audio-status" role="status">Charger une source pour inspecter les pistes réellement exposées.</p>
+<p><label for="subtitles">Sous-titres natifs</label> <select id="subtitles" disabled><option value="off">Désactivés</option></select></p>
+<p id="subtitle-status" role="status">Les pistes analysées par le serveur ne garantissent pas leur exposition ou leur rendu par le navigateur.</p>
+<p><label for="remux-language">Langue par remux préparé</label> <select id="remux-language" disabled><option value="fr">Français — 440 Hz</option><option value="en">Anglais — 880 Hz</option></select></p>
+<p id="remux-status" role="status">Expérience : changement de fichier, avec interruption possible et restauration de position. Aucun transcodage pendant la lecture.</p>
+<p id="status" role="status">Chargement de l’inventaire…</p><pre id="log"></pre>
+<script src="/bench.js" defer></script></html>

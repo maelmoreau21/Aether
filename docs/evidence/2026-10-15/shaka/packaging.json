@@ -1,0 +1,433 @@
+{
+  "generated_utc": "2026-10-15T13:48:09.070830+00:00",
+  "method": "Unchanged fMP4 file copies, DASH SegmentList byte ranges from parsed tfdt/tfhd/trun boxes; no mux/encoding/probe executed.",
+  "sources": [
+    "https://shaka-project.github.io/shaka-player/docs/api/lib_dash_segment_list.js.html",
+    "https://shaka-project.github.io/shaka-player/docs/api/tutorial-accessibility.html"
+  ],
+  "original_sha256_before": {
+    "tests\\fixtures\\generated\\av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66",
+    "tests\\fixtures\\generated\\av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "tests\\fixtures\\generated\\av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "tests\\fixtures\\generated\\av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mkv-en.mkv": "998ec6848bbf6560c13ea3a54a67a05f4b44adb89af18701aa6a2b5da6f395b8",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mkv-fr.mkv": "d89e09fa8ccbd6f247e639fe6c64f72af2c8f7b758b1525152111dc82c67ad36",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mp4-en.mp4": "139eb56a003d1285170e49535ac3200e06669901ad3b5fb980c74fe2da339963",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mp4-fr.mp4": "0ecab0d50950ca110d6a4c80fd17036945fbbc4096d00cbb81a29c2da2b726a3",
+    "tests\\fixtures\\generated\\mse\\audio-en-init.mp4": "00438d36a6f0bf30739c406b9230463c2fef0953429449a2fe791578d3aad48f",
+    "tests\\fixtures\\generated\\mse\\audio-en-media.m4s": "bde48f2095fd5c616a9dea9b1c1abe0b60f2d62cbc7653c9e280e0f0c3b1cc5e",
+    "tests\\fixtures\\generated\\mse\\audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+    "tests\\fixtures\\generated\\mse\\audio-fr-init.mp4": "35429b16b5cb972164242de4a8a0b8427f37ff7ec81e0737706cd6973d9a282b",
+    "tests\\fixtures\\generated\\mse\\audio-fr-media.m4s": "4298d5d7d0b2fe47b7b594ec05c938ee28bc3f223479fcf24553d949397871ca",
+    "tests\\fixtures\\generated\\mse\\audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "tests\\fixtures\\generated\\mse\\fr-full.vtt": "a9fdc3b61adfee639dd7dcf99ffb8ba66f88af9c5abb9e48cd1f0b06ab830b7d",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-en-init.mp4": "00438d36a6f0bf30739c406b9230463c2fef0953429449a2fe791578d3aad48f",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-en-media.m4s": "bde48f2095fd5c616a9dea9b1c1abe0b60f2d62cbc7653c9e280e0f0c3b1cc5e",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-fr-init.mp4": "35429b16b5cb972164242de4a8a0b8427f37ff7ec81e0737706cd6973d9a282b",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-fr-media.m4s": "4298d5d7d0b2fe47b7b594ec05c938ee28bc3f223479fcf24553d949397871ca",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "tests\\fixtures\\generated\\mse\\verified\\en-full.vtt": "74ee2e670c98df732720386714aa7a55b7a36cd259b095f8f433a9a98e9ade60",
+    "tests\\fixtures\\generated\\mse\\verified\\fr-forced.vtt": "9b3835734daad2e8dedc63f6e0973b9368b320bec4660113fef40de7935bbc80",
+    "tests\\fixtures\\generated\\mse\\verified\\fr-full.vtt": "a9fdc3b61adfee639dd7dcf99ffb8ba66f88af9c5abb9e48cd1f0b06ab830b7d",
+    "tests\\fixtures\\generated\\mse\\verified\\video-init.mp4": "993d47ed7ea67968a3c5587fc439e23d72b2043fa25a5e3325c84a4dc002a86c",
+    "tests\\fixtures\\generated\\mse\\verified\\video-media.m4s": "71056bd35b80ffbdcec60f2184b898a32d4441ac64308d4e8b6c8c33879f15ea",
+    "tests\\fixtures\\generated\\mse\\verified\\video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "tests\\fixtures\\generated\\mse\\video-init.mp4": "993d47ed7ea67968a3c5587fc439e23d72b2043fa25a5e3325c84a4dc002a86c",
+    "tests\\fixtures\\generated\\mse\\video-media.m4s": "71056bd35b80ffbdcec60f2184b898a32d4441ac64308d4e8b6c8c33879f15ea",
+    "tests\\fixtures\\generated\\mse\\video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "tests\\fixtures\\generated\\representative\\en-full.srt": "447dbde569f236ff431304aba57632ba631a8d3041693dcb3f8477f972b92e44",
+    "tests\\fixtures\\generated\\representative\\fr-forced.srt": "d44983aba02d9b70856674294b79b7b1fcfa1f879cf595193658e2795ce85e25",
+    "tests\\fixtures\\generated\\representative\\fr-full.srt": "49b431cf26d6c048bac9d701fcad1c18ed071ebe7648d18357a2feb605a90213",
+    "tests\\fixtures\\generated\\representative\\representative-en.mkv": "2e71c27674a205a70cf05e34d9f60c84c0178aab6edd76339512365cd034d697",
+    "tests\\fixtures\\generated\\representative\\representative-en.mp4": "609a9100ba1f1fcc62b9cfe2ea6a5e1d25404a186ab8564103910f8f61ae3bf4",
+    "tests\\fixtures\\generated\\representative\\representative.mkv": "a8ecf7ff37fadaf5e62c994cbc4985906999143eab2cf02ac2242993892fc3cc",
+    "tests\\fixtures\\generated\\representative\\representative.mp4": "70222167e1c24959cc589fc6db042d1d0a63a8d72125bd4304cc9fdbae4d8587"
+  },
+  "streams": [
+    {
+      "file": "video.mp4",
+      "sha256": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+      "bytes": 144641,
+      "timescale": 16000,
+      "segments": [
+        {
+          "start_tick": 0,
+          "duration_tick": 32000,
+          "sample_count": 48,
+          "range_start": 766,
+          "range_end": 24927
+        },
+        {
+          "start_tick": 32000,
+          "duration_tick": 32000,
+          "sample_count": 48,
+          "range_start": 24928,
+          "range_end": 54354
+        },
+        {
+          "start_tick": 64000,
+          "duration_tick": 32000,
+          "sample_count": 48,
+          "range_start": 54355,
+          "range_end": 78776
+        },
+        {
+          "start_tick": 96000,
+          "duration_tick": 8672,
+          "sample_count": 13,
+          "range_start": 78777,
+          "range_end": 79290
+        },
+        {
+          "start_tick": 104672,
+          "duration_tick": 32000,
+          "sample_count": 48,
+          "range_start": 79291,
+          "range_end": 106711
+        },
+        {
+          "start_tick": 136672,
+          "duration_tick": 32000,
+          "sample_count": 48,
+          "range_start": 106712,
+          "range_end": 125459
+        },
+        {
+          "start_tick": 168672,
+          "duration_tick": 23312,
+          "sample_count": 35,
+          "range_start": 125460,
+          "range_end": 144459
+        }
+      ],
+      "same_complete_file_as_mse": true,
+      "same_packet_payloads_as_representative_mkv": true,
+      "packet_count": 288,
+      "codec_init_identical": true,
+      "timestamp_comparison_to_representative": {
+        "pts_time": {
+          "compared_packets": 288,
+          "min_delta_s": 0.0,
+          "max_delta_s": 0.0
+        },
+        "dts_time": {
+          "compared_packets": 288,
+          "min_delta_s": 0.0,
+          "max_delta_s": 0.0
+        },
+        "duration_time": {
+          "compared_packets": 288,
+          "min_delta_s": 0.0,
+          "max_delta_s": 0.0010000000000000009
+        }
+      },
+      "mime": "video/mp4; codecs=\"av01.0.00M.10\""
+    },
+    {
+      "file": "audio-fr.mp4",
+      "sha256": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+      "bytes": 394436,
+      "timescale": 48000,
+      "segments": [
+        {
+          "start_tick": 0,
+          "duration_tick": 96048,
+          "sample_count": 100,
+          "range_start": 712,
+          "range_end": 59343
+        },
+        {
+          "start_tick": 96048,
+          "duration_tick": 96000,
+          "sample_count": 100,
+          "range_start": 59344,
+          "range_end": 122064
+        },
+        {
+          "start_tick": 192048,
+          "duration_tick": 96000,
+          "sample_count": 100,
+          "range_start": 122065,
+          "range_end": 183495
+        },
+        {
+          "start_tick": 288048,
+          "duration_tick": 96000,
+          "sample_count": 100,
+          "range_start": 183496,
+          "range_end": 253519
+        },
+        {
+          "start_tick": 384048,
+          "duration_tick": 96000,
+          "sample_count": 100,
+          "range_start": 253520,
+          "range_end": 326050
+        },
+        {
+          "start_tick": 480048,
+          "duration_tick": 96000,
+          "sample_count": 100,
+          "range_start": 326051,
+          "range_end": 393204
+        },
+        {
+          "start_tick": 576048,
+          "duration_tick": 336,
+          "sample_count": 1,
+          "range_start": 393205,
+          "range_end": 394254
+        }
+      ],
+      "same_complete_file_as_mse": true,
+      "same_packet_payloads_as_representative_mkv": true,
+      "packet_count": 601,
+      "codec_init_identical": true,
+      "timestamp_comparison_to_representative": {
+        "pts_time": {
+          "compared_packets": 601,
+          "min_delta_s": 0.006999999999999673,
+          "max_delta_s": 0.0070000000000014495
+        },
+        "dts_time": {
+          "compared_packets": 601,
+          "min_delta_s": 0.006999999999999673,
+          "max_delta_s": 0.0070000000000014495
+        },
+        "duration_time": {
+          "compared_packets": 601,
+          "min_delta_s": 0.0,
+          "max_delta_s": 0.0010000000000000009
+        }
+      },
+      "mime": "audio/mp4; codecs=\"opus\""
+    },
+    {
+      "file": "audio-en.mp4",
+      "sha256": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+      "bytes": 222850,
+      "timescale": 48000,
+      "segments": [
+        {
+          "start_tick": 0,
+          "duration_tick": 96048,
+          "sample_count": 100,
+          "range_start": 707,
+          "range_end": 37566
+        },
+        {
+          "start_tick": 96048,
+          "duration_tick": 96000,
+          "sample_count": 100,
+          "range_start": 37567,
+          "range_end": 74802
+        },
+        {
+          "start_tick": 192048,
+          "duration_tick": 96000,
+          "sample_count": 100,
+          "range_start": 74803,
+          "range_end": 111210
+        },
+        {
+          "start_tick": 288048,
+          "duration_tick": 96000,
+          "sample_count": 100,
+          "range_start": 111211,
+          "range_end": 148446
+        },
+        {
+          "start_tick": 384048,
+          "duration_tick": 96000,
+          "sample_count": 100,
+          "range_start": 148447,
+          "range_end": 185682
+        },
+        {
+          "start_tick": 480048,
+          "duration_tick": 96000,
+          "sample_count": 100,
+          "range_start": 185683,
+          "range_end": 222090
+        },
+        {
+          "start_tick": 576048,
+          "duration_tick": 336,
+          "sample_count": 1,
+          "range_start": 222091,
+          "range_end": 222668
+        }
+      ],
+      "same_complete_file_as_mse": true,
+      "same_packet_payloads_as_representative_mkv": true,
+      "packet_count": 601,
+      "codec_init_identical": true,
+      "timestamp_comparison_to_representative": {
+        "pts_time": {
+          "compared_packets": 601,
+          "min_delta_s": 0.006999999999999673,
+          "max_delta_s": 0.0070000000000014495
+        },
+        "dts_time": {
+          "compared_packets": 601,
+          "min_delta_s": 0.006999999999999673,
+          "max_delta_s": 0.0070000000000014495
+        },
+        "duration_time": {
+          "compared_packets": 601,
+          "min_delta_s": 0.0,
+          "max_delta_s": 0.0010000000000000009
+        }
+      },
+      "mime": "audio/mp4; codecs=\"opus\""
+    }
+  ],
+  "subtitles": [
+    {
+      "file": "fr-full.vtt",
+      "sha256": "a9fdc3b61adfee639dd7dcf99ffb8ba66f88af9c5abb9e48cd1f0b06ab830b7d",
+      "cues": [
+        {
+          "start_seconds": 2.0,
+          "end_seconds": 2.5,
+          "text": "FR COMPLET CUE 1"
+        },
+        {
+          "start_seconds": 4.0,
+          "end_seconds": 5.0,
+          "text": "FR COMPLET CUE 2"
+        },
+        {
+          "start_seconds": 6.0,
+          "end_seconds": 6.5,
+          "text": "FR COMPLET CUE 3"
+        },
+        {
+          "start_seconds": 9.0,
+          "end_seconds": 9.5,
+          "text": "FR COMPLET CUE 4"
+        }
+      ],
+      "forced": false,
+      "language": "fr",
+      "same_complete_file_as_mse": true
+    },
+    {
+      "file": "fr-forced.vtt",
+      "sha256": "9b3835734daad2e8dedc63f6e0973b9368b320bec4660113fef40de7935bbc80",
+      "cues": [
+        {
+          "start_seconds": 2.0,
+          "end_seconds": 2.5,
+          "text": "FR FORCE CUE 1"
+        },
+        {
+          "start_seconds": 4.0,
+          "end_seconds": 5.0,
+          "text": "FR FORCE CUE 2"
+        },
+        {
+          "start_seconds": 6.0,
+          "end_seconds": 6.5,
+          "text": "FR FORCE CUE 3"
+        },
+        {
+          "start_seconds": 9.0,
+          "end_seconds": 9.5,
+          "text": "FR FORCE CUE 4"
+        }
+      ],
+      "forced": true,
+      "language": "fr",
+      "same_complete_file_as_mse": true
+    },
+    {
+      "file": "en-full.vtt",
+      "sha256": "74ee2e670c98df732720386714aa7a55b7a36cd259b095f8f433a9a98e9ade60",
+      "cues": [
+        {
+          "start_seconds": 2.0,
+          "end_seconds": 2.5,
+          "text": "EN FULL CUE 1"
+        },
+        {
+          "start_seconds": 4.0,
+          "end_seconds": 5.0,
+          "text": "EN FULL CUE 2"
+        },
+        {
+          "start_seconds": 6.0,
+          "end_seconds": 6.5,
+          "text": "EN FULL CUE 3"
+        },
+        {
+          "start_seconds": 9.0,
+          "end_seconds": 9.5,
+          "text": "EN FULL CUE 4"
+        }
+      ],
+      "forced": false,
+      "language": "en",
+      "same_complete_file_as_mse": true
+    }
+  ],
+  "limitations": [
+    "DASH parsing/playback requires a separate Shaka browser run.",
+    "No adaptationSetSwitching/segmentAlignment promise across different channel layouts.",
+    "Original measured audio +7 ms timestamp shift retained, not compensated."
+  ],
+  "whitelist": [
+    "manifest.mpd",
+    "video.mp4",
+    "audio-fr.mp4",
+    "audio-en.mp4",
+    "fr-full.vtt",
+    "fr-forced.vtt",
+    "en-full.vtt"
+  ],
+  "manifest_sha256": "334044eace3d1fa999c8e0112ef94bea21f11d73a7332640c1dc635dba74c2c9",
+  "duration_seconds": 12.008,
+  "passed": true,
+  "original_sha256_after": {
+    "tests\\fixtures\\generated\\av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66",
+    "tests\\fixtures\\generated\\av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "tests\\fixtures\\generated\\av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "tests\\fixtures\\generated\\av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mkv-en.mkv": "998ec6848bbf6560c13ea3a54a67a05f4b44adb89af18701aa6a2b5da6f395b8",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mkv-fr.mkv": "d89e09fa8ccbd6f247e639fe6c64f72af2c8f7b758b1525152111dc82c67ad36",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mp4-en.mp4": "139eb56a003d1285170e49535ac3200e06669901ad3b5fb980c74fe2da339963",
+    "tests\\fixtures\\generated\\language-remux\\av1-opus-mp4-fr.mp4": "0ecab0d50950ca110d6a4c80fd17036945fbbc4096d00cbb81a29c2da2b726a3",
+    "tests\\fixtures\\generated\\mse\\audio-en-init.mp4": "00438d36a6f0bf30739c406b9230463c2fef0953429449a2fe791578d3aad48f",
+    "tests\\fixtures\\generated\\mse\\audio-en-media.m4s": "bde48f2095fd5c616a9dea9b1c1abe0b60f2d62cbc7653c9e280e0f0c3b1cc5e",
+    "tests\\fixtures\\generated\\mse\\audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+    "tests\\fixtures\\generated\\mse\\audio-fr-init.mp4": "35429b16b5cb972164242de4a8a0b8427f37ff7ec81e0737706cd6973d9a282b",
+    "tests\\fixtures\\generated\\mse\\audio-fr-media.m4s": "4298d5d7d0b2fe47b7b594ec05c938ee28bc3f223479fcf24553d949397871ca",
+    "tests\\fixtures\\generated\\mse\\audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "tests\\fixtures\\generated\\mse\\fr-full.vtt": "a9fdc3b61adfee639dd7dcf99ffb8ba66f88af9c5abb9e48cd1f0b06ab830b7d",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-en-init.mp4": "00438d36a6f0bf30739c406b9230463c2fef0953429449a2fe791578d3aad48f",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-en-media.m4s": "bde48f2095fd5c616a9dea9b1c1abe0b60f2d62cbc7653c9e280e0f0c3b1cc5e",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-en.mp4": "1bd155297682e6d626ab26cbefba3c890314e91bb959a721aa82b1ddf6aa686e",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-fr-init.mp4": "35429b16b5cb972164242de4a8a0b8427f37ff7ec81e0737706cd6973d9a282b",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-fr-media.m4s": "4298d5d7d0b2fe47b7b594ec05c938ee28bc3f223479fcf24553d949397871ca",
+    "tests\\fixtures\\generated\\mse\\verified\\audio-fr.mp4": "aaccdcf89005424001205f29f4316fdf1da6c3953fd57911e3c275289f958afe",
+    "tests\\fixtures\\generated\\mse\\verified\\en-full.vtt": "74ee2e670c98df732720386714aa7a55b7a36cd259b095f8f433a9a98e9ade60",
+    "tests\\fixtures\\generated\\mse\\verified\\fr-forced.vtt": "9b3835734daad2e8dedc63f6e0973b9368b320bec4660113fef40de7935bbc80",
+    "tests\\fixtures\\generated\\mse\\verified\\fr-full.vtt": "a9fdc3b61adfee639dd7dcf99ffb8ba66f88af9c5abb9e48cd1f0b06ab830b7d",
+    "tests\\fixtures\\generated\\mse\\verified\\video-init.mp4": "993d47ed7ea67968a3c5587fc439e23d72b2043fa25a5e3325c84a4dc002a86c",
+    "tests\\fixtures\\generated\\mse\\verified\\video-media.m4s": "71056bd35b80ffbdcec60f2184b898a32d4441ac64308d4e8b6c8c33879f15ea",
+    "tests\\fixtures\\generated\\mse\\verified\\video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "tests\\fixtures\\generated\\mse\\video-init.mp4": "993d47ed7ea67968a3c5587fc439e23d72b2043fa25a5e3325c84a4dc002a86c",
+    "tests\\fixtures\\generated\\mse\\video-media.m4s": "71056bd35b80ffbdcec60f2184b898a32d4441ac64308d4e8b6c8c33879f15ea",
+    "tests\\fixtures\\generated\\mse\\video.mp4": "a907cdaba5204c21ce334e153533e36c21b51730620c5b0fea2e5487628e69f4",
+    "tests\\fixtures\\generated\\representative\\en-full.srt": "447dbde569f236ff431304aba57632ba631a8d3041693dcb3f8477f972b92e44",
+    "tests\\fixtures\\generated\\representative\\fr-forced.srt": "d44983aba02d9b70856674294b79b7b1fcfa1f879cf595193658e2795ce85e25",
+    "tests\\fixtures\\generated\\representative\\fr-full.srt": "49b431cf26d6c048bac9d701fcad1c18ed071ebe7648d18357a2feb605a90213",
+    "tests\\fixtures\\generated\\representative\\representative-en.mkv": "2e71c27674a205a70cf05e34d9f60c84c0178aab6edd76339512365cd034d697",
+    "tests\\fixtures\\generated\\representative\\representative-en.mp4": "609a9100ba1f1fcc62b9cfe2ea6a5e1d25404a186ab8564103910f8f61ae3bf4",
+    "tests\\fixtures\\generated\\representative\\representative.mkv": "a8ecf7ff37fadaf5e62c994cbc4985906999143eab2cf02ac2242993892fc3cc",
+    "tests\\fixtures\\generated\\representative\\representative.mp4": "70222167e1c24959cc589fc6db042d1d0a63a8d72125bd4304cc9fdbae4d8587"
+  },
+  "originals_unchanged": true,
+  "total_ms": 153.57310000035795
+}

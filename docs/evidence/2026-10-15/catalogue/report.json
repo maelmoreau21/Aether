@@ -1,0 +1,50 @@
+{
+  "browser": "155.0.8059.40",
+  "os": "win32",
+  "headless": true,
+  "results": [
+    {
+      "width": 390,
+      "home": true,
+      "separateLibraries": true,
+      "filmVersions": true,
+      "seriesSeasonEpisode": true,
+      "playback": true,
+      "searchEmpty": true,
+      "overflow": false,
+      "cspErrors": []
+    },
+    {
+      "width": 768,
+      "home": true,
+      "separateLibraries": true,
+      "filmVersions": true,
+      "seriesSeasonEpisode": true,
+      "playback": true,
+      "searchEmpty": true,
+      "overflow": false,
+      "cspErrors": []
+    },
+    {
+      "width": 1440,
+      "home": true,
+      "separateLibraries": true,
+      "filmVersions": true,
+      "seriesSeasonEpisode": true,
+      "playback": true,
+      "searchEmpty": true,
+      "overflow": false,
+      "cspErrors": []
+    },
+    {
+      "loadingState": true,
+      "realEmptyStates": true,
+      "api503": true,
+      "retry": true,
+      "unknownWork404": true,
+      "episodeNotShownAsFilm": true,
+      "boundedPaginationWithTestData": 24
+    }
+  ],
+  "passed": true
+}

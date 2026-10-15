@@ -232,3 +232,30 @@ Tokens CSS partagés et composants de présentation légers dans apps/web/src/li
 L'écran principal reste client de Player et de l'API démo existante ; pas de
 couplage visuel au remux ou à Shaka/MSE. Illustration originale locale ; la
 fixture de lecture reste explicitement une mire. Voir docs/UI_DIRECTION.md.
+
+### Lecteur immersif P1
+
+L’ancien lecteur encadré est remplacé par ImmersivePlayer (cycle de vie/plein écran)
+et PlayerControls (présentation et callbacks), reliés par Player/PlaybackState et
+PlayerFactory. NativePlayer et API média inchangés. Voir docs/IMMERSIVE_PLAYER.md.
+
+### Premier catalogue P1 de fixtures (15 octobre 2026)
+
+Le Core ajoute `/api/v1/catalog` et `/api/v1/catalog/{id}` : associations
+explicites Work / Edition / MediaVersion / MediaSource vers les assets et Tracks
+déjà inventoriés. Films et séries sont séparés ; une série expose saisons et
+épisodes, sans aplatir ses épisodes dans les films. Recherche, tri et pagination
+bornée passent par l'API. Ces associations de fixtures ne sont pas persistées.
+
+Le Web ajoute cinq routes statiques et des fiches par paramètre `work`, avec
+composants de catalogue séparés de l'API et du moteur Player existant. Le build
+externalise le bootstrap de chaque page pour les accès directs sous CSP.
+Pas de SQLite, scanner ou comptes ajouté : les bibliothèques personnelles
+restent bloquées avant bootstrap, sessions et autorisation backend.
+Périmètre vérifié et prochaine étape : docs/CATALOGUE_P1.md.
+
+Validation locale : 15 tests Rust, check Web 0/0, lint, 8 tests Vitest et build
+réussis ; parcours catalogue et non-régression lecteur sous Chrome headless
+réussis, dont accès directs sous CSP et pagination simulée bornée à 24 cartes.
+Preuves docs/evidence/2026-10-15/catalogue/. Cela ne mesure pas un vrai catalogue
+à grande échelle et n'autorise pas de bibliothèque personnelle.

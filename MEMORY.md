@@ -555,3 +555,170 @@ Validation finale Node : 10 tests politique + 2 suites statistiques =12/12, exit
   physique 5.1 / 10 bits, films longs, NAS, Safari/mobile réel restent non vérifiés.
 - Première direction visuelle concrète, pas une expérience finie. Ne pas étendre
   automatiquement tous les écrans ; prochain petit jalon : retour sur cette base.
+
+## 2026-10-15 — Lecteur immersif P1 validé localement
+
+- Le lecteur encadré/panneau permanent de la page est remplacé par un dialog
+  plein écran, ouvert depuis les actions existantes de l'accueil. Identité,
+  hero, cartes et choix de source de l'accueil conservés. Aucune route ajoutée.
+- Fullscreen API depuis le clic ; repli couvrant la fenêtre en cas de refus.
+  Vidéo sans controls natifs, ratio conservé sur fond noir ; Retour/titre en
+  haut, progression et commandes superposées en bas, menus flottants à droite.
+- PlayerControls Svelte ne connaît que PlaybackState/callbacks. ImmersivePlayer
+  reçoit une PlayerFactory ; NativePlayer et backend inchangés. Types étendus
+  aux métadonnées déjà présentes pour les libellés audio/vidéo réels.
+- FR/EN, WebVTT/off/forced, vitesse, volume/muet, seek, sources MKV/MP4 ; choix
+  manuels et état conservés. Les sources de démo ne sont pas présentées comme
+  des œuvres ou versions éditoriales. Pistes vidéo internes affichées en
+  lecture seule avec sélection explicitement indisponible ; aucun faux choix.
+- Contrôles cachés après3s en lecture ; pause/menu/erreur/clavier les gardent.
+  Curseur masqué, mouvement/tactile les révèlent, menus clavier, Échap,
+  Space/flèches/M/F, zones sûres et focus restauré après sortie fullscreen.
+- Retour détruit le moteur, retire src/pistes, arrête média et timers. Les
+  callbacks tardifs sont ignorés par génération. Aucun retry automatique ajouté.
+- Tests réels Windows10.0.26300 headless : Chrome155.0.8059.40,
+  Edge155.0.4283.45, Firefox155.0.1/geckodriver0.37.1. Fullscreen réel et refus
+  simulé, menus/clavier, audio/texte/source, retour/nettoyage réussis. Toucher
+  simulé390×844/844×390 et layout360–1920px sans débordement/CSPerror ;
+  erreurs Core503/VTT404/audio404 explicites, tentative audio unique.
+- Non-régression média P1 :6parcours MKV/MP4, pixels/PCM FR6/EN2, seek,
+  pause/reprise, choix texte, fin/404, hashes originaux/VTT inchangés. Chrome
+  à1,5× ; Edge et Firefox validés à1×. Les échecs Edge multicanaux accélérés
+  observés ne sont pas effacés ni présentés comme résolus ; Firefox1,5× reste
+  également une limite connue. Pas de récupération ou de transcodage ajouté.
+- Tests P1 adaptés aux vrais menus sans supprimer leurs assertions média.
+  Position restaurée observée à seeked, séparément de l'avancement après reprise.
+  Fixture repositionnée avant commutation active pour ne pas mesurer après EOS.
+- check Svelte/TS0erreur0avertissement, lint/build,8tests Vitest et10tests Rust
+  passent ; fmt/clippy stricts et git diff --check réussis. Pas de CI distante.
+- Documentation docs/IMMERSIVE_PLAYER.md ; preuves et captures dans
+  docs/evidence/2026-10-15/immersive-player/. Mobile physique/Safari, films
+  longs, restitution5.1/10bits et NAS restent non vérifiés. P1 complet non clos.
+- Token saver appliqué à la fin : lectures ciblées, logs condensés et réutilisation
+  des preuves existantes ; aucun pourcentage de quota économisé inventé.
+
+## 2026-10-15 — Premier parcours catalogue P1 validé localement
+
+- Navigation statique Accueil / Films / Séries / Recherche / Paramètres ; fiches
+  par paramètre `work`, film et série séparés, saison puis épisode vers lecteur.
+- API `/api/v1/catalog` et `/api/v1/catalog/{id}`, recherche, tri alphabétique,
+  pagination 24 par défaut (maximum API 100). Associations explicites des
+  fixtures Work / Edition / MediaVersion / MediaSource vers Asset / Track.
+  Un film `fixture-film` regroupe MKV/MP4 ; `fixture-series` contient une saison
+  et `fixture-episode-1`, réutilisant explicitement la même mire synthétique.
+  Pas de fusion par titre, base persistante ou identification automatique.
+- Années/affiches réelles, dates d'ajout, historique et recommandations absents :
+  états explicites, replis typographiques signalés. Aucun média personnel.
+- Lecteur/moteur conservés ; sources limitées à l'œuvre ou l'épisode choisi.
+  Amorçage des scripts navigateur adapté sans retirer assertions média.
+  Bootstrap statique externalisé récursivement pour routes directes sous CSP.
+- Vérifié : 15 tests Rust passent ; check Web 0/0, lint, 8 tests Vitest et
+  build passent après ajustements UI. Chrome155.0.8059.40 Windows headless :
+  deux parcours média P1 MKV/MP4 pixels/PCM/hashes réussis après adaptation.
+  Commandes Rust standard fmt --check, clippy --locked --all-targets -- -D warnings,
+  test --locked relancées avec succès. Dernier browser-catalog : chargement
+  explicite et épisode jamais présenté comme film par `work` détourné vérifiés.
+- browser-catalog : 390/768/1440px, fiches, série→épisode→MP4, recherche vide,
+  catalogue vide injecté, 503/réessai, 404, pagination simulée72 bornée24 passent.
+  Captures Accueil/Films/Séries desktop/mobile inspectées. browser-p1-layout :
+  360/390/768/1280/1440/1920px sans débordement/CSP, audio404 tentative unique,
+  VTT404/Core503 passent. browser-immersive : fullscreen réel/refus, menus,
+  clavier, tactile simulé390×844/844×390 passent. Preuves dans
+  docs/evidence/2026-10-15/catalogue/ (report.json, regression, layout, immersive).
+  Aucun nouveau résultat Edge/Firefox/Safari/mobile physique/NAS ; pagination
+  simulée sans mesure de charge ou catalogue personnel.
+- Bootstrap admin, authentification, sessions, RBAC, SQLite et scanner absents :
+  interdisent l'exposition de dossiers personnels. Prochain petit jalon : admin
+  local + sessions/RBAC + SQLite, avant dossier explicitement configuré `ro`
+  et scan borné hors requêtes HTTP. P1 complet non clos, essais P0 suspendus.
+- Token saver : lectures ciblées et deux délégations ; aucun chiffre d'économie
+  revendiqué. Documentation : docs/CATALOGUE_P1.md et contrat docs/API.md.
+
+
+## 2026-10-15 — Navigation principale et menu profil
+
+- Navigation principale limitée à Accueil / Films / Séries / Recherche. Recherche
+  associe une loupe SVG et son texte sur desktop comme dans la barre mobile.
+  Paramètres reste accessible à son URL existante via le menu profil uniquement.
+- ProfileMenu frontend en haut à droite : avatar de repli, mention « Aucun profil
+  configuré », Profil désactivé « Bientôt », lien Paramètres fonctionnel. Pas de
+  faux compte, rôle, déconnexion, authentification ou nouveau backend.
+- Popover HTML natif auto : ouverture clic/Entrée/Espace, focus du premier lien
+  utilisable, fermeture Échap/clic extérieur/re-clic du bouton/navigation et
+  sortie clavier hors du composant. Retour du focus après Échap vérifié.
+  Styles sombre/améthyste, hover/focus/active et mouvement réduit conservés.
+- Aucun fichier du lecteur ni code Rust modifié pour cet ajustement. Ancien diff
+  de travail préservé. Le test catalogue passe désormais par le menu profil pour
+  ouvrir Paramètres et vérifie les quatre liens principaux.
+- Web : npm run check (0 erreur/0 avertissement), lint, 8 tests Vitest et build
+  réussis. Chrome155.0.8059.40 Windows10.0.26300 headless : nouveau runner
+  browser-profile.cjs passe en360/390/768/1440px (clavier, tactile simulé,
+  fermeture, focus, navigation, aucun débordement/CSP). Captures inspectées.
+  browser-catalog.cjs et browser-immersive.cjs passent sans retirer assertions.
+  Preuves : docs/evidence/2026-10-15/profile-navigation/.
+- Pas de nouvelle validation Safari/Firefox/Edge/mobile physique. Tests Rust non
+  relancés : backend inchangé. Prochain petit jalon fonctionnel reste admin local,
+  sessions/RBAC et SQLite avant bibliothèques personnelles ; aucun élargissement.
+
+
+## 2026-10-15 — Séparation profil, paramètres et administration
+
+- Menu : « Mon profil · Bientôt » (avatar/identité/mot de passe/préférences
+  langue/audio/sous-titres), Paramètres pour les réglages personnels uniquement.
+  Retrait de « Bibliothèques personnelles » et du bouton d’ajout de bibliothèque.
+- Bibliothèques Films/Séries, dossiers/scans, utilisateurs/permissions et
+  configuration relèvent de l’administration serveur future. Administration et
+  Déconnexion restent masquées : aucune identité authentifiée ni rôle simulé.
+  Deux rôles seulement administrator/user ; futurs droits à contrôler côté backend.
+- Aucune nouvelle fonctionnalité, route, auth ou administration. Lecteur,
+  catalogue métier et navigation principale inchangés. Tests existants adaptés
+  aux nouveaux libellés sans retirer les autres assertions.
+- Vérifié : check0/0, lint/build et browser-profile.cjs Chrome155 Windows
+  headless360/390/768/1440px passent, y compris absence Administration/Déconnexion
+  et bibliothèques dans Paramètres. Preuves docs/evidence/2026-10-15/personal-settings/.
+  Suites média/Rust non relancées : changement de présentation uniquement.
+
+## 2026-10-15 — Corrections ciblées du lecteur immersif
+
+- ImmersivePlayer.svelte : maintien du focus sur la surface (.player-shell) lors du
+  masquage automatique des contrôles ; ajout d'une écoute de secours globale des
+  raccourcis clavier (Space, flèches, M, F, Échap) via svelte:window sans perte après
+  inertie des contrôles.
+- PlayerControls.svelte : structure ARIA normalisée (rôles group et presentation pour les
+  sections, aria-controls et id de menu liés, suppression de la duplication de Tab,
+  pattern de roving tabindex 0/-1 lors de la navigation fléchée Home/End/haut/bas sans
+  anomalie de modulo négatif, bouton Fermer préservé).
+- Mobile : titre secondaire relevé de 6px à 10px lisible sur smartphone et 10px desktop.
+- Smartphone : disposition désencombrée sur mobile (<700px), curseur de volume inline masqué
+  au profit des boutons matériels/muet, espacements aérés (row-gap 8px), suppression des
+  débordements et cibles tactiles confortables (>=40px).
+- Vérifications exécutées :
+  - apps/web : npm run check (0 erreur, 0 avertissement), npm run lint (0 erreur),
+    npm test (8 tests Vitest passés), npm run build réussi.
+  - Rust : cargo fmt --check, cargo clippy --locked --all-targets -- -D warnings,
+    cargo test --locked (15 tests passés).
+  - Navigateurs réels : node scripts/browser-immersive.cjs (Chrome 155 headless, 11 étapes
+    incluant focus masqué, ARIA/roving tabindex, taille mobile >=10px et volume masqué),
+    node scripts/browser-immersive-firefox.cjs (Firefox 155 headless avec geckodriver) réussis.
+
+## 2026-10-15 — Mise à jour complète de la toolchain et des dépendances
+
+- **Toolchain Rust** : mise à jour vers stable 1.99.1 (rustc 1.99.1, cargo 1.99.1, rustup 1.29.1).
+- **Cargo.toml** : passage de `rust-version = "1.85"` à `rust-version = "1.99"`.
+- **Dépendances Rust** : vérification et alignement avec crates.io sur les dernières versions stables :
+  - `axum` 0.8.9, `tokio` 1.53.3, `tower` 0.5.3, `tower-http` 0.7.1, `serde` 1.0.229, `serde_json` 1.0.154, `thiserror` 2.0.21, `http-body-util` 0.1.5, `tempfile` 3.27.0.
+- **Frontend web (`apps/web`)** : mise à jour vers les dernières versions stables compatibles :
+  - `eslint` : passage de `^9.0.0` (9.39.5) à `^10.12.0`.
+  - `vitest` : passage de `^4.0.0` (4.1.12) à `^5.0.5`.
+  - `typescript-eslint` : passage de `^8.0.0` à `^8.71.2`.
+  - `eslint-plugin-svelte` : passage de `^3.0.0` à `^3.23.1`.
+  - `svelte-check` : passage de `^4.0.0` à `^4.7.6`.
+  - `@opentelemetry/api` : passage de `^1.0.0` à `^1.9.1`.
+  - `typescript` : fixé à `^6.0.3` (dernière version de la branche 6.x, compatibilité stricte avec le peer requirement `^5.0.0 || ^6.0.0` de `svelte-check`).
+  - Dépendances déjà à jour : `svelte` (5.57.2), `vite` (8.3.4), `@sveltejs/kit` (3.1.0), `@sveltejs/adapter-static` (4.0.0), `@sveltejs/vite-plugin-svelte` (7.3.1), `playwright` (1.64.1).
+- **Vérifications et tests validés** :
+  - Backend : `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked` (15/15 tests passés).
+  - Frontend : `npm audit --audit-level=high` (0 vulnérabilité), `npm run check` (0 erreur, 0 avertissement), `npm run lint` (ESLint 10 propre), `npm test` (8/8 tests Vitest 5 passés), `npm run build` (build statique réussi).
+  - Scripts de validation : `node scripts/player-comparison-stats.test.cjs`, `node scripts/safe-margin-stats.test.cjs`, `node --test scripts/audio-seek-policy.test.cjs` (10/10 tests passés).
+
+

@@ -29,3 +29,24 @@ Pause/lecture/seek/volume/vitesse, FR/EN avec position conservée, WebVTT/off,
 erreurs explicites. Aucun nouveau moteur, auth/catalogue réel ou DB anticipé.
 Décision et preuves : P1_WEB_INTEGRATION.md. La suite est le bootstrap admin local
 sécurisé, puis les bibliothèques ro autorisées.
+
+## Premier jalon catalogue P1 autorisé (15 octobre 2026)
+
+Navigation Accueil / Films / Séries / Recherche / Paramètres, listes séparées,
+fiche film et parcours série → saison → épisode → lecteur immersif conservé.
+Le catalogue vient d'une API avec recherche, tri et pagination ; seules les
+fixtures sont associées explicitement au modèle Work / Edition / MediaVersion /
+MediaSource / Asset / Track. Deux copies MKV/MP4 ne créent pas deux films.
+Les bibliothèques sont identifiées séparément, sans gestion de dossiers réelle.
+
+Ne pas afficher d'année, d'affiche réelle, d'historique, de récence ou de
+recommandation inventée. Les états indisponibles sont expliqués. Ce parcours
+ne clôture pas P1 autonome : bootstrap local, sessions/RBAC et SQLite restent
+prérequis avant tout dossier personnel en lecture seule. Aucun nouvel essai
+codec ou remplacement de lecteur n'est inclus. Voir CATALOGUE_P1.md.
+
+Ce jalon de fixtures a été vérifié localement : 15 tests Rust, check Web 0/0,
+lint, 8 tests Vitest, build et parcours navigateur Chrome headless catalogue /
+lecteur réussis. États vides/erreurs et pagination simulée bornée vérifiés,
+captures desktop/mobile inspectées. Aucun nouveau résultat Edge/Firefox/Safari,
+mobile physique ou NAS ; pas de preuve de charge ni de bibliothèque personnelle.

@@ -49,6 +49,10 @@ async function firefoxAdapter() {
     const element = async selector => (await call('POST',`/session/${session}/element`,{using:'css selector',value:selector}))['element-6066-11e4-a52e-4f735466cecf'];
     return {version:info.capabilities.browserVersion, driver:info.capabilities['moz:geckodriverVersion'], pid:info.capabilities['moz:processID'] ?? null,
       evaluate, close, goto:url=>call('POST',`/session/${session}/url`,{url}),
+      press:key=>{
+        const value={Space:'\uE00D',Escape:'\uE00C',ArrowLeft:'\uE012',ArrowUp:'\uE013',ArrowRight:'\uE014',ArrowDown:'\uE015',Tab:'\uE004',Enter:'\uE007'}[key]||key;
+        return call('POST',`/session/${session}/actions`,{actions:[{type:'key',id:'keyboard',actions:[{type:'keyDown',value},{type:'keyUp',value}]}]});
+      },
       select: value=>evaluate(value=>{ const s=document.querySelector('#asset'); s.value=value; s.dispatchEvent(new Event('change',{bubbles:true})); },value),
       click:async(selector='#load')=>call('POST',`/session/${session}/element/${await element(selector)}/click`,{}),
       screenshot:async name=>fs.writeFileSync(path.join(out,name),Buffer.from(await call('GET',`/session/${session}/screenshot`),'base64'))};

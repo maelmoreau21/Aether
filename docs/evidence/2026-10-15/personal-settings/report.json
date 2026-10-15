@@ -1,0 +1,64 @@
+{
+  "browser": "155.0.8059.40",
+  "os": "10.0.26300",
+  "headless": true,
+  "results": [
+    {
+      "width": 360,
+      "primaryLinks": 4,
+      "searchIcon": true,
+      "profilePlaceholder": true,
+      "keyboardEnterSpaceTabEscape": true,
+      "focusRestored": true,
+      "toggleClose": true,
+      "outsideClick": true,
+      "settingsNavigation": true,
+      "menuInViewport": true,
+      "overflow": false,
+      "cspErrors": []
+    },
+    {
+      "width": 390,
+      "primaryLinks": 4,
+      "searchIcon": true,
+      "profilePlaceholder": true,
+      "keyboardEnterSpaceTabEscape": true,
+      "focusRestored": true,
+      "toggleClose": true,
+      "outsideClick": true,
+      "settingsNavigation": true,
+      "menuInViewport": true,
+      "overflow": false,
+      "cspErrors": []
+    },
+    {
+      "width": 768,
+      "primaryLinks": 4,
+      "searchIcon": true,
+      "profilePlaceholder": true,
+      "keyboardEnterSpaceTabEscape": true,
+      "focusRestored": true,
+      "toggleClose": true,
+      "outsideClick": true,
+      "settingsNavigation": true,
+      "menuInViewport": true,
+      "overflow": false,
+      "cspErrors": []
+    },
+    {
+      "width": 1440,
+      "primaryLinks": 4,
+      "searchIcon": true,
+      "profilePlaceholder": true,
+      "keyboardEnterSpaceTabEscape": true,
+      "focusRestored": true,
+      "toggleClose": true,
+      "outsideClick": true,
+      "settingsNavigation": true,
+      "menuInViewport": true,
+      "overflow": false,
+      "cspErrors": []
+    }
+  ],
+  "passed": true
+}

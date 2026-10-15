@@ -1,0 +1,707 @@
+{
+  "p95Method": "nearest rank; n12 active switches per engine/browser, descriptive only; includes collection observer overhead",
+  "results": [
+    {
+      "engine": "mse",
+      "channel": "chrome",
+      "browser": "155.0.8059.40",
+      "passed": true,
+      "originalsUnchanged": true,
+      "activeLatencyMs": {
+        "n": 12,
+        "median": 370.3999999994412,
+        "p95NearestRank": 383.19999999925494,
+        "max": 383.19999999925494,
+        "min": 351.5
+      },
+      "pausedLatencyIncludingHoldAndResumeMs": {
+        "n": 6,
+        "median": 485.5,
+        "p95NearestRank": 520.4000000003725,
+        "max": 520.4000000003725,
+        "min": 454.40000000037253
+      },
+      "resumeToSignalMs": {
+        "n": 6,
+        "median": 372.2000000011176,
+        "p95NearestRank": 411.7999999988824,
+        "max": 411.7999999988824,
+        "min": 345.2000000011176
+      },
+      "activeSampledSilenceTotalMs": {
+        "n": 12,
+        "median": 0,
+        "p95NearestRank": 0,
+        "max": 0,
+        "min": 0
+      },
+      "activeMaxSampledSilenceRunMs": {
+        "n": 12,
+        "median": 0,
+        "p95NearestRank": 0,
+        "max": 0,
+        "min": 0
+      },
+      "activeMaxVideoCallbackGapMs": {
+        "n": 12,
+        "median": 50.11700000000019,
+        "p95NearestRank": 66.70000000000073,
+        "max": 66.70000000000073,
+        "min": 50
+      },
+      "baselineVideoGapMs": 66.60000000000014,
+      "activeSwitchesWithWaiting": 0,
+      "activeSwitchesWithSeeking": 0,
+      "allVideoSourcesUnchanged": true,
+      "allActiveSwitchesHaveVideoProgress": true,
+      "allManualSubtitleChoicesRetained": true,
+      "markerSkewMs": {
+        "n": 6,
+        "median": 18.215999999999788,
+        "p95NearestRank": 28.58499999999964,
+        "max": 28.58499999999964,
+        "min": 10.66699999999976
+      },
+      "maxPollMs": {
+        "n": 18,
+        "median": 20.600000000558794,
+        "p95NearestRank": 24,
+        "max": 24,
+        "min": 16.799999998882413
+      },
+      "resources": {
+        "status": "measured",
+        "samples": 27,
+        "durationSeconds": 13.098650500000002,
+        "logicalProcessors": 8,
+        "collectionMs": {
+          "n": 27,
+          "median": 336.38880000000063,
+          "p95NearestRank": 401.3683999999994,
+          "max": 498.31120000000004,
+          "min": 246.83029999999985
+        },
+        "limitations": [
+          "WorkingSet is resident working set, not private memory; sums double-count shared pages.",
+          "CPU is cumulative per PID plus creation time; consumers must calculate nonnegative deltas per identity, never sum cumulative samples or subtract totals across changing process sets.",
+          "Processes born and exited between samples can be missed. CIM enumeration and observer consume CPU and perturb timing.",
+          "CIM/Get-Process snapshots are not atomic. First-observed descendants persist after parent exit. No executable paths or command lines recorded."
+        ],
+        "browser": {
+          "observedCpuSeconds": 11.109375,
+          "meanCpuPercentOfOneLogicalCore": 84.81312635984905,
+          "meanCpuPercentOfMachine": 10.601640794981131,
+          "residentSumMiB": {
+            "n": 27,
+            "median": 776.69140625,
+            "p95NearestRank": 811.62890625,
+            "max": 828.89453125,
+            "min": 770.5078125
+          },
+          "distinctProcessIdentities": 9,
+          "rootPresentInEverySample": true
+        },
+        "server": {
+          "observedCpuSeconds": 0,
+          "meanCpuPercentOfOneLogicalCore": 0,
+          "meanCpuPercentOfMachine": 0,
+          "residentSumMiB": {
+            "n": 27,
+            "median": 9.8515625,
+            "p95NearestRank": 9.8515625,
+            "max": 9.8515625,
+            "min": 9.59765625
+          },
+          "distinctProcessIdentities": 1,
+          "rootPresentInEverySample": true
+        },
+        "observerCpuSeconds": 3.953125
+      }
+    },
+    {
+      "engine": "mse",
+      "channel": "firefox",
+      "browser": "155.0.1",
+      "passed": true,
+      "originalsUnchanged": true,
+      "activeLatencyMs": {
+        "n": 12,
+        "median": 1120,
+        "p95NearestRank": 1151,
+        "max": 1151,
+        "min": 1109
+      },
+      "pausedLatencyIncludingHoldAndResumeMs": {
+        "n": 6,
+        "median": 1232.5,
+        "p95NearestRank": 1241,
+        "max": 1241,
+        "min": 1225
+      },
+      "resumeToSignalMs": {
+        "n": 6,
+        "median": 1129,
+        "p95NearestRank": 1131,
+        "max": 1131,
+        "min": 1120
+      },
+      "activeSampledSilenceTotalMs": {
+        "n": 12,
+        "median": 0,
+        "p95NearestRank": 0,
+        "max": 0,
+        "min": 0
+      },
+      "activeMaxSampledSilenceRunMs": {
+        "n": 12,
+        "median": 0,
+        "p95NearestRank": 0,
+        "max": 0,
+        "min": 0
+      },
+      "activeMaxVideoCallbackGapMs": {
+        "n": 12,
+        "median": 56.48999999999978,
+        "p95NearestRank": 108.56000000000132,
+        "max": 108.56000000000132,
+        "min": 50
+      },
+      "baselineVideoGapMs": 67.8599999999999,
+      "activeSwitchesWithWaiting": 0,
+      "activeSwitchesWithSeeking": 0,
+      "allVideoSourcesUnchanged": true,
+      "allActiveSwitchesHaveVideoProgress": true,
+      "allManualSubtitleChoicesRetained": true,
+      "markerSkewMs": {
+        "n": 6,
+        "median": -29.334000000000415,
+        "p95NearestRank": 0,
+        "max": 0,
+        "min": -63.33400000000022
+      },
+      "maxPollMs": {
+        "n": 18,
+        "median": 18,
+        "p95NearestRank": 101,
+        "max": 101,
+        "min": 15
+      },
+      "resources": {
+        "status": "measured",
+        "samples": 53,
+        "durationSeconds": 26.5726722,
+        "logicalProcessors": 8,
+        "collectionMs": {
+          "n": 53,
+          "median": 337.36369999999806,
+          "p95NearestRank": 403.40279999999984,
+          "max": 634.0453,
+          "min": 255.53359999999998
+        },
+        "limitations": [
+          "WorkingSet is resident working set, not private memory; sums double-count shared pages.",
+          "CPU is cumulative per PID plus creation time; consumers must calculate nonnegative deltas per identity, never sum cumulative samples or subtract totals across changing process sets.",
+          "Processes born and exited between samples can be missed. CIM enumeration and observer consume CPU and perturb timing.",
+          "CIM/Get-Process snapshots are not atomic. First-observed descendants persist after parent exit. No executable paths or command lines recorded."
+        ],
+        "browser": {
+          "observedCpuSeconds": 20.109375,
+          "meanCpuPercentOfOneLogicalCore": 75.676901625272,
+          "meanCpuPercentOfMachine": 9.459612703159,
+          "residentSumMiB": {
+            "n": 53,
+            "median": 927.94140625,
+            "p95NearestRank": 1078.5859375,
+            "max": 1090.390625,
+            "min": 839.5703125
+          },
+          "distinctProcessIdentities": 13,
+          "rootPresentInEverySample": true
+        },
+        "server": {
+          "observedCpuSeconds": 0,
+          "meanCpuPercentOfOneLogicalCore": 0,
+          "meanCpuPercentOfMachine": 0,
+          "residentSumMiB": {
+            "n": 53,
+            "median": 9.6015625,
+            "p95NearestRank": 9.7109375,
+            "max": 9.7109375,
+            "min": 9.6015625
+          },
+          "distinctProcessIdentities": 1,
+          "rootPresentInEverySample": true
+        },
+        "observerCpuSeconds": 7.59375
+      }
+    },
+    {
+      "engine": "mse",
+      "channel": "msedge",
+      "browser": "155.0.4283.45",
+      "passed": true,
+      "originalsUnchanged": true,
+      "activeLatencyMs": {
+        "n": 12,
+        "median": 365.8999999994412,
+        "p95NearestRank": 386.69999999925494,
+        "max": 386.69999999925494,
+        "min": 341.19999999925494
+      },
+      "pausedLatencyIncludingHoldAndResumeMs": {
+        "n": 6,
+        "median": 476.5000000009313,
+        "p95NearestRank": 513.7999999988824,
+        "max": 513.7999999988824,
+        "min": 451.59999999962747
+      },
+      "resumeToSignalMs": {
+        "n": 6,
+        "median": 362.80000000074506,
+        "p95NearestRank": 395.7999999988824,
+        "max": 395.7999999988824,
+        "min": 340.5
+      },
+      "activeSampledSilenceTotalMs": {
+        "n": 12,
+        "median": 0,
+        "p95NearestRank": 0,
+        "max": 0,
+        "min": 0
+      },
+      "activeMaxSampledSilenceRunMs": {
+        "n": 12,
+        "median": 0,
+        "p95NearestRank": 0,
+        "max": 0,
+        "min": 0
+      },
+      "activeMaxVideoCallbackGapMs": {
+        "n": 12,
+        "median": 62.416999999999916,
+        "p95NearestRank": 66.86599999999999,
+        "max": 66.86599999999999,
+        "min": 50.099999999998545
+      },
+      "baselineVideoGapMs": 66.69999999999982,
+      "activeSwitchesWithWaiting": 0,
+      "activeSwitchesWithSeeking": 0,
+      "allVideoSourcesUnchanged": true,
+      "allActiveSwitchesHaveVideoProgress": true,
+      "allManualSubtitleChoicesRetained": true,
+      "markerSkewMs": {
+        "n": 6,
+        "median": 14.667000000000208,
+        "p95NearestRank": 21.33300000000027,
+        "max": 21.33300000000027,
+        "min": 10.66699999999976
+      },
+      "maxPollMs": {
+        "n": 18,
+        "median": 16.950000000186265,
+        "p95NearestRank": 21.09999999962747,
+        "max": 21.09999999962747,
+        "min": 15.5
+      },
+      "resources": {
+        "status": "measured",
+        "samples": 27,
+        "durationSeconds": 13.2812421,
+        "logicalProcessors": 8,
+        "collectionMs": {
+          "n": 27,
+          "median": 367.1793999999991,
+          "p95NearestRank": 402.6304,
+          "max": 416.3899000000001,
+          "min": 309.8502
+        },
+        "limitations": [
+          "WorkingSet is resident working set, not private memory; sums double-count shared pages.",
+          "CPU is cumulative per PID plus creation time; consumers must calculate nonnegative deltas per identity, never sum cumulative samples or subtract totals across changing process sets.",
+          "Processes born and exited between samples can be missed. CIM enumeration and observer consume CPU and perturb timing.",
+          "CIM/Get-Process snapshots are not atomic. First-observed descendants persist after parent exit. No executable paths or command lines recorded."
+        ],
+        "browser": {
+          "observedCpuSeconds": 9,
+          "meanCpuPercentOfOneLogicalCore": 67.76474619041844,
+          "meanCpuPercentOfMachine": 8.470593273802304,
+          "residentSumMiB": {
+            "n": 27,
+            "median": 624.3671875,
+            "p95NearestRank": 659.27734375,
+            "max": 676.91015625,
+            "min": 619.68359375
+          },
+          "distinctProcessIdentities": 10,
+          "rootPresentInEverySample": true
+        },
+        "server": {
+          "observedCpuSeconds": 0,
+          "meanCpuPercentOfOneLogicalCore": 0,
+          "meanCpuPercentOfMachine": 0,
+          "residentSumMiB": {
+            "n": 27,
+            "median": 9.63671875,
+            "p95NearestRank": 9.63671875,
+            "max": 9.63671875,
+            "min": 9.48046875
+          },
+          "distinctProcessIdentities": 1,
+          "rootPresentInEverySample": true
+        },
+        "observerCpuSeconds": 4.03125
+      }
+    },
+    {
+      "engine": "shaka",
+      "channel": "chrome",
+      "browser": "155.0.8059.40",
+      "passed": true,
+      "originalsUnchanged": true,
+      "activeLatencyMs": {
+        "n": 12,
+        "median": 160.74999999906868,
+        "p95NearestRank": 181.2000000011176,
+        "max": 181.2000000011176,
+        "min": 140.5
+      },
+      "pausedLatencyIncludingHoldAndResumeMs": {
+        "n": 6,
+        "median": 175.74999999906868,
+        "p95NearestRank": 192,
+        "max": 192,
+        "min": 162.90000000037253
+      },
+      "resumeToSignalMs": {
+        "n": 6,
+        "median": 70.75,
+        "p95NearestRank": 80.80000000074506,
+        "max": 80.80000000074506,
+        "min": 50.90000000037253
+      },
+      "activeSampledSilenceTotalMs": {
+        "n": 12,
+        "median": 30.90000000037253,
+        "p95NearestRank": 100.30000000074506,
+        "max": 100.30000000074506,
+        "min": 10.199999999254942
+      },
+      "activeMaxSampledSilenceRunMs": {
+        "n": 12,
+        "median": 30.90000000037253,
+        "p95NearestRank": 100.30000000074506,
+        "max": 100.30000000074506,
+        "min": 10.199999999254942
+      },
+      "activeMaxVideoCallbackGapMs": {
+        "n": 12,
+        "median": 74.90000000000055,
+        "p95NearestRank": 116.40200000000004,
+        "max": 116.40200000000004,
+        "min": 50
+      },
+      "baselineVideoGapMs": 583.3,
+      "activeSwitchesWithWaiting": 12,
+      "activeSwitchesWithSeeking": 12,
+      "allVideoSourcesUnchanged": true,
+      "allActiveSwitchesHaveVideoProgress": true,
+      "allManualSubtitleChoicesRetained": true,
+      "markerSkewMs": {
+        "n": 6,
+        "median": 18.66700000000021,
+        "p95NearestRank": 21.33300000000027,
+        "max": 21.33300000000027,
+        "min": 10.66699999999976
+      },
+      "maxPollMs": {
+        "n": 18,
+        "median": 16.399999999441206,
+        "p95NearestRank": 23.199999999254942,
+        "max": 23.199999999254942,
+        "min": 14.699999999254942
+      },
+      "resources": {
+        "status": "measured",
+        "samples": 18,
+        "durationSeconds": 8.6410213,
+        "logicalProcessors": 8,
+        "collectionMs": {
+          "n": 18,
+          "median": 370.6937999999999,
+          "p95NearestRank": 397.0079999999998,
+          "max": 397.0079999999998,
+          "min": 291.14250000000004
+        },
+        "limitations": [
+          "WorkingSet is resident working set, not private memory; sums double-count shared pages.",
+          "CPU is cumulative per PID plus creation time; consumers must calculate nonnegative deltas per identity, never sum cumulative samples or subtract totals across changing process sets.",
+          "Processes born and exited between samples can be missed. CIM enumeration and observer consume CPU and perturb timing.",
+          "CIM/Get-Process snapshots are not atomic. First-observed descendants persist after parent exit. No executable paths or command lines recorded."
+        ],
+        "browser": {
+          "observedCpuSeconds": 8.328125,
+          "meanCpuPercentOfOneLogicalCore": 96.378943077018,
+          "meanCpuPercentOfMachine": 12.04736788462725,
+          "residentSumMiB": {
+            "n": 18,
+            "median": 781.130859375,
+            "p95NearestRank": 815.1640625,
+            "max": 815.1640625,
+            "min": 774.91796875
+          },
+          "distinctProcessIdentities": 9,
+          "rootPresentInEverySample": true
+        },
+        "server": {
+          "observedCpuSeconds": 0.359375,
+          "meanCpuPercentOfOneLogicalCore": 4.158941258482953,
+          "meanCpuPercentOfMachine": 0.5198676573103691,
+          "residentSumMiB": {
+            "n": 18,
+            "median": 9.73046875,
+            "p95NearestRank": 9.73046875,
+            "max": 9.73046875,
+            "min": 9.66015625
+          },
+          "distinctProcessIdentities": 1,
+          "rootPresentInEverySample": true
+        },
+        "observerCpuSeconds": 2.328125
+      }
+    },
+    {
+      "engine": "shaka",
+      "channel": "firefox",
+      "browser": "155.0.1",
+      "passed": true,
+      "originalsUnchanged": true,
+      "activeLatencyMs": {
+        "n": 12,
+        "median": 167,
+        "p95NearestRank": 207,
+        "max": 207,
+        "min": 155
+      },
+      "pausedLatencyIncludingHoldAndResumeMs": {
+        "n": 6,
+        "median": 178,
+        "p95NearestRank": 184,
+        "max": 184,
+        "min": 156
+      },
+      "resumeToSignalMs": {
+        "n": 6,
+        "median": 74.5,
+        "p95NearestRank": 78,
+        "max": 78,
+        "min": 54
+      },
+      "activeSampledSilenceTotalMs": {
+        "n": 12,
+        "median": 72,
+        "p95NearestRank": 150,
+        "max": 150,
+        "min": 37
+      },
+      "activeMaxSampledSilenceRunMs": {
+        "n": 12,
+        "median": 72,
+        "p95NearestRank": 150,
+        "max": 150,
+        "min": 37
+      },
+      "activeMaxVideoCallbackGapMs": {
+        "n": 12,
+        "median": 101.76000000000022,
+        "p95NearestRank": 182.63999999999945,
+        "max": 182.63999999999945,
+        "min": 62.05999999999949
+      },
+      "baselineVideoGapMs": 48.700000000000045,
+      "activeSwitchesWithWaiting": 12,
+      "activeSwitchesWithSeeking": 12,
+      "allVideoSourcesUnchanged": true,
+      "allActiveSwitchesHaveVideoProgress": true,
+      "allManualSubtitleChoicesRetained": true,
+      "markerSkewMs": {
+        "n": 6,
+        "median": 9.33299999999937,
+        "p95NearestRank": 10.666000000000508,
+        "max": 10.666000000000508,
+        "min": -29.334000000000415
+      },
+      "maxPollMs": {
+        "n": 18,
+        "median": 19.5,
+        "p95NearestRank": 56,
+        "max": 56,
+        "min": 13
+      },
+      "resources": {
+        "status": "measured",
+        "samples": 20,
+        "durationSeconds": 9.5481965,
+        "logicalProcessors": 8,
+        "collectionMs": {
+          "n": 20,
+          "median": 378.74755000000005,
+          "p95NearestRank": 463.2934,
+          "max": 646.7523000000001,
+          "min": 323.4363000000003
+        },
+        "limitations": [
+          "WorkingSet is resident working set, not private memory; sums double-count shared pages.",
+          "CPU is cumulative per PID plus creation time; consumers must calculate nonnegative deltas per identity, never sum cumulative samples or subtract totals across changing process sets.",
+          "Processes born and exited between samples can be missed. CIM enumeration and observer consume CPU and perturb timing.",
+          "CIM/Get-Process snapshots are not atomic. First-observed descendants persist after parent exit. No executable paths or command lines recorded."
+        ],
+        "browser": {
+          "observedCpuSeconds": 10.09375,
+          "meanCpuPercentOfOneLogicalCore": 105.71368111244884,
+          "meanCpuPercentOfMachine": 13.214210139056105,
+          "residentSumMiB": {
+            "n": 20,
+            "median": 929.091796875,
+            "p95NearestRank": 1048.49609375,
+            "max": 1055.9765625,
+            "min": 867.671875
+          },
+          "distinctProcessIdentities": 13,
+          "rootPresentInEverySample": true
+        },
+        "server": {
+          "observedCpuSeconds": 0.4375,
+          "meanCpuPercentOfOneLogicalCore": 4.582017138000878,
+          "meanCpuPercentOfMachine": 0.5727521422501097,
+          "residentSumMiB": {
+            "n": 20,
+            "median": 9.65234375,
+            "p95NearestRank": 9.7265625,
+            "max": 9.7265625,
+            "min": 9.6015625
+          },
+          "distinctProcessIdentities": 1,
+          "rootPresentInEverySample": true
+        },
+        "observerCpuSeconds": 3.5625
+      }
+    },
+    {
+      "engine": "shaka",
+      "channel": "msedge",
+      "browser": "155.0.4283.45",
+      "passed": true,
+      "originalsUnchanged": true,
+      "activeLatencyMs": {
+        "n": 12,
+        "median": 152.04999999981374,
+        "p95NearestRank": 211,
+        "max": 211,
+        "min": 139.7999999988824
+      },
+      "pausedLatencyIncludingHoldAndResumeMs": {
+        "n": 6,
+        "median": 178.1499999994412,
+        "p95NearestRank": 191.5,
+        "max": 191.5,
+        "min": 172.80000000074506
+      },
+      "resumeToSignalMs": {
+        "n": 6,
+        "median": 66.75,
+        "p95NearestRank": 81.09999999962747,
+        "max": 81.09999999962747,
+        "min": 64.29999999888241
+      },
+      "activeSampledSilenceTotalMs": {
+        "n": 12,
+        "median": 30.149999999441206,
+        "p95NearestRank": 110,
+        "max": 110,
+        "min": 11.099999999627471
+      },
+      "activeMaxSampledSilenceRunMs": {
+        "n": 12,
+        "median": 30.149999999441206,
+        "p95NearestRank": 110,
+        "max": 110,
+        "min": 11.099999999627471
+      },
+      "activeMaxVideoCallbackGapMs": {
+        "n": 12,
+        "median": 58.18300000000045,
+        "p95NearestRank": 166.46199999999953,
+        "max": 166.46199999999953,
+        "min": 49.69999999999982
+      },
+      "baselineVideoGapMs": 66.59999999999991,
+      "activeSwitchesWithWaiting": 12,
+      "activeSwitchesWithSeeking": 12,
+      "allVideoSourcesUnchanged": true,
+      "allActiveSwitchesHaveVideoProgress": true,
+      "allManualSubtitleChoicesRetained": true,
+      "markerSkewMs": {
+        "n": 6,
+        "median": 19.013999999999864,
+        "p95NearestRank": 20.925999999999334,
+        "max": 20.925999999999334,
+        "min": 8.000000000000007
+      },
+      "maxPollMs": {
+        "n": 18,
+        "median": 15.650000000372529,
+        "p95NearestRank": 19.700000001117587,
+        "max": 19.700000001117587,
+        "min": 12.599999999627471
+      },
+      "resources": {
+        "status": "measured",
+        "samples": 18,
+        "durationSeconds": 8.5117247,
+        "logicalProcessors": 8,
+        "collectionMs": {
+          "n": 18,
+          "median": 372.8486499999999,
+          "p95NearestRank": 745.5958,
+          "max": 745.5958,
+          "min": 313.74030000000005
+        },
+        "limitations": [
+          "WorkingSet is resident working set, not private memory; sums double-count shared pages.",
+          "CPU is cumulative per PID plus creation time; consumers must calculate nonnegative deltas per identity, never sum cumulative samples or subtract totals across changing process sets.",
+          "Processes born and exited between samples can be missed. CIM enumeration and observer consume CPU and perturb timing.",
+          "CIM/Get-Process snapshots are not atomic. First-observed descendants persist after parent exit. No executable paths or command lines recorded."
+        ],
+        "browser": {
+          "observedCpuSeconds": 7.921875,
+          "meanCpuPercentOfOneLogicalCore": 93.07015063586348,
+          "meanCpuPercentOfMachine": 11.633768829482936,
+          "residentSumMiB": {
+            "n": 18,
+            "median": 660.755859375,
+            "p95NearestRank": 695.33203125,
+            "max": 695.33203125,
+            "min": 651.140625
+          },
+          "distinctProcessIdentities": 10,
+          "rootPresentInEverySample": true
+        },
+        "server": {
+          "observedCpuSeconds": 0.28125,
+          "meanCpuPercentOfOneLogicalCore": 3.304265703048408,
+          "meanCpuPercentOfMachine": 0.413033212881051,
+          "residentSumMiB": {
+            "n": 18,
+            "median": 9.68359375,
+            "p95NearestRank": 9.68359375,
+            "max": 9.68359375,
+            "min": 9.609375
+          },
+          "distinctProcessIdentities": 1,
+          "rootPresentInEverySample": true
+        },
+        "observerCpuSeconds": 2.65625
+      }
+    }
+  ]
+}

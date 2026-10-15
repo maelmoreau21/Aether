@@ -1,0 +1,435 @@
+{
+  "date": "2026-10-15T12:42:40.839Z",
+  "channel": "chrome",
+  "headless": true,
+  "os": {
+    "platform": "win32",
+    "release": "10.0.26300",
+    "arch": "x64"
+  },
+  "scenario": "native",
+  "settings": "default browser features; no experimental audioTracks flags/preferences",
+  "hashesBefore": {
+    "av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66"
+  },
+  "results": [
+    {
+      "id": "fixture-mkv",
+      "mime": "video/x-matroska",
+      "method": "html5-native-url",
+      "canPlayType": "maybe",
+      "events": [
+        {
+          "event": "loadedmetadata",
+          "time": 0
+        },
+        {
+          "event": "playing",
+          "time": 0
+        },
+        {
+          "event": "pause",
+          "time": 0.780835
+        },
+        {
+          "event": "seeking",
+          "time": 4
+        },
+        {
+          "event": "seeked",
+          "time": 4
+        },
+        {
+          "event": "playing",
+          "time": 4
+        },
+        {
+          "event": "pause",
+          "time": 8.008
+        },
+        {
+          "event": "ended",
+          "time": 8.008
+        }
+      ],
+      "mse": {
+        "available": true,
+        "actualAppend": "not-tested",
+        "type": "video/x-matroska; codecs=\"av01.0.00M.08,opus\"",
+        "isTypeSupported": false
+      },
+      "audioSelection": {
+        "status": "unavailable",
+        "reason": "HTMLMediaElement.audioTracks not exposed with default settings",
+        "tracks": null
+      },
+      "duration": 8.008,
+      "dimensions": [
+        320,
+        180
+      ],
+      "nativeAudioTracks": null,
+      "initialAudio": {
+        "rms": 0.08830462623452799,
+        "dominantHz": 439.453125,
+        "sampleRate": 48000
+      },
+      "distinctColors": 5806,
+      "pauseStable": true,
+      "seekTime": 4,
+      "afterSeekAudio": {
+        "rms": 0.08837063957879229,
+        "dominantHz": 439.453125,
+        "sampleRate": 48000
+      },
+      "decodedFrames": 87,
+      "ended": true,
+      "passed": true
+    },
+    {
+      "id": "fixture-mp4",
+      "mime": "video/mp4",
+      "method": "html5-native-url",
+      "canPlayType": "maybe",
+      "events": [
+        {
+          "event": "loadedmetadata",
+          "time": 0
+        },
+        {
+          "event": "playing",
+          "time": 0
+        },
+        {
+          "event": "pause",
+          "time": 0.730667
+        },
+        {
+          "event": "seeking",
+          "time": 4
+        },
+        {
+          "event": "seeked",
+          "time": 4
+        },
+        {
+          "event": "playing",
+          "time": 4
+        },
+        {
+          "event": "pause",
+          "time": 8.001
+        },
+        {
+          "event": "ended",
+          "time": 8.001
+        }
+      ],
+      "mse": {
+        "available": true,
+        "actualAppend": "not-tested",
+        "type": "video/mp4; codecs=\"av01.0.00M.08,opus\"",
+        "isTypeSupported": true
+      },
+      "audioSelection": {
+        "status": "unavailable",
+        "reason": "HTMLMediaElement.audioTracks not exposed with default settings",
+        "tracks": null
+      },
+      "duration": 8.001,
+      "dimensions": [
+        320,
+        180
+      ],
+      "nativeAudioTracks": null,
+      "initialAudio": {
+        "rms": 0.08837102467857347,
+        "dominantHz": 439.453125,
+        "sampleRate": 48000
+      },
+      "distinctColors": 6013,
+      "pauseStable": true,
+      "seekTime": 4,
+      "afterSeekAudio": {
+        "rms": 0.08831755905459106,
+        "dominantHz": 439.453125,
+        "sampleRate": 48000
+      },
+      "decodedFrames": 86,
+      "ended": true,
+      "passed": true
+    },
+    {
+      "id": "fixture-webm",
+      "mime": "video/webm",
+      "method": "html5-native-url",
+      "canPlayType": "maybe",
+      "events": [
+        {
+          "event": "loadedmetadata",
+          "time": 0
+        },
+        {
+          "event": "playing",
+          "time": 0
+        },
+        {
+          "event": "pause",
+          "time": 0.730667
+        },
+        {
+          "event": "seeking",
+          "time": 4
+        },
+        {
+          "event": "seeked",
+          "time": 4
+        },
+        {
+          "event": "playing",
+          "time": 4.008158
+        },
+        {
+          "event": "pause",
+          "time": 8.008
+        },
+        {
+          "event": "ended",
+          "time": 8.008
+        }
+      ],
+      "mse": {
+        "available": true,
+        "actualAppend": "not-tested",
+        "type": "video/webm; codecs=\"av01.0.00M.08,opus\"",
+        "isTypeSupported": true
+      },
+      "audioSelection": {
+        "status": "unavailable",
+        "reason": "HTMLMediaElement.audioTracks not exposed with default settings",
+        "tracks": null
+      },
+      "duration": 8.008,
+      "dimensions": [
+        320,
+        180
+      ],
+      "nativeAudioTracks": null,
+      "initialAudio": {
+        "rms": 0.08838640451124198,
+        "dominantHz": 439.453125,
+        "sampleRate": 48000
+      },
+      "distinctColors": 6013,
+      "pauseStable": true,
+      "seekTime": 4,
+      "afterSeekAudio": {
+        "rms": 0.08831755905459106,
+        "dominantHz": 439.453125,
+        "sampleRate": 48000
+      },
+      "decodedFrames": 86,
+      "ended": true,
+      "passed": true
+    },
+    {
+      "id": "fixture-fmp4",
+      "mime": "video/mp4",
+      "method": "html5-native-url",
+      "canPlayType": "maybe",
+      "events": [
+        {
+          "event": "loadedmetadata",
+          "time": 0
+        },
+        {
+          "event": "playing",
+          "time": 0
+        },
+        {
+          "event": "pause",
+          "time": 0.72
+        },
+        {
+          "event": "seeking",
+          "time": 4
+        },
+        {
+          "event": "seeked",
+          "time": 4
+        },
+        {
+          "event": "playing",
+          "time": 4
+        },
+        {
+          "event": "pause",
+          "time": 8.008
+        },
+        {
+          "event": "ended",
+          "time": 8.008
+        }
+      ],
+      "mse": {
+        "available": true,
+        "actualAppend": "not-tested",
+        "type": "video/mp4; codecs=\"av01.0.00M.08,opus\"",
+        "isTypeSupported": true
+      },
+      "audioSelection": {
+        "status": "unavailable",
+        "reason": "HTMLMediaElement.audioTracks not exposed with default settings",
+        "tracks": null
+      },
+      "duration": 8.008,
+      "dimensions": [
+        320,
+        180
+      ],
+      "nativeAudioTracks": null,
+      "initialAudio": {
+        "rms": 0.08833230284454871,
+        "dominantHz": 439.453125,
+        "sampleRate": 48000
+      },
+      "distinctColors": 6013,
+      "pauseStable": true,
+      "seekTime": 4,
+      "afterSeekAudio": {
+        "rms": 0.08837063957879229,
+        "dominantHz": 439.453125,
+        "sampleRate": 48000
+      },
+      "decodedFrames": 86,
+      "ended": true,
+      "passed": true
+    }
+  ],
+  "limits": "Decoded pixels and PCM only; human listening and physical display NT. Remux files are played by native URL; no MSE append.",
+  "browser": "155.0.8059.40",
+  "driver": "Playwright 1.62.1",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+  "missing": {
+    "httpStatus": 404,
+    "code": 4,
+    "message": "MEDIA_ELEMENT_ERROR: Format error",
+    "displayed": "Échec navigateur : 4 MEDIA_ELEMENT_ERROR: Format error"
+  },
+  "responses": [
+    {
+      "url": "/api/v1/assets/fixture-mkv/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0bf6b.1f93ebfc-3c390\"",
+        "content-range": "bytes 0-246671/246672",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "246672",
+        "date": "Thu, 15 Oct 2026 12:42:42 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 11:56:27 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mp4/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0bf6b.25f1fa20-3cd3e\"",
+        "content-range": "bytes 0-249149/249150",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "249150",
+        "date": "Thu, 15 Oct 2026 12:42:48 GMT",
+        "content-type": "video/mp4",
+        "last-modified": "Thu, 15 Oct 2026 11:56:27 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mp4/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0bf6b.25f1fa20-3cd3e\"",
+        "content-range": "bytes 229376-249149/249150",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "19774",
+        "date": "Thu, 15 Oct 2026 12:42:48 GMT",
+        "content-type": "video/mp4",
+        "last-modified": "Thu, 15 Oct 2026 11:56:27 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-webm/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0bf6b.28714d50-3c15c\"",
+        "content-range": "bytes 0-246107/246108",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "246108",
+        "date": "Thu, 15 Oct 2026 12:42:54 GMT",
+        "content-type": "video/webm",
+        "last-modified": "Thu, 15 Oct 2026 11:56:27 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-fmp4/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0bf6b.2ae88c88-3c722\"",
+        "content-range": "bytes 0-247585/247586",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "247586",
+        "date": "Thu, 15 Oct 2026 12:42:59 GMT",
+        "content-type": "video/mp4",
+        "last-modified": "Thu, 15 Oct 2026 11:56:27 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/missing/content",
+      "status": 404,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "content-length": "25",
+        "date": "Thu, 15 Oct 2026 12:43:04 GMT",
+        "content-type": "application/json",
+        "x-content-type-options": "nosniff"
+      }
+    },
+    {
+      "url": "/api/v1/assets/missing/content",
+      "status": 404,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "content-length": "25",
+        "date": "Thu, 15 Oct 2026 12:43:04 GMT",
+        "content-type": "application/json",
+        "x-content-type-options": "nosniff"
+      }
+    }
+  ],
+  "hashesAfter": {
+    "av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66"
+  },
+  "originalsUnchanged": true
+}

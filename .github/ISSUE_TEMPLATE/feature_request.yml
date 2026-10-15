@@ -1,0 +1,52 @@
+name: 💡 Proposition d'amélioration / Fonctionnalité
+description: Proposer une évolution ou une nouvelle fonctionnalité pour Aether.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci pour votre suggestion ! Avant de soumettre, veuillez vérifier :
+        - L'ordre des priorités : **P0** (AV1/Opus) → **P1** (Standalone) → **P2** (Multi-node/SSO) → **P3** (Pistes externes) → **P4** (Films/Séries UX) → **P5** (Robustesse).
+        - Les règles strictes : **2 rôles uniquement** (`administrator` et `user`), médias **100 % en lecture seule**, **aucun transcodage forcé**.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problème ou besoin constaté
+      description: Quelle limitation ou quel cas d'usage motive cette proposition ?
+      placeholder: Je constate que...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solution proposée
+      description: Décrivez de manière précise la solution envisagée.
+      placeholder: Il serait bénéfique de...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Jalon ciblé
+      description: À quelle phase du projet cette idée se rattache-t-elle ?
+      options:
+        - "P0 — Codecs & Conteneurs (AV1 + Opus, MKV/MP4, lecture navigateur)"
+        - "P1 — Mode autonome (Core + Node local + SQLite)"
+        - "P2 — Multi-Node & Authentik SSO"
+        - "P3 — Pistes externes / Formats élémentaires"
+        - "P4 — Ergonomie Films & Séries"
+        - "P5 — Robustesse & Observabilité"
+        - "Hors MVP / Recherche future"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives envisagées
+      description: Avez-vous considéré d'autres approches ou outils existants ?
+    validations:
+      required: false

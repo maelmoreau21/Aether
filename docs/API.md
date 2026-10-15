@@ -100,3 +100,18 @@ API indique une demande, pas la preuve du signal ; celle-ci dépend du testPCM.
 ### Expérience de récupération après seek
 
 GET /audio-seek-policy.js sert uniquement le contrôleur fixe du banc Shaka (JavaScript, même protection Host/Origin/CSP que le banc ; origine étrangère403). Aucun chemin fourni par le client. Option désactivée par défaut dans /shaka. État idle/recovering/error, erreur terminale sans boucle ; rechargement de la présentation après erreur. Le statut de récupération API ne prouve pas le signal audio. Voir P0C_AUDIO_SEEK_RECOVERY.md.
+
+## P1 local — contrat ajouté
+
+GET /api/v1/config : {name,mode:"localhost-fixtures"}.
+GET /api/v1/demo/media : {media:[{id,title,sources:[{id,audioTrackId,language,url,mime,tracks}],subtitles:[{id,language,label,url}]}],notice}.
+Sources = copies mono-audio FR/EN des fixtures10bits, langue BCP47 explicite ;
+tracks conserve les propriétés ffprobe (ISO fra/eng, index et champs techniques).
+IDs de démo uniquement, aucune identité de catalogue persistant. Aucun nom de lecteur
+imposé. Aucun chemin disque renvoyé. Absence du dossier p1 : media vide ; dossier
+partiel : démarrage refusé. Les anciens /api/v1/assets restent le contrat P0.
+Les URLs de contenu démo réutilisent GET/HEAD /api/v1/assets/{id}/content, Range206/416.
+GET/HEAD /api/v1/demo/subtitles/{name} : fr-full.vtt/fr-forced.vtt/en-full.vtt,
+text/vtt UTF8, autres noms404. Ressource préparée absente404. POST405, origine
+tierce403. Ce contrat localhost sans authentification ne permet aucune bibliothèque
+réelle. Voir P1_WEB_INTEGRATION.md pour tests et limites.

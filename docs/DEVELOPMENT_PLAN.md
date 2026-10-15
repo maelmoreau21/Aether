@@ -18,3 +18,13 @@
 4. Seulement après preuves P0 : P1 autonome, puis P2 Nodes/OIDC, P3 pistes
    externes et essences raw, P4 expérience, P5 robustesse. Multi-Core/plugins
    restent hors MVP conformément à `AGENTS.md`.
+
+## Décision officielle du 15 octobre 2026 — P1 autorisé
+
+Les recommandations historiques P0 ci-dessus ne sont plus la prochaine action.
+Suspendre les comparaisons et récupérations expérimentales. HTML5 natif + copies
+par langue retenus provisoirement ; interruption/rechargement acceptés. Mauvaise
+langue silencieuse, modification d'original, transcodage vidéo obligatoire et
+boucles de récupération refusés. Première intégration Web locale décrite dans
+P1_WEB_INTEGRATION.md ; elle ne clôture ni P0 exhaustif ni P1 autonome complet.
+Prochain jalon : admin local/SQLite ; bibliothèques ro après autorisation serveur.

@@ -102,3 +102,10 @@ locale correspondante. Lancer le serveur Rust et ouvrir /shaka ; /mse conservé.
 [Mesures, limites, protocole navigateur et CPU/RAM](docs/P0C_SHAKA_EXPERIMENT.md).
 Shaka change la langue plus vite sur ce banc mais présente des microcoupures ;
 aucun lecteur définitif choisi. Video.js n'est pas inclus dans ce jalon.
+
+## Première application Web P1 (localhost)
+
+Frontend SvelteKit servi par Rust : [instructions et résultats](docs/P1_WEB_INTEGRATION.md).
+Après préparation des fixtures, `npm ci --prefix apps/web`,
+`npm run build --prefix apps/web`, `cargo run --locked -p media-poc`,
+puis http://127.0.0.1:3000/app/. Fixtures uniquement, pas encore d'authentification.

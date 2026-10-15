@@ -272,3 +272,18 @@ Les anciennes suites restent présentes et doivent être rejouées séparément.
 
 node --test scripts/audio-seek-policy.test.cjs : mocks état/pause/vitesse/position, purge unique, concurrence/récursion, timeout terminal, watchdog blocage/pause, distinction vraie nouvelle piste marge0 et resélection active. Ces mocks ne prouvent pas la lecture.
 node scripts/browser-seek-policy.cjs : contrôles appariés FR/EN, positions0,5/1,99/2,01, PCM représentatif, requêtes HTTP/IDs, pause/vitesse, marqueur A/V ; aucun seuil des anciennes suites modifié. Séries complètes actuellement en échec, Firefox bloqué au démarrage automatisé. Protocole et résultats : P0C_AUDIO_SEEK_RECOVERY.md.
+
+## P1 — intégration SvelteKit
+
+Voir P1_WEB_INTEGRATION.md pour préparation, commandes et résultats observés.
+10 tests Rust (9 P0 conservés + contrat démo) ; npm check/lint/test/build/audit.
+Runner scripts/browser-p1.cjs : vrais contrôles UI + pixels/PCM représentatif,
+FR/EN pause/lecture, position/volume/vitesse, seeks, VTT, fin, erreurs.
+Runner scripts/browser-p1-layout.cjs : viewports390/1280, clavier/CSP, fautes
+Core/audio/VTT et tentative audio unique. Pas de comparaison de lecteurs.
+
+### Première refonte visuelle P1
+
+Même runner P1, Chrome/Edge à 1,5× et Firefox via MEDIA_TEST_SPEED=1.
+Layout enrichi :360/390/768/1280/1440/1920,  images/CSP/clavier, carte MP4.
+Résultats et limites : UI_DIRECTION.md ; preuves evidence/2026-10-15/p1-ui-v1/.

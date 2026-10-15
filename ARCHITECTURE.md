@@ -213,3 +213,22 @@ Le banc Rust sert aussi un MPD fixe et un bundle Shaka5.2.13 préparés hors
 lecture. Les flux AV1/Opus sont les copies identiques du témoin MSE conservé.
 La comparaison reste un outil P0, sans nouvelle couche produit ni dépendance
 FFmpeg de lecture. Voir docs/P0C_SHAKA_EXPERIMENT.md pour mesures et limites.
+
+## État P1 autorisé (15 octobre 2026)
+
+Première intégration locale concrète : apps/web SvelteKit statique, servi par
+le backend existant sous /app/ ; pas de service Node permanent. API démo sources/
+pistes indépendante du lecteur. Interface Player TypeScript et adaptateur natif
+avec remplacement de source borné, pas d'abstraction multi-backends. Marque par
+crates/shared/src/brand.rs, repli Web config/brand.ts puis configuration Core.
+Préparation FR/EN hors lecture ; streaming réutilise le Node interne P0.
+Pas encore de Core produit avec comptes/SQLite/bibliothèques. Les expériences
+Shaka/MSE sont conservées séparément et ne sont pas chargées par l'application.
+Voir docs/P1_WEB_INTEGRATION.md ; les comparaisons P0 sont suspendues.
+
+### Direction visuelle P1 v1
+
+Tokens CSS partagés et composants de présentation légers dans apps/web/src/lib/ui.
+L'écran principal reste client de Player et de l'API démo existante ; pas de
+couplage visuel au remux ou à Shaka/MSE. Illustration originale locale ; la
+fixture de lecture reste explicitement une mire. Voir docs/UI_DIRECTION.md.

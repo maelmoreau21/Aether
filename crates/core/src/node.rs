@@ -45,6 +45,13 @@ pub const REMUX_FIXTURES: [(&str, &str, &str); 4] = [
     ),
 ];
 
+pub const DEMO_FIXTURES: [(&str, &str, &str); 4] = [
+    ("demo-mkv-fr", "p1/clip-mkv-fr.mkv", "video/x-matroska"),
+    ("demo-mkv-en", "p1/clip-mkv-en.mkv", "video/x-matroska"),
+    ("demo-mp4-fr", "p1/clip-mp4-fr.mp4", "video/mp4"),
+    ("demo-mp4-en", "p1/clip-mp4-en.mp4", "video/mp4"),
+];
+
 #[derive(Clone, Serialize)]
 pub struct LanguageRemux {
     pub source_asset: &'static str,
@@ -187,6 +194,9 @@ impl Inventory {
         if tokio::fs::try_exists(root.join("representative")).await? {
             fixtures.extend(REPRESENTATIVE_FIXTURES);
         }
+        if tokio::fs::try_exists(root.join("p1")).await? {
+            fixtures.extend(DEMO_FIXTURES);
+        }
         for (id, name, mime) in fixtures {
             let file = root.join(name);
             // Reject links outside the selected root before probing, too.
@@ -196,6 +206,17 @@ impl Inventory {
             }
             let probe = media::probe(&canonical).await?;
             let language_remux = match id {
+                "demo-mkv-fr" | "demo-mp4-fr" | "demo-mkv-en" | "demo-mp4-en" => {
+                    Some(LanguageRemux {
+                        source_asset: if id.contains("mkv") {
+                            "fixture-representative-mkv"
+                        } else {
+                            "fixture-representative-mp4"
+                        },
+                        language: if id.ends_with("fr") { "fr" } else { "en" },
+                        source_audio_stream: if id.ends_with("fr") { 1 } else { 2 },
+                    })
+                }
                 "fixture-mkv-fr" => Some(LanguageRemux {
                     source_asset: "fixture-mkv",
                     language: "fr",
@@ -231,6 +252,20 @@ impl Inventory {
                 {
                     return Err("language remux does not match its declared tracks".into());
                 }
+            }
+            if id.starts_with("demo-")
+                && (probe.streams[0]
+                    .details
+                    .get("pix_fmt")
+                    .and_then(|v| v.as_str())
+                    != Some("yuv420p10le")
+                    || probe.streams[1]
+                        .details
+                        .get("channels")
+                        .and_then(|v| v.as_u64())
+                        != Some(if id.ends_with("fr") { 6 } else { 2 }))
+            {
+                return Err("demo profile must be AV1 10-bit / FR Opus 5.1 or EN stereo".into());
             }
             let representative = if id.starts_with("fixture-representative-") {
                 let english = id.ends_with("-en");
@@ -309,7 +344,11 @@ impl Inventory {
                     mime,
                     probe,
                     playback_status: "unverified-on-client",
-                    language_remux,
+                    language_remux: if id.starts_with("demo-") {
+                        None
+                    } else {
+                        language_remux
+                    },
                     representative,
                 },
             });
@@ -318,7 +357,19 @@ impl Inventory {
     }
 
     pub fn descriptors(&self) -> Vec<Descriptor> {
-        self.assets.iter().map(|a| a.descriptor.clone()).collect()
+        self.assets
+            .iter()
+            .filter(|a| !a.descriptor.id.starts_with("demo-"))
+            .map(|a| a.descriptor.clone())
+            .collect()
+    }
+
+    pub fn demo_descriptors(&self) -> Vec<Descriptor> {
+        self.assets
+            .iter()
+            .filter(|a| a.descriptor.id.starts_with("demo-"))
+            .map(|a| a.descriptor.clone())
+            .collect()
     }
 }
 
@@ -350,4 +401,19 @@ pub async fn content(
         Err(e) => match e {},
     }
     .into_response()
+}
+
+// Fixed WebVTT exports reused from P0; no MSE player dependency.
+pub async fn demo_subtitle(
+    state: State<Arc<Inventory>>,
+    path: Path<String>,
+    req: Request,
+) -> Response {
+    if !matches!(
+        path.0.as_str(),
+        "fr-full.vtt" | "fr-forced.vtt" | "en-full.vtt"
+    ) {
+        return error(StatusCode::NOT_FOUND, "unknown_subtitle");
+    }
+    mse_content(state, path, req).await
 }

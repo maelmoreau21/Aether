@@ -20,3 +20,12 @@ Pas de modification des médias personnels, de publication ou de changement de l
 Critères de ce jalon : fichiers valides, pistes AV1/Opus identifiées, remux sans
 modification des paquets, HTTP testé, résultat Chrome mesuré et limites explicites.
 Les phases complètes et les autres navigateurs restent ouverts.
+
+## Extension autorisée P1 (15 octobre 2026)
+
+Première intégration verticale Rust/SvelteKit sur localhost, fixtures seulement.
+HTML5 natif derrière interface Player légère, sources et pistes exposées par Core.
+Pause/lecture/seek/volume/vitesse, FR/EN avec position conservée, WebVTT/off,
+erreurs explicites. Aucun nouveau moteur, auth/catalogue réel ou DB anticipé.
+Décision et preuves : P1_WEB_INTEGRATION.md. La suite est le bootstrap admin local
+sécurisé, puis les bibliothèques ro autorisées.

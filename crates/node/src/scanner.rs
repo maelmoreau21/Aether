@@ -1,67 +1,60 @@
 //! Local Media Node discovery. No writes, database access, or HTTP concerns.
-use crate::media::{self, Probe};
-use serde::{Deserialize, Serialize};
+pub use crate::files::confined_file;
+use crate::{
+    files::{OpenedFile, is_linked},
+    probe,
+};
+pub use media_contracts::inventory::{CachedFile, ScanIssue, ScanReport, ScannedFile};
 use std::{
     collections::{BTreeMap, HashMap},
+    ffi::{OsStr, OsString},
     io,
     path::{Component, Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, UNIX_EPOCH},
+    time::Duration,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CachedFile {
-    pub size: u64,
-    pub modified_ns: String,
-    pub probe: Probe,
+/// Precomputed video stems and identity keys for a single directory,
+/// avoiding `O(N^2)` directory re-reads when resolving sidecar NFOs and posters.
+#[derive(Debug, Clone)]
+pub struct FolderVideos {
+    entries: Vec<(Option<OsString>, String)>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct ScannedFile {
-    pub poster: Option<super::images::LocalImage>,
-    pub editorial: super::nfo::NfoOutcome,
-    pub relative_path: String,
-    pub size: u64,
-    pub modified_ns: String,
-    pub title: String,
-    pub year: Option<u16>,
-    /// Explicit provider identity or an exact local path, never fuzzy title matching.
-    pub identity_key: String,
-    pub external_ids: BTreeMap<String, String>,
-    pub probe: Probe,
-    pub mime: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ScanIssue {
-    pub relative_path: String,
-    pub message: String,
-}
-
-#[derive(Debug, Default, Serialize)]
-pub struct ScanReport {
-    pub files: Vec<ScannedFile>,
-    pub errors: Vec<ScanIssue>,
-    pub warnings: Vec<ScanIssue>,
-    pub discovered: u64,
-    pub probed: u64,
-    pub reused: u64,
-    /// False on interrupted/incomplete traversal: callers must not mark missing files unavailable.
-    pub complete: bool,
-}
-
-fn linked(metadata: &std::fs::Metadata) -> bool {
-    if metadata.file_type().is_symlink() {
-        return true;
+impl FolderVideos {
+    pub async fn load(root: &Path, parent: &Path) -> io::Result<Self> {
+        let dir_path = if parent.as_os_str().is_empty() {
+            root.to_path_buf()
+        } else {
+            root.join(parent)
+        };
+        let mut read_dir = tokio::fs::read_dir(dir_path).await?;
+        let mut entries = Vec::new();
+        while let Some(entry) = read_dir.next_entry().await? {
+            let p = entry.path();
+            if p.extension()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.eq_ignore_ascii_case("mkv") || s.eq_ignore_ascii_case("mp4"))
+            {
+                let relative = p
+                    .strip_prefix(root)
+                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "outside root"))?;
+                let stem = p.file_stem().map(OsStr::to_os_string);
+                let key = identity(relative).3;
+                entries.push((stem, key));
+            }
+        }
+        Ok(Self { entries })
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        metadata.file_attributes() & 0x400 != 0 // all reparse points, including junctions
+
+    pub fn all_match_identity(&self, key: &str) -> bool {
+        self.entries.iter().all(|(_, k)| k == key)
     }
-    #[cfg(not(windows))]
-    {
-        false
+
+    pub fn stem_unambiguous(&self, stem: Option<&OsStr>, key: &str) -> bool {
+        self.entries
+            .iter()
+            .all(|(s, k)| s.as_deref() != stem || k == key)
     }
 }
 
@@ -85,46 +78,6 @@ fn ignored(name: &str) -> bool {
         ]
         .iter()
         .any(|suffix| name.ends_with(suffix))
-}
-
-/// Revalidate an inventory-relative path before I/O, rejecting every link component.
-/// Canonicalization and subsequent open are not atomic against a hostile local writer.
-pub async fn confined_file(root: &Path, relative: &Path) -> io::Result<PathBuf> {
-    if linked(&tokio::fs::symlink_metadata(root).await?) {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "library root link or reparse point forbidden",
-        ));
-    }
-    if relative.as_os_str().is_empty()
-        || relative
-            .components()
-            .any(|c| !matches!(c, Component::Normal(_)))
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid inventory-relative path",
-        ));
-    }
-    let root = tokio::fs::canonicalize(root).await?;
-    let mut current = root.clone();
-    for component in relative.components() {
-        current.push(component);
-        if linked(&tokio::fs::symlink_metadata(&current).await?) {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "links and reparse points are forbidden",
-            ));
-        }
-    }
-    let canonical = tokio::fs::canonicalize(&current).await?;
-    if !canonical.starts_with(&root) || !tokio::fs::metadata(&canonical).await?.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "asset outside root or not a regular file",
-        ));
-    }
-    Ok(canonical)
 }
 
 fn metadata_name(name: &str) -> (String, Option<u16>, BTreeMap<String, String>) {
@@ -176,7 +129,7 @@ fn metadata_name(name: &str) -> (String, Option<u16>, BTreeMap<String, String>) 
     )
 }
 
-pub(super) fn identity(relative: &Path) -> (String, Option<u16>, BTreeMap<String, String>, String) {
+pub(crate) fn identity(relative: &Path) -> (String, Option<u16>, BTreeMap<String, String>, String) {
     let stem = relative
         .file_stem()
         .and_then(|s| s.to_str())
@@ -235,7 +188,7 @@ pub async fn scan_with_images(
 ) -> io::Result<ScanReport> {
     if !root.is_absolute()
         || root.components().any(|c| c == Component::ParentDir)
-        || linked(&tokio::fs::symlink_metadata(root).await?)
+        || is_linked(&tokio::fs::symlink_metadata(root).await?)
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -244,6 +197,7 @@ pub async fn scan_with_images(
     }
     let root = tokio::fs::canonicalize(root).await?;
     let mut stack = vec![tokio::fs::read_dir(&root).await?];
+    let mut folder_cache: HashMap<PathBuf, FolderVideos> = HashMap::new();
     let mut report = ScanReport {
         complete: true,
         ..Default::default()
@@ -292,7 +246,7 @@ pub async fn scan_with_images(
                 continue;
             }
         };
-        if linked(&metadata) {
+        if is_linked(&metadata) {
             report.errors.push(ScanIssue {
                 relative_path,
                 message: "link or reparse point ignored".into(),
@@ -321,22 +275,8 @@ pub async fn scan_with_images(
             continue;
         }
         report.discovered += 1;
-        let modified_ns = match metadata
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        {
-            Some(t) => t.as_nanos().to_string(),
-            None => {
-                report.errors.push(ScanIssue {
-                    relative_path,
-                    message: "modification time unavailable".into(),
-                });
-                continue;
-            }
-        };
-        let file = match confined_file(&root, relative).await {
-            Ok(p) => p,
+        let opened = match OpenedFile::open_in_root(&root, relative).await {
+            Ok(f) => f,
             Err(_) => {
                 report.errors.push(ScanIssue {
                     relative_path,
@@ -345,15 +285,17 @@ pub async fn scan_with_images(
                 continue;
             }
         };
+        let modified_ns = opened.modified_ns().to_owned();
+        let file_size = opened.size();
         let probe = if let Some(cached) = cache
             .get(&relative_path)
-            .filter(|c| c.size == metadata.len() && c.modified_ns == modified_ns)
+            .filter(|c| c.size == file_size && c.modified_ns == modified_ns)
         {
             report.reused += 1;
             cached.probe.clone()
         } else {
             report.probed += 1;
-            let probing = media::probe(&file);
+            let probing = probe::probe(opened.canonical_path());
             tokio::pin!(probing);
             let result = loop {
                 tokio::select! {
@@ -371,7 +313,7 @@ pub async fn scan_with_images(
                 Some(Ok(probe)) => probe,
                 // A failed adapter/process is not evidence that all media are corrupt.
                 // Abort publication so an unavailable ffprobe cannot invalidate an inventory.
-                Some(Err(media::ProbeError::Io(error))) => return Err(error),
+                Some(Err(probe::ProbeError::Io(error))) => return Err(error),
                 Some(Err(error)) => {
                     report.errors.push(ScanIssue {
                         relative_path,
@@ -382,20 +324,26 @@ pub async fn scan_with_images(
             }
         };
         // Do not persist metadata paired with a file changed during its probe.
-        let unchanged = tokio::fs::symlink_metadata(&file).await.is_ok_and(|after| {
-            !linked(&after)
-                && after.len() == metadata.len()
-                && after.modified().ok() == metadata.modified().ok()
-        });
-        if !unchanged {
+        if opened.verify_unchanged_sync().is_err()
+            || file_size != metadata.len()
+            || opened.modified() != metadata.modified().ok()
+        {
             report.errors.push(ScanIssue {
                 relative_path,
                 message: "file changed during analysis; retry scan".into(),
             });
             continue;
         }
+        let parent = relative.parent().unwrap_or(Path::new("")).to_path_buf();
+        if !folder_cache.contains_key(&parent)
+            && let Ok(videos) = FolderVideos::load(&root, &parent).await
+        {
+            folder_cache.insert(parent.clone(), videos);
+        }
+        let folder_videos = folder_cache.get(&parent);
+
         let (title, year, external_ids, identity_key) = identity(relative);
-        let editorial = super::nfo::discover(&root, relative).await;
+        let editorial = super::nfo::discover_with_folder(&root, relative, folder_videos).await;
         if let super::nfo::NfoOutcome::Invalid { path, message } = &editorial {
             report.warnings.push(ScanIssue {
                 relative_path: path.clone(),
@@ -403,7 +351,8 @@ pub async fn scan_with_images(
             });
         }
         let (poster, poster_warning) =
-            super::images::discover_cached(&root, relative, image_cache).await;
+            super::images::discover_cached_with_folder(&root, relative, image_cache, folder_videos)
+                .await;
         if let Some(message) = poster_warning {
             report.warnings.push(ScanIssue {
                 relative_path: relative_path.clone(),
@@ -414,7 +363,7 @@ pub async fn scan_with_images(
             poster,
             editorial,
             relative_path,
-            size: metadata.len(),
+            size: file_size,
             modified_ns,
             title,
             year,
@@ -435,6 +384,9 @@ pub async fn scan_with_images(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::probe::Probe;
+    use std::time::UNIX_EPOCH;
+
     #[tokio::test]
     async fn traversal_refuses_directory_links_and_windows_junctions() {
         let temp = tempfile::tempdir().unwrap();
@@ -617,5 +569,73 @@ mod tests {
             .await
             .unwrap();
         assert!(!cancelled.complete);
+    }
+
+    #[tokio::test]
+    async fn dense_directory_scan_caches_folder_videos_and_reuses_sidecars() {
+        let temp = tempfile::tempdir().unwrap();
+        let dense = temp.path().join("Dense [tmdb-777]");
+        tokio::fs::create_dir(&dense).await.unwrap();
+        tokio::fs::write(
+            dense.join("movie.nfo"),
+            b"<movie><title>Dense Collection</title><year>2025</year></movie>",
+        )
+        .await
+        .unwrap();
+        let poster_path = dense.join("poster.png");
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(&poster_path)
+            .unwrap();
+
+        let mut cache = HashMap::new();
+        for i in 0..20 {
+            let filename = format!("version-{i}.mp4");
+            let file_path = dense.join(&filename);
+            tokio::fs::write(&file_path, b"synthetic-video-payload")
+                .await
+                .unwrap();
+            let meta = tokio::fs::metadata(&file_path).await.unwrap();
+            let modified_ns = meta
+                .modified()
+                .unwrap()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+                .to_string();
+            cache.insert(
+                format!("Dense [tmdb-777]/{filename}"),
+                CachedFile {
+                    size: meta.len(),
+                    modified_ns,
+                    probe: Probe {
+                        streams: vec![],
+                        format: BTreeMap::new(),
+                    },
+                },
+            );
+        }
+
+        let first = scan(temp.path(), &cache, &AtomicBool::new(false))
+            .await
+            .unwrap();
+        assert!(first.complete);
+        assert_eq!(first.discovered, 20);
+        assert_eq!(first.reused, 20);
+        assert_eq!(first.probed, 0);
+        assert!(first.errors.is_empty());
+        assert!(first.warnings.is_empty());
+        let poster = first.files[0].poster.clone().unwrap();
+        let image_cache = HashMap::from([(poster.path.clone(), poster)]);
+
+        let start = std::time::Instant::now();
+        let second = scan_with_images(temp.path(), &cache, &image_cache, &AtomicBool::new(false))
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+        assert!(second.complete);
+        assert_eq!(second.discovered, 20);
+        assert_eq!(second.reused, 20);
+        assert_eq!(second.probed, 0);
+        assert!(elapsed < Duration::from_secs(2));
     }
 }

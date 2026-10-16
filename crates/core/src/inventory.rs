@@ -458,102 +458,97 @@ pub async fn descriptor(
 }
 
 /// Authorization is enforced by the common route middleware before this helper.
-/// Confinement rechecks links before ServeFile opens; this does not eliminate TOCTOU races.
+/// Resolves an authorized `ReadGrant` from SQLite and delegates confined handle streaming to `LocalNode`.
 pub async fn content(
     store: &IdentityStore,
     asset_id: &str,
     request: axum::extract::Request,
 ) -> axum::response::Response {
-    use axum::{
-        http::{HeaderValue, StatusCode},
-        response::IntoResponse,
+    use axum::{body::Body, http::StatusCode, response::Response};
+    use media_contracts::{
+        errors::NodeErrorCode,
+        ids::{AssetId, LibraryId, NodeId},
+        inventory::{ReadGrant, ReadTarget},
     };
-    use tower::ServiceExt;
-    let row=sqlx::query("SELECT a.relative_path,a.mime,l.root FROM inventory_assets a JOIN libraries l ON l.id=a.library_id JOIN inventory_sources s ON s.id=a.source_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local'").bind(asset_id).fetch_optional(&store.pool).await;
+    let row = sqlx::query("SELECT a.library_id,a.relative_path,a.mime,l.root,l.node_id FROM inventory_assets a JOIN libraries l ON l.id=a.library_id JOIN inventory_sources s ON s.id=a.source_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local'")
+        .bind(asset_id)
+        .fetch_optional(&store.pool)
+        .await;
     let row = match row {
         Ok(Some(row)) => row,
-        Ok(None) => return crate::error(StatusCode::NOT_FOUND, "unknown_asset"),
+        Ok(None) => {
+            return crate::error(StatusCode::NOT_FOUND, NodeErrorCode::UnknownAsset.as_str());
+        }
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_error"),
     };
-    let root: String = row.get("root");
-    let relative: String = row.get("relative_path");
-    let path =
-        match crate::node::scanner::confined_file(Path::new(&root), Path::new(&relative)).await {
-            Ok(path) => path,
-            Err(_) => return crate::error(StatusCode::NOT_FOUND, "unavailable_asset"),
-        };
-    match tower_http::services::ServeFile::new(path)
-        .with_buf_chunk_size(65536)
-        .oneshot(request)
-        .await
-    {
-        Ok(response) => {
-            let mut response = response.into_response();
-            if let Ok(mime) = HeaderValue::from_str(row.get("mime")) {
-                response
-                    .headers_mut()
-                    .insert(axum::http::header::CONTENT_TYPE, mime);
-            }
-            response
+    let grant = ReadGrant {
+        target: ReadTarget::Asset(AssetId::from(asset_id)),
+        library_id: LibraryId::from(row.get::<String, _>("library_id")),
+        node_id: NodeId::from(row.get::<String, _>("node_id")),
+        root_snapshot: row.get("root"),
+        relative_path: row.get("relative_path"),
+        mime: row.get("mime"),
+    };
+    drop(row);
+    match crate::node::LocalNode.serve_grant(&grant, &request).await {
+        Ok(res) => {
+            let (parts, body) = res.into_parts();
+            Response::from_parts(parts, Body::new(body))
         }
-        Err(_) => crate::error(StatusCode::INTERNAL_SERVER_ERROR, "stream_error"),
+        Err(code @ NodeErrorCode::StreamError) => {
+            crate::error(StatusCode::INTERNAL_SERVER_ERROR, code.as_str())
+        }
+        Err(code) => crate::error(StatusCode::NOT_FOUND, code.as_str()),
     }
 }
 
 /// Session/library checks run before this handler, including HEAD and conditionals.
-/// The final ServeFile open remains subject to the documented local-writer TOCTOU race.
+/// Resolves an authorized `ReadGrant` from SQLite and delegates confined handle validation
+/// and streaming to `LocalNode` without reopening by path.
 pub async fn image(
     store: &IdentityStore,
     image_id: &str,
     request: axum::extract::Request,
 ) -> axum::response::Response {
-    use axum::{
-        http::{HeaderValue, StatusCode, header},
-        response::IntoResponse,
+    use axum::{body::Body, http::StatusCode, response::Response};
+    use media_contracts::{
+        errors::NodeErrorCode,
+        ids::{ImageId, LibraryId, NodeId},
+        inventory::{ReadGrant, ReadTarget},
     };
-    use tower::ServiceExt;
-    let row = sqlx::query("SELECT i.*,l.root FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind='films' AND l.node_id='local'")
-        .bind(image_id).fetch_optional(&store.pool).await;
+    let row = sqlx::query("SELECT i.*,l.root,l.node_id FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind='films' AND l.node_id='local'")
+        .bind(image_id)
+        .fetch_optional(&store.pool)
+        .await;
     let row = match row {
         Ok(Some(row)) => row,
-        Ok(None) => return crate::error(StatusCode::NOT_FOUND, "unknown_image"),
+        Ok(None) => {
+            return crate::error(StatusCode::NOT_FOUND, NodeErrorCode::UnknownImage.as_str());
+        }
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_error"),
     };
-    let root: String = row.get("root");
-    let relative: String = row.get("relative_path");
-    let path =
-        match crate::node::scanner::confined_file(Path::new(&root), Path::new(&relative)).await {
-            Ok(path) => path,
-            Err(_) => return crate::error(StatusCode::NOT_FOUND, "unavailable_image"),
-        };
-    let checked = match crate::node::images::validate(&path).await {
-        Ok(image) => image,
-        Err(_) => return crate::error(StatusCode::NOT_FOUND, "invalid_image"),
+    let grant = ReadGrant {
+        target: ReadTarget::Image {
+            id: ImageId::from(image_id),
+            expected_size: row.get::<i64, _>("size") as u64,
+            expected_modified_ns: row.get("modified_ns"),
+        },
+        library_id: LibraryId::from(row.get::<String, _>("library_id")),
+        node_id: NodeId::from(row.get::<String, _>("node_id")),
+        root_snapshot: row.get("root"),
+        relative_path: row.get("relative_path"),
+        mime: row.get("mime"),
     };
-    if checked.size_bytes != row.get::<i64, _>("size") as u64
-        || checked.modified_ns != row.get::<String, _>("modified_ns")
-        || checked.mime != row.get::<String, _>("mime")
-    {
-        return crate::error(StatusCode::NOT_FOUND, "image_changed_rescan_required");
-    }
-    match tower_http::services::ServeFile::new(path)
-        .with_buf_chunk_size(65536)
-        .oneshot(request)
-        .await
-    {
-        Ok(response) => {
-            let mut response = response.into_response();
-            response
-                .headers_mut()
-                .insert(header::CONTENT_TYPE, HeaderValue::from_static(checked.mime));
-            // Never let a browser cache bypass a later permission/revocation check.
-            response.headers_mut().insert(
-                header::CACHE_CONTROL,
-                HeaderValue::from_static("private, no-store"),
-            );
-            response
+    drop(row);
+    match crate::node::LocalNode.serve_grant(&grant, &request).await {
+        Ok(res) => {
+            let (parts, body) = res.into_parts();
+            Response::from_parts(parts, Body::new(body))
         }
-        Err(_) => crate::error(StatusCode::INTERNAL_SERVER_ERROR, "image_stream_error"),
+        Err(code @ NodeErrorCode::ImageStreamError) => {
+            crate::error(StatusCode::INTERNAL_SERVER_ERROR, code.as_str())
+        }
+        Err(code) => crate::error(StatusCode::NOT_FOUND, code.as_str()),
     }
 }
 

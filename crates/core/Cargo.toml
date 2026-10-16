@@ -7,6 +7,8 @@ publish = false
 default-run = "media-poc"
 
 [dependencies]
+media-contracts = { path = "../shared" }
+media-node = { path = "../node" }
 axum = "0.8.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -21,11 +23,10 @@ rpassword = "7.5.4"
 zeroize = "1"
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10.9"
-quick-xml = "0.42.0"
-image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
+image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 tempfile = "3"
 
 

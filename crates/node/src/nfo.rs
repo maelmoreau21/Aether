@@ -1,42 +1,14 @@
 //! Bounded, local-only film NFO ingestion. No URL or external entity resolver exists.
+pub use media_contracts::media::{FilmMetadata, NfoOutcome};
 use quick_xml::{Reader, events::Event};
-use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::Path};
+use std::path::Path;
 use tokio::io::AsyncReadExt;
+
+use crate::{files::OpenedFile, scanner::FolderVideos};
 
 pub const MAX_BYTES: usize = 1024 * 1024;
 const MAX_DEPTH: usize = 16;
 const MAX_FIELD: usize = 16 * 1024;
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct FilmMetadata {
-    pub title: Option<String>,
-    pub original_title: Option<String>,
-    pub plot: Option<String>,
-    pub outline: Option<String>,
-    pub year: Option<u16>,
-    pub premiered: Option<String>,
-    pub genres: Vec<String>,
-    pub rating: Option<f64>,
-    pub mpaa: Option<String>,
-    pub external_ids: BTreeMap<String, String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum NfoOutcome {
-    Missing,
-    Valid {
-        metadata: FilmMetadata,
-        path: String,
-        priority: u8,
-    },
-    Invalid {
-        path: String,
-        message: String,
-    },
-}
 
 fn insert_id(metadata: &mut FilmMetadata, provider: &str, value: &str) -> Result<(), String> {
     let valid = match provider {
@@ -243,6 +215,7 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
     }
     Ok(metadata)
 }
+
 fn append(stack: &mut [(String, String, String)], text: &str) -> Result<(), String> {
     if text.chars().any(|c| {
         !matches!(c, '\t' | '\r' | '\n')
@@ -265,6 +238,14 @@ fn append(stack: &mut [(String, String, String)], text: &str) -> Result<(), Stri
 /// Exact filename sidecar wins. Shared movie.nfo is used only for one unambiguous
 /// existing local identity group in a non-root directory.
 pub async fn discover(root: &Path, video: &Path) -> NfoOutcome {
+    discover_with_folder(root, video, None).await
+}
+
+pub async fn discover_with_folder(
+    root: &Path,
+    video: &Path,
+    folder_videos: Option<&FolderVideos>,
+) -> NfoOutcome {
     let exact = video.with_extension("nfo");
     let parent = video.parent().unwrap_or(Path::new(""));
     let shared = parent.join("movie.nfo");
@@ -279,7 +260,7 @@ pub async fn discover(root: &Path, video: &Path) -> NfoOutcome {
         }
         let path = relative.to_string_lossy().replace('\\', "/");
         let result = async {
-            let confined = super::scanner::confined_file(root, &relative)
+            let opened = OpenedFile::open_in_root(root, &relative)
                 .await
                 .map_err(|_| "NFO unavailable or unconfined")?;
             if priority == 1 {
@@ -292,36 +273,33 @@ pub async fn discover(root: &Path, video: &Path) -> NfoOutcome {
                 if !folder_key.starts_with("file:") && folder_key != key {
                     return Err("shared movie.nfo conflicts with the identified film folder".into());
                 }
-                let mut entries = tokio::fs::read_dir(root.join(parent))
-                    .await
-                    .map_err(|_| "NFO directory unreadable")?;
-                while let Some(entry) = entries
-                    .next_entry()
-                    .await
-                    .map_err(|_| "NFO directory unreadable")?
-                {
-                    let p = entry.path();
-                    if p.extension().and_then(|s| s.to_str()).is_some_and(|s| {
-                        s.eq_ignore_ascii_case("mkv") || s.eq_ignore_ascii_case("mp4")
-                    }) {
-                        let relative = p.strip_prefix(root).map_err(|_| "NFO outside root")?;
-                        if super::scanner::identity(relative).3 != key {
-                            return Err(
-                                "ambiguous shared movie.nfo: distinct films in directory".into()
-                            );
-                        }
+                let loaded_folder;
+                let videos = match folder_videos {
+                    Some(v) => v,
+                    None => {
+                        loaded_folder = FolderVideos::load(root, parent)
+                            .await
+                            .map_err(|_| "NFO directory unreadable")?;
+                        &loaded_folder
                     }
+                };
+                if !videos.all_match_identity(&key) {
+                    return Err("ambiguous shared movie.nfo: distinct films in directory".into());
                 }
             }
 
-            let file = tokio::fs::File::open(&confined)
-                .await
-                .map_err(|_| "NFO unreadable")?;
+            let check_handle = opened
+                .try_clone()
+                .map_err(|_| "NFO unreadable".to_owned())?;
+            let file = opened.into_tokio_file();
             let mut bytes = Vec::new();
             file.take((MAX_BYTES + 1) as u64)
                 .read_to_end(&mut bytes)
                 .await
                 .map_err(|_| "NFO read failed")?;
+            check_handle
+                .verify_unchanged_sync()
+                .map_err(|_| "NFO changed during read".to_owned())?;
             parse(&bytes)
         }
         .await;
@@ -342,7 +320,7 @@ mod tests {
     use super::*;
     #[test]
     fn extracts_bounded_editorial_only_and_entities() {
-        let m=parse(br#"<movie><title>A &amp; B &#233;</title><originaltitle>Original</originaltitle><plot><![CDATA[<script>evil()</script>]]></plot><genre>Drama</genre><genre>Comedy</genre><year>2024</year><premiered>2024-02-29</premiered><rating>8.5</rating><uniqueid type="tmdb">123</uniqueid><imdbid>tt123</imdbid><codec>fake</codec></movie>"#).unwrap();
+        let m = parse(br#"<movie><title>A &amp; B &#233;</title><originaltitle>Original</originaltitle><plot><![CDATA[<script>evil()</script>]]></plot><genre>Drama</genre><genre>Comedy</genre><year>2024</year><premiered>2024-02-29</premiered><rating>8.5</rating><uniqueid type="tmdb">123</uniqueid><imdbid>tt123</imdbid><codec>fake</codec></movie>"#).unwrap();
         assert_eq!(m.title.as_deref(), Some("A & B é"));
         assert_eq!(m.genres.len(), 2);
         assert_eq!(m.external_ids["imdb"], "tt123");

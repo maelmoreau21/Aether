@@ -4,6 +4,13 @@
 
 # ARCHITECTURE.md — Architecture cible Aether
 
+Jalon J1 (`docs/ARCHITECTURE_ROADMAP.md`, 16 octobre 2026) : découpage effectif du
+workspace Rust en trois crates (`crates/core`, `crates/node`, `crates/shared`),
+aucune dépendance de `media-node` vers `media-poc` ou `sqlx`, et confinement +
+streaming/lecture de descripteurs ouverts (`OpenedFile`) sans réouverture par chemin
+(`openat2` sous Linux / `FILE_FLAG_OPEN_REPARSE_POINT` et vérification d'identité de
+handle sous Windows).
+
 Extension P1 NFO Films : parsing borné et découverte dans le Node interne,
 instantanés éditoriaux/choix Work transactionnels dans Core/SQLite (migration0005).
 Le probe technique et le lecteur restent distincts. Voir [LOCAL_FILM_NFO.md](docs/LOCAL_FILM_NFO.md).

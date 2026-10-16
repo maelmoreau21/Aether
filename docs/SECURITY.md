@@ -1,12 +1,20 @@
+> Jalon J1 (`ARCHITECTURE_ROADMAP.md`, 16 octobre 2026) : confinement et streaming
+> sur descripteur de fichier ouvert (`OpenedFile` dans `crates/node`). Sous Linux/Docker,
+> traversée relative confinée via `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV)`
+> avec repli `openat(O_NOFOLLOW)` composant par composant ; sous Windows, ouverture avec
+> `FILE_FLAG_OPEN_REPARSE_POINT`, rejet immédiat de l'attribut `FILE_ATTRIBUTE_REPARSE_POINT` (`0x400`)
+> et vérification d'identité de handle (`verify_unchanged`). Le streaming HTTP (`GET`, `HEAD`, `Range`
+> par blocs de 64 Kio), la lecture NFO et le décodage d'affiches lisent directement depuis le
+> descripteur ouvert sans réouverture par chemin (`ServeFile` retiré des routes médias/images).
+>
 > Extension P1 affiches locales Films : inventaire séparé, route image avec
 > session/droits et repli Web. État actuel : [LOCAL_FILM_POSTERS.md](LOCAL_FILM_POSTERS.md).
 > Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
 
 > Mise à jour scanner Films P1 : inventaire SQLite et bibliothèques locales
 > autorisées par MEDIA_LIBRARY_ROOT. Jobs session/rôle/CSRF, contrôle des droits
-> avant GET/HEAD/Range, refus liens et points de réanalyse Windows. Confinement
-> non atomique : risque TOCTOU résiduel et ACL opérateur nécessaires ; pas de
-> publication LAN/NAS. Voir [LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md).
+> avant GET/HEAD/Range, refus liens et points de réanalyse Windows. Voir
+> [LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md).
 >
 > Mise à jour P1 bibliothèques : droits explicites SQLite et administration
 > session/rôle/CSRF livrés sur fixtures. Les restrictions administrator seule

@@ -15,7 +15,7 @@ pub async fn media(State(inventory): State<Arc<Inventory>>) -> Json<serde_json::
         }).collect();
         if sources.len() != 2 { return None; }
         Some(serde_json::json!({
-            "id":format!("demo-{container}"), "title":format!("Mire AV1 10 bits · {}", container.to_uppercase()),
+            "id":format!("demo-{container}"), "title":format!("Mire AV1 10 bits · {}", container.to_uppercase()), "synthetic":true,
             "sources":sources,
             "subtitles":[
                 {"id":"fr-forced", "language":"fr", "label":"Français forcés", "url":"/api/v1/demo/subtitles/fr-forced.vtt"},

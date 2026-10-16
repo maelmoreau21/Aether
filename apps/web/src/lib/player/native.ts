@@ -35,8 +35,8 @@ export class NativePlayer implements Player {
   async load(media: Media) {
     this.media = media;
     this.subtitle = null;
-    const source = media.sources.find(s => s.language === 'fr');
-    if (!source) throw new Error('Aucune source française explicitement disponible.');
+    const source = media.sources.find(s => s.language === 'fr') ?? media.sources[0];
+    if (!source) throw new Error('Aucune source disponible pour ce média.');
     await this.replace(source, 0, true);
   }
   private async replace(source: Source, position: number, paused: boolean) {

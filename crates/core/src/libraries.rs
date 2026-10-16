@@ -99,6 +99,14 @@ pub async fn initialize(
     tx.commit().await?;
     Ok(())
 }
+
+/// A real local library starts empty: experimental fixture libraries are never seeded.
+pub async fn initialize_local(store: &IdentityStore) -> Result<(), sqlx::Error> {
+    sqlx::query("INSERT OR IGNORE INTO library_initialization(singleton) VALUES(1)")
+        .execute(&store.pool)
+        .await?;
+    Ok(())
+}
 async fn load(store: &IdentityStore) -> Result<Vec<Library>, StatusCode> {
     // Same transaction gives a coherent configuration/grants snapshot.
     let mut tx = store.pool.begin().await.map_err(database)?;

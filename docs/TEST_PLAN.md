@@ -394,3 +394,55 @@ configuration désactivée conservée et contenu refusé après redémarrage.
 SQLite temporaire et Chrome : login, création/modification/désactivation Web,
 responsive 390/1440, catalogue, lecture MP4/seek, logout, CSP.
 Aucun NAS ni ingestion/scanner ; pas de nouvelle preuve audio/codec.
+
+## Scanner Films local P1 — 16 octobre 2026
+
+- `cargo fmt --check` : réussi.
+- `cargo clippy --locked --all-features --all-targets -- -D warnings` : réussi.
+- `cargo test --locked --all-features` :38 réussis,3 ignorés par harness.
+  Les2 tests navigateurs sont exécutés séparément ; le helper bootstrap ignoré
+  est exercé par competing_processes. Aucun échec dans la passe finale.
+- `npm run check` :0 erreur/avertissement ; `npm run lint`, `npm test` :13/13,
+  `npm run build` : réussis depuis apps/web.
+- `cargo test --locked --test browser_scanner -- --ignored --nocapture` :
+  parcours réel décrit dans [LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md),
+  scan initial puis0 probe/2 réutilisés, une carte/deux versions, lecture MP4,
+  pause/seek4s et vrai redémarrage du binaire même base. Chrome155 Windows headless.
+  Preuves [rapport initial](evidence/2026-10-16/scanner/report.json) et
+  [après redémarrage](evidence/2026-10-16/scanner/report-restart.json).
+- `cargo test --locked --test browser_auth -- --ignored --nocapture` :1/1 réussi,
+  non-régression session/administration/lecteur aux largeurs390/1440, aucun JS/CSP.
+- scanner_flow : MKV AV1 10bits/Opus FR5.1+EN2/sous-titres internes, MP4 AV1/Opus,
+  corruption/temporaire/sans NFO, versions, IDs/cache/reconstruction Core,
+  deux bibliothèques/droits et révocation/désactivation GET/HEAD/Range, hashes.
+  Tests Node : refus de jonction Windows réelle et de liens, parcours annulé,
+  entrée relative invalide, conflits de noms/ID. Tests inventory : réouverture,
+  disparition, parcours incomplet, racine modifiée/réassociation et cache invalidé.
+  Tests jobs : doublon409 déterministe, shutdown, job running→error au restart.
+- Originaux conservés ; aucune preuve de charge, PCM/audio physique ou nouveau
+  résultat MKV/Edge/Firefox/Safari/NAS. FFprobe ne garantit pas le Direct Play.
+
+## NFO Films locaux — 16 octobre 2026
+
+- `cargo fmt --check`, `cargo clippy --locked --all-features --all-targets -- -D warnings` : réussis.
+- `cargo test --locked --all-features` :45 réussis,4 ignorés par harness
+  (3 navigateurs explicites et helper bootstrap exercé par competing_processes).
+  Régressions scanner/lecteur/permissions conservées et exécutées.
+- Parser/discovery : métadonnées réelles, NFO exact/partagé/absent, UTF8/BOM,
+  XML malformé, encodage invalide, XXE/DTD/expansion/reférences interdites,
+  taille/profondeur/champs/genres bornés, HTML hostile comme texte, jonction Windows.
+- Persistance et parcours HTTP : upgrade0004 sans perte/IDs, candidat éditorial
+  déterministe, update/delete/invalid snapshot/racine modifiée, deux versions,
+  aucun probe vidéo inutile, conflits TMDb/IMDb sans fusion, droits et hashes.
+- Web `npm run check` :0 erreur/avertissement, `npm run lint`, `npm test` :13/13,
+  `npm run build` : réussis.
+- `cargo test --locked --test browser_nfo -- --ignored --nocapture` :1/1 réussi,
+  quatre phases initial/restart/update/delete avec vrais processus Core même DB.
+  Chrome155.0.8059.40 Windows10.0.26300 headless1440px : Accueil/Films/Recherche/
+  fiche, titre/année/genres/synopsis, HTML échappé, MP4/pause/seek4s après restart,
+  aucun nouveau probe lors des rescans éditoriaux, aucune erreur JS/CSP.
+  [Preuve après restart](evidence/2026-10-16/nfo/report-restart.json).
+- Migration0004 et13 anciens fichiers de preuve inchangés (SHA256). Mutations NFO
+  du test sur copies jetables explicites ; comparaisons sources avant/après.
+  Pas de nouvelle preuve mobile/autres navigateurs/PCM/NAS/charge.
+  Contrat réalisé et limites : [LOCAL_FILM_NFO.md](LOCAL_FILM_NFO.md).

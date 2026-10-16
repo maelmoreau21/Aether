@@ -20,7 +20,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let root = PathBuf::from(
-        std::env::var_os("MEDIA_FIXTURE_DIR").unwrap_or_else(|| "tests/fixtures/generated".into()),
+        std::env::var_os("MEDIA_LIBRARY_ROOT")
+            .or_else(|| std::env::var_os("MEDIA_FIXTURE_DIR"))
+            .unwrap_or_else(|| "tests/fixtures/generated".into()),
     );
     let path = media_poc::identity::configured_path(&root)?;
     // Do not silently create directories or modify their access rights.
@@ -39,6 +41,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let result = store.bootstrap(login.trim(), password).await;
     store.close().await;
     result?;
-    println!("Administrator created. Login and sessions are not implemented yet.");
+    println!("Administrator created. Sign in through /app/login/.");
     Ok(())
 }

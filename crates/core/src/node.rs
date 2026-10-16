@@ -1,3 +1,6 @@
+pub mod nfo;
+pub mod scanner;
+
 use crate::{
     error,
     media::{self, Probe},
@@ -223,8 +226,20 @@ pub async fn mse_content(
 }
 
 impl Inventory {
+    /// Standalone local Node without loading or probing experimental fixtures.
+    pub async fn local(root: PathBuf) -> io::Result<Self> {
+        let root = validate_library_root(&root, &root).await?;
+        Ok(Self {
+            root,
+            assets: Vec::new(),
+        })
+    }
     pub fn root(&self) -> &FsPath {
         &self.root
+    }
+
+    pub fn is_fixture_bench(&self) -> bool {
+        !self.assets.is_empty()
     }
 
     pub async fn load(root: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
@@ -419,8 +434,15 @@ impl Inventory {
 pub async fn content(
     State(s): State<Arc<Inventory>>,
     Path(id): Path<String>,
+    store: Option<axum::Extension<crate::identity::IdentityStore>>,
     req: Request,
 ) -> Response {
+    if !id.starts_with("fixture-") && !id.starts_with("demo-") {
+        return match store {
+            Some(axum::Extension(store)) => crate::inventory::content(&store, &id, req).await,
+            None => error(StatusCode::NOT_FOUND, "unknown_asset"),
+        };
+    }
     let Some(asset) = s.assets.iter().find(|a| a.descriptor.id == id) else {
         return error(StatusCode::NOT_FOUND, "unknown_asset");
     };

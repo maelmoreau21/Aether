@@ -1,5 +1,16 @@
 # ARCHITECTURE.md — Architecture cible Aether
 
+Extension P1 NFO Films : parsing borné et découverte dans le Node interne,
+instantanés éditoriaux/choix Work transactionnels dans Core/SQLite (migration0005).
+Le probe technique et le lecteur restent distincts. Voir [LOCAL_FILM_NFO.md](docs/LOCAL_FILM_NFO.md).
+
+Mise à jour scanner Films P1 (16 octobre 2026) : inventaire relationnel SQLite,
+jobs locaux et lecture native autorisée implémentés. Le parcours des fichiers
+reste dans le Node interne, l'ingestion et le catalogue dans le Core. Le mode
+`MEDIA_LIBRARY_ROOT` démarre sans fixtures. État/limites :
+[LOCAL_FILM_SCANNER.md](docs/LOCAL_FILM_SCANNER.md). Les mentions antérieures
+« pas de scanner » ci-dessous sont historiques.
+
 État local du 16 octobre 2026 : connexion/session SQLite ajoutées au Core existant,
 permissions communes avant les routes catalogue/média et séparation du banc P0
 par feature de test. Voir `docs/LOCAL_SESSIONS.md`. Aucun Node distant, OIDC ou

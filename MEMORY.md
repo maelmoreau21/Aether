@@ -878,3 +878,122 @@ Validation finale Node : 10 tests politique + 2 suites statistiques =12/12, exit
 - Trois sous-agents sur fichiers distincts, lectures ciblées token-saver,
   intégration/tests transverses centralisés ; aucun gain chiffré annoncé.
   Prochain jalon après validation : scanner local Media Node indépendant ARR.
+
+## 16 octobre 2026 — premier scanner Films local P1
+
+- Branche develop, jalon Bibliothèques/Permissions réutilisé. Aucun push,
+  publication, déploiement, compte réel ou média personnel utilisé.
+- Node interne : parcours récursif MKV/MP4, sans symlink/point de réanalyse Windows,
+  caches Jellyfin et temporaires ignorés ; erreurs non bloquantes. Adapter probe
+  existant réutilisé, AV1/Opus non imposés. JSON technique et index réels conservés.
+  Identité par fournisseur explicitement qualifié, dossier exact avec année ou
+  chemin exact ; conflits explicites séparés. Aucun rapprochement flou/NFO/réseau.
+- Migration0004 : Work/Edition/MediaVersion/MediaSource/Asset/Track distincts et
+  état durable des scans. IDs stables, taille/mtime/cache probe, pas de doublon
+  au second scan. Versions d'un dossier de film identifiées sous une carte.
+  Groupement limité à la bibliothèque/racine ; rapprochement entre bibliothèques
+  différé. Un fichier disparu devient indisponible ; aucune purge des métadonnées.
+  Parcours incomplet conserve les disparitions non confirmées ; transaction et
+  snapshot de racine évitent une publication après changement de configuration.
+- MEDIA_LIBRARY_ROOT : racine opérateur absolue existante, mode standalone-local
+  vide, aucun probe de fixtures ni amorçage des bibliothèques de démo. Le mode
+  MEDIA_FIXTURE_DIR historique reste isolé. DB hors médias, y compris bootstrap.
+- Administration Scanner : POST/GET /api/v1/admin/libraries/{id}/scan,
+  session administrator + Origin/CSRF, 202, doublon409 ; idle/queued/running/
+  completed/error, compteurs finaux et erreurs. Un seul probe local simultané,
+  cancellation Ctrl+C et attente des tâches ; jobs interrompus signalés au restart.
+- Catalogue/fiche SQLite avec recherche/tri/pagination ; descripteur natif
+  /api/v1/media/{assetId}. Routes de contenu existantes et streaming64Kio conservés.
+  Contrôles actifs des droits avant GET/HEAD/Range, révocation et désactivation.
+  Le lecteur garde son moteur ; source non française possible, aucune piste
+  interne sélectionnable ni lecture compatible inventée. Labels démo séparés.
+- Tests Rust : cargo fmt --check ; cargo clippy --locked --all-features
+  --all-targets -- -D warnings ; cargo test --locked --all-features :38 réussis,
+  3 ignorés par harness (2 navigateurs lancés séparément, helper processus exécuté
+  par competing_processes). Inclut scan exclusif/arrêt/restart jobs, jonction
+  Windows, corruption/temporaire, deux bibliothèques, révocation GET/HEAD/Range,
+  réouverture SQLite/IDs/cache, AV1 10bits/Opus FR/EN/sous-titres internes,
+  changement de racine/réassociation, disparition et scan incomplet.
+- Web : npm run check 0 erreur/avertissement ; npm run lint ; npm test13/13 ;
+  npm run build réussis. Parcours browser_scanner : création bibliothèque Web,
+  scan2 fichiers, un film/deux versions, second scan0 probe/2 réutilisés,
+  MP4 lecture/pause/seek4s, arrêt forcé/relance réel du binaire même SQLite puis
+  catalogue/lecture/seek réussis. Chrome155.0.8059.40, Windows10.0.26300 headless.
+  Rapports/captures docs/evidence/2026-10-16/scanner/ ; captures inspectées.
+- Non-régression navigateur : cargo test --locked --test browser_auth --
+  --ignored --nocapture réussi1/1, Chrome390/1440, CRUD permissions, lecture/seek,
+  logout/Range401 et aucune erreur JS/CSP. Passe browser_scanner finale1/1 réussie.
+- Dernier ajustement : erreur I/O du processus ffprobe fait échouer le job sans
+  publier une fausse corruption globale ; disparition pendant probe reste une
+  erreur fichier non bloquante. fmt/Clippy strict repassés ; cargo test --locked
+  --all-features node::scanner --lib :3/3 et cargo test --locked --all-features
+  --test scanner_flow :1/1 repassés (13,87s pour le parcours intégré).
+- Sources : copies synthétiques en dossiers jetables, hashes/comparaisons bytes
+  avant/après identiques ; aucun original modifié. Pas de nouvelle preuve PCM,
+  compatibilité MKV générale, Edge/Firefox/Safari, NAS, charge/RSS ou CI distante.
+- Premier essai navigateur échoué : POST scan répondait uniquement status, UI
+  attendait errors/counters. Corrigé des deux côtés, relance réussie. Une première
+  suite Rust a rencontré LNK1104 à cause du même exécutable navigateur lancé en
+  parallèle ; validations suivantes sérialisées et réussies.
+- Limites : confinement puis ouverture non atomiques (TOCTOU), ACL opérateur
+  requises ; flux déjà ouvert non coupé à révocation ; inventaire/cache en RAM
+  proportionnels aux fichiers ; ffprobe non sandboxé. Séries/NFO/images/pistes
+  externes/OIDC/multi-Node/ordonnanceur et vrai déploiement non implémentés.
+  Détails/usage : docs/LOCAL_FILM_SCANNER.md. Prochain petit jalon recommandé :
+  métadonnées NFO Films strictement locales et bornées, après validation utilisateur.
+
+## 16 octobre 2026 — métadonnées NFO Films locales
+
+- develop et modifications non commitées du scanner préservés. Migration0004
+  inchangée (SHA256 9175E1B4934317EE89921B164D18A048211A7D5AA4E1B28FD4D3A9D1A5C13E6F).
+  Migration additive0005_film_editorial : candidats par asset, JSON/provenance Work.
+- Node/nfo.rs, quick-xml0.42.0 : sidecar exact `<base vidéo>.nfo` prioritaire,
+  puis movie.nfo seulement dans un sous-dossier non ambigu. Pas de movie.nfo
+  partagé à la racine ; conflits explicites fichier/dossier refusés. NFO exact
+  invalide ne bascule pas silencieusement sur le partagé. Aucun appel ARR/réseau.
+- title/originaltitle/plot/outline/year/premiered/genres/rating/mpaa/IDs explicitement
+  qualifiés extraits. Champs techniques ignorés. Identifiants NFO jamais utilisés
+  comme clés de fusion ; IDs du graphe média conservés. Conflits interversions
+  ou avec repli local signalés, fournisseur contradictoire retiré des IDs publics.
+- Chaque scan relit les NFO bornés indépendamment du cache vidéo : actualisation
+  et suppression sans nouveau ffprobe vidéo. Valide actualise ; absent rétablit
+  le repli ; invalide garde le dernier instantané valide, sinon repli local.
+  Nouveau graphe/racine ne reprend pas l'ancien instantané. Sélection Work
+  déterministe exacte/partagée puis chemins, transactionnelle. Médias indisponibles
+  conservent leurs métadonnées. Avertissements NFO séparés des erreurs média,
+  exposés au statut admin sans rendre la vidéo indisponible.
+- XML non fiable : DTD/entités externes/inconnues rejetées, sans résolveur réseau.
+  UTF8 strict/BOM accepté, taille1Mio, profondeur16, champs16Kio,64genres ;
+  caractères XML interdits et références invalides rejetés. Liens/reparse refusés.
+  Valeurs jamais utilisées comme chemins/URLs. Texte échappé Svelte, aucun HTML
+  arbitraire. Risque TOCTOU existant toujours explicite, ACL opérateur requises.
+- Web garde design/navigation/lecteur, affiche titre/année/synopsis/genres dans
+  Accueil, Films, Recherche et fiche. API catalogue enrichie, provenance nfo/local,
+  autres champs et metadataWarnings. Aucun nouveau endpoint ou permission.
+- Vérifications : cargo fmt --check ; cargo clippy --locked --all-features
+  --all-targets -- -D warnings passent. cargo test --locked --all-features :
+  45 réussis,4 ignorés (3 navigateurs explicites, helper processus exercé ailleurs).
+  Tests nouveaux : parser hostile/XXE/expansion/taille/profondeur/encodage/HTML,
+  NFO exact/partagé/jonction Windows, migration0004→0005 préservant les IDs,
+  changement de racine, update/delete/invalides/cache sans probe, deux versions,
+  IDs contradictoires, droits fiche/GET/HEAD/Range et hashes sources/NFO.
+- Web npm run check :0 erreur/avertissement ; npm run lint ; npm test13/13 ;
+  npm run build passent. cargo test --locked --test browser_nfo -- --ignored
+  --nocapture :1/1 réussi en49,22s. Chrome155.0.8059.40 Windows10.0.26300 headless,
+  quatre phases initial/restart/update/delete, vrais arrêts/relances Core même DB,
+  métadonnées Accueil/Films/Recherche/fiche, HTML hostile rendu texte, MP4/seek4s/
+  pause ;0 probe après update/delete et deuxième scan. Aucune erreur JS/CSP.
+  Preuves distinctes docs/evidence/2026-10-16/nfo/, capture initiale inspectée.
+- 13 anciens fichiers de preuve du16octobre comparés SHA256 : tous inchangés.
+  Copies synthétiques jetables seulement ; seules les mutations explicites des
+  tests changent leurs NFO. Aucun original média/NFO écrit par le scanner,
+  hashes et comparaisons avant/après vérifiés. Aucun commit/push/publication.
+- Limites : UTF8 seulement, association prudente des NFO partagés, rating0..10,
+  pas de validation fournisseur en ligne ni fusion entre bibliothèques ; aucun
+  nouveau résultat mobile/Edge/Firefox/Safari/NAS/charge/CI distante. Séries,
+  illustrations, sous-titres externes, multi-Node/DB externe restent différés.
+  Prochain petit jalon recommandé : affiches locales Films en lecture seule,
+  après validation. Détails : docs/LOCAL_FILM_NFO.md.
+- Token saver appliqué à la demande : lectures ciblées, journaux limités,
+  compilations intégrées centralement ; validations obligatoires conservées,
+  aucun gain chiffré annoncé.

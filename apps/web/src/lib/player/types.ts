@@ -4,7 +4,7 @@ export interface CodecTrack {
 }
 export interface Source { id: string; audioTrackId: string; language: string; url: string; mime: string; tracks?: CodecTrack[] }
 export interface Subtitle { id: string; language: string; label: string; url: string }
-export interface Media { id: string; title: string; sources: Source[]; subtitles: Subtitle[] }
+export interface Media { id: string; title: string; synthetic?: boolean; sources: Source[]; subtitles: Subtitle[] }
 export interface PlaybackState { position: number; duration: number; paused: boolean; volume: number; speed: number }
 export interface Player {
   load(media: Media): Promise<void>;

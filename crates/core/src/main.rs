@@ -12,6 +12,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port: u16 = std::env::var("MEDIA_PORT")
         .unwrap_or_else(|_| "3000".into())
         .parse()?;
+    let db_path = media_poc::identity::configured_path(&root)?;
+    let database = media_poc::identity::IdentityStore::open(&db_path).await?;
     let inventory = Inventory::load(root).await?;
     let listener =
         tokio::net::TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await?;
@@ -22,5 +24,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await?;
+    database.close().await;
     Ok(())
 }

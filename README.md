@@ -109,3 +109,9 @@ Frontend SvelteKit servi par Rust : [instructions et résultats](docs/P1_WEB_INT
 Après préparation des fixtures, `npm ci --prefix apps/web`,
 `npm run build --prefix apps/web`, `cargo run --locked -p media-poc`,
 puis http://127.0.0.1:3000/app/. Fixtures uniquement, pas encore d'authentification.
+
+## Identité locale P1
+
+Parcours et vérifications : [docs/LOCAL_ADMIN.md](docs/LOCAL_ADMIN.md).
+Créer le dossier de données privé avant de lancer le Core ; aucun accès aux
+bibliothèques personnelles autorisé à ce stade.

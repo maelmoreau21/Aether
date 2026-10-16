@@ -7,3 +7,8 @@
 /apps/web/node_modules/
 /apps/web/.svelte-kit/
 /apps/web/build/
+
+/data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

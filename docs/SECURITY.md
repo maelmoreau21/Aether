@@ -71,3 +71,10 @@ accès à de vraies bibliothèques.
 La refonte visuelle P1 ajoute img-src self à la CSP pour l'illustration originale
 et les SVG locaux. Aucune image tierce/data, aucun script distant ni
 assouplissement d'origine ajouté. Tests de violations CSP après refonte réussis.
+
+## Bootstrap P1 local
+
+Le bootstrap est une CLI interactive autorisée par l'accès OS, jamais une API
+publique. Argon2id, transaction SQLite et marqueur durable : [LOCAL_ADMIN.md](LOCAL_ADMIN.md).
+L'identité persistée ne rend pas le prototype multi-utilisateur : sessions,
+CSRF, limitation des connexions et RBAC restent requis avant les médias privés.

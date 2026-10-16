@@ -355,3 +355,30 @@ concurrence de migrations et bootstrap entre pools/processus, PHC Argon2id,
 contraintes SQL, réouverture, fermeture durable, rollback, erreurs et CLI sans TTY.
 Formatage/Clippy strict réussis. Détails/limites : [LOCAL_ADMIN.md](LOCAL_ADMIN.md).
 Pas de nouveau test navigateur ni de saisie interactive manuelle revendiquée.
+
+## Connexion, sessions et permissions — 16 octobre 2026
+
+Commandes et périmètre : [LOCAL_SESSIONS.md](LOCAL_SESSIONS.md). Les tests auth
+vérifient connexion valide/invalide, réponse identique compte absent/mauvais
+secret, hash de session seul en DB, sessions différentes, réouverture, expirations
+idle/absolue, révocation, désactivation, CSRF et limite durable de tentatives.
+Le budget Argon2 concurrent et les cookies HTTP/HTTPS ont des assertions dédiées.
+
+`tests/permissions.rs` couvre 12 chemins protégés × GET/HEAD × Range absent,
+valide ou invalide : 401 anonyme/cookie invalide, 403 rôle user, 401 désactivation.
+L'administrateur obtient 200/206/416 selon la requête. Un test HTTPS configuré
+vérifie Host/Origin et Secure, sans prétendre déployer un serveur TLS réel.
+`tests/core_restart.rs` arrête/redémarre réellement le binaire avec une base
+jetable, puis confirme la persistance de la session et de sa révocation.
+
+`cargo test --locked --all-features` inclut le banc historique P0 via la feature
+`fixture-bench`, désormais explicite et jamais sélectionnée par le binaire.
+Le test navigateur ignoré par défaut est lancé séparément :
+`cargo test --locked --test browser_auth -- --ignored --nocapture`.
+Chrome155.0.8059.40, Windows10.0.26300 headless, 390/1440px : connexion invalide
+puis valide, cookie HttpOnly/Strict, absence de jeton localStorage, identité,
+Administration, catalogue, lecture MP4/seek, rechargement, déconnexion, 401
+catalogue/Range, aucune erreur JS/CSP. Captures de connexion inspectées.
+Preuve : [rapport](evidence/2026-10-16/auth/report.json).
+Pas de nouvelle validation audio PCM, Firefox/Edge/Safari, HTTPS navigateur,
+NAS, charge ou bibliothèque réelle dans ce jalon.

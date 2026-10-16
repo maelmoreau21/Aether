@@ -1,5 +1,10 @@
 # SQLite et premier administrateur local — P1
 
+**Suite livrée le 16 octobre 2026 :** le compte de cette CLI peut maintenant
+se connecter à `/app/login/`. Sessions, cookies, CSRF, limitation des tentatives
+et permissions : [LOCAL_SESSIONS.md](LOCAL_SESSIONS.md). Les mentions ci-dessous
+de sessions absentes décrivent le jalon initial du bootstrap.
+
 Le Core ouvre `MEDIA_DB_PATH` (défaut `data/core.sqlite3`) et applique les
 migrations SQLx embarquées avant de démarrer HTTP. Créer au préalable un dossier
 de données privé, distinct des médias et du build Web. Utiliser un disque local,

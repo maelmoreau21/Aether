@@ -1,4 +1,7 @@
 import type { Media } from '../player/types';
+import { session } from '../auth/session';
+import { goto } from '$app/navigation';
+import { resolve } from '$app/paths';
 export interface CatalogSource { id: string; assetIds: string[]; playbackMediaId: string }
 export interface Edition { id: string; label: string; versions: { id: string; label: string; sources: CatalogSource[] }[] }
 export interface Work {
@@ -10,6 +13,12 @@ export interface Work {
 export interface CatalogPage { items: Work[]; total: number; offset: number; limit: number; notice: string }
 export async function request<T>(url: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]) });
+  if (response.status === 401) {
+    session.set(null);
+    await goto(resolve('login/'), { replaceState:true });
+    throw new Error('Votre session a expiré. Connectez-vous à nouveau.');
+  }
+  if (response.status === 403) throw new Error('Votre compte n’a pas accès à cette ressource.');
   if (!response.ok) throw new Error(response.status === 404 ? 'Ce média est introuvable.' : `Le catalogue est indisponible (HTTP ${response.status}).`);
   return response.json() as Promise<T>;
 }

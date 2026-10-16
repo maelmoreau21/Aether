@@ -1,5 +1,11 @@
 # API expérimentale du banc P0
 
+**État courant du 16 octobre 2026 :** les routes catalogue, assets, streaming,
+sous-titres et expériences ci-dessous exigent maintenant une session et la
+permission de lecture des fixtures. Les anciens exemples sans cookie concernent
+le banc isolé. Connexion, identité, déconnexion, cookies, erreurs et CSRF :
+[LOCAL_SESSIONS.md](LOCAL_SESSIONS.md).
+
 Base exacte par défaut : `http://127.0.0.1:3000`. Contrat du banc uniquement,
 pas un contrat de sessions de lecture du futur produit. Pas de chemins disque
 acceptés depuis HTTP ; quatre IDs initiaux, quatre remux par langue optionnels
@@ -158,5 +164,6 @@ une persistance SQLite ou les droits d'accès d'un futur catalogue personnel.
 ## P1 — persistance et bootstrap local
 
 SQLite/SQLx et création du premier administrateur par CLI locale sont décrits
-dans [LOCAL_ADMIN.md](LOCAL_ADMIN.md). Aucune route HTTP sensible ajoutée.
-Sessions, connexion et RBAC restent absents ; fixtures uniquement sur loopback.
+dans [LOCAL_ADMIN.md](LOCAL_ADMIN.md). La connexion et les sessions sécurisées
+sont décrites dans [LOCAL_SESSIONS.md](LOCAL_SESSIONS.md). Fixtures uniquement
+sur loopback ; aucune bibliothèque personnelle ajoutée.

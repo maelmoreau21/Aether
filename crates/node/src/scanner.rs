@@ -200,8 +200,28 @@ pub async fn scan_with_images(
     Ok(report)
 }
 
+/// Maximum diagnostic issues retained in memory in `ScanReport`.
+/// All issues are streamed in batches and persisted into SQLite `scan_staging_issues`.
+pub const MAX_REPORT_ISSUES: usize = 100;
+
+#[inline]
+fn record_error(report: &mut ScanReport, batch: &mut Vec<ScanIssue>, issue: ScanIssue) {
+    if report.errors.len() < MAX_REPORT_ISSUES {
+        report.errors.push(issue.clone());
+    }
+    batch.push(issue);
+}
+
+#[inline]
+fn record_warning(report: &mut ScanReport, batch: &mut Vec<ScanIssue>, issue: ScanIssue) {
+    if report.warnings.len() < MAX_REPORT_ISSUES {
+        report.warnings.push(issue.clone());
+    }
+    batch.push(issue);
+}
+
 /// Bounded batch-streaming discovery traversal yielding `InventoryBatch` chunks with backpressure.
-/// Does not retain discovered files in RAM across batches, ensuring strictly O(1) memory footprint.
+/// Does not retain discovered files in RAM across batches, ensuring strictly bounded memory footprint.
 pub async fn scan_streaming<F, Fut>(
     root: &Path,
     cache: &HashMap<String, CachedFile>,
@@ -253,8 +273,7 @@ where
                         relative_path: String::new(),
                         message: "directory traversal failed".into(),
                     };
-                    report.errors.push(issue.clone());
-                    current_batch_errors.push(issue);
+                    record_error(&mut report, &mut current_batch_errors, issue);
                     stack.pop();
                     continue;
                 }
@@ -278,8 +297,7 @@ where
                     relative_path,
                     message: "file metadata unavailable".into(),
                 };
-                report.errors.push(issue.clone());
-                current_batch_errors.push(issue);
+                record_error(&mut report, &mut current_batch_errors, issue);
                 continue;
             }
         };
@@ -288,8 +306,7 @@ where
                 relative_path,
                 message: "link or reparse point ignored".into(),
             };
-            report.errors.push(issue.clone());
-            current_batch_errors.push(issue);
+            record_error(&mut report, &mut current_batch_errors, issue);
             continue;
         }
         if metadata.is_dir() {
@@ -301,8 +318,7 @@ where
                         relative_path,
                         message: "directory unreadable".into(),
                     };
-                    report.errors.push(issue.clone());
-                    current_batch_errors.push(issue);
+                    record_error(&mut report, &mut current_batch_errors, issue);
                 }
             }
             continue;
@@ -323,8 +339,7 @@ where
                     relative_path,
                     message: "file failed confinement validation".into(),
                 };
-                report.errors.push(issue.clone());
-                current_batch_errors.push(issue);
+                record_error(&mut report, &mut current_batch_errors, issue);
                 continue;
             }
         };
@@ -369,8 +384,7 @@ where
                         relative_path,
                         message: error.to_string(),
                     };
-                    report.errors.push(issue.clone());
-                    current_batch_errors.push(issue);
+                    record_error(&mut report, &mut current_batch_errors, issue);
                     continue;
                 }
             }
@@ -384,8 +398,7 @@ where
                 relative_path,
                 message: "file changed during analysis; retry scan".into(),
             };
-            report.errors.push(issue.clone());
-            current_batch_errors.push(issue);
+            record_error(&mut report, &mut current_batch_errors, issue);
             continue;
         }
         let parent = relative.parent().unwrap_or(Path::new("")).to_path_buf();
@@ -408,8 +421,7 @@ where
                 relative_path: path.clone(),
                 message: message.clone(),
             };
-            report.warnings.push(issue.clone());
-            current_batch_warnings.push(issue);
+            record_warning(&mut report, &mut current_batch_warnings, issue);
         }
         let (poster, poster_warning) =
             super::images::discover_cached_with_folder(&root, relative, image_cache, folder_videos)
@@ -419,8 +431,7 @@ where
                 relative_path: relative_path.clone(),
                 message,
             };
-            report.warnings.push(issue.clone());
-            current_batch_warnings.push(issue);
+            record_warning(&mut report, &mut current_batch_warnings, issue);
         }
         current_batch_files.push(ScannedFile {
             poster,

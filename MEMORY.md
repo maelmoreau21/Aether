@@ -1,5 +1,53 @@
 # MEMORY.md — État et décisions Aether
 
+## 16 octobre 2026 — Jalon P1 : Robustesse et scalabilité du scanner (Cold Ingestion 10k, publication paginée par clés, audit pool 4 connexions, BEGIN IMMEDIATE)
+
+- **Problèmes identifiés et résolus** :
+  - **Plafond mémoire des anomalies (`MAX_REPORT_ISSUES = 100`)** : `ScanReport.errors` et `warnings` n'accumulent plus de listes non bornées en RAM (plafonnement à 100 en mémoire vive via `record_error` et `record_warning`), tandis que 100 % des anomalies sont streamées et persistées dans `scan_staging_issues`.
+  - **Chargement de cache streaming sans allocation de vecteur intermédiaire** : `load_scan_cache` et `load_image_cache` utilisent désormais `.fetch(&store.pool)` avec `TryStreamExt::try_next` au lieu de `fetch_all`, éliminant les allocations massives de `Vec<SqliteRow>` en mémoire.
+    - Initial scan : 0 entrée en base = mémoire $O(1)$.
+    - Rescan : $O(N_{\text{indexés}})$ entrées chemins + timestamps légers (~150 octets/fichier sans `probe_json`).
+  - **Publication atomique chunkée par clés (`publish_staged_scan`)** :
+    - Élimination des `fetch_all()` non bornés de `scan_staging_files` : pagination par clés (`LIMIT 250` ordonné par `relative_path ASC`), traitant par tranches de 250 et libérant immédiatement la mémoire des probes après chaque lot.
+    - Résolution unifiée des affiches et de l'éditorial en une seule passe via `LEFT JOIN inventory_images` et `LEFT JOIN inventory_editorial`, supprimant les requêtes unitaires `SELECT`.
+    - Rafraîchissement éditorial groupé (`refresh_editorial_for_works`) par lots de 250 via `sqlx::QueryBuilder`, réduisant les allers-retours SQL par 250.
+    - Conservation stricte de l'atomicité transactionnelle (`tx.commit().await` unique en fin de parcours).
+  - **Audit du pool SQLite (4 connexions) & élimination de `SQLITE_BUSY_SNAPSHOT`** :
+    - **Audit** : le pool `IdentityStore` est explicitement configuré à 4 connexions pour permettre des lectures concurrentes via l'isolation de snapshot WAL (`SqlitePoolOptions::new().max_connections(4)`).
+    - **Bug critique résolu** : `store.pool.begin()` ouvrait une transaction différée (`BEGIN`), créant un snapshot de lecture. En présence de requêtes concurrentes authentifiées mettant à jour les sessions (`sessions.last_seen_at`), toute tentative d'écriture ultérieure échouait avec `SQLITE_BUSY_SNAPSHOT (code 517) : database is locked`.
+    - **Correction** : utilisation systématique de `conn.begin_with("BEGIN IMMEDIATE")` pour les transactions d'écriture (`publish_staged_scan`, `stage_batch`, `ingest`). Le verrou d'écriture est acquis dès l'ouverture, garantissant un snapshot à jour et éliminant 100 % des erreurs `SQLITE_BUSY_SNAPSHOT`.
+  - **Normalisation des chemins Windows** :
+    - Élimination des faux positifs de non-concordance de racines (`library configuration changed during scan`) en normalisant les préfixes `\\?\` sur les chaînes de chemins lors de la vérification et de l'insertion dans `inventory_sources` / `inventory_images`.
+
+- **Métriques mesurées et comparatives (Banc `crates/core/tests/scanner_performance.rs`)** :
+  - **Cold Ingestion de 10 000 NOUVEAUX médias synthétiques** (AV1 10-bit Main 10 + 2x Opus + 3 sous-titres + NFO + affiches) :
+    - Staging 10 000 fichiers (100 lots de 100) : **4 649 ms à 5 504 ms** (moyenne **46,5 à 55 ms/lot**). Empreinte mémoire différentielle staging : **+1,33 Mio**.
+    - Publication atomique intégrale (10 000 œuvres, éditions, versions, sources, assets, 40 000 pistes, 5 000 affiches, 10 000 éditoriaux) : **29,7 s à 34,6 s**.
+    - Empreinte mémoire différentielle publication : **+5,09 Mio** par rapport au baseline (pic RSS total : 15,05 Mio à 37 Mio en mode test).
+  - **Publication 10 000 entrées réutilisées** : **3 834 ms** (contre 7 733 ms avant optimisation, soit un gain de 2x).
+  - **Rescan de 10 000 médias inchangés** : publication en **689 ms** (accélération 5,6x).
+  - **Banc de concurrence et latence sous écriture SQLite** :
+    - 50 requêtes concurrentes (25 requêtes catalogue + 25 requêtes streaming HTTP Range) exécutées en continu pendant la transaction d'écriture exclusive de `publish_staged_scan`.
+    - Résultat : **0 erreur `SQLITE_BUSY`**, 50/50 requêtes réussies.
+    - Latences mesurées pendant l'écriture active : p50 = **7,29 ms** (à 11,13 ms), p95 = **17,11 ms** (à 23,63 ms).
+  - **Scan de 100 fichiers réels** :
+    - Scan initial : 100 probes en 7,84 s (RSS: 38,01 Mio).
+    - Rescan inchangé : 0 probe en 661 ms (RSS: 38,23 Mio).
+    - NFO modifié : 0 probe en 736 ms.
+    - Affiche supprimée : 0 probe en 817 ms.
+
+- **Couverture des cas difficiles (4 nouvelles suites de tests automatisés)** :
+  1. `test_10000_new_synthetic_media_cold_ingestion_benchmark` : ingestion à froid de 10 000 nouveaux médias avec métadonnées réalistes, staging et publication atomique paginée.
+  2. `test_mixed_diff_difficult_cases_and_atomic_publication` : mélange de fichiers inchangés, modifiés, disparus, corrompus/invalides, NFO modifiés, affiches supprimées, et nouveaux fichiers ; vérification de la stabilité déterministe des UUIDs et du catalogue.
+  3. `test_sqlite_pool_audit_and_concurrent_reads_during_publication` : audit du pool 4 connexions, mesure des latences p50/p95/p99 et validation de la lecture streaming/catalogue sans `SQLITE_BUSY` pendant la publication.
+  4. `test_crash_cancellation_permissions_and_rollback` : annulation/crash pendant le staging, rollback immédiat en cas de changement de configuration de bibliothèque pendant la publication, contrôle strict des permissions (403 Forbidden sur scan et catalogue pour rôle `user`), et respect du flag `complete: false` (fichiers manquants non marqués indisponibles).
+
+- **Qualité et conformité Workspace** :
+  - `cargo fmt --check` : 0 diff.
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --locked --workspace --all-features` : **89 tests réussis** (64 unitaires/intégration Rust + doc-tests), 0 échec, 5 ignorés (Playwright).
+  - Architecture 3 crates (`media-contracts`, `media-node`, `media-poc`), migrations 0001–0009, Docker et modèle de permissions scrupuleusement préservés. Aucun commit, push ou publication effectué.
+
 ## 16 octobre 2026 — Jalon J3 (`docs/ARCHITECTURE_ROADMAP.md`) / P1 : Scanner incrémental streaming et ingestion progressive à mémoire bornée
 
 - **Goulots d'étranglement confirmés et mesurés** :

@@ -16,6 +16,7 @@
   let name = $state(DEFAULT_NAME);
   let media = $state<Media[]>([]);
   let mediaError = $state('');
+  let catalogueNotice = $state('');
   let busy = $state(true);
   let error = $state('');
   let films = $state<Work[]>([]);
@@ -47,15 +48,15 @@
   }
   onMount(() => {
     const controller = new AbortController();
-    Promise.all([request<{name:string}>('/api/v1/config', controller.signal), request<{media:Media[]}>('/api/v1/demo/media', controller.signal)])
-      .then(([config, data]) => { name = config.name; media = data.media; })
+    request<{name:string}>('/api/v1/config', controller.signal)
+      .then(config => { name = config.name; })
       .catch(() => { if (!controller.signal.aborted) mediaError = 'La lecture est temporairement indisponible. Rechargez la page pour réessayer.'; });
     return () => controller.abort();
   });
   $effect(() => {
     const id = workId, q = query, sorting = order, start = offset, currentSection = section;
     const controller = new AbortController();
-    search = q; sort = sorting; busy = true; error = ''; detail = null;
+    search = q; sort = sorting; busy = true; error = ''; mediaError = ''; detail = null; media = [];
     async function load() {
       try {
         if (currentSection === 'settings') return;
@@ -65,11 +66,18 @@
           if (controller.signal.aborted) return;
           if ((currentSection === 'films' && work.kind !== 'film') || (currentSection === 'series' && work.kind !== 'series')) throw new Error('Ce média appartient à une autre bibliothèque.');
           detail = work; selected = playbackIds(work)[0] ?? ''; season = work.seasons?.[0]?.number ?? 1;
+          const ids = [...new Set([...playbackIds(work), ...(work.seasons ?? []).flatMap(season => season.episodes.flatMap(playbackIds))])];
+          try {
+            const demo = ids.some(id => id.startsWith('demo-')) ? (await request<{media:Media[]}>('/api/v1/demo/media', controller.signal)).media : [];
+            const indexed = await Promise.all(ids.filter(id => !id.startsWith('demo-')).map(id => request<Media>(`/api/v1/media/${encodeURIComponent(id)}`, controller.signal)));
+            if (!controller.signal.aborted) media = [...demo, ...indexed];
+          } catch (failure) { if (!controller.signal.aborted) mediaError = failure instanceof Error ? failure.message : 'Chargement des sources impossible.'; }
         } else {
           const kinds = currentSection === 'films' ? ['film'] : currentSection === 'series' ? ['series'] : ['film','series'];
           const results = await Promise.all(kinds.map(kind => request<CatalogPage>(`/api/v1/catalog?${new URLSearchParams({ kind, q, sort:sorting, offset:String(start), limit:'24' })}`, controller.signal)));
           if (controller.signal.aborted) return;
           films = []; series = []; totalFilms = 0; totalSeries = 0;
+          catalogueNotice = [...new Set(results.map(result => result.notice).filter(Boolean))].join(' ');
           results.forEach((result, index) => { if (kinds[index] === 'film') { films = result.items; totalFilms = result.total; } else { series = result.items; totalSeries = result.total; } });
         }
       } catch (e) { if (!controller.signal.aborted) error = e instanceof Error ? e.message : 'Connexion au catalogue impossible.'; }
@@ -79,7 +87,7 @@
     return () => controller.abort();
   });
 </script>
-<svelte:head><title>{detail?.title ?? title} · {name}</title><meta name="description" content="Films et séries, chacun à leur place. Bibliothèque locale de test." /></svelte:head>
+<svelte:head><title>{detail?.title ?? title} · {name}</title><meta name="description" content="Films et séries, chacun à leur place. Bibliothèques locales." /></svelte:head>
 <a class="skip-link" href="#main-content">Aller au contenu</a>
 <header class="site-header">
   <a class="brand" href={resolve('/')} aria-label={`${name}, accueil`}><img src={`${base}/images/brand-mark.svg`} width="25" height="30" alt="" /><span>{name}</span></a>
@@ -98,7 +106,7 @@
     <a class="back-link" href={resolve(section === 'series' ? 'series/' : 'films/')}>← {section === 'series' ? 'Toutes les séries' : 'Tous les films'}</a>
     <section class="detail">
       <div class="detail-poster"><Poster work={detail} showMetadata={false} /></div>
-      <div class="detail-copy"><p class="eyebrow">{detail.kind === 'series' ? 'SÉRIE' : 'FILM'}{detail.synthetic ? ' · DÉMONSTRATION' : ''}</p><h1>{detail.title}</h1><p class="metadata">{detail.year ?? 'Année non renseignée'}{detail.kind === 'series' ? ` · ${detail.seasonCount ?? 0} ${(detail.seasonCount ?? 0) > 1 ? 'saisons' : 'saison'} · ${detail.episodeCount ?? 0} ${(detail.episodeCount ?? 0) > 1 ? 'épisodes' : 'épisode'}` : ''}</p><p class="synopsis">{detail.description}</p>
+      <div class="detail-copy"><p class="eyebrow">{detail.kind === 'series' ? 'SÉRIE' : 'FILM'}{detail.synthetic ? ' · DÉMONSTRATION' : ''}</p><h1>{detail.title}</h1><p class="metadata">{detail.year ?? 'Année non renseignée'}{detail.kind === 'series' ? ` · ${detail.seasonCount ?? 0} ${(detail.seasonCount ?? 0) > 1 ? 'saisons' : 'saison'} · ${detail.episodeCount ?? 0} ${(detail.episodeCount ?? 0) > 1 ? 'épisodes' : 'épisode'}` : ''}</p>{#if detail.genres?.length}<p class="metadata genres">{detail.genres.join(' · ')}</p>{/if}<p class="synopsis">{detail.description || 'Synopsis non renseigné.'}</p>
       {#if detail.kind === 'film'}
         <div class="versions" aria-label="Versions disponibles">{#each playableMedia as item (item.id)}<button class="version-choice" aria-pressed={selected === item.id} aria-label={`Sélectionner la version ${sourceLabel(item)}`} onclick={() => selected = item.id}>{sourceLabel(item)}</button>{/each}</div>
         <button class="hero-cta" disabled={!playableMedia.length} onclick={openPlayer}><Icon name="play" size={18} />Lecture</button>
@@ -129,7 +137,7 @@
     {#if section !== 'home' && (offset > 0 || totalFilms > offset + 24 || totalSeries > offset + 24)}<nav class="pagination" aria-label="Pages du catalogue">{#if offset > 0}<a class="secondary" href={resolve(`${section === 'films' ? 'films/' : section === 'series' ? 'series/' : 'search/'}?${new URLSearchParams({ q:query, sort:order, offset:String(Math.max(0,offset-24)) })}`)}>← Précédent</a>{/if}<span>Page {Math.floor(offset / 24) + 1}</span>{#if totalFilms > offset + 24 || totalSeries > offset + 24}<a class="secondary" href={resolve(`${section === 'films' ? 'films/' : section === 'series' ? 'series/' : 'search/'}?${new URLSearchParams({ q:query, sort:order, offset:String(offset+24) })}`)}>Suivant →</a>{/if}</nav>{/if}
   {/if}
 </main>
-<footer><span>{name} <span class="footer-dot">·</span> Votre cinéma, autrement.</span><p>Mode démonstration · médias de test.<br />Vos bibliothèques personnelles ne sont pas connectées.</p></footer>
+<footer><span>{name} <span class="footer-dot">·</span> Votre cinéma, autrement.</span><p>{detail?.synthetic ? 'Fiche de démonstration · médias de test.' : catalogueNotice || 'Bibliothèques locales · fichiers en lecture seule.'}</p></footer>
 <ImmersivePlayer bind:this={immersive} catalogue={playerMedia} createPlayer={(video, onError) => new NativePlayer(video, onError)} />
 
 <style>

@@ -1,8 +1,20 @@
+> Mise à jour scanner Films P1 : inventaire SQLite et bibliothèques locales
+> autorisées par MEDIA_LIBRARY_ROOT. Jobs session/rôle/CSRF, contrôle des droits
+> avant GET/HEAD/Range, refus liens et points de réanalyse Windows. Confinement
+> non atomique : risque TOCTOU résiduel et ACL opérateur nécessaires ; pas de
+> publication LAN/NAS. Voir [LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md).
+>
 > Mise à jour P1 bibliothèques : droits explicites SQLite et administration
 > session/rôle/CSRF livrés sur fixtures. Les restrictions administrator seule
 > ci-dessous sont historiques. Voir [LIBRARIES_AND_SCANNER.md](LIBRARIES_AND_SCANNER.md).
 
 # Sécurité du Core local et historique du banc P0
+
+NFO Films : XML local non fiable, quick-xml sans résolveur, DTD/entités externes
+rejetées, UTF-8 strict, limites1Mio/profondeur16/champs16Kio/64genres, confinement
+symlink/reparse existant et rendu texte échappé. Aucun champ ne devient chemin
+ou URL consulté ; aucune modification des médias/NFO. Le risque TOCTOU reste
+explicite. Détails et tests : [LOCAL_FILM_NFO.md](LOCAL_FILM_NFO.md).
 
 ## État actuel — 16 octobre 2026
 

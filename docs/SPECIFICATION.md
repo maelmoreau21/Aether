@@ -1,5 +1,16 @@
 # Périmètre du premier jalon P0
 
+## Jalon réalisé : premier scanner Films local (16 octobre 2026)
+
+Découverte MKV/MP4 par le Node, probes réutilisés, inventaire SQLite distinct
+Work/Edition/Version/Source/Asset/Track, catalogue et lecteur existants raccordés,
+jobs administrateur/CSRF et permissions par bibliothèque. Démonstration sur
+fichiers synthétiques après vrai redémarrage Core, sans déclaration de P1 complet.
+Séries/NFO/images/pistes externes/OIDC/multi-Node différés. Voir
+[LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md) pour le contrat réalisé ; les
+restrictions « fixtures uniquement/pas de scanner » des jalons suivants sont
+historiques.
+
 ## Clarification du 16 octobre 2026
 
 SQLite/bootstrap et sessions existent désormais ; les mentions sans auth dans

@@ -1,5 +1,10 @@
 # SQLite et premier administrateur local — P1
 
+Scanner Films : définir `MEDIA_LIBRARY_ROOT` avant bootstrap et lancement ; les
+deux binaires rejettent SQLite dans cette racine. Voir
+[LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md). Sans cette variable, le banc
+historique utilise MEDIA_FIXTURE_DIR. Aucune création de compte implicite.
+
 **Suite livrée le 16 octobre 2026 :** le compte de cette CLI peut maintenant
 se connecter à `/app/login/`. Sessions, cookies, CSRF, limitation des tentatives
 et permissions : [LOCAL_SESSIONS.md](LOCAL_SESSIONS.md). Les mentions ci-dessous

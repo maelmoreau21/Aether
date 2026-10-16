@@ -1,5 +1,17 @@
 # Bibliothèques et permissions P1 — 16 octobre 2026
 
+Les métadonnées NFO Films sont maintenant traitées par le Node et persistées
+sans modifier les droits ni le cache technique : [LOCAL_FILM_NFO.md](LOCAL_FILM_NFO.md).
+
+## État actuel : scanner Films livré
+
+Le premier scanner local, sa migration SQLite, les jobs et le parcours Web sont
+décrits dans [LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md). Cette réalisation
+succède au jalon de permissions sur fixtures décrit ci-dessous. Le mode
+`MEDIA_LIBRARY_ROOT` autorise une bibliothèque locale existante, démarre vide et
+ne charge aucune fixture expérimentale. Aucun média personnel n'a été utilisé
+pour les validations, qui reposent sur des copies synthétiques jetables.
+
 SQLite conserve Library (ID stable, nom, films/series, node_id local, racine,
 enabled) et library_permissions. Interface Administration → Bibliothèques :
 liste, création, modification, activation et remplacement atomique des grants.

@@ -191,3 +191,20 @@ Session administrator requise ; Origin exact et x-csrf-token pour mutations.
 401 sans session, 403 rôle/CSRF, 400 configuration, 404 modification ID absent.
 Erreurs de structure JSON suivant Axum. Les routes média/catalogue vérifient
 session et bibliothèque active/autorisée avant GET/HEAD/Range.
+
+## Scanner Films local P1
+
+Extension NFO : les mêmes routes exposent `originalTitle`, `plot`, `outline`,
+`premiered`, `genres`, `rating`, `mpaa`, `externalIds`, `metadataProvenance` et
+`metadataWarnings`. Titre/année/description utilisent les métadonnées éditoriales.
+Aucun chemin NFO public ni nouvelle route ; voir [LOCAL_FILM_NFO.md](LOCAL_FILM_NFO.md).
+
+Contrat réalisé : [LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md#jobs-et-api).
+POST/GET `/api/v1/admin/libraries/{id}/scan`, états persistants et compteurs ;
+POST réservé administrator avec CSRF, doublon409. Catalogue existant sur
+inventaire SQLite, mode local-library, mêmes paramètres de recherche/tri/pagination.
+GET `/api/v1/media/{assetId}` fournit le descripteur natif directement ;
+GET/HEAD/Range `/api/v1/assets/{assetId}/content` garde les droits bibliothèque.
+Media contient aussi `synthetic` (true pour les démos, false pour l'inventaire).
+Configuration publique mode standalone-local avec MEDIA_LIBRARY_ROOT ; mode
+localhost-fixtures conservé pour le banc expérimental isolé.

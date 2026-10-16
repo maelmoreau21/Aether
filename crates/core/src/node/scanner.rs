@@ -1,0 +1,570 @@
+//! Local Media Node discovery. No writes, database access, or HTTP concerns.
+use crate::media::{self, Probe};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{BTreeMap, HashMap},
+    io,
+    path::{Component, Path, PathBuf},
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, UNIX_EPOCH},
+};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CachedFile {
+    pub size: u64,
+    pub modified_ns: String,
+    pub probe: Probe,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScannedFile {
+    pub editorial: super::nfo::NfoOutcome,
+    pub relative_path: String,
+    pub size: u64,
+    pub modified_ns: String,
+    pub title: String,
+    pub year: Option<u16>,
+    /// Explicit provider identity or an exact local path, never fuzzy title matching.
+    pub identity_key: String,
+    pub external_ids: BTreeMap<String, String>,
+    pub probe: Probe,
+    pub mime: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScanIssue {
+    pub relative_path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct ScanReport {
+    pub files: Vec<ScannedFile>,
+    pub errors: Vec<ScanIssue>,
+    pub warnings: Vec<ScanIssue>,
+    pub discovered: u64,
+    pub probed: u64,
+    pub reused: u64,
+    /// False on interrupted/incomplete traversal: callers must not mark missing files unavailable.
+    pub complete: bool,
+}
+
+fn linked(metadata: &std::fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0 // all reparse points, including junctions
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+fn ignored(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    name.starts_with('.')
+        || name.ends_with(".trickplay")
+        || name.ends_with(".metathumb")
+        || matches!(
+            name.as_str(),
+            "extrafanart" | "$recycle.bin" | "system volume information"
+        )
+        || [
+            ".part",
+            ".partial",
+            ".tmp",
+            ".temp",
+            ".crdownload",
+            ".download",
+            ".!qb",
+        ]
+        .iter()
+        .any(|suffix| name.ends_with(suffix))
+}
+
+/// Revalidate an inventory-relative path before I/O, rejecting every link component.
+/// Canonicalization and subsequent open are not atomic against a hostile local writer.
+pub async fn confined_file(root: &Path, relative: &Path) -> io::Result<PathBuf> {
+    if linked(&tokio::fs::symlink_metadata(root).await?) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "library root link or reparse point forbidden",
+        ));
+    }
+    if relative.as_os_str().is_empty()
+        || relative
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid inventory-relative path",
+        ));
+    }
+    let root = tokio::fs::canonicalize(root).await?;
+    let mut current = root.clone();
+    for component in relative.components() {
+        current.push(component);
+        if linked(&tokio::fs::symlink_metadata(&current).await?) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "links and reparse points are forbidden",
+            ));
+        }
+    }
+    let canonical = tokio::fs::canonicalize(&current).await?;
+    if !canonical.starts_with(&root) || !tokio::fs::metadata(&canonical).await?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "asset outside root or not a regular file",
+        ));
+    }
+    Ok(canonical)
+}
+
+fn metadata_name(name: &str) -> (String, Option<u16>, BTreeMap<String, String>) {
+    let mut ids = BTreeMap::new();
+    for token in name
+        .split('[')
+        .skip(1)
+        .filter_map(|s| s.split_once(']').map(|p| p.0))
+    {
+        if let Some((provider, id)) = token.split_once('-') {
+            let provider = provider.to_ascii_lowercase();
+            let valid = match provider.as_str() {
+                "tmdb" | "tvdb" => !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()),
+                "imdb" => id
+                    .strip_prefix("tt")
+                    .is_some_and(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit())),
+                _ => false,
+            };
+            if valid {
+                ids.insert(provider, id.to_owned());
+            }
+        }
+    }
+    let mut year = None;
+    let mut end = name.find('[').unwrap_or(name.len());
+    for (start, _) in name.match_indices('(') {
+        if let Some(value) = name.get(start + 1..start + 5)
+            && name.as_bytes().get(start + 5) == Some(&b')')
+            && let Ok(value) = value.parse::<u16>()
+            && (1888..=2100).contains(&value)
+        {
+            year = Some(value);
+            end = end.min(start);
+            break;
+        }
+    }
+    let title = name[..end]
+        .trim()
+        .trim_end_matches(['-', '.', '_', ' '])
+        .to_owned();
+    (
+        if title.is_empty() {
+            name.to_owned()
+        } else {
+            title
+        },
+        year,
+        ids,
+    )
+}
+
+pub(super) fn identity(relative: &Path) -> (String, Option<u16>, BTreeMap<String, String>, String) {
+    let stem = relative
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Untitled");
+    let parent = relative.parent().filter(|p| !p.as_os_str().is_empty());
+    let folder = parent.and_then(|p| p.file_name()).and_then(|s| s.to_str());
+    let parsed_folder = folder.map(metadata_name);
+    let parsed_file = metadata_name(stem);
+    let conflict = parsed_folder.as_ref().is_some_and(|(title, year, ids)| {
+        parsed_file
+            .2
+            .iter()
+            .any(|(provider, id)| ids.get(provider).is_some_and(|folder_id| folder_id != id))
+            || parsed_file
+                .1
+                .is_some_and(|file_year| year.is_some_and(|folder_year| folder_year != file_year))
+            || (parsed_file.1.is_some() && !parsed_file.0.eq_ignore_ascii_case(title))
+    });
+    let (title, year, ids, group) = match parsed_folder {
+        Some((title, year, ids)) if !conflict && (year.is_some() || !ids.is_empty()) => (
+            title,
+            year,
+            ids,
+            format!(
+                "folder:{}",
+                parent.unwrap_or(Path::new("")).to_string_lossy()
+            ),
+        ),
+        _ => {
+            let (t, y, ids) = parsed_file;
+            (t, y, ids, format!("file:{}", relative.to_string_lossy()))
+        }
+    };
+    let key = ["tmdb", "imdb", "tvdb"]
+        .iter()
+        .find_map(|p| ids.get(*p).map(|v| format!("{p}:{v}")))
+        .unwrap_or(group);
+    (title, year, ids, key)
+}
+
+/// Depth-first streaming traversal (one directory iterator per depth), one probe at a time.
+/// Probe cancellation drops its kill-on-drop child. Errors never contain absolute paths.
+pub async fn scan(
+    root: &Path,
+    cache: &HashMap<String, CachedFile>,
+    cancel: &AtomicBool,
+) -> io::Result<ScanReport> {
+    if !root.is_absolute()
+        || root.components().any(|c| c == Component::ParentDir)
+        || linked(&tokio::fs::symlink_metadata(root).await?)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid library root",
+        ));
+    }
+    let root = tokio::fs::canonicalize(root).await?;
+    let mut stack = vec![tokio::fs::read_dir(&root).await?];
+    let mut report = ScanReport {
+        complete: true,
+        ..Default::default()
+    };
+    while !stack.is_empty() {
+        if cancel.load(Ordering::Relaxed) {
+            report.complete = false;
+            break;
+        }
+        let entry = match stack.last_mut() {
+            Some(dir) => match dir.next_entry().await {
+                Ok(Some(entry)) => entry,
+                Ok(None) => {
+                    stack.pop();
+                    continue;
+                }
+                Err(_) => {
+                    report.complete = false;
+                    report.errors.push(ScanIssue {
+                        relative_path: String::new(),
+                        message: "directory traversal failed".into(),
+                    });
+                    stack.pop();
+                    continue;
+                }
+            },
+            None => break,
+        };
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(&root)
+            .map_err(|_| io::Error::other("unconfined traversal"))?;
+        let relative_path = relative.to_string_lossy().replace('\\', "/");
+        let name = entry.file_name();
+        if ignored(&name.to_string_lossy()) {
+            continue;
+        }
+        let metadata = match tokio::fs::symlink_metadata(&path).await {
+            Ok(m) => m,
+            Err(_) => {
+                report.complete = false;
+                report.errors.push(ScanIssue {
+                    relative_path,
+                    message: "file metadata unavailable".into(),
+                });
+                continue;
+            }
+        };
+        if linked(&metadata) {
+            report.errors.push(ScanIssue {
+                relative_path,
+                message: "link or reparse point ignored".into(),
+            });
+            continue;
+        }
+        if metadata.is_dir() {
+            match tokio::fs::read_dir(&path).await {
+                Ok(dir) => stack.push(dir),
+                Err(_) => {
+                    report.complete = false;
+                    report.errors.push(ScanIssue {
+                        relative_path,
+                        message: "directory unreadable".into(),
+                    });
+                }
+            }
+            continue;
+        }
+        let extension = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if !metadata.is_file() || !matches!(extension.as_str(), "mkv" | "mp4") {
+            continue;
+        }
+        report.discovered += 1;
+        let modified_ns = match metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        {
+            Some(t) => t.as_nanos().to_string(),
+            None => {
+                report.errors.push(ScanIssue {
+                    relative_path,
+                    message: "modification time unavailable".into(),
+                });
+                continue;
+            }
+        };
+        let file = match confined_file(&root, relative).await {
+            Ok(p) => p,
+            Err(_) => {
+                report.errors.push(ScanIssue {
+                    relative_path,
+                    message: "file failed confinement validation".into(),
+                });
+                continue;
+            }
+        };
+        let probe = if let Some(cached) = cache
+            .get(&relative_path)
+            .filter(|c| c.size == metadata.len() && c.modified_ns == modified_ns)
+        {
+            report.reused += 1;
+            cached.probe.clone()
+        } else {
+            report.probed += 1;
+            let probing = media::probe(&file);
+            tokio::pin!(probing);
+            let result = loop {
+                tokio::select! {
+                    result = &mut probing => break Some(result),
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                        if cancel.load(Ordering::Relaxed) { break None; }
+                    }
+                }
+            };
+            match result {
+                None => {
+                    report.complete = false;
+                    break;
+                }
+                Some(Ok(probe)) => probe,
+                // A failed adapter/process is not evidence that all media are corrupt.
+                // Abort publication so an unavailable ffprobe cannot invalidate an inventory.
+                Some(Err(media::ProbeError::Io(error))) => return Err(error),
+                Some(Err(error)) => {
+                    report.errors.push(ScanIssue {
+                        relative_path,
+                        message: error.to_string(),
+                    });
+                    continue;
+                }
+            }
+        };
+        // Do not persist metadata paired with a file changed during its probe.
+        let unchanged = tokio::fs::symlink_metadata(&file).await.is_ok_and(|after| {
+            !linked(&after)
+                && after.len() == metadata.len()
+                && after.modified().ok() == metadata.modified().ok()
+        });
+        if !unchanged {
+            report.errors.push(ScanIssue {
+                relative_path,
+                message: "file changed during analysis; retry scan".into(),
+            });
+            continue;
+        }
+        let (title, year, external_ids, identity_key) = identity(relative);
+        let editorial = super::nfo::discover(&root, relative).await;
+        if let super::nfo::NfoOutcome::Invalid { path, message } = &editorial {
+            report.warnings.push(ScanIssue {
+                relative_path: path.clone(),
+                message: message.clone(),
+            });
+        }
+        report.files.push(ScannedFile {
+            editorial,
+            relative_path,
+            size: metadata.len(),
+            modified_ns,
+            title,
+            year,
+            identity_key,
+            external_ids,
+            probe,
+            mime: if extension == "mp4" {
+                "video/mp4"
+            } else {
+                "video/x-matroska"
+            }
+            .into(),
+        });
+    }
+    Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn traversal_refuses_directory_links_and_windows_junctions() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        let outside = temp.path().join("outside");
+        tokio::fs::create_dir(&root).await.unwrap();
+        tokio::fs::create_dir(&outside).await.unwrap();
+        tokio::fs::write(outside.join("secret.mp4"), b"not media")
+            .await
+            .unwrap();
+        let link = root.join("escape");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        #[cfg(windows)]
+        assert!(
+            std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(&link)
+                .arg(&outside)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        let report = scan(&root, &HashMap::new(), &AtomicBool::new(false))
+            .await
+            .unwrap();
+        assert_eq!(report.discovered, 0);
+        assert_eq!(report.errors.len(), 1);
+        assert!(
+            confined_file(&root, Path::new("escape/secret.mp4"))
+                .await
+                .is_err()
+        );
+        assert!(confined_file(&link, Path::new("secret.mp4")).await.is_err());
+        assert!(
+            scan(&link, &HashMap::new(), &AtomicBool::new(false))
+                .await
+                .is_err()
+        );
+    }
+    #[test]
+    fn qualified_identity_and_exact_folders_only() {
+        let (title, year, ids, key) = identity(Path::new("Film (2024) [tmdb-123]/film-4k.mp4"));
+        assert_eq!(title, "Film");
+        assert_eq!(year, Some(2024));
+        assert_eq!(ids["tmdb"], "123");
+        assert_eq!(key, "tmdb:123");
+        assert_ne!(
+            identity(Path::new("A/Foo.mp4")).3,
+            identity(Path::new("B/Foo.mp4")).3
+        );
+        assert!(metadata_name("Film [12345]").2.is_empty());
+        assert_eq!(
+            identity(Path::new("Film (2026)/Other Film (2025).mp4")).0,
+            "Other Film"
+        );
+        assert_eq!(
+            identity(Path::new("Film (2026) [tmdb-1]/Film [tmdb-2].mp4")).3,
+            "tmdb:2"
+        );
+        assert_ne!(
+            identity(Path::new("Film (2026)/Film (2025).mp4")).3,
+            "folder:Film (2026)"
+        );
+        assert!(ignored("Film.trickplay"));
+        assert!(ignored("movie.mkv.part"));
+    }
+    #[tokio::test]
+    async fn cached_scan_skips_probe_and_temporary_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let film = temp.path().join("Film (2024)");
+        tokio::fs::create_dir(&film).await.unwrap();
+        let path = film.join("film.mp4");
+        tokio::fs::write(&path, b"cached synthetic media")
+            .await
+            .unwrap();
+        tokio::fs::write(film.join("incomplete.mkv.part"), b"temporary")
+            .await
+            .unwrap();
+        let m = tokio::fs::metadata(path).await.unwrap();
+        let probe = Probe {
+            streams: vec![],
+            format: BTreeMap::new(),
+        };
+        let cache = HashMap::from([(
+            "Film (2024)/film.mp4".into(),
+            CachedFile {
+                size: m.len(),
+                modified_ns: m
+                    .modified()
+                    .unwrap()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+                    .to_string(),
+                probe,
+            },
+        )]);
+        tokio::fs::write(
+            film.join("movie.nfo"),
+            b"<movie><title>Editorial title</title></movie>",
+        )
+        .await
+        .unwrap();
+        let result = scan(temp.path(), &cache, &AtomicBool::new(false))
+            .await
+            .unwrap();
+        assert!(result.complete);
+        assert_eq!(result.discovered, 1);
+        assert_eq!(result.reused, 1);
+        assert_eq!(result.probed, 0);
+        assert_eq!(result.files[0].title, "Film");
+        assert!(
+            matches!(&result.files[0].editorial, super::super::nfo::NfoOutcome::Valid { metadata, .. } if metadata.title.as_deref() == Some("Editorial title"))
+        );
+        tokio::fs::write(
+            film.join("movie.nfo"),
+            b"<movie><title>Changed</title></movie>",
+        )
+        .await
+        .unwrap();
+        let updated = scan(temp.path(), &cache, &AtomicBool::new(false))
+            .await
+            .unwrap();
+        assert_eq!(updated.probed, 0);
+        assert!(
+            matches!(&updated.files[0].editorial, super::super::nfo::NfoOutcome::Valid { metadata, .. } if metadata.title.as_deref() == Some("Changed"))
+        );
+        tokio::fs::remove_file(film.join("movie.nfo"))
+            .await
+            .unwrap();
+        let removed = scan(temp.path(), &cache, &AtomicBool::new(false))
+            .await
+            .unwrap();
+        assert_eq!(removed.probed, 0);
+        assert!(matches!(
+            &removed.files[0].editorial,
+            super::super::nfo::NfoOutcome::Missing
+        ));
+        assert_eq!(removed.files[0].identity_key, result.files[0].identity_key);
+        assert!(
+            confined_file(temp.path(), Path::new("../outside.mp4"))
+                .await
+                .is_err()
+        );
+        let cancelled = scan(temp.path(), &cache, &AtomicBool::new(true))
+            .await
+            .unwrap();
+        assert!(!cancelled.complete);
+    }
+}

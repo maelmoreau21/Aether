@@ -60,9 +60,9 @@
     try {
       await engine.load(media);
       if (current !== generation) return;
-      const source = media.sources.find(source => source.language === preferredLanguage) ?? media.sources.find(source => source.language === 'fr');
+      const source = media.sources.find(source => source.language === preferredLanguage) ?? media.sources.find(source => source.language === 'fr') ?? media.sources[0];
       if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
-      if (source.language !== preferredLanguage) notice = 'Votre langue précédente est indisponible. Source française sélectionnée.';
+      if (source.language !== preferredLanguage) notice = 'Votre langue précédente est indisponible. Première source disponible sélectionnée.';
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       const usableSubtitle = media.subtitles.some(track => track.id === subtitle) ? subtitle : null;
       await engine.selectSubtitle(usableSubtitle); subtitle = usableSubtitle;
@@ -176,7 +176,7 @@
     <button class="video-interaction" tabindex="-1" aria-label="Afficher ou masquer les commandes" onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
       <button class="return" aria-label="Retour à l’accueil" onclick={close}><Icon name="back" size={24} /></button>
-      <div class="title"><span>{active?.title ?? 'Votre séance'}</span><small>LECTURE LOCALE · MIRE SYNTHÉTIQUE</small></div>
+      <div class="title"><span>{active?.title ?? 'Votre séance'}</span><small>LECTURE LOCALE{active?.synthetic ? ' · MIRE SYNTHÉTIQUE' : ''}</small></div>
     </div>
     {#if busy}<div class="loading" role="status"><span class="loader"></span>Préparation de votre séance…</div>{/if}
     {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, playback); }}>Réessayer explicitement</button></div>{/if}

@@ -83,7 +83,7 @@
         <div role="separator" class="menu-separator"></div>
         <div role="group" aria-label="Sources de démonstration">
           <p class="menu-section" role="presentation">Sources de démonstration</p>
-          {#each catalogue as item (item.id)}<button data-source-id={item.id} role="menuitemradio" tabindex={item.id === media.id ? 0 : -1} aria-checked={item.id === media.id} disabled={busy} onclick={() => choose(() => onSource(item.id))}><span>{item.title}<small>Source préparée · même mire synthétique</small></span>{#if item.id === media.id}<Icon name="check" size={18} />{/if}</button>{/each}
+          {#each catalogue as item (item.id)}<button data-source-id={item.id} role="menuitemradio" tabindex={item.id === media.id ? 0 : -1} aria-checked={item.id === media.id} disabled={busy} onclick={() => choose(() => onSource(item.id))}><span>{item.title}<small>{item.synthetic ? 'Source préparée · même mire synthétique' : 'Fichier local indexé'}</small></span>{#if item.id === media.id}<Icon name="check" size={18} />{/if}</button>{/each}
         </div>
       {:else if menu === 'speed'}
         <div role="group" aria-label="Vitesses de lecture">

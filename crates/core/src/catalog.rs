@@ -160,6 +160,7 @@ pub async fn list(
     State(inventory): State<Arc<Inventory>>,
     query: Result<Query<CatalogQuery>, QueryRejection>,
     visible: Option<Extension<crate::permissions::VisibleLibraries>>,
+    store: Option<Extension<crate::identity::IdentityStore>>,
 ) -> Response {
     let Ok(Query(query)) = query else {
         return error(StatusCode::BAD_REQUEST, "invalid_catalog_query");
@@ -177,6 +178,24 @@ pub async fn list(
         return error(StatusCode::BAD_REQUEST, "invalid_catalog_query");
     }
     let search = query.q.unwrap_or_default().trim().to_lowercase();
+    if let (Some(Extension(store)), Some(Extension(visible))) = (&store, &visible)
+        && (!inventory.is_fixture_bench() || visible.0.iter().any(|id| !id.starts_with("fixture-")))
+    {
+        return match crate::inventory::catalogue(
+            store,
+            &visible.0,
+            query.kind.as_deref(),
+            &search,
+            query.sort.as_deref().unwrap_or("title-asc"),
+            offset,
+            limit,
+        )
+        .await
+        {
+            Ok(value) => Json(value).into_response(),
+            Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+        };
+    }
     let mut items: Vec<_> = works(available(&inventory))
         .into_iter()
         .filter(|work| {
@@ -200,7 +219,21 @@ pub async fn list(
     .into_response()
 }
 
-pub async fn detail(State(inventory): State<Arc<Inventory>>, Path(id): Path<String>) -> Response {
+pub async fn detail(
+    State(inventory): State<Arc<Inventory>>,
+    Path(id): Path<String>,
+    store: Option<Extension<crate::identity::IdentityStore>>,
+) -> Response {
+    if !id.starts_with("fixture-") {
+        return match store {
+            Some(Extension(store)) => match crate::inventory::detail(&store, &id).await {
+                Ok(Some(value)) => Json(value).into_response(),
+                Ok(None) => error(StatusCode::NOT_FOUND, "unknown_work"),
+                Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+            },
+            None => error(StatusCode::NOT_FOUND, "unknown_work"),
+        };
+    }
     if !available(&inventory) {
         return error(StatusCode::NOT_FOUND, "unknown_work");
     }

@@ -1,5 +1,14 @@
 # Plan de spécification — Scanner de bibliothèques P1
 
+> Extension réalisée : NFO Films locaux bornés, détails et écarts conservateurs
+> dans [LOCAL_FILM_NFO.md](LOCAL_FILM_NFO.md). Les IDs NFO ne deviennent pas des
+> clés de fusion ; séries/images/pistes externes de ce plan restent différées.
+
+> Réalisation partielle du 16 octobre 2026 : le jalon Films sans NFO/images/
+> sous-titres externes est implémenté séparément. Voir [LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md).
+> Ce plan reste une cible ; sa consigne historique de ne pas coder concernait
+> l'étape de conception et a été remplacée par la demande explicite du jalon.
+
 > **Statut : Spécification d'architecture et plan de test pour le jalon P1 autonome.**
 > **Règle absolue : Aucun code de scanner, aucune migration SQLite et aucune modification des médias réels ne sont réalisés dans cette étape.**
 > Ce document définit le contrat technique pour l'ingestion des dossiers organisés selon les conventions Radarr et Sonarr, en lecture seule (`:ro`), en coexistence pacifique avec Jellyfin.

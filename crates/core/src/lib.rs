@@ -5,10 +5,12 @@ mod brand;
 mod catalog;
 mod demo;
 pub mod identity;
+pub mod inventory;
 pub mod libraries;
 pub mod media;
 pub mod node;
 pub mod permissions;
+pub mod scans;
 
 use axum::{
     Json, Router,
@@ -74,23 +76,56 @@ pub async fn secure_app(
     _port: u16,
     auth: auth::AuthState,
 ) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
-    libraries::initialize(&auth.store, inventory.root()).await?;
+    secure_app_with_jobs(inventory, _port, auth, Arc::new(scans::ScanJobs::default())).await
+}
+
+pub async fn secure_app_with_jobs(
+    inventory: node::Inventory,
+    _port: u16,
+    auth: auth::AuthState,
+    jobs: Arc<scans::ScanJobs>,
+) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
+    let mode = if inventory.is_fixture_bench() {
+        "localhost-fixtures"
+    } else {
+        "standalone-local"
+    };
+    if inventory.is_fixture_bench() {
+        libraries::initialize(&auth.store, inventory.root()).await?;
+    } else {
+        libraries::initialize_local(&auth.store).await?;
+    }
     let root = inventory.root().to_owned();
     let origin = auth.origin().to_owned();
-    let media = media_routes(inventory).route_layer(middleware::from_fn_with_state(
-        permissions::MediaAccess {
-            auth: auth.clone(),
-            root: root.clone(),
-        },
-        permissions::require_media,
-    ));
+    let media = media_routes(inventory)
+        .route("/api/v1/media/{id}", get(indexed_descriptor))
+        .layer(axum::Extension(auth.store.clone()))
+        .route_layer(middleware::from_fn_with_state(
+            permissions::MediaAccess {
+                auth: auth.clone(),
+                root: root.clone(),
+            },
+            permissions::require_media,
+        ));
     Ok(local_security(
-        public_routes()
+        public_routes(mode)
             .merge(media)
+            .merge(scans::router(auth.clone(), root.clone(), jobs).await?)
             .merge(libraries::router(auth.clone(), root))
             .merge(auth::router(auth)),
         origin,
     ))
+}
+
+async fn indexed_descriptor(
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    match inventory::descriptor(&store, &id).await {
+        Ok(Some(media)) => Json(media).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, "unknown_media"),
+        Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+    }
 }
 
 /// Explicit compile-time isolated bench for synthetic fixture tests only.
@@ -98,12 +133,12 @@ pub async fn secure_app(
 #[cfg(feature = "fixture-bench")]
 pub fn app(inventory: node::Inventory, port: u16) -> Router {
     local_security(
-        public_routes().merge(media_routes(inventory)),
+        public_routes("localhost-fixtures").merge(media_routes(inventory)),
         format!("http://127.0.0.1:{port}"),
     )
 }
 
-fn public_routes() -> Router {
+fn public_routes(mode: &'static str) -> Router {
     Router::new()
         .nest_service(
             "/app",
@@ -112,13 +147,13 @@ fn public_routes() -> Router {
         )
         .route(
             "/api/v1/config",
-            get(|| async {
-                Json(serde_json::json!({"name": brand::DEFAULT_NAME, "mode":"localhost-fixtures"}))
+            get(move || async move {
+                Json(serde_json::json!({"name": brand::DEFAULT_NAME, "mode":mode}))
             }),
         )
         .route(
             "/api/v1/health",
-            get(|| async { Json(serde_json::json!({"status":"ok", "mode":"local-p0-bench"})) }),
+            get(move || async move { Json(serde_json::json!({"status":"ok", "mode":mode})) }),
         )
 }
 

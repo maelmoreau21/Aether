@@ -111,6 +111,10 @@ impl IdentityStore {
         self.pool.close().await;
     }
 
+    pub fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
     pub async fn bootstrap(
         &self,
         login: &str,

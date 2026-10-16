@@ -20,12 +20,19 @@ pub enum ProbeError {
 }
 
 pub async fn probe(path: &Path) -> Result<Probe, ProbeError> {
+    let file = std::fs::File::open(path)?;
+    probe_file(file).await
+}
+
+pub async fn probe_file(mut file: std::fs::File) -> Result<Probe, ProbeError> {
+    use std::io::Seek;
+    file.rewind()?;
     let mut child = Command::new("ffprobe")
         .args([
             "-v",
             "error",
             "-protocol_whitelist",
-            "file",
+            "fd,pipe",
             "-format_whitelist",
             "matroska,webm,mov",
             "-max_alloc",
@@ -39,9 +46,9 @@ pub async fn probe(path: &Path) -> Result<Probe, ProbeError> {
             "-show_data",
             "-of",
             "json",
+            "-",
         ])
-        .arg(path)
-        .stdin(Stdio::null())
+        .stdin(Stdio::from(file))
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true)
@@ -80,9 +87,75 @@ pub async fn probe_opened(opened: &OpenedFile) -> Result<Probe, ProbeError> {
     opened
         .verify_unchanged_sync()
         .map_err(|_| ProbeError::Rejected)?;
-    let result = probe(opened.canonical_path()).await?;
+    let file = opened.try_clone_std().map_err(ProbeError::Io)?;
+    let result = probe_file(file).await?;
     opened
         .verify_unchanged_sync()
         .map_err(|_| ProbeError::Rejected)?;
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn fixture_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/generated")
+    }
+
+    #[tokio::test]
+    async fn probe_opened_consumes_handle_and_resists_path_substitution() {
+        let root = tempfile::tempdir().unwrap();
+        let fixtures = fixture_root();
+        let original = root.path().join("film.mkv");
+        let substitute = root.path().join("substitute.mp4");
+
+        // Copy a 3-stream MKV as the original confined file
+        tokio::fs::copy(fixtures.join("av1-opus.mkv"), &original)
+            .await
+            .unwrap();
+        // Copy a 6-stream MP4 as the substitute
+        tokio::fs::copy(
+            fixtures.join("representative/representative.mp4"),
+            &substitute,
+        )
+        .await
+        .unwrap();
+
+        // 1. Confine and open the original file
+        let opened = OpenedFile::open_in_root(root.path(), Path::new("film.mkv"))
+            .await
+            .unwrap();
+
+        // 2. Perform path substitution on disk while handle is held
+        let backup = root.path().join("film_backup.mkv");
+        tokio::fs::rename(&original, &backup).await.unwrap();
+        tokio::fs::copy(&substitute, &original).await.unwrap();
+
+        // A path-based probe on the disk path probes the substituted file (6 streams)
+        let path_probe = probe(&original).await.unwrap();
+        assert_eq!(path_probe.streams.len(), 6);
+
+        // Directly probing the descriptor of the opened file probes the original file (3 streams)
+        let handle_probe = probe_file(opened.try_clone_std().unwrap()).await.unwrap();
+        assert_eq!(handle_probe.streams.len(), 3);
+        assert_eq!(handle_probe.streams[0].codec_name.as_deref(), Some("av1"));
+
+        // probe_opened detects that the path on disk was altered and rejects
+        assert!(matches!(
+            probe_opened(&opened).await,
+            Err(ProbeError::Rejected)
+        ));
+
+        // 3. Transient substitution: restore original file path on disk before probe_opened
+        tokio::fs::remove_file(&original).await.unwrap();
+        tokio::fs::rename(&backup, &original).await.unwrap();
+
+        // Now probe_opened succeeds, consuming the verified handle with identical 3 streams
+        opened.verify_unchanged_sync().unwrap();
+        let restored_probe = probe_opened(&opened).await.unwrap();
+        assert_eq!(restored_probe.streams.len(), 3);
+        assert_eq!(restored_probe.streams[0].codec_name.as_deref(), Some("av1"));
+    }
 }

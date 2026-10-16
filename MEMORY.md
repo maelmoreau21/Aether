@@ -1,5 +1,47 @@
 # MEMORY.md — État et décisions Aether
 
+## 16 octobre 2026 — Jalon J2 (`docs/ARCHITECTURE_ROADMAP.md`) : Catalogue SQLite performant et pagination en base
+
+- **Transfert complet du filtrage, tri, recherche, comptage et pagination vers SQLite** :
+  - Dans `crates/core/src/inventory.rs::catalogue()`, élimination intégrale du scan mémoire global (`fetch_all` sans LIMIT, `Vec<Value>` et tri Rust).
+  - Requête paramétrée sécurisée construite via `sqlx::QueryBuilder` : `WHERE w.library_id IN (?, ...)` applique strictement les permissions d'accès utilisateur en amont de toute pagination.
+  - Court-circuit instantané (< 0,01 ms) lorsque `visible` est vide ou que le type demandé est incompatible, éliminant tout appel superflu à SQLite.
+  - Requête de comptage dédiée (`SELECT COUNT(*)`) exécutée sans sous-requête d'affiche ni allocation de structures métier.
+  - Pagination SQLite `LIMIT ? OFFSET ?` : seules les 24 lignes de la page demandée sont lues et converties en JSON (réduction de 99,76 % des allocations mémoire sur 10 000 œuvres).
+  - Évaluation de la sous-requête corrélée d'affiches locales (`poster_url`) bornée exclusivement aux 24 œuvres de la page demandée.
+- **Migration non destructive `0007_catalogue_indexes.sql` et plan d'exécution optimisé** :
+  - Colonne `title_sort TEXT NOT NULL DEFAULT ''` sur `inventory_works`, peuplée automatiquement avec `lower(title)` et maintenue par Rust avec `to_lowercase()` pour le respect intégral des propriétés Unicode.
+  - Index couvrants `inventory_works_library_sort(library_id, title_sort, id)` et `inventory_works_title_sort(title_sort, id)`.
+  - Index sur clés étrangères du graphe média : `inventory_editions(work_id)`, `inventory_versions(edition_id)`, `inventory_sources(version_id)`, `inventory_assets(source_id, available)`.
+  - Validation `EXPLAIN QUERY PLAN` (`tests/catalog_performance.rs`) : comptage via index couvrant direct (`COVERING INDEX`), vérification `EXISTS` du graphe en O(1) par index seeks systématiques.
+- **Préservation de la sémantique de recherche et de tri Unicode** :
+  - Recherche par sous-chaîne `instr(w.title_sort, ?)` insensible à la casse Unicode (`été` retrouve `Été à Paris` et `Été & Neige`, `éléphant` retrouve `Éléphant Blanc`, `ça` retrouve `Ça chapitre un`), sans problème d'échappement de caractères spéciaux LIKE (`%`, `_`).
+  - Tri déterministe avec bris d'égalité stable `ORDER BY w.title_sort ASC, w.id ASC` (et `DESC`), préservant à l'identique l'ordre historique de `sort_by_key`.
+- **Métriques réelles mesurées en banc reproductible (`catalog_performance.rs`)** :
+  - 1 000 œuvres : passage de 64,12 ms à **22,04 ms** (gain 2,9x) ; recherche ciblée en **7,71 ms** (gain 8,3x).
+  - 10 000 œuvres : passage de 854,38 ms à **235,91 ms** (gain 3,6x) ; page éloignée (offset=9960) en **335,48 ms** (gain 2,5x) ; recherche ciblée en **53,66 ms** (gain 15,9x).
+  - Empreinte mémoire Rust : 24 structures JSON allouées au lieu de 10 000 (division par plus de 400).
+- **Validation** :
+  - `cargo fmt --check` : OK.
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --locked --workspace --all-features` : **81 tests réussis** (23 dans `media-node`, 2 dans `media-contracts`, 56 dans `media-poc`), 0 échec, 5 ignorés.
+  - Documentation complète créée dans `docs/SQL_PERFORMANCE.md`.
+
+## 16 octobre 2026 — Sécurisation de l'analyse ffprobe sur descripteur confiné (`probe_file` / `probe_opened`)
+
+- **Audit et élimination de la substitution transitoire de chemin (TOCTOU) dans `ffprobe`** :
+  - Dans `crates/node/src/probe.rs` et `crates/node/src/scanner.rs`, `probe` et `probe_opened` transmettaient précédemment un chemin canonique à `ffprobe`.
+  - Résolution : `ffprobe` est exécuté avec `-protocol_whitelist fd,pipe` et `-` sur stdin connecté directement au descripteur/handle `OpenedFile` cloné (`std::process::Stdio::from(opened.try_clone_std()?)`), avec `file.rewind()?` préalable.
+  - Le protocole `file:` est totalement retiré de la whitelist, interdisant mathématiquement à `ffprobe` d'ouvrir le moindre chemin de fichier sur le disque ou de résoudre des références externes (dref, segments Matroska externes).
+  - Capacités de seek préservées : sur Linux comme sur Windows, un descripteur régulier hérité sur stdin (`fd 0` / `STD_INPUT_HANDLE`) conserve l'aptitude `lseek` / `SetFilePointerEx`. Vérifié avec succès sur les conteneurs MKV, MP4, MP4 fragmenté et MP4 avec atome `moov` déplacé en fin de fichier.
+  - Le scanner (`scanner.rs`) utilise désormais `probe::probe_opened(&opened)` au lieu de `probe::probe(opened.canonical_path())`.
+  - Contrôle double : `OpenedFile::verify_unchanged_sync()` est exécuté avant et après le probe, garantissant l'intégrité de l'attribut fichier et détectant toute altération du chemin sur le disque.
+  - Test dédié de non-régression et de résistance à la substitution ajouté : `probe::tests::probe_opened_consumes_handle_and_resists_path_substitution`.
+- **Validation** :
+  - `cargo fmt --check` : OK.
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --locked --workspace --all-features` : **77 tests réussis** (23 dans `media-node`, 2 dans `media-contracts`, 52 dans `media-poc`), 0 échec, 5 ignorés.
+
 ## 16 octobre 2026 — Jalon J1 (`docs/ARCHITECTURE_ROADMAP.md`) : Workspace Rust 3 crates et confinement par descripteur (`OpenedFile`)
 
 - **Découpage effectif en 3 crates Cargo (`crates/core`, `crates/node`, `crates/shared`)** :
@@ -10,7 +52,7 @@
   - Sous Linux/Docker : traversée relative confinée via `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV)` avec repli composant par composant `openat(O_NOFOLLOW | O_CLOEXEC)` (`open_unix_fallback`, activé sur `ENOSYS` ou `EPERM` seccomp) et vérification `fstat`.
   - Sous Windows : ouverture des répertoires intermédiaires sans `FILE_SHARE_DELETE` maintenus ouverts pendant la traversée, ouverture avec `FILE_FLAG_OPEN_REPARSE_POINT`, rejet immédiat de `FILE_ATTRIBUTE_REPARSE_POINT` (`0x400`, symlinks et junctions NTFS) sur chaque handle et vérification d'identité de handle (`verify_unchanged` / `verify_unchanged_sync`).
   - Le streaming HTTP (`GET`, `HEAD`, `Range` simple RFC 9110 avec `200 OK`, `206 Partial Content`, `416 Range Not Satisfiable`, blocs de 64 Kio), la lecture NFO et le décodage d'images consomment directement le `std::fs::File` contenu dans `OpenedFile`.
-  - Limite documentée : `ffprobe` étant un processus externe, il reçoit le chemin vérifié par `OpenedFile::verify_unchanged` juste avant l'exécution et immédiatement après.
+  - L'analyse `ffprobe` consomme directement le descripteur de fichier ouvert via stdin avec whitelist `fd,pipe` (aucun accès `file:`).
 - **Mise à jour Docker et validations complètes** :
   - `Dockerfile` mis à jour pour mettre en cache les dépendances des 3 crates (`crates/core`, `crates/node`, `crates/shared`).
   - `cargo fmt --check`, `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 erreur, 0 avertissement.

@@ -6,6 +6,9 @@
 > et vérification d'identité de handle (`verify_unchanged`). Le streaming HTTP (`GET`, `HEAD`, `Range`
 > par blocs de 64 Kio), la lecture NFO et le décodage d'affiches lisent directement depuis le
 > descripteur ouvert sans réouverture par chemin (`ServeFile` retiré des routes médias/images).
+> L'analyse `ffprobe` (`probe_opened` / `probe_file`) consomme également directement le descripteur
+> déjà ouvert et confiné transmis sur son entrée standard (`-`, `protocol_whitelist` restreint à `fd,pipe`),
+> interdisant tout accès au protocole `file:` et éliminant le risque de substitution transitoire du chemin (TOCTOU).
 >
 > Extension P1 affiches locales Films : inventaire séparé, route image avec
 > session/droits et repli Web. État actuel : [LOCAL_FILM_POSTERS.md](LOCAL_FILM_POSTERS.md).
@@ -60,12 +63,15 @@ la vérification canonique puis l'ouverture ne sont pas atomiques face à un
 réelles ; le banc ne prétend pas sécuriser un stockage modifiable par un adversaire.
 
 ffprobe est un adaptateur temporaire externe, résolu depuis un PATH de confiance,
-lancé sans shell, protocoles limités à file, démuxeurs limités, plafond par
-allocation 64 MiB, sortie JSON limitée à 1 MiB, délai 10 s et kill-on-drop.
-Ce n'est pas un sandbox de parseur hostile ni une borne de RSS totale.
-FFmpeg ne s'exécute que pour la préparation et les vérifications hors serveur.
-Les probes publics retirent `format.filename` ; seuls des médias générés sans
-secrets sont autorisés. Aucune clé, identité OIDC ou mot de passe n'est créé.
+lancé sans shell, protocoles strictement limités à fd et pipe (aucun accès au protocole file),
+démuxeurs limités à matroska,webm,mov, plafond par allocation 64 MiB, sortie JSON limitée à 1 MiB,
+délai 10 s et kill-on-drop. Le fichier analysé est transmis sous forme de descripteur/handle déjà ouvert
+et vérifié sur stdin (`-`), avec rembobinage préalable, garantissant que ffprobe ne rouvre pas le chemin
+et ne peut être trompé par une substitution de fichier ou de lien. Les probes publics retirent
+`format.filename` ; seuls des médias générés sans secrets sont autorisés. Aucune clé, identité OIDC
+ou mot de passe n'est créé.
+Ce n'est pas un sandbox de parseur hostile ni une borne de RSS totale (les vulnérabilités mémoire
+internes à libavformat restent un risque intrinsèque à ffprobe).
 
 HTTP s'appuie sur ServeFile, chunks 64 KiB, lecture asynchrone et abandon du corps
 pour annuler l'I/O. Test sur copie temporaire portée à 1 GiB ; cela ne mesure pas

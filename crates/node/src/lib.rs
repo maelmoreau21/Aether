@@ -26,7 +26,7 @@ use http::{HeaderValue, Request, Response, header};
 use media_contracts::{
     errors::NodeErrorCode,
     ids::NodeId,
-    inventory::{CachedFile, ReadGrant, ReadTarget, ScanReport},
+    inventory::{CachedFile, InventoryBatch, ReadGrant, ReadTarget, ScanReport},
     media::{LocalImage, ValidatedImage},
 };
 use std::{
@@ -56,6 +56,23 @@ impl LocalNode {
         cancel: &AtomicBool,
     ) -> io::Result<ScanReport> {
         scanner::scan_with_images(root, cache, image_cache, cancel).await
+    }
+
+    /// Execute a bounded batch-streaming read-only library scan with optional probe and poster caches.
+    pub async fn scan_library_streaming<F, Fut>(
+        &self,
+        root: &Path,
+        cache: &HashMap<String, CachedFile>,
+        image_cache: &HashMap<String, LocalImage>,
+        cancel: &AtomicBool,
+        batch_size: usize,
+        on_batch: F,
+    ) -> io::Result<ScanReport>
+    where
+        F: FnMut(InventoryBatch) -> Fut,
+        Fut: std::future::Future<Output = Result<(), io::Error>>,
+    {
+        scanner::scan_streaming(root, cache, image_cache, cancel, batch_size, on_batch).await
     }
 
     /// Open a confined media file handle relative to `root`.

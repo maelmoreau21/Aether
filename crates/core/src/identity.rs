@@ -93,6 +93,7 @@ impl IdentityStore {
         let mut conn = pool.acquire().await?;
         let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
         sqlx::migrate!("./migrations").run(&mut *tx).await?;
+        crate::inventory::backfill_title_sort_unicode(&mut tx).await?;
         tx.commit().await?;
         drop(conn);
         Ok(Self { pool })

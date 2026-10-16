@@ -1,5 +1,76 @@
 # MEMORY.md — État et décisions Aether
 
+## 16 octobre 2026 — Jalon J3 (`docs/ARCHITECTURE_ROADMAP.md`) / P1 : Scanner incrémental streaming et ingestion progressive à mémoire bornée
+
+- **Goulots d'étranglement confirmés et mesurés** :
+  - `load_cache` désérialisait la totalité des `probe_json` SQLite dans une `HashMap` géante : **+37 à +57 Mio de pic RSS** pour 10 000 fichiers.
+  - `ScanReport.files` accumulait tous les fichiers scannés en mémoire dans le Node avant retour au Core (mémoire proportionnelle en $O(N)$).
+  - L'ancienne méthode d'ingestion exécutait ~17 requêtes par fichier et recalculait l'éditorial de toutes les œuvres (`refresh_editorial`) dans une seule transaction exclusive (`BEGIN IMMEDIATE`), verrouillant SQLite et provoquant des blocages de requêtes concurrentes.
+- **Architecture et optimisations réalisées** :
+  - **Migration additive `0009_scan_staging.sql`** : création des tables isolées `scan_staging_files` et `scan_staging_issues`, et de l'index `inventory_images_library_available`. Migrations 0001 à 0008 strictement inchangées.
+  - **Scanner streaming (`LocalNode::scan_library_streaming`)** : le Node émet des lots bornés (`InventoryBatch`, taille 100 par défaut) avec backpressure asynchrone (`callback(batch).await`). Cache de dossiers borné à `MAX_FOLDER_CACHE = 128` entrées.
+  - **Découplage des probes sur fichiers inchangés** : `load_scan_cache` n'extrait que `(size, modified_ns)`. Pour les fichiers inchangés, le Node renvoie `reused: true` et `Probe::default()`, éliminant le clonage et la ré-allocation d'arbres de métadonnées.
+  - **Staging par lots bornés (`stage_batch`)** : chaque lot de 100 est écrit dans `scan_staging_files` via une transaction courte (< 20 ms), sans verrouillage prolongé de SQLite.
+  - **Publication atomique (`publish_staged_scan`)** :
+    - Activation groupée des fichiers inchangés (`reused = 1`) en une seule passe `UPDATE`.
+    - Désactivation atomique des fichiers absents / supprimés.
+    - Ingestion des seuls nouveaux fichiers et mise à jour ciblée (`refresh_work_editorial`) restreinte aux seules œuvres modifiées.
+  - **Résilience aux pannes et annulations** :
+    - Nettoyage automatique du staging (`clean_staging`) en cas d'erreur ou d'annulation ; inventaire en direct inchangé.
+    - Au démarrage du Core, le routeur purge les résidus de staging orphelins et marque les jobs interrompus en `error` ("Scan interrompu par un redémarrage").
+- **Métriques comparatives mesurées (banc `crates/core/tests/scanner_performance.rs`)** :
+  - **Cache 10 000 entrées** : `load_scan_cache` charge 10 000 entrées en **145 ms** (+5,30 Mio RSS) vs `load_cache` legacy en **446 ms** (+37,07 Mio RSS), soit un gain mémoire de 7x et 3x plus rapide.
+  - **Staging 10 000 entrées** : 100 lots en **1 789 ms** (moyenne **17,89 ms/lot**, max **39 ms/lot**).
+  - **Publication atomique 10 000 entrées** : **7 733 ms**.
+  - **Catalogue sur 10 000 entrées** : 24 résultats paginés renvoyés en **324 ms**.
+  - **Scan de 1 000 fichiers synthétiques sur disque** : 1 000 découverts, **0 probe vidéo**, 1 000 réutilisés, pic RSS borné en $O(1)$ (+0,11 Mio RSS).
+  - **Scan de 100 fichiers réels** :
+    - Scan initial : 100 probes en 9,98 s.
+    - Second scan inchangé : **0 probe vidéo**, 100 réutilisés en **746 ms** (contre 1 229 ms avant optimisation).
+    - Modification NFO : **0 probe vidéo** en **705 ms**, métadonnées mises à jour dans le catalogue.
+    - Suppression affiche : **0 probe vidéo** en **771 ms**, affiche retirée dans le catalogue.
+  - **Concurrence catalogue et lecture pendant le scan** :
+    - 25 requêtes catalogue : latence moyenne **8 ms** (max **32 ms**), 100 % succès (200 OK).
+    - 25 requêtes HTTP Range de streaming : 25/25 `206 Partial Content` (0 échec, 0 `SQLITE_BUSY`).
+  - **Annulation et reprise après redémarrage** : validées avec staging vidé à 0 ligne et inventaire intact.
+- **Validations qualité** :
+  - `cargo fmt --check` : 0 diff.
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --locked --workspace --all-features` : **86 tests réussis**, 0 échec, 5 ignorés.
+
+## 16 octobre 2026 — Correction de l'initialisation Unicode de `title_sort` et audit de sécurité ffprobe stdin
+
+- **Correction de l'initialisation Unicode de `title_sort` (Migration additive 0008 et rattrapage Rust)** :
+  - **Diagnostic** : Dans la migration `0007_catalogue_indexes.sql`, l'instruction `UPDATE inventory_works SET title_sort = lower(title)` utilisait la fonction SQLite interne `lower()`, restreinte aux caractères ASCII `A-Z`. Les œuvres insérées avant la migration 0007 comportant des majuscules accentuées ou ligatures (`Été`, `À`, `Ça`, `Œuvre`, etc.) conservaient ces majuscules dans `title_sort`, ce qui rompait la recherche par sous-chaîne (`instr(w.title_sort, 'été')` renvoyait 0 résultat) et faussait le tri par rapport aux nouvelles œuvres normalisées en Rust via `title.to_lowercase()`.
+  - **Migration additive `0008_catalogue_unicode_sort.sql`** : création de la table de suivi `inventory_works_unicode_migration (completed_at TEXT NOT NULL)`. La migration 0007 n'a pas été altérée.
+  - **Procédure de rattrapage Rust par lots bornés (`backfill_title_sort_unicode`)** :
+    - Exécutée de façon sérialisée et atomique dans la transaction `BEGIN IMMEDIATE` de migration d'identité (`IdentityStore::open`).
+    - Parcours paginé par lots de 250 lignes (`LIMIT 250`, mémoire O(1)), garantissant une empreinte mémoire bornée quelle que soit la taille de la base SQLite.
+    - Seules les lignes dont `title_sort != title.to_lowercase()` sont mises à jour.
+    - Intégrité totale préservée : UUIDs (`id`), clés d'identité, métadonnées NFO, affiches locales, bibliothèques, permissions et inventaire restent strictement intacts. Zéro nouveau scan vidéo requis.
+    - Idempotence et court-circuit instantané (< 0,05 ms) lors des lancements ultérieurs grâce au marqueur dans `inventory_works_unicode_migration`.
+  - **Test d'intégration dédié** (`crates/core/tests/catalog_performance.rs::test_migrated_database_from_0006_to_0007_then_0008_unicode_fix`) :
+    - Création d'une base sur le schéma 0006 avec des œuvres réelles (`Été d'amour`, `À bout de souffle`, `Ça`, `Œuvre d'art`, `Zèbre`, `Alpha`).
+    - Application de la migration 0007 et confirmation formelle du bug `lower()` de SQLite (majuscules préservées, recherche en échec).
+    - Ouverture via `IdentityStore::open` appliquant 0008 et le rattrapage.
+    - Validation du tri exact et des recherches insensibles à la casse (`été`, `ÉTÉ`, `à`, `ça`, `œuvre`).
+
+- **Audit et vérification de `ffprobe` via stdin (`fd,pipe`)** :
+  - **Protocole effectivement utilisé** : `fd:` (confirmé par trace libavformat sur `"-"`).
+  - **Support du seek** : le protocole `fd:` sur descripteur de fichier régulier (`std::fs::File` via `Stdio::from(file)`) préserve les capacités de repositionnement (`lseek` sous Unix, `SetFilePointer` sous Windows), contrairement aux pipes anonymes non seekable (`cat | ffprobe`).
+  - **Validation des conteneurs et profils** :
+    - MKV, MP4 classique, MP4 fragmenté (fMP4) : 3 pistes (AV1 8-bit, 2 Opus FR/EN), durées exactes, codecs validés.
+    - Profil représentatif 10 bits (`representative.mkv`, `representative.mp4`) : 6 pistes (AV1 Main10 `yuv420p10le`, Opus 5.1 à 6 canaux, Opus stéréo, 3 pistes de sous-titres), durée 12 s validée.
+    - MP4 avec atome `moov` déplacé en fin de fichier (`moov` situé après `mdat`) : le probe via descripteur réussit sans réouverture de chemin, alors qu'une injection via pipe échoue avec l'erreur `moov atom not found`.
+  - **Limite de sécurité documentée (Sandbox OS vs Whitelist applicative)** :
+    - Une whitelist applicative de protocoles (`fd,pipe`) et formats (`matroska,webm,mov,mp4`) empêche libavformat de résoudre des chemins arbitraires (`file:`), des références externes (MOV `dref`) ou des URLs réseau, **mais ne constitue pas un sandbox de sécurité au niveau du système d'exploitation** (aucun filtre d'appels système seccomp imposé au binaire `ffprobe`).
+    - La défense en profondeur documentée dans `SECURITY.md` et `probe.rs` s'appuie sur le confinement Docker (`UID 10001:10001`, `cap_drop: ALL`, `no-new-privileges: true`), le montage en lecture seule `:ro`, les plafonds de mémoire (`-max_alloc 67108864`), d'analyse (`-probesize 5000000`, `-analyzeduration 5000000`), de sortie stdout (1 Mio), le délai d'exécution (10 s avec `kill_on_drop`), et la double vérification de descripteur (`verify_unchanged_sync`).
+
+- **Validation globale** :
+  - `cargo fmt --check` : 0 diff.
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --locked --workspace --all-features` : **85 tests réussis** (26 dans `media-node`, 2 dans `media-contracts`, 57 dans `media-poc`), 0 échec, 5 ignorés (4 tests browser headless et 1 worker helper).
+
 ## 16 octobre 2026 — Jalon J2 (`docs/ARCHITECTURE_ROADMAP.md`) : Catalogue SQLite performant et pagination en base
 
 - **Transfert complet du filtrage, tri, recherche, comptage et pagination vers SQLite** :

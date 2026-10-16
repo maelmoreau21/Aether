@@ -1,4 +1,23 @@
 //! Bounded ffprobe adapter for Media Node discovery. Never launched by a playback request.
+//!
+//! # Security Architecture & Sandbox Limits
+//!
+//! Input files are passed strictly as open OS file descriptors / handles (`std::fs::File`)
+//! inherited via stdin (`Stdio::from(file)`), coupled with `-protocol_whitelist fd,pipe`.
+//!
+//! **Important Boundary Note**: An FFmpeg protocol whitelist (`fd,pipe`) prevents libavformat
+//! from resolving arbitrary file paths (`file:`), network URLs (`http:`, `https:`), or nested
+//! format references (`concat:`, `subfile:`, MOV `dref` atoms). However, **it is not a full OS sandbox**:
+//! 1. FFmpeg protocol filters operate at application/library level, not the OS kernel level. They do
+//!    not replace OS-level isolation (such as Docker non-root user `10001:10001`, `cap_drop: ALL`,
+//!    `no-new-privileges: true`, or seccomp profiles).
+//! 2. Parsers for complex media demuxers run inside the external `ffprobe` process. Defense-in-depth
+//!    relies on:
+//!    - Strictly bounded memory allocations (`-max_alloc 67108864`).
+//!    - Bounded analysis windows (`-probesize 5000000`, `-analyzeduration 5000000`).
+//!    - Hard process execution timeouts (`10 seconds`) with `kill_on_drop(true)`.
+//!    - Maximum output stdout capture limit (`take(1_048_577)` / 1 MiB).
+//!    - File handle identity verification before and after execution (`OpenedFile::verify_unchanged_sync`).
 pub use media_contracts::media::{Probe, Track};
 use std::{io, path::Path, process::Stdio, time::Duration};
 use tokio::{io::AsyncReadExt, process::Command};
@@ -34,7 +53,7 @@ pub async fn probe_file(mut file: std::fs::File) -> Result<Probe, ProbeError> {
             "-protocol_whitelist",
             "fd,pipe",
             "-format_whitelist",
-            "matroska,webm,mov",
+            "matroska,webm,mov,mp4",
             "-max_alloc",
             "67108864",
             "-probesize",
@@ -157,5 +176,184 @@ mod tests {
         let restored_probe = probe_opened(&opened).await.unwrap();
         assert_eq!(restored_probe.streams.len(), 3);
         assert_eq!(restored_probe.streams[0].codec_name.as_deref(), Some("av1"));
+    }
+
+    #[tokio::test]
+    async fn probe_real_mkv_and_mp4_containers_and_fragmented() {
+        let fixtures = fixture_root();
+
+        for filename in ["av1-opus.mkv", "av1-opus.mp4", "av1-opus-fragmented.mp4"] {
+            let path = fixtures.join(filename);
+            let file = std::fs::File::open(&path).unwrap();
+            let probe = probe_file(file).await.unwrap();
+
+            assert_eq!(
+                probe.streams.len(),
+                3,
+                "File {filename} must have 3 streams"
+            );
+            assert_eq!(probe.streams[0].codec_name.as_deref(), Some("av1"));
+            assert_eq!(probe.streams[0].codec_type.as_deref(), Some("video"));
+            assert_eq!(probe.streams[1].codec_name.as_deref(), Some("opus"));
+            assert_eq!(probe.streams[1].codec_type.as_deref(), Some("audio"));
+            assert_eq!(probe.streams[2].codec_name.as_deref(), Some("opus"));
+            assert_eq!(probe.streams[2].codec_type.as_deref(), Some("audio"));
+
+            assert_eq!(
+                probe.streams[1]
+                    .tags
+                    .get("language")
+                    .and_then(|v| v.as_str()),
+                Some("fra")
+            );
+            assert_eq!(
+                probe.streams[2]
+                    .tags
+                    .get("language")
+                    .and_then(|v| v.as_str()),
+                Some("eng")
+            );
+
+            assert!(
+                !probe.format.contains_key("filename"),
+                "Filename must never be disclosed"
+            );
+            assert!(probe.format.contains_key("duration") || filename.contains("fragmented"));
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_representative_10bit_av1_and_multitrack_opus() {
+        let fixtures = fixture_root().join("representative");
+
+        for filename in ["representative.mkv", "representative.mp4"] {
+            let path = fixtures.join(filename);
+            let file = std::fs::File::open(&path).unwrap();
+            let probe = probe_file(file).await.unwrap();
+
+            assert_eq!(probe.streams.len(), 6, "{filename} must have 6 streams");
+
+            // Video stream: AV1 10-bit
+            let video = &probe.streams[0];
+            assert_eq!(video.codec_name.as_deref(), Some("av1"));
+            assert_eq!(video.codec_type.as_deref(), Some("video"));
+            assert_eq!(
+                video.details.get("pix_fmt").and_then(|v| v.as_str()),
+                Some("yuv420p10le")
+            );
+
+            // Audio streams: Opus 5.1 and stereo
+            let audio_tracks: Vec<_> = probe
+                .streams
+                .iter()
+                .filter(|s| s.codec_type.as_deref() == Some("audio"))
+                .collect();
+            assert_eq!(audio_tracks.len(), 2);
+            assert_eq!(audio_tracks[0].codec_name.as_deref(), Some("opus"));
+            assert_eq!(
+                audio_tracks[0]
+                    .details
+                    .get("channels")
+                    .and_then(|v| v.as_i64()),
+                Some(6)
+            );
+            assert_eq!(audio_tracks[1].codec_name.as_deref(), Some("opus"));
+            assert_eq!(
+                audio_tracks[1]
+                    .details
+                    .get("channels")
+                    .and_then(|v| v.as_i64()),
+                Some(2)
+            );
+
+            // Subtitle tracks: 3 tracks
+            let sub_tracks: Vec<_> = probe
+                .streams
+                .iter()
+                .filter(|s| s.codec_type.as_deref() == Some("subtitle"))
+                .collect();
+            assert_eq!(sub_tracks.len(), 3);
+
+            let duration: f64 = probe.format["duration"].as_str().unwrap().parse().unwrap();
+            assert!((duration - 12.0).abs() < 0.5, "Duration should be ~12.0s");
+            assert!(!probe.format.contains_key("filename"));
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_mp4_with_moov_at_end_validates_seek_via_file_descriptor() {
+        let ffmpeg_check = std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output();
+        if ffmpeg_check.is_err() {
+            eprintln!("ffmpeg not found, skipping synthetic moov_at_end generation test");
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let moov_at_end_path = temp.path().join("moov_at_end.mp4");
+
+        // Generate non-faststart MP4 where moov is placed after mdat at the end of the file
+        let output = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=1:size=320x180:rate=24",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=duration=1:frequency=440",
+                "-c:v",
+                "libaom-av1",
+                "-crf",
+                "50",
+                "-b:v",
+                "0",
+                "-c:a",
+                "libopus",
+                moov_at_end_path.to_str().unwrap(),
+            ])
+            .output()
+            .expect("ffmpeg failed to execute");
+        assert!(
+            output.status.success(),
+            "ffmpeg must successfully create non-faststart MP4"
+        );
+
+        // Verify atom positions in raw bytes: mdat must precede moov
+        let bytes = std::fs::read(&moov_at_end_path).unwrap();
+        let mdat_pos = bytes
+            .windows(4)
+            .position(|w| w == b"mdat")
+            .expect("mdat atom must exist");
+        let moov_pos = bytes
+            .windows(4)
+            .position(|w| w == b"moov")
+            .expect("moov atom must exist");
+        assert!(
+            mdat_pos < moov_pos,
+            "moov ({moov_pos}) must be positioned after mdat ({mdat_pos}) to test seek"
+        );
+
+        // 1. Probing via open file descriptor MUST succeed because fd 0 supports lseek/SetFilePointer
+        let file = std::fs::File::open(&moov_at_end_path).unwrap();
+        let probe_res = probe_file(file)
+            .await
+            .expect("probe_file must succeed on moov-at-end MP4");
+        assert_eq!(probe_res.streams.len(), 2);
+        assert_eq!(probe_res.streams[0].codec_name.as_deref(), Some("av1"));
+        assert_eq!(probe_res.streams[1].codec_name.as_deref(), Some("opus"));
+        assert!(!probe_res.format.contains_key("filename"));
+
+        // 2. Probing via OpenedFile in a root MUST also succeed and detect no modification
+        let opened = OpenedFile::open_in_root(temp.path(), Path::new("moov_at_end.mp4"))
+            .await
+            .unwrap();
+        let opened_probe = probe_opened(&opened)
+            .await
+            .expect("probe_opened must succeed on moov-at-end MP4");
+        assert_eq!(opened_probe.streams.len(), 2);
     }
 }

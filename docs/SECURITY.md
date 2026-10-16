@@ -62,16 +62,35 @@ la vérification canonique puis l'ouverture ne sont pas atomiques face à un
 écrivain local hostile (TOCTOU). Ce point doit être traité avant les bibliothèques
 réelles ; le banc ne prétend pas sécuriser un stockage modifiable par un adversaire.
 
-ffprobe est un adaptateur temporaire externe, résolu depuis un PATH de confiance,
-lancé sans shell, protocoles strictement limités à fd et pipe (aucun accès au protocole file),
-démuxeurs limités à matroska,webm,mov, plafond par allocation 64 MiB, sortie JSON limitée à 1 MiB,
-délai 10 s et kill-on-drop. Le fichier analysé est transmis sous forme de descripteur/handle déjà ouvert
-et vérifié sur stdin (`-`), avec rembobinage préalable, garantissant que ffprobe ne rouvre pas le chemin
-et ne peut être trompé par une substitution de fichier ou de lien. Les probes publics retirent
-`format.filename` ; seuls des médias générés sans secrets sont autorisés. Aucune clé, identité OIDC
-ou mot de passe n'est créé.
-Ce n'est pas un sandbox de parseur hostile ni une borne de RSS totale (les vulnérabilités mémoire
-internes à libavformat restent un risque intrinsèque à ffprobe).
+ffprobe est un adaptateur de découverte exécuté en sous-processus externe sans shell,
+consommant directement le descripteur/handle de fichier déjà ouvert et confiné transmis
+sur son entrée standard (`-`, via `Stdio::from(file)`), avec rembobinage préalable.
+Ses protocoles sont strictement restreints à `fd,pipe` (`-protocol_whitelist fd,pipe`),
+interdisant catégoriquement l'ouverture de chemins arbitraires (`file:`), de références
+externes (atomes MOV `dref`, segments Matroska externes) ou de ressources réseau (`http:`, `https:`).
+Le protocole effectivement mobilisé par ffprobe sur stdin est `fd:`. Ce protocole conserve
+la capacité de repositionnement (`lseek` sous Unix, `SetFilePointer` sous Windows) lorsque le
+descripteur pointe vers un fichier régulier du système de fichiers (à la différence d'un pipe
+anonyme non seekable). Cette capacité permet à ffprobe d'accéder directement aux atomes `moov`
+situés en fin de fichier dans les conteneurs MP4 non fragmentés sans nécessiter de réouverture par chemin.
+
+**Limite de sécurité documentée (Sandbox OS vs Whitelist applicative)** :
+Une liste blanche de protocoles FFmpeg (`-protocol_whitelist fd,pipe`) opère au niveau applicatif
+interne de `libavformat` ; **elle ne constitue pas un sandbox de sécurité au niveau du système d'exploitation**.
+Elle n'impose aucun filtrage des appels système (seccomp) ni d'isolation de l'espace de noms au processus fils `ffprobe`.
+Si un parseur C (`libavcodec` / `libavformat`) présentait une vulnérabilité de corruption mémoire (débordement
+de tas, entier non vérifié), le code attaquant s'exécuterait avec les privilèges de l'utilisateur hôte du processus.
+La défense en profondeur repose donc sur le confinement système complémentaire :
+1. Exécution sous Docker avec utilisateur non-privilégié dédié `aether` (`UID:GID 10001:10001`).
+2. Abandon strict de toutes les capacités Linux (`cap_drop: ALL`).
+3. Interdiction de toute élévation de privilèges (`no-new-privileges: true`).
+4. Montage des médias en lecture seule (`:ro`).
+5. Borne mémoire stricte par allocation (`-max_alloc 67108864`).
+6. Borne d'analyse (`-probesize 5000000`, `-analyzeduration 5000000`).
+7. Délai d'exécution maximal de 10 secondes avec terminaison forcée (`kill_on_drop(true)`).
+8. Plafond de capture de sortie standard limité à 1 Mio (`take(1_048_577)`).
+9. Contrôle d'intégrité avant et après exécution (`OpenedFile::verify_unchanged_sync`), détectant toute modification ou altération concurrente sur le disque.
+Les sorties publiques éliminent systématiquement `format.filename`.
 
 HTTP s'appuie sur ServeFile, chunks 64 KiB, lecture asynchrone et abandon du corps
 pour annuler l'I/O. Test sur copie temporaire portée à 1 GiB ; cela ne mesure pas

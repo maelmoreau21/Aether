@@ -16,7 +16,7 @@ pub struct Track {
     pub details: BTreeMap<String, Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Probe {
     pub streams: Vec<Track>,
     pub format: BTreeMap<String, Value>,

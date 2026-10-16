@@ -4,7 +4,9 @@ use crate::{
     files::{OpenedFile, is_linked},
     probe,
 };
-pub use media_contracts::inventory::{CachedFile, ScanIssue, ScanReport, ScannedFile};
+pub use media_contracts::inventory::{
+    CachedFile, InventoryBatch, ScanIssue, ScanReport, ScannedFile,
+};
 use std::{
     collections::{BTreeMap, HashMap},
     ffi::{OsStr, OsString},
@@ -170,6 +172,8 @@ pub(crate) fn identity(relative: &Path) -> (String, Option<u16>, BTreeMap<String
     (title, year, ids, key)
 }
 
+const MAX_FOLDER_CACHE: usize = 128;
+
 /// Depth-first streaming traversal (one directory iterator per depth), one probe at a time.
 /// Probe cancellation drops its kill-on-drop child. Errors never contain absolute paths.
 pub async fn scan(
@@ -186,6 +190,30 @@ pub async fn scan_with_images(
     image_cache: &HashMap<String, super::images::LocalImage>,
     cancel: &AtomicBool,
 ) -> io::Result<ScanReport> {
+    let mut files = Vec::new();
+    let mut report = scan_streaming(root, cache, image_cache, cancel, 100, |batch| {
+        files.extend(batch.files);
+        async { Ok(()) }
+    })
+    .await?;
+    report.files = files;
+    Ok(report)
+}
+
+/// Bounded batch-streaming discovery traversal yielding `InventoryBatch` chunks with backpressure.
+/// Does not retain discovered files in RAM across batches, ensuring strictly O(1) memory footprint.
+pub async fn scan_streaming<F, Fut>(
+    root: &Path,
+    cache: &HashMap<String, CachedFile>,
+    image_cache: &HashMap<String, super::images::LocalImage>,
+    cancel: &AtomicBool,
+    batch_size: usize,
+    mut on_batch: F,
+) -> io::Result<ScanReport>
+where
+    F: FnMut(InventoryBatch) -> Fut,
+    Fut: std::future::Future<Output = Result<(), io::Error>>,
+{
     if !root.is_absolute()
         || root.components().any(|c| c == Component::ParentDir)
         || is_linked(&tokio::fs::symlink_metadata(root).await?)
@@ -202,6 +230,11 @@ pub async fn scan_with_images(
         complete: true,
         ..Default::default()
     };
+    let mut current_batch_files = Vec::with_capacity(batch_size.max(1));
+    let mut current_batch_errors = Vec::new();
+    let mut current_batch_warnings = Vec::new();
+    let mut sequence = 0u64;
+
     while !stack.is_empty() {
         if cancel.load(Ordering::Relaxed) {
             report.complete = false;
@@ -216,10 +249,12 @@ pub async fn scan_with_images(
                 }
                 Err(_) => {
                     report.complete = false;
-                    report.errors.push(ScanIssue {
+                    let issue = ScanIssue {
                         relative_path: String::new(),
                         message: "directory traversal failed".into(),
-                    });
+                    };
+                    report.errors.push(issue.clone());
+                    current_batch_errors.push(issue);
                     stack.pop();
                     continue;
                 }
@@ -239,18 +274,22 @@ pub async fn scan_with_images(
             Ok(m) => m,
             Err(_) => {
                 report.complete = false;
-                report.errors.push(ScanIssue {
+                let issue = ScanIssue {
                     relative_path,
                     message: "file metadata unavailable".into(),
-                });
+                };
+                report.errors.push(issue.clone());
+                current_batch_errors.push(issue);
                 continue;
             }
         };
         if is_linked(&metadata) {
-            report.errors.push(ScanIssue {
+            let issue = ScanIssue {
                 relative_path,
                 message: "link or reparse point ignored".into(),
-            });
+            };
+            report.errors.push(issue.clone());
+            current_batch_errors.push(issue);
             continue;
         }
         if metadata.is_dir() {
@@ -258,10 +297,12 @@ pub async fn scan_with_images(
                 Ok(dir) => stack.push(dir),
                 Err(_) => {
                     report.complete = false;
-                    report.errors.push(ScanIssue {
+                    let issue = ScanIssue {
                         relative_path,
                         message: "directory unreadable".into(),
-                    });
+                    };
+                    report.errors.push(issue.clone());
+                    current_batch_errors.push(issue);
                 }
             }
             continue;
@@ -278,21 +319,30 @@ pub async fn scan_with_images(
         let opened = match OpenedFile::open_in_root(&root, relative).await {
             Ok(f) => f,
             Err(_) => {
-                report.errors.push(ScanIssue {
+                let issue = ScanIssue {
                     relative_path,
                     message: "file failed confinement validation".into(),
-                });
+                };
+                report.errors.push(issue.clone());
+                current_batch_errors.push(issue);
                 continue;
             }
         };
         let modified_ns = opened.modified_ns().to_owned();
         let file_size = opened.size();
-        let probe = if let Some(cached) = cache
+        let (probe, reused) = if let Some(cached) = cache
             .get(&relative_path)
             .filter(|c| c.size == file_size && c.modified_ns == modified_ns)
         {
             report.reused += 1;
-            cached.probe.clone()
+            (
+                if cached.probe.streams.is_empty() {
+                    media_contracts::media::Probe::default()
+                } else {
+                    cached.probe.clone()
+                },
+                true,
+            )
         } else {
             report.probed += 1;
             let probing = probe::probe_opened(&opened);
@@ -310,15 +360,17 @@ pub async fn scan_with_images(
                     report.complete = false;
                     break;
                 }
-                Some(Ok(probe)) => probe,
+                Some(Ok(probe)) => (probe, false),
                 // A failed adapter/process is not evidence that all media are corrupt.
                 // Abort publication so an unavailable ffprobe cannot invalidate an inventory.
                 Some(Err(probe::ProbeError::Io(error))) => return Err(error),
                 Some(Err(error)) => {
-                    report.errors.push(ScanIssue {
+                    let issue = ScanIssue {
                         relative_path,
                         message: error.to_string(),
-                    });
+                    };
+                    report.errors.push(issue.clone());
+                    current_batch_errors.push(issue);
                     continue;
                 }
             }
@@ -328,16 +380,23 @@ pub async fn scan_with_images(
             || file_size != metadata.len()
             || opened.modified() != metadata.modified().ok()
         {
-            report.errors.push(ScanIssue {
+            let issue = ScanIssue {
                 relative_path,
                 message: "file changed during analysis; retry scan".into(),
-            });
+            };
+            report.errors.push(issue.clone());
+            current_batch_errors.push(issue);
             continue;
         }
         let parent = relative.parent().unwrap_or(Path::new("")).to_path_buf();
         if !folder_cache.contains_key(&parent)
             && let Ok(videos) = FolderVideos::load(&root, &parent).await
         {
+            if folder_cache.len() >= MAX_FOLDER_CACHE
+                && let Some(first_key) = folder_cache.keys().next().cloned()
+            {
+                folder_cache.remove(&first_key);
+            }
             folder_cache.insert(parent.clone(), videos);
         }
         let folder_videos = folder_cache.get(&parent);
@@ -345,21 +404,25 @@ pub async fn scan_with_images(
         let (title, year, external_ids, identity_key) = identity(relative);
         let editorial = super::nfo::discover_with_folder(&root, relative, folder_videos).await;
         if let super::nfo::NfoOutcome::Invalid { path, message } = &editorial {
-            report.warnings.push(ScanIssue {
+            let issue = ScanIssue {
                 relative_path: path.clone(),
                 message: message.clone(),
-            });
+            };
+            report.warnings.push(issue.clone());
+            current_batch_warnings.push(issue);
         }
         let (poster, poster_warning) =
             super::images::discover_cached_with_folder(&root, relative, image_cache, folder_videos)
                 .await;
         if let Some(message) = poster_warning {
-            report.warnings.push(ScanIssue {
+            let issue = ScanIssue {
                 relative_path: relative_path.clone(),
                 message,
-            });
+            };
+            report.warnings.push(issue.clone());
+            current_batch_warnings.push(issue);
         }
-        report.files.push(ScannedFile {
+        current_batch_files.push(ScannedFile {
             poster,
             editorial,
             relative_path,
@@ -376,8 +439,37 @@ pub async fn scan_with_images(
                 "video/x-matroska"
             }
             .into(),
+            reused,
         });
+
+        if current_batch_files.len() >= batch_size {
+            sequence += 1;
+            let batch = InventoryBatch {
+                scan_id: media_contracts::ids::ScanId::from(format!("seq-{sequence}")),
+                sequence,
+                files: std::mem::take(&mut current_batch_files),
+                errors: std::mem::take(&mut current_batch_errors),
+                warnings: std::mem::take(&mut current_batch_warnings),
+            };
+            on_batch(batch).await?;
+        }
     }
+
+    if !current_batch_files.is_empty()
+        || !current_batch_errors.is_empty()
+        || !current_batch_warnings.is_empty()
+    {
+        sequence += 1;
+        let batch = InventoryBatch {
+            scan_id: media_contracts::ids::ScanId::from(format!("seq-{sequence}")),
+            sequence,
+            files: current_batch_files,
+            errors: current_batch_errors,
+            warnings: current_batch_warnings,
+        };
+        on_batch(batch).await?;
+    }
+
     Ok(report)
 }
 

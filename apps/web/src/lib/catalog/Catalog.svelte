@@ -1,18 +1,20 @@
+<script module lang="ts">
+  const links = [{ key:'home', path:'/', label:'Accueil', symbol:'⌂' },{ key:'films', path:'films/', label:'Films', symbol:'▤' },{ key:'series', path:'series/', label:'Séries', symbol:'▥' },{ key:'search', path:'search/', label:'Recherche', symbol:'⌕' }] as const;
+  let demoMediaCache: Media[] | null = null;
+</script>
 <script lang="ts">
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
-  import { DEFAULT_NAME } from '../config/brand';
-  import { NativePlayer } from '../player/native';
-  import ImmersivePlayer from '../player/ImmersivePlayer.svelte';
-  import type { Media } from '../player/types';
+  import { DEFAULT_NAME, fetchBrandName } from '../config/brand';
+  import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
+  import type { Media, PlayerFactory } from '../player/types';
   import Icon from '../ui/Icon.svelte';
   import ProfileMenu from '../ui/ProfileMenu.svelte';
   import Poster from './Poster.svelte';
   import EpisodePlayer from './EpisodePlayer.svelte';
   import { request, playbackIds, sourceLabel, type Work, type CatalogPage } from './api';
   let { section = 'home' }: { section?: 'home' | 'films' | 'series' | 'search' | 'settings' } = $props();
-  const links = [{ key:'home', path:'/', label:'Accueil', symbol:'⌂' },{ key:'films', path:'films/', label:'Films', symbol:'▤' },{ key:'series', path:'series/', label:'Séries', symbol:'▥' },{ key:'search', path:'search/', label:'Recherche', symbol:'⌕' }] as const;
   let name = $state(DEFAULT_NAME);
   let media = $state<Media[]>([]);
   let mediaError = $state('');
@@ -30,6 +32,26 @@
   let search = $state('');
   let sort = $state('title-asc');
   let immersive = $state<ImmersivePlayer>();
+  let ImmersivePlayerComponent = $state<typeof ImmersivePlayer>();
+  let createPlayer = $state<PlayerFactory>();
+  let playerLoading = false;
+
+  async function loadPlayer(): Promise<void> {
+    if (ImmersivePlayerComponent && createPlayer) return;
+    if (playerLoading) return;
+    playerLoading = true;
+    try {
+      const [{ default: comp }, { NativePlayer }] = await Promise.all([
+        import('../player/ImmersivePlayer.svelte'),
+        import('../player/native')
+      ]);
+      ImmersivePlayerComponent = comp;
+      createPlayer = (video, onError) => new NativePlayer(video, onError);
+    } finally {
+      playerLoading = false;
+    }
+  }
+
   const base = $derived(resolve('/').replace(/\/$/, ''));
   const workId = $derived(page.url.searchParams.get('work') ?? '');
   const query = $derived(page.url.searchParams.get('q') ?? '');
@@ -48,8 +70,8 @@
   }
   onMount(() => {
     const controller = new AbortController();
-    request<{name:string}>('/api/v1/config', controller.signal)
-      .then(config => { name = config.name; })
+    fetchBrandName(controller.signal)
+      .then(brandName => { name = brandName; })
       .catch(() => { if (!controller.signal.aborted) mediaError = 'La lecture est temporairement indisponible. Rechargez la page pour réessayer.'; });
     return () => controller.abort();
   });
@@ -62,14 +84,20 @@
         if (currentSection === 'settings') return;
         if (id) {
           if (currentSection !== 'films' && currentSection !== 'series') throw new Error('Ouvrez ce média depuis sa bibliothèque Films ou Séries.');
+          const playerPromise = loadPlayer();
           const work = await request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}`, controller.signal);
           if (controller.signal.aborted) return;
           if ((currentSection === 'films' && work.kind !== 'film') || (currentSection === 'series' && work.kind !== 'series')) throw new Error('Ce média appartient à une autre bibliothèque.');
+          await playerPromise;
+          if (controller.signal.aborted) return;
           detail = work; selected = playbackIds(work)[0] ?? ''; season = work.seasons?.[0]?.number ?? 1;
           const ids = [...new Set([...playbackIds(work), ...(work.seasons ?? []).flatMap(season => season.episodes.flatMap(playbackIds))])];
           try {
-            const demo = ids.some(id => id.startsWith('demo-')) ? (await request<{media:Media[]}>('/api/v1/demo/media', controller.signal)).media : [];
-            const indexed = await Promise.all(ids.filter(id => !id.startsWith('demo-')).map(id => request<Media>(`/api/v1/media/${encodeURIComponent(id)}`, controller.signal)));
+            const demoPromise = ids.some(id => id.startsWith('demo-'))
+              ? (demoMediaCache ? Promise.resolve(demoMediaCache) : request<{media:Media[]}>('/api/v1/demo/media', controller.signal).then(r => { demoMediaCache = r.media; return r.media; }))
+              : Promise.resolve([]);
+            const indexedPromise = Promise.all(ids.filter(id => !id.startsWith('demo-')).map(id => request<Media>(`/api/v1/media/${encodeURIComponent(id)}`, controller.signal)));
+            const [demo, indexed] = await Promise.all([demoPromise, indexedPromise]);
             if (!controller.signal.aborted) media = [...demo, ...indexed];
           } catch (failure) { if (!controller.signal.aborted) mediaError = failure instanceof Error ? failure.message : 'Chargement des sources impossible.'; }
         } else {
@@ -138,7 +166,9 @@
   {/if}
 </main>
 <footer><span>{name} <span class="footer-dot">·</span> Votre cinéma, autrement.</span><p>{detail?.synthetic ? 'Fiche de démonstration · médias de test.' : catalogueNotice || 'Bibliothèques locales · fichiers en lecture seule.'}</p></footer>
-<ImmersivePlayer bind:this={immersive} catalogue={playerMedia} createPlayer={(video, onError) => new NativePlayer(video, onError)} />
+{#if detail && ImmersivePlayerComponent && createPlayer}
+  <ImmersivePlayerComponent bind:this={immersive} catalogue={playerMedia} {createPlayer} />
+{/if}
 
 <style>
   .skip-link { position:fixed; top:-80px; left:20px; z-index:50; background:var(--color-text); color:var(--color-canvas); padding:14px; }.skip-link:focus { top:10px; }.site-header { display:flex; align-items:center; gap:60px; padding:0 var(--page-gutter); min-height:88px; border-bottom:1px solid var(--color-line); }.brand { display:flex; gap:9px; align-items:center; }.brand span { font-size:30px; letter-spacing:-.065em; font-weight:650; }nav { display:flex; gap:30px; }nav a { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--color-muted); padding:32px 0; border-bottom:2px solid transparent; }nav a[aria-current='page'] { color:var(--color-text); border-color:var(--color-accent); }nav a:hover { color:white; }.nav-symbol { display:none; }.search-icon { display:inline-flex; align-items:center; justify-content:center; }main { max-width:1600px; margin:auto; padding:0 var(--page-gutter) 70px; min-height:70vh; }h1 { font-size:clamp(34px,4.5vw,66px); line-height:1.12; letter-spacing:-.055em; font-weight:500; margin:16px 0 22px; }h2 { font-size:clamp(21px,2vw,28px); font-weight:500; letter-spacing:-.035em; margin:0; }h3 { font-size:16px; font-weight:550; }p { line-height:1.8; color:var(--color-muted); }.page-heading { padding:55px 0 26px; }.page-heading p { margin:0; }.home-intro { display:flex; justify-content:space-between; align-items:center; gap:30px; padding:70px 0 60px; border-bottom:1px solid var(--color-line); }.home-intro h1 { font-size:clamp(36px,4.5vw,66px); }.home-intro h1 em { color:#c9b8ef; font-family:Georgia,serif; font-weight:400; }.home-intro p { font-size:13px; }.intro-mark { color:#b4a1f83b; font-size:180px; letter-spacing:-.12em; padding:0 50px; font-family:Georgia,serif; }.intro-mark span { display:block; font-family:var(--font-sans); font-size:8px; color:var(--color-subtle); letter-spacing:.2em; white-space:nowrap; }.home-actions { display:flex; gap:12px; margin-top:28px; }.primary,.hero-cta,.secondary { display:inline-flex; gap:12px; align-items:center; justify-content:center; padding:13px 20px; border-radius:6px; font-size:12px; min-height:44px; border:1px solid var(--color-line); }.primary,.hero-cta { background:var(--color-text); color:#16121d; font-weight:600; }.primary:hover,.hero-cta:hover { background:white; transform:translateY(-2px); }.secondary { background:var(--color-surface); color:var(--color-text); }.secondary:hover { border-color:var(--color-accent); }.shelf { margin-top:42px; }.section-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px; }.section-heading>a,.section-heading>span { font-size:11px; color:var(--color-muted); }.library-heading { margin:24px 0 18px; color:var(--color-muted); font-size:13px; }.media-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:22px; }.empty { grid-column:1/-1; padding:32px; background:var(--color-surface); border:1px solid var(--color-line); border-radius:10px; color:var(--color-muted); font-size:13px; line-height:1.8; }.empty h2 { color:var(--color-text); }.empty.compact { margin-top:18px; padding:22px 26px; }.filters { display:flex; gap:18px; align-items:end; flex-wrap:wrap; padding:22px; border:1px solid var(--color-line); border-radius:10px; }label { display:grid; gap:8px; font-size:11px; color:var(--color-muted); }.search-field { flex:1; min-width:180px; }input { background:var(--color-raised); color:var(--color-text); border:1px solid var(--color-line); border-radius:6px; min-height:46px; padding:12px 14px; width:100%; }.future-filters { width:100%; font-size:12px; color:var(--color-muted); }.future-filters summary { cursor:pointer; }.future-filters p { margin-bottom:0; }.pagination { margin-top:32px; align-items:center; }.pagination span { font-size:12px; }.back-link { display:inline-block; margin-top:35px; color:var(--color-muted); font-size:12px; }.detail { display:grid; grid-template-columns:220px minmax(0,1fr); gap:60px; padding:36px 0; border-bottom:1px solid var(--color-line); }.detail-copy { align-self:center; max-width:700px; }.detail h1 { font-size:clamp(32px,4vw,54px); }.metadata { font-size:12px; }.synopsis { font-size:14px; }.detail-note { font-size:11px; max-width:520px; }.versions { display:flex; gap:8px; margin:25px 0 16px; }.version-choice { background:var(--color-surface); color:var(--color-muted); border:1px solid var(--color-line); border-radius:6px; min-height:40px; padding:8px 18px; font-size:12px; }.version-choice[aria-pressed='true'] { color:var(--color-accent); border-color:var(--color-accent); background:var(--color-accent-soft); }.episode { display:flex; gap:26px; padding:26px; background:var(--color-surface); border:1px solid var(--color-line); border-radius:10px; }.episode>div { flex:1; min-width:0; }.episode-number { color:var(--color-accent); font-size:28px; margin-top:12px; }.episode p { font-size:12px; }.error { color:var(--color-danger); }.unavailable { font-size:12px; }.settings-panel { max-width:700px; background:var(--color-surface); padding:30px; border:1px solid var(--color-line); border-radius:12px; }.settings-panel p { font-size:14px; }.settings-panel button { padding:12px; background:var(--color-raised); color:var(--color-muted); border:0; border-radius:6px; }footer { border-top:1px solid var(--color-line); padding:26px var(--page-gutter); display:flex; justify-content:space-between; align-items:center; gap:24px; font-size:12px; color:#c4becf; }footer p { margin:0; text-align:right; font-size:10px; }.footer-dot { color:var(--color-accent); padding:0 8px; }

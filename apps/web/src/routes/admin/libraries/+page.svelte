@@ -1,3 +1,6 @@
+<script module lang="ts">
+  const scanLabels = { idle: 'Jamais scanné', queued: 'En attente', running: 'En cours', completed: 'Terminé', error: 'Erreur' } as const;
+</script>
 <script lang="ts">
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
@@ -8,7 +11,6 @@
   let scans = $state<Record<string, Scan>>({});
   let pending = $state<string[]>([]);
   let polling = false;
-  const scanLabels = { idle: 'Jamais scanné', queued: 'En attente', running: 'En cours', completed: 'Terminé', error: 'Erreur' };
   let libraries = $state<Library[]>([]), users = $state<AuthUser[]>([]), roots = $state<string[]>([]);
   let loading = $state(true), saving = $state(false), error = $state(''), notice = $state('');
   let editing = $state<string | null>(null), name = $state(''), kind = $state<'films' | 'series'>('films'), root = $state(''), enabled = $state(true), userIds = $state<string[]>([]);

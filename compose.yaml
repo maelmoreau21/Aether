@@ -1,0 +1,69 @@
+# ==============================================================================
+# Aether All-in-One Standalone Distribution - Docker Compose Configuration
+# ==============================================================================
+# Target: Synology DS1522+ (AMD Ryzen Embedded R1600 x86_64, 2C/4T, no iGPU)
+#         and standard self-hosted x86_64 Linux servers.
+#
+# Hardware Notes (Synology DS1522+):
+# - The AMD Ryzen R1600 processor has NO integrated GPU (no AMD VCN/VCE, no Intel QuickSync).
+# - Do NOT add hardware devices such as '/dev/dri:/dev/dri'; doing so will cause container
+#   startup failure on DSM because the device node does not exist.
+# - Aether operates with zero mandatory video transcoding: direct streaming of AV1 + Opus
+#   in MKV and MP4 containers.
+#
+# Operational Security & Hardening:
+# - Default port binding is strictly loopback: "127.0.0.1:3000:3000" to prevent unauthenticated
+#   LAN exposure prior to administrator configuration.
+# - For LAN access: Change binding to "0.0.0.0:3000:3000" (or "3000:3000") and update MEDIA_PUBLIC_URL
+#   to your NAS IP (e.g., http://192.168.1.100:3000).
+# - For HTTPS Reverse Proxy (Synology Reverse Proxy, Nginx, Caddy): Keep loopback binding
+#   "127.0.0.1:3000:3000", terminate TLS on the proxy, set MEDIA_PUBLIC_URL to your public HTTPS
+#   domain (e.g., https://aether.example.com), and ensure the proxy forwards the 'Host' header.
+# - Media volumes are mounted strictly read-only (:ro). Aether never modifies media files or metadata.
+# - Persistent application state and SQLite database are stored in dedicated volume 'aether_data'.
+# - Container runs as unprivileged non-root user 'aether' (UID:GID 10001:10001) with all Linux
+#   capabilities dropped (cap_drop: ALL) and no-new-privileges enabled.
+# - Zero default credentials: run 'docker compose exec -it aether media-bootstrap' to create
+#   the initial local administrator account.
+# ==============================================================================
+
+services:
+  aether:
+    image: aether:latest
+    build:
+      context: .
+    container_name: aether
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      # Bound strictly to host loopback by default for security.
+      # Adjust to "0.0.0.0:3000:3000" for direct LAN access, or route via HTTPS reverse proxy.
+      - "127.0.0.1:3000:3000"
+    environment:
+      - MEDIA_PORT=3000
+      - MEDIA_BIND_ADDR=0.0.0.0
+      - MEDIA_PUBLIC_URL=http://127.0.0.1:3000
+      - MEDIA_DB_PATH=/data/core.sqlite3
+      - MEDIA_LIBRARY_ROOT=/media
+      - MEDIA_WEB_DIST=/app/apps/web/build
+    volumes:
+      # Persistent application state & SQLite database (WAL mode)
+      - aether_data:/data
+      # Media library root mounted strictly read-only (:ro).
+      # On Synology DSM, set MEDIA_LIBRARY_DIR in .env or replace with /volume1/video
+      - ${MEDIA_LIBRARY_DIR:-./tests/fixtures/generated}:/media:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:3000/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  aether_data:
+    name: aether_data

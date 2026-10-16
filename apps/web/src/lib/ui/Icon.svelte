@@ -1,6 +1,5 @@
-<script lang="ts">
+<script module lang="ts">
   export type IconName = 'play' | 'pause' | 'volume' | 'arrow' | 'check' | 'globe' | 'captions' | 'film' | 'chevron' | 'alert' | 'back' | 'fullscreen' | 'minimize' | 'muted' | 'settings' | 'search' | 'profile';
-  let { name, size = 20 }: { name: IconName; size?: number } = $props();
   const paths: Record<IconName, string> = {
     search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z',
     profile: 'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM4 21v-2a8 8 0 0 1 16 0v2',
@@ -13,5 +12,8 @@
     film: 'M3 4h18v16H3V4Zm4 0v16M17 4v16M3 9h4m10 0h4M3 15h4m10 0h4',
     chevron: 'm9 5 7 7-7 7', alert: 'M12 3 2 21h20L12 3Zm0 6v5m0 3v1'
   };
+</script>
+<script lang="ts">
+  let { name, size = 20 }: { name: IconName; size?: number } = $props();
 </script>
 <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>

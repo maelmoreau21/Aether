@@ -159,7 +159,8 @@ async fn start(
             sqlx::query("UPDATE scan_jobs SET status='running' WHERE library_id=?").bind(&job_id).execute(&store.pool).await?;
             let root = node::validate_library_root(std::path::Path::new(&root), &allowed_root).await?;
             let cache = inventory::load_cache(&store, &job_id).await?;
-            let report = node::scanner::scan(&root, &cache, &cancel).await?;
+            let images = inventory::load_image_cache(&store, &job_id).await?;
+            let report = node::scanner::scan_with_images(&root, &cache, &images, &cancel).await?;
             if cancel.load(Ordering::Acquire) { return Err("Scan arrêté".into()); }
             inventory::ingest(&store, &job_id, &root, &report).await?;
             let conflicts = inventory::editorial_warnings(&store, &job_id).await?;

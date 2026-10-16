@@ -1,3 +1,7 @@
+> Extension P1 affiches locales Films : inventaire séparé, route image avec
+> session/droits et repli Web. État actuel : [LOCAL_FILM_POSTERS.md](docs/LOCAL_FILM_POSTERS.md).
+> Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
+
 # ARCHITECTURE.md — Architecture cible Aether
 
 Extension P1 NFO Films : parsing borné et découverte dans le Node interne,

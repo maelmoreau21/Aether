@@ -1,3 +1,30 @@
+# Vérification affiches Films — 16 octobre 2026
+
+- Validation finale : cargo fmt --check ; cargo clippy --locked --all-features
+  --all-targets -- -D warnings ; cargo test --locked --all-features réussis :
+  50 tests réussis,5 ignorés (4 navigateurs explicites et helper subprocess).
+  Inclut migrations0004→0005→0006 avec IDs/metadata conservés, priorités/formats,
+  absences/corruptions/extensions trompeuses/oversize/jonction Windows, cache
+  images, modifications/suppressions sans probe, droits GET/HEAD de2 bibliothèques,
+  désactivation/grants/révocation de session, graphes/NFO/originaux inchangés.
+- Web : npm run check (0 erreur/avertissement), npm run lint, npm test (13/13),
+  npm run build réussis. Chrome explicite : cargo test --locked --test
+  browser_posters -- --ignored --nocapture,1/1 réussi en39,51s ; Chrome155.0.8059.40,
+  Windows10.0.26300 headless,4 phases initial/restart/update/delete, vrais arrêts
+  et relances Core avec même SQLite. Nouveaux pixels/dimensions après rescan,
+  Accueil/Films/recherche/fiche, lazy/repli après erreur, MIME/nosniff/no-store,
+  refus anonyme GET/HEAD, NFO échappé, lectureMP4/pause/seek4s et aucune erreur
+  JS/CSP. Preuves : docs/evidence/2026-10-16/posters/ ; captures initial/delete
+  inspectées visuellement. Originaux vidéo/NFO/affiche comparés, seules mutations
+  explicites des copies jetables par tests. Aucun média personnel connecté.
+- Essais initiaux corrigés : verrou Windows sur exécutable lors de compilations
+  concurrentes ; attente de scan navigateur remplacée par polling API ; Clippy
+  if imbriqué simplifié. Validation centrale finale sérialisée et réussie.
+- Pas de preuve NAS/LAN/charge/CI distante ni nouveau navigateur. Prochain petit
+  jalon recommandé : durcir les ouvertures de fichiers contre TOCTOU avant toute
+  exposition à un stockage modifiable par un acteur hostile. Séries/backdrops/
+  pistes externes/OIDC/multi-Node/PostgreSQL/Docker restent hors périmètre.
+
 # Tests P0 — exécutés et restants
 
 15 octobre 2026, Windows x64 10.0.26300, Rust/Cargo 1.96.1, FFmpeg/ffprobe

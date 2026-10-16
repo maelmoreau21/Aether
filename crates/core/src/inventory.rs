@@ -40,6 +40,30 @@ pub async fn load_cache(
         .collect()
 }
 
+pub async fn load_image_cache(
+    store: &IdentityStore,
+    library_id: &str,
+) -> Result<HashMap<String, crate::node::images::LocalImage>, sqlx::Error> {
+    let rows = sqlx::query("SELECT i.* FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.library_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind='films' AND l.node_id='local'")
+        .bind(library_id).fetch_all(&store.pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let path: String = row.get("relative_path");
+            (
+                path.clone(),
+                crate::node::images::LocalImage {
+                    path,
+                    size_bytes: row.get::<i64, _>("size") as u64,
+                    modified_ns: row.get("modified_ns"),
+                    mime: row.get("mime"),
+                    priority: row.get::<i64, _>("priority") as u8,
+                },
+            )
+        })
+        .collect())
+}
+
 pub async fn ingest(
     store: &IdentityStore,
     library_id: &str,
@@ -73,6 +97,12 @@ pub async fn ingest(
         .bind(&issue.relative_path)
         .execute(&mut *tx)
         .await?;
+    }
+    if report.complete {
+        sqlx::query("UPDATE inventory_images SET available=0 WHERE library_id=?")
+            .bind(library_id)
+            .execute(&mut *tx)
+            .await?;
     }
     for file in &report.files {
         let identity_key = format!("{}\n{}", _root.to_string_lossy(), file.identity_key);
@@ -163,6 +193,14 @@ pub async fn ingest(
         };
         sqlx::query("UPDATE inventory_assets SET size=?,modified_ns=?,mime=?,probe_json=?,available=1 WHERE id=?").bind(file.size as i64).bind(&file.modified_ns).bind(&file.mime).bind(json!(file.probe).to_string()).bind(&asset_id).execute(&mut *tx).await?;
         sqlx::query("UPDATE inventory_sources SET root_snapshot=? WHERE id=(SELECT source_id FROM inventory_assets WHERE id=?)").bind(_root.to_string_lossy().as_ref()).bind(&asset_id).execute(&mut *tx).await?;
+        if let Some(image) = &file.poster {
+            let work_id: String = sqlx::query_scalar("SELECT e.work_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id WHERE a.id=?")
+                .bind(&asset_id).fetch_one(&mut *tx).await?;
+            sqlx::query("INSERT INTO inventory_images(id,work_id,library_id,root_snapshot,relative_path,size,modified_ns,mime,priority,available) VALUES(?,?,?,?,?,?,?,?,?,1) ON CONFLICT(work_id,root_snapshot,relative_path) DO UPDATE SET size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,priority=excluded.priority,available=1")
+                .bind(id()).bind(work_id).bind(library_id).bind(_root.to_string_lossy().as_ref())
+                .bind(&image.path).bind(image.size_bytes as i64).bind(&image.modified_ns)
+                .bind(&image.mime).bind(i64::from(image.priority)).execute(&mut *tx).await?;
+        }
         let fallback =
             json!({"title":file.title,"year":file.year,"external_ids":file.external_ids});
         sqlx::query("INSERT INTO inventory_editorial(asset_id,fallback_json) VALUES(?,?) ON CONFLICT(asset_id) DO UPDATE SET fallback_json=excluded.fallback_json")
@@ -282,6 +320,9 @@ pub async fn resource_library(
 ) -> Result<Option<String>, sqlx::Error> {
     let query = match kind {
         "work" => "SELECT library_id FROM inventory_works WHERE id=?",
+        "image" => {
+            "SELECT i.library_id FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.root_snapshot=l.root AND l.kind='films' AND l.node_id='local'"
+        }
         "asset" | "media" => {
             "SELECT a.library_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id WHERE a.id=? AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local'"
         }
@@ -296,7 +337,7 @@ pub async fn resource_library(
 fn work(row: &sqlx::sqlite::SqliteRow) -> Value {
     let metadata: Value =
         serde_json::from_str(row.get("editorial_json")).unwrap_or_else(|_| json!({}));
-    json!({"id":row.get::<String,_>("id"),"libraryId":row.get::<String,_>("library_id"),"kind":"film","title":row.get::<String,_>("title"),"year":row.get::<Option<i64>,_>("year"),"description":metadata["plot"].as_str().or_else(||metadata["outline"].as_str()).unwrap_or("Média local indexé"),"plot":metadata["plot"],"genres":metadata["genres"].as_array().cloned().unwrap_or_default(),"originalTitle":metadata["original_title"],"outline":metadata["outline"],"premiered":metadata["premiered"],"rating":metadata["rating"],"mpaa":metadata["mpaa"],"externalIds":metadata["external_ids"],"metadataProvenance":metadata["provenance"].as_str().unwrap_or("local"),"metadataWarnings":metadata["warnings"].as_array().cloned().unwrap_or_default(),"synthetic":false})
+    json!({"id":row.get::<String,_>("id"),"libraryId":row.get::<String,_>("library_id"),"kind":"film","title":row.get::<String,_>("title"),"year":row.get::<Option<i64>,_>("year"),"description":metadata["plot"].as_str().or_else(||metadata["outline"].as_str()).unwrap_or("Média local indexé"),"plot":metadata["plot"],"genres":metadata["genres"].as_array().cloned().unwrap_or_default(),"originalTitle":metadata["original_title"],"outline":metadata["outline"],"premiered":metadata["premiered"],"rating":metadata["rating"],"mpaa":metadata["mpaa"],"externalIds":metadata["external_ids"],"metadataProvenance":metadata["provenance"].as_str().unwrap_or("local"),"metadataWarnings":metadata["warnings"].as_array().cloned().unwrap_or_default(),"synthetic":false,"posterUrl":row.try_get::<Option<String>,_>("poster_url").ok().flatten()})
 }
 
 /// Administrator scan diagnostics. Only currently available sources contribute;
@@ -332,7 +373,7 @@ pub async fn catalogue(
     offset: usize,
     limit: usize,
 ) -> Result<Value, sqlx::Error> {
-    let rows=sqlx::query("SELECT w.* FROM inventory_works w WHERE EXISTS(SELECT 1 FROM inventory_editions e JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=s.library_id WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1)").fetch_all(&store.pool).await?;
+    let rows=sqlx::query("SELECT w.*,(SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i JOIN libraries il ON il.id=i.library_id WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind='films' AND il.node_id='local' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS poster_url FROM inventory_works w WHERE EXISTS(SELECT 1 FROM inventory_editions e JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=s.library_id WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1)").fetch_all(&store.pool).await?;
     let mut items: Vec<Value> = rows
         .iter()
         .filter(|r| {
@@ -356,7 +397,7 @@ pub async fn catalogue(
 }
 
 pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value>, sqlx::Error> {
-    let Some(row) = sqlx::query("SELECT * FROM inventory_works WHERE id=?")
+    let Some(row) = sqlx::query("SELECT w.*,(SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i JOIN libraries il ON il.id=i.library_id WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind='films' AND il.node_id='local' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS poster_url FROM inventory_works w WHERE w.id=?")
         .bind(work_id)
         .fetch_optional(&store.pool)
         .await?
@@ -459,6 +500,63 @@ pub async fn content(
     }
 }
 
+/// Session/library checks run before this handler, including HEAD and conditionals.
+/// The final ServeFile open remains subject to the documented local-writer TOCTOU race.
+pub async fn image(
+    store: &IdentityStore,
+    image_id: &str,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use axum::{
+        http::{HeaderValue, StatusCode, header},
+        response::IntoResponse,
+    };
+    use tower::ServiceExt;
+    let row = sqlx::query("SELECT i.*,l.root FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind='films' AND l.node_id='local'")
+        .bind(image_id).fetch_optional(&store.pool).await;
+    let row = match row {
+        Ok(Some(row)) => row,
+        Ok(None) => return crate::error(StatusCode::NOT_FOUND, "unknown_image"),
+        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_error"),
+    };
+    let root: String = row.get("root");
+    let relative: String = row.get("relative_path");
+    let path =
+        match crate::node::scanner::confined_file(Path::new(&root), Path::new(&relative)).await {
+            Ok(path) => path,
+            Err(_) => return crate::error(StatusCode::NOT_FOUND, "unavailable_image"),
+        };
+    let checked = match crate::node::images::validate(&path).await {
+        Ok(image) => image,
+        Err(_) => return crate::error(StatusCode::NOT_FOUND, "invalid_image"),
+    };
+    if checked.size_bytes != row.get::<i64, _>("size") as u64
+        || checked.modified_ns != row.get::<String, _>("modified_ns")
+        || checked.mime != row.get::<String, _>("mime")
+    {
+        return crate::error(StatusCode::NOT_FOUND, "image_changed_rescan_required");
+    }
+    match tower_http::services::ServeFile::new(path)
+        .with_buf_chunk_size(65536)
+        .oneshot(request)
+        .await
+    {
+        Ok(response) => {
+            let mut response = response.into_response();
+            response
+                .headers_mut()
+                .insert(header::CONTENT_TYPE, HeaderValue::from_static(checked.mime));
+            // Never let a browser cache bypass a later permission/revocation check.
+            response.headers_mut().insert(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("private, no-store"),
+            );
+            response
+        }
+        Err(_) => crate::error(StatusCode::INTERNAL_SERVER_ERROR, "image_stream_error"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,6 +595,16 @@ mod tests {
             preserved,
             ("stable".into(), "Film".into(), 2026, "{}".into())
         );
+        sqlx::raw_sql(include_str!("../migrations/0006_local_posters.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let after: (String, String, i64, String) =
+            sqlx::query_as("SELECT id,title,year,editorial_json FROM inventory_works")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(preserved, after);
     }
     #[tokio::test]
     async fn nfo_refresh_preserves_graph_technical_data_and_invalid_snapshot() {
@@ -512,7 +620,7 @@ mod tests {
             title: "Film".into(), year: Some(2026), identity_key: "folder:Film (2026)".into(),
             external_ids: Default::default(), mime: "video/mp4".into(),
             probe: serde_json::from_value(json!({"streams":[{"index":0,"codec_type":"video","codec_name":"av1"}],"format":{"duration":"2"}})).unwrap(),
-            editorial: NfoOutcome::Missing,
+            editorial: NfoOutcome::Missing, poster: None,
         }], complete: true, ..Default::default() };
         ingest(&store, "lib", Path::new("/movies"), &report)
             .await
@@ -619,6 +727,7 @@ mod tests {
             probe: probe.clone(),
             mime: "video/mp4".into(),
             editorial: NfoOutcome::Missing,
+            poster: None,
         };
         let report = ScanReport {
             files: vec![file("film.mp4"), file("film.mkv")],

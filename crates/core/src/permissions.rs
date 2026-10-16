@@ -73,11 +73,24 @@ pub async fn require_media(
         let id = path
             .strip_prefix("/api/v1/media/")
             .or_else(|| {
-                path.strip_prefix("/api/v1/assets/")
-                    .and_then(|value| value.strip_suffix("/content"))
+                path.strip_prefix("/api/v1/assets/").and_then(|value| {
+                    value
+                        .strip_suffix("/content")
+                        .or_else(|| value.strip_suffix("/image"))
+                })
             })
             .unwrap_or("");
-        match crate::inventory::resource_library(&state.auth.store, "asset", id).await {
+        match crate::inventory::resource_library(
+            &state.auth.store,
+            if path.ends_with("/image") {
+                "image"
+            } else {
+                "asset"
+            },
+            id,
+        )
+        .await
+        {
             Ok(Some(library)) => visible.iter().any(|v| v == &library),
             Ok(None) => false,
             Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),

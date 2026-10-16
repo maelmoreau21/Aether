@@ -7,6 +7,7 @@ export interface Edition { id: string; label: string; versions: { id: string; la
 export interface Work {
   id: string; kind: 'film' | 'series' | 'episode'; title: string; year: number | null;
   description: string; libraryId: string; synthetic: boolean; number?: number;
+  posterUrl?: string | null;
   originalTitle?: string | null; plot?: string | null; outline?: string | null;
   premiered?: string | null; genres?: string[]; rating?: number | null; mpaa?: string | null;
   externalIds?: Record<string, string>; metadataProvenance?: string | null;

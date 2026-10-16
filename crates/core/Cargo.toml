@@ -22,6 +22,7 @@ zeroize = "1"
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10.9"
 quick-xml = "0.42.0"
+image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 
 [dev-dependencies]
 http-body-util = "0.1"

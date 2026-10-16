@@ -1,3 +1,7 @@
+> Extension P1 affiches locales Films : inventaire séparé, route image avec
+> session/droits et repli Web. État actuel : [LOCAL_FILM_POSTERS.md](LOCAL_FILM_POSTERS.md).
+> Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
+
 # Métadonnées NFO Films locales — P1
 
 Ce jalon enrichit le scanner Films existant sans changer le lecteur, les droits

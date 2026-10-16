@@ -1,3 +1,7 @@
+> Mise à jour P1 bibliothèques : droits explicites SQLite et administration
+> session/rôle/CSRF livrés sur fixtures. Les restrictions administrator seule
+> ci-dessous sont historiques. Voir [LIBRARIES_AND_SCANNER.md](LIBRARIES_AND_SCANNER.md).
+
 # Connexion et sessions locales — P1
 
 Ce jalon réutilise le compte créé par `media-bootstrap` et SQLite. Aucun compte

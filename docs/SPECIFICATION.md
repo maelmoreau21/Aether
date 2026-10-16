@@ -1,5 +1,17 @@
 # Périmètre du premier jalon P0
 
+## Clarification du 16 octobre 2026
+
+SQLite/bootstrap et sessions existent désormais ; les mentions sans auth dans
+les jalons historiques ci-dessous ne décrivent plus le binaire actuel.
+Web = interface/administration ; Core = catalogue SQLite/comptes/permissions ;
+Media Node = dossiers locaux/scan/analyse/streaming. Chaque bibliothèque possède
+un Node et une racine explicite. Scanner indépendant de Radarr/Sonarr, compatible
+avec dossiers manuels et conventions ARR. Le Core ne scanne pas les disques
+ distants. P1 conserve un Node local unique : administration/permissions avant
+scanner réel. Voir [LIBRARIES_AND_SCANNER.md](LIBRARIES_AND_SCANNER.md).
+
+
 Document créé le 15 octobre 2026 : absent dans le dépôt initial.
 Les règles `AGENTS.md`, `ARCHITECTURE.md` et `PROMPT_DEMARRAGE_IA.md` priment.
 

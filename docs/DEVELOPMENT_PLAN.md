@@ -1,5 +1,16 @@
 # Découpage réel
 
+## Prochaine étape actée — 16 octobre 2026
+
+SQLite/bootstrap et sessions existent. Administration et permissions explicites
+par bibliothèque sur fixtures restent prioritaires, avec association vers un
+Node local unique et une racine explicite. Ensuite seulement : scanner récursif
+du Media Node, indépendant de Radarr/Sonarr, dossiers manuels et conventions ARR.
+Aucun multi-Node P2 ni scan distant du Core dans ce jalon.
+Voir [LIBRARIES_AND_SCANNER.md](LIBRARIES_AND_SCANNER.md).
+Les étapes ci-dessous conservent l'historique.
+
+
 1. Premier jalon P0A/P0B : banc Rust, quatre fixtures, probe des pistes,
    HTTP Range et lecture native Chrome ; résultats dans la matrice. Livré
    avec limites documentées, pas de clôture des phases complètes.

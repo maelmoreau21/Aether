@@ -53,13 +53,41 @@ Les réplicas Web partagent la même API et le même catalogue. Le mode autonome
 
 **Web (`apps/web`)** : SvelteKit, navigation, accessibilité, lecteur et préférences ; reçoit des **descripteurs de lecture** sans chemins NAS ; aucune autorisation de sécurité finale dans le navigateur. Statique et séparable.
 
-**Core (`crates/core`)** : API versionnée, compte local/OIDC, deux rôles `administrator|user`, bibliothèques/permissions, catalogue global, métadonnées, statut des Nodes, progression, découverte des pistes, émission de sessions de lecture autorisées et stratégie de source.
+**Core (`crates/core`)** : API versionnée, compte local/OIDC, deux rôles `administrator|user`, bibliothèques/permissions, catalogue global en SQLite, métadonnées reçues du Node, statut des Nodes, progression, émission de sessions de lecture autorisées et stratégie de source. Le Core ne parcourt pas les disques d'un Node distant et ne découvre pas lui-même les pistes.
 
 **Node (`crates/node`)** : bibliothèques montées `ro`, scan local, analyse conteneurs/codecs/pistes, indexation locale, streaming des fichiers ou segments autorisés, refus des accès par chemin arbitraire, health/heartbeat, reprise en cas de Core indisponible. Ne connaît pas les identifiants/mots de passe d'utilisateurs.
 
 **Media (`crates/media`)** : lecture des informations Matroska / ISO BMFF, index et timebases, descriptions de pistes ; plus tard association d'assets séparés, remux/packaging bornés et éventuellement interprétation de flux élémentaires.
 
 **Shared (`crates/shared`)** : types versionnés, IDs, erreurs, feature/protocol version. **Aucune dépendance circulaire**.
+
+### Bibliothèques et scanner — décision du 16 octobre 2026
+
+Chaque bibliothèque dépend d'un seul Media Node et d'une racine explicitement
+configurée sur ce Node : Films → Node local → `/Films`, Séries → Node local →
+`/Séries`. Ces chemins sont des exemples, jamais des valeurs implicites.
+P1 conserve exactement un Node local dans le processus standalone ; plusieurs
+bibliothèques peuvent lui appartenir. Aucune implémentation multi-Node P2 ici.
+
+Le Media Node est seul responsable du parcours récursif des racines autorisées,
+de l'identification films/séries/saisons/épisodes, de l'analyse réelle MKV/MP4 et
+de toutes leurs pistes, de la détection des sous-titres externes et de
+l'exploitation des NFO/images locaux. Il doit accepter les organisations
+manuelles comme les structures Radarr/Sonarr, sans dépendre de ces applications,
+de leur API, de leur base ou de leur présence. Les cas ambigus doivent être
+signalés, pas fusionnés arbitrairement. Détecter un sous-titre externe ne prouve
+pas sa lecture ; les formats externes avancés/raw restent dans leur jalon P3.
+
+Le Core reçoit l'inventaire du Node et gère le catalogue global et les droits.
+Le Web administre la configuration via le Core ; aucun chemin libre dans une
+requête de lecture. Le Node résout uniquement les assets de son inventaire,
+sous la racine autorisée, après contrôle backend. Médias, NFO, images et
+sous-titres restent en lecture seule ; caches et données sont séparés.
+
+Le jalon en cours reste administration et permissions sur fixtures, avant le
+véritable scanner. Les contrats cibles et critères futurs sont détaillés dans
+[docs/LIBRARIES_AND_SCANNER.md](docs/LIBRARIES_AND_SCANNER.md) ; aucune capacité
+de scan de bibliothèques réelles n'est déclarée livrée par cette décision.
 
 ## 4. Modèle de données conceptuel
 
@@ -272,3 +300,11 @@ migrations embarquées et fournit un bootstrap CLI local. La séparation compte 
 credential local prépare les futurs liens OIDC par issuer+subject et sessions
 par user_id ; ces mécanismes ne sont pas implémentés. Aucun nouvel endpoint.
 Voir docs/LOCAL_ADMIN.md et MEMORY.md pour preuves et limites.
+
+## Bibliothèques locales P1 — 16 octobre 2026
+
+Registre Library/Node/grants SQLite et administration Web implémentés sur fixtures.
+La validation de racine reste dans node.rs, sans scanner. Core autorise chaque
+requête via SQLite ; le catalogue éditorial reste une association Rust explicite
+jusqu'au scanner/ingestion. Un Node local, aucun transport distant ajouté.
+Voir docs/LIBRARIES_AND_SCANNER.md pour associations partagées et limites.

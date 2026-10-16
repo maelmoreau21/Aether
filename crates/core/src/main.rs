@@ -5,7 +5,7 @@ use std::{
 };
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let root = PathBuf::from(
         std::env::var("MEDIA_FIXTURE_DIR").unwrap_or_else(|_| "tests/fixtures/generated".into()),
     );
@@ -14,7 +14,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()?;
     let db_path = media_poc::identity::configured_path(&root)?;
     let database = media_poc::identity::IdentityStore::open(&db_path).await?;
-    let inventory = Inventory::load(root).await?;
+    let inventory = Inventory::load(root)
+        .await
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     let listener =
         tokio::net::TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await?;
     let port = listener.local_addr()?.port();
@@ -22,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("MEDIA_PUBLIC_URL").unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
     let auth = AuthState::new(database.clone(), public_origin).await?;
     println!("Authenticated local fixtures: http://127.0.0.1:{port}/app/ (P1) ; / (P0 bench)");
-    axum::serve(listener, secure_app(inventory, port, auth))
+    axum::serve(listener, secure_app(inventory, port, auth).await?)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })

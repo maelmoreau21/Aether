@@ -79,7 +79,9 @@ async fn auth_precedes_all_fixture_metadata_streams_and_derived_resources() {
         .await
         .unwrap();
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/generated");
-    let router = secure_app(Inventory::load(root).await.unwrap(), 3000, auth);
+    let router = secure_app(Inventory::load(root).await.unwrap(), 3000, auth)
+        .await
+        .unwrap();
     assert_denied(&router, None, StatusCode::UNAUTHORIZED).await;
     assert_denied(
         &router,
@@ -152,6 +154,76 @@ async fn auth_precedes_all_fixture_metadata_streams_and_derived_resources() {
         .await
         .unwrap();
     assert_denied(&router, Some(&cookie), StatusCode::FORBIDDEN).await;
+    sqlx::query("INSERT INTO library_permissions(library_id,user_id) VALUES('fixture-series',?)")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (path, expected) in [
+        ("/api/v1/catalog/fixture-film", StatusCode::FORBIDDEN),
+        ("/api/v1/catalog/fixture-series", StatusCode::OK),
+        (
+            "/api/v1/assets/demo-mp4-fr/content",
+            StatusCode::PARTIAL_CONTENT,
+        ),
+        (
+            "/api/v1/demo/subtitles/fr-forced.vtt",
+            StatusCode::PARTIAL_CONTENT,
+        ),
+        ("/api/v1/assets/fixture-mp4/content", StatusCode::FORBIDDEN),
+        ("/api/v1/admin/libraries", StatusCode::FORBIDDEN),
+    ] {
+        for method in ["GET", "HEAD"] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .header("host", "127.0.0.1:3000")
+                        .header(header::COOKIE, &cookie)
+                        .header(header::RANGE, "bytes=0-15")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected, "{method} {path}");
+        }
+    }
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/catalog?q=mire")
+                .header("host", "127.0.0.1:3000")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    use http_body_util::BodyExt;
+    let body: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["libraryId"], "fixture-series");
+    sqlx::query("UPDATE libraries SET enabled=0 WHERE id='fixture-series'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_denied(&router, Some(&cookie), StatusCode::FORBIDDEN).await;
+    sqlx::query("UPDATE libraries SET enabled=1 WHERE id='fixture-series'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM library_permissions WHERE user_id=?")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_denied(&router, Some(&cookie), StatusCode::FORBIDDEN).await;
+
     sqlx::query("UPDATE users SET disabled_at=unixepoch() WHERE id=?")
         .bind(&id)
         .execute(&pool)
@@ -179,7 +251,9 @@ async fn configured_https_origin_is_enforced_and_sets_secure_cookie() {
         .await
         .unwrap();
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/generated");
-    let router = secure_app(Inventory::load(root).await.unwrap(), 3000, auth);
+    let router = secure_app(Inventory::load(root).await.unwrap(), 3000, auth)
+        .await
+        .unwrap();
     let request = || {
         Request::builder()
             .method("POST")

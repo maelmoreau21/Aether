@@ -259,3 +259,11 @@ réussis ; parcours catalogue et non-régression lecteur sous Chrome headless
 réussis, dont accès directs sous CSP et pagination simulée bornée à 24 cartes.
 Preuves docs/evidence/2026-10-15/catalogue/. Cela ne mesure pas un vrai catalogue
 à grande échelle et n'autorise pas de bibliothèque personnelle.
+
+## Jalon identité local P1 livré le 16 octobre 2026
+
+Le module identity du Core persiste les comptes avec SQLx/SQLite, applique les
+migrations embarquées et fournit un bootstrap CLI local. La séparation compte /
+credential local prépare les futurs liens OIDC par issuer+subject et sessions
+par user_id ; ces mécanismes ne sont pas implémentés. Aucun nouvel endpoint.
+Voir docs/LOCAL_ADMIN.md et MEMORY.md pour preuves et limites.

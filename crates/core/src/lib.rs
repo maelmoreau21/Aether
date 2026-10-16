@@ -3,6 +3,7 @@
 mod brand;
 mod catalog;
 mod demo;
+pub mod identity;
 pub mod media;
 pub mod node;
 

@@ -154,3 +154,9 @@ Chrome 155.0.8059.40 Windows headless, états vides injectés, 503/réessai, fic
 404 et pagination simulée 72 œuvres bornée à 24 cartes vérifiés.
 Preuves `evidence/2026-10-15/catalogue/`. Ces essais ne valident pas un scanner,
 une persistance SQLite ou les droits d'accès d'un futur catalogue personnel.
+
+## P1 — persistance et bootstrap local
+
+SQLite/SQLx et création du premier administrateur par CLI locale sont décrits
+dans [LOCAL_ADMIN.md](LOCAL_ADMIN.md). Aucune route HTTP sensible ajoutée.
+Sessions, connexion et RBAC restent absents ; fixtures uniquement sur loopback.

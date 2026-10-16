@@ -346,3 +346,12 @@ Non-régression catalogue (390/768/1440px) et lecteur immersif (fullscreen,
 menus, clavier, audio/texte/source, retour/nettoyage, tactile simulé) réussie.
 Preuves : evidence/2026-10-15/profile-navigation/ et sous-dossiers catalogue/
 et immersive/. Aucun nouveau résultat Edge/Firefox/Safari/mobile physique.
+
+## Identité SQLite et bootstrap local — 16 octobre 2026
+
+`cargo test --locked` : 22 tests réussis, un helper de processus ignoré par
+le harness mais lancé par competing_processes. Les six tests identité vérifient
+concurrence de migrations et bootstrap entre pools/processus, PHC Argon2id,
+contraintes SQL, réouverture, fermeture durable, rollback, erreurs et CLI sans TTY.
+Formatage/Clippy strict réussis. Détails/limites : [LOCAL_ADMIN.md](LOCAL_ADMIN.md).
+Pas de nouveau test navigateur ni de saisie interactive manuelle revendiquée.

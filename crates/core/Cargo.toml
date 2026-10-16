@@ -4,6 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
+default-run = "media-poc"
 
 [dependencies]
 axum = "0.8.9"
@@ -14,7 +15,17 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["fs", "set-header"] }
 
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
+argon2 = { version = "0.6.0", features = ["zeroize"] }
+rpassword = "7.5.4"
+zeroize = "1"
+uuid = { version = "1", features = ["v4"] }
+
 [dev-dependencies]
 http-body-util = "0.1"
 tempfile = "3"
 
+
+[[bin]]
+name = "media-bootstrap"
+path = "src/bootstrap.rs"

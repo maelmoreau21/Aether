@@ -67,7 +67,7 @@
 | DB MVP | SQLx + SQLite | Choisi, non codé |
 | DB cluster | PostgreSQL partagé, migration explicite | Futur uniquement |
 | Cache/coordination | Local d'abord, Valkey éventuel | Futur si besoin |
-| Auth | local bootstrap + OIDC Authorization Code / PKCE | Conception seulement |
+| Auth | local bootstrap + OIDC Authorization Code / PKCE | Bootstrap CLI test� ; connexion/sessions/OIDC absents |
 | Streaming | Direct si compatible, remux/packaging testé, erreur sinon | Natif, remplacement URL, MSE minimal et Shaka DASH testés localement ; P0 partiel, Video.js et sortie physique NT |
 | Raws AV1/Opus | Format et index à concevoir/valider ultérieurement | **Non implémenté** |
 | Plugins | Facultatifs, pas de framework à ce stade | Hors MVP |
@@ -733,3 +733,40 @@ Validation finale Node : 10 tests politique + 2 suites statistiques =12/12, exit
 - **Tests non exécutés** : CI GitHub distante (pas de push automatique).
 
 
+
+## 16 octobre 2026 — jalon identité SQLite / bootstrap local
+
+- SQLx 0.9.0, SQLite embarqué/WAL/FK et migration 0001 : users UUID,
+  local_credentials séparés, rôle CHECK administrator/user, marqueur de
+  bootstrap durable. Modèle User typé avec création/désactivation ; aucune
+  session/table OIDC anticipée, aucune nouvelle route HTTP.
+- Core ouvre MEDIA_DB_PATH (défaut data/core.sqlite3) et migre avant HTTP.
+  Parent privé existant requis, distinct des médias ; aucun média modifié.
+  CLI media-bootstrap : terminal interactif, saisie masquée/confirmation,
+  pas d'arguments ni secret en variable/pipe. Aucun compte réel créé par l'agent.
+- Argon2id v19, m=65536 KiB/t=3/p=1, sortie32octets, sel OS, PHC seulement,
+  Zeroizing pour mot de passe/confirmation, hashing spawn_blocking.
+- BEGIN IMMEDIATE protège migration et bootstrap ; test initial a révélé que
+  le verrou de migration SQLx SQLite est un no-op, corrigé par transaction
+  englobant vérification/application. Bootstrap atomique et définitivement
+  fermé même après suppression du compte ; rollback de panne testé.
+- Windows / Rust1.99.1 : cargo fmt --check, cargo clippy --locked --all-targets
+  -- -D warnings réussis ; cargo test --locked : 22 tests réussis (16 existants,
+  6 identité), un helper ignoré exécuté par le test multi-processus.
+  Trois processus sur une base initialement absente : 1 gagnant, 2 refus.
+  Deux pools concurrents, migrations rejouées/réouverture, hash valide/mauvais
+  secret, rôle interdit/FK, entrées invalides, corruption, parent absent,
+  panne d'insertion et refus CLI sans terminal couverts. Un lancement de test
+  concurrent au précédent a eu un conflit linker Windows ; relance séquentielle
+  complète réussie. Correction finale Clippy stylistique uniquement.
+- Pas de preuve de saisie masquée interactive manuelle, de NAS, de CI distante,
+  de navigateur supplémentaire ou de coût Argon2 de production. Lecteur/UI
+  inchangés ; pas de relance Web ou des expériences codecs.
+- Frontière de confiance : opérateur OS et ACL du dossier, pas de protection
+  contre un opérateur pouvant remplacer DB/symlinks. Aucun endpoint sensible.
+  Prototype toujours loopback, sans session : aucune bibliothèque personnelle,
+  publication, tunnel ou exposition LAN autorisée. Voir docs/LOCAL_ADMIN.md.
+- Prochain jalon proposé, non commencé : connexion, sessions révocables,
+  CSRF/rate limiting et permissions backend. P1 complet reste ouvert.
+- Skill codex-token-saver appliqué : tests Rust pertinents conservés ; aucun
+  test Web/codec répété sans changement concerné ni pourcentage d'économie annoncé.

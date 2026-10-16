@@ -26,6 +26,8 @@ pub struct ScannedFile {
     pub external_ids: BTreeMap<String, String>,
     pub probe: Probe,
     pub mime: String,
+    #[serde(default)]
+    pub reused: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

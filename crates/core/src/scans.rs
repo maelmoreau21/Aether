@@ -41,6 +41,18 @@ impl Drop for ScanJobs {
     }
 }
 impl ScanJobs {
+    pub fn cancel_all(&self) {
+        self.cancel.store(true, Ordering::Release);
+    }
+
+    pub fn reset(&self) {
+        self.cancel.store(false, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Acquire)
+    }
+
     pub async fn shutdown(&self) {
         self.cancel.store(true, Ordering::Release);
         self.slots.close();
@@ -78,6 +90,12 @@ pub async fn router(
 ) -> Result<Router, sqlx::Error> {
     // A stopped process cannot resume a probe. Keep its last inventory and report interruption.
     sqlx::query("UPDATE scan_jobs SET status='error',errors_json='[\"Scan interrompu par un redémarrage\"]' WHERE status IN ('queued','running')").execute(&auth.store.pool).await?;
+    sqlx::query("DELETE FROM scan_staging_files")
+        .execute(&auth.store.pool)
+        .await?;
+    sqlx::query("DELETE FROM scan_staging_issues")
+        .execute(&auth.store.pool)
+        .await?;
     Ok(Router::new()
         .route("/api/v1/admin/libraries/{id}/scan", get(status).post(start))
         .with_state(ScanState { auth, root, jobs }))
@@ -154,24 +172,61 @@ async fn start(
     let job_id = id.clone();
     let allowed_root = state.root.clone();
     let task = tokio::spawn(async move {
+        let scan_id = uuid::Uuid::new_v4().to_string();
+        let scan_id_err = scan_id.clone();
+        let store_err = store.clone();
         let result: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
             let _permit = slots.acquire().await?;
             if cancel.load(Ordering::Acquire) { return Err("Scan arrêté".into()); }
             sqlx::query("UPDATE scan_jobs SET status='running' WHERE library_id=?").bind(&job_id).execute(&store.pool).await?;
             let root = node::LocalNode.validate_root(std::path::Path::new(&root), &allowed_root).await?;
-            let cache = inventory::load_cache(&store, &job_id).await?;
+            let cache = inventory::load_scan_cache(&store, &job_id).await?;
             let images = inventory::load_image_cache(&store, &job_id).await?;
-            let report = node::LocalNode.scan_library(&root, &cache, &images, &cancel).await?;
-            if cancel.load(Ordering::Acquire) { return Err("Scan arrêté".into()); }
-            inventory::ingest(&store, &job_id, &root, &report).await?;
+
+            let store_stage = store.clone();
+            let scan_id_stage = scan_id.clone();
+            let job_id_stage = job_id.clone();
+            let report = node::LocalNode.scan_library_streaming(
+                &root,
+                &cache,
+                &images,
+                &cancel,
+                100,
+                move |batch| {
+                    let store = store_stage.clone();
+                    let scan_id = scan_id_stage.clone();
+                    let job_id = job_id_stage.clone();
+                    async move {
+                        inventory::stage_batch(&store, &scan_id, &job_id, &batch).await
+                            .map_err(|e| std::io::Error::other(e.to_string()))
+                    }
+                }
+            ).await?;
+
+            if cancel.load(Ordering::Acquire) {
+                let _ = inventory::clean_staging(&store, &scan_id).await;
+                return Err("Scan arrêté".into());
+            }
+
+            inventory::publish_staged_scan(&store, &scan_id, &job_id, &root, report.complete).await?;
             let conflicts = inventory::editorial_warnings(&store, &job_id).await?;
             let errors: Vec<String> = report.errors.iter().chain(report.warnings.iter()).map(|issue| format!("{}: {}", issue.relative_path, issue.message)).chain(conflicts).take(100).collect();
             sqlx::query("UPDATE scan_jobs SET status=?,discovered=?,probed=?,reused=?,errors_json=? WHERE library_id=?")
                 .bind(if report.complete { "completed" } else { "error" }).bind(report.discovered as i64).bind(report.probed as i64).bind(report.reused as i64).bind(serde_json::to_string(&errors)?).bind(&job_id).execute(&store.pool).await?;
             Ok(())
         }.await;
-        if result.is_err() {
-            let _ = sqlx::query("UPDATE scan_jobs SET status='error',errors_json='[\"Scan échoué ou interrompu ; inventaire précédent conservé\"]' WHERE library_id=?").bind(&job_id).execute(&store.pool).await;
+        if let Err(e) = &result {
+            eprintln!("[SCAN ERROR in job {}]: {:?}", job_id, e);
+            let _ = inventory::clean_staging(&store_err, &scan_id_err).await;
+            let err_msg = format!("Scan échoué: {}", e);
+            let errors_json = serde_json::to_string(&vec![err_msg])
+                .unwrap_or_else(|_| "[\"Scan échoué ou interrompu\"]".into());
+            let _ =
+                sqlx::query("UPDATE scan_jobs SET status='error',errors_json=? WHERE library_id=?")
+                    .bind(errors_json)
+                    .bind(&job_id)
+                    .execute(&store.pool)
+                    .await;
         }
     });
     let mut tasks = state

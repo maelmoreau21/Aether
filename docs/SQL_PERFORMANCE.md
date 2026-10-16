@@ -47,7 +47,26 @@ CREATE INDEX inventory_assets_source_available ON inventory_assets(source_id, av
   - L'usage de `instr()` plutôt que `LIKE` garantit que les caractères spéciaux (comme `%`, `_`, `'`, `&`) sont recherchés littéralement comme sous-chaînes, reproduisant exactement le comportement de `str::contains()` en Rust.
   - L'ordre de tri `ORDER BY w.title_sort ASC, w.id ASC` (ou `DESC`) s'appuie sur la représentation UTF-8 normalisée en bas de casse et ajoute `w.id` pour garantir un bris d'égalité déterministe et une pagination stable d'une page à l'autre.
 
-### 2.3 Requêtes paramétrées avec `sqlx::QueryBuilder`
+### 2.3 Migration additive `0008_catalogue_unicode_sort.sql` et rattrapage Unicode Rust
+
+Lors de l'application de la migration `0007_catalogue_indexes.sql`, l'instruction `UPDATE inventory_works SET title_sort = lower(title);` a été exécutée par le moteur SQLite. Or, sans extension ICU, la fonction intégrée `lower()` de SQLite ne convertit que les caractères ASCII `A-Z` vers `a-z`, laissant intactes en majuscules les lettres accentuées et ligatures (`É`, `À`, `Ç`, `Œ`, etc.). Les nouvelles insertions et mises à jour utilisent en revanche `title.to_lowercase()` dans Rust.
+
+Pour corriger les bases de données existantes sans toucher à la migration 0007 (déjà déployée) et sans nécessiter de rescan des médias :
+1. **Migration additive `0008_catalogue_unicode_sort.sql`** :
+   ```sql
+   CREATE TABLE IF NOT EXISTS inventory_works_unicode_migration (
+       completed_at TEXT NOT NULL
+   );
+   ```
+2. **Procédure de rattrapage Rust par lots bornés (`backfill_title_sort_unicode`)** :
+   - Exécutée de manière unique et sérialisée au démarrage dans la transaction `BEGIN IMMEDIATE` de migration d'identité (`IdentityStore::open`).
+   - Traitement par lots bornés de 250 lignes (`LIMIT 250`, mémoire O(1)) évitant tout pic mémoire sur de grandes bases.
+   - Seules les lignes où `title_sort != title.to_lowercase()` sont mises à jour.
+   - Préservation stricte et intégrale de l'ensemble des UUIDs, métadonnées éditoriales NFO, affiches locales, bibliothèques et relations du graphe média.
+   - Horodatage d'achèvement consigné dans `inventory_works_unicode_migration` : les démarrages ultérieurs court-circuitent instantanément (< 0,05 ms).
+   - Validé sur base migrée de 0006 vers 0007 puis 0008 dans `tests/catalog_performance.rs::test_migrated_database_from_0006_to_0007_then_0008_unicode_fix`.
+
+### 2.4 Requêtes paramétrées avec `sqlx::QueryBuilder`
 
 Le filtrage des permissions, le comptage et la pagination sont délégués à SQLite :
 1. **Élimination immédiate des états vides** : si `visible` est vide ou si `kind` ne correspond à aucun média géré, la fonction renvoie immédiatement `total = 0` et `items = []` sans solliciter SQLite.

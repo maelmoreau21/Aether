@@ -1,5 +1,92 @@
 # MEMORY.md — État et décisions Aether
 
+## 16 octobre 2026 — Audit et optimisation du frontend SvelteKit (Performance & Code Splitting)
+
+- **Audit et optimisation ciblée du frontend (`apps/web`)** :
+  - **Scission dynamique et chargement différé du lecteur** : `ImmersivePlayer` et `NativePlayer` scindés en modules asynchrones (`chunks/ZWKrfpLt.js` et `chunks/5MZuhulj.js`), chargés en parallèle uniquement lorsqu'une fiche média est consultée (`?work=`).
+  - **Élimination de l'initialisation inutile du lecteur** : aucun élément `<dialog>`, `<video>` ni écouteur d'événement (`fullscreenchange`, `keydown`) n'est monté sur les écrans sans lecture (`/`, `/search`, `/settings`, listes des bibliothèques).
+  - **Réduction mesurée des bundles de production** :
+    - Chunk principal du catalogue (`Catalog.js`) : réduit de **42,65 Ko** (gzip: 13,93 Ko) à **21,35 Ko** (gzip: 7,62 Ko), soit **-50,0 %** brut (-45,3 % gzip).
+    - Feuille de style du catalogue (`Catalog.css`) : réduite de **18,09 Ko** à **10,81 Ko**, soit **-40,2 %** brut.
+    - Transfert initial total sur `/` : réduit de 145,21 Ko à **123,87 Ko JS** (-14,7 %) et de 23,71 Ko à **16,43 Ko CSS** (-30,7 %).
+  - **Optimisation des requêtes réseau et cache mémoire** :
+    - Mise en cache mémoire de la configuration publique (`fetchBrandName()` dans `brand.ts`), éliminant 100 % des appels redondants à `/api/v1/config` lors des navigations.
+    - Mise en cache en mémoire des médias de démonstration (`demoMediaCache`) et parallélisation systématique des résolutions de sources (`Promise.all`).
+  - **Optimisations de mémoire et rendu** :
+    - Déplacement des données statiques dans des blocs `<script module>` (`Icon.svelte`, `admin/libraries/+page.svelte`, `Catalog.svelte`), évitant les allocations à chaque instanciation.
+    - Réutilisation unique de `Intl.DisplayNames` dans `track-labels.ts`.
+    - Déduplication du balisage dans `Poster.svelte` via snippet Svelte 5.
+    - Suppression de la dépendance inutilisée `@opentelemetry/api` dans `package.json`.
+  - **Vérifications de non-régression validées** :
+    - `npm run check` (0 erreur, 0 avertissement).
+    - `npm run lint` (0 erreur).
+    - `npm test` (13/13 Vitest réussis).
+    - `npm run build` (build réussi en 405 ms avec externalisation bootstrap CSP).
+    - `cargo test --test static_web` (test d'intégration Rust Core / Axum réussi).
+  - Rapport complet documenté dans `docs/WEB_PERFORMANCE.md`.
+
+## 16 octobre 2026 — Distribution Docker autonome P1 et validation E2E
+
+- **Jalon P1 validé et opérationnel** : première distribution Docker « tout-en-un » (`aether:latest`, `compose.yaml`), réunissant le frontend SvelteKit compilé, le Core Axum/Tokio, le Media Node local, la persistance SQLite en mode WAL et `ffprobe`.
+- **Décisions architecturales retenues** :
+  - Pipeline de construction multi-stage en 3 étapes :
+    - Étape 1 (`web-builder`) : Node.js 22 bookworm-slim compile le frontend statique via `@sveltejs/adapter-static` et externalise les scripts d'amorçage (`scripts/externalize-bootstrap.mjs`) pour la conformité CSP.
+    - Étape 2 (`rust-builder`) : Rust slim-bookworm compile les binaires release `media-poc` et `media-bootstrap` avec mise en cache des dépendances Cargo et dépouillement des symboles (`strip --strip-all`).
+    - Étape 3 (`runtime`) : Image minimale Debian bookworm-slim avec `ffprobe`, `ca-certificates`, `tini` et l'utilisateur non-privilégié `aether` (`UID:GID 10001:10001`).
+  - **Zéro runtime Node.js permanent** : l'interpréteur Node.js est totalement absent de l'image de production ; les fichiers statiques sont servis directement par Axum (`ServeDir`).
+  - **Gestion propre du cycle de vie et signaux** : `ENTRYPOINT ["tini", "--"]` avec `STOPSIGNAL SIGINT` et `stop_grace_period: 15s`. `media-poc` capture `SIGINT`, annule les scans en cours sans perte d'inventaire et synchronise le journal WAL SQLite.
+  - **Liaison réseau et sécurité** : liaison hôte restreinte par défaut à la boucle locale (`127.0.0.1:3000:3000`) pour prévenir toute exposition non authentifiée sur le LAN. Compatibilité proxy inverse documentée avec validation stricte de l'en-tête `Host` correspondant à `MEDIA_PUBLIC_URL`.
+  - **Sonde de santé découplée** : route `/api/v1/health` isolée de la validation `Host` externe, garantissant le succès des sondes Docker internes (`127.0.0.1`) sans fuite d'informations sensibles quel que soit le domaine public configuré.
+  - **Sécurité et moindre privilège** : exécution non-root (`10001:10001`), `cap_drop: ALL`, `no-new-privileges: true`.
+  - **Étanchéité des données** : bibliothèques médias montées strictement en lecture seule (`:ro`) ; état applicatif et base SQLite isolés dans le volume persistant `aether_data` (`/data`).
+- **Amorçage administrateur local (Bootstrap)** :
+  - Commande documentée : `docker compose exec -it aether media-bootstrap`.
+  - Rejet systématique en mode non interactif sans terminal (code 1).
+  - Amorçage interactif par pseudo-TTY avec saisie masquée et confirmation du mot de passe. Zéro identifiant ou mot de passe par défaut.
+  - Verrouillage définitif en base SQLite : toute tentative ultérieure échoue (`initial bootstrap is already closed`).
+- **Métriques réelles mesurées en conteneur (AC-11)** :
+  - Taille de l'image : contenu 213 Mo (753,84 Mo de couches décompressées, empreinte disque hôte 790 Mo).
+  - Délai de démarrage jusqu'à l'état `healthy` : 6,34 secondes.
+  - Mémoire RSS du conteneur au repos (idle) : 2,88 Mo (2,883 MiB).
+  - Mémoire RSS pic pendant le scan ffprobe de bibliothèque : 12,56 Mo.
+- **Vérifications de bout en bout validées (AC-1 à AC-11)** :
+  - AC-1 : `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (52 réussis, 0 échec, 5 ignorés).
+  - AC-2 : `npm run check` (0 erreur, 0 warning), `npm run build`, `npm test` (13/13 Vitest réussis).
+  - AC-3 : `.dockerignore` exclut `.git`, `target`, `node_modules`, fixtures et logs (< 5 Mo ; transfert effectif mesuré : 5,82 Ko).
+  - AC-4 : image non-root (10001:10001), `ffprobe` dans le `PATH`, aucun binaire Node.js dans le runtime.
+  - AC-5 : démarrage Compose, migrations SQLite WAL automatiques dans `/data`, conteneur `healthy`.
+  - AC-6 : rejet des requêtes anonymes (401/403), contrôles `Host`/`Origin`/CSRF actifs sous Docker.
+  - AC-7 : amorçage administrateur interactif réussi, second amorçage rejeté, session et cookie sécurisé émis.
+  - AC-8 : scan de bibliothèque `:ro` avec `ffprobe`, catalogue et affiches locales peuplés, écriture refusée dans `/media` (`Read-only file system`), 0 octet modifié dans les médias sources.
+  - AC-9 : streaming MP4 et requêtes HTTP Range seek (`206 Partial Content`, `416 Range Not Satisfiable`) conformes.
+  - AC-10 : arrêt (`docker compose down`) et redémarrage (`docker compose up -d`) avec persistance des comptes, du catalogue et récupération propre des scans interrompus (`Scan échoué ou interrompu`).
+  - AC-11 : métriques réelles enregistrées dans la documentation.
+- Documentation ajoutée : `docs/DEPLOYMENT_DOCKER.md`, mise à jour de `README.md` et `MEMORY.md`.
+
+## 16 octobre 2026 — audit et consolidation de l'architecture Rust
+
+- Feuille de route : `docs/ARCHITECTURE_ROADMAP.md`. Audit du code actuel sur
+  develop, sans refactorisation backend, modification Web/packaging/migrations,
+  commit, push ni publication. Un sous-agent a vérifié les frontières Node/I/O.
+- Cible retenue : trois crates core/node/shared, appels Rust en standalone,
+  Core propriétaire des UUID/droits/SQLite, Node sans dépendance Core/SQL Core.
+  Auth et DB restent des modules ; aucune crate vide supplémentaire créée.
+- Trois macro-jalons proposés : extraction et sécurité fichiers P1 ; standalone
+  utilisable/mesuré P1 ; Node distant et OIDC P2. Ce plan n'implémente aucune de
+  ces étapes et ne clôture pas P1. Les quatre images restent une cible packaging.
+- Risques prioritaires vérifiés : TOCTOU confinement/réouverture, cycle logique
+  Node/inventory, rapports/cache et pagination catalogue en RAM, coût des images
+  et relectures de dossiers, contention SQL et budgets globaux manquants.
+- Web statique servi par Rust : runtime sans Node.js possible. ffprobe externe
+  reste requis pour les scans actuels ; aucun parseur Rust natif annoncé.
+- Exécutés : cargo metadata --locked --no-deps --format-version 1 ; cargo fmt
+  --check ; cargo clippy --locked --all-features --all-targets -- -D warnings ;
+  cargo test --locked --all-features : 50 tests réussis, 5 ignorés (4 navigateurs
+  et helper subprocess). git diff --check réussi. Aucun benchmark, navigateur,
+  conteneur ou NAS relancé. Les objectifs de performance du document sont proposés.
+- Statut initial propre ; `.agents/` et `ORIGINAL_REQUEST.md` sont apparus pendant
+  l'audit, hors de nos modifications, et ont été laissés intacts.
+
 ## 16 octobre 2026 — clarification bibliothèques et scanner
 
 - Décision : Media Node responsable des dossiers, scan récursif, analyse réelle
@@ -21,7 +108,7 @@
   suites Rust/Web non relancées pour cette clarification documentaire seule.
 
 
-> **Etat courant : 16 octobre 2026. SQLite/bootstrap, connexion Web, sessions persistantes et permissions backend des fixtures sont presents. Bibliotheques et droits fins sur fixtures livres ; scanner et bibliotheques personnelles absents, P1 autonome incomplet.** Les entrees datees conservent l'historique ; verifier code/tests avant toute annonce.
+> **État courant : 16 octobre 2026. Distribution Docker autonome P1 livrée et vérifiée de bout en bout (AC-1 à AC-11). SQLite/bootstrap interactif, connexion Web, sessions persistantes, permissions backend, scanner local de films, affiches locales et conteneur non-root sans Node.js opérationnels. Standalone déployé et mesuré.** Les entrees datees conservent l'historique ; verifier code/tests avant toute annonce.
 
 ## 1. Vision actée
 
@@ -99,7 +186,7 @@
 - [ ] **P0A** — Scanner les MKV AV1+Opus et lire/démontrer sur Chrome/Edge/Firefox ; informations de pistes exactes.
 - [ ] **P0B** — Même chose pour les MP4 AV1+Opus ; différence claire entre MP4 valide, navigateur compatible et fMP4/MSE si requis.
 - [ ] **P0C** — Pistes internes multiples, seek, pistes FR/EN, sous-titres et erreurs explicites ; comparer moteurs de lecture.
-- [ ] **P1** — Mode autonome utilisable : scan read-only, catalogue minimal, lecture P0, admin local, SQLite, déploiement simple.
+- [x] **P1** — Mode autonome utilisable : scan read-only, catalogue minimal, lecture P0, admin local, SQLite, déploiement simple.
 - [ ] **P2** — Deux Nodes, appairage/auth, catalogue global, OIDC Authentik et permissions user/admin.
 - [ ] **P3A** — Associations de pistes externes, versions vidéo alternatives et audio indépendant, synchronisation.
 - [ ] **P3B** — POC raw AV1 / raw Opus + index/manifeste, puis décision de format ; **pas nécessaire pour lancer la V1**.
@@ -117,8 +204,8 @@ Pas de rôle invité, pas de cluster, pas de moteur de recommandation, pas de tr
 - [x] Scan MKV AV1+Opus réussi : fixture synthétique, trois pistes, adaptateur ffprobe temporaire.
 - [x] Scan MP4 AV1+Opus réussi : fixtures classique/fragmentée, trois pistes chacune.
 - [x] Lecture navigateur réelle vérifiée : Chrome 155.0.8059.40, Edge 155.0.4283.45, Firefox 155.0.1 headless Windows ; pixels/PCM/pause/seek/fin et FR/EN par remux, écoute humaine et sélection interne non validées.
-- [ ] Sécurité bootstrap administrateur vérifiée.
-- [ ] Standalone déployé.
+- [x] Sécurité bootstrap administrateur vérifiée.
+- [x] Standalone déployé.
 - [ ] Deux Nodes et OIDC testés.
 - [ ] Pistes externes synchronisées.
 - [ ] Formats raw conçus et vérifiés.

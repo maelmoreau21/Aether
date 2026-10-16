@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { DEFAULT_NAME } from '../../lib/config/brand';
+  import { DEFAULT_NAME, fetchBrandName } from '../../lib/config/brand';
   import { login } from '../../lib/auth/session';
   let name = $state(DEFAULT_NAME);
   let identifier = $state('');
@@ -18,7 +18,7 @@
   }
   $effect(() => {
     const controller = new AbortController();
-    fetch('/api/v1/config', { signal: controller.signal }).then(response => response.ok ? response.json() : null).then(config => { if (config?.name) name = config.name; }).catch(() => {});
+    fetchBrandName(controller.signal).then(brandName => { name = brandName; });
     return () => controller.abort();
   });
 </script>

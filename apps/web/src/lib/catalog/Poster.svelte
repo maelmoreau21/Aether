@@ -4,25 +4,23 @@
   let { work, href = '', showMetadata = true, eager = false }: { work: Work; href?: string; showMetadata?: boolean; eager?: boolean } = $props();
   const imageUrl = $derived(work.posterUrl && work.posterUrl !== failedUrl ? work.posterUrl : '');
 </script>
+{#snippet posterBody()}
+  <div class="poster" class:series={work.kind === 'series'}>
+    {#if imageUrl}<img class="poster-image" src={imageUrl} alt={`Affiche de ${work.title}`} width="400" height="600" loading={eager ? 'eager' : 'lazy'} decoding="async" onerror={() => { failedUrl = imageUrl; }} />{/if}
+    <span class="format" class:image-label={!!imageUrl}>{work.kind === 'series' ? 'SÉRIE' : 'FILM'}</span>
+    {#if !imageUrl}<span class="poster-type" aria-hidden="true">{work.kind === 'series' ? 'S' : 'F'}{#if work.synthetic}<span>DÉMO</span>{/if}</span>{/if}
+    {#if href}<span class="card-open" aria-hidden="true">↗</span>{/if}
+  </div>
+  {#if showMetadata}<h3>{work.title}</h3><p>{work.year ?? 'Année non renseignée'}{work.kind === 'series' ? ` · ${work.episodeCount ?? 0} ${(work.episodeCount ?? 0) > 1 ? 'épisodes' : 'épisode'}` : ''}</p>{#if work.genres?.length}<p class="genres">{work.genres.join(' · ')}</p>{/if}{#if work.description}<p class="synopsis">{work.description}</p>{/if}{/if}
+{/snippet}
 {#if href}
   <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- href already resolved by the parent route. -->
   <a class="media-card" {href} aria-label={`Voir ${work.title}`}>
-    <div class="poster" class:series={work.kind === 'series'}>
-      {#if imageUrl}<img class="poster-image" src={imageUrl} alt={`Affiche de ${work.title}`} width="400" height="600" loading={eager ? 'eager' : 'lazy'} decoding="async" onerror={() => { failedUrl = imageUrl; }} />{/if}
-      <span class="format" class:image-label={!!imageUrl}>{work.kind === 'series' ? 'SÉRIE' : 'FILM'}</span>
-      {#if !imageUrl}<span class="poster-type" aria-hidden="true">{work.kind === 'series' ? 'S' : 'F'}{#if work.synthetic}<span>DÉMO</span>{/if}</span>{/if}
-      <span class="card-open" aria-hidden="true">↗</span>
-    </div>
-    {#if showMetadata}<h3>{work.title}</h3><p>{work.year ?? 'Année non renseignée'}{work.kind === 'series' ? ` · ${work.episodeCount ?? 0} ${(work.episodeCount ?? 0) > 1 ? 'épisodes' : 'épisode'}` : ''}</p>{#if work.genres?.length}<p class="genres">{work.genres.join(' · ')}</p>{/if}{#if work.description}<p class="synopsis">{work.description}</p>{/if}{/if}
+    {@render posterBody()}
   </a>
 {:else}
   <div class="media-card">
-    <div class="poster" class:series={work.kind === 'series'}>
-      {#if imageUrl}<img class="poster-image" src={imageUrl} alt={`Affiche de ${work.title}`} width="400" height="600" loading={eager ? 'eager' : 'lazy'} decoding="async" onerror={() => { failedUrl = imageUrl; }} />{/if}
-      <span class="format" class:image-label={!!imageUrl}>{work.kind === 'series' ? 'SÉRIE' : 'FILM'}</span>
-      {#if !imageUrl}<span class="poster-type" aria-hidden="true">{work.kind === 'series' ? 'S' : 'F'}{#if work.synthetic}<span>DÉMO</span>{/if}</span>{/if}
-    </div>
-    {#if showMetadata}<h3>{work.title}</h3><p>{work.year ?? 'Année non renseignée'}{work.kind === 'series' ? ` · ${work.episodeCount ?? 0} ${(work.episodeCount ?? 0) > 1 ? 'épisodes' : 'épisode'}` : ''}</p>{#if work.genres?.length}<p class="genres">{work.genres.join(' · ')}</p>{/if}{#if work.description}<p class="synopsis">{work.description}</p>{/if}{/if}
+    {@render posterBody()}
   </div>
 {/if}
 <style>

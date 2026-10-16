@@ -1,0 +1,9 @@
+{
+  "image_disk_size": "790MB",
+  "image_size_bytes": 790456927,
+  "image_size_mb": 753.84,
+  "startup_duration_seconds": 6.34,
+  "idle_rss_raw": "2.883MiB / 7.528GiB",
+  "idle_rss_mb": 2.88,
+  "scan_peak_rss_mb": 12.56
+}

@@ -1,0 +1,399 @@
+# Milestone 1: Resilient Healthcheck and Security Layer Analysis
+
+## 1. Executive Summary
+
+This investigation analyzes the interaction between Aether's security layer (`local_security` middleware in `crates/core/src/lib.rs`) and container healthcheck probes when `MEDIA_PUBLIC_URL` is configured to an external origin (e.g., `https://nas.example.com`).
+
+Currently, `crates/core/src/lib.rs` wraps all application routes—including `/api/v1/health`—inside `local_security`. This middleware strictly requires that the incoming `Host` HTTP header matches the authority component of `origin` (derived from `MEDIA_PUBLIC_URL`). When deployed in Docker with an external public URL, internal container healthchecks (e.g., `curl http://127.0.0.1:3000/api/v1/health`) provide `Host: 127.0.0.1:3000`. Because `"127.0.0.1:3000" != "nas.example.com"`, `local_security` unconditionally responds with `403 Forbidden`, causing Docker to mark the container unhealthy and trigger restart loops.
+
+We evaluate three architectural solutions in Axum:
+1. **Architectural Route Separation (Recommended)**: Decoupling `/api/v1/health` into a distinct `health_routes` router merged outside `local_security`, equipped with `nosniff` and `no-store` headers.
+2. **Middleware-Level Exemption**: Adding path-based conditional logic inside `local_security` allowing loopback hosts when `path == "/api/v1/health"`.
+3. **Hybrid Dedicated Healthcheck Layer**: Decoupled health router with explicit loopback/configured-host validation and `sec-fetch-site: cross-site` blocking.
+
+We conclude that **Architectural Route Separation (Option 1)** is the cleanest, most idiomatic Axum architecture and adheres strictly to industry standard container health probe practices without weakening any security invariants on protected APIs or media streaming endpoints.
+
+---
+
+## 2. Problem Statement & Root Cause Analysis
+
+### 2.1 Code Inspection
+
+In `crates/core/src/lib.rs`:
+
+```rust
+// Lines 150-167: public_routes definition
+fn public_routes(mode: &'static str) -> Router {
+    Router::new()
+        .nest_service(
+            "/app",
+            tower_http::services::ServeDir::new("apps/web/build")
+                .append_index_html_on_directories(true),
+        )
+        .route(
+            "/api/v1/config",
+            get(move || async move {
+                Json(serde_json::json!({"name": brand::DEFAULT_NAME, "mode":mode}))
+            }),
+        )
+        .route(
+            "/api/v1/health",
+            get(move || async move { Json(serde_json::json!({"status":"ok", "mode":mode})) }),
+        )
+}
+
+// Lines 169-188: local_security middleware
+fn local_security(router: Router, origin: String) -> Router {
+    let host = origin
+        .parse::<axum::http::Uri>()
+        .ok()
+        .and_then(|uri| uri.authority().map(|value| value.as_str().to_owned()));
+    router
+        .layer(middleware::from_fn(move |req: Request, next: Next| {
+            let host = host.clone();
+            let origin = origin.clone();
+            async move {
+                // Preserve the loopback-only origin boundary for the local Core.
+                if req.headers().get(header::HOST).and_then(|h| h.to_str().ok()) != host.as_deref()
+                    || req.headers().get("sec-fetch-site").is_some_and(|h| h == "cross-site")
+                    || req.headers().get(header::ORIGIN).is_some_and(|h| h.as_bytes() != origin.as_bytes())
+                {
+                    return StatusCode::FORBIDDEN.into_response();
+                }
+                next.run(req).await
+            }
+        }))
+        ...
+```
+
+In `crates/core/src/lib.rs` (lines 111-118), `secure_app_with_jobs` wraps all merged sub-routers with `local_security`:
+
+```rust
+    Ok(local_security(
+        public_routes(mode)
+            .merge(media)
+            .merge(scans::router(auth.clone(), root.clone(), jobs).await?)
+            .merge(libraries::router(auth.clone(), root))
+            .merge(auth::router(auth)),
+        origin,
+    ))
+```
+
+And in `crates/core/src/main.rs` (lines 28-30):
+
+```rust
+    let public_origin =
+        std::env::var("MEDIA_PUBLIC_URL").unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
+    let auth = AuthState::new(database.clone(), public_origin).await?;
+```
+
+### 2.2 Trace of Failure under External `MEDIA_PUBLIC_URL`
+
+1. **Configuration**: The administrator deploys Aether behind a reverse proxy (e.g. Caddy/Nginx on Synology DS1522+) with:
+   - `MEDIA_PUBLIC_URL=https://nas.example.com`
+   - `MEDIA_PORT=3000`
+   - `MEDIA_BIND_ADDR=0.0.0.0`
+2. **Origin & Authority Extraction**:
+   - `origin` is `"https://nas.example.com"`.
+   - `origin.parse::<axum::http::Uri>().authority()` yields `"nas.example.com"`.
+   - `host` in `local_security` is `Some("nas.example.com")`.
+3. **Internal Healthcheck Execution**:
+   - Docker container healthcheck command executes locally inside the container:
+     ```sh
+     curl -f http://127.0.0.1:3000/api/v1/health || exit 1
+     ```
+   - Standard HTTP request generated by `curl`:
+     ```http
+     GET /api/v1/health HTTP/1.1
+     Host: 127.0.0.1:3000
+     User-Agent: curl/7.88.1
+     Accept: */*
+     ```
+4. **Middleware Evaluation**:
+   - `req.headers().get(header::HOST).and_then(|h| h.to_str().ok())` evaluates to `Some("127.0.0.1:3000")`.
+   - `host.as_deref()` is `Some("nas.example.com")`.
+   - Comparison: `"127.0.0.1:3000" != "nas.example.com"` is **`true`**.
+5. **Rejection**:
+   - Condition triggers line 184: `return StatusCode::FORBIDDEN.into_response();`.
+   - The probe receives `HTTP/1.1 403 Forbidden`.
+   - `curl -f` exits with status `22` (The requested URL returned error 403).
+   - Docker marks the container status as `unhealthy`.
+
+---
+
+## 3. Architectural Options & Comparative Evaluation
+
+### Option 1: Router Separation (Recommended)
+Decouple `/api/v1/health` into a distinct `health_routes` router that is merged outside `local_security`.
+
+```rust
+fn health_routes(mode: &'static str) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/health",
+            get(move || async move { Json(serde_json::json!({"status":"ok", "mode":mode})) }),
+        )
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ))
+}
+```
+
+In `secure_app_with_jobs`:
+```rust
+    let protected = local_security(
+        public_routes(mode)
+            .merge(media)
+            .merge(scans::router(auth.clone(), root.clone(), jobs).await?)
+            .merge(libraries::router(auth.clone(), root))
+            .merge(auth::router(auth)),
+        origin,
+    );
+    Ok(health_routes(mode).merge(protected))
+```
+
+And in `app` (when compiled with `--features fixture-bench`):
+```rust
+#[cfg(feature = "fixture-bench")]
+pub fn app(inventory: node::Inventory, port: u16) -> Router {
+    health_routes("localhost-fixtures").merge(local_security(
+        public_routes("localhost-fixtures").merge(media_routes(inventory)),
+        format!("http://127.0.0.1:{port}"),
+    ))
+}
+```
+
+#### Evaluation:
+- **Axum Design**: Idiomatic. Axum is structured around composing routers with distinct layers. Endpoints with different security policies belong to distinct routers.
+- **Simplicity**: Zero conditional branching in middleware. No runtime string parsing or path checking per request.
+- **Robustness**: Immune to URL encoding variations, trailing slash issues, or path traversal ambiguities.
+- **Container Compatibility**: Works universally whether probed via `127.0.0.1:3000`, `localhost:3000`, Docker container IP `172.17.0.x:3000`, or public FQDN.
+- **Security Boundary**: The `local_security` middleware remains strict and uncompromising with zero exemptions.
+
+---
+
+### Option 2: Middleware-Level Exemption in `local_security`
+Keep `/api/v1/health` in `public_routes` and add a special-case exception in `local_security`:
+
+```rust
+fn local_security(router: Router, origin: String) -> Router {
+    let host = origin
+        .parse::<axum::http::Uri>()
+        .ok()
+        .and_then(|uri| uri.authority().map(|value| value.as_str().to_owned()));
+    router
+        .layer(middleware::from_fn(move |req: Request, next: Next| {
+            let host = host.clone();
+            let origin = origin.clone();
+            async move {
+                if req.uri().path() == "/api/v1/health" {
+                    let req_host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok());
+                    let is_loopback = req_host.is_some_and(|h| {
+                        let h_name = h.split(':').next().unwrap_or(h);
+                        matches!(h_name, "127.0.0.1" | "localhost" | "[::1]")
+                    });
+                    if req_host == host.as_deref() || is_loopback {
+                        return next.run(req).await;
+                    }
+                }
+
+                if req.headers().get(header::HOST).and_then(|h| h.to_str().ok()) != host.as_deref()
+                    || req.headers().get("sec-fetch-site").is_some_and(|h| h == "cross-site")
+                    || req.headers().get(header::ORIGIN).is_some_and(|h| h.as_bytes() != origin.as_bytes())
+                {
+                    return StatusCode::FORBIDDEN.into_response();
+                }
+                next.run(req).await
+            }
+        }))
+        ...
+```
+
+#### Evaluation:
+- **Axum Design**: Anti-pattern. Re-implements route matching inside middleware.
+- **Overhead**: Evaluates string comparison `req.uri().path() == "/api/v1/health"` on every single HTTP request throughout the daemon lifetime.
+- **Brittleness**: If healthcheck route paths evolve or if Docker internal network uses container hostnames (e.g. `http://aether:3000/api/v1/health`), hardcoded loopback checks fail.
+- **Response Headers**: Forces CSP headers onto JSON responses where they are irrelevant.
+
+---
+
+### Option 3: Dedicated Health Route with Cross-Site Protection (Hybrid)
+Route `/api/v1/health` outside `local_security` (as in Option 1), but attach a lightweight middleware blocking `sec-fetch-site: cross-site`.
+
+```rust
+fn health_routes(mode: &'static str) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/health",
+            get(move || async move { Json(serde_json::json!({"status":"ok", "mode":mode})) }),
+        )
+        .layer(middleware::from_fn(|req: Request, next: Next| async move {
+            if req.headers().get("sec-fetch-site").is_some_and(|h| h == "cross-site") {
+                return StatusCode::FORBIDDEN.into_response();
+            }
+            next.run(req).await
+        }))
+        .layer(SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
+        .layer(SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
+}
+```
+
+#### Evaluation:
+- Blocks browser-driven cross-site scripts from querying the endpoint.
+- Since `curl`, Docker healthcheck, and reverse proxies do not send browser `Sec-Fetch-Site` headers, container probes are never blocked.
+- Adds minimal complexity compared to Option 1.
+
+---
+
+### Comparison Matrix
+
+| Evaluation Criteria | Option 1: Router Separation | Option 2: Middleware Exemption | Option 3: Separation + Cross-Site Guard |
+|---|:---:|:---:|:---:|
+| **Idiomatic Axum Design** | ⭐⭐⭐⭐⭐ (Clean router merge) | ⭐⭐ (Path inspection in layer) | ⭐⭐⭐⭐ (Clean router + layer) |
+| **Protected Route Security** | Unchanged (No exemptions) | Relaxed in middleware | Unchanged (No exemptions) |
+| **Docker Probe Reliability** | 100% resilient (any internal host/IP) | Partial (only hardcoded loopback) | 100% resilient (curl sends no sec-fetch-site) |
+| **DNS Rebinding Resistance on Protected APIs** | Fully preserved | Fully preserved | Fully preserved |
+| **CSRF & Origin Integrity** | Fully preserved | Fully preserved | Fully preserved |
+| **Response Headers Quality** | `nosniff`, `no-store` | Unnecessary HTML CSP | `nosniff`, `no-store` |
+| **Maintenance / Complexity** | Minimal (2 lines changed) | Moderate (regex/split + logic) | Low |
+
+**Verdict**: **Option 1** is the cleanest, most standard, and most robust solution. If defense-in-depth against browser cross-site scanning of health status is desired, **Option 3** is a strictly superior enhancement over Option 2.
+
+---
+
+## 4. Security Invariant & Protection Boundary Verification
+
+We verify each security boundary against the proposed change (Option 1):
+
+### 4.1 Host Header Validation
+- **What is protected**: All routes inside `local_security`:
+  - `/app` (ServeDir static frontend)
+  - `/api/v1/config` (Brand and mode configuration)
+  - `/api/v1/auth/login`, `/api/v1/auth/me`, `/api/v1/auth/logout`
+  - `/api/v1/catalog`, `/api/v1/catalog/{id}`, `/api/v1/media/{id}`
+  - `/api/v1/assets`, `/api/v1/assets/{id}/content`, `/api/v1/assets/{id}/image`
+  - `/api/v1/admin/libraries/*`, `/api/v1/admin/libraries/{id}/scan`
+  - `/mse`, `/shaka`, `/bench.js`
+- **Verification**: Because these routes remain inside `local_security`, any request to them where `Host != host` returns `403 Forbidden`. DNS rebinding attacks against any data-bearing or state-modifying endpoint remain strictly impossible.
+
+### 4.2 Origin Header & CSRF Protections
+- **Authentication routes (`auth::router`)**:
+  - `login` checks `state.check_origin(&headers)`: `Origin == origin` and `sec-fetch-site != "cross-site"`.
+  - `logout` checks `require_csrf(&headers, &identity)`: validates exact origin, `sec-fetch-site`, and `x-csrf-token`.
+- **Administrative routes (`scans::router`, `libraries::router`)**:
+  - Mutating operations (`POST`, `PUT`, `DELETE`) call `authorize(..., mutation: true)`, strictly checking `state.auth.require_csrf(headers, &identity)`.
+- **Verification**: No CSRF check or Origin check is bypassed or relaxed.
+
+### 4.3 Content-Security-Policy & Security Headers
+- The strict CSP (`default-src 'none'; script-src 'self'; img-src 'self'; media-src 'self' blob:; ...`) remains applied to all routes in `local_security`.
+- The healthcheck route receives explicit `X-Content-Type-Options: nosniff` and `Cache-Control: no-store` headers.
+
+### 4.4 Information Leakage Assessment
+- `/api/v1/health` responds exclusively with:
+  ```json
+  {"status":"ok", "mode":"standalone-local"}
+  ```
+  or
+  ```json
+  {"status":"ok", "mode":"localhost-fixtures"}
+  ```
+- It exposes:
+  - Zero session tokens or credentials.
+  - Zero database records or user counts.
+  - Zero local filesystem paths or mount locations.
+  - Zero network interface details.
+- This adheres to Requirement R3: *"Expose and configure a container healthcheck that accurately reflects service readiness without leaking sensitive internal details."*
+
+---
+
+## 5. Detailed Implementation Strategy & Proposed Patch
+
+### 5.1 Proposed Changes in `crates/core/src/lib.rs`
+
+```diff
+--- a/crates/core/src/lib.rs
++++ b/crates/core/src/lib.rs
+@@ -111,12 +111,15 @@ pub async fn secure_app_with_jobs(
+-    Ok(local_security(
+-        public_routes(mode)
+-            .merge(media)
+-            .merge(scans::router(auth.clone(), root.clone(), jobs).await?)
+-            .merge(libraries::router(auth.clone(), root))
+-            .merge(auth::router(auth)),
+-        origin,
+-    ))
++    let protected = local_security(
++        public_routes(mode)
++            .merge(media)
++            .merge(scans::router(auth.clone(), root.clone(), jobs).await?)
++            .merge(libraries::router(auth.clone(), root))
++            .merge(auth::router(auth)),
++        origin,
++    );
++    Ok(health_routes(mode).merge(protected))
+ }
+
+ #[cfg(feature = "fixture-bench")]
+ pub fn app(inventory: node::Inventory, port: u16) -> Router {
+-    local_security(
+-        public_routes("localhost-fixtures").merge(media_routes(inventory)),
+-        format!("http://127.0.0.1:{port}"),
+-    )
++    health_routes("localhost-fixtures").merge(local_security(
++        public_routes("localhost-fixtures").merge(media_routes(inventory)),
++        format!("http://127.0.0.1:{port}"),
++    ))
+ }
+
++fn health_routes(mode: &'static str) -> Router {
++    Router::new()
++        .route(
++            "/api/v1/health",
++            get(move || async move { Json(serde_json::json!({"status":"ok", "mode":mode})) }),
++        )
++        .layer(SetResponseHeaderLayer::overriding(
++            header::X_CONTENT_TYPE_OPTIONS,
++            HeaderValue::from_static("nosniff"),
++        ))
++        .layer(SetResponseHeaderLayer::overriding(
++            header::CACHE_CONTROL,
++            HeaderValue::from_static("no-store"),
++        ))
++}
++
+ fn public_routes(mode: &'static str) -> Router {
+     Router::new()
+         .nest_service(
+             "/app",
+             tower_http::services::ServeDir::new("apps/web/build")
+                 .append_index_html_on_directories(true),
+         )
+         .route(
+             "/api/v1/config",
+             get(move || async move {
+                 Json(serde_json::json!({"name": brand::DEFAULT_NAME, "mode":mode}))
+             }),
+         )
+-        .route(
+-            "/api/v1/health",
+-            get(move || async move { Json(serde_json::json!({"status":"ok", "mode":mode})) }),
+-        )
+ }
+```
+
+### 5.2 Verification Test Strategy
+
+Add an automated integration test verifying:
+1. When `AuthState` is initialized with `https://media.example.invalid`:
+   - A probe to `GET /api/v1/health` with `Host: 127.0.0.1:3000` receives `200 OK` and `{"status":"ok", "mode":"standalone-local"}`.
+   - A probe to `GET /api/v1/health` with `Host: media.example.invalid` receives `200 OK`.
+   - A request to `GET /api/v1/catalog` with `Host: 127.0.0.1:3000` receives `403 Forbidden`.
+   - A request to `POST /api/v1/auth/login` with `Host: 127.0.0.1:3000` receives `403 Forbidden`.
+   - A request to `GET /api/v1/config` with `Host: 127.0.0.1:3000` receives `403 Forbidden`.
+
+This test guarantees both the healthcheck resilience and the immutability of the security perimeter on all protected endpoints.

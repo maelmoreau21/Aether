@@ -1,6 +1,9 @@
 import type { Source, CodecTrack } from './types';
+
+const displayNames = typeof Intl !== 'undefined' && Intl.DisplayNames ? new Intl.DisplayNames(['fr'], { type: 'language' }) : null;
+
 export function languageLabel(language: string) {
-  try { return new Intl.DisplayNames(['fr'], { type: 'language' }).of(language) ?? language; }
+  try { return displayNames?.of(language) ?? language; }
   catch { return language; }
 }
 export function audioLabel(source: Source) {

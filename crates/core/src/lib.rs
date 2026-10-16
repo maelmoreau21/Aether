@@ -108,14 +108,15 @@ pub async fn secure_app_with_jobs(
             },
             permissions::require_media,
         ));
-    Ok(local_security(
+    let protected = local_security(
         public_routes(mode)
             .merge(media)
             .merge(scans::router(auth.clone(), root.clone(), jobs).await?)
             .merge(libraries::router(auth.clone(), root))
             .merge(auth::router(auth)),
         origin,
-    ))
+    );
+    Ok(health_routes(mode).merge(protected))
 }
 
 async fn indexed_image(
@@ -141,17 +142,49 @@ async fn indexed_descriptor(
 /// The production binary never selects this constructor.
 #[cfg(feature = "fixture-bench")]
 pub fn app(inventory: node::Inventory, port: u16) -> Router {
-    local_security(
+    health_routes("localhost-fixtures").merge(local_security(
         public_routes("localhost-fixtures").merge(media_routes(inventory)),
         format!("http://127.0.0.1:{port}"),
-    )
+    ))
+}
+
+/// Helper to resolve web dist path from an optional string slice.
+pub fn configured_web_dist_from(val: Option<&str>) -> std::path::PathBuf {
+    let raw = match val {
+        Some(s) if !s.trim().is_empty() => std::path::PathBuf::from(s.trim()),
+        _ => std::path::PathBuf::from("apps/web/build"),
+    };
+    raw.canonicalize().unwrap_or(raw)
+}
+
+/// Resolve the static web distribution directory from `MEDIA_WEB_DIST`.
+/// Defaults to `"apps/web/build"` if unset or empty/whitespace.
+/// Best-effort canonicalizes if the directory exists on disk.
+pub fn configured_web_dist() -> std::path::PathBuf {
+    configured_web_dist_from(std::env::var("MEDIA_WEB_DIST").ok().as_deref())
+}
+
+fn health_routes(mode: &'static str) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/health",
+            get(move || async move { Json(serde_json::json!({"status":"ok", "mode":mode})) }),
+        )
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ))
 }
 
 fn public_routes(mode: &'static str) -> Router {
     Router::new()
         .nest_service(
             "/app",
-            tower_http::services::ServeDir::new("apps/web/build")
+            tower_http::services::ServeDir::new(configured_web_dist())
                 .append_index_html_on_directories(true),
         )
         .route(
@@ -159,10 +192,6 @@ fn public_routes(mode: &'static str) -> Router {
             get(move || async move {
                 Json(serde_json::json!({"name": brand::DEFAULT_NAME, "mode":mode}))
             }),
-        )
-        .route(
-            "/api/v1/health",
-            get(move || async move { Json(serde_json::json!({"status":"ok", "mode":mode})) }),
         )
 }
 
@@ -194,4 +223,41 @@ fn local_security(router: Router, origin: String) -> Router {
 
 pub fn error(status: StatusCode, code: &'static str) -> Response {
     (status, Json(serde_json::json!({"error":code}))).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_web_dist_defaults_when_unset_or_empty() {
+        let expected = std::path::PathBuf::from("apps/web/build");
+        let expected = expected.canonicalize().unwrap_or(expected);
+
+        assert_eq!(configured_web_dist_from(None), expected);
+        assert_eq!(configured_web_dist_from(Some("")), expected);
+        assert_eq!(configured_web_dist_from(Some("   \t  ")), expected);
+    }
+
+    #[test]
+    fn configured_web_dist_custom_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let custom = temp.path().join("dist");
+        std::fs::create_dir_all(&custom).unwrap();
+        let canonical_custom = custom.canonicalize().unwrap();
+
+        assert_eq!(
+            configured_web_dist_from(Some(custom.to_str().unwrap())),
+            canonical_custom
+        );
+    }
+
+    #[test]
+    fn configured_web_dist_nonexistent_path_falls_back_to_raw() {
+        let nonexistent = "nonexistent/custom/path";
+        assert_eq!(
+            configured_web_dist_from(Some(nonexistent)),
+            std::path::PathBuf::from(nonexistent)
+        );
+    }
 }

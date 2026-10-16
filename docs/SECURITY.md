@@ -1,3 +1,7 @@
+> Extension P1 affiches locales Films : inventaire séparé, route image avec
+> session/droits et repli Web. État actuel : [LOCAL_FILM_POSTERS.md](LOCAL_FILM_POSTERS.md).
+> Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
+
 > Mise à jour scanner Films P1 : inventaire SQLite et bibliothèques locales
 > autorisées par MEDIA_LIBRARY_ROOT. Jobs session/rôle/CSRF, contrôle des droits
 > avant GET/HEAD/Range, refus liens et points de réanalyse Windows. Confinement

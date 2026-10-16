@@ -1,3 +1,4 @@
+pub mod images;
 pub mod nfo;
 pub mod scanner;
 

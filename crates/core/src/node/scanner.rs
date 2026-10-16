@@ -18,6 +18,7 @@ pub struct CachedFile {
 
 #[derive(Debug, Serialize)]
 pub struct ScannedFile {
+    pub poster: Option<super::images::LocalImage>,
     pub editorial: super::nfo::NfoOutcome,
     pub relative_path: String,
     pub size: u64,
@@ -223,6 +224,15 @@ pub async fn scan(
     cache: &HashMap<String, CachedFile>,
     cancel: &AtomicBool,
 ) -> io::Result<ScanReport> {
+    scan_with_images(root, cache, &HashMap::new(), cancel).await
+}
+
+pub async fn scan_with_images(
+    root: &Path,
+    cache: &HashMap<String, CachedFile>,
+    image_cache: &HashMap<String, super::images::LocalImage>,
+    cancel: &AtomicBool,
+) -> io::Result<ScanReport> {
     if !root.is_absolute()
         || root.components().any(|c| c == Component::ParentDir)
         || linked(&tokio::fs::symlink_metadata(root).await?)
@@ -392,7 +402,16 @@ pub async fn scan(
                 message: message.clone(),
             });
         }
+        let (poster, poster_warning) =
+            super::images::discover_cached(&root, relative, image_cache).await;
+        if let Some(message) = poster_warning {
+            report.warnings.push(ScanIssue {
+                relative_path: relative_path.clone(),
+                message,
+            });
+        }
         report.files.push(ScannedFile {
+            poster,
             editorial,
             relative_path,
             size: metadata.len(),
@@ -557,6 +576,38 @@ mod tests {
             super::super::nfo::NfoOutcome::Missing
         ));
         assert_eq!(removed.files[0].identity_key, result.files[0].identity_key);
+        let poster = film.join("poster.png");
+        image::DynamicImage::new_rgb8(2, 3).save(&poster).unwrap();
+        let with_image = scan(temp.path(), &cache, &AtomicBool::new(false))
+            .await
+            .unwrap();
+        assert_eq!(with_image.probed, 0);
+        let image = with_image.files[0].poster.clone().unwrap();
+        let image_cache = HashMap::from([(image.path.clone(), image.clone())]);
+        let reused = scan_with_images(temp.path(), &cache, &image_cache, &AtomicBool::new(false))
+            .await
+            .unwrap();
+        assert_eq!(
+            reused.files[0].poster.as_ref().unwrap().modified_ns,
+            image.modified_ns
+        );
+        image::DynamicImage::new_rgb8(5, 7).save(&poster).unwrap();
+        let updated = scan_with_images(temp.path(), &cache, &image_cache, &AtomicBool::new(false))
+            .await
+            .unwrap();
+        assert_eq!(updated.probed, 0);
+        assert!(updated.files[0].poster.is_some());
+        assert_ne!(
+            updated.files[0].poster.as_ref().unwrap().size_bytes,
+            image.size_bytes
+        );
+        tokio::fs::remove_file(&poster).await.unwrap();
+        let deleted = scan_with_images(temp.path(), &cache, &image_cache, &AtomicBool::new(false))
+            .await
+            .unwrap();
+        assert_eq!(deleted.probed, 0);
+        assert!(deleted.files[0].poster.is_none());
+        assert_eq!(deleted.files[0].identity_key, result.files[0].identity_key);
         assert!(
             confined_file(temp.path(), Path::new("../outside.mp4"))
                 .await

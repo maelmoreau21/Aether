@@ -99,6 +99,7 @@ pub async fn secure_app_with_jobs(
     let origin = auth.origin().to_owned();
     let media = media_routes(inventory)
         .route("/api/v1/media/{id}", get(indexed_descriptor))
+        .route("/api/v1/assets/{id}/image", get(indexed_image))
         .layer(axum::Extension(auth.store.clone()))
         .route_layer(middleware::from_fn_with_state(
             permissions::MediaAccess {
@@ -115,6 +116,14 @@ pub async fn secure_app_with_jobs(
             .merge(auth::router(auth)),
         origin,
     ))
+}
+
+async fn indexed_image(
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    request: Request,
+) -> Response {
+    inventory::image(&store, &id, request).await
 }
 
 async fn indexed_descriptor(

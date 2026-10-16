@@ -105,7 +105,7 @@
   {:else if detail}
     <a class="back-link" href={resolve(section === 'series' ? 'series/' : 'films/')}>← {section === 'series' ? 'Toutes les séries' : 'Tous les films'}</a>
     <section class="detail">
-      <div class="detail-poster"><Poster work={detail} showMetadata={false} /></div>
+      <div class="detail-poster"><Poster work={detail} showMetadata={false} eager /></div>
       <div class="detail-copy"><p class="eyebrow">{detail.kind === 'series' ? 'SÉRIE' : 'FILM'}{detail.synthetic ? ' · DÉMONSTRATION' : ''}</p><h1>{detail.title}</h1><p class="metadata">{detail.year ?? 'Année non renseignée'}{detail.kind === 'series' ? ` · ${detail.seasonCount ?? 0} ${(detail.seasonCount ?? 0) > 1 ? 'saisons' : 'saison'} · ${detail.episodeCount ?? 0} ${(detail.episodeCount ?? 0) > 1 ? 'épisodes' : 'épisode'}` : ''}</p>{#if detail.genres?.length}<p class="metadata genres">{detail.genres.join(' · ')}</p>{/if}<p class="synopsis">{detail.description || 'Synopsis non renseigné.'}</p>
       {#if detail.kind === 'film'}
         <div class="versions" aria-label="Versions disponibles">{#each playableMedia as item (item.id)}<button class="version-choice" aria-pressed={selected === item.id} aria-label={`Sélectionner la version ${sourceLabel(item)}`} onclick={() => selected = item.id}>{sourceLabel(item)}</button>{/each}</div>

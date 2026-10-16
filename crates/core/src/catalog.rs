@@ -1,7 +1,7 @@
 //! Explicit fixture associations, never a filename/title based media classifier.
 use crate::{error, node::Inventory};
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, Query, State, rejection::QueryRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -159,6 +159,7 @@ fn available(inventory: &Inventory) -> bool {
 pub async fn list(
     State(inventory): State<Arc<Inventory>>,
     query: Result<Query<CatalogQuery>, QueryRejection>,
+    visible: Option<Extension<crate::permissions::VisibleLibraries>>,
 ) -> Response {
     let Ok(Query(query)) = query else {
         return error(StatusCode::BAD_REQUEST, "invalid_catalog_query");
@@ -179,7 +180,10 @@ pub async fn list(
     let mut items: Vec<_> = works(available(&inventory))
         .into_iter()
         .filter(|work| {
-            query.kind.as_deref().is_none_or(|kind| work.kind == kind)
+            visible
+                .as_ref()
+                .is_none_or(|v| v.0.0.iter().any(|id| id == work.library_id))
+                && query.kind.as_deref().is_none_or(|kind| work.kind == kind)
                 && work.title.to_lowercase().contains(&search)
         })
         .collect();

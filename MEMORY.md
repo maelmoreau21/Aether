@@ -1,6 +1,27 @@
 # MEMORY.md — État et décisions Aether
 
-> **Etat courant : 16 octobre 2026. SQLite/bootstrap, connexion Web, sessions persistantes et permissions backend des fixtures sont presents. Permissions fines et bibliotheques personnelles restent absentes ; P1 autonome incomplet.** Les entrees datees conservent l'historique ; verifier code/tests avant toute annonce.
+## 16 octobre 2026 — clarification bibliothèques et scanner
+
+- Décision : Media Node responsable des dossiers, scan récursif, analyse réelle
+  MKV/MP4 multipistes et streaming ; Core responsable du catalogue global SQLite,
+  comptes/permissions et réception de l'inventaire. Web = interface/administration.
+- Chaque bibliothèque appartient à un Node et une racine explicite : Films →
+  Node local → /Films, Séries → Node local → /Séries (exemples uniquement).
+  P1 conserve un seul Node local ; aucun multi-Node P2 implémenté.
+- Scanner futur autonome, sans dépendance Radarr/Sonarr : dossiers manuels et
+  conventions ARR, films/séries/saisons/épisodes, sous-titres externes, NFO/images.
+  Entrées non fiables et médias toujours en lecture seule ; caches séparés.
+- Code inspecté : inventaire explicite de fixtures, libraryId statiques, sessions
+  SQLite présentes ; pas de Library/Node/racine persistants ni de grants fins.
+  Les anciennes notes globales pré-auth ne décrivent plus le code courant.
+- Contrats précisés dans docs/LIBRARIES_AND_SCANNER.md et documents associés.
+  Aucun code, migration ou endpoint ajouté ; administration/permissions sur
+  fixtures d'abord, véritable scanner ensuite. Aucun média personnel connecté.
+- Validation de cette intervention : git diff --check et revue des liens locaux ;
+  suites Rust/Web non relancées pour cette clarification documentaire seule.
+
+
+> **Etat courant : 16 octobre 2026. SQLite/bootstrap, connexion Web, sessions persistantes et permissions backend des fixtures sont presents. Bibliotheques et droits fins sur fixtures livres ; scanner et bibliotheques personnelles absents, P1 autonome incomplet.** Les entrees datees conservent l'historique ; verifier code/tests avant toute annonce.
 
 ## 1. Vision actée
 
@@ -67,7 +88,7 @@
 | DB MVP | SQLx + SQLite | Choisi, non codé |
 | DB cluster | PostgreSQL partagé, migration explicite | Futur uniquement |
 | Cache/coordination | Local d'abord, Valkey éventuel | Futur si besoin |
-| Auth | local bootstrap + OIDC Authorization Code / PKCE | Bootstrap CLI test� ; connexion/sessions/OIDC absents |
+| Auth | local bootstrap + OIDC Authorization Code / PKCE | Bootstrap CLI testé ; connexion/sessions/OIDC absents |
 | Streaming | Direct si compatible, remux/packaging testé, erreur sinon | Natif, remplacement URL, MSE minimal et Shaka DASH testés localement ; P0 partiel, Video.js et sortie physique NT |
 | Raws AV1/Opus | Format et index à concevoir/valider ultérieurement | **Non implémenté** |
 | Plugins | Facultatifs, pas de framework à ce stade | Hors MVP |
@@ -819,3 +840,41 @@ Validation finale Node : 10 tests politique + 2 suites statistiques =12/12, exit
   fixtures, avant toute connexion de dossiers personnels ro.
 - Token saver applique : trois sous-agents aux fichiers distincts, lectures ciblees,
   integration centralisee et tests utiles conserves. Aucun gain chiffre revendique.
+
+## 16 octobre 2026 — bibliothèques et permissions P1 livrées sur fixtures
+
+- SQLite migration0003 : Node local, bibliothèques stables (UUID créations),
+  nom/type/racine canonique/état et droits par compte. Initialisation unique des
+  deux bibliothèques de fixtures sans grants. Configuration et grants atomiques.
+- Administration Web : liste/ajout/modification/activation/utilisateurs autorisés.
+  API session administrator, Origin exact et CSRF mutations. Node valide racines
+  existantes dans MEDIA_FIXTURE_DIR, refuse relatifs/parents/sorties et junctions.
+  Aucun scan, disque distant, NAS ni original modifié.
+- Core autorise chaque lecture SQLite : recherche filtrée avant pagination,
+  fiches et URLs directes, sous-titres/médias GET/HEAD/Range, révocation immédiate
+  aux prochaines requêtes. Administrator ne lit pas une bibliothèque désactivée.
+  Assets demo/sous-titres explicitement partagés Films/Séries (même mire) ;
+  P0/MSE/DASH et descripteurs relèvent de Films. Racine/type incompatible retire
+  association fixture. Les nouvelles bibliothèques restent vides avant scanner.
+- Catalogue éditorial encore explicite en Rust, seul registre bibliothèques/droits
+  persisté. Pas d'endpoint image privée ; illustrations statiques publiques.
+- Tests : cargo fmt --check ; cargo clippy --locked --all-features --all-targets
+  -- -D warnings ; cargo test --locked --all-features réussis :32 tests,
+  2 ignorés (helper exécuté par sous-processus, navigateur lancé séparément).
+  CRUD/CSRF/rôles/rollback/révocation/confinement/junction Windows testés.
+  core_restart relance trois vrais processus : bibliothèque modifiée/désactivée
+  conservée et média refusé après redémarrage, session/logout conservés aussi.
+- Web check0/0, lint, 12 tests, build réussis. cargo test --locked --test
+  browser_auth -- --ignored --nocapture réussi : Chrome155.0.8059.40 Windows
+  10.0.26300 headless390/1440, création/modification/désactivation, catalogue,
+  MP4/seek/logout, pas d'erreur JS/CSP/débordement. Captures inspectées dans
+  docs/evidence/2026-10-16/libraries/. Premier essai échoué sur sélecteur de test
+  encodé CP1252 ; corrigé UTF-8, relance réussie.
+- Limites : fixtures/loopback, pas de scanner/NFO/transcodage/Node distant,
+  compte réel ni interface création utilisateurs. Canonicalisation/ouverture
+  non atomiques contre écrivain OS hostile ; flux ouvert non coupé à révocation.
+  Aucun nouvel essai PCM/MKV/Firefox/Edge/Safari/NAS/charge/CI distante.
+  Aucun commit/push/déploiement. Voir docs/LIBRARIES_AND_SCANNER.md.
+- Trois sous-agents sur fichiers distincts, lectures ciblées token-saver,
+  intégration/tests transverses centralisés ; aucun gain chiffré annoncé.
+  Prochain jalon après validation : scanner local Media Node indépendant ARR.

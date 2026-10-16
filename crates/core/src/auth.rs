@@ -23,7 +23,7 @@ const COOKIE: &str = "media_session";
 
 #[derive(Clone)]
 pub struct AuthState {
-    store: IdentityStore,
+    pub(crate) store: IdentityStore,
     origin: Arc<str>,
     secure: bool,
     dummy_hash: Arc<str>,

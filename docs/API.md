@@ -1,5 +1,14 @@
 # API expérimentale du banc P0
 
+## Clarification du 16 octobre 2026
+
+Contrat cible : chaque bibliothèque possède un Media Node et une racine explicite.
+Le Node scanne/analyse et fournit son inventaire ; le Core gère catalogue SQLite
+et permissions. Aucun endpoint de scan ou CRUD ajouté. Administration et droits
+sur fixtures d'abord, scanner ensuite, un Node local unique en P1.
+Voir [LIBRARIES_AND_SCANNER.md](LIBRARIES_AND_SCANNER.md).
+
+
 **État courant du 16 octobre 2026 :** les routes catalogue, assets, streaming,
 sous-titres et expériences ci-dessous exigent maintenant une session et la
 permission de lecture des fixtures. Les anciens exemples sans cookie concernent
@@ -167,3 +176,18 @@ SQLite/SQLx et création du premier administrateur par CLI locale sont décrits
 dans [LOCAL_ADMIN.md](LOCAL_ADMIN.md). La connexion et les sessions sécurisées
 sont décrites dans [LOCAL_SESSIONS.md](LOCAL_SESSIONS.md). Fixtures uniquement
 sur loopback ; aucune bibliothèque personnelle ajoutée.
+
+## Administration bibliothèques P1 (fixtures)
+
+- GET `/api/v1/admin/libraries` : `{libraries:[{id,name,kind,nodeId,root,enabled,userIds}]}`.
+- POST même route : 201 et bibliothèque. PUT `/api/v1/admin/libraries/{id}` : 200.
+  JSON `{name,kind:"films"|"series",nodeId:"local",root,enabled,userIds:[]}`.
+  Nom 1..100 caractères, au plus 1000 comptes user actifs ; doublons normalisés.
+  PUT remplace configuration et droits atomiquement ; aucun scan.
+- GET `/api/v1/admin/users` : `{users:[{id,login,role}]}` actifs.
+- GET `/api/v1/admin/roots` : `{roots:[racineCanonique]}` privée administrateur.
+
+Session administrator requise ; Origin exact et x-csrf-token pour mutations.
+401 sans session, 403 rôle/CSRF, 400 configuration, 404 modification ID absent.
+Erreurs de structure JSON suivant Axum. Les routes média/catalogue vérifient
+session et bibliothèque active/autorisée avant GET/HEAD/Range.

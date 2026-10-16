@@ -9,7 +9,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    io,
+    path::{Component, Path as FsPath, PathBuf},
+    sync::Arc,
+};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
@@ -110,6 +114,41 @@ pub struct Inventory {
     assets: Vec<Asset>,
 }
 
+/// Validate administrative configuration against the local Node's operator-selected
+/// fixture root. This performs no discovery, probe or write. The canonical result
+/// is private configuration, never a public media identifier.
+pub async fn validate_library_root(root: &FsPath, allowed_root: &FsPath) -> io::Result<PathBuf> {
+    if !root.is_absolute()
+        || !allowed_root.is_absolute()
+        || root.components().any(|part| part == Component::ParentDir)
+        || allowed_root
+            .components()
+            .any(|part| part == Component::ParentDir)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "library roots must be absolute without parent components",
+        ));
+    }
+    let allowed = tokio::fs::canonicalize(allowed_root).await?;
+    let canonical = tokio::fs::canonicalize(root).await?;
+    if !canonical.starts_with(&allowed) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "library root outside local Node inventory",
+        ));
+    }
+    if !tokio::fs::metadata(&allowed).await?.is_dir()
+        || !tokio::fs::metadata(&canonical).await?.is_dir()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "library root must be a directory",
+        ));
+    }
+    Ok(canonical)
+}
+
 pub async fn shaka_content(
     State(s): State<Arc<Inventory>>,
     Path(name): Path<String>,
@@ -184,6 +223,10 @@ pub async fn mse_content(
 }
 
 impl Inventory {
+    pub fn root(&self) -> &FsPath {
+        &self.root
+    }
+
     pub async fn load(root: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let root = tokio::fs::canonicalize(root).await?;
         let mut assets = Vec::new();
@@ -416,4 +459,81 @@ pub async fn demo_subtitle(
         return error(StatusCode::NOT_FOUND, "unknown_subtitle");
     }
     mse_content(state, path, req).await
+}
+
+#[cfg(test)]
+mod root_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn library_root_requires_existing_confined_absolute_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let allowed = temp.path().join("allowed");
+        let child = allowed.join("films");
+        let sibling = temp.path().join("allowed-other");
+        tokio::fs::create_dir_all(&child).await.unwrap();
+        tokio::fs::create_dir(&sibling).await.unwrap();
+        let canonical = tokio::fs::canonicalize(&child).await.unwrap();
+        assert_eq!(
+            validate_library_root(&child, &allowed).await.unwrap(),
+            canonical
+        );
+        assert_eq!(
+            validate_library_root(&allowed, &allowed).await.unwrap(),
+            tokio::fs::canonicalize(&allowed).await.unwrap()
+        );
+        assert_eq!(
+            validate_library_root(&sibling, &allowed)
+                .await
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        for invalid in [
+            FsPath::new("films").to_path_buf(),
+            child.join(".."),
+            child.join("missing"),
+        ] {
+            assert!(validate_library_root(&invalid, &allowed).await.is_err());
+        }
+        let file = allowed.join("file.mkv");
+        tokio::fs::write(&file, b"fixture").await.unwrap();
+        assert!(validate_library_root(&file, &allowed).await.is_err());
+        assert!(validate_library_root(&child, &file).await.is_err());
+        assert!(
+            validate_library_root(&child, FsPath::new("allowed"))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn library_root_rejects_symlink_escape() {
+        let temp = tempfile::tempdir().unwrap();
+        let allowed = temp.path().join("allowed");
+        let outside = temp.path().join("outside");
+        tokio::fs::create_dir(&allowed).await.unwrap();
+        tokio::fs::create_dir(&outside).await.unwrap();
+        let link = allowed.join("escape");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        #[cfg(windows)]
+        {
+            // Directory junctions need no developer-mode symlink privilege.
+            let output = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(&link)
+                .arg(&outside)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "junction fixture creation failed");
+        }
+        assert_eq!(
+            validate_library_root(&link, &allowed)
+                .await
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::PermissionDenied
+        );
+    }
 }

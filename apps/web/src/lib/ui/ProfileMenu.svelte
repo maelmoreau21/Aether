@@ -8,7 +8,6 @@
   let expanded = $state(false);
   let busy = $state(false);
   let error = $state('');
-  let administration = $state(false);
   async function signOut() {
     if (!$session || busy) return;
     busy = true; error = '';
@@ -39,8 +38,7 @@
       <button class="profile-entry" disabled aria-describedby="profile-planned"><Icon name="profile" size={17} /><span>Mon profil</span><small>Bientôt</small></button>
       <span id="profile-planned" class="sr-only">Avatar, identité, mot de passe et préférences personnelles de langue, audio et sous-titres : bientôt.</span>
       <a class="profile-entry" href={resolve('settings/')} onclick={() => panel.hidePopover()}><Icon name="settings" size={17} /><span>Paramètres</span><Icon name="chevron" size={13} /></a>
-      {#if $session?.user.role === 'administrator'}<button class="profile-entry" onclick={() => administration = !administration} aria-expanded={administration}><Icon name="settings" size={17} /><span>Administration</span></button>{/if}
-      {#if administration && $session?.user.role === 'administrator'}<p class="menu-notice">L’administration du serveur sera disponible prochainement.</p>{/if}
+      {#if $session?.user.role === 'administrator'}<a class="profile-entry" href={resolve('admin/libraries/')} onclick={() => panel.hidePopover()}><Icon name="settings" size={17} /><span>Administration</span><Icon name="chevron" size={13} /></a>{/if}
       <button class="profile-entry" disabled={busy} onclick={signOut}><span>{busy ? 'Déconnexion…' : 'Se déconnecter'}</span></button>
       {#if error}<p class="menu-notice error" role="alert">{error}</p>{/if}
     </nav>

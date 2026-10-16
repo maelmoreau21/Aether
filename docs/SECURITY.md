@@ -1,3 +1,7 @@
+> Mise à jour P1 bibliothèques : droits explicites SQLite et administration
+> session/rôle/CSRF livrés sur fixtures. Les restrictions administrator seule
+> ci-dessous sont historiques. Voir [LIBRARIES_AND_SCANNER.md](LIBRARIES_AND_SCANNER.md).
+
 # Sécurité du Core local et historique du banc P0
 
 ## État actuel — 16 octobre 2026

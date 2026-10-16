@@ -92,6 +92,41 @@ async fn production_process_restart_keeps_session_and_logout_revokes_it() {
         .to_owned();
     let identity: serde_json::Value =
         serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let libraries_response = http(
+        port,
+        "GET",
+        "/api/v1/admin/libraries",
+        &format!("Cookie: {cookie}\r\n"),
+        "",
+    )
+    .await;
+    let libraries: serde_json::Value =
+        serde_json::from_str(libraries_response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let mut library = libraries["libraries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["id"] == "fixture-films")
+        .unwrap()
+        .clone();
+    library.as_object_mut().unwrap().remove("id");
+    library["enabled"] = serde_json::json!(false);
+    library["name"] = serde_json::json!("Restart library");
+    let admin_headers = format!(
+        "Cookie: {cookie}\r\nOrigin: http://127.0.0.1:{port}\r\nx-csrf-token: {}\r\nContent-Type: application/json\r\n",
+        identity["csrfToken"].as_str().unwrap()
+    );
+    assert!(
+        http(
+            port,
+            "PUT",
+            "/api/v1/admin/libraries/fixture-films",
+            &admin_headers,
+            &library.to_string()
+        )
+        .await
+        .starts_with("HTTP/1.1 200")
+    );
     child.kill().await.unwrap();
     let mut child = start(&root, &db, port).await;
     let headers = format!("Cookie: {cookie}\r\n");
@@ -99,6 +134,19 @@ async fn production_process_restart_keeps_session_and_logout_revokes_it() {
         http(port, "GET", "/api/v1/auth/me", &headers, "")
             .await
             .starts_with("HTTP/1.1 200")
+    );
+    let persisted = http(port, "GET", "/api/v1/admin/libraries", &headers, "").await;
+    assert!(persisted.contains("Restart library"));
+    assert!(
+        http(
+            port,
+            "GET",
+            "/api/v1/assets/fixture-mp4/content",
+            &headers,
+            ""
+        )
+        .await
+        .starts_with("HTTP/1.1 403")
     );
     let csrf = identity["csrfToken"].as_str().unwrap();
     let headers =

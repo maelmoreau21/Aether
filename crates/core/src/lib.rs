@@ -5,6 +5,7 @@ mod brand;
 mod catalog;
 mod demo;
 pub mod identity;
+pub mod libraries;
 pub mod media;
 pub mod node;
 pub mod permissions;
@@ -68,16 +69,28 @@ fn media_routes(inventory: node::Inventory) -> Router {
 }
 
 /// Production constructor: authentication precedes all media/resource handlers.
-pub fn secure_app(inventory: node::Inventory, _port: u16, auth: auth::AuthState) -> Router {
+pub async fn secure_app(
+    inventory: node::Inventory,
+    _port: u16,
+    auth: auth::AuthState,
+) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
+    libraries::initialize(&auth.store, inventory.root()).await?;
+    let root = inventory.root().to_owned();
     let origin = auth.origin().to_owned();
     let media = media_routes(inventory).route_layer(middleware::from_fn_with_state(
-        auth.clone(),
+        permissions::MediaAccess {
+            auth: auth.clone(),
+            root: root.clone(),
+        },
         permissions::require_media,
     ));
-    local_security(
-        public_routes().merge(media).merge(auth::router(auth)),
+    Ok(local_security(
+        public_routes()
+            .merge(media)
+            .merge(libraries::router(auth.clone(), root))
+            .merge(auth::router(auth)),
         origin,
-    )
+    ))
 }
 
 /// Explicit compile-time isolated bench for synthetic fixture tests only.

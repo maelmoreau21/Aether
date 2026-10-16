@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('isolated test origin required');
-const out = 'docs/evidence/2026-10-16/auth';
+const out = 'docs/evidence/2026-10-16/libraries';
 fs.mkdirSync(out, {recursive:true});
 (async () => {
   const browser = await chromium.launch({channel:'chrome',headless:true});
@@ -34,6 +34,19 @@ fs.mkdirSync(out, {recursive:true});
       assert.match(await page.locator('#profile-menu').textContent(),/browser-admin/);
       assert.match(await menu.textContent(),/Administration/);
       await page.keyboard.press('Escape');
+      await page.goto(origin+'/app/admin/libraries/');
+      await page.getByRole('heading',{name:'Bibliothèques configurées',exact:true}).waitFor();
+      await page.getByLabel('Nom',{exact:true}).fill(`Bibliothèque navigateur ${width}`);
+      await page.getByRole('button',{name:'Enregistrer',exact:true}).click();
+      await page.getByRole('heading',{name:`Bibliothèque navigateur ${width}`,exact:true}).waitFor();
+      await page.getByRole('button',{name:`Modifier Bibliothèque navigateur ${width}`,exact:true}).click();
+      await page.getByLabel('Bibliothèque active',{exact:true}).uncheck();
+      await page.getByLabel('Nom',{exact:true}).fill(`Bibliothèque modifiée ${width}`);
+      await page.getByRole('button',{name:'Enregistrer',exact:true}).click();
+      await page.getByRole('heading',{name:`Bibliothèque modifiée ${width}`,exact:true}).waitFor();
+      assert.match(await page.getByRole('heading',{name:`Bibliothèque modifiée ${width}`,exact:true}).locator('..').textContent(),/Désactivée/);
+      assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      await page.screenshot({path:`${out}/libraries-${width}.png`});
       await page.goto(origin+'/app/films/?work=fixture-film');
       await page.locator('.version-choice').first().waitFor();
       await page.getByRole('button',{name:'Sélectionner la version MP4'}).click();
@@ -50,11 +63,10 @@ fs.mkdirSync(out, {recursive:true});
       assert.equal((await context.request.get(origin+'/api/v1/assets/demo-mp4-fr/content',{headers:{Range:'bytes=0-31'}})).status(),401);
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
       assert.deepEqual(errors,[]);
-      report.results.push({width,invalidLogin:true,login:true,httpOnlyCookie:true,avatarIdentity:true,administratorMenu:true,catalog:true,playback:true,seek:true,reload:true,logout:true,anonymousRange401:true,cspErrors:errors});
+      report.results.push({width,invalidLogin:true,login:true,httpOnlyCookie:true,avatarIdentity:true,administratorMenu:true,libraryCreateEditDisable:true,catalog:true,playback:true,seek:true,reload:true,logout:true,anonymousRange401:true,cspErrors:errors});
       await context.close();
     }
     report.passed=true;
   } catch(e) {report.failure=String(e.stack);process.exitCode=1;}
   finally {await browser.close();fs.writeFileSync(`${out}/report.json`,JSON.stringify(report,null,2));console.log(JSON.stringify(report));}
 })();
-

@@ -382,3 +382,15 @@ catalogue/Range, aucune erreur JS/CSP. Captures de connexion inspectées.
 Preuve : [rapport](evidence/2026-10-16/auth/report.json).
 Pas de nouvelle validation audio PCM, Firefox/Edge/Safari, HTTPS navigateur,
 NAS, charge ou bibliothèque réelle dans ce jalon.
+
+## Bibliothèques et droits P1
+
+`cargo test --locked --all-features` : migrations/CRUD, persistance et grants,
+HTTP session/rôle/CSRF, rollback, racines canoniques et junction extérieure,
+filtrage recherche, fiches Films/Séries, médias et sous-titres GET/HEAD/Range,
+désactivation/révocation. core_restart arrête et relance de vrais processus :
+configuration désactivée conservée et contenu refusé après redémarrage.
+`cargo test --locked --test browser_auth -- --ignored --nocapture` utilise
+SQLite temporaire et Chrome : login, création/modification/désactivation Web,
+responsive 390/1440, catalogue, lecture MP4/seek, logout, CSP.
+Aucun NAS ni ingestion/scanner ; pas de nouvelle preuve audio/codec.

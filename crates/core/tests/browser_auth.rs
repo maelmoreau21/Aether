@@ -32,7 +32,7 @@ async fn browser_login_catalog_player_logout() {
     // Run this test alone: ServeDir uses the process working directory.
     std::env::set_current_dir(&root).unwrap();
     let server = tokio::spawn(async move {
-        axum::serve(listener, secure_app(inventory, port, auth))
+        axum::serve(listener, secure_app(inventory, port, auth).await.unwrap())
             .await
             .unwrap()
     });

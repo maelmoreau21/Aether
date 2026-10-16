@@ -580,6 +580,56 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
         dur_publish.as_millis()
     );
 
+    // Test rescan publish of 10,000 unchanged staged entries (reused = true with already indexed editorial)
+    let scan_id_rescan = uuid::Uuid::new_v4().to_string();
+    for chunk in 0..batches_count {
+        let files: Vec<ScannedFile> = (0..100)
+            .map(|j| {
+                let idx = chunk * 100 + j;
+                ScannedFile {
+                    relative_path: format!("film_{:06}/movie.mkv", idx),
+                    identity_key: format!("synth:{:06}", idx),
+                    title: format!("Synthetic #{:06}", idx),
+                    year: Some(2020),
+                    external_ids: std::collections::BTreeMap::new(),
+                    size: 1048576,
+                    modified_ns: "1700000000".into(),
+                    mime: "video/x-matroska".into(),
+                    probe: media_poc::media::Probe::default(),
+                    editorial: NfoOutcome::Missing,
+                    poster: None,
+                    reused: true,
+                }
+            })
+            .collect();
+        let batch = InventoryBatch {
+            scan_id: scan_id_rescan.clone().into(),
+            sequence: chunk as u64,
+            files,
+            errors: vec![],
+            warnings: vec![],
+        };
+        media_poc::inventory::stage_batch(&store, &scan_id_rescan, "lib-main", &batch)
+            .await
+            .unwrap();
+    }
+    let t_publish_rescan = Instant::now();
+    media_poc::inventory::publish_staged_scan(
+        &store,
+        &scan_id_rescan,
+        "lib-main",
+        Path::new("/media/films"),
+        true,
+    )
+    .await
+    .unwrap();
+    let dur_publish_rescan = t_publish_rescan.elapsed();
+    println!(
+        "Rescan publish of 10,000 unchanged entries: published in {:.2} ms (speedup: {:.1}x)",
+        dur_publish_rescan.as_millis(),
+        dur_publish.as_millis() as f64 / dur_publish_rescan.as_millis().max(1) as f64
+    );
+
     // Test catalogue latency with 10,000 items
     let t_cat = Instant::now();
     let cat_res = media_poc::inventory::catalogue(
@@ -1050,4 +1100,1092 @@ async fn test_1000_synthetic_files_scan_and_rescan() {
     )
     .await;
     assert_eq!(cat["total"], file_count);
+}
+
+#[tokio::test]
+async fn test_10000_new_synthetic_media_cold_ingestion_benchmark() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("fresh_10k.sqlite3");
+    let store = IdentityStore::open(&db).await.unwrap();
+    store
+        .bootstrap("admin", Zeroizing::new("admin password 12345".into()))
+        .await
+        .unwrap();
+
+    let root_path = Path::new("/media/cold_ingest");
+    sqlx::query("INSERT INTO libraries VALUES('lib-cold','Cold Ingest Library','films','local','/media/cold_ingest',1)")
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    let count = 10000;
+    let batches_count = 100;
+    let scan_id = uuid::Uuid::new_v4().to_string();
+
+    let rss_baseline = current_rss_bytes();
+    println!(
+        "Cold Ingest 10,000 New Media: Baseline RSS: {:.2} MiB",
+        rss_baseline as f64 / (1024.0 * 1024.0)
+    );
+
+    // Realistic technical probe (AV1 10-bit Main10 + Opus 6ch + Opus 2ch + 3 Subtitles)
+    let probe = media_contracts::media::Probe {
+        format: {
+            let mut m = std::collections::BTreeMap::new();
+            m.insert("format_name".into(), json!("matroska,webm"));
+            m.insert("duration".into(), json!("7200.000"));
+            m.insert("size".into(), json!("4294967296"));
+            m.insert("probe_score".into(), json!(100));
+            m
+        },
+        streams: vec![
+            media_contracts::media::Track {
+                index: 0,
+                codec_name: Some("av1".into()),
+                codec_type: Some("video".into()),
+                time_base: Some("1/1000".into()),
+                tags: std::collections::BTreeMap::new(),
+                details: {
+                    let mut d = std::collections::BTreeMap::new();
+                    d.insert("profile".into(), json!("Main 10"));
+                    d.insert("width".into(), json!(3840));
+                    d.insert("height".into(), json!(2160));
+                    d.insert("pix_fmt".into(), json!("yuv420p10le"));
+                    d
+                },
+            },
+            media_contracts::media::Track {
+                index: 1,
+                codec_name: Some("opus".into()),
+                codec_type: Some("audio".into()),
+                time_base: Some("1/48000".into()),
+                tags: {
+                    let mut t = std::collections::BTreeMap::new();
+                    t.insert("language".into(), json!("fra"));
+                    t
+                },
+                details: {
+                    let mut d = std::collections::BTreeMap::new();
+                    d.insert("channels".into(), json!(6));
+                    d.insert("channel_layout".into(), json!("5.1"));
+                    d.insert("sample_rate".into(), json!("48000"));
+                    d
+                },
+            },
+            media_contracts::media::Track {
+                index: 2,
+                codec_name: Some("opus".into()),
+                codec_type: Some("audio".into()),
+                time_base: Some("1/48000".into()),
+                tags: {
+                    let mut t = std::collections::BTreeMap::new();
+                    t.insert("language".into(), json!("eng"));
+                    t
+                },
+                details: {
+                    let mut d = std::collections::BTreeMap::new();
+                    d.insert("channels".into(), json!(2));
+                    d.insert("channel_layout".into(), json!("stereo"));
+                    d.insert("sample_rate".into(), json!("48000"));
+                    d
+                },
+            },
+            media_contracts::media::Track {
+                index: 3,
+                codec_name: Some("subrip".into()),
+                codec_type: Some("subtitle".into()),
+                time_base: Some("1/1000".into()),
+                tags: {
+                    let mut t = std::collections::BTreeMap::new();
+                    t.insert("language".into(), json!("fra"));
+                    t
+                },
+                details: std::collections::BTreeMap::new(),
+            },
+        ],
+    };
+
+    // Stage 10,000 brand new media files with probe, NFO editorial, and posters
+    let t_stage = Instant::now();
+    for chunk in 0..batches_count {
+        let files: Vec<ScannedFile> = (0..100)
+            .map(|j| {
+                let idx = chunk * 100 + j;
+                let rel = format!("film_{:06}/movie.mkv", idx);
+                let title = format!("Cold Movie #{:06}", idx);
+                let mut ext = std::collections::BTreeMap::new();
+                ext.insert("tmdb".into(), format!("{}", 100000 + idx));
+
+                let editorial = NfoOutcome::Valid {
+                    metadata: media_contracts::media::FilmMetadata {
+                        title: Some(title.clone()),
+                        year: Some(2024),
+                        plot: Some(format!("Synopsis for cold movie #{:06}", idx)),
+                        external_ids: ext.clone(),
+                        ..Default::default()
+                    },
+                    path: format!("film_{:06}/movie.nfo", idx),
+                    priority: 1,
+                };
+
+                let poster = if idx % 2 == 0 {
+                    Some(media_contracts::media::LocalImage {
+                        path: format!("film_{:06}/poster.png", idx),
+                        size_bytes: 65536,
+                        modified_ns: "1710000000".into(),
+                        mime: "image/png".into(),
+                        priority: 1,
+                    })
+                } else {
+                    None
+                };
+
+                ScannedFile {
+                    relative_path: rel,
+                    identity_key: format!("tmdb:{}", 100000 + idx),
+                    title,
+                    year: Some(2024),
+                    external_ids: ext,
+                    size: 4294967296,
+                    modified_ns: "1710000000".into(),
+                    mime: "video/x-matroska".into(),
+                    probe: probe.clone(),
+                    editorial,
+                    poster,
+                    reused: false,
+                }
+            })
+            .collect();
+
+        let batch = InventoryBatch {
+            scan_id: scan_id.clone().into(),
+            sequence: chunk as u64,
+            files,
+            errors: vec![],
+            warnings: vec![],
+        };
+        media_poc::inventory::stage_batch(&store, &scan_id, "lib-cold", &batch)
+            .await
+            .unwrap();
+    }
+    let dur_stage = t_stage.elapsed();
+    let rss_after_stage = current_rss_bytes();
+    println!(
+        "Cold Ingestion 10,000 files staged in {:.2} ms (avg {:.2} ms/batch) (RSS: {:.2} MiB, diff: +{:.2} MiB)",
+        dur_stage.as_millis(),
+        dur_stage.as_millis() as f64 / batches_count as f64,
+        rss_after_stage as f64 / (1024.0 * 1024.0),
+        (rss_after_stage.saturating_sub(rss_baseline)) as f64 / (1024.0 * 1024.0)
+    );
+
+    // Verify 10,000 staged in DB
+    let staged_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM scan_staging_files WHERE scan_id=?")
+            .bind(&scan_id)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(staged_count, count as i64);
+
+    // Publish all 10,000 brand new media atomically
+    let t_publish = Instant::now();
+    media_poc::inventory::publish_staged_scan(&store, &scan_id, "lib-cold", root_path, true)
+        .await
+        .unwrap();
+    let dur_publish = t_publish.elapsed();
+    let rss_after_publish = current_rss_bytes();
+    println!(
+        "Cold Ingestion 10,000 NEW media PUBLISHED in {:.2} ms (RSS: {:.2} MiB, diff from base: +{:.2} MiB)",
+        dur_publish.as_millis(),
+        rss_after_publish as f64 / (1024.0 * 1024.0),
+        (rss_after_publish.saturating_sub(rss_baseline)) as f64 / (1024.0 * 1024.0)
+    );
+
+    // Verify integrity of database records:
+    let works_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM inventory_works WHERE library_id='lib-cold'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(works_count, count as i64);
+
+    let assets_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM inventory_assets WHERE library_id='lib-cold' AND available=1",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(assets_count, count as i64);
+
+    let tracks_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM inventory_tracks t JOIN inventory_assets a ON a.id=t.asset_id WHERE a.library_id='lib-cold'"
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        tracks_count,
+        count as i64 * 4,
+        "Each file must have 4 tracks persisted"
+    );
+
+    let images_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM inventory_images WHERE library_id='lib-cold' AND available=1",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        images_count,
+        count as i64 / 2,
+        "5,000 posters must be indexed and available"
+    );
+
+    // Staging table must be completely empty after atomic publish
+    let staging_remaining: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM scan_staging_files WHERE scan_id=?")
+            .bind(&scan_id)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(staging_remaining, 0);
+
+    // Verify catalogue query on 10,000 items
+    let cat_res = media_poc::inventory::catalogue(
+        &store,
+        &["lib-cold".into()],
+        Some("film"),
+        "",
+        "title-asc",
+        0,
+        24,
+    )
+    .await
+    .unwrap();
+    assert_eq!(cat_res["total"], count as i64);
+    assert_eq!(cat_res["items"].as_array().unwrap().len(), 24);
+
+    // Verify search
+    let cat_search = media_poc::inventory::catalogue(
+        &store,
+        &["lib-cold".into()],
+        Some("film"),
+        "cold movie #000042",
+        "title-asc",
+        0,
+        24,
+    )
+    .await
+    .unwrap();
+    assert_eq!(cat_search["total"], 1);
+    assert_eq!(cat_search["items"][0]["title"], "Cold Movie #000042");
+    assert_eq!(cat_search["items"][0]["year"], 2024);
+}
+
+#[tokio::test]
+async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("mixed_diff.sqlite3");
+    let store = IdentityStore::open(&db).await.unwrap();
+    store
+        .bootstrap("admin", Zeroizing::new("admin password 12345".into()))
+        .await
+        .unwrap();
+
+    let root_path = Path::new("/media/mixed");
+    sqlx::query("INSERT INTO libraries VALUES('lib-mixed','Mixed Library','films','local','/media/mixed',1)")
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    let make_meta = |title: &str, year: u16| media_contracts::media::FilmMetadata {
+        title: Some(title.to_string()),
+        year: Some(year),
+        ..Default::default()
+    };
+
+    // 1. Initial seed of 100 movies
+    let initial_count = 100;
+    let scan_id1 = uuid::Uuid::new_v4().to_string();
+    let files1: Vec<ScannedFile> = (0..initial_count)
+        .map(|i| ScannedFile {
+            relative_path: format!("movie_{:03}/movie.mkv", i),
+            identity_key: format!("tmdb:{}", 20000 + i),
+            title: format!("Original Movie {:03}", i),
+            year: Some(2020),
+            external_ids: std::collections::BTreeMap::new(),
+            size: 1000000 + i as u64,
+            modified_ns: "1700000000".into(),
+            mime: "video/x-matroska".into(),
+            probe: media_poc::media::Probe::default(),
+            editorial: NfoOutcome::Valid {
+                metadata: make_meta(&format!("Original Movie {:03}", i), 2020),
+                path: format!("movie_{:03}/movie.nfo", i),
+                priority: 1,
+            },
+            poster: Some(media_contracts::media::LocalImage {
+                path: format!("movie_{:03}/poster.png", i),
+                size_bytes: 50000,
+                modified_ns: "1700000000".into(),
+                mime: "image/png".into(),
+                priority: 1,
+            }),
+            reused: false,
+        })
+        .collect();
+
+    let batch1 = InventoryBatch {
+        scan_id: scan_id1.clone().into(),
+        sequence: 1,
+        files: files1,
+        errors: vec![],
+        warnings: vec![],
+    };
+    media_poc::inventory::stage_batch(&store, &scan_id1, "lib-mixed", &batch1)
+        .await
+        .unwrap();
+    media_poc::inventory::publish_staged_scan(&store, &scan_id1, "lib-mixed", root_path, true)
+        .await
+        .unwrap();
+
+    // Record initial asset and work IDs to verify deterministic persistence
+    let asset_0_before: String = sqlx::query_scalar(
+        "SELECT id FROM inventory_assets WHERE library_id='lib-mixed' AND relative_path='movie_000/movie.mkv'"
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+
+    let work_0_before: String = sqlx::query_scalar(
+        "SELECT id FROM inventory_works WHERE library_id='lib-mixed' AND identity_key='/media/mixed\ntmdb:20000'"
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+
+    // 2. Second scan with difficult mix:
+    // - Movies 0..20: unchanged (reused = true)
+    // - Movies 20..40: modified size/mtime (reused = false)
+    // - Movies 40..60: modified NFO (reused = true, but editorial title updated)
+    // - Movies 60..70: poster deleted (reused = true, poster = None)
+    // - Movies 70..80: disappeared (omitted from staging)
+    // - Movies 80..90: errored (staged as error in scan_staging_issues)
+    // - Movies 90..100: unchanged (reused = true)
+    // - Movies 100..120: 20 brand new movies (reused = false)
+
+    let scan_id2 = uuid::Uuid::new_v4().to_string();
+    let mut files2 = Vec::new();
+
+    // 0..20 unchanged
+    for i in 0..20 {
+        files2.push(ScannedFile {
+            relative_path: format!("movie_{:03}/movie.mkv", i),
+            identity_key: format!("tmdb:{}", 20000 + i),
+            title: format!("Original Movie {:03}", i),
+            year: Some(2020),
+            external_ids: std::collections::BTreeMap::new(),
+            size: 1000000 + i as u64,
+            modified_ns: "1700000000".into(),
+            mime: "video/x-matroska".into(),
+            probe: media_poc::media::Probe::default(),
+            editorial: NfoOutcome::Valid {
+                metadata: make_meta(&format!("Original Movie {:03}", i), 2020),
+                path: format!("movie_{:03}/movie.nfo", i),
+                priority: 1,
+            },
+            poster: Some(media_contracts::media::LocalImage {
+                path: format!("movie_{:03}/poster.png", i),
+                size_bytes: 50000,
+                modified_ns: "1700000000".into(),
+                mime: "image/png".into(),
+                priority: 1,
+            }),
+            reused: true,
+        });
+    }
+
+    // 20..40 modified
+    for i in 20..40 {
+        files2.push(ScannedFile {
+            relative_path: format!("movie_{:03}/movie.mkv", i),
+            identity_key: format!("tmdb:{}", 20000 + i),
+            title: format!("Original Movie {:03}", i),
+            year: Some(2020),
+            external_ids: std::collections::BTreeMap::new(),
+            size: 2000000 + i as u64,         // changed
+            modified_ns: "1720000000".into(), // changed
+            mime: "video/x-matroska".into(),
+            probe: media_poc::media::Probe::default(),
+            editorial: NfoOutcome::Valid {
+                metadata: make_meta(&format!("Original Movie {:03}", i), 2020),
+                path: format!("movie_{:03}/movie.nfo", i),
+                priority: 1,
+            },
+            poster: Some(media_contracts::media::LocalImage {
+                path: format!("movie_{:03}/poster.png", i),
+                size_bytes: 50000,
+                modified_ns: "1700000000".into(),
+                mime: "image/png".into(),
+                priority: 1,
+            }),
+            reused: false, // re-probed
+        });
+    }
+
+    // 40..60 modified NFO
+    for i in 40..60 {
+        files2.push(ScannedFile {
+            relative_path: format!("movie_{:03}/movie.mkv", i),
+            identity_key: format!("tmdb:{}", 20000 + i),
+            title: format!("Updated Title {:03}", i),
+            year: Some(2025),
+            external_ids: std::collections::BTreeMap::new(),
+            size: 1000000 + i as u64,
+            modified_ns: "1700000000".into(),
+            mime: "video/x-matroska".into(),
+            probe: media_poc::media::Probe::default(),
+            editorial: NfoOutcome::Valid {
+                metadata: make_meta(&format!("Updated Title {:03}", i), 2025),
+                path: format!("movie_{:03}/movie.nfo", i),
+                priority: 1,
+            },
+            poster: Some(media_contracts::media::LocalImage {
+                path: format!("movie_{:03}/poster.png", i),
+                size_bytes: 50000,
+                modified_ns: "1700000000".into(),
+                mime: "image/png".into(),
+                priority: 1,
+            }),
+            reused: true,
+        });
+    }
+
+    // 60..70 deleted poster
+    for i in 60..70 {
+        files2.push(ScannedFile {
+            relative_path: format!("movie_{:03}/movie.mkv", i),
+            identity_key: format!("tmdb:{}", 20000 + i),
+            title: format!("Original Movie {:03}", i),
+            year: Some(2020),
+            external_ids: std::collections::BTreeMap::new(),
+            size: 1000000 + i as u64,
+            modified_ns: "1700000000".into(),
+            mime: "video/x-matroska".into(),
+            probe: media_poc::media::Probe::default(),
+            editorial: NfoOutcome::Valid {
+                metadata: make_meta(&format!("Original Movie {:03}", i), 2020),
+                path: format!("movie_{:03}/movie.nfo", i),
+                priority: 1,
+            },
+            poster: None, // poster deleted
+            reused: true,
+        });
+    }
+
+    // 70..80 omitted (disappeared)
+
+    // 80..90 errored
+    let mut errors2 = Vec::new();
+    for i in 80..90 {
+        errors2.push(media_contracts::inventory::ScanIssue {
+            relative_path: format!("movie_{:03}/movie.mkv", i),
+            message: "file corrupt or unreadable".into(),
+        });
+    }
+
+    // 90..100 unchanged
+    for i in 90..100 {
+        files2.push(ScannedFile {
+            relative_path: format!("movie_{:03}/movie.mkv", i),
+            identity_key: format!("tmdb:{}", 20000 + i),
+            title: format!("Original Movie {:03}", i),
+            year: Some(2020),
+            external_ids: std::collections::BTreeMap::new(),
+            size: 1000000 + i as u64,
+            modified_ns: "1700000000".into(),
+            mime: "video/x-matroska".into(),
+            probe: media_poc::media::Probe::default(),
+            editorial: NfoOutcome::Valid {
+                metadata: make_meta(&format!("Original Movie {:03}", i), 2020),
+                path: format!("movie_{:03}/movie.nfo", i),
+                priority: 1,
+            },
+            poster: Some(media_contracts::media::LocalImage {
+                path: format!("movie_{:03}/poster.png", i),
+                size_bytes: 50000,
+                modified_ns: "1700000000".into(),
+                mime: "image/png".into(),
+                priority: 1,
+            }),
+            reused: true,
+        });
+    }
+
+    // 100..120 new
+    for i in 100..120 {
+        files2.push(ScannedFile {
+            relative_path: format!("movie_{:03}/movie.mkv", i),
+            identity_key: format!("tmdb:{}", 20000 + i),
+            title: format!("Brand New Movie {:03}", i),
+            year: Some(2024),
+            external_ids: std::collections::BTreeMap::new(),
+            size: 3000000 + i as u64,
+            modified_ns: "1730000000".into(),
+            mime: "video/x-matroska".into(),
+            probe: media_poc::media::Probe::default(),
+            editorial: NfoOutcome::Valid {
+                metadata: make_meta(&format!("Brand New Movie {:03}", i), 2024),
+                path: format!("movie_{:03}/movie.nfo", i),
+                priority: 1,
+            },
+            poster: Some(media_contracts::media::LocalImage {
+                path: format!("movie_{:03}/poster.png", i),
+                size_bytes: 50000,
+                modified_ns: "1730000000".into(),
+                mime: "image/png".into(),
+                priority: 1,
+            }),
+            reused: false,
+        });
+    }
+
+    let batch2 = InventoryBatch {
+        scan_id: scan_id2.clone().into(),
+        sequence: 1,
+        files: files2,
+        errors: errors2,
+        warnings: vec![],
+    };
+    media_poc::inventory::stage_batch(&store, &scan_id2, "lib-mixed", &batch2)
+        .await
+        .unwrap();
+
+    media_poc::inventory::publish_staged_scan(&store, &scan_id2, "lib-mixed", root_path, true)
+        .await
+        .unwrap();
+
+    // Assertions:
+    // Deterministic UUIDs: movie 0 must retain same asset ID and work ID
+    let asset_0_after: String = sqlx::query_scalar(
+        "SELECT id FROM inventory_assets WHERE library_id='lib-mixed' AND relative_path='movie_000/movie.mkv'"
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        asset_0_before, asset_0_after,
+        "Asset UUID must remain deterministic and stable"
+    );
+
+    let work_0_after: String = sqlx::query_scalar(
+        "SELECT id FROM inventory_works WHERE library_id='lib-mixed' AND identity_key='/media/mixed\ntmdb:20000'"
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        work_0_before, work_0_after,
+        "Work UUID must remain deterministic and stable"
+    );
+
+    // Modified file (movie_020) must have updated size and modified_ns
+    let (mod_size, mod_time): (i64, String) = sqlx::query_as(
+        "SELECT size, modified_ns FROM inventory_assets WHERE library_id='lib-mixed' AND relative_path='movie_020/movie.mkv'"
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(mod_size, 2000020);
+    assert_eq!(mod_time, "1720000000");
+
+    // Modified NFO (movie_045) must have updated title and year in inventory_works
+    let (upd_title, upd_year): (String, Option<i64>) = sqlx::query_as(
+        "SELECT title, year FROM inventory_works WHERE library_id='lib-mixed' AND identity_key='/media/mixed\ntmdb:20045'"
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(upd_title, "Updated Title 045");
+    assert_eq!(upd_year, Some(2025));
+
+    // Deleted poster (movie_065) must have available=0 in inventory_images
+    let poster_avail: i64 = sqlx::query_scalar(
+        "SELECT available FROM inventory_images WHERE library_id='lib-mixed' AND relative_path='movie_065/poster.png'"
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(poster_avail, 0, "Deleted poster must be marked available=0");
+
+    // Disappeared movie (movie_075) must have available=0
+    let dis_avail: i64 = sqlx::query_scalar(
+        "SELECT available FROM inventory_assets WHERE library_id='lib-mixed' AND relative_path='movie_075/movie.mkv'"
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(dis_avail, 0, "Disappeared movie must be marked available=0");
+
+    // Errored movie (movie_085) must have available=0
+    let err_avail: i64 = sqlx::query_scalar(
+        "SELECT available FROM inventory_assets WHERE library_id='lib-mixed' AND relative_path='movie_085/movie.mkv'"
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(err_avail, 0, "Errored movie must be marked available=0");
+
+    // New movie (movie_110) must have available=1
+    let new_avail: i64 = sqlx::query_scalar(
+        "SELECT available FROM inventory_assets WHERE library_id='lib-mixed' AND relative_path='movie_110/movie.mkv'"
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(new_avail, 1, "New movie must be indexed and available=1");
+
+    // Total available assets:
+    // Initial 100 - 10 disappeared (70..80) - 10 errored (80..90) + 20 new (100..120) = 100
+    let total_active_assets: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM inventory_assets WHERE library_id='lib-mixed' AND available=1",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(total_active_assets, 100);
+
+    // Catalogue must also return total = 100
+    let cat_res = media_poc::inventory::catalogue(
+        &store,
+        &["lib-mixed".into()],
+        Some("film"),
+        "",
+        "title-asc",
+        0,
+        24,
+    )
+    .await
+    .unwrap();
+    assert_eq!(cat_res["total"], 100);
+}
+
+#[tokio::test]
+async fn test_sqlite_pool_audit_and_concurrent_reads_during_publication() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("media");
+    let films = root.join("Films");
+    tokio::fs::create_dir_all(&films).await.unwrap();
+
+    let generated = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/generated");
+    let sample_mp4 = generated.join("p1/clip-mp4-en.mp4");
+    assert!(sample_mp4.exists());
+
+    // Populate baseline files on disk for live streaming
+    for i in 0..10 {
+        let folder = films.join(format!("Audit Movie {:02} (2024)", i));
+        tokio::fs::create_dir_all(&folder).await.unwrap();
+        tokio::fs::copy(&sample_mp4, folder.join("movie.mp4"))
+            .await
+            .unwrap();
+        tokio::fs::write(
+            folder.join("movie.nfo"),
+            format!(
+                "<movie><title>Audit Movie {:02}</title><year>2024</year></movie>",
+                i
+            ),
+        )
+        .await
+        .unwrap();
+    }
+
+    let db = temp.path().join("pool_audit.sqlite3");
+    let store = IdentityStore::open(&db).await.unwrap();
+    store
+        .bootstrap(
+            "scan-admin",
+            Zeroizing::new("synthetic scanner password".into()),
+        )
+        .await
+        .unwrap();
+
+    // Audit pool configuration: assert pool max_connections == 4
+    let pool_options = store.pool().options();
+    assert_eq!(
+        pool_options.get_max_connections(),
+        4,
+        "IdentityStore pool must be configured with 4 connections for concurrent readers in WAL mode"
+    );
+
+    let (app, cookie, csrf) = setup_app(&root, &store).await;
+    let library = create_library(&app, &films, &cookie, &csrf, "AuditFilms").await;
+
+    // Initial scan to establish catalogue & live asset IDs for streaming
+    trigger_scan(&app, &library, &cookie, &csrf).await;
+    let res = wait_scan(&app, &library, &cookie, 60).await;
+    assert_eq!(res["status"], "completed");
+
+    let (_, cat, _, _) = request(
+        &app,
+        "GET",
+        "/api/v1/catalog?limit=5",
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    let work_id = cat["items"][0]["id"].as_str().unwrap();
+    let (_, detail, _, _) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/catalog/{work_id}"),
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    let asset_id = detail["editions"][0]["versions"][0]["sources"][0]["assetIds"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Now stage 1,000 synthetic entries to publish
+    let scan_id = uuid::Uuid::new_v4().to_string();
+    let stage_count = 1000;
+    for chunk in 0..10 {
+        let files: Vec<ScannedFile> = (0..100)
+            .map(|j| {
+                let idx = chunk * 100 + j;
+                ScannedFile {
+                    relative_path: format!("audit_synth_{:04}/movie.mkv", idx),
+                    identity_key: format!("synth:audit:{:04}", idx),
+                    title: format!("Audit Synth #{:04}", idx),
+                    year: Some(2024),
+                    external_ids: std::collections::BTreeMap::new(),
+                    size: 1048576,
+                    modified_ns: "1700000000".into(),
+                    mime: "video/x-matroska".into(),
+                    probe: media_poc::media::Probe::default(),
+                    editorial: NfoOutcome::Missing,
+                    poster: None,
+                    reused: false,
+                }
+            })
+            .collect();
+        let batch = InventoryBatch {
+            scan_id: scan_id.clone().into(),
+            sequence: chunk as u64,
+            files,
+            errors: vec![],
+            warnings: vec![],
+        };
+        media_poc::inventory::stage_batch(&store, &scan_id, &library, &batch)
+            .await
+            .unwrap();
+    }
+
+    // Spawn publish_staged_scan in background to hold active writer transaction
+    let store_pub = store.clone();
+    let scan_id_pub = scan_id.clone();
+    let library_pub = library.clone();
+    let films_pub = films.clone();
+    let publish_task = tokio::spawn(async move {
+        let t0 = Instant::now();
+        media_poc::inventory::publish_staged_scan(
+            &store_pub,
+            &scan_id_pub,
+            &library_pub,
+            &films_pub,
+            false,
+        )
+        .await
+        .map(|_| t0.elapsed())
+    });
+
+    // Concurrently send 50 queries (25 catalog + 25 range streaming) WHILE publish_staged_scan is running
+    let app_clone = app.clone();
+    let cookie_clone = cookie.clone();
+    let asset_id_clone = asset_id.clone();
+
+    let concurrent_task = tokio::spawn(async move {
+        let mut latencies: Vec<Duration> = Vec::with_capacity(50);
+        let mut sqlite_busy_errors = 0;
+        let mut success_count = 0;
+
+        for step in 0..50 {
+            let t0 = Instant::now();
+            let (status, _body, _bytes, _) = if step % 2 == 0 {
+                request(
+                    &app_clone,
+                    "GET",
+                    "/api/v1/catalog?limit=10",
+                    &cookie_clone,
+                    None,
+                    Value::Null,
+                    None,
+                )
+                .await
+            } else {
+                request(
+                    &app_clone,
+                    "GET",
+                    &format!("/api/v1/assets/{asset_id_clone}/content"),
+                    &cookie_clone,
+                    None,
+                    Value::Null,
+                    Some("bytes=0-63"),
+                )
+                .await
+            };
+            let lat = t0.elapsed();
+            latencies.push(lat);
+
+            if status == StatusCode::OK || status == StatusCode::PARTIAL_CONTENT {
+                success_count += 1;
+            } else {
+                eprintln!("STEP {} STATUS: {}", step, status);
+                if status == StatusCode::INTERNAL_SERVER_ERROR {
+                    sqlite_busy_errors += 1;
+                }
+            }
+        }
+        (latencies, sqlite_busy_errors, success_count)
+    });
+
+    let (pub_join, concurrent_join) = tokio::join!(publish_task, concurrent_task);
+    let pub_dur = pub_join.unwrap().unwrap();
+    let (mut latencies, sqlite_busy, success_count) = concurrent_join.unwrap();
+    println!(
+        "publish_staged_scan duration: {:.2} ms",
+        pub_dur.as_millis()
+    );
+
+    assert_eq!(
+        sqlite_busy, 0,
+        "Zero SQLITE_BUSY errors must occur during atomic publication with 4-connection pool"
+    );
+    assert_eq!(
+        success_count, 50,
+        "All 50 concurrent requests during publication must succeed"
+    );
+
+    latencies.sort();
+    let p50 = latencies[latencies.len() / 2];
+    let p95 = latencies[(latencies.len() as f64 * 0.95) as usize];
+    let p99 = latencies[(latencies.len() as f64 * 0.99) as usize];
+
+    println!(
+        "Concurrent Latencies DURING write transaction: p50={:.2} ms, p95={:.2} ms, p99={:.2} ms (50 requests, 0 SQLITE_BUSY)",
+        p50.as_secs_f64() * 1000.0,
+        p95.as_secs_f64() * 1000.0,
+        p99.as_secs_f64() * 1000.0
+    );
+
+    // Verify catalog total now includes both baseline and newly published
+    let (_, final_cat, _, _) = request(
+        &app,
+        "GET",
+        "/api/v1/catalog?limit=1",
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    assert_eq!(final_cat["total"], 10 + stage_count);
+}
+
+#[tokio::test]
+async fn test_crash_cancellation_permissions_and_rollback() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("media");
+    let films = root.join("Films");
+    tokio::fs::create_dir_all(&films).await.unwrap();
+
+    let db = temp.path().join("resilience.sqlite3");
+    let store = IdentityStore::open(&db).await.unwrap();
+    store
+        .bootstrap(
+            "scan-admin",
+            Zeroizing::new("synthetic scanner password".into()),
+        )
+        .await
+        .unwrap();
+
+    let (app, cookie, csrf) = setup_app(&root, &store).await;
+    let library = create_library(&app, &films, &cookie, &csrf, "ResilienceLib").await;
+
+    // 1. Rollback on library configuration change during publication
+    let scan_id = uuid::Uuid::new_v4().to_string();
+    let batch = InventoryBatch {
+        scan_id: scan_id.clone().into(),
+        sequence: 1,
+        files: vec![ScannedFile {
+            relative_path: "uncommitted.mkv".into(),
+            identity_key: "uncommitted".into(),
+            title: "Uncommitted Movie".into(),
+            year: Some(2024),
+            external_ids: std::collections::BTreeMap::new(),
+            size: 1048576,
+            modified_ns: "1700".into(),
+            mime: "video/x-matroska".into(),
+            probe: media_poc::media::Probe::default(),
+            editorial: NfoOutcome::Missing,
+            poster: None,
+            reused: false,
+        }],
+        errors: vec![],
+        warnings: vec![],
+    };
+    media_poc::inventory::stage_batch(&store, &scan_id, &library, &batch)
+        .await
+        .unwrap();
+
+    // Mutate library root path in DB to simulate mismatch / concurrent config change
+    sqlx::query("UPDATE libraries SET root='/changed/path' WHERE id=?")
+        .bind(&library)
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    // publish_staged_scan MUST fail and rollback
+    let pub_res =
+        media_poc::inventory::publish_staged_scan(&store, &scan_id, &library, &films, true).await;
+    assert!(
+        pub_res.is_err(),
+        "Must reject publication when root does not match"
+    );
+
+    // Clean staging
+    media_poc::inventory::clean_staging(&store, &scan_id)
+        .await
+        .unwrap();
+    let remaining_staging: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM scan_staging_files WHERE scan_id=?")
+            .bind(&scan_id)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(remaining_staging, 0);
+
+    // Verify nothing leaked into inventory_assets or works
+    let asset_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM inventory_assets WHERE library_id=?")
+            .bind(&library)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(asset_count, 0, "Failed publication must leave 0 assets");
+
+    // 2. Permission enforcement: non-admin gets 403 Forbidden on scan
+    sqlx::query("UPDATE users SET role='user' WHERE role='administrator'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    let (scan_status, _, _, _) = request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/libraries/{library}/scan"),
+        &cookie,
+        Some(&csrf),
+        Value::Null,
+        None,
+    )
+    .await;
+    assert_eq!(
+        scan_status,
+        StatusCode::FORBIDDEN,
+        "Non-admin role must get 403 on admin scan"
+    );
+
+    let (cat_status, _, _, _) = request(
+        &app,
+        "GET",
+        "/api/v1/catalog",
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    assert_eq!(
+        cat_status,
+        StatusCode::FORBIDDEN,
+        "User without library grant must get 403 Forbidden on catalog"
+    );
+
+    // Restore administrator role
+    sqlx::query("UPDATE users SET role='administrator' WHERE role='user'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    // 3. Incomplete scan (complete = false): missing files are NOT marked unavailable
+    // Restore library root
+    sqlx::query("UPDATE libraries SET root=? WHERE id=?")
+        .bind(films.to_string_lossy().as_ref())
+        .bind(&library)
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    // Stage an asset
+    let scan_id_ok = uuid::Uuid::new_v4().to_string();
+    let batch_ok = InventoryBatch {
+        scan_id: scan_id_ok.clone().into(),
+        sequence: 1,
+        files: vec![ScannedFile {
+            relative_path: "file1.mkv".into(),
+            identity_key: "file1".into(),
+            title: "File 1".into(),
+            year: Some(2024),
+            external_ids: std::collections::BTreeMap::new(),
+            size: 1048576,
+            modified_ns: "1700".into(),
+            mime: "video/x-matroska".into(),
+            probe: media_poc::media::Probe::default(),
+            editorial: NfoOutcome::Missing,
+            poster: None,
+            reused: false,
+        }],
+        errors: vec![],
+        warnings: vec![],
+    };
+    media_poc::inventory::stage_batch(&store, &scan_id_ok, &library, &batch_ok)
+        .await
+        .unwrap();
+    media_poc::inventory::publish_staged_scan(&store, &scan_id_ok, &library, &films, true)
+        .await
+        .unwrap();
+
+    // Now run an incomplete scan with an empty batch (complete = false)
+    let scan_id_incomplete = uuid::Uuid::new_v4().to_string();
+    let batch_empty = InventoryBatch {
+        scan_id: scan_id_incomplete.clone().into(),
+        sequence: 1,
+        files: vec![],
+        errors: vec![],
+        warnings: vec![],
+    };
+    media_poc::inventory::stage_batch(&store, &scan_id_incomplete, &library, &batch_empty)
+        .await
+        .unwrap();
+    media_poc::inventory::publish_staged_scan(&store, &scan_id_incomplete, &library, &films, false)
+        .await
+        .unwrap();
+
+    // Verify file1 is STILL available!
+    let file1_avail: i64 = sqlx::query_scalar(
+        "SELECT available FROM inventory_assets WHERE library_id=? AND relative_path='file1.mkv'",
+    )
+    .bind(&library)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        file1_avail, 1,
+        "Incomplete scan must NOT mark missing files unavailable"
+    );
 }

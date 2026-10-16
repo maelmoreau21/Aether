@@ -1,5 +1,23 @@
 # MEMORY.md — État et décisions Aether
 
+## 16 octobre 2026 — Jalon J1 (`docs/ARCHITECTURE_ROADMAP.md`) : Workspace Rust 3 crates et confinement par descripteur (`OpenedFile`)
+
+- **Découpage effectif en 3 crates Cargo (`crates/core`, `crates/node`, `crates/shared`)** :
+  - `crates/shared` (`media-contracts`) : contrats partagés, identifiants et constantes de marque (`brand.rs`), types de pistes/probes (`media.rs`), descripteurs d'inventaire/NFO/images (`inventory.rs`) et erreurs communes (`errors.rs`). Aucune dépendance sur Axum, SQLx ou Tokio.
+  - `crates/node` (`media-node`) : confinement des racines et fichiers (`files.rs` avec `OpenedFile`), exécution bornée de `ffprobe` (`probe.rs`), parsing XML NFO borné sur handle ouvert (`nfo.rs`), validation et découverte d'affiches locales sur handle ouvert (`images.rs`), parcours récursif avec cache de vidéos par dossier (`scanner.rs` / `FolderVideos` éliminant la relecture `O(N^2)` des dossiers), inventaire de fixtures (`inventory.rs`), streaming HTTP `GET`/`HEAD`/`Range` 64 Kio sur descripteur ouvert (`stream.rs`) et façade `LocalNode` (`lib.rs`). **Zéro dépendance vers `media-poc` ou `sqlx`**.
+  - `crates/core` (`media-poc`) : serveur HTTP Axum, authentification/sessions/CSRF, catalogue et persistance SQLite (`migrations/0001` à `0006` inchangées, identifiants déterministes et UUID existants préservés), délégant toutes les opérations fichiers, le scan et le streaming média/affiches à `LocalNode` via `ReadGrant` / `ReadTarget`.
+- **Élimination du TOCTOU de réouverture par chemin (`canonicalize` + `ServeFile`)** :
+  - Sous Linux/Docker : traversée relative confinée via `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV)` avec repli composant par composant `openat(O_NOFOLLOW | O_CLOEXEC)` (`open_unix_fallback`, activé sur `ENOSYS` ou `EPERM` seccomp) et vérification `fstat`.
+  - Sous Windows : ouverture des répertoires intermédiaires sans `FILE_SHARE_DELETE` maintenus ouverts pendant la traversée, ouverture avec `FILE_FLAG_OPEN_REPARSE_POINT`, rejet immédiat de `FILE_ATTRIBUTE_REPARSE_POINT` (`0x400`, symlinks et junctions NTFS) sur chaque handle et vérification d'identité de handle (`verify_unchanged` / `verify_unchanged_sync`).
+  - Le streaming HTTP (`GET`, `HEAD`, `Range` simple RFC 9110 avec `200 OK`, `206 Partial Content`, `416 Range Not Satisfiable`, blocs de 64 Kio), la lecture NFO et le décodage d'images consomment directement le `std::fs::File` contenu dans `OpenedFile`.
+  - Limite documentée : `ffprobe` étant un processus externe, il reçoit le chemin vérifié par `OpenedFile::verify_unchanged` juste avant l'exécution et immédiatement après.
+- **Mise à jour Docker et validations complètes** :
+  - `Dockerfile` mis à jour pour mettre en cache les dépendances des 3 crates (`crates/core`, `crates/node`, `crates/shared`).
+  - `cargo fmt --check`, `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 erreur, 0 avertissement.
+  - `cargo test --locked --workspace --all-features` : **76 tests réussis** (`2` dans `media-contracts`, `22` dans `media-node`, `52` dans `media-poc`), 0 échec, 5 ignorés (et `24/24` tests unitaires `media-contracts` + `media-node` validés en conteneur Linux Docker).
+  - Frontend (`apps/web`) : `npm run check` (0 erreur, 0 warning), `npm run lint`, `npm test` (13/13 Vitest), `npm run build` réussis sans modification de `apps/web`.
+  - Validation Docker E2E Linux (`docker compose build` + `docker compose up -d`) : conteneur `healthy` (RSS au repos ~2,11 MiB), bootstrap admin, login, scan `/media`, catalogue, streaming `Range: bytes=0-63` (`206 Partial Content` via `openat2` Linux) et persistance des UUID après redémarrage du conteneur validés.
+
 ## 16 octobre 2026 — Audit et optimisation du frontend SvelteKit (Performance & Code Splitting)
 
 - **Audit et optimisation ciblée du frontend (`apps/web`)** :

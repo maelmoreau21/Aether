@@ -140,7 +140,8 @@ async fn start(
     }
     let root: Option<String> = sqlx::query_scalar("SELECT root FROM libraries WHERE id=? AND enabled=1 AND kind='films' AND node_id='local' AND id NOT IN ('fixture-films','fixture-series')").bind(&id).fetch_optional(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let root = root.ok_or(StatusCode::BAD_REQUEST)?;
-    node::validate_library_root(std::path::Path::new(&root), &state.root)
+    node::LocalNode
+        .validate_root(std::path::Path::new(&root), &state.root)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
     let result = sqlx::query("INSERT INTO scan_jobs(library_id,status) VALUES(?,'queued') ON CONFLICT(library_id) DO UPDATE SET status='queued',discovered=0,probed=0,reused=0,errors_json='[]' WHERE scan_jobs.status NOT IN ('queued','running')").bind(&id).execute(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -157,10 +158,10 @@ async fn start(
             let _permit = slots.acquire().await?;
             if cancel.load(Ordering::Acquire) { return Err("Scan arrêté".into()); }
             sqlx::query("UPDATE scan_jobs SET status='running' WHERE library_id=?").bind(&job_id).execute(&store.pool).await?;
-            let root = node::validate_library_root(std::path::Path::new(&root), &allowed_root).await?;
+            let root = node::LocalNode.validate_root(std::path::Path::new(&root), &allowed_root).await?;
             let cache = inventory::load_cache(&store, &job_id).await?;
             let images = inventory::load_image_cache(&store, &job_id).await?;
-            let report = node::scanner::scan_with_images(&root, &cache, &images, &cancel).await?;
+            let report = node::LocalNode.scan_library(&root, &cache, &images, &cancel).await?;
             if cancel.load(Ordering::Acquire) { return Err("Scan arrêté".into()); }
             inventory::ingest(&store, &job_id, &root, &report).await?;
             let conflicts = inventory::editorial_warnings(&store, &job_id).await?;

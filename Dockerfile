@@ -24,11 +24,15 @@ WORKDIR /build
 
 # Copy workspace manifests
 COPY Cargo.toml Cargo.lock ./
+COPY crates/shared/Cargo.toml ./crates/shared/
+COPY crates/node/Cargo.toml ./crates/node/
 COPY crates/core/Cargo.toml ./crates/core/
 
 # Scaffold dummy source hierarchy for dependency precompilation caching
 # Explicit test targets declared in crates/core/Cargo.toml (p0, catalog) must exist
-RUN mkdir -p crates/core/src crates/core/tests && \
+RUN mkdir -p crates/shared/src crates/node/src crates/core/src crates/core/tests && \
+    echo 'pub fn dummy() {}' > crates/shared/src/lib.rs && \
+    echo 'pub fn dummy() {}' > crates/node/src/lib.rs && \
     echo 'pub fn dummy() {}' > crates/core/src/lib.rs && \
     echo 'fn main() {}' > crates/core/src/main.rs && \
     echo 'fn main() {}' > crates/core/src/bootstrap.rs && \
@@ -39,12 +43,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo build --release --locked --bin media-poc --bin media-bootstrap
 
-# Copy actual workspace crates (including shared brand.rs and core migrations)
+# Copy actual workspace crates (shared contracts, node, and core with migrations)
 COPY crates/ ./crates/
 
 # Clean dummy binary/deps artifacts, recompile actual release binaries, and strip symbols
-RUN touch crates/core/src/lib.rs crates/core/src/main.rs crates/core/src/bootstrap.rs && \
-    rm -f target/release/deps/media_poc* target/release/deps/media_bootstrap* target/release/media-poc target/release/media-bootstrap && \
+RUN touch crates/shared/src/lib.rs crates/node/src/lib.rs crates/core/src/lib.rs crates/core/src/main.rs crates/core/src/bootstrap.rs && \
+    rm -f target/release/deps/*media_contracts* target/release/deps/*media_node* target/release/deps/*media_poc* target/release/deps/*media_bootstrap* target/release/media-poc target/release/media-bootstrap && \
     cargo build --release --locked --bin media-poc --bin media-bootstrap && \
     strip --strip-all target/release/media-poc target/release/media-bootstrap
 

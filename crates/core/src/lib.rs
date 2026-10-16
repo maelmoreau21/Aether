@@ -1,7 +1,6 @@
 //! Local Core: persistent authentication and isolated synthetic media inventory.
 pub mod auth;
-#[path = "../../shared/src/brand.rs"]
-mod brand;
+use media_contracts::brand;
 mod catalog;
 mod demo;
 pub mod identity;
@@ -222,7 +221,11 @@ fn local_security(router: Router, origin: String) -> Router {
 }
 
 pub fn error(status: StatusCode, code: &'static str) -> Response {
-    (status, Json(serde_json::json!({"error":code}))).into_response()
+    (
+        status,
+        Json(media_contracts::errors::ApiErrorBody::new(code)),
+    )
+        .into_response()
 }
 
 #[cfg(test)]

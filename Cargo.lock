@@ -898,6 +898,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "media-contracts"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "media-node"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "http",
+ "http-body",
+ "http-body-util",
+ "image",
+ "media-contracts",
+ "quick-xml",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "media-poc"
 version = "0.1.0"
 dependencies = [
@@ -905,7 +933,8 @@ dependencies = [
  "axum",
  "http-body-util",
  "image",
- "quick-xml",
+ "media-contracts",
+ "media-node",
  "rpassword",
  "serde",
  "serde_json",

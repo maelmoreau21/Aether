@@ -1,37 +1,101 @@
 //! Read-only local film posters. Paths never form part of the public contract.
 use image::{ImageDecoder, ImageFormat, ImageReader, Limits};
-use serde::{Deserialize, Serialize};
+pub use media_contracts::media::{LocalImage, ValidatedImage};
 use std::{
-    io::{self, Cursor, Read},
+    io::{self, Cursor, Read, Seek, SeekFrom},
     path::Path,
     time::UNIX_EPOCH,
 };
 use tokio::sync::Semaphore;
 
+use crate::{files::OpenedFile, scanner::FolderVideos};
+
 pub const MAX_BYTES: u64 = 10 * 1024 * 1024;
 static VALIDATION: Semaphore = Semaphore::const_new(1);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LocalImage {
-    pub path: String,
-    pub size_bytes: u64,
-    pub modified_ns: String,
-    pub mime: String,
-    pub priority: u8,
-}
-#[derive(Debug)]
-pub struct ValidatedImage {
-    pub mime: &'static str,
-    pub size_bytes: u64,
-    pub modified_ns: String,
-}
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
-/// Caller must first apply confined_file. One blocking decoder at a time; compressed
-/// input <=10 MiB, strict dimensions <=4096 each and decoder allocation budget32MiB.
-/// Allocation budget is decoder best effort, not a process RSS guarantee.
+fn decode_and_verify(bytes: Vec<u8>, extension: &str) -> io::Result<&'static str> {
+    let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+    let mime = match reader.format() {
+        Some(ImageFormat::Jpeg) => "image/jpeg",
+        Some(ImageFormat::Png) => "image/png",
+        Some(ImageFormat::WebP) => "image/webp",
+        _ => return Err(invalid("unsupported image content")),
+    };
+    let expected = match extension {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        _ => return Err(invalid("unsupported image extension")),
+    };
+    if expected != mime {
+        return Err(invalid("poster extension does not match image content"));
+    }
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(4096);
+    limits.max_image_height = Some(4096);
+    limits.max_alloc = Some(32 * 1024 * 1024);
+    reader.limits(limits);
+    let decoder = reader
+        .into_decoder()
+        .map_err(|_| invalid("invalid image header"))?;
+    if decoder.total_bytes() > 32 * 1024 * 1024 {
+        return Err(invalid("image decoded pixels exceed 32 MiB"));
+    }
+    image::DynamicImage::from_decoder(decoder)
+        .map_err(|_| invalid("corrupt image or image decoding limit exceeded"))?;
+    Ok(mime)
+}
+
+/// Validate an already-confined `OpenedFile` handle without reopening by path.
+/// Ensures no TOCTOU substitution can occur between confinement, validation, and streaming.
+pub async fn validate_opened(opened: &OpenedFile) -> io::Result<ValidatedImage> {
+    let permit = VALIDATION
+        .acquire()
+        .await
+        .map_err(|_| io::Error::other("image validation stopped"))?;
+    let mut cloned = opened.try_clone()?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        cloned.verify_unchanged_sync()?;
+        let size = cloned.size();
+        if size == 0 || size > MAX_BYTES {
+            return Err(invalid("image must be a regular file of at most 10 MiB"));
+        }
+        let modified_ns = cloned.modified_ns().to_owned();
+        let extension = cloned
+            .canonical_path()
+            .extension()
+            .and_then(|v| v.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let file = cloned.std_file_mut();
+        file.seek(SeekFrom::Start(0))?;
+        let mut bytes = Vec::with_capacity(size as usize);
+        file.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
+        let _ = cloned.std_file_mut().seek(SeekFrom::Start(0));
+        if bytes.len() as u64 != size || bytes.len() as u64 > MAX_BYTES {
+            return Err(invalid("image changed during validation"));
+        }
+        cloned
+            .verify_unchanged()
+            .map_err(|_| invalid("image changed during validation"))?;
+        let mime = decode_and_verify(bytes, &extension)?;
+        Ok(ValidatedImage {
+            mime,
+            size_bytes: size,
+            modified_ns,
+        })
+    })
+    .await
+    .map_err(|_| io::Error::other("image validation failed"))?
+}
+
+/// Caller must first apply confined_file or use `validate_opened`. One blocking decoder at a time;
+/// compressed input <=10 MiB, strict dimensions <=4096 each and decoder allocation budget 32MiB.
 pub async fn validate(path: &Path) -> io::Result<ValidatedImage> {
     let permit = VALIDATION
         .acquire()
@@ -54,40 +118,12 @@ pub async fn validate(path: &Path) -> io::Result<ValidatedImage> {
         if after.len() != metadata.len() || after.modified()? != metadata.modified()? {
             return Err(invalid("image changed during validation"));
         }
-        let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
-        let mime = match reader.format() {
-            Some(ImageFormat::Jpeg) => "image/jpeg",
-            Some(ImageFormat::Png) => "image/png",
-            Some(ImageFormat::WebP) => "image/webp",
-            _ => return Err(invalid("unsupported image content")),
-        };
         let extension = path
             .extension()
             .and_then(|v| v.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        let expected = match extension.as_str() {
-            "jpg" | "jpeg" => "image/jpeg",
-            "png" => "image/png",
-            "webp" => "image/webp",
-            _ => return Err(invalid("unsupported image extension")),
-        };
-        if expected != mime {
-            return Err(invalid("poster extension does not match image content"));
-        }
-        let mut limits = Limits::default();
-        limits.max_image_width = Some(4096);
-        limits.max_image_height = Some(4096);
-        limits.max_alloc = Some(32 * 1024 * 1024);
-        reader.limits(limits);
-        let decoder = reader
-            .into_decoder()
-            .map_err(|_| invalid("invalid image header"))?;
-        if decoder.total_bytes() > 32 * 1024 * 1024 {
-            return Err(invalid("image decoded pixels exceed 32 MiB"));
-        }
-        image::DynamicImage::from_decoder(decoder)
-            .map_err(|_| invalid("corrupt image or image decoding limit exceeded"))?;
+        let mime = decode_and_verify(bytes, &extension)?;
         let modified_ns = metadata
             .modified()?
             .duration_since(UNIX_EPOCH)
@@ -104,32 +140,17 @@ pub async fn validate(path: &Path) -> io::Result<ValidatedImage> {
     .map_err(|_| io::Error::other("image validation failed"))?
 }
 
-async fn shared_allowed(root: &Path, video: &Path) -> io::Result<bool> {
+fn shared_allowed_from_folder(video: &Path, videos: &FolderVideos) -> bool {
     let parent = video.parent().unwrap_or(Path::new(""));
     if parent.as_os_str().is_empty() {
-        return Ok(false);
+        return false;
     }
     let key = super::scanner::identity(video).3;
     let folder_key = super::scanner::identity(&parent.join("__unqualified_media__.mp4")).3;
     if !folder_key.starts_with("file:") && folder_key != key {
-        return Ok(false);
+        return false;
     }
-    let mut entries = tokio::fs::read_dir(root.join(parent)).await?;
-    while let Some(entry) = entries.next_entry().await? {
-        let p = entry.path();
-        if p.extension()
-            .and_then(|s| s.to_str())
-            .is_some_and(|s| s.eq_ignore_ascii_case("mkv") || s.eq_ignore_ascii_case("mp4"))
-        {
-            let relative = p
-                .strip_prefix(root)
-                .map_err(|_| invalid("image outside library"))?;
-            if super::scanner::identity(relative).3 != key {
-                return Ok(false);
-            }
-        }
-    }
-    Ok(true)
+    videos.all_match_identity(&key)
 }
 
 /// Name priority poster, folder, exact-video-poster, exact-video; within each:
@@ -144,32 +165,34 @@ pub async fn discover_cached(
     video: &Path,
     cache: &std::collections::HashMap<String, LocalImage>,
 ) -> (Option<LocalImage>, Option<String>) {
+    discover_cached_with_folder(root, video, cache, None).await
+}
+
+pub async fn discover_cached_with_folder(
+    root: &Path,
+    video: &Path,
+    cache: &std::collections::HashMap<String, LocalImage>,
+    folder_videos: Option<&FolderVideos>,
+) -> (Option<LocalImage>, Option<String>) {
     let parent = video.parent().unwrap_or(Path::new(""));
     let stem = video.file_stem().unwrap_or_default().to_string_lossy();
-    let shared = match shared_allowed(root, video).await {
-        Ok(value) => value,
-        Err(_) => return (None, Some("poster directory unreadable".into())),
+    let loaded_folder;
+    let videos = match folder_videos {
+        Some(v) => v,
+        None => match FolderVideos::load(root, parent).await {
+            Ok(v) => {
+                loaded_folder = v;
+                &loaded_folder
+            }
+            Err(_) => return (None, Some("poster directory unreadable".into())),
+        },
     };
+    let shared = shared_allowed_from_folder(video, videos);
     // Two files with the same stem can be separate Works under existing grouping.
     // A stem sidecar cannot choose between them, so only share it within one identity.
-    let mut exact_allowed = true;
-    if let Ok(mut entries) = tokio::fs::read_dir(root.join(parent)).await {
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let p = entry.path();
-            if p.file_stem() == video.file_stem()
-                && p.extension()
-                    .and_then(|v| v.to_str())
-                    .is_some_and(|v| v.eq_ignore_ascii_case("mp4") || v.eq_ignore_ascii_case("mkv"))
-                && p.strip_prefix(root).is_ok_and(|p| {
-                    super::scanner::identity(p).3 != super::scanner::identity(video).3
-                })
-            {
-                exact_allowed = false;
-            }
-        }
-    } else {
-        exact_allowed = false;
-    }
+    let video_identity = super::scanner::identity(video).3;
+    let exact_allowed = videos.stem_unambiguous(video.file_stem(), &video_identity);
+
     for (name_index, name) in [
         "poster".to_owned(),
         "folder".to_owned(),
@@ -192,19 +215,14 @@ pub async fn discover_cached(
                 continue;
             }
             let result = async {
-                let file = super::scanner::confined_file(root, &relative)
+                let opened = OpenedFile::open_in_root(root, &relative)
                     .await
                     .map_err(|_| invalid("poster unavailable or unconfined"))?;
-                let metadata = tokio::fs::metadata(&file).await?;
                 let key = relative.to_string_lossy().replace('\\', "/");
-                let modified = metadata
-                    .modified()?
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(|_| invalid("image modification time unavailable"))?
-                    .as_nanos()
-                    .to_string();
+                let modified = opened.modified_ns().to_owned();
+                let size_bytes = opened.size();
                 if let Some(cached) = cache.get(&key).filter(|c| {
-                    c.size_bytes == metadata.len()
+                    c.size_bytes == size_bytes
                         && c.modified_ns == modified
                         && c.size_bytes <= MAX_BYTES
                 }) {
@@ -212,7 +230,7 @@ pub async fn discover_cached(
                     reused.priority = (name_index * 4 + format_index) as u8;
                     return Ok(reused);
                 }
-                let validated = validate(&file).await?;
+                let validated = validate_opened(&opened).await?;
                 let expected = match *extension {
                     "jpg" | "jpeg" => "image/jpeg",
                     "png" => "image/png",

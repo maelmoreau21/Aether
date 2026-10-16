@@ -295,7 +295,7 @@ pub async fn scan_with_images(
             cached.probe.clone()
         } else {
             report.probed += 1;
-            let probing = probe::probe(opened.canonical_path());
+            let probing = probe::probe_opened(&opened);
             tokio::pin!(probing);
             let result = loop {
                 tokio::select! {

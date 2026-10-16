@@ -129,13 +129,15 @@ pub async fn ingest(
                 row.get::<String, _>("id")
             } else {
                 let work_id = id();
-                sqlx::query("INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json) VALUES(?,?,?,?,?,?)")
+                let title_sort = file.title.to_lowercase();
+                sqlx::query("INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort) VALUES(?,?,?,?,?,?,?)")
                     .bind(&work_id)
                     .bind(library_id)
                     .bind(&identity_key)
                     .bind(&file.title)
                     .bind(file.year.map(i64::from))
                     .bind(json!(file.external_ids).to_string())
+                    .bind(title_sort)
                     .execute(&mut *tx)
                     .await?;
                 work_id
@@ -306,9 +308,10 @@ async fn refresh_editorial(
                 .map(|provider| format!("Conflicting {provider} identifiers; no automatic merge"))
                 .collect::<Vec<_>>()
         );
+        let title_sort = title.to_lowercase();
         // Private sidecar paths stay in inventory_editorial, never in catalogue output.
-        sqlx::query("UPDATE inventory_works SET title=?,year=?,external_ids_json=?,editorial_json=? WHERE id=?")
-            .bind(title).bind(year).bind(json!(ids).to_string()).bind(metadata.to_string()).bind(&work_id).execute(&mut **tx).await?;
+        sqlx::query("UPDATE inventory_works SET title=?,year=?,external_ids_json=?,editorial_json=?,title_sort=? WHERE id=?")
+            .bind(title).bind(year).bind(json!(ids).to_string()).bind(metadata.to_string()).bind(title_sort).bind(&work_id).execute(&mut **tx).await?;
     }
     Ok(())
 }
@@ -373,27 +376,118 @@ pub async fn catalogue(
     offset: usize,
     limit: usize,
 ) -> Result<Value, sqlx::Error> {
-    let rows=sqlx::query("SELECT w.*,(SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i JOIN libraries il ON il.id=i.library_id WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind='films' AND il.node_id='local' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS poster_url FROM inventory_works w WHERE EXISTS(SELECT 1 FROM inventory_editions e JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=s.library_id WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1)").fetch_all(&store.pool).await?;
-    let mut items: Vec<Value> = rows
-        .iter()
-        .filter(|r| {
-            visible.contains(&r.get::<String, _>("library_id"))
-                && kind.is_none_or(|k| k == "film")
-                && r.get::<String, _>("title")
-                    .to_lowercase()
-                    .contains(&search.to_lowercase())
-        })
-        .map(work)
-        .collect();
-    items.sort_by_key(|v| v["title"].as_str().unwrap_or_default().to_lowercase());
-    if sort == "title-desc" {
-        items.reverse();
+    if visible.is_empty() || kind.is_some_and(|k| k != "film") {
+        return Ok(json!({
+            "items": [],
+            "total": 0,
+            "offset": offset,
+            "limit": limit,
+            "mode": "local-library",
+            "notice": "Bibliothèques locales indexées"
+        }));
     }
-    let total = items.len();
-    let items: Vec<_> = items.into_iter().skip(offset).take(limit).collect();
-    Ok(
-        json!({"items":items,"total":total,"offset":offset,"limit":limit,"mode":"local-library","notice":"Bibliothèques locales indexées"}),
-    )
+
+    let search_clean = search.trim().to_lowercase();
+    let has_search = !search_clean.is_empty();
+
+    let mut count_builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "SELECT COUNT(*) FROM inventory_works w WHERE w.library_id IN (",
+    );
+    let mut separated = count_builder.separated(", ");
+    for lib in visible {
+        separated.push_bind(lib);
+    }
+    separated.push_unseparated(") ");
+
+    if has_search {
+        count_builder.push("AND instr(w.title_sort, ");
+        count_builder.push_bind(&search_clean);
+        count_builder.push(") > 0 ");
+    }
+
+    count_builder.push(
+        "AND EXISTS ( \
+           SELECT 1 FROM inventory_editions e \
+           JOIN inventory_versions v ON v.edition_id=e.id \
+           JOIN inventory_sources s ON s.version_id=v.id \
+           JOIN inventory_assets a ON a.source_id=s.id \
+           JOIN libraries l ON l.id=s.library_id \
+           WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+         )",
+    );
+
+    let total: i64 = count_builder
+        .build_query_scalar()
+        .fetch_one(&store.pool)
+        .await?;
+    let total = total as usize;
+
+    if total == 0 || offset >= total || limit == 0 {
+        return Ok(json!({
+            "items": [],
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "mode": "local-library",
+            "notice": "Bibliothèques locales indexées"
+        }));
+    }
+
+    let mut data_builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "SELECT w.*, \
+           (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
+            FROM inventory_images i \
+            JOIN libraries il ON il.id=i.library_id \
+            WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind='films' AND il.node_id='local' \
+            ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url \
+         FROM inventory_works w \
+         WHERE w.library_id IN (",
+    );
+    let mut separated = data_builder.separated(", ");
+    for lib in visible {
+        separated.push_bind(lib);
+    }
+    separated.push_unseparated(") ");
+
+    if has_search {
+        data_builder.push("AND instr(w.title_sort, ");
+        data_builder.push_bind(&search_clean);
+        data_builder.push(") > 0 ");
+    }
+
+    data_builder.push(
+        "AND EXISTS ( \
+           SELECT 1 FROM inventory_editions e \
+           JOIN inventory_versions v ON v.edition_id=e.id \
+           JOIN inventory_sources s ON s.version_id=v.id \
+           JOIN inventory_assets a ON a.source_id=s.id \
+           JOIN libraries l ON l.id=s.library_id \
+           WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+         ) ",
+    );
+
+    if sort == "title-desc" {
+        data_builder.push("ORDER BY w.title_sort DESC, w.id DESC ");
+    } else {
+        data_builder.push("ORDER BY w.title_sort ASC, w.id ASC ");
+    }
+
+    data_builder.push("LIMIT ");
+    data_builder.push_bind(limit as i64);
+    data_builder.push(" OFFSET ");
+    data_builder.push_bind(offset as i64);
+
+    let rows = data_builder.build().fetch_all(&store.pool).await?;
+    let items: Vec<Value> = rows.iter().map(work).collect();
+
+    Ok(json!({
+        "items": items,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "mode": "local-library",
+        "notice": "Bibliothèques locales indexées"
+    }))
 }
 
 pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value>, sqlx::Error> {
@@ -600,6 +694,25 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(preserved, after);
+        sqlx::raw_sql(include_str!("../migrations/0007_catalogue_indexes.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let after_0007: (String, String, i64, String, String) =
+            sqlx::query_as("SELECT id,title,year,editorial_json,title_sort FROM inventory_works")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            after_0007,
+            (
+                "stable".into(),
+                "Film".into(),
+                2026,
+                "{}".into(),
+                "film".into()
+            )
+        );
     }
     #[tokio::test]
     async fn nfo_refresh_preserves_graph_technical_data_and_invalid_snapshot() {

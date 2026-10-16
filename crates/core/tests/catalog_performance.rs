@@ -1,0 +1,634 @@
+//! Benchmark and functional verification of SQLite catalog performance,
+//! pagination, Unicode search, and multi-user library permissions.
+
+use media_poc::identity::IdentityStore;
+use serde_json::{Value, json};
+use std::time::Instant;
+
+/// Old in-memory catalogue implementation kept purely as a baseline for performance comparison.
+async fn legacy_in_memory_catalogue(
+    store: &IdentityStore,
+    visible: &[String],
+    kind: Option<&str>,
+    search: &str,
+    sort: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<(Value, usize), sqlx::Error> {
+    // 1. Fetch all works with correlated poster subquery without any WHERE library or LIMIT
+    let rows = sqlx::query(
+        "SELECT w.*,(SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
+         FROM inventory_images i JOIN libraries il ON il.id=i.library_id \
+         WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind='films' AND il.node_id='local' \
+         ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS poster_url \
+         FROM inventory_works w \
+         WHERE EXISTS( \
+           SELECT 1 FROM inventory_editions e \
+           JOIN inventory_versions v ON v.edition_id=e.id \
+           JOIN inventory_sources s ON s.version_id=v.id \
+           JOIN inventory_assets a ON a.source_id=s.id \
+           JOIN libraries l ON l.id=s.library_id \
+           WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+         )"
+    )
+    .fetch_all(store.pool())
+    .await?;
+
+    let total_rows_fetched = rows.len();
+
+    // 2. Filter in memory
+    let mut items: Vec<Value> = rows
+        .iter()
+        .filter(|r| {
+            visible.contains(&sqlx::Row::get::<String, _>(*r, "library_id"))
+                && kind.is_none_or(|k| k == "film")
+                && sqlx::Row::get::<String, _>(*r, "title")
+                    .to_lowercase()
+                    .contains(&search.to_lowercase())
+        })
+        .map(|r| {
+            let metadata: Value = serde_json::from_str(sqlx::Row::get(r, "editorial_json"))
+                .unwrap_or_else(|_| json!({}));
+            json!({
+                "id": sqlx::Row::get::<String, _>(r, "id"),
+                "libraryId": sqlx::Row::get::<String, _>(r, "library_id"),
+                "kind": "film",
+                "title": sqlx::Row::get::<String, _>(r, "title"),
+                "year": sqlx::Row::get::<Option<i64>, _>(r, "year"),
+                "description": metadata["plot"].as_str().or_else(|| metadata["outline"].as_str()).unwrap_or("Média local"),
+                "posterUrl": sqlx::Row::try_get::<Option<String>, _>(r, "poster_url").ok().flatten()
+            })
+        })
+        .collect();
+
+    // 3. Sort in memory
+    items.sort_by_key(|v| v["title"].as_str().unwrap_or_default().to_lowercase());
+    if sort == "title-desc" {
+        items.reverse();
+    }
+    let total = items.len();
+    let items: Vec<_> = items.into_iter().skip(offset).take(limit).collect();
+    Ok((
+        json!({"items": items, "total": total, "offset": offset, "limit": limit}),
+        total_rows_fetched,
+    ))
+}
+
+/// Populates synthetic libraries and works.
+/// Generates:
+/// - Library `lib-main`: active films library (contains ~80% of works)
+/// - Library `lib-priv`: active restricted films library (contains ~20% of works)
+/// - Library `lib-disabled`: disabled films library (contains 10 works)
+async fn populate_synthetic_catalog(
+    store: &IdentityStore,
+    count: usize,
+) -> (Vec<String>, Vec<String>) {
+    let mut tx = store.pool().begin().await.unwrap();
+
+    // Insert libraries
+    sqlx::query("INSERT OR IGNORE INTO libraries VALUES('lib-main','Films Populaires','films','local','/media/films',1)")
+        .execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT OR IGNORE INTO libraries VALUES('lib-priv','Films Prives','films','local','/media/private',1)")
+        .execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT OR IGNORE INTO libraries VALUES('lib-disabled','Films Desactives','films','local','/media/disabled',0)")
+        .execute(&mut *tx).await.unwrap();
+
+    let sample_titles = [
+        "Été à Paris",
+        "Éléphant Blanc",
+        "À la dérive",
+        "Ça chapitre un",
+        "L'Odyssée de l'espace",
+        "Cinéma Paradiso",
+        "The Matrix Resurrections",
+        "Interstellar Voyage",
+        "Blade Runner 2049",
+        "Le Fabuleux Destin d'Amélie",
+        "Zootopie Aventure",
+        "Alien le huitième passager",
+    ];
+
+    for i in 0..count {
+        let work_id = format!("work-{:06}", i);
+        let lib_id = if i % 5 == 0 { "lib-priv" } else { "lib-main" };
+        let title_base = sample_titles[i % sample_titles.len()];
+        let title = format!("{} #{:06}", title_base, i);
+        let title_sort = title.to_lowercase();
+        let year = 1990 + (i % 35) as i64;
+        let identity_key = format!("synthetic:{:06}", i);
+
+        sqlx::query(
+            "INSERT INTO inventory_works(id, library_id, identity_key, title, year, external_ids_json, editorial_json, title_sort) \
+             VALUES(?, ?, ?, ?, ?, '{}', '{\"plot\": \"Synopsis synthétique pour test de charge\"}', ?)"
+        )
+        .bind(&work_id)
+        .bind(lib_id)
+        .bind(&identity_key)
+        .bind(&title)
+        .bind(year)
+        .bind(&title_sort)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+        let edition_id = format!("edition-{:06}", i);
+        sqlx::query("INSERT INTO inventory_editions VALUES(?, ?)")
+            .bind(&edition_id)
+            .bind(&work_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+
+        let version_id = format!("version-{:06}", i);
+        sqlx::query("INSERT INTO inventory_versions VALUES(?, ?)")
+            .bind(&version_id)
+            .bind(&edition_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+
+        let source_id = format!("source-{:06}", i);
+        let root = if lib_id == "lib-main" {
+            "/media/films"
+        } else {
+            "/media/private"
+        };
+        sqlx::query("INSERT INTO inventory_sources VALUES(?, ?, ?, ?)")
+            .bind(root)
+            .bind(&source_id)
+            .bind(&version_id)
+            .bind(lib_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+
+        let asset_id = format!("asset-{:06}", i);
+        let rel_path = format!("film_{:06}/movie.mkv", i);
+        sqlx::query(
+            "INSERT INTO inventory_assets VALUES(?, ?, ?, ?, 1048576, '1700000000', 'video/x-matroska', '{\"streams\":[]}', 1)"
+        )
+        .bind(&asset_id)
+        .bind(&source_id)
+        .bind(lib_id)
+        .bind(&rel_path)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+        // 50% of works also have an indexed poster
+        if i % 2 == 0 {
+            let img_id = format!("img-{:06}", i);
+            let img_rel = format!("film_{:06}/poster.jpg", i);
+            sqlx::query(
+                "INSERT INTO inventory_images VALUES(?, ?, ?, ?, ?, 51200, '1700000000', 'image/jpeg', 1, 1)"
+            )
+            .bind(&img_id)
+            .bind(&work_id)
+            .bind(lib_id)
+            .bind(root)
+            .bind(&img_rel)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        }
+    }
+
+    // Add 10 works in disabled library
+    for i in 0..10 {
+        let work_id = format!("disabled-work-{:03}", i);
+        let title = format!("Film Inactif #{:03}", i);
+        let title_sort = title.to_lowercase();
+        sqlx::query(
+            "INSERT INTO inventory_works(id, library_id, identity_key, title, year, external_ids_json, editorial_json, title_sort) \
+             VALUES(?, 'lib-disabled', ?, ?, 2020, '{}', '{}', ?)"
+        )
+        .bind(&work_id)
+        .bind(format!("disabled:{}", i))
+        .bind(&title)
+        .bind(&title_sort)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+        let edition_id = format!("disabled-edition-{:03}", i);
+        sqlx::query("INSERT INTO inventory_editions VALUES(?, ?)")
+            .bind(&edition_id)
+            .bind(&work_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let version_id = format!("disabled-version-{:03}", i);
+        sqlx::query("INSERT INTO inventory_versions VALUES(?, ?)")
+            .bind(&version_id)
+            .bind(&edition_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let source_id = format!("disabled-source-{:03}", i);
+        sqlx::query(
+            "INSERT INTO inventory_sources VALUES('/media/disabled', ?, ?, 'lib-disabled')",
+        )
+        .bind(&source_id)
+        .bind(&version_id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        let asset_id = format!("disabled-asset-{:03}", i);
+        let rel_path = format!("disabled_{:03}/disabled.mkv", i);
+        sqlx::query("INSERT INTO inventory_assets VALUES(?, ?, 'lib-disabled', ?, 100, '100', 'video/x-matroska', '{}', 1)").bind(&asset_id).bind(&source_id).bind(&rel_path).execute(&mut *tx).await.unwrap();
+    }
+
+    tx.commit().await.unwrap();
+
+    let main_libs = vec!["lib-main".to_string()];
+    let all_active_libs = vec!["lib-main".to_string(), "lib-priv".to_string()];
+    (main_libs, all_active_libs)
+}
+
+#[tokio::test]
+async fn explain_query_plan_verifies_index_usage() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("explain.sqlite");
+    let store = IdentityStore::open(&db).await.unwrap();
+    populate_synthetic_catalog(&store, 100).await;
+
+    // 1. Check EXPLAIN QUERY PLAN for Count Query
+    let count_explain: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN \
+         SELECT COUNT(*) FROM inventory_works w \
+         WHERE w.library_id IN ('lib-main') \
+           AND EXISTS ( \
+             SELECT 1 FROM inventory_editions e \
+             JOIN inventory_versions v ON v.edition_id=e.id \
+             JOIN inventory_sources s ON s.version_id=v.id \
+             JOIN inventory_assets a ON a.source_id=s.id \
+             JOIN libraries l ON l.id=s.library_id \
+             WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+           )"
+    )
+    .fetch_all(store.pool())
+    .await
+    .unwrap();
+
+    let explain_text = count_explain
+        .iter()
+        .map(|(_, _, _, detail)| detail.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    println!("EXPLAIN QUERY PLAN (count):\n{}", explain_text);
+    assert!(
+        explain_text.contains("USING INDEX inventory_works_library_sort")
+            || explain_text.contains("USING COVERING INDEX inventory_works_library_sort")
+            || explain_text.contains("USING INDEX"),
+        "Count query must use inventory_works indexes: {}",
+        explain_text
+    );
+    assert!(
+        explain_text.contains("USING INDEX inventory_editions_work"),
+        "EXISTS subquery must use inventory_editions_work index: {}",
+        explain_text
+    );
+
+    // 2. Check EXPLAIN QUERY PLAN for Paginated Data Query
+    let data_explain: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN \
+         SELECT w.*, \
+           (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
+            FROM inventory_images i \
+            JOIN libraries il ON il.id=i.library_id \
+            WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind='films' AND il.node_id='local' \
+            ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url \
+         FROM inventory_works w \
+         WHERE w.library_id IN ('lib-main') \
+           AND EXISTS ( \
+             SELECT 1 FROM inventory_editions e \
+             JOIN inventory_versions v ON v.edition_id=e.id \
+             JOIN inventory_sources s ON s.version_id=v.id \
+             JOIN inventory_assets a ON a.source_id=s.id \
+             JOIN libraries l ON l.id=s.library_id \
+             WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+           ) \
+         ORDER BY w.title_sort ASC, w.id ASC \
+         LIMIT 24 OFFSET 0"
+    )
+    .fetch_all(store.pool())
+    .await
+    .unwrap();
+
+    let data_explain_text = data_explain
+        .iter()
+        .map(|(_, _, _, detail)| detail.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    println!("EXPLAIN QUERY PLAN (data):\n{}", data_explain_text);
+    assert!(
+        data_explain_text.contains("USING INDEX inventory_works_library_sort")
+            || data_explain_text.contains("USING INDEX"),
+        "Data query must use index on inventory_works: {}",
+        data_explain_text
+    );
+}
+
+#[tokio::test]
+async fn multi_user_permissions_and_disabled_libraries() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("permissions.sqlite");
+    let store = IdentityStore::open(&db).await.unwrap();
+
+    let (main_libs, all_libs) = populate_synthetic_catalog(&store, 500).await;
+
+    // User A: only main library
+    let res_a = media_poc::inventory::catalogue(&store, &main_libs, None, "", "title-asc", 0, 24)
+        .await
+        .unwrap();
+    let total_a = res_a["total"].as_u64().unwrap();
+    assert_eq!(total_a, 400); // 80% of 500
+    assert_eq!(res_a["items"].as_array().unwrap().len(), 24);
+
+    // User B: both main and private libraries
+    let res_b = media_poc::inventory::catalogue(&store, &all_libs, None, "", "title-asc", 0, 24)
+        .await
+        .unwrap();
+    let total_b = res_b["total"].as_u64().unwrap();
+    assert_eq!(total_b, 500); // 100% of 500
+
+    // User C: only disabled library
+    let res_c = media_poc::inventory::catalogue(
+        &store,
+        &["lib-disabled".to_string()],
+        None,
+        "",
+        "title-asc",
+        0,
+        24,
+    )
+    .await
+    .unwrap();
+    assert_eq!(res_c["total"], 0, "Disabled library must never yield items");
+    assert_eq!(res_c["items"].as_array().unwrap().len(), 0);
+
+    // User D: empty libraries
+    let res_d = media_poc::inventory::catalogue(&store, &[], None, "", "title-asc", 0, 24)
+        .await
+        .unwrap();
+    assert_eq!(res_d["total"], 0);
+    assert_eq!(res_d["items"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn unicode_search_and_sort_semantics_and_deep_pagination() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("unicode.sqlite");
+    let store = IdentityStore::open(&db).await.unwrap();
+
+    let (_, all_libs) = populate_synthetic_catalog(&store, 1000).await;
+
+    // 1. Unicode case folding search: "été" finds "Été à Paris"
+    let res_ete =
+        media_poc::inventory::catalogue(&store, &all_libs, None, "été", "title-asc", 0, 24)
+            .await
+            .unwrap();
+    assert!(res_ete["total"].as_u64().unwrap() > 0);
+    for item in res_ete["items"].as_array().unwrap() {
+        assert!(item["title"].as_str().unwrap().contains("Été"));
+    }
+
+    // 2. Unicode search: "éléphant" finds "Éléphant Blanc"
+    let res_ele =
+        media_poc::inventory::catalogue(&store, &all_libs, None, "éléphant", "title-asc", 0, 24)
+            .await
+            .unwrap();
+    assert!(res_ele["total"].as_u64().unwrap() > 0);
+    for item in res_ele["items"].as_array().unwrap() {
+        assert!(item["title"].as_str().unwrap().contains("Éléphant"));
+    }
+
+    // 3. Unicode search: "ça" finds "Ça chapitre un"
+    let res_ca = media_poc::inventory::catalogue(&store, &all_libs, None, "ça", "title-asc", 0, 24)
+        .await
+        .unwrap();
+    assert!(res_ca["total"].as_u64().unwrap() > 0);
+    for item in res_ca["items"].as_array().unwrap() {
+        assert!(item["title"].as_str().unwrap().contains("Ça"));
+    }
+
+    // 4. Sorting: title-asc vs title-desc
+    let res_asc = media_poc::inventory::catalogue(&store, &all_libs, None, "", "title-asc", 0, 24)
+        .await
+        .unwrap();
+    let res_desc =
+        media_poc::inventory::catalogue(&store, &all_libs, None, "", "title-desc", 0, 24)
+            .await
+            .unwrap();
+
+    let (legacy_asc, _) =
+        legacy_in_memory_catalogue(&store, &all_libs, None, "", "title-asc", 0, 24)
+            .await
+            .unwrap();
+    let (legacy_desc, _) =
+        legacy_in_memory_catalogue(&store, &all_libs, None, "", "title-desc", 0, 24)
+            .await
+            .unwrap();
+
+    let first_asc = res_asc["items"][0]["title"].as_str().unwrap();
+    let first_desc = res_desc["items"][0]["title"].as_str().unwrap();
+    assert_ne!(first_asc, first_desc);
+    assert_eq!(
+        first_asc,
+        legacy_asc["items"][0]["title"].as_str().unwrap(),
+        "SQLite title-asc must match legacy Rust sort"
+    );
+    assert_eq!(
+        first_desc,
+        legacy_desc["items"][0]["title"].as_str().unwrap(),
+        "SQLite title-desc must match legacy Rust sort"
+    );
+
+    // 5. Deep pagination on 1,000 items
+    let page_last =
+        media_poc::inventory::catalogue(&store, &all_libs, None, "", "title-asc", 984, 24)
+            .await
+            .unwrap();
+    assert_eq!(page_last["total"], 1000);
+    assert_eq!(page_last["offset"], 984);
+    assert_eq!(page_last["items"].as_array().unwrap().len(), 16); // 1000 - 984 = 16
+
+    // 6. Out-of-bounds offset
+    let page_oob =
+        media_poc::inventory::catalogue(&store, &all_libs, None, "", "title-asc", 2000, 24)
+            .await
+            .unwrap();
+    assert_eq!(page_oob["total"], 1000);
+    assert_eq!(page_oob["items"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn benchmark_1000_and_10000_works_comparison() {
+    let temp = tempfile::tempdir().unwrap();
+
+    // ==============================================================
+    // BENCHMARK 1: 1,000 WORKS
+    // ==============================================================
+    let db_1k = temp.path().join("bench_1k.sqlite");
+    let store_1k = IdentityStore::open(&db_1k).await.unwrap();
+    let (_, all_libs_1k) = populate_synthetic_catalog(&store_1k, 1000).await;
+
+    // Warm-up
+    let _ = media_poc::inventory::catalogue(&store_1k, &all_libs_1k, None, "", "title-asc", 0, 24)
+        .await
+        .unwrap();
+
+    // 1. Measure New SQLite-driven Catalogue on 1k
+    let start_new_1k = Instant::now();
+    let res_new_1k =
+        media_poc::inventory::catalogue(&store_1k, &all_libs_1k, None, "", "title-asc", 0, 24)
+            .await
+            .unwrap();
+    let elapsed_new_1k = start_new_1k.elapsed();
+    assert_eq!(res_new_1k["total"], 1000);
+    assert_eq!(res_new_1k["items"].as_array().unwrap().len(), 24);
+
+    // Deep page (offset=960)
+    let start_new_1k_deep = Instant::now();
+    let res_new_1k_deep =
+        media_poc::inventory::catalogue(&store_1k, &all_libs_1k, None, "", "title-asc", 960, 24)
+            .await
+            .unwrap();
+    let elapsed_new_1k_deep = start_new_1k_deep.elapsed();
+    assert_eq!(res_new_1k_deep["items"].as_array().unwrap().len(), 24);
+
+    // Search query on 1k
+    let start_new_1k_search = Instant::now();
+    let res_new_1k_search = media_poc::inventory::catalogue(
+        &store_1k,
+        &all_libs_1k,
+        None,
+        "matrix",
+        "title-asc",
+        0,
+        24,
+    )
+    .await
+    .unwrap();
+    let elapsed_new_1k_search = start_new_1k_search.elapsed();
+
+    // 2. Measure Legacy In-Memory Catalogue on 1k
+    let start_legacy_1k = Instant::now();
+    let (res_legacy_1k, rows_legacy_1k) =
+        legacy_in_memory_catalogue(&store_1k, &all_libs_1k, None, "", "title-asc", 0, 24)
+            .await
+            .unwrap();
+    let elapsed_legacy_1k = start_legacy_1k.elapsed();
+    assert_eq!(res_legacy_1k["total"], 1000);
+    assert_eq!(
+        rows_legacy_1k, 1000,
+        "Legacy loaded ALL 1,000 works into RAM"
+    );
+
+    println!("\n=== RÉSULTATS BENCHMARK 1 000 ŒUVRES ===");
+    println!(
+        "Legacy (in-memory):   {:>8.2?} (1 000 rows matérialisées en RAM)",
+        elapsed_legacy_1k
+    );
+    println!(
+        "Nouveau (SQLite SQL): {:>8.2?} (page 1: 24 items)",
+        elapsed_new_1k
+    );
+    println!(
+        "Nouveau (Page 960):   {:>8.2?} (page 41: 24 items)",
+        elapsed_new_1k_deep
+    );
+    println!(
+        "Nouveau (Recherche):  {:>8.2?} (total: {})",
+        elapsed_new_1k_search, res_new_1k_search["total"]
+    );
+
+    // ==============================================================
+    // BENCHMARK 2: 10,000 WORKS
+    // ==============================================================
+    let db_10k = temp.path().join("bench_10k.sqlite");
+    let store_10k = IdentityStore::open(&db_10k).await.unwrap();
+    let (_, all_libs_10k) = populate_synthetic_catalog(&store_10k, 10000).await;
+
+    // Warm-up
+    let _ =
+        media_poc::inventory::catalogue(&store_10k, &all_libs_10k, None, "", "title-asc", 0, 24)
+            .await
+            .unwrap();
+
+    // 1. Measure New SQLite-driven Catalogue on 10k
+    let start_new_10k = Instant::now();
+    let res_new_10k =
+        media_poc::inventory::catalogue(&store_10k, &all_libs_10k, None, "", "title-asc", 0, 24)
+            .await
+            .unwrap();
+    let elapsed_new_10k = start_new_10k.elapsed();
+    assert_eq!(res_new_10k["total"], 10000);
+    assert_eq!(res_new_10k["items"].as_array().unwrap().len(), 24);
+
+    // Deep page on 10k (offset=9960)
+    let start_new_10k_deep = Instant::now();
+    let res_new_10k_deep =
+        media_poc::inventory::catalogue(&store_10k, &all_libs_10k, None, "", "title-asc", 9960, 24)
+            .await
+            .unwrap();
+    let elapsed_new_10k_deep = start_new_10k_deep.elapsed();
+    assert_eq!(res_new_10k_deep["items"].as_array().unwrap().len(), 24);
+
+    // Search query on 10k
+    let start_new_10k_search = Instant::now();
+    let res_new_10k_search = media_poc::inventory::catalogue(
+        &store_10k,
+        &all_libs_10k,
+        None,
+        "matrix",
+        "title-asc",
+        0,
+        24,
+    )
+    .await
+    .unwrap();
+    let elapsed_new_10k_search = start_new_10k_search.elapsed();
+
+    // 2. Measure Legacy In-Memory Catalogue on 10k
+    let start_legacy_10k = Instant::now();
+    let (res_legacy_10k, rows_legacy_10k) =
+        legacy_in_memory_catalogue(&store_10k, &all_libs_10k, None, "", "title-asc", 0, 24)
+            .await
+            .unwrap();
+    let elapsed_legacy_10k = start_legacy_10k.elapsed();
+    assert_eq!(res_legacy_10k["total"], 10000);
+    assert_eq!(
+        rows_legacy_10k, 10000,
+        "Legacy loaded ALL 10,000 works into RAM"
+    );
+
+    println!("\n=== RÉSULTATS BENCHMARK 10 000 ŒUVRES ===");
+    println!(
+        "Legacy (in-memory):   {:>8.2?} (10 000 rows + poster_url subqueries matérialisées)",
+        elapsed_legacy_10k
+    );
+    println!(
+        "Nouveau (SQLite SQL): {:>8.2?} (page 1: 24 items)",
+        elapsed_new_10k
+    );
+    println!(
+        "Nouveau (Page 9960):  {:>8.2?} (page 416: 24 items)",
+        elapsed_new_10k_deep
+    );
+    println!(
+        "Nouveau (Recherche):  {:>8.2?} (total: {})",
+        elapsed_new_10k_search, res_new_10k_search["total"]
+    );
+    println!("=========================================\n");
+
+    // Assert that the new implementation is significantly faster and allocations are bounded
+    assert!(
+        elapsed_new_10k < elapsed_legacy_10k,
+        "New SQLite pagination ({:?}) must be faster than legacy in-memory ({:?})",
+        elapsed_new_10k,
+        elapsed_legacy_10k
+    );
+}

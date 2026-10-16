@@ -1,9 +1,21 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import Icon from './Icon.svelte';
+  import { goto } from '$app/navigation';
+  import { session, logout } from '../auth/session';
 
   let panel: HTMLDivElement;
   let expanded = $state(false);
+  let busy = $state(false);
+  let error = $state('');
+  let administration = $state(false);
+  async function signOut() {
+    if (!$session || busy) return;
+    busy = true; error = '';
+    try { await logout($session); panel.hidePopover(); await goto(resolve('login/'), { replaceState:true }); }
+    catch (failure) { error = failure instanceof Error ? failure.message : 'Déconnexion impossible. Réessayez.'; }
+    finally { busy = false; }
+  }
 
   function toggled(event: ToggleEvent) {
     expanded = event.newState === 'open';
@@ -18,16 +30,19 @@
 <div class="profile-access">
   <button class="profile-trigger" popovertarget="profile-menu" aria-label="Menu profil" aria-expanded={expanded} aria-controls="profile-menu">
     <span class="avatar"><Icon name="profile" size={18} /></span>
-    <span class="profile-caption">Espace personnel</span>
+    <span class="profile-caption">{$session?.user.login ?? 'Espace personnel'}</span>
     <span class="profile-chevron" class:expanded><Icon name="chevron" size={12} /></span>
   </button>
   <div id="profile-menu" class="profile-popover" popover="auto" bind:this={panel} ontoggle={toggled} onfocusout={focusLeft}>
-    <div class="profile-heading"><span class="avatar"><Icon name="profile" size={18} /></span><div><strong>Votre espace</strong><p>Aucun profil configuré</p></div></div>
+    <div class="profile-heading"><span class="avatar"><Icon name="profile" size={18} /></span><div><strong>{$session?.user.login}</strong><p>{$session?.user.role === 'administrator' ? 'Administrateur' : 'Utilisateur'}</p></div></div>
     <nav aria-label="Menu profil">
       <button class="profile-entry" disabled aria-describedby="profile-planned"><Icon name="profile" size={17} /><span>Mon profil</span><small>Bientôt</small></button>
       <span id="profile-planned" class="sr-only">Avatar, identité, mot de passe et préférences personnelles de langue, audio et sous-titres : bientôt.</span>
       <a class="profile-entry" href={resolve('settings/')} onclick={() => panel.hidePopover()}><Icon name="settings" size={17} /><span>Paramètres</span><Icon name="chevron" size={13} /></a>
-      <!-- Administration and sign-out stay absent until authenticated identity and backend authorization exist. -->
+      {#if $session?.user.role === 'administrator'}<button class="profile-entry" onclick={() => administration = !administration} aria-expanded={administration}><Icon name="settings" size={17} /><span>Administration</span></button>{/if}
+      {#if administration && $session?.user.role === 'administrator'}<p class="menu-notice">L’administration du serveur sera disponible prochainement.</p>{/if}
+      <button class="profile-entry" disabled={busy} onclick={signOut}><span>{busy ? 'Déconnexion…' : 'Se déconnecter'}</span></button>
+      {#if error}<p class="menu-notice error" role="alert">{error}</p>{/if}
     </nav>
   </div>
 </div>
@@ -50,7 +65,8 @@
   .profile-entry>span { flex:1; }
   .profile-entry:disabled { opacity:1; color:var(--color-muted); cursor:default; }
   small { padding:3px 6px; border:1px solid var(--color-line); border-radius:4px; font-size:9px; color:var(--color-muted); }
-  a.profile-entry:hover,a.profile-entry:focus-visible { background:var(--color-accent-soft); color:var(--color-accent-hover); }
+  .profile-entry:hover:not(:disabled),.profile-entry:focus-visible { background:var(--color-accent-soft); color:var(--color-accent-hover); }
+  .menu-notice { padding:4px 12px; line-height:1.7; }.error { color:var(--color-danger); }.profile-heading>div { min-width:0; overflow-wrap:anywhere; }.profile-caption { max-width:150px; overflow:hidden; text-overflow:ellipsis; }
   a.profile-entry:active { background:#34294b; }
   a.profile-entry:focus-visible { outline-offset:-2px; }
   @keyframes reveal { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }

@@ -20,6 +20,7 @@ argon2 = { version = "0.6.0", features = ["zeroize"] }
 rpassword = "7.5.4"
 zeroize = "1"
 uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10.9"
 
 [dev-dependencies]
 http-body-util = "0.1"
@@ -29,3 +30,14 @@ tempfile = "3"
 [[bin]]
 name = "media-bootstrap"
 path = "src/bootstrap.rs"
+
+[features]
+fixture-bench = []
+
+[[test]]
+name = "p0"
+required-features = ["fixture-bench"]
+
+[[test]]
+name = "catalog"
+required-features = ["fixture-bench"]

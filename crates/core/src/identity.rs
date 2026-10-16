@@ -54,7 +54,7 @@ pub struct User {
 
 #[derive(Clone)]
 pub struct IdentityStore {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 impl IdentityStore {
     /// Operator-controlled local file, never supplied by an HTTP request.
@@ -65,10 +65,30 @@ impl IdentityStore {
             .foreign_keys(true)
             .journal_mode(SqliteJournalMode::Wal)
             .busy_timeout(Duration::from_secs(15));
-        let pool = SqlitePoolOptions::new()
-            .max_connections(4)
-            .connect_with(options)
-            .await?;
+        // Concurrent first opens may race on PRAGMA journal_mode=WAL before the
+        // busy handler can wait. Retry only SQLite BUSY/LOCKED, never corruption,
+        // permissions or schema errors. Each attempt retains its 15-second timeout.
+        let mut retries = 0;
+        let pool = loop {
+            match SqlitePoolOptions::new()
+                .max_connections(4)
+                .connect_with(options.clone())
+                .await
+            {
+                Ok(pool) => break pool,
+                Err(sqlx::Error::Database(error))
+                    if retries < 2
+                        && error
+                            .code()
+                            .and_then(|code| code.parse::<i32>().ok())
+                            .is_some_and(|code| matches!(code & 0xff, 5 | 6)) =>
+                {
+                    retries += 1;
+                    tokio::time::sleep(Duration::from_millis(50 * retries)).await;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        };
         // SQLx SQLite migration lock is a no-op: serialize the entire check/apply sequence.
         let mut conn = pool.acquire().await?;
         let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;

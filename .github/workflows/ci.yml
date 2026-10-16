@@ -71,10 +71,10 @@ jobs:
         run: cargo fmt --check
 
       - name: Analyse statique stricte (cargo clippy)
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --locked --all-features --all-targets -- -D warnings
 
       - name: Exécuter les tests (cargo test)
-        run: cargo test --locked
+        run: cargo test --locked --all-features
 
   # =========================================================================
   # 2. Audit de sécurité des dépendances Rust

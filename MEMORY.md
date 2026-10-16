@@ -1,6 +1,6 @@
 # MEMORY.md — État et décisions Aether
 
-> **Date de la décision : 15 octobre 2026. État : première intégration P1 locale et direction visuelle v1 réalisées ; lecture de fixtures testée, P0 exhaustif et P1 autonome restent incomplets.** Toute future IA doit vérifier le dépôt avant de déclarer quoi que ce soit terminé.
+> **Etat courant : 16 octobre 2026. SQLite/bootstrap, connexion Web, sessions persistantes et permissions backend des fixtures sont presents. Permissions fines et bibliotheques personnelles restent absentes ; P1 autonome incomplet.** Les entrees datees conservent l'historique ; verifier code/tests avant toute annonce.
 
 ## 1. Vision actée
 
@@ -770,3 +770,52 @@ Validation finale Node : 10 tests politique + 2 suites statistiques =12/12, exit
   CSRF/rate limiting et permissions backend. P1 complet reste ouvert.
 - Skill codex-token-saver appliqué : tests Rust pertinents conservés ; aucun
   test Web/codec répété sans changement concerné ni pourcentage d'économie annoncé.
+
+## 16 octobre 2026 — connexion, sessions et permissions des fixtures
+
+- Parcours Web /app/login/ -> session -> catalogue/lecture proteges -> deconnexion.
+  Compte CLI existant reutilise, aucun compte reel cree par l'agent, aucun role
+  supplementaire ni inscription/OIDC/multi-Node. Lecteur et medias conserves.
+- Migration 0002 : sessions (SHA-256 du jeton seulement, user_id, dates) et budget
+  global de connexion. Deux UUIDv4 OS par jeton (244 bits aleatoires), cookie
+  HttpOnly/SameSite Strict/Path=/, Secure pour origine HTTPS ; expiration absolue
+  12h, idle30min controlees atomiquement, suppression a la deconnexion.
+  CSRF derive/separe du jeton + Origin exact ; aucun jeton localStorage.
+- Argon2id existant, verification factice pour compte absent/desactive ; message
+  generique. Budget SQLite 10 tentatives/60s conserve apres redemarrage et maximum
+  deux workers Argon2, permis conserve meme si HTTP annule. Pas de secrets logs.
+- secure_app impose auth puis permission avant catalogue/descripteurs/fichiers,
+  sous-titres et derives MSE/DASH, y compris GET/HEAD/Range. Administrator autorise
+  uniquement sur inventaire synthetique ; user refuse403 sans droits implicites.
+  Pas encore de stockage/gestion de grants par bibliotheque ou de medias personnels.
+- Banc historique app compile seulement via fixture-bench pour tests ; binaire
+  toujours secure_app meme avec cette feature, aucun bypass runtime. CI adaptee
+  pour clippy/test --all-features ; CI distante non executee.
+- MEDIA_PUBLIC_URL origine exacte HTTPS ou HTTP loopback, Host/Origin verifies,
+  en-tetes forwarded ignores, listener toujours127.0.0.1. TLS non termine par Core,
+  aucun proxy/publication effectue, HTTPS navigateur/deploiement non valide.
+- Verification finale Windows/Rust1.99.1 : cargo fmt --check,
+  cargo clippy --locked --all-features --all-targets -- -D warnings passent ;
+  cargo test --locked --all-features : 27 tests reussis, 2 ignores par harness
+  (helper bootstrap lance par competing_processes, navigateur lance separement).
+  Le test core_restart arrete/redemarre vraiment trois processus : session
+  conservee puis revocation conservee. Tests HTTP HTTPS Secure/Host/Origin passent.
+- Premier run complet a revele une course PRAGMA WAL a l'ouverture SQLite.
+  Correction IdentityStore : trois tentatives maximum uniquement BUSY/LOCKED,
+  attente50/100ms ; corruption/permissions/autres erreurs jamais masquees.
+  Test concurrent repasse six fois ; suite complete finale reussie.
+- Web : npm run check (0 erreur/avertissement), lint, npm test (12 tests), build
+  passent. cargo test --locked --test browser_auth -- --ignored --nocapture passe :
+  Chrome155.0.8059.40 Windows10.0.26300 headless390/1440px, erreur login puis succes,
+  cookie HttpOnly/Strict, identite/menu admin, catalogue, MP4/seek, rechargement,
+  logout puis catalogue/Range401, aucune erreur JS/CSP. Captures inspectees dans
+  docs/evidence/2026-10-16/auth/ ; pas de nouvelle preuve PCM/MKV/Firefox/Edge/Safari.
+- Limites : flux deja ouvert non interrompu au logout, budget global pouvant etre
+  epuise par un acteur, revocation session courante seulement, pas de droits fins,
+  TLS reel/NAS/charge non testes ; ACL operateur/TOCTOU du banc toujours applicables.
+  Voir docs/LOCAL_SESSIONS.md et docs/TEST_PLAN.md. Pas de commit/push/deploiement.
+- Prochain petit jalon P1 propose : droits explicites par bibliotheque en SQLite,
+  matrice administrator/user et tests de chaque ressource/derive, toujours sur
+  fixtures, avant toute connexion de dossiers personnels ro.
+- Token saver applique : trois sous-agents aux fichiers distincts, lectures ciblees,
+  integration centralisee et tests utiles conserves. Aucun gain chiffre revendique.

@@ -1,5 +1,10 @@
 # ARCHITECTURE.md — Architecture cible Aether
 
+État local du 16 octobre 2026 : connexion/session SQLite ajoutées au Core existant,
+permissions communes avant les routes catalogue/média et séparation du banc P0
+par feature de test. Voir `docs/LOCAL_SESSIONS.md`. Aucun Node distant, OIDC ou
+gestion de bibliothèques personnelles ajouté ; les sections cibles restent futures.
+
 > **Architecture cible, pas un état de livraison.** Un banc P0 expérimental et le changement FR/EN par remux sont testés localement ; les composants produit ci-dessous restent des intentions. Voir `MEMORY.md` et les preuves de compatibilité pour l'état réel.
 
 ## 1. Objectif

@@ -1,5 +1,14 @@
 # Aether — banc P0 AV1 / Opus
 
+**16 octobre 2026 — Core local authentifié :** SQLite et bootstrap CLI,
+connexion Web, sessions révocables et permissions backend sont présents.
+Commencer par [le bootstrap](docs/LOCAL_ADMIN.md), puis
+[la connexion et les tests actuels](docs/LOCAL_SESSIONS.md).
+L'interface est à `/app/login/`. Fixtures uniquement ; pas de bibliothèques
+personnelles ni de standalone/NAS validé. Le texte P0 ci-dessous est historique.
+Les anciens runners sans connexion nécessitent désormais un banc de test isolé ;
+le parcours navigateur actuel est `tests/browser_auth.rs`.
+
 Premier jalon de développement, 15 octobre 2026. Serveur Rust/Axum local et
 fixtures synthétiques uniquement. P0A/P0B restent partiels ; aucun produit
 standalone, compte, catalogue, déploiement NAS ou moteur de lecture définitif.
@@ -17,8 +26,10 @@ Depuis la racine du dépôt, PowerShell :
 ./scripts/prepare-language-remux.ps1
 python scripts/generate-representative-fixtures.py
 cargo fmt --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
+cargo clippy --locked --all-features --all-targets -- -D warnings
+cargo test --locked --all-features
+New-Item -ItemType Directory -Path data -ErrorAction SilentlyContinue
+cargo run --locked -p media-poc --bin media-bootstrap
 cargo run --locked -p media-poc
 ```
 

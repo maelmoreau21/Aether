@@ -1,4 +1,20 @@
-# Sécurité du banc local P0
+# Sécurité du Core local et historique du banc P0
+
+## État actuel — 16 octobre 2026
+
+Le binaire exige désormais une session SQLite et une permission backend pour
+les routes catalogue et média, y compris HEAD, Range, sous-titres et expériences
+MSE/DASH. Connexion Argon2id, sessions hachées/révocables, expirations, CSRF et
+limitation persistante des tentatives : [LOCAL_SESSIONS.md](LOCAL_SESSIONS.md).
+Seul l'administrateur accède à l'inventaire synthétique ; `user` est refusé
+jusqu'au prochain jalon de permissions explicites par bibliothèque.
+Le texte ci-dessous décrit les jalons historiques et leurs limites persistantes
+(notamment fixtures uniquement et confinement non atomique). Ses mentions
+« aucune authentification » ne décrivent plus le binaire actuel.
+Le constructeur sans auth est réservé à la feature de test `fixture-bench` ;
+le binaire ne l'utilise jamais. Pas de médias personnels ni de publication validée.
+
+## Historique du banc local P0
 
 Le binaire écoute exclusivement sur `127.0.0.1`, sans option pour ouvrir le LAN.
 Il vérifie Host, Origin et Sec-Fetch-Site, n'autorise pas CORS et applique une CSP

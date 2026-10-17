@@ -37,6 +37,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .or_else(|_| std::env::var("MEDIA_NODE_PAIRING_TOKEN"))
         .ok()
         .filter(|s| !s.trim().is_empty());
+    if bootstrap_token
+        .as_ref()
+        .is_some_and(|s| s.len() < 48 || !s.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return Err("pairing secret must be at least 24 random bytes encoded as hex".into());
+    }
     let configured_node_id = std::env::var("MEDIA_NODE_ID")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -44,9 +50,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let configured_name = std::env::var("MEDIA_NODE_NAME")
         .ok()
         .filter(|s| !s.trim().is_empty());
-    let public_url = std::env::var("MEDIA_NODE_PUBLIC_URL")
-        .ok()
-        .filter(|s| !s.trim().is_empty());
+    // Explicit empty value clears a previously persisted direct-stream origin.
+    let public_url = std::env::var("MEDIA_NODE_PUBLIC_URL").ok();
     let batch_size = std::env::var("MEDIA_NODE_SCAN_BATCH_SIZE")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())

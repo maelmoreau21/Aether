@@ -5,10 +5,10 @@ const fs = require('node:fs');
 const origin = process.env.MEDIA_TEST_ORIGIN || 'http://127.0.0.1:3000';
 const node1Url = process.env.MEDIA_TEST_NODE1_URL || 'http://aether-node-films:4101';
 const node1PublicUrl = process.env.MEDIA_TEST_NODE1_PUBLIC_URL || 'http://127.0.0.1:4101';
-const node1Token = process.env.MEDIA_TEST_NODE1_TOKEN || 'pair-token-films-test';
+const node1Token = process.env.MEDIA_TEST_NODE1_TOKEN;
 const node2Url = process.env.MEDIA_TEST_NODE2_URL || 'http://aether-node-series:4102';
 const node2PublicUrl = process.env.MEDIA_TEST_NODE2_PUBLIC_URL || 'http://127.0.0.1:4102';
-const node2Token = process.env.MEDIA_TEST_NODE2_TOKEN || 'pair-token-series-test';
+const node2Token = process.env.MEDIA_TEST_NODE2_TOKEN;
 const adminLogin = process.env.MEDIA_TEST_ADMIN_LOGIN || 'admin-synology';
 const adminPass = process.env.MEDIA_TEST_ADMIN_PASS || 'distributed-docker-pass-2026';
 
@@ -48,7 +48,7 @@ fs.mkdirSync(out, { recursive: true });
       }
     });
     page.on('pageerror', error => errors.push(String(error)));
-    page.on('console', message => console.log('PAGE CONSOLE:', message.type(), message.text()));
+    page.on('console', message => { if (message.type() === 'error') errors.push('browser console error'); });
     page.on('response', res => {
       if (res.url().includes('/api/v1/')) {
         console.log('API RESPONSE:', res.status(), res.url());
@@ -148,7 +148,7 @@ fs.mkdirSync(out, { recursive: true });
     await page.waitForFunction(() => document.querySelector('video') !== null, null, { timeout: 15000 });
     await page.waitForFunction(() => (document.querySelector('video')?.currentTime ?? 0) > 0.05, null, { timeout: 15000 });
     const filmVideoSrc = await page.evaluate(() => document.querySelector('video')?.currentSrc || document.querySelector('video')?.src);
-    report.results.filmVideoSrc = filmVideoSrc;
+    report.results.filmVideoSrc = filmVideoSrc.split('?')[0];
     assert.ok(filmVideoSrc.startsWith(node1PublicUrl), `Expected direct stream from Node 1 (${node1PublicUrl}), got ${filmVideoSrc}`);
 
     // Pause & seek on Node 1 film
@@ -177,7 +177,7 @@ fs.mkdirSync(out, { recursive: true });
     await page.waitForFunction(() => document.querySelector('video') !== null, null, { timeout: 15000 });
     await page.waitForFunction(() => (document.querySelector('video')?.currentTime ?? 0) > 0.05, null, { timeout: 15000 });
     const epVideoSrc = await page.evaluate(() => document.querySelector('video')?.currentSrc || document.querySelector('video')?.src);
-    report.results.episodeVideoSrc = epVideoSrc;
+    report.results.episodeVideoSrc = epVideoSrc.split('?')[0];
     assert.ok(epVideoSrc.startsWith(node2PublicUrl), `Expected direct stream from Node 2 (${node2PublicUrl}), got ${epVideoSrc}`);
 
     await page.evaluate(() => {

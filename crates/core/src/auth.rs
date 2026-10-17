@@ -322,10 +322,11 @@ pub struct AuthUser {
 fn serialize_role<S: serde::Serializer>(role: &Role, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(role.as_str())
 }
+#[derive(Clone)]
 pub struct Authenticated {
     pub user: AuthUser,
     pub csrf_token: String,
-    token_hash: String,
+    pub(crate) token_hash: String,
 }
 #[derive(Deserialize)]
 struct Login {
@@ -404,6 +405,15 @@ impl AuthState {
     pub async fn authenticate(&self, headers: &HeaderMap) -> Result<Authenticated, StatusCode> {
         let raw = session_token(headers).ok_or(StatusCode::UNAUTHORIZED)?;
         let token_hash = hash(raw);
+        let user = self.session_from_hash(&token_hash).await?;
+        Ok(Authenticated {
+            user,
+            csrf_token: csrf(raw),
+            token_hash,
+        })
+    }
+    /// Internal capability checks share live validation and coalesced activity with P1.
+    pub(crate) async fn session_from_hash(&self, token_hash: &str) -> Result<AuthUser, StatusCode> {
         // Validate session, user, role, active state, absolute expiry and idle expiry
         // via a pure SQLite read (WAL snapshot) so authenticated reads never block on write locks.
         let row: Option<(String, String, Role, i64, i64)> = sqlx::query_as(
@@ -416,20 +426,16 @@ impl AuthState {
                AND s.last_seen_at > unixepoch() - ? \
                AND u.disabled_at IS NULL",
         )
-        .bind(&token_hash)
+        .bind(token_hash)
         .bind(IDLE_SECONDS)
         .fetch_optional(&self.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         let (id, login, role, last_seen_at, now) = row.ok_or(StatusCode::UNAUTHORIZED)?;
         if now.saturating_sub(last_seen_at) >= self.toucher.shared.interval_seconds {
-            self.toucher.shared.record(&token_hash, now);
+            self.toucher.shared.record(token_hash, now);
         }
-        Ok(Authenticated {
-            user: AuthUser { id, login, role },
-            csrf_token: csrf(raw),
-            token_hash,
-        })
+        Ok(AuthUser { id, login, role })
     }
     pub fn require_csrf(
         &self,

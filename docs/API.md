@@ -212,3 +212,22 @@ GET/HEAD/Range `/api/v1/assets/{assetId}/content` garde les droits bibliothèque
 Media contient aussi `synthetic` (true pour les démos, false pour l'inventaire).
 Configuration publique mode standalone-local avec MEDIA_LIBRARY_ROOT ; mode
 localhost-fixtures conservé pour le banc expérimental isolé.
+
+## P2 — contrôle interne de chaque requête directe (17 octobre 2026)
+
+POST `/internal/v1/core/playback/authorize` reçoit des `PlaybackTokenClaims`
+JSON, signés par le Node avec les mêmes en-têtes de protocole que ses callbacks.
+Node/key/time/nonce/digest sont vérifiés avant toute lecture de droits. Le Core
+vérifie la ressource, sa bibliothèque et son Node, la session encore active,
+le compte, le rôle actuel et les permissions. Le contrôle de session et sa
+coalescence d'activité sont ceux de P1. 200 `{"authorized":true}` uniquement
+si tout est valide, sinon refus ; les réponses de décision sont signées avec
+le digest des octets JSON. Identité Node invalide : refus avant décision.
+Aucun cache positif et aucun jeton brut de session dans le contrat.
+
+Les réponses d'appairage, rotation et autres réponses de contrôle incluent
+également le digest du corps dans le MAC. Une ancienne réponse sans ce digest
+n'est pas acceptée. Les clients internes ne suivent pas les redirections.
+Les capacités de lecture publique exigent HTTPS, sauf pour les origines loopback
+des tests locaux. Les URL historiques non conformes retombent sur le relais.
+Voir [le contrat détaillé et les commandes](P2_DOCKER_VALIDATION.md).

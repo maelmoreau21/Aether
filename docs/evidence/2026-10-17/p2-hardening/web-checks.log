@@ -1,0 +1,25 @@
+
+> check
+> svelte-kit sync && svelte-check --tsconfig ./tsconfig.json
+
+Loading svelte-check in workspace: c:\Users\Mael\Documents\GitHub\Aether\apps\web
+Getting Svelte diagnostics...
+
+svelte-check found 0 errors and 0 warnings
+
+> lint
+> eslint src
+
+
+> test
+> vitest run
+
+
+ RUN  v5.0.5 C:/Users/Mael/Documents/GitHub/Aether/apps/web
+
+
+ Test Files  4 passed (4)
+      Tests  33 passed (33)
+   Start at  20:51:09
+   Duration  3.58s (transform 82%, import 14%, tests 4%)
+

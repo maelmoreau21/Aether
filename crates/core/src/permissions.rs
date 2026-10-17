@@ -106,5 +106,6 @@ pub async fn require_media(
         return error(StatusCode::FORBIDDEN, "permission_denied");
     }
     request.extensions_mut().insert(VisibleLibraries(visible));
+    request.extensions_mut().insert(identity);
     next.run(request).await
 }

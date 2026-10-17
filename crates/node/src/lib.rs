@@ -12,6 +12,7 @@ pub mod probe;
 pub mod scanner;
 pub mod server;
 pub mod stream;
+pub mod transport;
 
 pub use files::{OpenedFile, confined_file, validate_library_root};
 pub use inventory::{

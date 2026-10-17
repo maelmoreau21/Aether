@@ -243,6 +243,8 @@ pub struct PlaybackTokenClaims {
     pub iat: i64,
     pub exp: i64,
     pub jti: String,
+    #[serde(default)]
+    pub session_hash: String,
 }
 
 pub fn unix_now() -> i64 {
@@ -421,6 +423,7 @@ pub fn verify_internal_request(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn sign_internal_response(
     secret: &str,
     req_nonce: &str,
@@ -429,9 +432,10 @@ pub fn sign_internal_response(
     key_id: &str,
     timestamp: i64,
     res_nonce: &str,
+    body_sha256: &str,
 ) -> String {
     let canonical = format!(
-        "{PROTOCOL_VERSION}-res\n{req_nonce}\n{status}\n{node_id}\n{key_id}\n{timestamp}\n{res_nonce}"
+        "{PROTOCOL_VERSION}-res\n{req_nonce}\n{status}\n{node_id}\n{key_id}\n{timestamp}\n{res_nonce}\n{body_sha256}"
     );
     hmac_sha256_hex(secret, &canonical)
 }
@@ -446,6 +450,7 @@ pub fn verify_internal_response(
     timestamp: i64,
     res_nonce: &str,
     signature: &str,
+    body_sha256: &str,
     now: i64,
 ) -> Result<(), &'static str> {
     if (now - timestamp).abs() > MAX_CLOCK_SKEW_SECS {
@@ -455,7 +460,14 @@ pub fn verify_internal_response(
         return Err("invalid_response_nonce");
     }
     let expected = sign_internal_response(
-        secret, req_nonce, status, node_id, key_id, timestamp, res_nonce,
+        secret,
+        req_nonce,
+        status,
+        node_id,
+        key_id,
+        timestamp,
+        res_nonce,
+        body_sha256,
     );
     if !constant_time_eq(expected.as_bytes(), signature.as_bytes()) {
         return Err("invalid_response_signature");
@@ -515,7 +527,10 @@ pub fn verify_playback_token(
     if claims.action != expected_action {
         return Err("wrong_token_action");
     }
-    if now > claims.exp {
+    if now >= claims.exp
+        || claims.exp <= claims.iat
+        || claims.exp - claims.iat > DEFAULT_PLAYBACK_TOKEN_TTL_SECS
+    {
         return Err("expired_playback_token");
     }
     if claims.iat > now + MAX_CLOCK_SKEW_SECS {
@@ -696,6 +711,7 @@ mod tests {
             action: "stream".to_owned(),
             iat: now,
             exp: now + 900,
+            session_hash: String::new(),
             jti: "jti-1".to_owned(),
         };
         let token = issue_playback_token(secret, &claims).unwrap();

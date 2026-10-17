@@ -38,8 +38,7 @@ use media_contracts::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::{io, sync::Arc, time::Duration};
-use tokio::net::TcpStream;
+use std::{io, sync::Arc};
 
 #[derive(Clone)]
 pub struct NodesState {
@@ -129,6 +128,10 @@ pub fn router(auth: AuthState, replay_window: Arc<ReplayWindow>) -> Router {
         .route("/api/v1/admin/nodes/{id}/revoke", post(revoke_node_admin))
         .route("/internal/v1/core/heartbeat", post(receive_node_heartbeat))
         .route(
+            "/internal/v1/core/playback/authorize",
+            post(authorize_playback),
+        )
+        .route(
             "/internal/v1/core/scans/{scan_id}/batches",
             post(receive_scan_batch),
         )
@@ -160,19 +163,22 @@ async fn require_admin(
 }
 
 fn validate_http_url(raw: &str) -> Result<String, StatusCode> {
-    let trimmed = raw.trim().trim_end_matches('/');
-    let parsed = url::Url::parse(trimmed).map_err(|_| StatusCode::BAD_REQUEST)?;
-    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+    let parsed = media_node::transport::validate_url(raw).map_err(|_| StatusCode::BAD_REQUEST)?;
+    Ok(parsed.as_str().trim_end_matches('/').to_owned())
+}
+
+fn validate_public_url(raw: &str) -> Result<String, StatusCode> {
+    let origin = validate_http_url(raw)?;
+    let parsed = url::Url::parse(&origin).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let host = parsed.host_str().unwrap_or("").trim_matches(['[', ']']);
+    let loopback = host == "localhost"
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    if parsed.scheme() == "http" && !loopback {
         return Err(StatusCode::BAD_REQUEST);
     }
-    if !parsed.username().is_empty()
-        || parsed.password().is_some()
-        || parsed.query().is_some()
-        || parsed.fragment().is_some()
-    {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    Ok(trimmed.to_owned())
+    Ok(origin)
 }
 
 pub async fn load_node(
@@ -281,7 +287,7 @@ async fn pair_node_admin(
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        Some(u) => Some(validate_http_url(u)?),
+        Some(u) => Some(validate_public_url(u)?),
         None => None,
     };
     let pairing_token = input.pairing_token.trim();
@@ -321,7 +327,7 @@ async fn pair_node_admin(
     };
 
     let body = serde_json::to_vec(&pair_req).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let (status, _res_headers, res_bytes) =
+    let (status, res_headers, res_bytes) =
         send_plain_json_post(&base_url, "/internal/v1/node/pair", Bytes::from(body))
             .await
             .map_err(|_| StatusCode::BAD_GATEWAY)?;
@@ -354,9 +360,33 @@ async fn pair_node_admin(
         return Err(StatusCode::BAD_GATEWAY);
     }
 
+    verify_internal_response(
+        &derived_secret,
+        &nonce,
+        status.as_u16(),
+        pair_res.node_id.as_str(),
+        &key_id,
+        res_headers
+            .get(HDR_RES_TIMESTAMP)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+        res_headers
+            .get(HDR_RES_NONCE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or(""),
+        res_headers
+            .get(HDR_RES_SIGNATURE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or(""),
+        &sha256_hex(&res_bytes),
+        unix_now(),
+    )
+    .map_err(|_| StatusCode::BAD_GATEWAY)?;
+
     let final_public_url = explicit_public_url.or({
         match pair_res.public_url.as_deref() {
-            Some(u) => validate_http_url(u).ok(),
+            Some(u) => validate_public_url(u).ok(),
             None => None,
         }
     });
@@ -441,7 +471,10 @@ async fn reconnect_node(
             if let Ok(hb) = serde_json::from_slice::<HeartbeatPayload>(&bytes) {
                 let roots_json =
                     serde_json::to_string(&hb.roots).unwrap_or_else(|_| rec.roots_json.clone());
-                let pub_url = hb.public_url.or(rec.public_url);
+                let pub_url = hb
+                    .public_url
+                    .or(rec.public_url)
+                    .and_then(|u| validate_public_url(&u).ok());
                 sqlx::query(
                     "UPDATE media_nodes SET status='connected', roots_json=?, public_url=?, last_seen_at=? WHERE id=?",
                 )
@@ -726,6 +759,7 @@ fn signed_core_response<T: Serialize>(
         &rec.key_id,
         now,
         &res_nonce,
+        &sha256_hex(&body),
     );
     let mut res = Response::new(Body::from(body));
     *res.status_mut() = status;
@@ -1181,11 +1215,13 @@ pub fn build_direct_playback_url(
     target_kind: &str,
     target_id: &str,
     action: &str,
+    session_hash: &str,
 ) -> Option<(String, i64)> {
     if rec.kind != "remote" || rec.status != NodeStatus::Connected.as_str() {
         return None;
     }
-    let public_url = rec.public_url.as_deref()?.trim_end_matches('/');
+    let checked_public_url = validate_public_url(rec.public_url.as_deref()?).ok()?;
+    let public_url = checked_public_url.trim_end_matches('/');
     if public_url.is_empty() || rec.shared_secret.is_empty() {
         return None;
     }
@@ -1202,6 +1238,7 @@ pub fn build_direct_playback_url(
         iat: now,
         exp,
         jti: random_nonce_hex(),
+        session_hash: session_hash.to_owned(),
     };
     let token = issue_playback_token(&rec.shared_secret, &claims).ok()?;
     let route = if target_kind == "image" {
@@ -1233,17 +1270,15 @@ pub async fn relay_from_remote_node(
     let Some(host) = parsed.host_str().map(str::to_owned) else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
     };
-    let port = parsed.port_or_known_default().unwrap_or(80);
-    let addr = format!("{host}:{port}");
+
     let host_header = if let Some(p) = parsed.port() {
         format!("{host}:{p}")
     } else {
         host.clone()
     };
 
-    let stream = match tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(&addr)).await
-    {
-        Ok(Ok(s)) => s,
+    let stream = match media_node::transport::connect(base_url).await {
+        Ok(s) => s,
         _ => {
             let _ = sqlx::query(
                 "UPDATE media_nodes SET status='disconnected' WHERE id=? AND status != 'revoked'",
@@ -1305,7 +1340,7 @@ pub async fn relay_from_remote_node(
         Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "stream_error"),
     };
 
-    let upstream_res = match sender.send_request(upstream_req).await {
+    let upstream_res = match media_node::transport::send_request(&mut sender, upstream_req).await {
         Ok(r) => r,
         Err(_) => {
             let _ = sqlx::query(
@@ -1326,6 +1361,36 @@ pub async fn relay_from_remote_node(
     .execute(&store.pool)
     .await;
 
+    let h = upstream_res.headers();
+    let response_signature = h
+        .get(HDR_RES_SIGNATURE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let response_nonce = h
+        .get(HDR_RES_NONCE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let response_timestamp = h
+        .get(HDR_RES_TIMESTAMP)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    if verify_internal_response(
+        &rec.shared_secret,
+        &nonce,
+        upstream_res.status().as_u16(),
+        &rec.id,
+        &rec.key_id,
+        response_timestamp,
+        response_nonce,
+        response_signature,
+        &media_node::transport::stream_metadata_digest(h),
+        unix_now(),
+    )
+    .is_err()
+    {
+        return error(StatusCode::BAD_GATEWAY, "invalid_node_response");
+    }
     let (parts, incoming) = upstream_res.into_parts();
     let stream_body = StreamBody::new(
         incoming
@@ -1359,17 +1424,14 @@ async fn send_plain_json_post(
         .host_str()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing host"))?
         .to_owned();
-    let port = parsed.port_or_known_default().unwrap_or(80);
-    let addr = format!("{host}:{port}");
+
     let host_header = if let Some(p) = parsed.port() {
         format!("{host}:{p}")
     } else {
         host.clone()
     };
 
-    let stream = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(&addr))
-        .await
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connection timed out"))??;
+    let stream = media_node::transport::connect(base_url).await?;
     let io = TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
         .await
@@ -1385,15 +1447,10 @@ async fn send_plain_json_post(
         .header(header::CONTENT_TYPE, "application/json")
         .body(Full::new(body))
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-    let res = sender.send_request(req).await.map_err(io::Error::other)?;
+    let res = media_node::transport::send_request(&mut sender, req).await?;
     let status = res.status();
     let headers = res.headers().clone();
-    let bytes = res
-        .into_body()
-        .collect()
-        .await
-        .map_err(io::Error::other)?
-        .to_bytes();
+    let bytes = media_node::transport::json_body(res.into_body()).await?;
     Ok((status, headers, bytes))
 }
 
@@ -1412,8 +1469,7 @@ async fn send_signed_rotation_request(
         .host_str()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing host"))?
         .to_owned();
-    let port = parsed.port_or_known_default().unwrap_or(80);
-    let addr = format!("{host}:{port}");
+
     let host_header = if let Some(p) = parsed.port() {
         format!("{host}:{p}")
     } else {
@@ -1436,9 +1492,7 @@ async fn send_signed_rotation_request(
         &body_sha,
     );
 
-    let stream = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(&addr))
-        .await
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connection timed out"))??;
+    let stream = media_node::transport::connect(base_url).await?;
     let io = TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
         .await
@@ -1462,21 +1516,25 @@ async fn send_signed_rotation_request(
         .body(Full::new(body))
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
 
-    let res = sender.send_request(req).await.map_err(io::Error::other)?;
+    let res = media_node::transport::send_request(&mut sender, req).await?;
     let status = res.status();
     let headers = res.headers().clone();
-    let collected = res
-        .into_body()
-        .collect()
-        .await
-        .map_err(io::Error::other)?
-        .to_bytes();
+    let collected = media_node::transport::json_body(res.into_body()).await?;
 
     if !status.is_success() {
         return Err(io::Error::other("rotation rejected by node"));
     }
 
-    if let Some(resp_sig) = headers.get(HDR_RES_SIGNATURE).and_then(|v| v.to_str().ok()) {
+    {
+        let resp_sig = headers
+            .get(HDR_RES_SIGNATURE)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "missing_response_signature",
+                )
+            })?;
         let resp_ts = headers
             .get(HDR_RES_TIMESTAMP)
             .and_then(|v| v.to_str().ok())
@@ -1495,6 +1553,7 @@ async fn send_signed_rotation_request(
             resp_ts,
             resp_nonce,
             resp_sig,
+            &sha256_hex(&collected),
             unix_now(),
         )
         .map_err(|reason| io::Error::new(io::ErrorKind::PermissionDenied, reason))?;
@@ -1518,4 +1577,79 @@ async fn send_signed_rotation_request(
     }
 
     Ok(collected)
+}
+
+/// Online, fail-closed authorization for every new direct GET/HEAD/Range request.
+async fn authorize_playback(
+    State(state): State<NodesState>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    let (rec, nonce) =
+        match verify_signed_node_call(&state, &headers, &Method::POST, uri.path(), &body).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let claims: PlaybackTokenClaims = match serde_json::from_slice(&body) {
+        Ok(c) => c,
+        Err(_) => return error(StatusCode::BAD_REQUEST, "invalid_claims"),
+    };
+    let library =
+        inventory::resource_library(&state.auth.store, &claims.target_kind, &claims.target_id)
+            .await;
+    let valid_target = matches!(library, Ok(Some(ref l)) if l == claims.library_id.as_str());
+    let allowed = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM sessions s JOIN users u ON u.id=s.user_id JOIN libraries l ON l.id=? \
+         WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-1800 \
+         AND u.disabled_at IS NULL AND l.enabled=1 AND l.node_id=? \
+         AND (u.role='administrator' OR EXISTS(SELECT 1 FROM library_permissions p WHERE p.library_id=l.id AND p.user_id=u.id))")
+        .bind(claims.library_id.as_str()).bind(&claims.session_hash).bind(&rec.id)
+        .fetch_one(&state.auth.store.pool).await.unwrap_or(0) == 1;
+    let valid_session = state
+        .auth
+        .session_from_hash(&claims.session_hash)
+        .await
+        .is_ok();
+    let valid = valid_session
+        && valid_target
+        && allowed
+        && claims.node_id.as_str() == rec.id
+        && claims.kid == rec.key_id
+        && claims.action == "stream"
+        && claims.exp > unix_now();
+    signed_core_response(
+        &rec,
+        &nonce,
+        if valid {
+            StatusCode::OK
+        } else {
+            StatusCode::FORBIDDEN
+        },
+        &serde_json::json!({"authorized":valid}),
+    )
+}
+
+#[cfg(test)]
+mod transport_policy_tests {
+    use super::*;
+    #[test]
+    fn playback_bearers_require_https_except_local_loopback() {
+        for raw in [
+            "http://192.168.1.20:4101",
+            "http://node.lan",
+            "https://user:pass@node.lan",
+            "https://node.lan/path",
+        ] {
+            assert!(validate_public_url(raw).is_err());
+        }
+        for raw in [
+            "https://node.lan",
+            "http://127.0.0.1:4101",
+            "http://localhost:4101",
+            "http://[::1]:4101",
+        ] {
+            assert!(validate_public_url(raw).is_ok());
+        }
+    }
 }

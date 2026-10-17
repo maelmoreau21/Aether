@@ -147,3 +147,24 @@ Le bootstrap est une CLI interactive autorisée par l'accès OS, jamais une API
 publique. Argon2id, transaction SQLite et marqueur durable : [LOCAL_ADMIN.md](LOCAL_ADMIN.md).
 L'identité persistée ne rend pas le prototype multi-utilisateur : sessions,
 CSRF, limitation des connexions et RBAC restent requis avant les médias privés.
+
+## P2 — transport et révocation, 17 octobre 2026
+
+Le contrat courant remplace les mentions historiques « Node futur » pour les
+chemins réalisés : [P2 Docker](P2_DOCKER_VALIDATION.md). TLS vérifié pour chaque
+URL HTTPS ; HTTP interne uniquement en loopback ou vers une autorité explicitement
+autorisée dans un réseau déclaré fiable. Les URL publiques porteuses de capacités
+refusent HTTP hors loopback. Aucun suivi de redirection ; DNS contrôlé puis
+connexion à l'adresse contrôlée. Les réseaux physiques/DSM restent à tester.
+
+Le MAC de contrôle lie désormais les octets des réponses JSON. Le relais lie ses
+métadonnées par signature et ses octets par TLS sur les liens non fiables. Ne pas
+confondre cela avec un MAC de contenu indépendant du transport sur un bridge HTTP.
+
+Chaque nouvelle requête directe consulte les droits et la session vivants du
+Core, sans cache positif, et réutilise la coalescence d'activité P1. La perte du
+Core bloque la requête. Un flux déjà ouvert n'est pas interrompu, comme en P1.
+Les URL sont porteuses : expurger leurs queries dans tout proxy/journal. Les
+anciens rapports synthétiques conservés ont été expurgés sans changer les
+observations de lecture ; aucune nouvelle preuve n'est déduite de ces anciens
+rapports. L'amorçage ne peut plus reconstituer une identité déjà appairée.

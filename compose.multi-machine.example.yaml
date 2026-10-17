@@ -25,6 +25,8 @@ services:
       # Reverse proxy terminates TLS on 443 and forwards to 127.0.0.1:3000
       - "127.0.0.1:3000:3000"
     environment:
+      - MEDIA_INTERNAL_ALLOWED_AUTHORITIES=node-films.example.lan:443,node-series.example.lan:443
+      - MEDIA_INTERNAL_TRUSTED_HTTP=false
       - MEDIA_MODE=distributed
       - MEDIA_PORT=3000
       - MEDIA_BIND_ADDR=0.0.0.0
@@ -61,12 +63,14 @@ services:
       - "127.0.0.1:4101:4101"
     environment:
       - MEDIA_NODE_PORT=4101
+      - MEDIA_INTERNAL_ALLOWED_AUTHORITIES=media.example.lan:443
+      - MEDIA_INTERNAL_TRUSTED_HTTP=false
       - MEDIA_NODE_BIND_ADDR=0.0.0.0
       - MEDIA_NODE_NAME=NAS-1 Films
       - MEDIA_NODE_PUBLIC_URL=https://node-films.example.lan
       - MEDIA_NODE_DATA_DIR=/data
       - MEDIA_NODE_ROOTS=/media/films
-      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_FILMS_PAIRING_TOKEN}
+      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_FILMS_PAIRING_TOKEN:?Generate a unique random pairing secret}
     volumes:
       - /volume1/docker/aether-node-films/data:/data
       - /volume1/video/Films:/media/films:ro
@@ -95,12 +99,14 @@ services:
       - "127.0.0.1:4102:4102"
     environment:
       - MEDIA_NODE_PORT=4102
+      - MEDIA_INTERNAL_ALLOWED_AUTHORITIES=media.example.lan:443
+      - MEDIA_INTERNAL_TRUSTED_HTTP=false
       - MEDIA_NODE_BIND_ADDR=0.0.0.0
       - MEDIA_NODE_NAME=NAS-2 Séries
       - MEDIA_NODE_PUBLIC_URL=https://node-series.example.lan
       - MEDIA_NODE_DATA_DIR=/data
       - MEDIA_NODE_ROOTS=/media/series
-      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_SERIES_PAIRING_TOKEN}
+      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_SERIES_PAIRING_TOKEN:?Generate a unique random pairing secret}
     volumes:
       - /volume1/docker/aether-node-series/data:/data
       - /volume1/video/Series:/media/series:ro

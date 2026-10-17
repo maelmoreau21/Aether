@@ -1,0 +1,368 @@
+   Compiling media-node v0.1.0 (C:\Users\Mael\Documents\GitHub\Aether\crates\node)
+   Compiling media-poc v0.1.0 (C:\Users\Mael\Documents\GitHub\Aether\crates\core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 48s
+     Running unittests src\lib.rs (target\debug\deps\media_contracts-aefeca9b216e1021.exe)
+
+running 5 tests
+test protocol::tests::rfc4231_hmac_sha256_test_vector_1 ... ok
+test tests::transparent_ids_preserve_historical_and_uuid_strings ... ok
+test tests::nfo_outcome_serialization_contract_is_preserved ... ok
+test protocol::tests::playback_token_binds_node_asset_action_key_and_expiration ... ok
+test protocol::tests::internal_request_signature_and_replay_window_reject_replays_and_tampering ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\media_node-ec6d7d95dbb30cf7.exe)
+
+running 29 tests
+test files::tests::opened_file_detects_in_place_mutation_via_verify_unchanged ... ok
+test files::tests::opened_file_reads_original_handle_even_if_path_is_substituted_after_open ... ok
+test files::tests::nested_subdirectories_and_fallback_traversal_confinement ... ok
+test files::tests::library_root_requires_existing_confined_absolute_directory ... ok
+test images::tests::shared_posters_never_cross_distinct_film_identities ... ok
+test nfo::tests::extracts_bounded_editorial_only_and_entities ... ok
+test images::tests::deterministic_names_formats_missing_and_original_bytes ... ok
+test nfo::tests::parses_tvshow_and_episodedetails_nfo ... ok
+test inventory::tests::local_inventory_confinement_and_fixture_bench_flag ... ok
+test nfo::tests::rejects_hostile_malformed_and_resource_abuse ... ok
+test files::tests::library_root_rejects_symlink_escape ... ok
+test files::tests::opened_file_rejects_traversal_and_directory_links ... ok
+test images::tests::rejects_corruption_misleading_extension_and_oversize ... ok
+test nfo::tests::exact_priority_and_shared_ambiguity ... ok
+test images::tests::junction_or_directory_link_is_rejected ... ok
+test scanner::tests::qualified_identity_and_exact_folders_only ... ok
+test scanner::tests::cached_scan_skips_probe_and_temporary_files ... ok
+test stream::tests::range_parser_and_byte_range_resist_u64_max_overflow_and_boundary_cases ... ok
+test stream::tests::streams_get_head_and_ranges_from_confined_handle_even_if_path_replaced ... ok
+test tests::local_node_serve_grant_streams_asset_and_validates_image_handle ... ok
+test transport::tests::metadata_and_multicast_destinations_are_denied_before_connect ... ok
+test transport::tests::origins_reject_credentials_paths_queries_and_non_http_schemes ... ok
+test scanner::tests::dense_directory_scan_caches_folder_videos_and_reuses_sidecars ... ok
+test nfo::tests::rejects_oversize_sidecars_folder_conflicts_and_link_escape ... ok
+test scanner::tests::traversal_refuses_directory_links_and_windows_junctions ... ok
+test probe::tests::probe_representative_10bit_av1_and_multitrack_opus ... ok
+test probe::tests::probe_real_mkv_and_mp4_containers_and_fragmented ... ok
+test probe::tests::probe_opened_consumes_handle_and_resists_path_substitution ... ok
+test probe::tests::probe_mp4_with_moov_at_end_validates_seek_via_file_descriptor ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.47s
+
+     Running unittests src\bin\aether-node.rs (target\debug\deps\aether_node-568f98f1a2b1a15b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\internal_transport.rs (target\debug\deps\internal_transport-a1c6134267266be4.exe)
+
+running 4 tests
+test real_https_certificate_chain_hostname_and_expiry ... ignored, requires ephemeral certificate directory and MEDIA_INTERNAL_CA_FILE
+test mandatory_response_proof_binds_bytes_and_rejects_redirects ... ok
+test https_never_sends_plaintext_http ... ok
+test missing_control_response_body_has_a_deadline ... ok
+
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 15.03s
+
+     Running unittests src\lib.rs (target\debug\deps\media_poc-469305be9c9a676e.exe)
+
+running 17 tests
+test catalog::tests::missing_prepared_media_never_creates_catalog_items ... ok
+test catalog::tests::fixture_associations_distinguish_work_version_source_and_asset ... ok
+test inventory::tests::editorial_migration_preserves_existing_0004_works ... ok
+test inventory::tests::inventory_survives_reopen_is_idempotent_and_preserves_failed_scan ... ok
+test inventory::tests::nfo_refresh_preserves_graph_technical_data_and_invalid_snapshot ... ok
+test nodes::transport_policy_tests::playback_bearers_require_https_except_local_loopback ... ok
+test libraries::tests::invalid_grants_roll_back_configuration_and_existing_grants ... ok
+test tests::configured_web_dist_custom_path ... ok
+test tests::configured_web_dist_defaults_when_unset_or_empty ... ok
+test tests::configured_web_dist_nonexistent_path_falls_back_to_raw ... ok
+test libraries::http_tests::library_http_roles_csrf_crud_and_grants ... ok
+test libraries::tests::persistence_revocation_and_restart_do_not_restore_defaults ... ok
+test scans::tests::queued_scan_is_exclusive_and_shutdown_retains_inventory ... ok
+test auth::tests::edge_cases_coalescing_expiry_saturation_logout_and_restart ... ok
+test auth::tests::login_persistence_expiry_csrf_and_revocation ... ok
+test auth::tests::generic_credentials_durable_throttle_and_origin ... ok
+test auth::tests::origin_configuration_http_loopback_http_lan_and_https_matrix ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 39.98s
+
+     Running unittests src\bin\aether-core.rs (target\debug\deps\aether_core-4030f6ab232f7e3c.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\backup.rs (target\debug\deps\media_backup-2e396a93c36fa5ad.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bootstrap.rs (target\debug\deps\media_bootstrap-7b3f090a2dcc282f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\debug\deps\media_poc-14d4ce4f5ca7a175.exe)
+
+running 3 tests
+test tests::parse_bind_addr_default_when_unset_or_empty ... ok
+test tests::parse_bind_addr_invalid_ipv4_returns_error ... ok
+test tests::parse_bind_addr_valid_ipv4 ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\restore.rs (target\debug\deps\media_restore-2a85e14fc41d923b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\adversarial_challenge.rs (target\debug\deps\adversarial_challenge-9488e83b38279f6a.exe)
+
+running 5 tests
+test adversarial_web_dist_resolution_permutations ... ok
+test adversarial_bind_addr_permutations_socket_binding ... ok
+test adversarial_bind_addr_invalid_formats_reject_immediately ... ok
+test adversarial_web_dist_serving_and_security_under_app ... ok
+test adversarial_nonexistent_web_dist_serves_404_without_crashing ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.68s
+
+     Running tests\auth_under_sqlite_lock.rs (target\debug\deps\auth_under_sqlite_lock-cce70378ada80ca5.exe)
+
+running 1 test
+test auth_and_catalog_reads_succeed_under_30s_sqlite_begin_immediate_lock ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 43.28s
+
+     Running tests\backup_restore.rs (target\debug\deps\backup_restore-7cc3c5e54dfcb8eb.exe)
+
+running 9 tests
+test test_restore_corrupted_backup_fails_closed_without_modifying_destination ... ok
+test test_restore_refuses_media_root_and_traversal ... ok
+test test_backup_refuses_overwriting_existing_file_by_default ... ok
+test test_backup_failure_preserves_previous_valid_backup_and_cleans_temp_files ... ok
+test test_restore_refused_when_residual_wal_or_shm_journals_present ... ok
+test test_restore_refused_when_sqlite_connection_open_without_active_write ... ok
+test test_backup_with_replace_produces_and_verifies_before_replacing ... ok
+test test_restore_refused_on_existing_database_and_preserves_data ... ok
+test test_sqlite_wal_backup_and_restore_preserves_users_grants_uuids_and_metadata ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.80s
+
+     Running tests\browser_auth.rs (target\debug\deps\browser_auth-640d02cd6eb77412.exe)
+
+running 1 test
+test browser_login_catalog_player_logout ... ignored, requires built Web assets, generated fixtures and installed Chrome/Playwright
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\browser_nfo.rs (target\debug\deps\browser_nfo-15f3e1386b0fa5ad.exe)
+
+running 1 test
+test browser_nfo_persists_refreshes_and_plays_after_core_restart ... ignored, requires built Web assets, generated synthetic fixtures and Chrome/Playwright
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\browser_posters.rs (target\debug\deps\browser_posters-8582f8c8bee073a5.exe)
+
+running 1 test
+test browser_posters_persist_refresh_and_fallback_after_core_restart ... ignored, requires built Web assets, generated synthetic fixtures and Chrome/Playwright
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\browser_scanner.rs (target\debug\deps\browser_scanner-40125f1b91f4af6d.exe)
+
+running 1 test
+test browser_scanner_persists_and_plays_after_core_restart ... ignored, requires built Web assets, generated synthetic fixtures and Chrome/Playwright
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\browser_series.rs (target\debug\deps\browser_series-3c775efaddbeac9d.exe)
+
+running 1 test
+test browser_series_flow_and_playback ... ignored, requires built Web assets, generated synthetic fixtures and Chrome/Playwright
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\catalog.rs (target\debug\deps\catalog-3b3e33d03de1c73d.exe)
+
+running 3 tests
+test unprepared_p1_inventory_exposes_an_empty_catalog_and_no_details ... ok
+test catalog_search_pagination_errors_and_origin_guards ... ok
+test catalog_separates_films_series_and_playable_episodes ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.77s
+
+     Running tests\catalog_performance.rs (target\debug\deps\catalog_performance-31a671000e63ac71.exe)
+
+running 5 tests
+test explain_query_plan_verifies_index_usage ... ok
+test multi_user_permissions_and_disabled_libraries ... ok
+test unicode_search_and_sort_semantics_and_deep_pagination ... ok
+test test_migrated_database_from_0006_to_0007_then_0008_unicode_fix ... ok
+test benchmark_1000_and_10000_works_comparison ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.33s
+
+     Running tests\challenger_security_challenge.rs (target\debug\deps\challenger_security_challenge-4096a710827bc430.exe)
+
+running 4 tests
+test challenge_healthcheck_host_permutations_and_info_leak_audit ... ok
+test challenge_csrf_and_mutating_endpoint_protections ... ok
+test challenge_reverse_proxy_configuration_boundaries ... ok
+test challenge_all_protected_routes_fail_closed_under_host_origin_and_fetch_site_attacks ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.83s
+
+     Running tests\concurrency_writes_during_publication.rs (target\debug\deps\concurrency_writes_during_publication-bf4c3a818b20852d.exe)
+
+running 1 test
+test test_concurrent_writes_during_sqlite_publication_and_timeout_behavior ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.61s
+
+     Running tests\core_restart.rs (target\debug\deps\core_restart-8173465ca0d47078.exe)
+
+running 1 test
+test production_process_restart_keeps_session_and_logout_revokes_it ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.99s
+
+     Running tests\distributed_multi_node.rs (target\debug\deps\distributed_multi_node-080ceb668b10e95b.exe)
+
+running 1 test
+test distributed_core_and_two_remote_nodes_end_to_end ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.57s
+
+     Running tests\healthcheck_resilience.rs (target\debug\deps\healthcheck_resilience-98b430d2b923189c.exe)
+
+running 1 test
+test healthcheck_resilient_under_external_public_url_while_protected_routes_fail_closed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.59s
+
+     Running tests\identity.rs (target\debug\deps\identity-b943f2ae5d0e615d.exe)
+
+running 7 tests
+test bootstrap_process_worker ... ignored, subprocess helper, exercised by competing_processes
+test missing_parent_and_corrupt_database_fail_closed ... ok
+test cli_rejects_noninteractive_input_and_secret_arguments ... ok
+test independent_connections_compete_and_invalid_input_does_not_consume_bootstrap ... ok
+test competing_processes ... ok
+test failed_insert_rolls_back_entire_bootstrap ... ok
+test migrations_bootstrap_hash_restart_and_permanent_closure ... ok
+
+test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 8.54s
+
+     Running tests\nfo_flow.rs (target\debug\deps\nfo_flow-aacbadfe89d5dbfd.exe)
+
+running 1 test
+test nfo_refresh_preserves_media_graph_probe_and_permissions ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.71s
+
+     Running tests\p0.rs (target\debug\deps\p0-158922888920cf91.exe)
+
+running 11 tests
+test mse_subtitles_exact_timing_and_no_preroll_drift ... ok
+test large_file_is_not_buffered_in_full ... ok
+test mse_fixed_inventory_ranges_and_errors ... ok
+test demo_contract_and_read_only_sources ... ok
+test dash_fixed_inventory_and_manifest_ranges ... ok
+test real_containers_all_tracks_and_invalid_media ... ok
+test http_head_ranges_and_exact_bytes ... ok
+test security_and_unknown_ids ... ok
+test representative_tracks_and_ten_bit_profile ... ok
+test language_remux_inventory_and_partial_preparation ... ok
+test streaming_is_chunked_and_can_be_cancelled ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.85s
+
+     Running tests\permissions.rs (target\debug\deps\permissions-b206229a81557964.exe)
+
+running 2 tests
+test configured_https_origin_is_enforced_and_sets_secure_cookie ... ok
+test auth_precedes_all_fixture_metadata_streams_and_derived_resources ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.56s
+
+     Running tests\posters_flow.rs (target\debug\deps\posters_flow-532acab43b6cf19f.exe)
+
+running 1 test
+test local_posters_refresh_preserve_media_and_enforce_library_permissions ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.73s
+
+     Running tests\scan_diagnostics.rs (target\debug\deps\scan_diagnostics-cfe7d229259a8b37.exe)
+
+running 1 test
+test test_scan_diagnostics_bounded_errors_total_counters_and_staging_cleanup ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.23s
+
+     Running tests\scanner_flow.rs (target\debug\deps\scanner_flow-31d274096b1b62c7.exe)
+
+running 1 test
+test real_films_scan_persists_reuses_probes_and_enforces_live_library_permissions ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.20s
+
+     Running tests\scanner_performance.rs (target\debug\deps\scanner_performance-391a5af46b7f6818.exe)
+
+running 9 tests
+test test_mixed_diff_difficult_cases_and_atomic_publication ... ok
+test test_crash_cancellation_permissions_and_rollback ... ok
+test test_scan_cancellation_and_restart_recovery ... ok
+test test_concurrent_playback_and_catalog_navigation_during_scan ... ok
+test test_sqlite_pool_audit_and_concurrent_reads_during_publication ... ok
+test benchmark_10000_entries_cache_and_catalog_latency ... ok
+test benchmark_scanner_flow_and_metrics ... ok
+test test_10000_new_synthetic_media_cold_ingestion_benchmark ... ok
+test test_1000_synthetic_files_scan_and_rescan ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 39.21s
+
+     Running tests\series_flow.rs (target\debug\deps\series_flow-a2cc6a3d53d599c8.exe)
+
+running 2 tests
+test a3_contradictory_series_staging_deterministic_selection_and_200_episodes ... ok
+test comprehensive_series_flow_indexing_playback_permissions_and_rescan ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.27s
+
+     Running tests\series_performance.rs (target\debug\deps\series_performance-d2fc5cf939a61fb8.exe)
+
+running 1 test
+test test_200_episodes_series_performance_multiversion_and_playback ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.89s
+
+     Running tests\static_web.rs (target\debug\deps\static_web-05cc69dd5e74b406.exe)
+
+running 1 test
+test static_web_serves_custom_dist_and_applies_security_headers ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.25s
+
+   Doc-tests media_contracts
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests media_node
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests media_poc
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

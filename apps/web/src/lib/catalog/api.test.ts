@@ -8,11 +8,13 @@ import {
   getCachedMedia,
   playbackIds,
   preloadMediaDescriptor,
+  preloadMediaDescriptors,
+  request,
   revalidateMediaDescriptor,
   sourceLabel,
   type Work
 } from './api';
-import { login, logout, readSession, session, type Session } from '../auth/session';
+import { getSessionGeneration, login, logout, readSession, session, type Session } from '../auth/session';
 import type { Media } from '../player/types';
 
 const sessionA: Session = {
@@ -36,6 +38,13 @@ const sampleMedia2: Media = {
   id: 'media-2',
   title: 'Épisode 2',
   sources: [{ id: 's2', audioTrackId: 'a2', language: 'fr', url: '/api/v1/assets/media-2/content', mime: 'video/mp4' }],
+  subtitles: []
+};
+
+const demoMedia1: Media = {
+  id: 'demo-1',
+  title: 'Démo 1',
+  sources: [{ id: 'ds1', audioTrackId: 'da1', language: 'fr', url: '/api/v1/demo/assets/1', mime: 'video/mp4' }],
   subtitles: []
 };
 
@@ -132,7 +141,7 @@ describe('media descriptor cache and deferred loading', () => {
     expect(getCachedMedia('media-1')).toBeUndefined();
   });
 
-  it('prevents an in-flight request from user A from repopulating the cache after user B connects', async () => {
+  it('rejects a late HTTP 200 from user A and prevents repopulating cache after user B connects', async () => {
     let resolveInFlightA!: (value: Response) => void;
     const fetchMock = vi.fn().mockImplementation((url: string) => {
       if (url === '/api/v1/media/media-1') {
@@ -160,19 +169,74 @@ describe('media descriptor cache and deferred loading', () => {
     // Before A's request finishes, A logs out and B connects
     await logout(sessionA);
     await login('bob', 'password-b');
+    const genB = getSessionGeneration();
     expect(get(session)).toEqual(sessionB);
 
     // B caches media-2
     await fetchMediaDescriptor('media-2');
     expect(getCachedMedia('media-2')).toEqual(sampleMedia2);
 
-    // Now A's late response arrives
+    // Now A's late HTTP 200 arrives: it MUST be rejected for the caller AND must NOT enter B's cache
     resolveInFlightA(Response.json(sampleMedia));
-    await inFlightA.catch(() => {});
+    await expect(inFlightA).rejects.toThrow('La session a changé pendant la requête.');
 
-    // A's late response must NOT have entered B's cache
+    expect(get(session)).toEqual(sessionB);
+    expect(getSessionGeneration()).toBe(genB);
     expect(getCachedMedia('media-1')).toBeUndefined();
     expect(getCachedMedia('media-2')).toEqual(sampleMedia2);
+  });
+
+  it('rejects late HTTP 200 for demo media, preloads, and generic catalog requests on account switch during request', async () => {
+    let resolveDemoA!: (value: Response) => void;
+    let resolvePreloadA!: (value: Response) => void;
+    let resolveCatalogA!: (value: Response) => void;
+
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === '/api/v1/demo/media') {
+        return new Promise<Response>(resolve => {
+          resolveDemoA = resolve;
+        });
+      }
+      if (url === '/api/v1/media/media-1') {
+        return new Promise<Response>(resolve => {
+          resolvePreloadA = resolve;
+        });
+      }
+      if (url === '/api/v1/catalog/work-1') {
+        return new Promise<Response>(resolve => {
+          resolveCatalogA = resolve;
+        });
+      }
+      if (url === '/api/v1/auth/me') {
+        return Promise.resolve(Response.json(sessionB));
+      }
+      return Promise.reject(new Error(`unexpected url: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    session.set(sessionA);
+    const demoPromise = fetchMediaDescriptor('demo-1');
+    const preloadPromise = preloadMediaDescriptors(['media-1']);
+    const catalogPromise = request<{ id: string }>('/api/v1/catalog/work-1', new AbortController().signal);
+
+    // Account switches from A to B via readSession while all three requests are in flight
+    await readSession();
+    const genB = getSessionGeneration();
+    expect(get(session)).toEqual(sessionB);
+
+    resolveDemoA(Response.json({ media: [demoMedia1] }));
+    resolvePreloadA(Response.json(sampleMedia));
+    resolveCatalogA(Response.json({ id: 'work-1' }));
+
+    await expect(demoPromise).rejects.toThrow('La session a changé pendant la requête.');
+    await expect(preloadPromise).rejects.toThrow('La session a changé pendant la requête.');
+    await expect(catalogPromise).rejects.toThrow('La session a changé pendant la requête.');
+
+    // Session B remains intact and cache remains empty
+    expect(get(session)).toEqual(sessionB);
+    expect(getSessionGeneration()).toBe(genB);
+    expect(getCachedMedia('demo-1')).toBeUndefined();
+    expect(getCachedMedia('media-1')).toBeUndefined();
   });
 
   it('prevents a stale HTTP 401 from session A from logging out user B or clearing B cache', async () => {
@@ -209,6 +273,47 @@ describe('media descriptor cache and deferred loading', () => {
     // User B must remain logged in and B's cached descriptors must remain intact
     expect(get(session)).toEqual(sessionB);
     expect(getCachedMedia('media-2')).toEqual(sampleMedia2);
+  });
+
+  it('prevents a stale HTTP 403 from session A from purging user B cache or invalidating B session', async () => {
+    let resolveStale403!: (value: Response) => void;
+    let callCount = 0;
+    const mediaForB: Media = { ...sampleMedia, title: 'Épisode 1 Autorisé pour B' };
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === '/api/v1/media/media-1') {
+        callCount += 1;
+        if (callCount === 1) {
+          return new Promise<Response>(resolve => {
+            resolveStale403 = resolve;
+          });
+        }
+        return Promise.resolve(Response.json(mediaForB));
+      }
+      if (url === '/api/v1/auth/login') {
+        return Promise.resolve(Response.json(sessionB));
+      }
+      return Promise.reject(new Error(`unexpected url: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    session.set(sessionA);
+    const stale403RequestA = fetchMediaDescriptor('media-1');
+
+    // User B logs in and fetches media-1 (which B is allowed to access)
+    await login('bob', 'password-b');
+    const genB = getSessionGeneration();
+    const resB = await fetchMediaDescriptor('media-1');
+    expect(resB).toEqual(mediaForB);
+    expect(getCachedMedia('media-1')).toEqual(mediaForB);
+
+    // Now User A's old request for media-1 resolves with HTTP 403
+    resolveStale403(new Response(null, { status: 403 }));
+    await expect(stale403RequestA).rejects.toThrow('Votre compte n’a pas accès à cette ressource.');
+
+    // User B's session and User B's cached descriptor for media-1 must remain untouched
+    expect(get(session)).toEqual(sessionB);
+    expect(getSessionGeneration()).toBe(genB);
+    expect(getCachedMedia('media-1')).toEqual(mediaForB);
   });
 
   it('invalidates current session and purges cache on a current HTTP 401', async () => {

@@ -369,6 +369,7 @@ pub async fn stage_batch(
             .map(|ids| json!(ids).to_string());
         let series_editorial_json = match &file.series_editorial {
             Some(NfoOutcome::Valid { metadata, .. }) => Some(json!(metadata).to_string()),
+            Some(NfoOutcome::Invalid { .. }) => Some(r#"{"_outcome":"invalid"}"#.to_string()),
             _ => None,
         };
 
@@ -598,22 +599,115 @@ pub async fn publish_staged_scan(
     .await?;
 
     if lib_kind == "series" {
-        // Find all distinct series in staging
+        // Deterministic series metadata and poster selection per series_identity_key:
+        // 1. Metadata tuple (series_title, series_year, series_external_ids_json, series_editorial_json)
+        //    is selected atomically from a single representative row (ranked_meta.rn = 1), ordered by:
+        //    - Valid NFO presence (is_valid_nfo = 1 first)
+        //    - Non-empty external IDs
+        //    - Year presence
+        //    - Non-empty title
+        //    - Lexical relative_path ASC (unique per scan_id, independent of SQLite insertion order)
+        // 2. Poster tuple (series_poster_path, series_poster_size, series_poster_modified_ns,
+        //    series_poster_mime, series_poster_priority) is selected atomically from a single
+        //    representative row (ranked_poster.rn = 1), ordered by:
+        //    - series_poster_priority ASC (lower number = higher priority)
+        //    - series_poster_path ASC
+        //    - relative_path ASC
         let staged_series = sqlx::query(
-            "SELECT series_identity_key,
-                    MAX(series_title) AS series_title,
-                    MAX(series_year) AS series_year,
-                    MAX(series_external_ids_json) AS series_external_ids_json,
-                    MAX(series_editorial_json) AS series_editorial_json,
-                    MAX(series_poster_path) AS series_poster_path,
-                    MAX(series_poster_size) AS series_poster_size,
-                    MAX(series_poster_modified_ns) AS series_poster_modified_ns,
-                    MAX(series_poster_mime) AS series_poster_mime,
-                    MAX(series_poster_priority) AS series_poster_priority
-             FROM scan_staging_files
-             WHERE scan_id=? AND series_identity_key IS NOT NULL
-             GROUP BY series_identity_key",
+            "WITH ranked_meta AS (
+                SELECT
+                    series_identity_key,
+                    series_title,
+                    series_year,
+                    series_external_ids_json,
+                    series_editorial_json,
+                    CASE
+                        WHEN series_editorial_json IS NOT NULL
+                             AND json_valid(series_editorial_json) = 1
+                             AND json_extract(series_editorial_json, '$._outcome') IS NULL
+                             AND series_editorial_json != '{}'
+                        THEN 1
+                        ELSE 0
+                    END AS is_valid_nfo,
+                    MAX(
+                        CASE
+                            WHEN (series_editorial_json IS NOT NULL
+                                  AND (json_valid(series_editorial_json) = 0
+                                       OR json_extract(series_editorial_json, '$._outcome') = 'invalid'))
+                                 OR (series_editorial_json IS NULL AND editorial_outcome = 'invalid')
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) OVER (PARTITION BY series_identity_key) AS has_invalid_nfo,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY series_identity_key
+                        ORDER BY
+                            CASE
+                                WHEN series_editorial_json IS NOT NULL
+                                     AND json_valid(series_editorial_json) = 1
+                                     AND json_extract(series_editorial_json, '$._outcome') IS NULL
+                                     AND series_editorial_json != '{}'
+                                THEN 0
+                                ELSE 1
+                            END ASC,
+                            CASE
+                                WHEN series_external_ids_json IS NOT NULL
+                                     AND series_external_ids_json != ''
+                                     AND series_external_ids_json != '{}'
+                                THEN 0
+                                ELSE 1
+                            END ASC,
+                            CASE WHEN series_year IS NOT NULL THEN 0 ELSE 1 END ASC,
+                            CASE WHEN series_title IS NOT NULL AND series_title != '' THEN 0 ELSE 1 END ASC,
+                            relative_path ASC
+                    ) AS rn
+                FROM scan_staging_files
+                WHERE scan_id = ? AND series_identity_key IS NOT NULL
+            ),
+            ranked_poster AS (
+                SELECT
+                    series_identity_key,
+                    series_poster_path,
+                    series_poster_size,
+                    series_poster_modified_ns,
+                    series_poster_mime,
+                    series_poster_priority,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY series_identity_key
+                        ORDER BY
+                            series_poster_priority ASC,
+                            series_poster_path ASC,
+                            relative_path ASC
+                    ) AS rn
+                FROM scan_staging_files
+                WHERE scan_id = ?
+                  AND series_identity_key IS NOT NULL
+                  AND series_poster_path IS NOT NULL
+                  AND series_poster_size IS NOT NULL
+                  AND series_poster_modified_ns IS NOT NULL
+                  AND series_poster_mime IS NOT NULL
+                  AND series_poster_priority IS NOT NULL
+            )
+            SELECT
+                m.series_identity_key,
+                m.series_title,
+                m.series_year,
+                m.series_external_ids_json,
+                m.series_editorial_json,
+                m.is_valid_nfo,
+                m.has_invalid_nfo,
+                p.series_poster_path,
+                p.series_poster_size,
+                p.series_poster_modified_ns,
+                p.series_poster_mime,
+                p.series_poster_priority
+            FROM ranked_meta m
+            LEFT JOIN ranked_poster p
+                ON p.series_identity_key = m.series_identity_key AND p.rn = 1
+            WHERE m.rn = 1
+            ORDER BY m.series_identity_key ASC",
         )
+        .bind(scan_id)
         .bind(scan_id)
         .fetch_all(&mut *tx)
         .await?;
@@ -623,38 +717,89 @@ pub async fn publish_staged_scan(
         for s_row in staged_series {
             let series_key: String = s_row.get("series_identity_key");
             let series_scoped_key = format!("{}\n{}", root_snapshot, series_key);
-            let s_title: String = s_row
-                .get::<Option<String>, _>("series_title")
-                .unwrap_or_else(|| series_key.clone());
-            let s_year: Option<i64> = s_row.get("series_year");
-            let s_ext_ids: String = s_row
+            let is_valid_nfo: i64 = s_row.get("is_valid_nfo");
+            let has_invalid_nfo: i64 = s_row.get("has_invalid_nfo");
+            let row_title: Option<String> = s_row.get("series_title");
+            let row_year: Option<i64> = s_row.get("series_year");
+            let row_ext_ids: String = s_row
                 .get::<Option<String>, _>("series_external_ids_json")
+                .filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| "{}".into());
-            let s_editorial: String = s_row
-                .get::<Option<String>, _>("series_editorial_json")
-                .unwrap_or_else(|| "{}".into());
+            let row_editorial: Option<String> = s_row.get("series_editorial_json");
+
+            let (s_title, s_year, s_ext_ids, s_editorial) = if is_valid_nfo == 1 {
+                let mut nfo_val: Value = row_editorial
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str(s).ok())
+                    .unwrap_or_else(|| json!({}));
+                let title = nfo_val
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+                    .map(str::to_owned)
+                    .or_else(|| row_title.filter(|s| !s.trim().is_empty()))
+                    .unwrap_or_else(|| series_key.clone());
+                let year = nfo_val.get("year").and_then(Value::as_i64).or(row_year);
+                let ext_ids = if let Some(ext_obj) = nfo_val
+                    .get("external_ids")
+                    .and_then(Value::as_object)
+                    .filter(|o| !o.is_empty())
+                {
+                    json!(ext_obj).to_string()
+                } else {
+                    row_ext_ids
+                };
+                if let Some(obj) = nfo_val.as_object_mut() {
+                    obj.entry("provenance").or_insert_with(|| json!("nfo"));
+                    if (!obj.contains_key("external_ids")
+                        || obj
+                            .get("external_ids")
+                            .and_then(Value::as_object)
+                            .is_some_and(|o| o.is_empty()))
+                        && let Ok(parsed_ids) = serde_json::from_str::<Value>(&ext_ids)
+                    {
+                        obj.insert("external_ids".to_string(), parsed_ids);
+                    }
+                }
+                (title, year, ext_ids, nfo_val.to_string())
+            } else {
+                let title = row_title
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| series_key.clone());
+                (title, row_year, row_ext_ids, "{}".to_string())
+            };
             let s_title_sort = s_title.to_lowercase();
 
-            let existing_series =
-                sqlx::query("SELECT id FROM inventory_works WHERE library_id=? AND identity_key=?")
-                    .bind(library_id)
-                    .bind(&series_scoped_key)
-                    .fetch_optional(&mut *tx)
-                    .await?;
+            let existing_series = sqlx::query(
+                "SELECT id, editorial_json FROM inventory_works WHERE library_id=? AND identity_key=?",
+            )
+            .bind(library_id)
+            .bind(&series_scoped_key)
+            .fetch_optional(&mut *tx)
+            .await?;
 
             let series_work_id = if let Some(row) = existing_series {
                 let swid: String = row.get("id");
-                sqlx::query(
-                    "UPDATE inventory_works SET title=?, year=?, external_ids_json=?, title_sort=?, editorial_json=?, kind='series' WHERE id=?",
-                )
-                .bind(&s_title)
-                .bind(s_year)
-                .bind(&s_ext_ids)
-                .bind(&s_title_sort)
-                .bind(&s_editorial)
-                .bind(&swid)
-                .execute(&mut *tx)
-                .await?;
+                let prev_editorial: String = row.get("editorial_json");
+                // Preserve already-validated NFO metadata if the replacement NFO in this scan is invalid.
+                if is_valid_nfo == 0 && has_invalid_nfo == 1 && prev_editorial != "{}" {
+                    sqlx::query("UPDATE inventory_works SET kind='series' WHERE id=?")
+                        .bind(&swid)
+                        .execute(&mut *tx)
+                        .await?;
+                } else {
+                    sqlx::query(
+                        "UPDATE inventory_works SET title=?, year=?, external_ids_json=?, title_sort=?, editorial_json=?, kind='series' WHERE id=?",
+                    )
+                    .bind(&s_title)
+                    .bind(s_year)
+                    .bind(&s_ext_ids)
+                    .bind(&s_title_sort)
+                    .bind(&s_editorial)
+                    .bind(&swid)
+                    .execute(&mut *tx)
+                    .await?;
+                }
                 swid
             } else {
                 let swid = id();
@@ -682,6 +827,17 @@ pub async fn publish_staged_scan(
                 let poster_modified_ns: String = s_row.get("series_poster_modified_ns");
                 let poster_mime: String = s_row.get("series_poster_mime");
                 let poster_priority: i64 = s_row.get("series_poster_priority");
+
+                if complete {
+                    sqlx::query(
+                        "UPDATE inventory_images SET available=0 WHERE work_id=? AND root_snapshot=? AND relative_path != ?",
+                    )
+                    .bind(&series_work_id)
+                    .bind(&root_snapshot)
+                    .bind(&poster_path)
+                    .execute(&mut *tx)
+                    .await?;
+                }
 
                 sqlx::query(
                     "INSERT INTO inventory_images(id, work_id, library_id, root_snapshot, relative_path, size, modified_ns, mime, priority, available)

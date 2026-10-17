@@ -1,6 +1,14 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { playbackIds, sourceLabel, fetchMediaDescriptor, getCachedMedia, type Work } from './api';
+  import {
+    playbackIds,
+    sourceLabel,
+    fetchMediaDescriptor,
+    revalidateMediaDescriptor,
+    getCachedMedia,
+    type Work
+  } from './api';
+  import { session, getSessionGeneration } from '../auth/session';
   import type { Media } from '../player/types';
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
 
@@ -22,6 +30,9 @@
 
   const versionIds = $derived(playbackIds(episode));
   let selected = $state('');
+  let cacheVersion = $state(0);
+  let prefetchController: AbortController | null = null;
+  let inFlightPrefetches: string[] = [];
 
   $effect(() => {
     if (!versionIds.includes(selected)) {
@@ -29,17 +40,44 @@
     }
   });
 
+  $effect(() => {
+    const activeSessionKey = $session ? `${$session.user.id}:${$session.csrfToken}` : 'anonymous';
+    void activeSessionKey;
+    return () => {
+      prefetchController?.abort();
+      prefetchController = null;
+      inFlightPrefetches = [];
+    };
+  });
+
   function getLabel(id: string, index: number): string {
-    const item = media.find(m => m.id === id) ?? getCachedMedia(id);
+    void $session;
+    void cacheVersion;
+    const item = getCachedMedia(id) ?? media.find(m => m.id === id);
     if (item) return sourceLabel(item);
     return versionIds.length > 1 ? `Version ${index + 1}` : 'Version locale';
   }
 
   function prefetchVersions() {
     onselect?.();
+    if (!prefetchController || prefetchController.signal.aborted) {
+      prefetchController = new AbortController();
+    }
+    const signal = prefetchController.signal;
+    const startGen = getSessionGeneration();
     for (const id of versionIds) {
-      if (!getCachedMedia(id)) {
-        void fetchMediaDescriptor(id).catch(() => {});
+      if (!getCachedMedia(id) && !inFlightPrefetches.includes(id)) {
+        inFlightPrefetches = [...inFlightPrefetches, id];
+        void fetchMediaDescriptor(id, signal)
+          .then(() => {
+            if (!signal.aborted && startGen === getSessionGeneration()) {
+              cacheVersion += 1;
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            inFlightPrefetches = inFlightPrefetches.filter(item => item !== id);
+          });
       }
     }
   }
@@ -50,8 +88,8 @@
       await onlaunch(episode, selected);
     } else {
       await tick();
-      const item = media.find(m => m.id === selected) ?? getCachedMedia(selected);
-      if (item) immersive?.open(item);
+      const item = await revalidateMediaDescriptor(selected);
+      immersive?.open(item);
     }
   }
 </script>

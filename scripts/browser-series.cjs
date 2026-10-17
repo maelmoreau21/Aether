@@ -118,6 +118,142 @@ fs.mkdirSync(out, {recursive:true});
     await page.waitForFunction(() => document.querySelector('video')?.currentTime > 0.1);
     report.results.season2Playback = true;
 
+    // Close immersive player after Season 2 playback (S02E01 is now in descriptorCache)
+    await closeBtn.click({force: true});
+    await page.waitForFunction(() => !document.querySelector('dialog#player')?.hasAttribute('open'));
+
+    // 7. Revoke permissions (simulate HTTP 403 on /api/v1/media/) -> must revalidate on launch, evict cache, and block playback
+    const mediaCallsBefore403 = requestedMediaUrls.length;
+    await page.route('**/api/v1/media/**', route => route.fulfill({status: 403}));
+    await ep2PlayButton.click();
+    const alert403 = page.getByRole('alert').filter({hasText: /n’a pas accès à cette ressource/});
+    await alert403.waitFor();
+    assert(
+      requestedMediaUrls.length > mediaCallsBefore403,
+      'Launching playback must revalidate permissions with the server even when descriptor was cached'
+    );
+    assert.equal(
+      await page. evaluate(() => Boolean(document.querySelector('dialog#player')?.hasAttribute('open'))),
+      false,
+      'Player must not open when revalidation returns HTTP 403'
+    );
+    report.results.revokedPermission403 = true;
+
+    // 8. Restore permissions -> playback must succeed again
+    await page.unroute('**/api/v1/media/**');
+    const mediaCallsBeforeRestore = requestedMediaUrls.length;
+    await ep2PlayButton.click();
+    await page.waitForFunction(() => Boolean(document.querySelector('dialog#player')?.hasAttribute('open')));
+    await page.waitForFunction(() => document.querySelector('video')?.currentTime > 0.1);
+    assert(
+      requestedMediaUrls.length > mediaCallsBeforeRestore,
+      'Restored playback must re-fetch descriptor from server'
+    );
+    report.results.restoredPermissionPlayback = true;
+
+    await closeBtn.click({force: true});
+    await page.waitForFunction(() => !document.querySelector('dialog#player')?.hasAttribute('open'));
+
+    // 9. Account switch in SPA (User A -> cache filled -> logout -> login User B without page reload)
+    await seasonSelect.selectOption('1');
+    const ep1Select = page.locator('select[aria-label="Version de Episode One"]');
+    await ep1Select.waitFor();
+
+    // Focus Episode 1 version selector in Session A to ensure all its versions are prefetched and cached
+    await ep1Select.focus();
+    await page.waitForFunction(
+      () => {
+        const sel = document.querySelector('select[aria-label="Version de Episode One"]');
+        return sel && Array.from(sel.options).every(opt => opt.textContent === 'MP4' || opt.textContent === 'MKV');
+      },
+      null,
+      {timeout: 5000}
+    );
+    const mediaCallsAfterPrefetchA = requestedMediaUrls.length;
+
+    // Re-focus in Session A: must hit descriptorCache with 0 new network calls
+    await ep1Select.blur();
+    await ep1Select.focus();
+    await page.waitForTimeout(100);
+    assert.equal(
+      requestedMediaUrls.length,
+      mediaCallsAfterPrefetchA,
+      'Same-session prefetch must use descriptorCache without extra network calls'
+    );
+
+    // Logout User A via ProfileMenu (pure SPA transition, no page.goto/reload)
+    await page.getByRole('button', {name: 'Menu profil', exact: true}).click();
+    await page.getByRole('button', {name: 'Se déconnecter', exact: true}).click();
+    await page.waitForURL('**/app/login/**');
+
+    // Intercept auth responses to represent User B while preserving Core session cookie & CSRF token
+    await page.route('**/api/v1/auth/**', async route => {
+      const url = route.request().url();
+      if (url.endsWith('/login') || url.endsWith('/me')) {
+        const upstream = await route.fetch();
+        if (upstream.status() === 200) {
+          const body = await upstream.json();
+          body.user = {id: 'user-b-browser', login: 'series-user-b', role: 'administrator'};
+          await route.fulfill({response: upstream, json: body});
+          return;
+        }
+        await route.fulfill({response: upstream});
+        return;
+      }
+      await route.continue();
+    });
+
+    // Login as User B via SPA login form
+    await page.locator('input[autocomplete="username"]').fill('series-admin');
+    await page.locator('input[autocomplete="current-password"]').fill('disposable series browser password');
+    await page.locator('button[type="submit"]').click();
+    await page.waitForURL(origin + '/app/');
+
+    // Verify ProfileMenu shows User B
+    assert.match(await page.locator('.profile-trigger').textContent(), /series-user-b/);
+
+    // Navigate via SPA links to Series -> Browser Series (no full page reload)
+    await page.getByRole('navigation', {name: 'Navigation principale'}).getByRole('link', {name: 'Séries', exact: true}).click();
+    await card.waitFor();
+    const mediaCallsBeforeDetailB = requestedMediaUrls.length;
+    await card.click();
+    await page.getByRole('heading', {name: 'Browser Series', exact: true}).waitFor();
+
+    // Verify opening series detail in Session B still makes 0 eager media calls
+    assert.equal(
+      requestedMediaUrls.length,
+      mediaCallsBeforeDetailB,
+      'Opening series detail in Session B must not pre-fetch episode descriptors'
+    );
+
+    // Verify Episode 1 options reverted to uncached generic labels ('Version 1', 'Version 2') because Session A cache was purged!
+    const ep1SelectB = page.locator('select[aria-label="Version de Episode One"]');
+    await ep1SelectB.waitFor();
+    const initialLabelsB = await ep1SelectB.locator('option').allTextContents();
+    assert.deepEqual(
+      initialLabelsB,
+      ['Version 1', 'Version 2'],
+      'Session A cached version labels (MP4/MKV) must not leak into Session B'
+    );
+
+    // Focus Episode 1 selector in Session B -> must fetch fresh descriptors from network
+    const mediaCallsBeforePrefetchB = requestedMediaUrls.length;
+    await ep1SelectB.focus();
+    await page.waitForFunction(
+      () => {
+        const sel = document.querySelector('select[aria-label="Version de Episode One"]');
+        return sel && Array.from(sel.options).every(opt => opt.textContent === 'MP4' || opt.textContent === 'MKV');
+      },
+      null,
+      {timeout: 5000}
+    );
+    assert.equal(
+      requestedMediaUrls.length - mediaCallsBeforePrefetchB,
+      2,
+      'Session B must perform fresh network requests for both versions after Session A cache purge'
+    );
+    report.results.accountSwitchCacheIsolation = true;
+
     assert.deepEqual(errors, []);
     report.results.cspErrors = errors;
     report.passed = true;

@@ -35,6 +35,14 @@ tempfile = "3"
 name = "media-bootstrap"
 path = "src/bootstrap.rs"
 
+[[bin]]
+name = "media-backup"
+path = "src/bin/backup.rs"
+
+[[bin]]
+name = "media-restore"
+path = "src/bin/restore.rs"
+
 [features]
 fixture-bench = []
 

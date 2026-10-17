@@ -41,6 +41,8 @@ pub struct ScanReport {
     pub files: Vec<ScannedFile>,
     pub errors: Vec<ScanIssue>,
     pub warnings: Vec<ScanIssue>,
+    pub errors_count: u64,
+    pub warnings_count: u64,
     pub discovered: u64,
     pub probed: u64,
     pub reused: u64,

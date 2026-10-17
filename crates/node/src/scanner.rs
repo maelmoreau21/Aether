@@ -206,6 +206,7 @@ pub const MAX_REPORT_ISSUES: usize = 100;
 
 #[inline]
 fn record_error(report: &mut ScanReport, batch: &mut Vec<ScanIssue>, issue: ScanIssue) {
+    report.errors_count += 1;
     if report.errors.len() < MAX_REPORT_ISSUES {
         report.errors.push(issue.clone());
     }
@@ -214,6 +215,7 @@ fn record_error(report: &mut ScanReport, batch: &mut Vec<ScanIssue>, issue: Scan
 
 #[inline]
 fn record_warning(report: &mut ScanReport, batch: &mut Vec<ScanIssue>, issue: ScanIssue) {
+    report.warnings_count += 1;
     if report.warnings.len() < MAX_REPORT_ISSUES {
         report.warnings.push(issue.clone());
     }

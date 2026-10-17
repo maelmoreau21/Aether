@@ -74,6 +74,7 @@ async function fetchWithAbort(url: string, signal: AbortSignal): Promise<Respons
 }
 
 export async function request<T>(url: string, signal: AbortSignal): Promise<T> {
+  syncCacheWithSession();
   const requestSessionGen = getSessionGeneration();
   const combinedSignal = AbortSignal.any([signal, AbortSignal.timeout(10000)]);
   const response = await fetchWithAbort(url, combinedSignal);
@@ -95,9 +96,15 @@ export async function request<T>(url: string, signal: AbortSignal): Promise<T> {
     throw new Error('Votre compte n’a pas accès à cette ressource.');
   }
   if (!response.ok) throw new Error(response.status === 404 ? 'Ce média est introuvable.' : `Le catalogue est indisponible (HTTP ${response.status}).`);
+  if (requestSessionGen !== getSessionGeneration()) {
+    throw new Error('La session a changé pendant la requête.');
+  }
   const data = (await response.json()) as T;
   if (combinedSignal.aborted) {
     throw combinedSignal.reason ?? new DOMException('Aborted', 'AbortError');
+  }
+  if (requestSessionGen !== getSessionGeneration()) {
+    throw new Error('La session a changé pendant la requête.');
   }
   return data;
 }
@@ -134,69 +141,88 @@ export async function fetchMediaDescriptor(
     throw signal.reason ?? new DOMException('Aborted', 'AbortError');
   }
   syncCacheWithSession();
+  const reqSessionGen = getSessionGeneration();
+  const reqCacheGen = cacheGeneration;
   const revalidate = options?.revalidate ?? false;
   if (!revalidate) {
     const cached = descriptorCache.get(id);
     if (cached) return cached;
   }
 
-  const reqSessionGen = getSessionGeneration();
-  const reqCacheGen = cacheGeneration;
   const sig = signal ?? new AbortController().signal;
 
   if (id.startsWith('demo-')) {
-    if (
-      !demoFetchPromise ||
-      revalidate ||
-      demoFetchSessionGeneration !== reqSessionGen ||
-      demoFetchCacheGeneration !== reqCacheGen
-    ) {
-      demoFetchSessionGeneration = reqSessionGen;
-      demoFetchCacheGeneration = reqCacheGen;
-      const currentPromise = request<{ media: Media[] }>('/api/v1/demo/media', sig)
-        .then(r => {
-          if (
-            !sig.aborted &&
-            reqSessionGen === getSessionGeneration() &&
-            reqCacheGen === cacheGeneration
-          ) {
-            for (const item of r.media) {
-              setCachedDescriptor(item.id, item);
+    try {
+      if (
+        !demoFetchPromise ||
+        revalidate ||
+        demoFetchSessionGeneration !== reqSessionGen ||
+        demoFetchCacheGeneration !== reqCacheGen
+      ) {
+        demoFetchSessionGeneration = reqSessionGen;
+        demoFetchCacheGeneration = reqCacheGen;
+        const currentPromise = request<{ media: Media[] }>('/api/v1/demo/media', sig)
+          .then(r => {
+            if (
+              !sig.aborted &&
+              reqSessionGen === getSessionGeneration() &&
+              reqCacheGen === cacheGeneration
+            ) {
+              for (const item of r.media) {
+                setCachedDescriptor(item.id, item);
+              }
             }
-          }
-          return r.media;
-        })
-        .finally(() => {
-          if (demoFetchPromise === currentPromise) {
-            demoFetchPromise = null;
-          }
-        });
-      demoFetchPromise = currentPromise;
+            return r.media;
+          })
+          .finally(() => {
+            if (demoFetchPromise === currentPromise) {
+              demoFetchPromise = null;
+            }
+          });
+        demoFetchPromise = currentPromise;
+      }
+      const list = await demoFetchPromise;
+      if (sig.aborted) {
+        throw sig.reason ?? new DOMException('Aborted', 'AbortError');
+      }
+      if (reqSessionGen !== getSessionGeneration()) {
+        throw new Error('La session a changé pendant la requête.');
+      }
+      const found =
+        (reqCacheGen === cacheGeneration ? descriptorCache.get(id) : undefined) ??
+        list.find(item => item.id === id);
+      if (found) return found;
+      throw new Error('Média de démonstration introuvable.');
+    } catch (err) {
+      if (
+        !sig.aborted &&
+        reqSessionGen === getSessionGeneration() &&
+        reqCacheGen === cacheGeneration
+      ) {
+        descriptorCache.delete(id);
+      }
+      throw err;
     }
-    const list = await demoFetchPromise;
-    if (sig.aborted) {
-      throw sig.reason ?? new DOMException('Aborted', 'AbortError');
-    }
-    const found =
-      (reqSessionGen === getSessionGeneration() && reqCacheGen === cacheGeneration
-        ? descriptorCache.get(id)
-        : undefined) ?? list.find(item => item.id === id);
-    if (found) return found;
-    throw new Error('Média de démonstration introuvable.');
   }
 
   try {
     const item = await request<Media>(`/api/v1/media/${encodeURIComponent(id)}`, sig);
+    if (sig.aborted) {
+      throw sig.reason ?? new DOMException('Aborted', 'AbortError');
+    }
+    if (reqSessionGen !== getSessionGeneration()) {
+      throw new Error('La session a changé pendant la requête.');
+    }
+    if (reqCacheGen === cacheGeneration) {
+      setCachedDescriptor(item.id, item);
+    }
+    return item;
+  } catch (err) {
     if (
       !sig.aborted &&
       reqSessionGen === getSessionGeneration() &&
       reqCacheGen === cacheGeneration
     ) {
-      setCachedDescriptor(item.id, item);
-    }
-    return item;
-  } catch (err) {
-    if (!sig.aborted && reqSessionGen === getSessionGeneration()) {
       descriptorCache.delete(id);
     }
     throw err;

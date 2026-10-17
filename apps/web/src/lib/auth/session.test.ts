@@ -111,4 +111,36 @@ describe('cookie based authentication client', () => {
     expect(invalidateSession(genB - 1)).toBe(false);
     expect(get(session)).toEqual(secondUser);
   });
+
+  it('prevents a slow logout from session A from wiping out a newer login of session B', async () => {
+    let resolveLogoutA!: (value: Response) => void;
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === '/api/v1/auth/logout') {
+        return new Promise<Response>(resolve => {
+          resolveLogoutA = resolve;
+        });
+      }
+      if (url === '/api/v1/auth/login') {
+        return Promise.resolve(Response.json(secondUser));
+      }
+      return Promise.reject(new Error('unexpected url'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    session.set(current);
+    const logoutPromise = logout(current);
+
+    // User B logs in before A's logout response comes back
+    await login('viewer', 'secret2');
+    const genB = getSessionGeneration();
+    expect(get(session)).toEqual(secondUser);
+
+    // Now A's logout finishes
+    resolveLogoutA(new Response(null, { status: 204 }));
+    await logoutPromise;
+
+    // Session B must remain active and generation must not be overwritten
+    expect(get(session)).toEqual(secondUser);
+    expect(getSessionGeneration()).toBe(genB);
+  });
 });

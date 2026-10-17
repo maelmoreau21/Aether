@@ -7,6 +7,7 @@ type SessionGenerationListener = (generation: number, current: Session | null) =
 
 let currentSession: Session | null = null;
 let sessionGeneration = 0;
+let authActionSeq = 0;
 const generationListeners = new Set<SessionGenerationListener>();
 const baseSession = writable<Session | null>(null);
 
@@ -38,9 +39,11 @@ function applySession(next: Session | null, forceNewGeneration = false): number 
 export const session = {
   subscribe: baseSession.subscribe,
   set(next: Session | null): void {
+    authActionSeq += 1;
     applySession(next, false);
   },
   update(updater: (value: Session | null) => Session | null): void {
+    authActionSeq += 1;
     applySession(updater(currentSession), false);
   }
 };
@@ -66,16 +69,22 @@ export function invalidateSession(expectedGeneration?: number): boolean {
 
 export async function readSession(): Promise<Session | null> {
   const requestGeneration = sessionGeneration;
+  const requestActionSeq = authActionSeq;
   const response = await fetch('/api/v1/auth/me', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
   if (response.status === 401) {
-    if (sessionGeneration === requestGeneration) {
+    if (sessionGeneration === requestGeneration && authActionSeq === requestActionSeq) {
       applySession(null, true);
     }
     return currentSession;
   }
-  if (!response.ok) throw new Error('Impossible de vérifier la session. Réessayez.');
+  if (!response.ok) {
+    if (sessionGeneration !== requestGeneration || authActionSeq !== requestActionSeq) {
+      return currentSession;
+    }
+    throw new Error('Impossible de vérifier la session. Réessayez.');
+  }
   const current: Session = await response.json();
-  if (sessionGeneration !== requestGeneration) {
+  if (sessionGeneration !== requestGeneration || authActionSeq !== requestActionSeq) {
     return currentSession;
   }
   applySession(current, false);
@@ -83,6 +92,7 @@ export async function readSession(): Promise<Session | null> {
 }
 
 export async function login(login: string, password: string): Promise<void> {
+  const actionSeq = ++authActionSeq;
   const response = await fetch('/api/v1/auth/login', {
     method: 'POST', credentials: 'same-origin', cache: 'no-store',
     headers: { 'content-type': 'application/json' }, body: JSON.stringify({ login, password }),
@@ -91,14 +101,22 @@ export async function login(login: string, password: string): Promise<void> {
   if (response.status === 429) throw new Error('Trop de tentatives. Patientez avant de réessayer.');
   if (response.status === 401 || response.status === 400) throw new Error('Identifiants incorrects.');
   if (!response.ok) throw new Error('La connexion est indisponible. Réessayez.');
-  applySession(await response.json() as Session, true);
+  const authenticated = (await response.json()) as Session;
+  if (actionSeq !== authActionSeq) {
+    throw new Error('La session a changé pendant la connexion.');
+  }
+  applySession(authenticated, true);
 }
 
 export async function logout(current: Session): Promise<void> {
+  const requestGeneration = sessionGeneration;
+  const actionSeq = ++authActionSeq;
   const response = await fetch('/api/v1/auth/logout', {
     method: 'POST', credentials: 'same-origin', cache: 'no-store',
     headers: { 'x-csrf-token': current.csrfToken }, signal: AbortSignal.timeout(10000)
   });
   if (!response.ok && response.status !== 401) throw new Error('Déconnexion impossible. Réessayez.');
-  applySession(null, true);
+  if (actionSeq === authActionSeq && (sessionGeneration === requestGeneration || isSameSession(currentSession, current))) {
+    applySession(null, true);
+  }
 }

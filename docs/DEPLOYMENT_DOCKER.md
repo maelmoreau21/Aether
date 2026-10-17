@@ -184,84 +184,124 @@ docker compose down
 - Au redémarrage (`docker compose up -d`), les scans interrompus sont automatiquement marqués en état `error` avec le libellé `"Scan interrompu par un redémarrage"` et l'inventaire existant est intégralement préservé.
 
 ### Sauvegarde et restauration fiables (SQLite WAL & Docker)
+
 Toutes les données applicatives (comptes administrateur/utilisateurs, hachages Argon2id, sessions, graphe média, catalogue, bibliothèques et autorisations) résident dans `/data/core.sqlite3` avec le journal WAL SQLite.
+
+> [!CAUTION]
+> **Une sauvegarde stockée dans `/data/backups` NE PROTÈGE PAS contre la perte du volume Docker.**
+> Le dossier `/data/backups` réside à l'intérieur même du volume nommé Docker `aether_data`. Si ce volume est supprimé (`docker volume rm`), corrompu ou détruit avec le disque hôte, **toutes les sauvegardes internes à `/data/backups` sont irrémédiablement perdues**.
+> Pour assurer une véritable reprise après sinistre, toute sauvegarde doit être **exportée hors du volume `aether_data`**, vers un stockage externe (partage NAS `/volume1/backups`, disque externe, ou copie via `docker cp`).
 
 > [!WARNING]
 > **Ne jamais effectuer de copie naïve du seul fichier `core.sqlite3` à chaud** : en mode SQLite WAL, les transactions récentes résident dans `core.sqlite3-wal` et un instantané fichier direct produit une base corrompue ou incomplète.
-> De plus, sur Synology DSM comme sur Linux standard, les volumes nommés Docker (ex. `aether_data`) sont gérés par le démon et ne se situent pas à un chemin arbitraire de l'hôte.
 
 Aether intègre deux binaires natifs dédiés, légers et autonomes : `media-backup` et `media-restore` (aucun service tiers ou dépendance externe requis).
 
+#### Périmètre et confidentialité des sauvegardes
+- **Aucun média original inclus** : La sauvegarde contient exclusivement l'état applicatif SQLite (schéma, utilisateurs, hachages, sessions, métadonnées éditoriales, catalogue et permissions). Les fichiers volumineux de vidéos, pistes audio, sous-titres et affiches situés dans `/media` ne sont **jamais** dupliqués dans la sauvegarde.
+- **Confidentialité des données sensibles** : SQLite contient des données sensibles (hachages de mots de passe Argon2id, jetons de sessions). Les fichiers de sauvegarde sont créés avec des permissions strictes `0600` (`rw-------`, propriétaire seul) et le dossier en `0750`. Les utilitaires `media-backup` et `media-restore` n'affichent **aucun hachage, mot de passe ou secret dans les journaux ou la console** (uniquement les compteurs globaux).
+
 #### 1. Sauvegarde à chaud (cohérente WAL, sans coupure de service)
 Exécutable en direct sans interrompre les utilisateurs connectés ni le streaming en cours :
+
 ```bash
+# Sauvegarde interne (horodatée automatiquement)
 docker compose exec aether media-backup
+
+# Sauvegarde exportable directement vers un dossier hôte externe (ex. /volume1/backups sur Synology)
+# Requiert le montage du dossier hôte dans compose.yaml (ex. - /volume1/backups:/backups) :
+docker compose exec aether media-backup /backups/core_backup_$(date +%Y%m%d_%H%M%S).sqlite3
+
+# Ou avec remplacement explicite et sécurisé d'une sauvegarde existante :
+docker compose exec aether media-backup --replace /backups/core_backup_latest.sqlite3
 ```
-Par défaut, la sauvegarde est enregistrée dans `/data/backups/core_backup_<timestamp>.sqlite3`. Vous pouvez également spécifier un chemin cible précis :
+
+Si le dossier hôte n'est pas monté dans le conteneur, exportez immédiatement la sauvegarde via `docker cp` :
 ```bash
-docker compose exec aether media-backup /data/backups/core_backup.sqlite3
+# 1. Sauvegarde dans le volume
+docker compose exec aether media-backup /data/backups/export_temp.sqlite3
+
+# 2. Exportation vers le système de fichiers hôte
+docker cp $(docker compose ps -q aether):/data/backups/export_temp.sqlite3 /volume1/backups/aether_backup_$(date +%Y%m%d_%H%M%S).sqlite3
+
+# 3. Nettoyage du fichier temporaire du conteneur
+docker compose exec aether rm /data/backups/export_temp.sqlite3
 ```
-- **Mécanisme** : Utilise l'instruction SQLite `VACUUM INTO`, créant un instantané transactionnel point-in-time compact, défragmenté, qui consolide tous les journaux WAL dans un fichier SQLite unifié.
-- **Sécurité et intégrité** :
-  - Exécute automatiquement `PRAGMA integrity_check` avant confirmation.
-  - Permissions strictes `0600` (`rw-------`) appliquées au fichier et `0750` au dossier.
-  - Zéro fuite de mots de passe, hachages ou secrets dans les journaux ou sorties terminal (uniquement le résumé des compteurs).
 
-#### 2. Sauvegarde à froid du volume Docker (Compose ou Synology Container Manager)
-Si vous préférez sauvegarder le volume Docker à froid lors d'une fenêtre de maintenance :
-- **Méthode 1 — Utilitaire `media-backup` hors ligne** :
-  ```bash
-  docker compose stop aether
-  docker compose run --rm aether media-backup /data/backups/core_backup.sqlite3
-  docker compose start aether
-  ```
-- **Méthode 2 — Instantané tar du volume Docker nommé** (universel sur Synology DSM et Linux) :
-  ```bash
-  docker compose stop aether
-  docker run --rm -v aether_data:/data -v /volume1/backups:/backup alpine tar czf /backup/aether_data_$(date +%Y%m%d).tar.gz -C /data .
-  docker compose start aether
-  ```
+- **Mécanisme et protection contre la perte de la copie précédente** :
+  - `media-backup` refuse par défaut d'écraser un fichier existant (`TargetExists`).
+  - En cas de remplacement demandé (`--replace`), l'utilitaire **ne supprime jamais la copie existante** au préalable. Il génère d'abord un instantané temporaire unique (`.backup-<pid>-<uuid>.tmp`) dans le même répertoire via SQLite `VACUUM INTO`.
+  - Il valide ensuite l'intégrité (`PRAGMA integrity_check`) et le schéma (présence des tables `users`, `local_credentials`, `libraries`, `inventory_works`), applique les permissions `0600` et synchronise les blocs sur disque (`sync_all()`).
+  - La publication finale remplace l'ancienne copie de façon atomique (`std::fs::rename`).
+  - En cas d'erreur ou d'interruption à n'importe quelle étape, le fichier temporaire est immédiatement nettoyé et la sauvegarde existante reste **strictement intacte**.
 
-#### 3. Restauration dans une installation neuve ou après incident
-Pour restaurer la base sur une nouvelle machine, un nouveau disque ou un volume Docker vierge :
+#### 2. Sauvegarde à froid du volume Docker (Synology DSM ou Linux)
+Si vous préférez archiver l'intégralité du volume Docker lors d'une fenêtre de maintenance :
+```bash
+docker compose stop aether
+docker run --rm -v aether_data:/data -v /volume1/backups:/backup alpine tar czf /backup/aether_data_$(date +%Y%m%d_%H%M%S).tar.gz -C /data .
+docker compose start aether
+```
 
-1. Créez le volume Docker vierge (si nécessaire) et lancez l'utilitaire de restauration :
+#### 3. Restauration sûre : volume neuf sans écraser l'ancien
+Pour prévenir toute perte accidentelle de données, **`media-restore` interdit strictement d'écraser une base existante** et refuse de s'exécuter si des journaux résiduels (`-wal`, `-shm`) ou des symlinks sont détectés dans le dossier cible. Il n'existe aucune option `--force` permettant de contourner cette sécurité.
+
+Pour restaurer après un incident ou changer de version, appliquez la procédure hors ligne dans un **volume neuf** :
+
+1. **Arrêtez le conteneur Aether existant** (l'ancien volume `aether_data` reste intact) :
    ```bash
-   # Création du volume persistant
-   docker volume create aether_data
-
-   # Restauration atomique à partir d'un fichier de sauvegarde
-   docker compose run --rm -v /volume1/backups:/backup aether media-restore /backup/core_backup.sqlite3
-   ```
-   *Ou si vous utilisez une archive tar de volume :*
-   ```bash
-   docker run --rm -v aether_data:/data -v /volume1/backups:/backup alpine tar xzf /backup/aether_data_20261017.tar.gz -C /data
+   docker compose stop aether
    ```
 
-2. **Garanties opérationnelles de `media-restore`** :
-   - Validation stricte de l'intégrité SQLite (`PRAGMA integrity_check`) et contrôle de présence des tables requises avant toute altération du disque.
-   - Nettoyage automatique des anciens journaux `-wal` et `-shm` résiduels pour interdire toute relecture transactionnelle asynchrone incompatible.
-   - Remplacement atomique via fichier de staging (`core.sqlite3.restoring`) et rétablissement des permissions `0600`.
-   - Exécution idempotente des migrations et rattrapage Unicode pour garantir la cohérence du schéma.
-   - Préservation déterministe intégrale : identifiants UUID des œuvres, versions, pistes, comptes administrateur/utilisateurs et droits d'accès.
-   - Reconnexion immédiate : l'administrateur et les utilisateurs se reconnectent immédiatement avec leurs mots de passe originaux sans réinitialisation requise.
+2. **Créez un volume Docker neuf et vide** :
+   ```bash
+   docker volume create aether_data_restored
+   ```
 
-3. Démarrez ensuite le service Aether :
+3. **Exécutez `media-restore` depuis la sauvegarde externe vers le nouveau volume** :
+   ```bash
+   docker run --rm \
+     -v aether_data_restored:/data \
+     -v /volume1/backups:/backup:ro \
+     aether media-restore /backup/core_backup_latest.sqlite3 /data/core.sqlite3
+   ```
+
+4. **Basculez le service sur le volume restauré** :
+   - Dans votre fichier `compose.yaml`, modifiez la déclaration du volume persistant :
+     ```yaml
+     volumes:
+       aether_data:
+         external: true
+         name: aether_data_restored
+     ```
+   - Ou conservez le nom `aether_data` en archivant préalablement l'ancien volume.
+
+5. **Démarrez Aether et vérifiez le catalogue** :
    ```bash
    docker compose up -d
    ```
 
+6. **Garanties opérationnelles vérifiées après restauration** :
+   - **Intégrité vérifiée avant écriture** : `media-restore` contrôle `PRAGMA integrity_check` et valide les tables de schéma avant de toucher au dossier cible.
+   - **Zéro journal incompatible** : les fichiers `-wal` et `-shm` résiduels ne sont jamais supprimés silencieusement ; la restauration exige une destination vierge.
+   - **Préservation déterministe** : Les identifiants UUID des œuvres, éditions, versions, sources et assets sont conservés à l'identique.
+   - **Authentification préservée** : L'administrateur et les utilisateurs se reconnectent immédiatement avec leurs mots de passe d'origine (hachages Argon2id intacts).
+   - **Permissions et bibliothèques intactes** : Les droits d'accès utilisateurs (`library_permissions`) et les chemins de montage sont restaurés sans modification.
+
 ---
 
-### Concurrence des écritures pendant la publication SQLite
+### Concurrence des écritures et limites du timeout SQLite
 Lors de l'ingestion initiale d'une volumineuse bibliothèque (ex. 10 000 nouveaux médias), la transaction d'écriture exclusive de publication (`publish_staged_scan` via `BEGIN IMMEDIATE`) peut être maintenue active pendant environ 30 secondes.
 
-- **Lectures concurrentes non bloquées** : En mode SQLite WAL, les requêtes HTTP de lecture (`GET /api/v1/catalog`, streaming HTTP Range, affiches locales) sont servies en isolation de snapshot sans jamais attendre ni bloquer l'écrivain (latences mesurées : `p50 = 7,29 ms`).
-- **Écritures concurrentes en attente** : Les opérations nécessitant une écriture (mise à jour de session `last_seen_at`, création ou édition de bibliothèques, déclenchement d'un nouveau scan) attendent la libération du verrou d'écriture via le gestionnaire SQLite Busy (`busy_timeout`).
-- **Délai `busy_timeout` et configuration** :
-  - Valeur par défaut : 15 secondes.
-  - En cas de premier scan massif (> 10 000 nouveaux médias simultanés), configurez `MEDIA_SQLITE_BUSY_TIMEOUT_SECS=45` ou `60` dans votre `compose.yaml` pour éviter les erreurs `SQLITE_BUSY (code 5 : database is locked)` sur les requêtes d'écriture concurrentes.
-- **Absence de blocage permanent** : Dès validation (`COMMIT`) de la transaction de publication, SQLite libère immédiatement le verrou d'écriture et toutes les opérations en attente aboutissent sans interblocage ni corruption.
+- **Lectures concurrentes non bloquées** : En mode SQLite WAL, les requêtes HTTP de lecture non authentifiées ou le streaming média HTTP Range ne subissent aucun blocage (latences `p50 ~ 7 ms`).
+- **Écritures concurrentes sur routes authentifiées** :
+  - **Comportement réel** : Chaque requête HTTP authentifiée exécute dans son middleware de session l'instruction `UPDATE sessions SET last_seen_at = unixepoch() WHERE ...`. Cette mise à jour constitue une **écriture SQLite**.
+  - **Verrouillage exclusif** : En raison du modèle mono-écrivain de SQLite, toute mise à jour de session arrivant pendant une publication massive doit acquérir le verrou d'écriture et se met en attente (`busy_timeout`).
+  - **Limites du timeout (`MEDIA_SQLITE_BUSY_TIMEOUT_SECS`)** :
+    - La valeur par défaut est de 15 secondes.
+    - Si une publication maintient le verrou d'écriture pendant 30 secondes, les requêtes authentifiées en attente au-delà de 15 secondes reçoivent l'erreur `SQLITE_BUSY (code 5 : database is locked)` renvoyant une réponse HTTP 500 (`internal_error`).
+    - Augmenter simplement le timeout (ex. à 45s ou 60s) évite l'échec immédiat mais contraint les requêtes HTTP du client à rester bloquées pendant 20 à 30 secondes avant de répondre.
+    - Ce compromis reflète le comportement transactionnel normal de SQLite WAL pour P1 (un seul écrivain à la fois). Les évolutions futures découpleront la mise à jour de l'horodatage de session de la transaction critique de scan.
 
 ---
 

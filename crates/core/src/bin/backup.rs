@@ -9,6 +9,19 @@ async fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let mut allow_replace = false;
+    let mut target_arg = None;
+
+    for arg in std::env::args_os().skip(1) {
+        if arg == "--replace" {
+            allow_replace = true;
+        } else if target_arg.is_none() {
+            target_arg = Some(PathBuf::from(arg));
+        } else {
+            return Err("usage: media-backup [--replace] [TARGET_PATH]".into());
+        }
+    }
+
     let media_root = std::env::var_os("MEDIA_LIBRARY_ROOT")
         .or_else(|| std::env::var_os("MEDIA_FIXTURE_DIR"))
         .map(PathBuf::from)
@@ -16,8 +29,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let db_path = media_poc::identity::configured_path(&media_root)?;
 
-    let target_path = if let Some(arg) = std::env::args_os().nth(1) {
-        PathBuf::from(arg)
+    let target_path = if let Some(path) = target_arg {
+        path
     } else {
         let timestamp = chrono_lite_timestamp();
         let backup_dir = db_path
@@ -27,8 +40,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         backup_dir.join(format!("core_backup_{timestamp}.sqlite3"))
     };
 
-    let summary =
-        media_poc::backup::backup_database(&db_path, &target_path, Some(&media_root)).await?;
+    let options = media_poc::backup::BackupOptions { allow_replace };
+    let summary = media_poc::backup::backup_database_with_options(
+        &db_path,
+        &target_path,
+        Some(&media_root),
+        options,
+    )
+    .await?;
 
     println!("Aether SQLite WAL-consistent backup completed successfully.");
     println!("  Source:    {}", summary.source_path);

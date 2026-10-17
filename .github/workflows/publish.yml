@@ -1,0 +1,139 @@
+name: Publication Docker GHCR
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Branche cible (main ou develop)"
+        required: true
+        default: "develop"
+        type: choice
+        options:
+          - develop
+          - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-publish:
+    name: Construire et publier les images Docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Configurer Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Connexion au registre GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Déterminer les tags immuables et de branche
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Déterminer la référence effective (workflow_call vs workflow_dispatch)
+          REF="${GITHUB_REF:-}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.target_branch }}" ]; then
+            REF="refs/heads/${{ github.event.inputs.target_branch }}"
+          fi
+
+          SHA="${GITHUB_SHA}"
+          SHORT_SHA="${SHA:0:7}"
+          TAG_SHA="sha-${SHORT_SHA}"
+          TAG_FULL_SHA="sha-${SHA}"
+
+          TAG_BRANCH=""
+          IS_LATEST="false"
+
+          if [ "$REF" = "refs/heads/main" ]; then
+            TAG_BRANCH="main"
+            IS_LATEST="true"
+          elif [ "$REF" = "refs/heads/develop" ]; then
+            TAG_BRANCH="develop"
+            IS_LATEST="false"
+          else
+            echo "::error::Branche non autorisée pour la publication: $REF"
+            exit 1
+          fi
+
+          AETHER_TAGS=$(cat <<EOF
+ghcr.io/maelmoreau21/aether:${TAG_BRANCH}
+ghcr.io/maelmoreau21/aether:${TAG_SHA}
+ghcr.io/maelmoreau21/aether:${TAG_FULL_SHA}
+EOF
+)
+
+          CORE_TAGS=$(cat <<EOF
+ghcr.io/maelmoreau21/aether-core:${TAG_BRANCH}
+ghcr.io/maelmoreau21/aether-core:${TAG_SHA}
+ghcr.io/maelmoreau21/aether-core:${TAG_FULL_SHA}
+EOF
+)
+
+          NODE_TAGS=$(cat <<EOF
+ghcr.io/maelmoreau21/aether-node:${TAG_BRANCH}
+ghcr.io/maelmoreau21/aether-node:${TAG_SHA}
+ghcr.io/maelmoreau21/aether-node:${TAG_FULL_SHA}
+EOF
+)
+
+          if [ "$IS_LATEST" = "true" ]; then
+            AETHER_TAGS="${AETHER_TAGS}"$'\n'"ghcr.io/maelmoreau21/aether:latest"
+            CORE_TAGS="${CORE_TAGS}"$'\n'"ghcr.io/maelmoreau21/aether-core:latest"
+            NODE_TAGS="${NODE_TAGS}"$'\n'"ghcr.io/maelmoreau21/aether-node:latest"
+          fi
+
+          {
+            echo "aether_tags<<EOF"
+            echo "$AETHER_TAGS"
+            echo "EOF"
+            echo "core_tags<<EOF"
+            echo "$CORE_TAGS"
+            echo "EOF"
+            echo "node_tags<<EOF"
+            echo "$NODE_TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Construire et publier ghcr.io/maelmoreau21/aether (Standalone)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.aether_tags }}
+          cache-from: type=gha,scope=aether
+          cache-to: type=gha,mode=max,scope=aether
+
+      - name: Construire et publier ghcr.io/maelmoreau21/aether-core (Core)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime-core
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.core_tags }}
+          cache-from: type=gha,scope=aether
+          cache-to: type=gha,mode=max,scope=aether
+
+      - name: Construire et publier ghcr.io/maelmoreau21/aether-node (Node)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime-node
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.node_tags }}
+          cache-from: type=gha,scope=aether
+          cache-to: type=gha,mode=max,scope=aether

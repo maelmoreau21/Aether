@@ -27,7 +27,7 @@ Le Synology DiskStation DS1522+ est équipé d'un processeur **AMD Ryzen Embedde
 
 ### Contraintes matérielles critiques :
 - **Absence totale d'iGPU** : Le Ryzen R1600 ne possède aucun processeur graphique intégré (pas d'AMD VCN/VCE, pas d'Intel QuickSync).
-- **Interdiction de passthrough `/dev/dri`** : Ne JAMAIS déclarer de montage `/dev/dri:/dev/dri` dans `compose.yaml`. Sur DSM, ce nœud de périphérique n'existe pas et provoquerait le crash immédiat du conteneur au démarrage.
+- **Interdiction de passthrough `/dev/dri`** : Ne JAMAIS déclarer de montage `/dev/dri:/dev/dri` dans `docker-compose.yml`. Sur DSM, ce nœud de périphérique n'existe pas et provoquerait le crash immédiat du conteneur au démarrage.
 - **Lecture directe (Direct Play) prioritaire** : Aether privilégie la lecture directe AV1 vidéo + Opus audio dans les conteneurs `.mkv` et `.mp4`. Aucun transcodage vidéo en temps réel n'est imposé, garantissant une charge CPU minimale sur le DS1522+.
 
 ---
@@ -56,7 +56,7 @@ Le conteneur utilise deux montages distincts :
 - **Refus explicite de HTTP sur le LAN ou Internet** : toute origine HTTP non-loopback (par exemple `http://192.168.1.100:3000`, `http://10.0.0.5:3000` ou `http://nas.local:3000`) est **rejetée au démarrage** avec l'erreur `AuthConfigError::Origin` (`public origin must be HTTPS or HTTP on loopback, without path or credentials`). Aucun mot de passe ni jeton de session ne doit transiter en clair sur le réseau local.
 - **Format canonique** : `MEDIA_PUBLIC_URL` ne doit contenir ni chemin (`/app`), ni paramètres de requête, ni identifiants (`user@`). Une barre oblique finale éventuelle (`/`) est normalisée automatiquement.
 
-Dans `compose.yaml`, le port hôte est lié par défaut à la boucle locale :
+Dans `docker-compose.yml`, le port hôte est lié par défaut à la boucle locale :
 ```yaml
 ports:
   - "127.0.0.1:3000:3000"
@@ -107,7 +107,7 @@ Configuration directement exploitable sur un NAS Synology (ex. DS1522+) :
      - Protocole : `HTTP`
      - Nom d'hôte : `127.0.0.1`
      - Port : `3000`
-3. **Dans `compose.yaml`** :
+3. **Dans `docker-compose.yml`** :
    - Conservez `ports: ["127.0.0.1:3000:3000"]`.
    - Définissez `MEDIA_PUBLIC_URL=https://aether.votredomaine.synology.me` (ou `https://aether.nas.lan:8443` si le port Source est `8443`).
    - *Note : Le proxy inverse intégré de DSM transmet automatiquement l'en-tête `Host` d'origine (`$http_host`) au conteneur.*
@@ -167,14 +167,22 @@ Connectez-vous en SSH à votre machine ou Synology, ou créez un projet dans **S
 mkdir -p /volume1/docker/aether
 cd /volume1/docker/aether
 ```
-Placez-y les fichiers `compose.yaml` (ou `docker-compose.yml`) et le fichier `.env` suivant :
+Placez-y le fichier `docker-compose.yml` et le fichier `.env` suivant :
 ```env
 # Chemin vers votre dossier de vidéos existant
 MEDIA_LIBRARY_DIR=/volume1/video
+
+# Facultatif : tag d'image (latest par défaut, ou develop)
+# AETHER_TAG=latest
 ```
 
-### Étape 2 : Construction et lancement du service
-Si vous construisez l'image localement à partir des sources :
+### Étape 2 : Lancement du service
+Par défaut, Docker Compose télécharge l'image officielle pré-compilée (`ghcr.io/maelmoreau21/aether:latest`) :
+```bash
+docker compose up -d
+```
+
+Pour les contributeurs souhaitant compiler localement depuis les sources :
 ```bash
 docker compose build
 docker compose up -d
@@ -255,7 +263,7 @@ Exécutable en direct sans interrompre les utilisateurs connectés ni le streami
 docker compose exec aether media-backup
 
 # Sauvegarde exportable directement vers un dossier hôte externe (ex. /volume1/backups sur Synology)
-# Requiert le montage du dossier hôte dans compose.yaml (ex. - /volume1/backups:/backups) :
+# Requiert le montage du dossier hôte dans docker-compose.yml (ex. - /volume1/backups:/backups) :
 docker compose exec aether media-backup /backups/core_backup_$(date +%Y%m%d_%H%M%S).sqlite3
 
 # Ou avec remplacement explicite et sécurisé d'une sauvegarde existante :
@@ -313,7 +321,7 @@ Pour restaurer après un incident ou changer de version, appliquez la procédure
    ```
 
 4. **Basculez le service sur le volume restauré** :
-   - Dans votre fichier `compose.yaml`, modifiez la déclaration du volume persistant :
+   - Dans votre fichier `docker-compose.yml`, modifiez la déclaration du volume persistant :
      ```yaml
      volumes:
        aether_data:

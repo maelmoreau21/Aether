@@ -11,6 +11,12 @@
 # - Aether operates with zero mandatory video transcoding: direct streaming of AV1 + Opus
 #   in MKV and MP4 containers.
 #
+# Image Tags:
+# - Default: latest (ghcr.io/maelmoreau21/aether:latest) -> stable release from main
+# - Development: develop (ghcr.io/maelmoreau21/aether:develop) -> latest develop branch
+# - Override with AETHER_TAG env variable: AETHER_TAG=develop docker compose up -d
+# - Local developer build: docker compose build OR docker compose up -d --build
+#
 # Operational Security & Hardening:
 # - HTTP is strictly restricted to loopback origins (http://127.0.0.1:3000, http://localhost:3000,
 #   http://[::1]:3000) for local development/testing on the host itself.
@@ -34,9 +40,10 @@
 
 services:
   aether:
-    image: aether:latest
+    image: ghcr.io/maelmoreau21/aether:${AETHER_TAG:-latest}
     build:
       context: .
+      target: runtime
     container_name: aether
     restart: unless-stopped
     stop_signal: SIGINT

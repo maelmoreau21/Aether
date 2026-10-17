@@ -1,5 +1,40 @@
 # MEMORY.md — État et décisions Aether
 
+## 17 octobre 2026 — CI, GHCR et simplification Docker (branche `develop`)
+
+- **Correction CI `clippy::collapsible_if` (`crates/core/src/backup.rs:202`)** :
+  - L'imbrication `if let Some(parent) = target_path.parent() { if let Ok(dir) = std::fs::File::open(parent) { ... } }` sous `#[cfg(unix)]` a été repliée en une clause unique avec let-chain : `if let Some(parent) = target_path.parent() && let Ok(dir) = std::fs::File::open(parent) { let _ = dir.sync_all(); }`.
+  - Formatage et analyse statique stricts vérifiés sans écart ni warning : `cargo fmt --check` (succès), `cargo clippy --locked --all-features --all-targets -- -D warnings` (0 avertissement), suite `cargo test` (124 tests passés, 0 échec).
+  - Frontend vérifié : `npm run check` (0 erreur / 0 warning), `npm run lint` (0 avertissement), `npm test` (33/33 tests passés), `npm run build` (build statique vérifié).
+
+- **Workflow GHCR et automatisation (`.github/workflows/publish.yml` & `.github/workflows/ci.yml`)** :
+  - Création du workflow dédié `.github/workflows/publish.yml` publiant les 3 images :
+    - `ghcr.io/maelmoreau21/aether` (cible Dockerfile : `runtime`, mode standalone tout-en-un) ;
+    - `ghcr.io/maelmoreau21/aether-core` (cible Dockerfile : `runtime-core`, mode distribué Core) ;
+    - `ghcr.io/maelmoreau21/aether-node` (cible Dockerfile : `runtime-node`, mode distribué Media Node).
+  - Politique de taggage :
+    - Push sur `develop` → `:develop` et tag immuable commit SHA (`:sha-<short>` et `:sha-<full>`).
+    - Push sur `main` → `:main`, `:latest` et tag immuable commit SHA.
+    - `:latest` n'est JAMAIS publié depuis `develop`.
+    - Aucune publication depuis les pull requests (déclenchement strictement réservé à `push` sur `main` ou `develop`).
+    - Utilisation de Docker Buildx, cache GitHub Actions (`type=gha`), `GITHUB_TOKEN` avec `packages: write`, plateforme `linux/amd64` (Synology DS1522+ et serveurs Linux).
+    - Exécution du job `publish` dans `ci.yml` conditionnée par `needs: [rust, security-audit, frontend, browser]` : aucune image n'est construite ou publiée si un test requis échoue.
+    - Note de rigueur : les images ne sont pas déclarées publiées avant l'exécution effective du workflow sur GitHub.
+
+- **Simplification Docker Compose et suppression du doublon** :
+  - `docker-compose.yml` est conservé comme fichier principal standalone ; le doublon `compose.yaml` est supprimé (`git rm compose.yaml`).
+  - `docker-compose.yml` pointe vers `image: ghcr.io/maelmoreau21/aether:${AETHER_TAG:-latest}` avec bloc `build: { context: ., target: runtime }` pour préserver le build local explicite (`docker compose up -d --build`).
+  - Les utilisateurs finaux ne sont plus obligés d'installer ou de compiler Rust / Node.js pour exécuter Aether.
+  - Toutes les références à `compose.yaml` dans `README.md`, `docs/DEPLOYMENT_DOCKER.md`, `docs/DEPLOYMENT_SYNOLOGY.md`, `docs/P2_DOCKER_VALIDATION.md`, `compose.multi-machine.example.yaml` et `.env.example` ont été migrées vers `docker-compose.yml`.
+
+- **Node polyvalent par défaut (`compose.distributed.yaml`)** :
+  - `compose.distributed.yaml` déploie par défaut 1 Core (`aether-core`) et 1 Node polyvalent (`aether-node`) capable de gérer à la fois Films et Séries.
+  - Le Node polyvalent monte `/media/films:ro` et `/media/series:ro`, et configure `MEDIA_NODE_ROOTS=/media/films;/media/series`.
+  - Depuis l'UI Web (`/app/admin/libraries/`), l'administrateur peut créer plusieurs bibliothèques de types différents (Films et Séries) rattachées à ce même Node polyvalent.
+  - La possibilité d'ajouter des Nodes indépendants supplémentaires reste entièrement préservée et documentée.
+  - Séparation stricte maintenue : les bases SQLite, identités de nœuds et données persistantes (`/data`) restent dans des volumes dédiés indépendants (`aether_core_data`, `aether_core_backups`, `aether_node_data`), et les médias restent en lecture seule stricte (`:ro`).
+  - Validation syntaxique et structurelle validée sans avertissement (`docker compose config` sur les deux fichiers Compose, `docker buildx build --check` sur les 3 cibles).
+
 ## 17 octobre 2026 — P2 : transport fiabilisé, deux modes Docker revérifiés
 
 Cette entrée précise les annonces du premier jalon P2 ci-dessous. Pas de preuve

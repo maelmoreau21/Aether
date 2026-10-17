@@ -2,8 +2,8 @@
 
 Résultats réellement exécutés et mesures : [P2_DOCKER_RESULTS.md](P2_DOCKER_RESULTS.md).
 
-Les deux déploiements restent distincts : `compose.yaml` pour un conteneur
-standalone ; `compose.distributed.yaml` pour un Core et deux Nodes. Backend Rust,
+Les deux déploiements restent distincts : `docker-compose.yml` pour un conteneur
+standalone ; `compose.distributed.yaml` pour un Core et un Node polyvalent (ou multi-nodes). Backend Rust,
 frontend SvelteKit statique. Aucun OIDC, P3 ni déploiement NAS dans ce jalon.
 
 ## Contrat de transport

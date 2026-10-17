@@ -46,15 +46,16 @@ MEDIA_LIBRARY_DIR=/volume1/video
 Puis lancez :
 
 ```bash
-docker compose -f compose.yaml up -d --build
+docker compose up -d
 ```
+*Note : Docker Compose télécharge directement l'image pré-compilée `ghcr.io/maelmoreau21/aether:latest`. Ajoutez `--build` uniquement si vous souhaitez compiler localement depuis les sources.*
 
 ### 2.3 Création du premier administrateur local
 
 Aucun compte ni mot de passe par défaut n'existe. Initialisez le premier administrateur local :
 
 ```bash
-docker compose -f compose.yaml exec -it aether media-bootstrap --login admin
+docker compose exec -it aether media-bootstrap --login admin
 ```
 
 ---
@@ -63,24 +64,22 @@ docker compose -f compose.yaml exec -it aether media-bootstrap --login admin
 
 Ce mode sépare physiquement et logiquement :
 - **`aether-core`** : API publique `/api/v1/...`, comptes utilisateurs, RBAC, catalogue global SQLite et interface Web statique SvelteKit. **Ne monte aucun dossier média.**
-- **`aether-node`** (un ou plusieurs conteneurs sur le même NAS ou sur d'autres machines) : scanne ses propres bibliothèques montées en `:ro`, analyse les pistes via `ffprobe`, lit les `.nfo`/posters et sert les flux vidéos/images autorisés par jeton court (`PlaybackToken`) ou via relais Core borné.
+- **`aether-node`** (Node polyvalent par défaut, ou plusieurs conteneurs si besoin) : monte à la fois `/media/films:ro` et `/media/series:ro`, scanne ses bibliothèques en `:ro`, analyse les pistes via `ffprobe`, lit les `.nfo`/posters et sert les flux vidéos/images autorisés par jeton court (`PlaybackToken`) ou via relais Core borné.
 
-### 3.1 Préparation des dossiers et secrets d'appairage
+### 3.1 Préparation des dossiers et secret d'appairage
 
 ```bash
 sudo mkdir -p \
   /volume1/docker/aether-core/data \
   /volume1/docker/aether-core/backups \
-  /volume1/docker/aether-node-films/data \
-  /volume1/docker/aether-node-series/data
+  /volume1/docker/aether-node/data
 
 sudo chown -R 10001:10001 \
   /volume1/docker/aether-core \
-  /volume1/docker/aether-node-films \
-  /volume1/docker/aether-node-series
+  /volume1/docker/aether-node
 ```
 
-Créez un fichier `.env` avec deux jetons d'appairage aléatoires (`openssl rand -hex 24`) :
+Créez un fichier `.env` avec le secret d'appairage aléatoire (`openssl rand -hex 24`) :
 
 ```dotenv
 MEDIA_PUBLIC_URL=http://127.0.0.1:3000
@@ -89,43 +88,36 @@ MEDIA_CORE_INTERNAL_URL=http://aether-core:3000
 MEDIA_FILMS_DIR=/volume1/video/Films
 MEDIA_SERIES_DIR=/volume1/video/Series
 
-MEDIA_NODE_FILMS_NAME=Node Films Synology
-MEDIA_NODE_FILMS_PORT=4101
-MEDIA_NODE_FILMS_PUBLIC_URL=http://127.0.0.1:4101
-MEDIA_NODE_FILMS_PAIRING_TOKEN=remplacer_par_secret_aleatoire_films
-
-MEDIA_NODE_SERIES_NAME=Node Séries Synology
-MEDIA_NODE_SERIES_PORT=4102
-MEDIA_NODE_SERIES_PUBLIC_URL=http://127.0.0.1:4102
-MEDIA_NODE_SERIES_PAIRING_TOKEN=remplacer_par_secret_aleatoire_series
+MEDIA_NODE_NAME=Node Principal Synology
+MEDIA_NODE_PORT=4101
+MEDIA_NODE_PUBLIC_URL=http://127.0.0.1:4101
+MEDIA_NODE_PAIRING_TOKEN=remplacer_par_secret_aleatoire_hex_48_caracteres
 ```
 
-### 3.2 Démarrage des 3 conteneurs et bootstrap administrateur
+### 3.2 Démarrage des conteneurs et bootstrap administrateur
 
 ```bash
-docker compose -f compose.distributed.yaml up -d --build
+docker compose -f compose.distributed.yaml up -d
 docker compose -f compose.distributed.yaml exec -it aether-core media-bootstrap --login admin
 ```
+*Note : Docker Compose télécharge automatiquement les images officielles `ghcr.io/maelmoreau21/aether-core:latest` et `ghcr.io/maelmoreau21/aether-node:latest`. Ajoutez `--build` pour compiler localement.*
 
-### 3.3 Appairage des Nodes et scan des bibliothèques depuis l'interface Web
+### 3.3 Appairage du Node et configuration des bibliothèques depuis l'interface Web
 
 1. Ouvrez `/app/` et connectez-vous avec votre compte administrateur.
 2. Accédez à **Bibliothèques** (`/app/admin/libraries/`).
-3. Dans la section **Media Nodes distribués (`aether-node`)**, appairez chaque Node :
-   - **Node 1 (Films)** :
-     - Nom : `Node Films Synology`
-     - URL interne Node : `http://aether-node-films:4101`
-     - URL publique directe : `http://127.0.0.1:4101` (ou l'URL HTTPS de votre proxy inverse pour ce Node ; laissez vide pour forcer le relais via Core)
-     - Jeton d'appairage : valeur de `MEDIA_NODE_FILMS_PAIRING_TOKEN`
-   - **Node 2 (Séries)** :
-     - Nom : `Node Séries Synology`
-     - URL interne Node : `http://aether-node-series:4102`
-     - URL publique directe : `http://127.0.0.1:4102`
-     - Jeton d'appairage : valeur de `MEDIA_NODE_SERIES_PAIRING_TOKEN`
-4. Dans le formulaire **Nouvelle bibliothèque** :
-   - Créez la bibliothèque **Films** en sélectionnant `Node Films Synology` et la racine `/media/films`.
-   - Créez la bibliothèque **Séries** en sélectionnant `Node Séries Synology` et la racine `/media/series`.
-5. Cliquez sur **Scanner** sur chacune des bibliothèques : chaque Node parcourt ses fichiers locaux en `:ro`, transmet les observations par lots signés (`HMAC-SHA256`) au Core, et les œuvres apparaissent dans le catalogue global.
+3. Dans la section **Media Nodes distribués (`aether-node`)**, appairez le Node polyvalent :
+   - Nom : `Node Principal Synology`
+   - URL interne Node : `http://aether-node:4101`
+   - URL publique directe : `http://127.0.0.1:4101` (ou l'URL HTTPS de votre proxy inverse pour ce Node ; laissez vide pour forcer le relais via Core)
+   - Jeton d'appairage : valeur de `MEDIA_NODE_PAIRING_TOKEN`
+4. Une fois appairé, le Node expose automatiquement ses deux racines autorisées (`/media/films` et `/media/series`).
+5. Dans le formulaire **Nouvelle bibliothèque**, ajoutez les deux types de bibliothèques sur ce même Node :
+   - Bibliothèque 1 : Nom `Films`, Type `Films`, Node `Node Principal Synology`, Racine `/media/films`.
+   - Bibliothèque 2 : Nom `Séries`, Type `Séries`, Node `Node Principal Synology`, Racine `/media/series`.
+6. Cliquez sur **Scanner** sur chaque bibliothèque pour indexer les médias.
+
+*Note : La topologie permet également d'ajouter d'autres Nodes indépendants sur le réseau si vous disposez de plusieurs machines de stockage, sans jamais imposer un Node dédié par type de média.*
 
 ---
 
@@ -161,15 +153,15 @@ DS1522+ est x86_64 ; les tests de ce jalon ne prouvent pas une image arm64.
 
 ### Standalone, un conteneur
 
-Copier `compose.yaml`, `.env.example` et les documents. Préparer `.env` en privé,
+Copier `docker-compose.yml`, `.env.example` et les documents. Préparer `.env` en privé,
 régler `MEDIA_LIBRARY_DIR=/volume1/video` et `MEDIA_PUBLIC_URL` à l'origine HTTPS
 exacte pour un accès distant. Pour un essai local sur le NAS, garder l'origine
 loopback. Le volume nommé existant `aether_data` est conservé et les médias restent
 `:ro`. Ne pas réutiliser une base de production pour un essai.
 
 ```sh
-docker compose -f compose.yaml up -d --no-build
-docker compose -f compose.yaml exec -it aether media-bootstrap
+docker compose up -d
+docker compose exec -it aether media-bootstrap
 ```
 
 Le bootstrap est réservé à une base neuve ; une base déjà initialisée utilise son
@@ -178,33 +170,29 @@ publie que l'origine HTTPS ; le port Core reste lié à `127.0.0.1`.
 
 ### Distribué mono-hôte, bridge de confiance explicite
 
-Créer deux secrets distincts sans les afficher :
+Créer un secret d'appairage aléatoire sans l'afficher :
 
 ```sh
 umask 077
 cp .env.example .env
-film_secret=$(openssl rand -hex 32)
-series_secret=$(openssl rand -hex 32)
-[ "$film_secret" != "$series_secret" ] || exit 1
-sed -i "s/^MEDIA_NODE_FILMS_PAIRING_TOKEN=.*/MEDIA_NODE_FILMS_PAIRING_TOKEN=$film_secret/" .env
-sed -i "s/^MEDIA_NODE_SERIES_PAIRING_TOKEN=.*/MEDIA_NODE_SERIES_PAIRING_TOKEN=$series_secret/" .env
-unset film_secret series_secret
+node_secret=$(openssl rand -hex 32)
+sed -i "s/^MEDIA_NODE_PAIRING_TOKEN=.*/MEDIA_NODE_PAIRING_TOKEN=$node_secret/" .env
+unset node_secret
 ```
 
-Ne pas activer `set -x`. Sous PowerShell 7, `./scripts/new-pairing-secrets.ps1`
-produit le même fichier sans écraser une configuration existante. Régler ensuite
-les deux chemins médias et l'origine publique dans ce fichier privé. Le Compose
-exige les secrets, les Nodes refusent un secret non hexadécimal ou trop court.
+Ne pas activer `set -x`. Régler ensuite les deux chemins médias et l'origine publique
+dans ce fichier privé. Le Compose exige le secret, le Node refuse un secret non
+hexadécimal ou trop court (< 24 octets).
 
 ```sh
-docker compose -f compose.distributed.yaml up -d --no-build
+docker compose -f compose.distributed.yaml up -d
 docker compose -f compose.distributed.yaml exec -it aether-core media-bootstrap
 ```
 
-Dans l'administration, appairer Films avec `http://aether-node-films:4101`, Séries
-avec `http://aether-node-series:4102`, chacun avec son secret distinct. Créer les
-bibliothèques depuis les racines réellement annoncées puis scanner. Ce HTTP
-est limité au bridge du même hôte déclaré fiable dans le Compose.
+Dans l'administration, appairer le Node polyvalent avec `http://aether-node:4101`
+et son secret. Créer les bibliothèques Films (`/media/films`) et Séries (`/media/series`)
+depuis les racines annoncées puis scanner. Ce HTTP est limité au bridge du même hôte
+déclaré fiable dans le Compose. Plusieurs Nodes indépendants peuvent également être ajoutés.
 
 ### Plusieurs machines, HTTPS obligatoire
 

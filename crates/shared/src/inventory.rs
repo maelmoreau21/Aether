@@ -12,7 +12,7 @@ pub struct CachedFile {
     pub probe: Probe,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScannedFile {
     pub poster: Option<LocalImage>,
     pub editorial: NfoOutcome,
@@ -28,6 +28,22 @@ pub struct ScannedFile {
     pub mime: String,
     #[serde(default)]
     pub reused: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series_identity_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series_year: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series_external_ids: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series_editorial: Option<NfoOutcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series_poster: Option<LocalImage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub season_number: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode_number: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

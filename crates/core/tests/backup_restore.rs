@@ -115,6 +115,7 @@ async fn test_sqlite_wal_backup_and_restore_preserves_users_grants_uuids_and_met
                 priority: 1,
             }),
             reused: false,
+            ..Default::default()
         })
         .collect();
 

@@ -535,6 +535,7 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
                     editorial: NfoOutcome::Missing,
                     poster: None,
                     reused: true,
+                    ..Default::default()
                 }
             })
             .collect();
@@ -599,6 +600,7 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
                     editorial: NfoOutcome::Missing,
                     poster: None,
                     reused: true,
+                    ..Default::default()
                 }
             })
             .collect();
@@ -746,6 +748,7 @@ async fn test_scan_cancellation_and_restart_recovery() {
             editorial: NfoOutcome::Missing,
             poster: None,
             reused: false,
+            ..Default::default()
         }],
         errors: vec![],
         warnings: vec![media_contracts::inventory::ScanIssue {
@@ -1026,7 +1029,7 @@ async fn test_1000_synthetic_files_scan_and_rescan() {
             20000 + i
         );
 
-        sqlx::query("INSERT INTO inventory_works VALUES(?, ?, ?, ?, 2024, '{}', '{}', ?)")
+        sqlx::query("INSERT INTO inventory_works(id, library_id, identity_key, title, year, external_ids_json, editorial_json, title_sort, kind) VALUES(?, ?, ?, ?, 2024, '{}', '{}', ?, 'film')")
             .bind(&work_id)
             .bind(&library)
             .bind(&rel_path)
@@ -1253,6 +1256,7 @@ async fn test_10000_new_synthetic_media_cold_ingestion_benchmark() {
                     editorial,
                     poster,
                     reused: false,
+                    ..Default::default()
                 }
             })
             .collect();
@@ -1431,6 +1435,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
                 priority: 1,
             }),
             reused: false,
+            ..Default::default()
         })
         .collect();
 
@@ -1501,6 +1506,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
                 priority: 1,
             }),
             reused: true,
+            ..Default::default()
         });
     }
 
@@ -1529,6 +1535,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
                 priority: 1,
             }),
             reused: false, // re-probed
+            ..Default::default()
         });
     }
 
@@ -1557,6 +1564,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
                 priority: 1,
             }),
             reused: true,
+            ..Default::default()
         });
     }
 
@@ -1579,6 +1587,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
             },
             poster: None, // poster deleted
             reused: true,
+            ..Default::default()
         });
     }
 
@@ -1618,6 +1627,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
                 priority: 1,
             }),
             reused: true,
+            ..Default::default()
         });
     }
 
@@ -1646,6 +1656,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
                 priority: 1,
             }),
             reused: false,
+            ..Default::default()
         });
     }
 
@@ -1870,6 +1881,7 @@ async fn test_sqlite_pool_audit_and_concurrent_reads_during_publication() {
                     editorial: NfoOutcome::Missing,
                     poster: None,
                     reused: false,
+                    ..Default::default()
                 }
             })
             .collect();
@@ -2034,6 +2046,7 @@ async fn test_crash_cancellation_permissions_and_rollback() {
             editorial: NfoOutcome::Missing,
             poster: None,
             reused: false,
+            ..Default::default()
         }],
         errors: vec![],
         warnings: vec![],
@@ -2149,6 +2162,7 @@ async fn test_crash_cancellation_permissions_and_rollback() {
             editorial: NfoOutcome::Missing,
             poster: None,
             reused: false,
+            ..Default::default()
         }],
         errors: vec![],
         warnings: vec![],

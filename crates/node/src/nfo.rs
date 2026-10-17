@@ -105,6 +105,40 @@ fn apply(
                 .ok()
                 .filter(|n| n.is_finite() && (0.0..=10.0).contains(n))
         }
+        "season" => metadata.season = text.parse::<u16>().ok(),
+        "episode" => metadata.episode = text.parse::<u16>().ok(),
+        "aired" => {
+            let bytes = text.as_bytes();
+            if bytes.len() == 10
+                && bytes[4] == b'-'
+                && bytes[7] == b'-'
+                && bytes
+                    .iter()
+                    .enumerate()
+                    .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit())
+            {
+                let year = text[..4].parse::<u16>().unwrap_or(0);
+                let month = text[5..7].parse::<u8>().unwrap_or(0);
+                let day = text[8..].parse::<u8>().unwrap_or(0);
+                let leap = year.is_multiple_of(4)
+                    && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+                let max = match month {
+                    2 => {
+                        if leap {
+                            29
+                        } else {
+                            28
+                        }
+                    }
+                    4 | 6 | 9 | 11 => 30,
+                    1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+                    _ => 0,
+                };
+                if (1888..=2100).contains(&year) && day > 0 && day <= max {
+                    metadata.premiered = Some(text.into());
+                }
+            }
+        }
         "uniqueid" if !provider.is_empty() => insert_id(metadata, provider, text)?,
         "tmdbid" | "tmdb" => insert_id(metadata, "tmdb", text)?,
         "imdbid" | "imdb" => insert_id(metadata, "imdb", text)?,
@@ -140,8 +174,12 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
                 let name = e.name().as_ref().to_ascii_lowercase();
                 if stack.is_empty() {
                     roots += 1;
-                    if roots != 1 || name != "movie" {
-                        return Err("NFO requires one movie root".into());
+                    if roots != 1
+                        || (name != "movie" && name != "tvshow" && name != "episodedetails")
+                    {
+                        return Err(
+                            "NFO requires one valid root (movie, tvshow, or episodedetails)".into(),
+                        );
                     }
                 }
                 if stack.len() >= MAX_DEPTH {
@@ -224,7 +262,7 @@ fn append(stack: &mut [(String, String, String)], text: &str) -> Result<(), Stri
         return Err("invalid XML character reference".into());
     }
     if stack.is_empty() && !text.trim().is_empty() {
-        return Err("text outside movie root".into());
+        return Err("text outside root".into());
     }
     for (_, _, field) in stack.iter_mut().skip(1) {
         if field.len().saturating_add(text.len()) > MAX_FIELD {
@@ -315,6 +353,56 @@ pub async fn discover_with_folder(
     NfoOutcome::Missing
 }
 
+/// Discover tvshow.nfo in the series directory.
+pub async fn discover_series_nfo(root: &Path, series_dir: &Path) -> NfoOutcome {
+    let relative = series_dir.join("tvshow.nfo");
+    read_and_parse_nfo(root, &relative, 0).await
+}
+
+/// Discover episode NFO with the exact same stem as the video file.
+pub async fn discover_episode_nfo(root: &Path, video: &Path) -> NfoOutcome {
+    let relative = video.with_extension("nfo");
+    read_and_parse_nfo(root, &relative, 0).await
+}
+
+async fn read_and_parse_nfo(root: &Path, relative: &Path, priority: u8) -> NfoOutcome {
+    let exists = tokio::fs::symlink_metadata(root.join(relative)).await;
+    if exists
+        .as_ref()
+        .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+    {
+        return NfoOutcome::Missing;
+    }
+    let path = relative.to_string_lossy().replace('\\', "/");
+    let result = async {
+        let opened = OpenedFile::open_in_root(root, relative)
+            .await
+            .map_err(|_| "NFO unavailable or unconfined")?;
+        let check_handle = opened
+            .try_clone()
+            .map_err(|_| "NFO unreadable".to_owned())?;
+        let file = opened.into_tokio_file();
+        let mut bytes = Vec::new();
+        file.take((MAX_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|_| "NFO read failed")?;
+        check_handle
+            .verify_unchanged_sync()
+            .map_err(|_| "NFO changed during read".to_owned())?;
+        parse(&bytes)
+    }
+    .await;
+    match result {
+        Ok(metadata) => NfoOutcome::Valid {
+            metadata,
+            path,
+            priority,
+        },
+        Err(message) => NfoOutcome::Invalid { path, message },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,6 +413,22 @@ mod tests {
         assert_eq!(m.genres.len(), 2);
         assert_eq!(m.external_ids["imdb"], "tt123");
         assert_eq!(m.rating, Some(8.5));
+    }
+    #[test]
+    fn parses_tvshow_and_episodedetails_nfo() {
+        let show = parse(br#"<tvshow><title>Breaking Code</title><plot>A thrilling drama.</plot><year>2024</year><genre>Drama</genre><uniqueid type="tvdb">81189</uniqueid></tvshow>"#).unwrap();
+        assert_eq!(show.title.as_deref(), Some("Breaking Code"));
+        assert_eq!(show.plot.as_deref(), Some("A thrilling drama."));
+        assert_eq!(show.year, Some(2024));
+        assert_eq!(show.external_ids["tvdb"], "81189");
+
+        let ep = parse(br#"<episodedetails><title>Pilot</title><plot>The beginning.</plot><season>1</season><episode>1</episode><aired>2024-01-15</aired><rating>9.2</rating></episodedetails>"#).unwrap();
+        assert_eq!(ep.title.as_deref(), Some("Pilot"));
+        assert_eq!(ep.plot.as_deref(), Some("The beginning."));
+        assert_eq!(ep.season, Some(1));
+        assert_eq!(ep.episode, Some(1));
+        assert_eq!(ep.premiered.as_deref(), Some("2024-01-15"));
+        assert_eq!(ep.rating, Some(9.2));
     }
     #[test]
     fn rejects_hostile_malformed_and_resource_abuse() {

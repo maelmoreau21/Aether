@@ -59,9 +59,11 @@ impl LocalNode {
     }
 
     /// Execute a bounded batch-streaming read-only library scan with optional probe and poster caches.
+    #[allow(clippy::too_many_arguments)]
     pub async fn scan_library_streaming<F, Fut>(
         &self,
         root: &Path,
+        kind: &str,
         cache: &HashMap<String, CachedFile>,
         image_cache: &HashMap<String, LocalImage>,
         cancel: &AtomicBool,
@@ -72,7 +74,7 @@ impl LocalNode {
         F: FnMut(InventoryBatch) -> Fut,
         Fut: std::future::Future<Output = Result<(), io::Error>>,
     {
-        scanner::scan_streaming(root, cache, image_cache, cancel, batch_size, on_batch).await
+        scanner::scan_streaming(root, kind, cache, image_cache, cancel, batch_size, on_batch).await
     }
 
     /// Open a confined media file handle relative to `root`.

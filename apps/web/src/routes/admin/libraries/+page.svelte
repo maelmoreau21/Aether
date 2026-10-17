@@ -50,7 +50,7 @@
     if (polling || !administrator) return;
     polling = true;
     try {
-      const results = await Promise.all(libraries.filter(library => library.kind === 'films' && library.enabled && library.nodeId === 'local' && !library.id.startsWith('fixture-')).map(async library => [library.id, await request<Scan>(`/api/v1/admin/libraries/${encodeURIComponent(library.id)}/scan`)] as const));
+      const results = await Promise.all(libraries.filter(library => (library.kind === 'films' || library.kind === 'series') && library.enabled && library.nodeId === 'local' && !library.id.startsWith('fixture-')).map(async library => [library.id, await request<Scan>(`/api/v1/admin/libraries/${encodeURIComponent(library.id)}/scan`)] as const));
       for (const [id, scan] of results) scans[id] = scan;
     } catch (failure) { error = failure instanceof Error ? failure.message : 'État du scan indisponible.'; }
     finally { polling = false; }
@@ -89,7 +89,7 @@
           {#each libraries as library (library.id)}
             <article><div><h3>{library.name}</h3><p>{library.kind === 'films' ? 'Films' : 'Séries'} · Node local · {library.enabled ? 'Active' : 'Désactivée'}</p><p class="path">{library.root}</p><p>{library.userIds.length} utilisateur(s) autorisé(s)</p>
               {#if scans[library.id]}{@const scan = scans[library.id]}<div class="scan-state" role="status"><p>Scan : {scanLabels[scan.status]} · {scan.discovered} fichier(s) découvert(s) · {scan.probed} analysé(s) · {scan.reused} réutilisé(s)</p>{#if scan.errors.length}<details><summary>{scan.errors.length} erreur(s) signalée(s)</summary><ul>{#each scan.errors as failure, index (index)}<li>{failure}</li>{/each}</ul></details>{/if}</div>{/if}
-              {#if library.kind === 'films' && library.enabled && library.nodeId === 'local' && !library.id.startsWith('fixture-')}<button disabled={pending.includes(library.id) || scans[library.id]?.status === 'queued' || scans[library.id]?.status === 'running'} onclick={() => scan(library)} aria-label={`Scanner ${library.name}`}>Scanner</button>{/if}
+              {#if (library.kind === 'films' || library.kind === 'series') && library.enabled && library.nodeId === 'local' && !library.id.startsWith('fixture-')}<button disabled={pending.includes(library.id) || scans[library.id]?.status === 'queued' || scans[library.id]?.status === 'running'} onclick={() => scan(library)} aria-label={`Scanner ${library.name}`}>Scanner</button>{/if}
               </div><button disabled={saving} onclick={() => edit(library)} aria-label={`Modifier ${library.name}`}>Modifier</button></article>
           {/each}
         </section>
@@ -108,7 +108,7 @@
             </fieldset>
             <div class="actions"><button class="primary" type="submit" disabled={!roots.includes(root)}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button><button type="button" onclick={reset}>{editing ? 'Annuler' : 'Réinitialiser'}</button></div>
           </fieldset></form>
-          <p class="muted">Les fichiers restent en lecture seule. Lancez le scan après l’ajout d’une bibliothèque Films. Aucun scan ne se déclenche automatiquement. Les séries ne sont pas encore scannées.</p>
+          <p class="muted">Les fichiers restent en lecture seule. Lancez le scan après l’ajout d’une bibliothèque. Aucun scan ne se déclenche automatiquement.</p>
         </section>
       </div>
     {/if}

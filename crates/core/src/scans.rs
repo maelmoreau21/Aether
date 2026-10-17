@@ -161,8 +161,8 @@ async fn start(
     if state.jobs.cancel.load(Ordering::Acquire) {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
-    let root: Option<String> = sqlx::query_scalar("SELECT root FROM libraries WHERE id=? AND enabled=1 AND kind='films' AND node_id='local' AND id NOT IN ('fixture-films','fixture-series')").bind(&id).fetch_optional(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let root = root.ok_or(StatusCode::BAD_REQUEST)?;
+    let library: Option<(String, String)> = sqlx::query_as("SELECT root, kind FROM libraries WHERE id=? AND enabled=1 AND kind IN ('films', 'series') AND node_id='local' AND id NOT IN ('fixture-films','fixture-series')").bind(&id).fetch_optional(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let (root, kind) = library.ok_or(StatusCode::BAD_REQUEST)?;
     node::LocalNode
         .validate_root(std::path::Path::new(&root), &state.root)
         .await
@@ -193,6 +193,7 @@ async fn start(
             let job_id_stage = job_id.clone();
             let report = node::LocalNode.scan_library_streaming(
                 &root,
+                &kind,
                 &cache,
                 &images,
                 &cancel,

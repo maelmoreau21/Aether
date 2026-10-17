@@ -20,6 +20,22 @@ Depuis la racine du dépôt :
 docker compose up -d
 ```
 
+Par défaut, Docker Compose télécharge l'image officielle pré-compilée depuis GitHub Container Registry (`ghcr.io/maelmoreau21/aether:latest`). Aucune compilation Rust ou Node.js n'est requise.
+
+Pour choisir une version spécifique :
+```bash
+# Version de développement (branche develop)
+AETHER_TAG=develop docker compose up -d
+
+# Version stable (branche main, défaut)
+AETHER_TAG=latest docker compose up -d
+```
+
+Pour les contributeurs souhaitant recompiler les sources localement :
+```bash
+docker compose up -d --build
+```
+
 Vérifiez l'état du conteneur :
 ```bash
 docker compose ps
@@ -82,7 +98,7 @@ Le Synology DS1522+ embarque un processeur **AMD Ryzen Embedded R1600** (x86_64,
 
 ## 4. Exposition réseau & Proxy Inverse HTTPS
 
-- **HTTP limité strictement au loopback (développement/test local)** : `compose.yaml` lie le port hôte sur `"127.0.0.1:3000:3000"` avec `MEDIA_PUBLIC_URL=http://127.0.0.1:3000`. `AuthState::new()` refuse toute origine `http://` hors loopback (ex. `http://192.168.1.100:3000` est rejeté au démarrage avec `AuthConfigError::Origin`).
+- **HTTP limité strictement au loopback (développement/test local)** : `docker-compose.yml` lie le port hôte sur `"127.0.0.1:3000:3000"` avec `MEDIA_PUBLIC_URL=http://127.0.0.1:3000`. `AuthState::new()` refuse toute origine `http://` hors loopback (ex. `http://192.168.1.100:3000` est rejeté au démarrage avec `AuthConfigError::Origin`).
 - **Accès LAN distant ou Internet via Proxy Inverse HTTPS (Synology DSM, Nginx, Caddy)** :
   1. Conservez la liaison locale `"127.0.0.1:3000:3000"` sur le conteneur.
   2. Définissez `MEDIA_PUBLIC_URL` sur l'origine HTTPS canonique exacte (ex. `https://aether.mondomaine.fr` ou `https://aether.nas.lan:8443`).

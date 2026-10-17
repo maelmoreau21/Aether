@@ -232,3 +232,19 @@ jobs:
           path: |
             docs/evidence/2026-10-16/scanner/
             docs/evidence/2026-10-17/series/
+
+  # =========================================================================
+  # 5. Publication des images Docker sur GHCR
+  # Uniquement sur push (main ou develop) après réussite complète des tests.
+  # Les pull requests non fiables ne publient jamais d'image.
+  # =========================================================================
+  publish:
+    name: Publication Docker GHCR
+    needs: [rust, security-audit, frontend, browser]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish.yml
+    secrets: inherit
+

@@ -199,10 +199,10 @@ fn publish_file(temp_path: &Path, target_path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         std::fs::rename(temp_path, target_path)?;
-        if let Some(parent) = target_path.parent() {
-            if let Ok(dir) = std::fs::File::open(parent) {
-                let _ = dir.sync_all();
-            }
+        if let Some(parent) = target_path.parent()
+            && let Ok(dir) = std::fs::File::open(parent)
+        {
+            let _ = dir.sync_all();
         }
         Ok(())
     }

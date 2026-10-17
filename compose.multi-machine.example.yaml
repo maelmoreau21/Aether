@@ -12,7 +12,7 @@
 # ------------------------------------------------------------------------------
 services:
   aether-core:
-    image: aether-core:latest
+    image: ghcr.io/maelmoreau21/aether-core:${AETHER_TAG:-latest}
     container_name: aether-core
     restart: unless-stopped
     stop_signal: SIGINT
@@ -46,10 +46,10 @@ services:
 
 # ------------------------------------------------------------------------------
 # MACHINE B (e.g. Storage Host 1 — Films Node — `https://node-films.example.lan`)
-# Copy the service below into Machine B's `compose.yaml`
+# Copy the service below into Machine B's `docker-compose.yml`
 # ------------------------------------------------------------------------------
   aether-node-films:
-    image: aether-node:latest
+    image: ghcr.io/maelmoreau21/aether-node:${AETHER_TAG:-latest}
     container_name: aether-node-films
     restart: unless-stopped
     stop_signal: SIGINT
@@ -83,10 +83,10 @@ services:
 
 # ------------------------------------------------------------------------------
 # MACHINE C (e.g. Storage Host 2 — Series Node — `https://node-series.example.lan`)
-# Copy the service below into Machine C's `compose.yaml`
+# Copy the service below into Machine C's `docker-compose.yml`
 # ------------------------------------------------------------------------------
   aether-node-series:
-    image: aether-node:latest
+    image: ghcr.io/maelmoreau21/aether-node:${AETHER_TAG:-latest}
     container_name: aether-node-series
     restart: unless-stopped
     stop_signal: SIGINT

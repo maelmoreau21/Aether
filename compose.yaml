@@ -12,13 +12,18 @@
 #   in MKV and MP4 containers.
 #
 # Operational Security & Hardening:
-# - Default port binding is strictly loopback: "127.0.0.1:3000:3000" to prevent unauthenticated
-#   LAN exposure prior to administrator configuration.
-# - For LAN access: Change binding to "0.0.0.0:3000:3000" (or "3000:3000") and update MEDIA_PUBLIC_URL
-#   to your NAS IP (e.g., http://192.168.1.100:3000).
-# - For HTTPS Reverse Proxy (Synology Reverse Proxy, Nginx, Caddy): Keep loopback binding
-#   "127.0.0.1:3000:3000", terminate TLS on the proxy, set MEDIA_PUBLIC_URL to your public HTTPS
-#   domain (e.g., https://aether.example.com), and ensure the proxy forwards the 'Host' header.
+# - HTTP is strictly restricted to loopback origins (http://127.0.0.1:3000, http://localhost:3000,
+#   http://[::1]:3000) for local development/testing on the host itself.
+# - AuthState::new() explicitly rejects non-loopback HTTP origins (such as http://192.168.1.100:3000)
+#   at startup (AuthConfigError::Origin) to prevent cleartext credential and session transmission.
+# - Default port binding is strictly loopback ("127.0.0.1:3000:3000") so the backend is never exposed
+#   in cleartext HTTP on the LAN.
+# - For LAN or Internet access: Keep loopback binding "127.0.0.1:3000:3000" (or internal Docker network),
+#   terminate TLS on a trusted HTTPS reverse proxy (Synology DSM Reverse Proxy, Nginx, Caddy, Traefik),
+#   set MEDIA_PUBLIC_URL to your canonical HTTPS origin (e.g., https://aether.example.com or
+#   https://aether.nas.lan:8443), and ensure the proxy preserves the client 'Host' header ($http_host).
+# - In HTTPS mode, session cookies automatically enforce 'Secure; HttpOnly; SameSite=Strict', and all
+#   protected routes validate 'Host', 'Origin', 'Sec-Fetch-Site', and 'x-csrf-token'.
 # - Media volumes are mounted strictly read-only (:ro). Aether never modifies media files or metadata.
 # - Persistent application state and SQLite database are stored in dedicated volume 'aether_data'.
 # - Container runs as unprivileged non-root user 'aether' (UID:GID 10001:10001) with all Linux
@@ -41,8 +46,8 @@ services:
     cap_drop:
       - ALL
     ports:
-      # Bound strictly to host loopback by default for security.
-      # Adjust to "0.0.0.0:3000:3000" for direct LAN access, or route via HTTPS reverse proxy.
+      # Bound strictly to host loopback. For LAN or remote access, expose via a trusted HTTPS
+      # reverse proxy forwarding to 127.0.0.1:3000 and set MEDIA_PUBLIC_URL to your https:// origin.
       - "127.0.0.1:3000:3000"
     environment:
       - MEDIA_PORT=3000

@@ -48,54 +48,100 @@ Le conteneur utilise deux montages distincts :
 
 ---
 
-## 4. Configuration réseau & Sécurité
+## 4. Configuration réseau, Origines & Sécurité HTTPS
 
-### 4.1 Liaison d'écoute par défaut (Loopback sécurisé)
-Dans `compose.yaml`, le port hôte est configuré par défaut sur :
+### 4.1 Politique stricte des origines (`MEDIA_PUBLIC_URL`)
+`AuthState::new()` applique une validation stricte de `MEDIA_PUBLIC_URL` dès le démarrage du processus :
+- **HTTP autorisé uniquement sur la boucle locale (loopback)** : seules les origines `http://127.0.0.1[:port]`, `http://localhost[:port]` et `http://[::1][:port]` sont acceptées en clair, pour le développement ou l'administration locale sur la machine hôte elle-même.
+- **Refus explicite de HTTP sur le LAN ou Internet** : toute origine HTTP non-loopback (par exemple `http://192.168.1.100:3000`, `http://10.0.0.5:3000` ou `http://nas.local:3000`) est **rejetée au démarrage** avec l'erreur `AuthConfigError::Origin` (`public origin must be HTTPS or HTTP on loopback, without path or credentials`). Aucun mot de passe ni jeton de session ne doit transiter en clair sur le réseau local.
+- **Format canonique** : `MEDIA_PUBLIC_URL` ne doit contenir ni chemin (`/app`), ni paramètres de requête, ni identifiants (`user@`). Une barre oblique finale éventuelle (`/`) est normalisée automatiquement.
+
+Dans `compose.yaml`, le port hôte est lié par défaut à la boucle locale :
 ```yaml
 ports:
   - "127.0.0.1:3000:3000"
 ```
-Cette liaison restreint l'accès à la boucle locale de l'hôte, empêchant toute exposition accidentelle non authentifiée sur le réseau local (LAN).
+Cette liaison garantit que le serveur HTTP interne du conteneur n'est joignable que depuis l'hôte lui-même (ou son proxy inverse local).
 
-### 4.2 Accès direct sur le réseau local (LAN)
-Pour autoriser les appareils de votre réseau local à accéder directement à Aether sans proxy inverse :
-1. Dans `compose.yaml`, modifiez la redirection de port :
+### 4.2 Accès LAN distant ou Internet : HTTPS obligatoire via Proxy Inverse de confiance
+Pour accéder à Aether depuis un autre appareil du réseau local (LAN) ou depuis Internet, le trafic doit passer par un **proxy inverse HTTPS de confiance** (Synology DSM Reverse Proxy, Nginx, Caddy, Traefik) assurant la terminaison TLS :
+
+1. **Conservez la liaison loopback sur le conteneur** :
    ```yaml
    ports:
-     - "0.0.0.0:3000:3000"
+     - "127.0.0.1:3000:3000"
    ```
-2. Mettez à jour la variable `MEDIA_PUBLIC_URL` avec l'adresse IP de votre NAS ou machine :
+2. **Définissez `MEDIA_PUBLIC_URL` avec l'origine HTTPS exacte vue par le navigateur** (incluant le port uniquement s'il est différent de `443`) :
    ```yaml
    environment:
-     - MEDIA_PUBLIC_URL=http://192.168.1.100:3000
-   ```
-3. Les en-têtes HTTP `Host` et `Origin` reçus doivent correspondre exactement à `MEDIA_PUBLIC_URL` pour franchir la protection CSRF et DNS-rebinding.
-
-### 4.3 Exposition via Proxy Inverse HTTPS (Synology Reverse Proxy, Nginx, Caddy, Traefik)
-Pour un accès sécurisé depuis Internet ou votre domaine local en HTTPS :
-1. Conservez la liaison loopback locale `"127.0.0.1:3000:3000"` sur le conteneur.
-2. Définissez `MEDIA_PUBLIC_URL` avec l'URL publique HTTPS canonique :
-   ```yaml
-   environment:
+     # Exemple sur le port HTTPS standard 443 :
      - MEDIA_PUBLIC_URL=https://aether.mondomaine.fr
+     # Exemple sur un port HTTPS personnalisé (ex. 8443 sur Synology DSM) :
+     # - MEDIA_PUBLIC_URL=https://aether.nas.lan:8443
    ```
-3. **Obligation de transfert d'en-tête `Host`** : Configurez votre proxy inverse pour relayer l'en-tête `Host` réel du client :
-   - **Nginx** :
-     ```nginx
-     proxy_set_header Host $host;
-     proxy_set_header X-Forwarded-Proto $scheme;
-     proxy_set_header X-Forwarded-For $remote_addr;
-     proxy_pass http://127.0.0.1:3000;
-     ```
-   - **Synology DSM Reverse Proxy** : Activé automatiquement via le portail de connexion / proxy inverse DSM.
-   - **Caddy** :
-     ```caddy
-     aether.mondomaine.fr {
-         reverse_proxy 127.0.0.1:3000
-     }
-     ```
-4. **Sonde de santé découplée** : L'endpoint interne `/api/v1/health` est découplé de la validation stricte d'hôte externe, permettant à Docker d'interroger `http://127.0.0.1:3000/api/v1/health` avec succès même lorsque `MEDIA_PUBLIC_URL` est configuré sur un domaine HTTPS externe.
+
+### 4.3 Conservation de `Host`, validation d'origine, CSRF et cookies `Secure`
+Aether protège toutes les routes applicatives et les sessions via quatre mécanismes complémentaires :
+1. **Validation stricte de l'en-tête `Host`** : Le middleware `local_security` compare l'en-tête `Host` de chaque requête entrante à l'autorité (`host[:port]`) de `MEDIA_PUBLIC_URL`. Si le proxy inverse réécrit `Host` en `127.0.0.1:3000` ou omet le port non standard, le Core rejette la requête avec `403 Forbidden` (protection contre le DNS rebinding et l'injection d'en-tête Host).
+2. **Validation de l'origine canonique (`Origin` & `Sec-Fetch-Site`)** :
+   - Toute requête portant `Sec-Fetch-Site: cross-site` est immédiatement rejetée (`403 Forbidden`).
+   - Dès qu'un en-tête `Origin` est présent (et **obligatoirement** sur toutes les mutations `POST`/`PUT` d'authentification et d'administration), sa valeur doit correspondre à l'octet près à l'origine canonique configurée dans `MEDIA_PUBLIC_URL`.
+3. **Cookies de session `HttpOnly`, `SameSite=Strict` et `Secure`** :
+   - Le cookie `media_session` est toujours émis avec `Path=/; HttpOnly; SameSite=Strict; Max-Age=43200`. Aucun secret de session n'est accessible en JavaScript ni stocké dans `localStorage`.
+   - Lorsque `MEDIA_PUBLIC_URL` utilise le schéma `https://`, l'attribut `; Secure` est **automatiquement ajouté** au cookie `media_session`, interdisant au navigateur de transmettre le cookie sur une connexion non chiffrée.
+4. **Protection CSRF liée à la session (`x-csrf-token`)** :
+   - Toute mutation authentifiée (`POST /api/v1/auth/logout`, création/modification de bibliothèque, déclenchement de scan) exige à la fois l'en-tête `Origin` exact et l'en-tête `x-csrf-token` dérivé cryptographiquement (`SHA-256`) du jeton de session courant, comparé en temps constant.
+
+### 4.4 Exemples de configuration du Proxy Inverse
+
+#### A. Synology DSM 7.2+ (Portail de connexion > Proxy inverse)
+Configuration directement exploitable sur un NAS Synology (ex. DS1522+) :
+1. **Certificat TLS** : Dans **Panneau de configuration > Sécurité > Certificat**, associez un certificat valide au nom d'hôte choisi (certificat Let's Encrypt via DDNS Synology `*.synology.me`, certificat de domaine, ou autorité locale installée sur vos appareils).
+2. **Règle de proxy inverse** : Dans **Panneau de configuration > Portail de connexion > Avancé > Proxy inverse > Créer** :
+   - **Source (client → NAS)** :
+     - Protocole : `HTTPS`
+     - Nom d'hôte : `aether.votredomaine.synology.me` (ou `aether.nas.lan`)
+     - Port : `443` (ou `8443` si le port 443 est déjà utilisé)
+     - Activer HSTS : facultatif (recommandé si domaine dédié)
+   - **Destination (NAS → conteneur Aether)** :
+     - Protocole : `HTTP`
+     - Nom d'hôte : `127.0.0.1`
+     - Port : `3000`
+3. **Dans `compose.yaml`** :
+   - Conservez `ports: ["127.0.0.1:3000:3000"]`.
+   - Définissez `MEDIA_PUBLIC_URL=https://aether.votredomaine.synology.me` (ou `https://aether.nas.lan:8443` si le port Source est `8443`).
+   - *Note : Le proxy inverse intégré de DSM transmet automatiquement l'en-tête `Host` d'origine (`$http_host`) au conteneur.*
+
+#### B. Nginx
+Utilisez `$http_host` (et non `$host` seul si un port personnalisé est employé) afin de préserver `host:port` à l'identique de `MEDIA_PUBLIC_URL` :
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name aether.mondomaine.fr;
+
+    ssl_certificate     /etc/letsencrypt/live/aether.mondomaine.fr/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/aether.mondomaine.fr/privkey.pem;
+
+    location / {
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_buffering off;
+        proxy_pass http://127.0.0.1:3000;
+    }
+}
+```
+
+#### C. Caddy
+Caddy conserve par défaut l'en-tête `Host` entrant lorsqu'il relaie vers une adresse locale :
+```caddy
+aether.mondomaine.fr {
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+#### D. Sonde de santé interne découplée
+L'endpoint interne `/api/v1/health` est volontairement placé en amont du middleware de validation d'hôte externe. Cela permet au `healthcheck` Docker d'interroger `http://127.0.0.1:3000/api/v1/health` avec succès même lorsque `MEDIA_PUBLIC_URL` est configuré sur un domaine HTTPS externe.
 
 ---
 
@@ -105,7 +151,7 @@ Pour un accès sécurisé depuis Internet ou votre domaine local en HTTPS :
 |---|---|---|
 | `MEDIA_PORT` | `3000` | Port d'écoute interne du serveur HTTP |
 | `MEDIA_BIND_ADDR` | `0.0.0.0` | Adresse IP d'écoute à l'intérieur du conteneur |
-| `MEDIA_PUBLIC_URL` | `http://127.0.0.1:3000` | Origine publique canonique validée pour `Host`, `Origin` et cookies de session |
+| `MEDIA_PUBLIC_URL` | `http://127.0.0.1:3000` | Origine publique canonique (`https://...` pour LAN/Internet, ou `http://` uniquement sur loopback `127.0.0.1`/`localhost`/`[::1]`) |
 | `MEDIA_DB_PATH` | `/data/core.sqlite3` | Chemin du fichier SQLite dans le volume persistant |
 | `MEDIA_SQLITE_BUSY_TIMEOUT_SECS` | `15` | Délai d'attente max sur verrou d'écriture SQLite avant erreur BUSY (45s+ recommandé sur 10k+ médias) |
 | `MEDIA_LIBRARY_ROOT` | `/media` | Racine absolue du dossier des bibliothèques montées en lecture seule |

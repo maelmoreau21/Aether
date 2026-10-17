@@ -1176,4 +1176,127 @@ mod tests {
         // Because persisted last_seen_at is still < 1800s old, session remains valid after restart
         assert!(reopened_state.authenticate(&restart_headers).await.is_ok());
     }
+
+    #[tokio::test]
+    async fn origin_configuration_http_loopback_http_lan_and_https_matrix() {
+        let (_temp, base_state) = setup().await;
+        let store = base_state.store.clone();
+
+        // 1. HTTP loopback origins (127.0.0.1, localhost, [::1], with or without trailing slash) are accepted
+        for (input, canonical) in [
+            ("http://127.0.0.1:3000", "http://127.0.0.1:3000"),
+            ("http://127.0.0.1:3000/", "http://127.0.0.1:3000"),
+            ("http://localhost:3000", "http://localhost:3000"),
+            ("http://[::1]:3000", "http://[::1]:3000"),
+        ] {
+            let state = AuthState::new(store.clone(), input.into()).await.unwrap();
+            assert_eq!(state.origin(), canonical);
+            assert!(!state.cookie("tok", 300).contains("; Secure"));
+        }
+
+        // 2. HTTP LAN and non-loopback origins are explicitly rejected with AuthConfigError::Origin
+        for rejected in [
+            "http://192.168.1.100:3000",
+            "http://10.0.0.10:3000",
+            "http://172.16.0.5:3000",
+            "http://0.0.0.0:3000",
+            "http://nas.local:3000",
+            "http://aether.mondomaine.fr",
+            "https://admin@aether.mondomaine.fr",
+            "https://aether.mondomaine.fr/app",
+            "https://aether.mondomaine.fr?foo=bar",
+            "ws://127.0.0.1:3000",
+        ] {
+            assert!(
+                matches!(
+                    AuthState::new(store.clone(), rejected.into()).await,
+                    Err(AuthConfigError::Origin)
+                ),
+                "Expected AuthConfigError::Origin for {rejected}"
+            );
+        }
+
+        // 3. HTTPS LAN / Internet origins (standard port 443 and custom port e.g. 8443 on Synology DSM) are accepted
+        for (input, canonical) in [
+            (
+                "https://aether.mondomaine.fr",
+                "https://aether.mondomaine.fr",
+            ),
+            (
+                "https://aether.mondomaine.fr/",
+                "https://aether.mondomaine.fr",
+            ),
+            ("https://aether.nas.lan:8443", "https://aether.nas.lan:8443"),
+            ("https://192.168.1.100:8443", "https://192.168.1.100:8443"),
+            ("https://[::1]:8443", "https://[::1]:8443"),
+        ] {
+            let state = AuthState::new(store.clone(), input.into()).await.unwrap();
+            assert_eq!(state.origin(), canonical);
+            let set_cookie = state.cookie("tok", 300);
+            assert!(set_cookie.contains("HttpOnly; SameSite=Strict"));
+            assert!(set_cookie.ends_with("; Secure"));
+
+            // Reset login throttle before testing login on this HTTPS origin
+            sqlx::query("DELETE FROM login_throttle")
+                .execute(&store.pool)
+                .await
+                .unwrap();
+
+            // Login with exact canonical HTTPS Origin succeeds and emits a Secure cookie
+            let login_res = request(
+                &state,
+                "/api/v1/auth/login",
+                "POST",
+                None,
+                Some(canonical),
+                None,
+                serde_json::json!({"login":"admin","password":PASSWORD}),
+            )
+            .await;
+            assert_eq!(login_res.status(), StatusCode::OK);
+            let raw_set_cookie = login_res.headers()[header::SET_COOKIE]
+                .to_str()
+                .unwrap()
+                .to_owned();
+            assert!(raw_set_cookie.ends_with("; Secure"));
+            let cookie_pair = raw_set_cookie.split(';').next().unwrap().to_owned();
+            let body: serde_json::Value =
+                serde_json::from_slice(&login_res.into_body().collect().await.unwrap().to_bytes())
+                    .unwrap();
+            let csrf_tok = body["csrfToken"].as_str().unwrap().to_owned();
+
+            // Mismatched scheme (http:// instead of https://) or mismatched port is rejected with 403
+            let wrong_scheme = canonical.replacen("https://", "http://", 1);
+            assert_eq!(
+                request(
+                    &state,
+                    "/api/v1/auth/logout",
+                    "POST",
+                    Some(&cookie_pair),
+                    Some(&wrong_scheme),
+                    Some(&csrf_tok),
+                    serde_json::json!(null),
+                )
+                .await
+                .status(),
+                StatusCode::FORBIDDEN
+            );
+
+            // Exact canonical HTTPS Origin + valid CSRF token succeeds
+            assert_eq!(
+                request(
+                    &state,
+                    "/api/v1/auth/logout",
+                    "POST",
+                    Some(&cookie_pair),
+                    Some(canonical),
+                    Some(&csrf_tok),
+                    serde_json::json!(null),
+                )
+                .await
+                .status(),
+                StatusCode::NO_CONTENT
+            );
+        }
+    }
 }

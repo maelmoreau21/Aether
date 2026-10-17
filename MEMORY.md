@@ -1,5 +1,41 @@
 # MEMORY.md — État et décisions Aether
 
+## 17 octobre 2026 — Clôture P1 (Audit A2 cookies, A4 CI navigateur, A5 documentation HTTPS) : Séquencement des mutations d'authentification, job CI Chrome dédié et documentation HTTPS/DSM
+
+- **Clôture A2 — Vérification et séquencement des cookies `HttpOnly` lors des transitions de session (`apps/web/src/lib/auth/session.ts`, `crates/core/tests/browser_series.rs`, `scripts/browser-series.cjs`)** :
+  - **Problème analysé** : bien que `authActionSeq` protégeât déjà le store JavaScript `session` contre les réponses obsolètes, les mutations HTTP concurrentes (`POST /api/v1/auth/logout`, `POST /api/v1/auth/login`) laissaient le moteur HTTP du navigateur appliquer les en-têtes `Set-Cookie` dans l'ordre d'arrivée réseau :
+    1. Si la réponse HTTP d'un `logout(A)` était retardée et arrivait après la réponse HTTP d'un `login(B)`, son en-tête `Set-Cookie: media_session=; Max-Age=0` supprimait dans le navigateur le cookie `HttpOnly` nouvellement installé par `B`.
+    2. Si deux appels `login(A)` puis `login(B)` étaient lancés concurremment et que la réponse HTTP de `A` arrivait après celle de `B`, son `Set-Cookie` remplaçait dans le navigateur le cookie `HttpOnly` de `B` par celui de `A` alors que l'interface affichait `B`.
+  - **Correction minimale appliquée (`apps/web/src/lib/auth/session.ts`)** :
+    - Séquencement strict des mutations d'authentification (`login()`, `logout()`) via une file d'attente réseau locale (`enqueueAuthMutation`, `authMutationQueue`, `pendingAuthMutations`) : la requête HTTP d'un `login(B)` n'est émise sur le réseau qu'après réception complète de la réponse HTTP (et application de son `Set-Cookie` par le navigateur) de tout `logout(A)` ou `login(A)` précédent au sein du même onglet.
+    - `readSession()` attend la complétion des mutations d'authentification en cours (`pendingAuthMutations > 0`) avant d'interroger `GET /api/v1/auth/me`, et n'écrase jamais un changement manuel de session (`manualOverrideSeq`) intervenu pendant la lecture.
+    - Aucune modification du modèle de sécurité CSRF (`X-CSRF-Token` dérivé par HMAC du jeton de session) ni stockage de secret côté JavaScript.
+    - **Portée explicite** : cette sérialisation garantit l'ordre des `Set-Cookie` au sein d'un même onglet (`window`), mais ne constitue pas une synchronisation inter-onglets si l'utilisateur déclenche simultanément des connexions/déconnexions concurrentes depuis plusieurs onglets partageant le même jar de cookies navigateur.
+  - **Validation réelle sous Chromium avec vrais cookies `HttpOnly` et deux comptes SQLite distincts (`crates/core/tests/browser_series.rs` & `scripts/browser-series.cjs`)** :
+    - Création d'un second compte SQLite réel `series-user-b` (`Role::User`, hash Argon2id réel) en plus de `series-admin`, avec octroi de permission sur la bibliothèque via l'UI d'administration.
+    - Suppression de toute simulation JSON sur `/api/v1/auth/**` :
+      - **Étape 9a (`accountSwitchCacheIsolation: true`)** : déconnexion réelle de `series-admin` (`POST /api/v1/auth/logout` → `Set-Cookie: Max-Age=0`) puis connexion réelle de `series-user-b` (`POST /api/v1/auth/login` → nouveau cookie `HttpOnly`), vérification de la rotation du cookie dans `context.cookies()` et de la purge du cache de descripteurs.
+      - **Étape 9b (`delayedLogoutDoesNotWipeNewLoginCookie: true`)** : déclenchement concurrent de `logout()` (`series-user-b`, réponse serveur réelle retardée de 250 ms) et `login('series-admin', ...)` ; vérification que la requête `POST /api/v1/auth/login` ne part qu'après la fin du `POST /api/v1/auth/logout`, que le cookie `HttpOnly` final est bien celui de `series-admin` et que `GET /api/v1/auth/me` retourne `200` (`series-admin`).
+      - **Étape 9c (`concurrentLoginsSequencedCorrectly: true`)** : déclenchement concurrent de `login('series-admin')` (réponse serveur réelle retardée de 250 ms) et `login('series-user-b')` (0 ms) ; vérification que `series-user-b` s'exécute après `series-admin`, que le cookie `HttpOnly`, `/api/v1/auth/me` et le store Svelte convergent tous sur `series-user-b`, et que la déconnexion CSRF finale réussit (`HTTP 204`).
+
+- **Clôture A4 — CI navigateur reproductible (`.github/workflows/ci.yml`, `crates/core/tests/browser_series.rs`, `scripts/browser-scanner.cjs`, `scripts/browser-series.cjs`)** :
+  - `browser_series_flow_and_playback` est marqué `#[ignore = "requires built Web assets, generated synthetic fixtures and Chrome/Playwright"]` dans `crates/core/tests/browser_series.rs`, aligné avec `browser_scanner`, `browser_auth`, `browser_catalog` et `browser_p0`. Le job CI `rust` (`cargo test --locked --workspace --all-features`) s'exécute ainsi sur un runner propre sans dépendre de Node.js, de `apps/web/build` ou d'un navigateur.
+  - Ajout d'un job dédié `browser` (`Navigateur Chrome (Films & Séries)`) dans `.github/workflows/ci.yml` qui :
+    - installe Rust stable, Node.js 24, `ffmpeg` et les dépendances `npm ci` dans `apps/web` ;
+    - installe explicitement Google Chrome stable via `npx playwright install --with-deps chrome` (correspondant exactement à `chromium.launch({ channel: 'chrome', headless: true })` utilisé par les runners) ;
+    - construit le frontend SvelteKit (`npm run build` dans `apps/web`) et vérifie `apps/web/build/index.html` ;
+    - purge `tests/fixtures/generated` et les répertoires de rapports avant l'exécution, puis génère les fixtures synthétiques P0/P1 (`generate-fixtures.ps1`, `prepare-language-remux.ps1`, `generate-representative-fixtures.py`, `prepare-p1.py`) ;
+    - exécute explicitement `browser_scanner` (Films + redémarrage Core) et `browser_series` (Séries + permissions + transitions de cookies), vérifie la présence et la fraîcheur des `report.json` et captures `.png` générés pendant le job, et les publie via `actions/upload-artifact@v4` (`browser-evidence-films-series`).
+  - Les scripts `scripts/browser-scanner.cjs` et `scripts/browser-series.cjs` prennent en charge `MEDIA_REPORT_DIR` et purgent leur dossier de sortie avant d'écrire les nouvelles preuves.
+
+- **Clôture A5 — Documentation Docker/HTTPS et tests de validation d'origine (`docs/DEPLOYMENT_DOCKER.md`, `compose.yaml`, `docker-compose.yml`, `README.md`, `crates/core/src/auth.rs`)** :
+  - Suppression de toute recommandation `MEDIA_PUBLIC_URL=http://192.168.1.100:3000` (rejetée au démarrage par `AuthState::new()` avec `AuthConfigError::Origin`).
+  - Documentation alignée dans `docs/DEPLOYMENT_DOCKER.md`, `compose.yaml`, `docker-compose.yml` et `README.md` :
+    - `http://` autorisé exclusivement sur loopback (`127.0.0.1`, `localhost`, `[::1]`) pour le développement ou un tunnel local ;
+    - `https://` obligatoire pour tout accès LAN ou Internet via un proxy inverse de confiance ;
+    - conservation obligatoire de l'en-tête `Host` (`proxy_set_header Host $http_host;` / configuration du Portail de connexion Synology DSM), correspondance exacte avec `MEDIA_PUBLIC_URL`, activation automatique de l'attribut `Secure` sur le cookie `media_session`, et contrôles CSRF / `Origin` / `Sec-Fetch-Site`.
+  - Ajout du test unitaire `auth::tests::origin_configuration_http_loopback_http_lan_and_https_matrix` dans `crates/core/src/auth.rs` vérifiant l'acceptation des origines HTTP loopback (`localhost`, `127.0.0.1`, `[::1]`, cookie sans `Secure`), le rejet explicite des origines HTTP LAN/distantes (`http://192.168.1.100:3000`, `http://10.0.0.15:3000`, `http://nas.local:3000`, `http://media.example.com`), l'acceptation des origines HTTPS LAN/domaine avec activation de `Secure`, et le rejet des origines malformées (chemin, query, fragment, userinfo, schéma invalide).
+
 ## 17 octobre 2026 — Clôture P1 (Audit A2 & A3) : Rejet des réponses HTTP devenues obsolètes et sélection déterministe cohérente des métadonnées Séries
 
 - **Clôture A2 — Rejet des réponses HTTP issues d'une ancienne génération de session et protection des transitions (`apps/web/src/lib/catalog/api.ts` & `apps/web/src/lib/auth/session.ts`)** :

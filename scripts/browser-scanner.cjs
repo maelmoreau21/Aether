@@ -4,8 +4,9 @@ const fs = require('node:fs');
 const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('isolated test origin required');
 const restart = process.env.MEDIA_TEST_RESTART === '1';
-const out = 'docs/evidence/2026-10-16/scanner';
-fs.mkdirSync(out, {recursive:true});
+const out = process.env.MEDIA_REPORT_DIR || 'docs/evidence/2026-10-16/scanner';
+if (!restart) fs.rmSync(out, {recursive: true, force: true});
+fs.mkdirSync(out, {recursive: true});
 (async () => {
   const browser = await chromium.launch({channel:'chrome', headless:true});
   const report = {browser:browser.version(), os:require('node:os').release(), headless:true, restart, results:{}};

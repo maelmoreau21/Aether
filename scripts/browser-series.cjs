@@ -3,8 +3,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('isolated test origin required');
-const out = 'docs/evidence/2026-10-17/series';
-fs.mkdirSync(out, {recursive:true});
+const out = process.env.MEDIA_REPORT_DIR || 'docs/evidence/2026-10-17/series';
+fs.rmSync(out, {recursive: true, force: true});
+fs.mkdirSync(out, {recursive: true});
 
 (async () => {
   const browser = await chromium.launch({channel:'chrome', headless:true});
@@ -30,7 +31,7 @@ fs.mkdirSync(out, {recursive:true});
       }
     });
 
-    // 1. Login
+    // 1. Login as series-admin
     await page.goto(origin + '/app/');
     await page.waitForURL('**/app/login/**');
     await page.locator('input[autocomplete="username"]').fill('series-admin');
@@ -38,10 +39,11 @@ fs.mkdirSync(out, {recursive:true});
     await page.locator('button[type="submit"]').click();
     await page.waitForURL(origin + '/app/');
 
-    // 2. Admin libraries: add Séries library and scan
+    // 2. Admin libraries: add Séries library, grant access to series-user-b, and scan
     await page.goto(origin + '/app/admin/libraries/');
     await page.locator('#library-name').fill('Séries Navigateur');
     await page.locator('#library-kind').selectOption('series');
+    await page.getByLabel('series-user-b', {exact: true}).check();
     await page.getByRole('button', {name:'Enregistrer', exact:true}).click();
     await page.getByRole('heading', {name:'Séries Navigateur', exact:true}).waitFor();
 
@@ -133,7 +135,7 @@ fs.mkdirSync(out, {recursive:true});
       'Launching playback must revalidate permissions with the server even when descriptor was cached'
     );
     assert.equal(
-      await page. evaluate(() => Boolean(document.querySelector('dialog#player')?.hasAttribute('open'))),
+      await page.evaluate(() => Boolean(document.querySelector('dialog#player')?.hasAttribute('open'))),
       false,
       'Player must not open when revalidation returns HTTP 403'
     );
@@ -154,7 +156,7 @@ fs.mkdirSync(out, {recursive:true});
     await closeBtn.click({force: true});
     await page.waitForFunction(() => !document.querySelector('dialog#player')?.hasAttribute('open'));
 
-    // 9. Account switch in SPA (User A -> cache filled -> logout -> login User B without page reload)
+    // 9a. Real account switch in SPA (series-admin -> cache filled -> logout -> login series-user-b with real HttpOnly cookies)
     await seasonSelect.selectOption('1');
     const ep1Select = page.locator('select[aria-label="Version de Episode One"]');
     await ep1Select.waitFor();
@@ -181,35 +183,28 @@ fs.mkdirSync(out, {recursive:true});
       'Same-session prefetch must use descriptorCache without extra network calls'
     );
 
-    // Logout User A via ProfileMenu (pure SPA transition, no page.goto/reload)
+    const cookieAdmin = (await context.cookies()).find(c => c.name === 'media_session');
+    assert(cookieAdmin && cookieAdmin.httpOnly && cookieAdmin.sameSite === 'Strict' && !cookieAdmin.secure);
+
+    // Logout series-admin via ProfileMenu (pure SPA transition, real Core logout)
     await page.getByRole('button', {name: 'Menu profil', exact: true}).click();
     await page.getByRole('button', {name: 'Se déconnecter', exact: true}).click();
     await page.waitForURL('**/app/login/**');
 
-    // Intercept auth responses to represent User B while preserving Core session cookie & CSRF token
-    await page.route('**/api/v1/auth/**', async route => {
-      const url = route.request().url();
-      if (url.endsWith('/login') || url.endsWith('/me')) {
-        const upstream = await route.fetch();
-        if (upstream.status() === 200) {
-          const body = await upstream.json();
-          body.user = {id: 'user-b-browser', login: 'series-user-b', role: 'administrator'};
-          await route.fulfill({response: upstream, json: body});
-          return;
-        }
-        await route.fulfill({response: upstream});
-        return;
-      }
-      await route.continue();
-    });
+    const cookieAfterLogout = (await context.cookies()).find(c => c.name === 'media_session');
+    assert(!cookieAfterLogout, 'Logout Set-Cookie must remove HttpOnly media_session cookie');
 
-    // Login as User B via SPA login form
-    await page.locator('input[autocomplete="username"]').fill('series-admin');
-    await page.locator('input[autocomplete="current-password"]').fill('disposable series browser password');
+    // Login as second distinct SQLite account series-user-b via SPA login form (no mocked auth JSON)
+    await page.locator('input[autocomplete="username"]').fill('series-user-b');
+    await page.locator('input[autocomplete="current-password"]').fill('disposable series user-b password');
     await page.locator('button[type="submit"]').click();
     await page.waitForURL(origin + '/app/');
 
-    // Verify ProfileMenu shows User B
+    const cookieUserB = (await context.cookies()).find(c => c.name === 'media_session');
+    assert(cookieUserB && cookieUserB.httpOnly && cookieUserB.sameSite === 'Strict' && !cookieUserB.secure);
+    assert.notEqual(cookieUserB.value, cookieAdmin.value, 'Second account must receive a distinct HttpOnly session cookie');
+
+    // Verify ProfileMenu shows series-user-b
     assert.match(await page.locator('.profile-trigger').textContent(), /series-user-b/);
 
     // Navigate via SPA links to Series -> Browser Series (no full page reload)
@@ -236,7 +231,7 @@ fs.mkdirSync(out, {recursive:true});
       'Session A cached version labels (MP4/MKV) must not leak into Session B'
     );
 
-    // Focus Episode 1 selector in Session B -> must fetch fresh descriptors from network
+    // Focus Episode 1 selector in Session B -> must fetch fresh descriptors from network using series-user-b cookie
     const mediaCallsBeforePrefetchB = requestedMediaUrls.length;
     await ep1SelectB.focus();
     await page.waitForFunction(
@@ -253,6 +248,177 @@ fs.mkdirSync(out, {recursive:true});
       'Session B must perform fresh network requests for both versions after Session A cache purge'
     );
     report.results.accountSwitchCacheIsolation = true;
+
+    // 9b. Delayed logout of A (series-user-b) + concurrent login of B (series-admin) with real HttpOnly Set-Cookie headers
+    const logoutLoginSequence = [];
+    await page.route('**/api/v1/auth/**', async route => {
+      const url = route.request().url();
+      if (url.endsWith('/logout')) {
+        logoutLoginSequence.push('logout-request');
+        await new Promise(r => setTimeout(r, 250));
+        const upstream = await route.fetch();
+        logoutLoginSequence.push('logout-response');
+        await route.fulfill({response: upstream});
+        return;
+      }
+      if (url.endsWith('/login')) {
+        logoutLoginSequence.push('login-request');
+        const upstream = await route.fetch();
+        logoutLoginSequence.push('login-response');
+        await route.fulfill({response: upstream});
+        return;
+      }
+      await route.continue();
+    });
+
+    const delayedLogoutResult = await page.evaluate(async () => {
+      const chunkUrls = performance
+        .getEntriesByType('resource')
+        .map(r => r.name)
+        .filter(u => u.includes('/_app/immutable/chunks/'));
+      let loginFn, logoutFn, sessionStore;
+      for (const url of chunkUrls) {
+        const mod = await import(url);
+        for (const val of Object.values(mod)) {
+          if (typeof val === 'function' && val.toString().includes('/api/v1/auth/login')) loginFn = val;
+          if (typeof val === 'function' && val.toString().includes('/api/v1/auth/logout')) logoutFn = val;
+          if (val && typeof val === 'object' && typeof val.subscribe === 'function' && typeof val.set === 'function') sessionStore = val;
+        }
+        if (loginFn && logoutFn && sessionStore) break;
+      }
+      if (!loginFn || !logoutFn || !sessionStore) throw new Error('Auth module exports not found');
+
+      let currentVal = null;
+      const unsub = sessionStore.subscribe(v => { currentVal = v; });
+      const initialSession = currentVal;
+
+      // Start logout of series-user-b (delayed 250ms on network)
+      const pLogout = logoutFn(initialSession);
+      // 20ms later, while logout is still in flight, start login of series-admin
+      await new Promise(r => setTimeout(r, 20));
+      const pLogin = loginFn('series-admin', 'disposable series browser password');
+      await Promise.all([pLogout, pLogin]);
+      unsub();
+
+      const meRes = await fetch('/api/v1/auth/me', {credentials: 'same-origin', cache: 'no-store'});
+      const meBody = meRes.ok ? await meRes.json() : null;
+      return {
+        storeSession: currentVal,
+        meStatus: meRes.status,
+        meBody
+      };
+    });
+    await page.unroute('**/api/v1/auth/**');
+
+    assert.deepEqual(
+      logoutLoginSequence,
+      ['logout-request', 'logout-response', 'login-request', 'login-response'],
+      'Login HTTP request must be sequenced strictly after delayed logout HTTP response so Set-Cookie of logout never wipes the new session cookie'
+    );
+    assert.equal(delayedLogoutResult.meStatus, 200);
+    assert.equal(delayedLogoutResult.meBody.user.login, 'series-admin');
+    assert.equal(delayedLogoutResult.storeSession.user.login, 'series-admin');
+    assert.equal(delayedLogoutResult.storeSession.csrfToken, delayedLogoutResult.meBody.csrfToken);
+    const cookieAfterDelayedLogout = (await context.cookies()).find(c => c.name === 'media_session');
+    assert(cookieAfterDelayedLogout && cookieAfterDelayedLogout.httpOnly);
+    assert.notEqual(cookieAfterDelayedLogout.value, cookieUserB.value);
+    report.results.delayedLogoutDoesNotWipeNewLoginCookie = true;
+
+    // 9c. Two concurrent logins (series-admin delayed 250ms, series-user-b fast 0ms) with real HttpOnly Set-Cookie headers
+    // First log out cleanly
+    await page.evaluate(async () => {
+      const chunkUrls = performance
+        .getEntriesByType('resource')
+        .map(r => r.name)
+        .filter(u => u.includes('/_app/immutable/chunks/'));
+      let logoutFn, sessionStore;
+      for (const url of chunkUrls) {
+        const mod = await import(url);
+        for (const val of Object.values(mod)) {
+          if (typeof val === 'function' && val.toString().includes('/api/v1/auth/logout')) logoutFn = val;
+          if (val && typeof val === 'object' && typeof val.subscribe === 'function' && typeof val.set === 'function') sessionStore = val;
+        }
+        if (logoutFn && sessionStore) break;
+      }
+      let currentVal = null;
+      const unsub = sessionStore.subscribe(v => { currentVal = v; });
+      unsub();
+      if (currentVal) await logoutFn(currentVal);
+    });
+
+    const concurrentLoginSequence = [];
+    await page.route('**/api/v1/auth/login', async route => {
+      const body = JSON.parse(route.request().postData() || '{}');
+      const who = body.login;
+      concurrentLoginSequence.push(`login-${who}-request`);
+      if (who === 'series-admin') {
+        await new Promise(r => setTimeout(r, 250));
+      }
+      const upstream = await route.fetch();
+      concurrentLoginSequence.push(`login-${who}-response`);
+      await route.fulfill({response: upstream});
+    });
+
+    const concurrentLoginResult = await page.evaluate(async () => {
+      const chunkUrls = performance
+        .getEntriesByType('resource')
+        .map(r => r.name)
+        .filter(u => u.includes('/_app/immutable/chunks/'));
+      let loginFn, logoutFn, sessionStore;
+      for (const url of chunkUrls) {
+        const mod = await import(url);
+        for (const val of Object.values(mod)) {
+          if (typeof val === 'function' && val.toString().includes('/api/v1/auth/login')) loginFn = val;
+          if (typeof val === 'function' && val.toString().includes('/api/v1/auth/logout')) logoutFn = val;
+          if (val && typeof val === 'object' && typeof val.subscribe === 'function' && typeof val.set === 'function') sessionStore = val;
+        }
+        if (loginFn && logoutFn && sessionStore) break;
+      }
+      let currentVal = null;
+      const unsub = sessionStore.subscribe(v => { currentVal = v; });
+
+      // Start slow login A (series-admin, 250ms), then 20ms later start fast login B (series-user-b, 0ms)
+      const pLoginA = loginFn('series-admin', 'disposable series browser password');
+      await new Promise(r => setTimeout(r, 20));
+      const pLoginB = loginFn('series-user-b', 'disposable series user-b password');
+      await Promise.all([pLoginA, pLoginB]);
+      unsub();
+
+      const meRes = await fetch('/api/v1/auth/me', {credentials: 'same-origin', cache: 'no-store'});
+      const meBody = meRes.ok ? await meRes.json() : null;
+
+      // Also verify CSRF token from store works against the active HttpOnly cookie
+      const logoutRes = await fetch('/api/v1/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {'x-csrf-token': currentVal.csrfToken}
+      });
+      return {
+        storeSession: currentVal,
+        meStatus: meRes.status,
+        meBody,
+        logoutStatus: logoutRes.status
+      };
+    });
+    await page.unroute('**/api/v1/auth/login');
+
+    assert.deepEqual(
+      concurrentLoginSequence,
+      [
+        'login-series-admin-request',
+        'login-series-admin-response',
+        'login-series-user-b-request',
+        'login-series-user-b-response'
+      ],
+      'Concurrent logins must be serialized so the slower first login Set-Cookie cannot arrive after and overwrite the second login cookie'
+    );
+    assert.equal(concurrentLoginResult.meStatus, 200);
+    assert.equal(concurrentLoginResult.meBody.user.login, 'series-user-b');
+    assert.equal(concurrentLoginResult.meBody.user.role, 'user');
+    assert.equal(concurrentLoginResult.storeSession.user.login, 'series-user-b');
+    assert.equal(concurrentLoginResult.storeSession.csrfToken, concurrentLoginResult.meBody.csrfToken);
+    assert.equal(concurrentLoginResult.logoutStatus, 204);
+    report.results.concurrentLoginsSequencedCorrectly = true;
 
     assert.deepEqual(errors, []);
     report.results.cspErrors = errors;

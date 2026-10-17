@@ -36,6 +36,7 @@ async fn start(root: &Path, db: &Path, library: &Path, port: u16) -> tokio::proc
 }
 
 #[tokio::test]
+#[ignore = "requires built Web assets, generated synthetic fixtures and Chrome/Playwright"]
 async fn browser_series_flow_and_playback() {
     let temp = tempfile::tempdir().unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -92,6 +93,32 @@ async fn browser_series_flow_and_playback() {
         )
         .await
         .unwrap();
+
+    // Create a second distinct account (Role::User) with a real Argon2id password hash
+    let user_b_id = uuid::Uuid::new_v4().to_string();
+    let user_b_hash = tokio::task::spawn_blocking(|| {
+        use argon2::{Algorithm, Argon2, Params, Version, password_hash::PasswordHasher};
+        let params = Params::new(65536, 3, 1, Some(32)).unwrap();
+        Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+            .hash_password(b"disposable series user-b password")
+            .unwrap()
+            .to_string()
+    })
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO users(id, role) VALUES (?, 'user')")
+        .bind(&user_b_id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO local_credentials(user_id, login, password_hash) VALUES (?, ?, ?)")
+        .bind(&user_b_id)
+        .bind("series-user-b")
+        .bind(&user_b_hash)
+        .execute(store.pool())
+        .await
+        .unwrap();
+
     store.close().await;
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

@@ -1,5 +1,43 @@
 # MEMORY.md — État et décisions Aether
 
+## 17 octobre 2026 — Jalon P1 : Sécurisation finale des sauvegardes et restaurations (Refus strict d'écrasement, protection contre la perte de l'ancienne copie, isolation de volume Docker et limites de concurrence)
+
+- **Sécurisation de la restauration (`restore_database` & `media-restore`)** :
+  - **Refus strict d'écrasement d'une base existante** : `restore_database` renvoie immédiatement l'erreur typée `BackupError::TargetExists` si la destination existe déjà sur disque. Aucune base existante ne peut être écrasée ou tronquée accidentellement.
+  - **Refus strict des journaux résiduels incompatibles** : détection préalable de fichiers `-wal` ou `-shm` orphelins dans la destination (`BackupError::ResidualJournals`), **sans suppression automatique**, pour interdire toute réconciliation asynchrone corrompue.
+  - **Élimination de la vérification trompeuse `BEGIN IMMEDIATE`** : suppression définitive du test transactionnel immédiat qui laissait faussement penser qu'un serveur actif mais momentanément inactif était arrêté.
+  - **Défense en profondeur sur les chemins** : rejet strict de tout chemin contenant `..`, des liens symboliques et des points d'analyse NTFS (`FILE_ATTRIBUTE_REPARSE_POINT`, jonctions), ainsi que de tout placement à l'intérieur de la racine média (`/media`).
+  - **Procédure de reprise hors ligne sur volume neuf** : documentation claire interdisant la restauration sur un volume Docker en service et imposant la restauration dans un volume Docker vierge (`aether_data_restored`) tout en conservant l'ancien volume intact.
+  - **Zéro option `--force` dangereuse** : aucun contournement permis.
+
+- **Sécurisation de la sauvegarde (`backup_database_with_options` & `media-backup`)** :
+  - **Protection absolue de la copie précédente** : suppression définitive de l'ancien comportement qui effaçait la sauvegarde cible avant d'exécuter `VACUUM INTO`.
+  - **Workflow atomique par fichier temporaire** : création d'un instantané temporaire unique (`.backup-<pid>-<uuid>.tmp`) dans le même répertoire.
+  - **Vérification complète avant publication** : exécution de `VACUUM INTO`, contrôle d'intégrité SQLite (`PRAGMA integrity_check`), vérification de la présence des tables clés du schéma (`users`, `local_credentials`, `libraries`, `inventory_works`), application des permissions `0600` (Unix), synchronisation des blocs sur disque (`sync_file` avec support `GENERIC_WRITE` sous Windows pour `FlushFileBuffers`).
+  - **Publication atomique** : remplacement de l'ancien fichier uniquement après validation intégrale (`std::fs::rename`).
+  - **Refus par défaut d'écrasement** : `backup_database` refuse d'écraser un fichier existant par défaut. L'option explicite `--replace` (`BackupOptions { allow_replace: true }`) est requise pour remplacer une sauvegarde existante de façon atomique et vérifiée.
+  - **Nettoyage garanti sur incident (`TempFileGuard`)** : en cas d'erreur ou d'interruption, le fichier temporaire est immédiatement purgé par le guard RAII et la sauvegarde précédente reste 100 % intacte.
+
+- **Vérification et durcissement des sauvegardes Docker & Synology DSM** :
+  - **Avertissement de criticité sur `/data/backups`** : clarification formelle dans la documentation que `/data/backups` se trouvant à l'intérieur du volume `aether_data`, il ne protège pas contre la perte ou la suppression du volume Docker. Procédures d'exportation vers un dossier hôte externe (ex. `/volume1/backups` sur DSM) ou via `docker cp` documentées.
+  - **Périmètre applicatif strict** : les sauvegardes contiennent exclusivement l'état applicatif SQLite (comptes, hachages Argon2id, sessions, graphe média, catalogue, bibliothèques, permissions) et zéro média original (`/media`).
+  - **Confidentialité** : permissions strictes `0600` sur les sauvegardes, `0750` sur le dossier, zéro fuite de hachages ou secrets dans les sorties de commande.
+  - **Restauration vers volume neuf** : procédure étape par étape avec `docker run` sur un volume Docker dédié sans écraser le volume existant.
+  - **Fidélité déterministe** : préservation totale des UUIDs, permissions de bibliothèques et reconnexion immédiate de l'administrateur et des utilisateurs sans réinitialisation de mot de passe.
+
+- **Concurrence des écritures et limites du timeout SQLite** :
+  - **Comportement sous publication massive (10k items)** : la publication atomique `publish_staged_scan` maintient le verrou d'écriture exclusif `BEGIN IMMEDIATE` pendant ~30 secondes.
+  - **Contention sur routes authentifiées** : chaque requête authentifiée exécute `UPDATE sessions SET last_seen_at = unixepoch() ...`. Ces écritures se mettent en attente du verrou d'écriture jusqu'au `busy_timeout` (défaut 15 secondes).
+  - **Limites du timeout** : au-delà de 15 secondes d'attente, SQLite renvoie `SQLITE_BUSY (code 5 : database is locked)` et le serveur répond HTTP 500. Augmenter le timeout masque le symptôme mais impose une latence client de 20-30s. Comportement documenté pour P1 sans altération du moteur de scan.
+
+- **Qualité et conformité Workspace** :
+  - `cargo fmt --check` : 0 diff.
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --locked --workspace --all-features` : **99 tests réussis** (2 doc-tests, 29 `media-node`, 2 `media-contracts`, 66 `media-poc`), 0 échec, 5 ignorés (Playwright).
+  - 9 tests dédiés dans `crates/core/tests/backup_restore.rs` validant tous les cas limites : destination vierge, base existante, connexion ouverte idle, journaux WAL/SHM résiduels, sauvegarde corrompue, refus de traversée/media root, refus d'écrasement par défaut, remplacement vérifié et préservation intégrale des données existantes en cas d'échec.
+  - Statut Docker : Démon Docker Engine Windows non démarré (`//./pipe/dockerDesktopLinuxEngine` introuvable), validé rigoureusement hors conteneur sans simulation.
+  - Zéro commit, zéro push, zéro publication Docker ni déploiement NAS.
+
 ## 17 octobre 2026 — Jalon P1 : Fiabilité opérationnelle et reprise sur incident (Sauvegarde/Restauration SQLite WAL, Concurrence sous écriture, Diagnostics de scan, Validation Docker)
 
 - **Sauvegarde et restauration SQLite WAL fiables (`media-backup` et `media-restore`)** :

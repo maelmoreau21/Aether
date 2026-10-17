@@ -38,16 +38,21 @@ L'amorçage est alors définitivement clos en base SQLite ; toute tentative ult�
 Connectez-vous ensuite sur [http://127.0.0.1:3000/app/login/](http://127.0.0.1:3000/app/login/).
 
 ### Sauvegarde et restauration SQLite (WAL)
-Aether fournit deux outils natifs pour sauvegarder et restaurer la base sans arrêter le service :
+Aether fournit deux outils natifs pour sauvegarder et restaurer la base de données sans arrêter le service :
 
 ```bash
-# Sauvegarde cohérente à chaud (SQLite WAL via VACUUM INTO)
-docker compose exec aether media-backup /data/backups/backup.sqlite3
+# Sauvegarde cohérente à chaud vers un dossier externe à aether_data (ex. monté sur l'hôte)
+docker compose exec aether media-backup /backups/core_backup_$(date +%Y%m%d_%H%M%S).sqlite3
 
-# Restauration dans un volume vierge (ou après arrêt du conteneur)
-docker compose run --rm aether media-restore /data/backups/backup.sqlite3
+# Ou remplacement explicite et sécurisé d'une sauvegarde existante
+docker compose exec aether media-backup --replace /backups/core_backup_latest.sqlite3
+
+# Restauration dans un volume vierge (n'écrase jamais un volume existant)
+docker run --rm -v aether_data_restored:/data -v /volume1/backups:/backup:ro aether media-restore /backup/core_backup_latest.sqlite3 /data/core.sqlite3
 ```
-Consultez la [documentation complète de sauvegarde et restauration](docs/DEPLOYMENT_DOCKER.md#7-sauvegarde-et-restauration-sqlite-wal-fiables) pour les procédures de reprise après sinistre sur Docker Compose et Synology DSM.
+*Note : Les sauvegardes contiennent uniquement l'état applicatif SQLite (comptes, hachages Argon2id, catalogue, permissions) et jamais les médias d'origine situés dans `/media`.*
+
+Consultez la [documentation complète de sauvegarde et restauration](docs/DEPLOYMENT_DOCKER.md#7-sauvegarde-et-restauration-sqlite-wal-fiables) pour les procédures détaillées sur Docker Compose et Synology DSM.
 
 ---
 

@@ -145,7 +145,7 @@
       </div>
     </section>
     {#if detail.kind === 'series'}
-      <section class="shelf"><div class="section-heading"><h2>Épisodes</h2><label>Saison <select aria-label="Saison" bind:value={season}>{#each detail.seasons ?? [] as item (item.id)}<option value={item.number}>Saison {item.number}</option>{/each}</select></label></div>
+      <section class="shelf"><div class="section-heading"><h2>Épisodes</h2><label>Saison <select aria-label="Saison" bind:value={season}>{#each detail.seasons ?? [] as item (item.id)}<option value={item.number}>{item.title || (item.number === 0 ? 'Hors-série' : `Saison ${item.number}`)}</option>{/each}</select></label></div>
         {#each activeSeason?.episodes ?? [] as episode (episode.id)}
           <article class="episode"><span class="episode-number">{String(episode.number).padStart(2,'0')}</span><div><h3>{episode.title}</h3><p>{episode.description}</p><EpisodePlayer {episode} {media} {immersive} onselect={() => playingEpisode = episode} /></div></article>
         {:else}<div class="empty">Aucun épisode disponible pour cette saison.</div>{/each}

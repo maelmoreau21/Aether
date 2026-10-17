@@ -35,11 +35,17 @@ pub struct FilmMetadata {
     pub rating: Option<f64>,
     pub mpaa: Option<String>,
     pub external_ids: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub season: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode: Option<u16>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum NfoOutcome {
+    #[default]
     Missing,
     Valid {
         metadata: FilmMetadata,

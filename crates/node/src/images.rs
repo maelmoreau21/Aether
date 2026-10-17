@@ -257,6 +257,65 @@ pub async fn discover_cached_with_folder(
     (None, None)
 }
 
+/// Discover series poster in the series directory (`poster`, `folder` in jpg, jpeg, png, webp).
+pub async fn discover_series_poster(
+    root: &Path,
+    series_dir: &Path,
+    cache: &std::collections::HashMap<String, LocalImage>,
+) -> (Option<LocalImage>, Option<String>) {
+    for (name_index, name) in ["poster", "folder"].iter().enumerate() {
+        for (format_index, extension) in ["jpg", "jpeg", "png", "webp"].iter().enumerate() {
+            let relative = series_dir.join(format!("{name}.{extension}"));
+            if tokio::fs::symlink_metadata(root.join(&relative))
+                .await
+                .as_ref()
+                .is_err_and(|e| e.kind() == io::ErrorKind::NotFound)
+            {
+                continue;
+            }
+            let result = async {
+                let opened = OpenedFile::open_in_root(root, &relative)
+                    .await
+                    .map_err(|_| invalid("poster unavailable or unconfined"))?;
+                let key = relative.to_string_lossy().replace('\\', "/");
+                let modified = opened.modified_ns().to_owned();
+                let size_bytes = opened.size();
+                if let Some(cached) = cache.get(&key).filter(|c| {
+                    c.size_bytes == size_bytes
+                        && c.modified_ns == modified
+                        && c.size_bytes <= MAX_BYTES
+                }) {
+                    let mut reused = cached.clone();
+                    reused.priority = (name_index * 4 + format_index) as u8;
+                    return Ok(reused);
+                }
+                let validated = validate_opened(&opened).await?;
+                let expected = match *extension {
+                    "jpg" | "jpeg" => "image/jpeg",
+                    "png" => "image/png",
+                    _ => "image/webp",
+                };
+                if validated.mime != expected {
+                    return Err(invalid("poster extension does not match image content"));
+                }
+                Ok(LocalImage {
+                    path: key,
+                    size_bytes: validated.size_bytes,
+                    modified_ns: validated.modified_ns,
+                    mime: validated.mime.into(),
+                    priority: (name_index * 4 + format_index) as u8,
+                })
+            }
+            .await;
+            return match result {
+                Ok(image) => (Some(image), None),
+                Err(error) => (None, Some(error.to_string())),
+            };
+        }
+    }
+    (None, None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,5 +1,60 @@
 # MEMORY.md — État et décisions Aether
 
+## 17 octobre 2026 — Jalon P1 : Séries, saisons et épisodes réels (Reconnaissance, persistance SQLite additive 0011, métadonnées NFO locales, navigation multi-saison, streaming et validation Docker)
+
+- **Reconnaissance déterministe des séries et épisodes** :
+  - **Formats d'arborescence et nommages pris en charge** :
+    - `Ma Série/Season 01/Ma Série - S01E01.mkv`
+    - `Ma Série/Saison 01/S01E02.mp4`
+    - `Ma Série/Season 02/02x03.mkv`
+    - `Ma Série/Specials/S00E01.mkv` (saison 0 / hors-série)
+  - **Détection déterministe (`parse_series_episode`)** : analyse sans ambiguïté des composants de chemin et des motifs regex/tokens pour extraire le dossier de série, le titre brut, l'année, les identifiants explicites (`[tvdb-123]`, `[tmdb-456]`), le numéro de saison et d'épisode.
+  - **Absence de fusion hasardeuse** : deux séries distinctes dans des dossiers différents ne sont jamais fusionnées sur un titre ressemblant.
+  - **Multi-versions et épisodes multi-fichiers** : les fichiers partageant la même identité de série, saison et épisode sont rattachés au même épisode logique, apparaissant sous forme de versions/sources distinctes dans le lecteur.
+  - **Épisodes multiples dans un seul fichier (ex. S01E01-E02)** : reconnaissance et indexation sur l'épisode primaire sans générer de lectures concurrentes désynchronisées ni de doublons.
+
+- **Graphe média et persistance SQLite additive (`0011_series.sql`)** :
+  - **Migration additive 0011** :
+    - Ajout de la colonne `kind TEXT NOT NULL DEFAULT 'film'` sur `inventory_works`.
+    - Création de la table `inventory_seasons(id TEXT PRIMARY KEY, series_id TEXT NOT NULL REFERENCES inventory_works(id) ON DELETE CASCADE, season_number INTEGER NOT NULL, title TEXT NOT NULL, UNIQUE(series_id, season_number))`.
+    - Création de la table `inventory_episodes(id TEXT PRIMARY KEY, season_id TEXT NOT NULL REFERENCES inventory_seasons(id) ON DELETE CASCADE, episode_number INTEGER NOT NULL, work_id TEXT NOT NULL REFERENCES inventory_works(id) ON DELETE CASCADE, UNIQUE(season_id, episode_number))`.
+    - Ajout des colonnes de staging séries dans `scan_staging_files` (`series_identity_key`, `series_title`, `series_year`, `series_external_ids_json`, `series_editorial_json`, `series_poster_path`, `series_poster_size`, `series_poster_modified_ns`, `series_poster_mime`, `series_poster_priority`, `season_number`, `episode_number`).
+    - Migrations 0001 à 0010 rigoureusement intactes.
+  - **Publication atomique (`publish_staged_scan`)** :
+    - Branche spécifique `lib_kind == "series"` publiant l'œuvre parente de la série (`kind = 'series'`), son affiche dans `inventory_images`, ses saisons ordonnées dans `inventory_seasons`, et les épisodes individuels dans `inventory_works` (`kind = 'episode'`) et `inventory_episodes`.
+    - Chaque épisode hérite directement du graphe média standard (`inventory_editions` → `inventory_versions` → `inventory_sources` → `inventory_assets` → `inventory_tracks`), rendant le streaming Range/seek et le confinement de chemin immédiatement fonctionnels sans réinvention.
+    - Préservation totale des bibliothèques Films existantes (`lib_kind == "films"`, `kind = 'film'`).
+    - Réutilisation des probes inchangés à 100 % au rescan (`reused = 1`), stabilité déterministe des UUIDs et suppression propre des épisodes retirés (`available = 0`).
+
+- **Métadonnées locales NFO et Affiches** :
+  - **Parseur XML sécurisé étendu (`crates/node/src/nfo.rs`)** : prise en charge des balises racines `<tvshow>` pour les séries et `<episodedetails>` pour les épisodes, tout en conservant les protections strictes (limite de taille 2 Mo, profondeur max 16, interdiction d'entités externes et encodage UTF-8 contrôlé).
+  - **Résilience aux NFO invalides** : un NFO malformé génère un diagnostic d'anomalie sans faire échouer le scan, avec repli automatique sur les métadonnées inférées du dossier.
+  - **Affiches locales de séries (`crates/node/src/images.rs`)** : découverte sécurisée de `poster.jpg`, `folder.png`, etc. dans le dossier de la série, avec validation d'en-tête et dimensions bornées.
+
+- **API et permissions** :
+  - **Catalogue `/api/v1/catalog`** : filtrage étendu supportant `kind=series` et `kind=film` garantissant une étanchéité absolue entre films et séries.
+  - **Fiche série `/api/v1/catalog/{id}`** : fournit le titre, la description/synopsis, le nombre de saisons, le nombre d'épisodes, les saisons ordonnées (avec libellé "Hors-série" pour la saison 0 et "Saison X"), et les épisodes ordonnés avec numéro, titre, résumé et identifiants de lecture (`playbackMediaId`).
+  - **RBAC et confinement** : vérification stricte des permissions de bibliothèque sur chaque route (catalogue, détails, streaming `/api/v1/assets/{id}/content`, image `/api/v1/assets/{id}/image`). Les chemins physiques absolus du serveur ne sont jamais exposés aux clients.
+
+- **Interface SvelteKit (`apps/web`)** :
+  - **Administration des bibliothèques (`admin/libraries/+page.svelte`)** : sélection du type "Séries" (`kind = 'series'`) et déclenchement du scan en direct.
+  - **Catalogue et fiche série (`Catalog.svelte`)** : badge `SÉRIE`, sélecteur dynamique de saison et liste ordonnée des épisodes.
+  - **Lecteur d'épisode (`EpisodePlayer.svelte` & `ImmersivePlayer.svelte`)** : sélection de version et lecture instantanée via le lecteur immersif avec support pause, reprise, seek et requêtes Range.
+
+- **Validation Docker et intégrité opérationnelle** :
+  - Reconstruction réussie de l'image Docker `aether:test` sous Linux x86_64.
+  - Démarrage du conteneur en mode autonome avec persistance SQLite `/data` et validation de l'endpoint `/api/v1/health` (HTTP 200).
+  - Contrôle de sauvegarde à chaud avec `media-backup` dans `/data/test_backup.sqlite3`.
+  - Contrôle de restauration avec `media-restore` vers un volume Docker vierge (`/data`).
+  - Nettoyage intégral des conteneurs, volumes et images de test.
+
+- **Qualité et conformité Workspace** :
+  - `cargo fmt --check` : 0 diff.
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --locked --workspace --all-features` : **100 tests réussis** (2 doc-tests, 29 `media-node`, 2 `media-contracts`, 67 `media-poc` dont le banc `series_flow.rs`), 0 échec, 5 ignorés (Playwright).
+  - Frontend (`apps/web`) : `npm run check` (0 erreur, 0 avertissement), `npm run lint` (0 erreur), `npm test` (13/13 Vitest réussis), `npm run build` (succès).
+  - Zéro commit, zéro push, zéro publication Docker ni déploiement NAS.
+
 ## 17 octobre 2026 — Jalon P1 : Sécurisation finale des sauvegardes et restaurations (Refus strict d'écrasement, protection contre la perte de l'ancienne copie, isolation de volume Docker et limites de concurrence)
 
 - **Sécurisation de la restauration (`restore_database` & `media-restore`)** :

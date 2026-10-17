@@ -172,6 +172,322 @@ pub(crate) fn identity(relative: &Path) -> (String, Option<u16>, BTreeMap<String
     (title, year, ids, key)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedSeriesEpisode {
+    pub series_dir: PathBuf,
+    pub series_raw_title: String,
+    pub series_year: Option<u16>,
+    pub series_external_ids: BTreeMap<String, String>,
+    pub series_identity_key: String,
+    pub season_number: u32,
+    pub episode_number: u32,
+    pub episode_title: String,
+}
+
+fn extract_s_e_pattern(stem: &str) -> Option<(u32, u32, Option<String>)> {
+    let bytes = stem.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len {
+        if (bytes[i] == b's' || bytes[i] == b'S') && i + 1 < len && bytes[i + 1].is_ascii_digit() {
+            let mut j = i + 1;
+            while j < len && bytes[j].is_ascii_digit() {
+                j += 1;
+            }
+            if let Ok(s_val) = stem[i + 1..j].parse::<u32>() {
+                let mut k = j;
+                while k < len && matches!(bytes[k], b'.' | b' ' | b'_' | b'-') {
+                    k += 1;
+                }
+                if k < len
+                    && (bytes[k] == b'e' || bytes[k] == b'E')
+                    && k + 1 < len
+                    && bytes[k + 1].is_ascii_digit()
+                {
+                    let mut m = k + 1;
+                    while m < len && bytes[m].is_ascii_digit() {
+                        m += 1;
+                    }
+                    if let Ok(e_val) = stem[k + 1..m].parse::<u32>() {
+                        // Check if multi-episode suffix like -E02 or E02
+                        let mut after = m;
+                        if after < len
+                            && (bytes[after] == b'-'
+                                || bytes[after] == b'e'
+                                || bytes[after] == b'E')
+                        {
+                            if bytes[after] == b'-'
+                                && after + 1 < len
+                                && (bytes[after + 1] == b'e' || bytes[after + 1] == b'E')
+                            {
+                                after += 2;
+                                while after < len && bytes[after].is_ascii_digit() {
+                                    after += 1;
+                                }
+                            } else if bytes[after] == b'e' || bytes[after] == b'E' {
+                                after += 1;
+                                while after < len && bytes[after].is_ascii_digit() {
+                                    after += 1;
+                                }
+                            }
+                        }
+                        let rem = stem[after..].trim();
+                        let title = if let Some(stripped) = rem.strip_prefix('-') {
+                            let t = stripped.trim().trim_matches(['.', '_', '-']).trim();
+                            if !t.is_empty() {
+                                Some(t.to_string())
+                            } else {
+                                None
+                            }
+                        } else if !rem.is_empty() {
+                            let t = rem.trim_matches(['.', '_', '-']).trim();
+                            if !t.is_empty() {
+                                Some(t.to_string())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        return Some((s_val, e_val, title));
+                    }
+                }
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+fn extract_x_pattern(stem: &str) -> Option<(u32, u32, Option<String>)> {
+    let bytes = stem.as_bytes();
+    let len = bytes.len();
+    for (i, &b) in bytes.iter().enumerate() {
+        if (b == b'x' || b == b'X') && i > 0 && i + 1 < len {
+            let mut start = i;
+            while start > 0 && bytes[start - 1].is_ascii_digit() {
+                start -= 1;
+            }
+            if start == i {
+                continue;
+            }
+            if start > 0 && !matches!(bytes[start - 1], b'.' | b' ' | b'_' | b'-' | b'[' | b'(') {
+                continue;
+            }
+            let Ok(s_val) = stem[start..i].parse::<u32>() else {
+                continue;
+            };
+
+            let mut end = i + 1;
+            while end < len && bytes[end].is_ascii_digit() {
+                end += 1;
+            }
+            if end == i + 1 {
+                continue;
+            }
+            if end < len && !matches!(bytes[end], b'.' | b' ' | b'_' | b'-' | b']' | b')') {
+                continue;
+            }
+            let Ok(e_val) = stem[i + 1..end].parse::<u32>() else {
+                continue;
+            };
+
+            let rem = stem[end..].trim();
+            let title = if let Some(stripped) = rem.strip_prefix('-') {
+                let t = stripped.trim().trim_matches(['.', '_', '-']).trim();
+                if !t.is_empty() {
+                    Some(t.to_string())
+                } else {
+                    None
+                }
+            } else if !rem.is_empty() {
+                let t = rem.trim_matches(['.', '_', '-']).trim();
+                if !t.is_empty() {
+                    Some(t.to_string())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            return Some((s_val, e_val, title));
+        }
+    }
+    None
+}
+
+fn extract_season_from_folder(parent: &str) -> Option<u32> {
+    let lower = parent.to_ascii_lowercase();
+    let lower = lower.trim();
+    if lower == "specials"
+        || lower == "special"
+        || lower == "season 0"
+        || lower == "saison 0"
+        || lower == "s0"
+        || lower == "s00"
+        || lower == "hors-série"
+        || lower == "hors série"
+    {
+        return Some(0);
+    }
+    for prefix in ["season", "saison", "staffel"] {
+        if let Some(rem) = lower.strip_prefix(prefix) {
+            let digits: String = rem.chars().filter(|c| c.is_ascii_digit()).collect();
+            if let Ok(num) = digits.parse::<u32>() {
+                return Some(num);
+            }
+        }
+    }
+    if let Some(rem) = lower.strip_prefix('s') {
+        let digits: String = rem.chars().filter(|c| c.is_ascii_digit()).collect();
+        if let Ok(num) = digits.parse::<u32>() {
+            return Some(num);
+        }
+    }
+    None
+}
+
+fn extract_episode_from_filename(stem: &str) -> Option<(u32, Option<String>)> {
+    let lower = stem.to_ascii_lowercase();
+    for prefix in ["episode", "ep", "e"] {
+        if let Some(idx) = lower.find(prefix) {
+            let after = &lower[idx + prefix.len()..];
+            let after_trimmed = after.trim_start_matches(['.', ' ', '_', '-']);
+            let digits: String = after_trimmed
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if let Ok(num) = digits.parse::<u32>() {
+                let rem_idx =
+                    idx + prefix.len() + (after.len() - after_trimmed.len()) + digits.len();
+                let rem = stem[rem_idx..].trim();
+                let title = if let Some(stripped) = rem.strip_prefix('-') {
+                    let t = stripped.trim().trim_matches(['.', '_', '-']).trim();
+                    if !t.is_empty() {
+                        Some(t.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                return Some((num, title));
+            }
+        }
+    }
+    let trimmed = stem.trim();
+    let digits: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if !digits.is_empty()
+        && digits.len() <= 4
+        && let Ok(num) = digits.parse::<u32>()
+    {
+        let rem = trimmed[digits.len()..].trim();
+        let title = if let Some(stripped) = rem.strip_prefix('-') {
+            let t = stripped.trim().trim_matches(['.', '_', '-']).trim();
+            if !t.is_empty() {
+                Some(t.to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        return Some((num, title));
+    }
+    None
+}
+
+pub fn parse_series_episode(relative: &Path) -> Option<ParsedSeriesEpisode> {
+    let mut components = Vec::new();
+    for c in relative.components() {
+        if let Component::Normal(s) = c
+            && let Some(str_val) = s.to_str()
+        {
+            components.push(str_val);
+        }
+    }
+    if components.is_empty() {
+        return None;
+    }
+
+    let (series_dir, series_folder_name) = if components.len() >= 2 {
+        (PathBuf::from(components[0]), components[0])
+    } else {
+        (PathBuf::new(), components[0])
+    };
+
+    let (series_raw_title, series_year, series_external_ids) = metadata_name(series_folder_name);
+    let series_identity_key = ["tvdb", "tmdb", "imdb"]
+        .iter()
+        .find_map(|p| series_external_ids.get(*p).map(|v| format!("{p}:{v}")))
+        .unwrap_or_else(|| {
+            if series_dir.as_os_str().is_empty() {
+                format!("series:{}", series_raw_title)
+            } else {
+                format!("folder:{}", series_dir.to_string_lossy().replace('\\', "/"))
+            }
+        });
+
+    let stem = relative.file_stem().and_then(|s| s.to_str())?;
+    let parent_name = relative
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+
+    // 1. Pattern S(\d+)E(\d+)
+    if let Some((s, e, remaining_title)) = extract_s_e_pattern(stem) {
+        let ep_title = remaining_title.unwrap_or_else(|| format!("S{:02}E{:02}", s, e));
+        return Some(ParsedSeriesEpisode {
+            series_dir,
+            series_raw_title,
+            series_year,
+            series_external_ids,
+            series_identity_key,
+            season_number: s,
+            episode_number: e,
+            episode_title: ep_title,
+        });
+    }
+
+    // 2. Pattern (\d+)x(\d+)
+    if let Some((s, e, remaining_title)) = extract_x_pattern(stem) {
+        let ep_title = remaining_title.unwrap_or_else(|| format!("S{:02}E{:02}", s, e));
+        return Some(ParsedSeriesEpisode {
+            series_dir,
+            series_raw_title,
+            series_year,
+            series_external_ids,
+            series_identity_key,
+            season_number: s,
+            episode_number: e,
+            episode_title: ep_title,
+        });
+    }
+
+    // 3. Parent folder provides season, filename provides episode
+    let season_from_parent = extract_season_from_folder(parent_name);
+    if let Some(s) = season_from_parent
+        && let Some((e, remaining_title)) = extract_episode_from_filename(stem)
+    {
+        let ep_title = remaining_title.unwrap_or_else(|| format!("S{:02}E{:02}", s, e));
+        return Some(ParsedSeriesEpisode {
+            series_dir,
+            series_raw_title,
+            series_year,
+            series_external_ids,
+            series_identity_key,
+            season_number: s,
+            episode_number: e,
+            episode_title: ep_title,
+        });
+    }
+
+    None
+}
+
 const MAX_FOLDER_CACHE: usize = 128;
 
 /// Depth-first streaming traversal (one directory iterator per depth), one probe at a time.
@@ -191,7 +507,7 @@ pub async fn scan_with_images(
     cancel: &AtomicBool,
 ) -> io::Result<ScanReport> {
     let mut files = Vec::new();
-    let mut report = scan_streaming(root, cache, image_cache, cancel, 100, |batch| {
+    let mut report = scan_streaming(root, "films", cache, image_cache, cancel, 100, |batch| {
         files.extend(batch.files);
         async { Ok(()) }
     })
@@ -226,6 +542,7 @@ fn record_warning(report: &mut ScanReport, batch: &mut Vec<ScanIssue>, issue: Sc
 /// Does not retain discovered files in RAM across batches, ensuring strictly bounded memory footprint.
 pub async fn scan_streaming<F, Fut>(
     root: &Path,
+    kind: &str,
     cache: &HashMap<String, CachedFile>,
     image_cache: &HashMap<String, super::images::LocalImage>,
     cancel: &AtomicBool,
@@ -248,6 +565,10 @@ where
     let root = tokio::fs::canonicalize(root).await?;
     let mut stack = vec![tokio::fs::read_dir(&root).await?];
     let mut folder_cache: HashMap<PathBuf, FolderVideos> = HashMap::new();
+    let mut series_cache: HashMap<
+        PathBuf,
+        (super::nfo::NfoOutcome, Option<super::images::LocalImage>),
+    > = HashMap::new();
     let mut report = ScanReport {
         complete: true,
         ..Default::default()
@@ -416,44 +737,160 @@ where
         }
         let folder_videos = folder_cache.get(&parent);
 
-        let (title, year, external_ids, identity_key) = identity(relative);
-        let editorial = super::nfo::discover_with_folder(&root, relative, folder_videos).await;
-        if let super::nfo::NfoOutcome::Invalid { path, message } = &editorial {
-            let issue = ScanIssue {
-                relative_path: path.clone(),
-                message: message.clone(),
+        let scanned_file = if kind == "series" {
+            let Some(parsed) = parse_series_episode(relative) else {
+                let issue = ScanIssue {
+                    relative_path: relative_path.clone(),
+                    message: "unrecognized series file; expected S01E01, 1x01, or Season folder"
+                        .into(),
+                };
+                record_warning(&mut report, &mut current_batch_warnings, issue);
+                continue;
             };
-            record_warning(&mut report, &mut current_batch_warnings, issue);
-        }
-        let (poster, poster_warning) =
-            super::images::discover_cached_with_folder(&root, relative, image_cache, folder_videos)
-                .await;
-        if let Some(message) = poster_warning {
-            let issue = ScanIssue {
-                relative_path: relative_path.clone(),
-                message,
-            };
-            record_warning(&mut report, &mut current_batch_warnings, issue);
-        }
-        current_batch_files.push(ScannedFile {
-            poster,
-            editorial,
-            relative_path,
-            size: file_size,
-            modified_ns,
-            title,
-            year,
-            identity_key,
-            external_ids,
-            probe,
-            mime: if extension == "mp4" {
-                "video/mp4"
-            } else {
-                "video/x-matroska"
+
+            if !series_cache.contains_key(&parsed.series_dir) {
+                let series_nfo = super::nfo::discover_series_nfo(&root, &parsed.series_dir).await;
+                if let super::nfo::NfoOutcome::Invalid { path, message } = &series_nfo {
+                    let issue = ScanIssue {
+                        relative_path: path.clone(),
+                        message: message.clone(),
+                    };
+                    record_warning(&mut report, &mut current_batch_warnings, issue);
+                }
+                let (series_poster, poster_warning) =
+                    super::images::discover_series_poster(&root, &parsed.series_dir, image_cache)
+                        .await;
+                if let Some(message) = poster_warning {
+                    let issue = ScanIssue {
+                        relative_path: parsed.series_dir.to_string_lossy().replace('\\', "/"),
+                        message,
+                    };
+                    record_warning(&mut report, &mut current_batch_warnings, issue);
+                }
+                series_cache.insert(parsed.series_dir.clone(), (series_nfo, series_poster));
             }
-            .into(),
-            reused,
-        });
+
+            let (series_nfo, series_poster) =
+                series_cache.get(&parsed.series_dir).cloned().unwrap();
+            let (series_title, series_year, series_external_ids) = match &series_nfo {
+                super::nfo::NfoOutcome::Valid { metadata, .. } => (
+                    metadata.title.clone().unwrap_or(parsed.series_raw_title),
+                    metadata.year.or(parsed.series_year),
+                    if !metadata.external_ids.is_empty() {
+                        metadata.external_ids.clone()
+                    } else {
+                        parsed.series_external_ids
+                    },
+                ),
+                _ => (
+                    parsed.series_raw_title,
+                    parsed.series_year,
+                    parsed.series_external_ids,
+                ),
+            };
+
+            let episode_editorial = super::nfo::discover_episode_nfo(&root, relative).await;
+            if let super::nfo::NfoOutcome::Invalid { path, message } = &episode_editorial {
+                let issue = ScanIssue {
+                    relative_path: path.clone(),
+                    message: message.clone(),
+                };
+                record_warning(&mut report, &mut current_batch_warnings, issue);
+            }
+
+            let (episode_title, episode_year) = match &episode_editorial {
+                super::nfo::NfoOutcome::Valid { metadata, .. } => (
+                    metadata.title.clone().unwrap_or(parsed.episode_title),
+                    metadata.year.or(series_year),
+                ),
+                _ => (parsed.episode_title, series_year),
+            };
+
+            let episode_identity_key = format!(
+                "episode:{}:s{:02}e{:02}",
+                parsed.series_identity_key, parsed.season_number, parsed.episode_number
+            );
+
+            ScannedFile {
+                poster: None,
+                editorial: episode_editorial,
+                relative_path,
+                size: file_size,
+                modified_ns,
+                title: episode_title,
+                year: episode_year,
+                identity_key: episode_identity_key,
+                external_ids: BTreeMap::new(),
+                probe,
+                mime: if extension == "mp4" {
+                    "video/mp4"
+                } else {
+                    "video/x-matroska"
+                }
+                .into(),
+                reused,
+                series_identity_key: Some(parsed.series_identity_key),
+                series_title: Some(series_title),
+                series_year,
+                series_external_ids: Some(series_external_ids),
+                series_editorial: Some(series_nfo),
+                series_poster,
+                season_number: Some(parsed.season_number),
+                episode_number: Some(parsed.episode_number),
+            }
+        } else {
+            let (title, year, external_ids, identity_key) = identity(relative);
+            let editorial = super::nfo::discover_with_folder(&root, relative, folder_videos).await;
+            if let super::nfo::NfoOutcome::Invalid { path, message } = &editorial {
+                let issue = ScanIssue {
+                    relative_path: path.clone(),
+                    message: message.clone(),
+                };
+                record_warning(&mut report, &mut current_batch_warnings, issue);
+            }
+            let (poster, poster_warning) = super::images::discover_cached_with_folder(
+                &root,
+                relative,
+                image_cache,
+                folder_videos,
+            )
+            .await;
+            if let Some(message) = poster_warning {
+                let issue = ScanIssue {
+                    relative_path: relative_path.clone(),
+                    message,
+                };
+                record_warning(&mut report, &mut current_batch_warnings, issue);
+            }
+            ScannedFile {
+                poster,
+                editorial,
+                relative_path,
+                size: file_size,
+                modified_ns,
+                title,
+                year,
+                identity_key,
+                external_ids,
+                probe,
+                mime: if extension == "mp4" {
+                    "video/mp4"
+                } else {
+                    "video/x-matroska"
+                }
+                .into(),
+                reused,
+                series_identity_key: None,
+                series_title: None,
+                series_year: None,
+                series_external_ids: None,
+                series_editorial: None,
+                series_poster: None,
+                season_number: None,
+                episode_number: None,
+            }
+        };
+        current_batch_files.push(scanned_file);
 
         if current_batch_files.len() >= batch_size {
             sequence += 1;

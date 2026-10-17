@@ -21,7 +21,7 @@ pub async fn load_cache(
     library_id: &str,
 ) -> Result<HashMap<String, CachedFile>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT relative_path,size,modified_ns,probe_json FROM inventory_assets WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id WHERE s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local')",
+        "SELECT relative_path,size,modified_ns,probe_json FROM inventory_assets WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local')",
     )
     .bind(library_id)
     .fetch_all(&store.pool)
@@ -52,7 +52,7 @@ pub async fn load_scan_cache(
     library_id: &str,
 ) -> Result<HashMap<String, CachedFile>, sqlx::Error> {
     let mut rows = sqlx::query(
-        "SELECT relative_path,size,modified_ns FROM inventory_assets WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id WHERE s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local')",
+        "SELECT relative_path,size,modified_ns FROM inventory_assets WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local')",
     )
     .bind(library_id)
     .fetch(&store.pool);
@@ -75,7 +75,7 @@ pub async fn load_image_cache(
     store: &IdentityStore,
     library_id: &str,
 ) -> Result<HashMap<String, crate::node::images::LocalImage>, sqlx::Error> {
-    let mut rows = sqlx::query("SELECT i.* FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.library_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind='films' AND l.node_id='local'")
+    let mut rows = sqlx::query("SELECT i.* FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.library_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND l.node_id='local'")
         .bind(library_id).fetch(&store.pool);
     let mut cache = HashMap::new();
     while let Some(row) = rows.try_next().await? {
@@ -103,7 +103,7 @@ pub async fn ingest(
     let mut conn = store.pool.acquire().await?;
     let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
     let configured: Option<String> = sqlx::query_scalar(
-        "SELECT root FROM libraries WHERE id=? AND enabled=1 AND kind='films' AND node_id='local'",
+        "SELECT root FROM libraries WHERE id=? AND enabled=1 AND kind IN ('films', 'series') AND node_id='local'",
     )
     .bind(library_id)
     .fetch_optional(&mut *tx)
@@ -346,6 +346,32 @@ pub async fn stage_batch(
                 None => (None, None, None, None, None),
             };
 
+        let (
+            series_poster_path,
+            series_poster_size,
+            series_poster_modified_ns,
+            series_poster_mime,
+            series_poster_priority,
+        ) = match &file.series_poster {
+            Some(img) => (
+                Some(img.path.as_str()),
+                Some(img.size_bytes as i64),
+                Some(img.modified_ns.as_str()),
+                Some(img.mime.as_str()),
+                Some(i64::from(img.priority)),
+            ),
+            None => (None, None, None, None, None),
+        };
+
+        let series_external_ids_json = file
+            .series_external_ids
+            .as_ref()
+            .map(|ids| json!(ids).to_string());
+        let series_editorial_json = match &file.series_editorial {
+            Some(NfoOutcome::Valid { metadata, .. }) => Some(json!(metadata).to_string()),
+            _ => None,
+        };
+
         let (outcome, editorial_json, editorial_path, editorial_priority) = match &file.editorial {
             NfoOutcome::Missing => ("missing", None, None, None),
             NfoOutcome::Valid {
@@ -374,8 +400,12 @@ pub async fn stage_batch(
                 scan_id, library_id, relative_path, size, modified_ns, mime,
                 title, year, identity_key, external_ids_json, probe_json, reused,
                 poster_path, poster_size, poster_modified_ns, poster_mime, poster_priority,
-                editorial_outcome, editorial_json, editorial_path, editorial_priority
-            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                editorial_outcome, editorial_json, editorial_path, editorial_priority,
+                series_identity_key, series_title, series_year, series_external_ids_json,
+                series_editorial_json, series_poster_path, series_poster_size,
+                series_poster_modified_ns, series_poster_mime, series_poster_priority,
+                season_number, episode_number
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(scan_id, relative_path) DO UPDATE SET
                 size=excluded.size, modified_ns=excluded.modified_ns, mime=excluded.mime,
                 title=excluded.title, year=excluded.year, identity_key=excluded.identity_key,
@@ -384,7 +414,19 @@ pub async fn stage_batch(
                 poster_modified_ns=excluded.poster_modified_ns, poster_mime=excluded.poster_mime,
                 poster_priority=excluded.poster_priority, editorial_outcome=excluded.editorial_outcome,
                 editorial_json=excluded.editorial_json, editorial_path=excluded.editorial_path,
-                editorial_priority=excluded.editorial_priority",
+                editorial_priority=excluded.editorial_priority,
+                series_identity_key=excluded.series_identity_key,
+                series_title=excluded.series_title,
+                series_year=excluded.series_year,
+                series_external_ids_json=excluded.series_external_ids_json,
+                series_editorial_json=excluded.series_editorial_json,
+                series_poster_path=excluded.series_poster_path,
+                series_poster_size=excluded.series_poster_size,
+                series_poster_modified_ns=excluded.series_poster_modified_ns,
+                series_poster_mime=excluded.series_poster_mime,
+                series_poster_priority=excluded.series_poster_priority,
+                season_number=excluded.season_number,
+                episode_number=excluded.episode_number",
         )
         .bind(scan_id)
         .bind(library_id)
@@ -407,6 +449,18 @@ pub async fn stage_batch(
         .bind(&editorial_json)
         .bind(editorial_path)
         .bind(editorial_priority)
+        .bind(file.series_identity_key.as_deref())
+        .bind(file.series_title.as_deref())
+        .bind(file.series_year.map(i64::from))
+        .bind(&series_external_ids_json)
+        .bind(&series_editorial_json)
+        .bind(series_poster_path)
+        .bind(series_poster_size)
+        .bind(series_poster_modified_ns)
+        .bind(series_poster_mime)
+        .bind(series_poster_priority)
+        .bind(file.season_number.map(i64::from))
+        .bind(file.episode_number.map(i64::from))
         .execute(&mut *tx)
         .await?;
     }
@@ -424,14 +478,14 @@ pub async fn publish_staged_scan(
     let mut conn = store.pool.acquire().await?;
     let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
 
-    let configured: Option<String> = sqlx::query_scalar(
-        "SELECT root FROM libraries WHERE id=? AND enabled=1 AND kind='films' AND node_id='local'",
+    let configured: Option<(String, String)> = sqlx::query_as(
+        "SELECT root, kind FROM libraries WHERE id=? AND enabled=1 AND kind IN ('films', 'series') AND node_id='local'",
     )
     .bind(library_id)
     .fetch_optional(&mut *tx)
     .await?;
 
-    let configured_matches = configured.as_deref().is_some_and(|c| {
+    let configured_matches = configured.as_ref().is_some_and(|(c, _)| {
         let root_str = root.to_str().unwrap_or("");
         let c_clean = c.strip_prefix(r"\\?\").unwrap_or(c);
         let root_clean = root_str.strip_prefix(r"\\?\").unwrap_or(root_str);
@@ -446,7 +500,7 @@ pub async fn publish_staged_scan(
             "library configuration changed during scan".into(),
         ));
     }
-    let root_snapshot = configured.unwrap();
+    let (root_snapshot, lib_kind) = configured.unwrap();
 
     let mut affected_work_ids = std::collections::BTreeSet::new();
 
@@ -488,9 +542,12 @@ pub async fn publish_staged_scan(
              SET available=0 
              WHERE library_id=? AND available=1 AND relative_path NOT IN (
                  SELECT poster_path FROM scan_staging_files WHERE scan_id=? AND poster_path IS NOT NULL
+                 UNION
+                 SELECT series_poster_path FROM scan_staging_files WHERE scan_id=? AND series_poster_path IS NOT NULL
              )",
         )
         .bind(library_id)
+        .bind(scan_id)
         .bind(scan_id)
         .execute(&mut *tx)
         .await?;
@@ -540,195 +597,570 @@ pub async fn publish_staged_scan(
     .execute(&mut *tx)
     .await?;
 
-    // Keyset pagination in bounded chunks (250 items at a time) for new / modified files.
-    // Avoids loading all probe_json blobs into RAM simultaneously, strictly bounding RSS.
-    let mut last_new_path = String::new();
-    loop {
-        let chunk = sqlx::query(
-            "SELECT relative_path, identity_key, title, year, external_ids_json, probe_json, size, modified_ns, mime 
-             FROM scan_staging_files 
-             WHERE scan_id=? AND reused=0 AND relative_path > ? 
-             ORDER BY relative_path ASC 
-             LIMIT 250",
+    if lib_kind == "series" {
+        // Find all distinct series in staging
+        let staged_series = sqlx::query(
+            "SELECT DISTINCT series_identity_key, series_title, series_year,
+                    series_external_ids_json, series_editorial_json,
+                    series_poster_path, series_poster_size, series_poster_modified_ns,
+                    series_poster_mime, series_poster_priority
+             FROM scan_staging_files
+             WHERE scan_id=? AND series_identity_key IS NOT NULL",
         )
         .bind(scan_id)
-        .bind(&last_new_path)
         .fetch_all(&mut *tx)
         .await?;
 
-        if chunk.is_empty() {
-            break;
-        }
+        let mut series_work_map: HashMap<String, String> = HashMap::new();
 
-        for row in &chunk {
-            let relative_path: String = row.get("relative_path");
-            let file_identity_key: String = row.get("identity_key");
-            let identity_key = format!("{}\n{}", root.to_string_lossy(), file_identity_key);
-            let title: String = row.get("title");
-            let year: Option<i64> = row.get("year");
-            let external_ids_json: String = row.get("external_ids_json");
-            let probe_json: Option<String> = row.get("probe_json");
-            let probe_json = probe_json.unwrap_or_else(|| "{}".into());
-            let size: i64 = row.get("size");
-            let modified_ns: String = row.get("modified_ns");
-            let mime: String = row.get("mime");
+        for s_row in staged_series {
+            let series_key: String = s_row.get("series_identity_key");
+            let series_scoped_key = format!("{}\n{}", root_snapshot, series_key);
+            let s_title: String = s_row
+                .get::<Option<String>, _>("series_title")
+                .unwrap_or_else(|| series_key.clone());
+            let s_year: Option<i64> = s_row.get("series_year");
+            let s_ext_ids: String = s_row
+                .get::<Option<String>, _>("series_external_ids_json")
+                .unwrap_or_else(|| "{}".into());
+            let s_editorial: String = s_row
+                .get::<Option<String>, _>("series_editorial_json")
+                .unwrap_or_else(|| "{}".into());
+            let s_title_sort = s_title.to_lowercase();
 
-            let existing = sqlx::query(
-                "SELECT a.id,w.id as work_id,w.identity_key,s.root_snapshot 
-                 FROM inventory_assets a 
-                 JOIN inventory_sources s ON s.id=a.source_id 
-                 JOIN inventory_versions v ON v.id=s.version_id 
-                 JOIN inventory_editions e ON e.id=v.edition_id 
-                 JOIN inventory_works w ON w.id=e.work_id 
-                 WHERE a.library_id=? AND a.relative_path=?",
-            )
-            .bind(library_id)
-            .bind(&relative_path)
-            .fetch_optional(&mut *tx)
-            .await?;
-
-            let previous_asset_id = existing.as_ref().map(|r| r.get::<String, _>("id"));
-            let is_existing_matching = existing.as_ref().is_some_and(|r| {
-                r.get::<String, _>("identity_key") == identity_key
-                    && r.get::<String, _>("root_snapshot") == root_snapshot
-            });
-
-            let (asset_id, work_id) = if is_existing_matching {
-                let r = existing.unwrap();
-                let asset_id: String = r.get("id");
-                let work_id: String = r.get("work_id");
-                sqlx::query(
-                    "UPDATE inventory_assets SET size=?,modified_ns=?,mime=?,probe_json=?,available=1 WHERE id=?",
-                )
-                .bind(size)
-                .bind(&modified_ns)
-                .bind(&mime)
-                .bind(&probe_json)
-                .bind(&asset_id)
-                .execute(&mut *tx)
-                .await?;
-
-                (asset_id, work_id)
-            } else {
-                let work = sqlx::query(
-                    "SELECT id FROM inventory_works WHERE library_id=? AND identity_key=?",
-                )
-                .bind(library_id)
-                .bind(&identity_key)
-                .fetch_optional(&mut *tx)
-                .await?;
-                let work_id = if let Some(row) = work {
-                    row.get::<String, _>("id")
-                } else {
-                    let work_id = id();
-                    let title_sort = title.to_lowercase();
-                    sqlx::query(
-                        "INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort) VALUES(?,?,?,?,?,?,?)",
-                    )
-                    .bind(&work_id)
+            let existing_series =
+                sqlx::query("SELECT id FROM inventory_works WHERE library_id=? AND identity_key=?")
                     .bind(library_id)
-                    .bind(&identity_key)
-                    .bind(&title)
-                    .bind(year)
-                    .bind(&external_ids_json)
-                    .bind(title_sort)
-                    .execute(&mut *tx)
+                    .bind(&series_scoped_key)
+                    .fetch_optional(&mut *tx)
                     .await?;
-                    work_id
-                };
 
-                let edition_id = sqlx::query_scalar::<_, String>(
-                    "SELECT id FROM inventory_editions WHERE work_id=? LIMIT 1",
-                )
-                .bind(&work_id)
-                .fetch_optional(&mut *tx)
-                .await?;
-                let edition_id = if let Some(edition_id) = edition_id {
-                    edition_id
-                } else {
-                    let edition_id = id();
-                    sqlx::query("INSERT INTO inventory_editions VALUES(?,?)")
-                        .bind(&edition_id)
-                        .bind(&work_id)
-                        .execute(&mut *tx)
-                        .await?;
-                    edition_id
-                };
-
-                let version_id = id();
-                let source_id = id();
-                let is_new_asset = previous_asset_id.is_none();
-                let asset_id = previous_asset_id.unwrap_or_else(id);
-                if !is_new_asset {
-                    sqlx::query("DELETE FROM inventory_editorial WHERE asset_id=?")
-                        .bind(&asset_id)
-                        .execute(&mut *tx)
-                        .await?;
-                }
-                sqlx::query("INSERT INTO inventory_versions VALUES(?,?)")
-                    .bind(&version_id)
-                    .bind(&edition_id)
-                    .execute(&mut *tx)
-                    .await?;
+            let series_work_id = if let Some(row) = existing_series {
+                let swid: String = row.get("id");
                 sqlx::query(
-                    "INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,?,?)",
+                    "UPDATE inventory_works SET title=?, year=?, external_ids_json=?, title_sort=?, editorial_json=?, kind='series' WHERE id=?",
                 )
-                .bind(&source_id)
-                .bind(&version_id)
-                .bind(library_id)
-                .bind(&root_snapshot)
+                .bind(&s_title)
+                .bind(s_year)
+                .bind(&s_ext_ids)
+                .bind(&s_title_sort)
+                .bind(&s_editorial)
+                .bind(&swid)
                 .execute(&mut *tx)
                 .await?;
+                swid
+            } else {
+                let swid = id();
                 sqlx::query(
-                    "INSERT INTO inventory_assets VALUES(?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET source_id=excluded.source_id,size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,probe_json=excluded.probe_json,available=1",
+                    "INSERT INTO inventory_works (id, library_id, identity_key, title, year, external_ids_json, title_sort, editorial_json, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'series')",
                 )
-                .bind(&asset_id)
-                .bind(source_id)
+                .bind(&swid)
                 .bind(library_id)
-                .bind(&relative_path)
-                .bind(size)
-                .bind(&modified_ns)
-                .bind(&mime)
-                .bind(&probe_json)
+                .bind(&series_scoped_key)
+                .bind(&s_title)
+                .bind(s_year)
+                .bind(&s_ext_ids)
+                .bind(&s_title_sort)
+                .bind(&s_editorial)
                 .execute(&mut *tx)
                 .await?;
-
-                (asset_id, work_id)
+                swid
             };
 
-            affected_work_ids.insert(work_id.clone());
+            series_work_map.insert(series_key.clone(), series_work_id.clone());
 
-            if let Ok(probe) = decode(&probe_json) {
-                let indexes: Vec<i64> = probe.streams.iter().map(|t| i64::from(t.index)).collect();
-                let previous =
-                    sqlx::query("SELECT id,stream_index FROM inventory_tracks WHERE asset_id=?")
-                        .bind(&asset_id)
-                        .fetch_all(&mut *tx)
-                        .await?;
-                for r in previous {
-                    if !indexes.contains(&r.get("stream_index")) {
-                        sqlx::query("DELETE FROM inventory_tracks WHERE id=?")
-                            .bind(r.get::<String, _>("id"))
-                            .execute(&mut *tx)
-                            .await?;
-                    }
-                }
-                for track in &probe.streams {
-                    sqlx::query(
-                        "INSERT INTO inventory_tracks VALUES(?,?,?,?) 
-                         ON CONFLICT(asset_id,stream_index) DO UPDATE SET metadata_json=excluded.metadata_json",
-                    )
-                    .bind(id())
-                    .bind(&asset_id)
-                    .bind(i64::from(track.index))
-                    .bind(json!(track).to_string())
-                    .execute(&mut *tx)
-                    .await?;
-                }
+            let poster_path: Option<String> = s_row.get("series_poster_path");
+            if let Some(poster_path) = poster_path {
+                let poster_size: i64 = s_row.get("series_poster_size");
+                let poster_modified_ns: String = s_row.get("series_poster_modified_ns");
+                let poster_mime: String = s_row.get("series_poster_mime");
+                let poster_priority: i64 = s_row.get("series_poster_priority");
+
+                sqlx::query(
+                    "INSERT INTO inventory_images(id, work_id, library_id, root_snapshot, relative_path, size, modified_ns, mime, priority, available)
+                     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                     ON CONFLICT(work_id, root_snapshot, relative_path) DO UPDATE SET
+                        size=excluded.size, modified_ns=excluded.modified_ns, mime=excluded.mime, priority=excluded.priority, available=1",
+                )
+                .bind(id())
+                .bind(&series_work_id)
+                .bind(library_id)
+                .bind(&root_snapshot)
+                .bind(&poster_path)
+                .bind(poster_size)
+                .bind(&poster_modified_ns)
+                .bind(&poster_mime)
+                .bind(poster_priority)
+                .execute(&mut *tx)
+                .await?;
             }
         }
 
-        last_new_path = chunk.last().unwrap().get("relative_path");
+        // Seasons
+        let staged_seasons = sqlx::query(
+            "SELECT DISTINCT series_identity_key, season_number
+             FROM scan_staging_files
+             WHERE scan_id=? AND series_identity_key IS NOT NULL AND season_number IS NOT NULL",
+        )
+        .bind(scan_id)
+        .fetch_all(&mut *tx)
+        .await?;
+
+        let mut season_map: HashMap<(String, i64), String> = HashMap::new();
+
+        for s_row in staged_seasons {
+            let series_key: String = s_row.get("series_identity_key");
+            let season_num: i64 = s_row.get("season_number");
+            let Some(series_work_id) = series_work_map.get(&series_key) else {
+                continue;
+            };
+
+            let existing_season = sqlx::query(
+                "SELECT id FROM inventory_seasons WHERE series_id=? AND season_number=?",
+            )
+            .bind(series_work_id)
+            .bind(season_num)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+            let season_id = if let Some(row) = existing_season {
+                row.get::<String, _>("id")
+            } else {
+                let sid = id();
+                let season_title = if season_num == 0 {
+                    "Hors-série".to_string()
+                } else {
+                    format!("Saison {}", season_num)
+                };
+                sqlx::query(
+                    "INSERT INTO inventory_seasons(id, series_id, season_number, title) VALUES(?, ?, ?, ?)",
+                )
+                .bind(&sid)
+                .bind(series_work_id)
+                .bind(season_num)
+                .bind(season_title)
+                .execute(&mut *tx)
+                .await?;
+                sid
+            };
+
+            season_map.insert((series_key, season_num), season_id);
+        }
+
+        // Episodes: Keyset pagination for new / modified files (reused=0)
+        let mut last_new_path = String::new();
+        loop {
+            let chunk = sqlx::query(
+                "SELECT relative_path, identity_key, title, year, external_ids_json, probe_json, size, modified_ns, mime,
+                        series_identity_key, season_number, episode_number
+                 FROM scan_staging_files 
+                 WHERE scan_id=? AND reused=0 AND relative_path > ? 
+                 ORDER BY relative_path ASC 
+                 LIMIT 250",
+            )
+            .bind(scan_id)
+            .bind(&last_new_path)
+            .fetch_all(&mut *tx)
+            .await?;
+
+            if chunk.is_empty() {
+                break;
+            }
+
+            for row in &chunk {
+                let relative_path: String = row.get("relative_path");
+                let file_identity_key: String = row.get("identity_key");
+                let series_identity_key: Option<String> = row.get("series_identity_key");
+                let season_number: Option<i64> = row.get("season_number");
+                let episode_number: Option<i64> = row.get("episode_number");
+
+                let identity_key = if let (Some(s_key), Some(s_num), Some(e_num)) =
+                    (&series_identity_key, season_number, episode_number)
+                {
+                    format!("{}\n{}/s{:02}e{:02}", root_snapshot, s_key, s_num, e_num)
+                } else {
+                    format!("{}\n{}", root_snapshot, file_identity_key)
+                };
+
+                let title: String = row.get("title");
+                let year: Option<i64> = row.get("year");
+                let external_ids_json: String = row.get("external_ids_json");
+                let probe_json: Option<String> = row.get("probe_json");
+                let probe_json = probe_json.unwrap_or_else(|| "{}".into());
+                let size: i64 = row.get("size");
+                let modified_ns: String = row.get("modified_ns");
+                let mime: String = row.get("mime");
+
+                let existing = sqlx::query(
+                    "SELECT a.id,w.id as work_id,w.identity_key,s.root_snapshot 
+                     FROM inventory_assets a 
+                     JOIN inventory_sources s ON s.id=a.source_id 
+                     JOIN inventory_versions v ON v.id=s.version_id 
+                     JOIN inventory_editions e ON e.id=v.edition_id 
+                     JOIN inventory_works w ON w.id=e.work_id 
+                     WHERE a.library_id=? AND a.relative_path=?",
+                )
+                .bind(library_id)
+                .bind(&relative_path)
+                .fetch_optional(&mut *tx)
+                .await?;
+
+                let previous_asset_id = existing.as_ref().map(|r| r.get::<String, _>("id"));
+                let is_existing_matching = existing.as_ref().is_some_and(|r| {
+                    r.get::<String, _>("identity_key") == identity_key
+                        && r.get::<String, _>("root_snapshot") == root_snapshot
+                });
+
+                let (asset_id, ep_work_id) = if is_existing_matching {
+                    let r = existing.unwrap();
+                    let asset_id: String = r.get("id");
+                    let ep_work_id: String = r.get("work_id");
+                    sqlx::query(
+                        "UPDATE inventory_assets SET size=?,modified_ns=?,mime=?,probe_json=?,available=1 WHERE id=?",
+                    )
+                    .bind(size)
+                    .bind(&modified_ns)
+                    .bind(&mime)
+                    .bind(&probe_json)
+                    .bind(&asset_id)
+                    .execute(&mut *tx)
+                    .await?;
+
+                    (asset_id, ep_work_id)
+                } else {
+                    let work = sqlx::query(
+                        "SELECT id FROM inventory_works WHERE library_id=? AND identity_key=?",
+                    )
+                    .bind(library_id)
+                    .bind(&identity_key)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+
+                    let ep_work_id = if let Some(row) = work {
+                        row.get::<String, _>("id")
+                    } else {
+                        let wid = id();
+                        let title_sort = title.to_lowercase();
+                        sqlx::query(
+                            "INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort,kind) VALUES(?,?,?,?,?,?,?,'episode')",
+                        )
+                        .bind(&wid)
+                        .bind(library_id)
+                        .bind(&identity_key)
+                        .bind(&title)
+                        .bind(year)
+                        .bind(&external_ids_json)
+                        .bind(title_sort)
+                        .execute(&mut *tx)
+                        .await?;
+                        wid
+                    };
+
+                    if let (Some(s_key), Some(s_num), Some(e_num)) =
+                        (&series_identity_key, season_number, episode_number)
+                        && let Some(season_id) = season_map.get(&(s_key.clone(), s_num))
+                    {
+                        sqlx::query(
+                            "INSERT INTO inventory_episodes(id, season_id, episode_number, work_id)
+                             VALUES(?, ?, ?, ?)
+                             ON CONFLICT(season_id, episode_number) DO UPDATE SET work_id=excluded.work_id",
+                        )
+                        .bind(id())
+                        .bind(season_id)
+                        .bind(e_num)
+                        .bind(&ep_work_id)
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+
+                    let edition_id = sqlx::query_scalar::<_, String>(
+                        "SELECT id FROM inventory_editions WHERE work_id=? LIMIT 1",
+                    )
+                    .bind(&ep_work_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    let edition_id = if let Some(edition_id) = edition_id {
+                        edition_id
+                    } else {
+                        let edition_id = id();
+                        sqlx::query("INSERT INTO inventory_editions VALUES(?,?)")
+                            .bind(&edition_id)
+                            .bind(&ep_work_id)
+                            .execute(&mut *tx)
+                            .await?;
+                        edition_id
+                    };
+
+                    let version_id = id();
+                    let source_id = id();
+                    let is_new_asset = previous_asset_id.is_none();
+                    let asset_id = previous_asset_id.unwrap_or_else(id);
+                    if !is_new_asset {
+                        sqlx::query("DELETE FROM inventory_editorial WHERE asset_id=?")
+                            .bind(&asset_id)
+                            .execute(&mut *tx)
+                            .await?;
+                    }
+                    sqlx::query("INSERT INTO inventory_versions VALUES(?,?)")
+                        .bind(&version_id)
+                        .bind(&edition_id)
+                        .execute(&mut *tx)
+                        .await?;
+                    sqlx::query(
+                        "INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,?,?)",
+                    )
+                    .bind(&source_id)
+                    .bind(&version_id)
+                    .bind(library_id)
+                    .bind(&root_snapshot)
+                    .execute(&mut *tx)
+                    .await?;
+                    sqlx::query(
+                        "INSERT INTO inventory_assets VALUES(?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET source_id=excluded.source_id,size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,probe_json=excluded.probe_json,available=1",
+                    )
+                    .bind(&asset_id)
+                    .bind(source_id)
+                    .bind(library_id)
+                    .bind(&relative_path)
+                    .bind(size)
+                    .bind(&modified_ns)
+                    .bind(&mime)
+                    .bind(&probe_json)
+                    .execute(&mut *tx)
+                    .await?;
+
+                    (asset_id, ep_work_id)
+                };
+
+                affected_work_ids.insert(ep_work_id.clone());
+
+                if let Ok(probe) = decode(&probe_json) {
+                    let indexes: Vec<i64> =
+                        probe.streams.iter().map(|t| i64::from(t.index)).collect();
+                    let previous = sqlx::query(
+                        "SELECT id,stream_index FROM inventory_tracks WHERE asset_id=?",
+                    )
+                    .bind(&asset_id)
+                    .fetch_all(&mut *tx)
+                    .await?;
+                    for r in previous {
+                        if !indexes.contains(&r.get("stream_index")) {
+                            sqlx::query("DELETE FROM inventory_tracks WHERE id=?")
+                                .bind(r.get::<String, _>("id"))
+                                .execute(&mut *tx)
+                                .await?;
+                        }
+                    }
+                    for track in &probe.streams {
+                        sqlx::query(
+                            "INSERT INTO inventory_tracks VALUES(?,?,?,?) 
+                             ON CONFLICT(asset_id,stream_index) DO UPDATE SET metadata_json=excluded.metadata_json",
+                        )
+                        .bind(id())
+                        .bind(&asset_id)
+                        .bind(i64::from(track.index))
+                        .bind(json!(track).to_string())
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+                }
+            }
+
+            last_new_path = chunk.last().unwrap().get("relative_path");
+        }
+    } else {
+        // Keyset pagination in bounded chunks (250 items at a time) for new / modified files.
+        // Avoids loading all probe_json blobs into RAM simultaneously, strictly bounding RSS.
+        let mut last_new_path = String::new();
+        loop {
+            let chunk = sqlx::query(
+                "SELECT relative_path, identity_key, title, year, external_ids_json, probe_json, size, modified_ns, mime 
+                 FROM scan_staging_files 
+                 WHERE scan_id=? AND reused=0 AND relative_path > ? 
+                 ORDER BY relative_path ASC 
+                 LIMIT 250",
+            )
+            .bind(scan_id)
+            .bind(&last_new_path)
+            .fetch_all(&mut *tx)
+            .await?;
+
+            if chunk.is_empty() {
+                break;
+            }
+
+            for row in &chunk {
+                let relative_path: String = row.get("relative_path");
+                let file_identity_key: String = row.get("identity_key");
+                let identity_key = format!("{}\n{}", root.to_string_lossy(), file_identity_key);
+                let title: String = row.get("title");
+                let year: Option<i64> = row.get("year");
+                let external_ids_json: String = row.get("external_ids_json");
+                let probe_json: Option<String> = row.get("probe_json");
+                let probe_json = probe_json.unwrap_or_else(|| "{}".into());
+                let size: i64 = row.get("size");
+                let modified_ns: String = row.get("modified_ns");
+                let mime: String = row.get("mime");
+
+                let existing = sqlx::query(
+                    "SELECT a.id,w.id as work_id,w.identity_key,s.root_snapshot 
+                     FROM inventory_assets a 
+                     JOIN inventory_sources s ON s.id=a.source_id 
+                     JOIN inventory_versions v ON v.id=s.version_id 
+                     JOIN inventory_editions e ON e.id=v.edition_id 
+                     JOIN inventory_works w ON w.id=e.work_id 
+                     WHERE a.library_id=? AND a.relative_path=?",
+                )
+                .bind(library_id)
+                .bind(&relative_path)
+                .fetch_optional(&mut *tx)
+                .await?;
+
+                let previous_asset_id = existing.as_ref().map(|r| r.get::<String, _>("id"));
+                let is_existing_matching = existing.as_ref().is_some_and(|r| {
+                    r.get::<String, _>("identity_key") == identity_key
+                        && r.get::<String, _>("root_snapshot") == root_snapshot
+                });
+
+                let (asset_id, work_id) = if is_existing_matching {
+                    let r = existing.unwrap();
+                    let asset_id: String = r.get("id");
+                    let work_id: String = r.get("work_id");
+                    sqlx::query(
+                        "UPDATE inventory_assets SET size=?,modified_ns=?,mime=?,probe_json=?,available=1 WHERE id=?",
+                    )
+                    .bind(size)
+                    .bind(&modified_ns)
+                    .bind(&mime)
+                    .bind(&probe_json)
+                    .bind(&asset_id)
+                    .execute(&mut *tx)
+                    .await?;
+
+                    (asset_id, work_id)
+                } else {
+                    let work = sqlx::query(
+                        "SELECT id FROM inventory_works WHERE library_id=? AND identity_key=?",
+                    )
+                    .bind(library_id)
+                    .bind(&identity_key)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    let work_id = if let Some(row) = work {
+                        row.get::<String, _>("id")
+                    } else {
+                        let work_id = id();
+                        let title_sort = title.to_lowercase();
+                        sqlx::query(
+                            "INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort,kind) VALUES(?,?,?,?,?,?,?,'film')",
+                        )
+                        .bind(&work_id)
+                        .bind(library_id)
+                        .bind(&identity_key)
+                        .bind(&title)
+                        .bind(year)
+                        .bind(&external_ids_json)
+                        .bind(title_sort)
+                        .execute(&mut *tx)
+                        .await?;
+                        work_id
+                    };
+
+                    let edition_id = sqlx::query_scalar::<_, String>(
+                        "SELECT id FROM inventory_editions WHERE work_id=? LIMIT 1",
+                    )
+                    .bind(&work_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    let edition_id = if let Some(edition_id) = edition_id {
+                        edition_id
+                    } else {
+                        let edition_id = id();
+                        sqlx::query("INSERT INTO inventory_editions VALUES(?,?)")
+                            .bind(&edition_id)
+                            .bind(&work_id)
+                            .execute(&mut *tx)
+                            .await?;
+                        edition_id
+                    };
+
+                    let version_id = id();
+                    let source_id = id();
+                    let is_new_asset = previous_asset_id.is_none();
+                    let asset_id = previous_asset_id.unwrap_or_else(id);
+                    if !is_new_asset {
+                        sqlx::query("DELETE FROM inventory_editorial WHERE asset_id=?")
+                            .bind(&asset_id)
+                            .execute(&mut *tx)
+                            .await?;
+                    }
+                    sqlx::query("INSERT INTO inventory_versions VALUES(?,?)")
+                        .bind(&version_id)
+                        .bind(&edition_id)
+                        .execute(&mut *tx)
+                        .await?;
+                    sqlx::query(
+                        "INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,?,?)",
+                    )
+                    .bind(&source_id)
+                    .bind(&version_id)
+                    .bind(library_id)
+                    .bind(&root_snapshot)
+                    .execute(&mut *tx)
+                    .await?;
+                    sqlx::query(
+                        "INSERT INTO inventory_assets VALUES(?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET source_id=excluded.source_id,size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,probe_json=excluded.probe_json,available=1",
+                    )
+                    .bind(&asset_id)
+                    .bind(source_id)
+                    .bind(library_id)
+                    .bind(&relative_path)
+                    .bind(size)
+                    .bind(&modified_ns)
+                    .bind(&mime)
+                    .bind(&probe_json)
+                    .execute(&mut *tx)
+                    .await?;
+
+                    (asset_id, work_id)
+                };
+
+                affected_work_ids.insert(work_id.clone());
+
+                if let Ok(probe) = decode(&probe_json) {
+                    let indexes: Vec<i64> =
+                        probe.streams.iter().map(|t| i64::from(t.index)).collect();
+                    let previous = sqlx::query(
+                        "SELECT id,stream_index FROM inventory_tracks WHERE asset_id=?",
+                    )
+                    .bind(&asset_id)
+                    .fetch_all(&mut *tx)
+                    .await?;
+                    for r in previous {
+                        if !indexes.contains(&r.get("stream_index")) {
+                            sqlx::query("DELETE FROM inventory_tracks WHERE id=?")
+                                .bind(r.get::<String, _>("id"))
+                                .execute(&mut *tx)
+                                .await?;
+                        }
+                    }
+                    for track in &probe.streams {
+                        sqlx::query(
+                            "INSERT INTO inventory_tracks VALUES(?,?,?,?) 
+                             ON CONFLICT(asset_id,stream_index) DO UPDATE SET metadata_json=excluded.metadata_json",
+                        )
+                        .bind(id())
+                        .bind(&asset_id)
+                        .bind(i64::from(track.index))
+                        .bind(json!(track).to_string())
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+                }
+            }
+
+            last_new_path = chunk.last().unwrap().get("relative_path");
+        }
     }
 
     // Unified single-pass keyset pagination for artwork and editorial across all staged files.
@@ -901,7 +1333,7 @@ pub async fn refresh_editorial_for_works(
              JOIN inventory_versions v ON v.id=s.version_id 
              JOIN inventory_editions e ON e.id=v.edition_id 
              JOIN libraries l ON l.id=s.library_id 
-             WHERE a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 AND l.kind='films' AND l.node_id='local' AND e.work_id IN ("
+             WHERE a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND l.node_id='local' AND e.work_id IN ("
         );
         let mut separated = builder.separated(", ");
         for id in chunk {
@@ -1029,10 +1461,10 @@ pub async fn resource_library(
     let query = match kind {
         "work" => "SELECT library_id FROM inventory_works WHERE id=?",
         "image" => {
-            "SELECT i.library_id FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.root_snapshot=l.root AND l.kind='films' AND l.node_id='local'"
+            "SELECT i.library_id FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local'"
         }
         "asset" | "media" => {
-            "SELECT a.library_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id WHERE a.id=? AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local'"
+            "SELECT a.library_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id WHERE a.id=? AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local'"
         }
         _ => return Ok(None),
     };
@@ -1045,7 +1477,34 @@ pub async fn resource_library(
 fn work(row: &sqlx::sqlite::SqliteRow) -> Value {
     let metadata: Value =
         serde_json::from_str(row.get("editorial_json")).unwrap_or_else(|_| json!({}));
-    json!({"id":row.get::<String,_>("id"),"libraryId":row.get::<String,_>("library_id"),"kind":"film","title":row.get::<String,_>("title"),"year":row.get::<Option<i64>,_>("year"),"description":metadata["plot"].as_str().or_else(||metadata["outline"].as_str()).unwrap_or("Média local indexé"),"plot":metadata["plot"],"genres":metadata["genres"].as_array().cloned().unwrap_or_default(),"originalTitle":metadata["original_title"],"outline":metadata["outline"],"premiered":metadata["premiered"],"rating":metadata["rating"],"mpaa":metadata["mpaa"],"externalIds":metadata["external_ids"],"metadataProvenance":metadata["provenance"].as_str().unwrap_or("local"),"metadataWarnings":metadata["warnings"].as_array().cloned().unwrap_or_default(),"synthetic":false,"posterUrl":row.try_get::<Option<String>,_>("poster_url").ok().flatten()})
+    let kind: String = row.try_get("kind").unwrap_or_else(|_| "film".to_string());
+    let season_count: Option<i64> = row.try_get("season_count").ok().flatten();
+    let episode_count: Option<i64> = row.try_get("episode_count").ok().flatten();
+    let mut val = json!({
+        "id": row.get::<String,_>("id"),
+        "libraryId": row.get::<String,_>("library_id"),
+        "kind": kind,
+        "title": row.get::<String,_>("title"),
+        "year": row.get::<Option<i64>,_>("year"),
+        "description": metadata["plot"].as_str().or_else(||metadata["outline"].as_str()).unwrap_or("Média local indexé"),
+        "plot": metadata["plot"],
+        "genres": metadata["genres"].as_array().cloned().unwrap_or_default(),
+        "originalTitle": metadata["original_title"],
+        "outline": metadata["outline"],
+        "premiered": metadata["premiered"],
+        "rating": metadata["rating"],
+        "mpaa": metadata["mpaa"],
+        "externalIds": metadata["external_ids"],
+        "metadataProvenance": metadata["provenance"].as_str().unwrap_or("local"),
+        "metadataWarnings": metadata["warnings"].as_array().cloned().unwrap_or_default(),
+        "synthetic": false,
+        "posterUrl": row.try_get::<Option<String>,_>("poster_url").ok().flatten()
+    });
+    if kind == "series" {
+        val["seasonCount"] = json!(season_count.unwrap_or(0));
+        val["episodeCount"] = json!(episode_count.unwrap_or(0));
+    }
+    val
 }
 
 /// Administrator scan diagnostics. Only currently available sources contribute;
@@ -1054,7 +1513,7 @@ pub async fn editorial_warnings(
     store: &IdentityStore,
     library_id: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    let rows = sqlx::query("SELECT w.editorial_json FROM inventory_works w WHERE w.library_id=? AND EXISTS(SELECT 1 FROM inventory_editions e JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=s.library_id WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 AND l.kind='films' AND l.node_id='local') ORDER BY w.id")
+    let rows = sqlx::query("SELECT w.editorial_json FROM inventory_works w WHERE w.library_id=? AND EXISTS(SELECT 1 FROM inventory_editions e JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=s.library_id WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND l.node_id='local') ORDER BY w.id")
         .bind(library_id).fetch_all(&store.pool).await?;
     let mut warnings = Vec::new();
     for row in rows {
@@ -1081,7 +1540,23 @@ pub async fn catalogue(
     offset: usize,
     limit: usize,
 ) -> Result<Value, sqlx::Error> {
-    if visible.is_empty() || kind.is_some_and(|k| k != "film") {
+    let target_kind = match kind {
+        Some("film") | Some("films") => Some("film"),
+        Some("series") => Some("series"),
+        None => None,
+        Some(_) => {
+            return Ok(json!({
+                "items": [],
+                "total": 0,
+                "offset": offset,
+                "limit": limit,
+                "mode": "local-library",
+                "notice": "Bibliothèques locales indexées"
+            }));
+        }
+    };
+
+    if visible.is_empty() {
         return Ok(json!({
             "items": [],
             "total": 0,
@@ -1110,16 +1585,59 @@ pub async fn catalogue(
         count_builder.push(") > 0 ");
     }
 
-    count_builder.push(
-        "AND EXISTS ( \
-           SELECT 1 FROM inventory_editions e \
-           JOIN inventory_versions v ON v.edition_id=e.id \
-           JOIN inventory_sources s ON s.version_id=v.id \
-           JOIN inventory_assets a ON a.source_id=s.id \
-           JOIN libraries l ON l.id=s.library_id \
-           WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
-         )",
-    );
+    match target_kind {
+        Some("film") => {
+            count_builder.push(
+                "AND w.kind = 'film' AND EXISTS ( \
+                   SELECT 1 FROM inventory_editions e \
+                   JOIN inventory_versions v ON v.edition_id=e.id \
+                   JOIN inventory_sources s ON s.version_id=v.id \
+                   JOIN inventory_assets a ON a.source_id=s.id \
+                   JOIN libraries l ON l.id=s.library_id \
+                   WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+                 )",
+            );
+        }
+        Some("series") => {
+            count_builder.push(
+                "AND w.kind = 'series' AND EXISTS ( \
+                   SELECT 1 FROM inventory_seasons s \
+                   JOIN inventory_episodes ep ON ep.season_id=s.id \
+                   JOIN inventory_editions e ON e.work_id=ep.work_id \
+                   JOIN inventory_versions v ON v.edition_id=e.id \
+                   JOIN inventory_sources src ON src.version_id=v.id \
+                   JOIN inventory_assets a ON a.source_id=src.id \
+                   JOIN libraries l ON l.id=src.library_id \
+                   WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND l.node_id='local' AND l.enabled=1 \
+                 )",
+            );
+        }
+        _ => {
+            count_builder.push(
+                "AND ( \
+                   (w.kind = 'film' AND EXISTS ( \
+                      SELECT 1 FROM inventory_editions e \
+                      JOIN inventory_versions v ON v.edition_id=e.id \
+                      JOIN inventory_sources s ON s.version_id=v.id \
+                      JOIN inventory_assets a ON a.source_id=s.id \
+                      JOIN libraries l ON l.id=s.library_id \
+                      WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+                   )) \
+                   OR \
+                   (w.kind = 'series' AND EXISTS ( \
+                      SELECT 1 FROM inventory_seasons s \
+                      JOIN inventory_episodes ep ON ep.season_id=s.id \
+                      JOIN inventory_editions e ON e.work_id=ep.work_id \
+                      JOIN inventory_versions v ON v.edition_id=e.id \
+                      JOIN inventory_sources src ON src.version_id=v.id \
+                      JOIN inventory_assets a ON a.source_id=src.id \
+                      JOIN libraries l ON l.id=src.library_id \
+                      WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND l.node_id='local' AND l.enabled=1 \
+                   )) \
+                 )",
+            );
+        }
+    }
 
     let total: i64 = count_builder
         .build_query_scalar()
@@ -1140,10 +1658,30 @@ pub async fn catalogue(
 
     let mut data_builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
         "SELECT w.*, \
+           CASE WHEN w.kind = 'series' THEN ( \
+             SELECT COUNT(DISTINCT s.id) FROM inventory_seasons s \
+             JOIN inventory_episodes ep ON ep.season_id=s.id \
+             JOIN inventory_editions e ON e.work_id=ep.work_id \
+             JOIN inventory_versions v ON v.edition_id=e.id \
+             JOIN inventory_sources src ON src.version_id=v.id \
+             JOIN inventory_assets a ON a.source_id=src.id \
+             JOIN libraries l ON l.id=src.library_id \
+             WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND l.node_id='local' AND l.enabled=1 \
+           ) ELSE NULL END AS season_count, \
+           CASE WHEN w.kind = 'series' THEN ( \
+             SELECT COUNT(DISTINCT ep.id) FROM inventory_seasons s \
+             JOIN inventory_episodes ep ON ep.season_id=s.id \
+             JOIN inventory_editions e ON e.work_id=ep.work_id \
+             JOIN inventory_versions v ON v.edition_id=e.id \
+             JOIN inventory_sources src ON src.version_id=v.id \
+             JOIN inventory_assets a ON a.source_id=src.id \
+             JOIN libraries l ON l.id=src.library_id \
+             WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND l.node_id='local' AND l.enabled=1 \
+           ) ELSE NULL END AS episode_count, \
            (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
             FROM inventory_images i \
             JOIN libraries il ON il.id=i.library_id \
-            WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind='films' AND il.node_id='local' \
+            WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND il.node_id='local' \
             ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url \
          FROM inventory_works w \
          WHERE w.library_id IN (",
@@ -1160,16 +1698,59 @@ pub async fn catalogue(
         data_builder.push(") > 0 ");
     }
 
-    data_builder.push(
-        "AND EXISTS ( \
-           SELECT 1 FROM inventory_editions e \
-           JOIN inventory_versions v ON v.edition_id=e.id \
-           JOIN inventory_sources s ON s.version_id=v.id \
-           JOIN inventory_assets a ON a.source_id=s.id \
-           JOIN libraries l ON l.id=s.library_id \
-           WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
-         ) ",
-    );
+    match target_kind {
+        Some("film") => {
+            data_builder.push(
+                "AND w.kind = 'film' AND EXISTS ( \
+                   SELECT 1 FROM inventory_editions e \
+                   JOIN inventory_versions v ON v.edition_id=e.id \
+                   JOIN inventory_sources s ON s.version_id=v.id \
+                   JOIN inventory_assets a ON a.source_id=s.id \
+                   JOIN libraries l ON l.id=s.library_id \
+                   WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+                 ) ",
+            );
+        }
+        Some("series") => {
+            data_builder.push(
+                "AND w.kind = 'series' AND EXISTS ( \
+                   SELECT 1 FROM inventory_seasons s \
+                   JOIN inventory_episodes ep ON ep.season_id=s.id \
+                   JOIN inventory_editions e ON e.work_id=ep.work_id \
+                   JOIN inventory_versions v ON v.edition_id=e.id \
+                   JOIN inventory_sources src ON src.version_id=v.id \
+                   JOIN inventory_assets a ON a.source_id=src.id \
+                   JOIN libraries l ON l.id=src.library_id \
+                   WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND l.node_id='local' AND l.enabled=1 \
+                 ) ",
+            );
+        }
+        _ => {
+            data_builder.push(
+                "AND ( \
+                   (w.kind = 'film' AND EXISTS ( \
+                      SELECT 1 FROM inventory_editions e \
+                      JOIN inventory_versions v ON v.edition_id=e.id \
+                      JOIN inventory_sources s ON s.version_id=v.id \
+                      JOIN inventory_assets a ON a.source_id=s.id \
+                      JOIN libraries l ON l.id=s.library_id \
+                      WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+                   )) \
+                   OR \
+                   (w.kind = 'series' AND EXISTS ( \
+                      SELECT 1 FROM inventory_seasons s \
+                      JOIN inventory_episodes ep ON ep.season_id=s.id \
+                      JOIN inventory_editions e ON e.work_id=ep.work_id \
+                      JOIN inventory_versions v ON v.edition_id=e.id \
+                      JOIN inventory_sources src ON src.version_id=v.id \
+                      JOIN inventory_assets a ON a.source_id=src.id \
+                      JOIN libraries l ON l.id=src.library_id \
+                      WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND l.node_id='local' AND l.enabled=1 \
+                   )) \
+                 ) ",
+            );
+        }
+    }
 
     if sort == "title-desc" {
         data_builder.push("ORDER BY w.title_sort DESC, w.id DESC ");
@@ -1195,40 +1776,136 @@ pub async fn catalogue(
     }))
 }
 
-pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value>, sqlx::Error> {
-    let Some(row) = sqlx::query("SELECT w.*,(SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i JOIN libraries il ON il.id=i.library_id WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind='films' AND il.node_id='local' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS poster_url FROM inventory_works w WHERE w.id=?")
-        .bind(work_id)
-        .fetch_optional(&store.pool)
-        .await?
-    else {
-        return Ok(None);
-    };
-    let mut value = work(&row);
+async fn load_work_editions(
+    pool: &sqlx::SqlitePool,
+    work_id: &str,
+) -> Result<Vec<Value>, sqlx::Error> {
     let mut editions = vec![];
     for edition in sqlx::query("SELECT id FROM inventory_editions WHERE work_id=?")
         .bind(work_id)
-        .fetch_all(&store.pool)
+        .fetch_all(pool)
         .await?
     {
         let edition_id: String = edition.get("id");
         let mut versions = vec![];
         for version in sqlx::query("SELECT id FROM inventory_versions WHERE edition_id=?")
             .bind(&edition_id)
-            .fetch_all(&store.pool)
+            .fetch_all(pool)
             .await?
         {
             let version_id: String = version.get("id");
-            let sources:Vec<_>=sqlx::query("SELECT s.id,a.id AS asset_id,a.relative_path FROM inventory_sources s JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=s.library_id WHERE s.version_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1").bind(&version_id).fetch_all(&store.pool).await?.iter().map(|r|json!({"id":r.get::<String,_>("id"),"assetIds":[r.get::<String,_>("asset_id")],"playbackMediaId":r.get::<String,_>("asset_id")})).collect();
+            let sources: Vec<_> = sqlx::query(
+                "SELECT s.id, a.id AS asset_id, a.relative_path 
+                 FROM inventory_sources s 
+                 JOIN inventory_assets a ON a.source_id=s.id 
+                 JOIN libraries l ON l.id=s.library_id 
+                 WHERE s.version_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local' AND l.enabled=1",
+            )
+            .bind(&version_id)
+            .fetch_all(pool)
+            .await?
+            .iter()
+            .map(|r| {
+                json!({
+                    "id": r.get::<String, _>("id"),
+                    "assetIds": [r.get::<String, _>("asset_id")],
+                    "playbackMediaId": r.get::<String, _>("asset_id")
+                })
+            })
+            .collect();
             if !sources.is_empty() {
-                versions.push(json!({"id":version_id,"label":"Version locale","sources":sources}));
+                versions
+                    .push(json!({"id": version_id, "label": "Version locale", "sources": sources}));
             }
         }
         if !versions.is_empty() {
-            editions.push(json!({"id":edition_id,"label":"Édition locale","versions":versions}));
+            editions
+                .push(json!({"id": edition_id, "label": "Édition locale", "versions": versions}));
         }
     }
-    value["editions"] = json!(editions);
-    value["seasons"] = json!([]);
+    Ok(editions)
+}
+
+pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value>, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        "SELECT w.*, (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
+         FROM inventory_images i JOIN libraries il ON il.id=i.library_id \
+         WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND il.node_id='local' \
+         ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url \
+         FROM inventory_works w WHERE w.id=?",
+    )
+    .bind(work_id)
+    .fetch_optional(&store.pool)
+    .await?
+    else {
+        return Ok(None);
+    };
+
+    let mut value = work(&row);
+    let kind: String = row.try_get("kind").unwrap_or_else(|_| "film".to_string());
+
+    if kind == "series" {
+        let seasons_rows = sqlx::query(
+            "SELECT id, season_number, title FROM inventory_seasons WHERE series_id=? ORDER BY season_number ASC",
+        )
+        .bind(work_id)
+        .fetch_all(&store.pool)
+        .await?;
+
+        let mut seasons_val = Vec::new();
+        let mut total_episodes = 0;
+
+        for s_row in seasons_rows {
+            let season_id: String = s_row.get("id");
+            let season_num: i64 = s_row.get("season_number");
+            let season_title: String = s_row.get("title");
+
+            let ep_rows = sqlx::query(
+                "SELECT ep.id as ep_id, ep.episode_number, w.* FROM inventory_episodes ep \
+                 JOIN inventory_works w ON w.id=ep.work_id \
+                 WHERE ep.season_id=? \
+                 ORDER BY ep.episode_number ASC",
+            )
+            .bind(&season_id)
+            .fetch_all(&store.pool)
+            .await?;
+
+            let mut episodes_val = Vec::new();
+            for ep_row in ep_rows {
+                let ep_work_id: String = ep_row.get("id");
+                let ep_num: i64 = ep_row.get("episode_number");
+                let editions = load_work_editions(&store.pool, &ep_work_id).await?;
+
+                if !editions.is_empty() {
+                    let mut ep_val = work(&ep_row);
+                    ep_val["kind"] = json!("episode");
+                    ep_val["number"] = json!(ep_num);
+                    ep_val["editions"] = json!(editions);
+                    episodes_val.push(ep_val);
+                    total_episodes += 1;
+                }
+            }
+
+            if !episodes_val.is_empty() {
+                seasons_val.push(json!({
+                    "id": season_id,
+                    "number": season_num,
+                    "title": season_title,
+                    "episodes": episodes_val
+                }));
+            }
+        }
+
+        value["seasonCount"] = json!(seasons_val.len());
+        value["episodeCount"] = json!(total_episodes);
+        value["seasons"] = json!(seasons_val);
+        value["editions"] = json!([]);
+    } else {
+        let editions = load_work_editions(&store.pool, work_id).await?;
+        value["editions"] = json!(editions);
+        value["seasons"] = json!([]);
+    }
+
     Ok(Some(value))
 }
 
@@ -1236,7 +1913,7 @@ pub async fn descriptor(
     store: &IdentityStore,
     asset_id: &str,
 ) -> Result<Option<Value>, sqlx::Error> {
-    let row=sqlx::query("SELECT a.mime,a.probe_json,w.title FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id JOIN libraries l ON l.id=s.library_id WHERE a.id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1").bind(asset_id).fetch_optional(&store.pool).await?;
+    let row=sqlx::query("SELECT a.mime,a.probe_json,w.title FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id JOIN libraries l ON l.id=s.library_id WHERE a.id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local' AND l.enabled=1").bind(asset_id).fetch_optional(&store.pool).await?;
     let Some(row) = row else { return Ok(None) };
     let probe = decode(row.get("probe_json"))?;
     let language = probe
@@ -1269,7 +1946,7 @@ pub async fn content(
         ids::{AssetId, LibraryId, NodeId},
         inventory::{ReadGrant, ReadTarget},
     };
-    let row = sqlx::query("SELECT a.library_id,a.relative_path,a.mime,l.root,l.node_id FROM inventory_assets a JOIN libraries l ON l.id=a.library_id JOIN inventory_sources s ON s.id=a.source_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local'")
+    let row = sqlx::query("SELECT a.library_id,a.relative_path,a.mime,l.root,l.node_id FROM inventory_assets a JOIN libraries l ON l.id=a.library_id JOIN inventory_sources s ON s.id=a.source_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local'")
         .bind(asset_id)
         .fetch_optional(&store.pool)
         .await;
@@ -1315,7 +1992,7 @@ pub async fn image(
         ids::{ImageId, LibraryId, NodeId},
         inventory::{ReadGrant, ReadTarget},
     };
-    let row = sqlx::query("SELECT i.*,l.root,l.node_id FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind='films' AND l.node_id='local'")
+    let row = sqlx::query("SELECT i.*,l.root,l.node_id FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND l.node_id='local'")
         .bind(image_id)
         .fetch_optional(&store.pool)
         .await;
@@ -1507,6 +2184,7 @@ mod tests {
             external_ids: Default::default(), mime: "video/mp4".into(),
             probe: serde_json::from_value(json!({"streams":[{"index":0,"codec_type":"video","codec_name":"av1"}],"format":{"duration":"2"}})).unwrap(),
             editorial: NfoOutcome::Missing, poster: None, reused: false,
+            ..Default::default()
         }], complete: true, ..Default::default() };
         ingest(&store, "lib", Path::new("/movies"), &report)
             .await
@@ -1615,6 +2293,7 @@ mod tests {
             editorial: NfoOutcome::Missing,
             poster: None,
             reused: false,
+            ..Default::default()
         };
         let report = ScanReport {
             files: vec![file("film.mp4"), file("film.mkv")],

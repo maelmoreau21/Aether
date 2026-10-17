@@ -117,6 +117,7 @@ async fn test_concurrent_writes_during_sqlite_publication_and_timeout_behavior()
                     editorial: NfoOutcome::Missing,
                     poster: None,
                     reused: false,
+                    ..Default::default()
                 }
             })
             .collect();

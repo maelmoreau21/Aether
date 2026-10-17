@@ -489,6 +489,7 @@ pub fn parse_series_episode(relative: &Path) -> Option<ParsedSeriesEpisode> {
 }
 
 const MAX_FOLDER_CACHE: usize = 128;
+const MAX_SERIES_CACHE: usize = 128;
 
 /// Depth-first streaming traversal (one directory iterator per depth), one probe at a time.
 /// Probe cancellation drops its kill-on-drop child. Errors never contain absolute paths.
@@ -567,7 +568,7 @@ where
     let mut folder_cache: HashMap<PathBuf, FolderVideos> = HashMap::new();
     let mut series_cache: HashMap<
         PathBuf,
-        (super::nfo::NfoOutcome, Option<super::images::LocalImage>),
+        std::sync::Arc<(super::nfo::NfoOutcome, Option<super::images::LocalImage>)>,
     > = HashMap::new();
     let mut report = ScanReport {
         complete: true,
@@ -749,6 +750,11 @@ where
             };
 
             if !series_cache.contains_key(&parsed.series_dir) {
+                if series_cache.len() >= MAX_SERIES_CACHE
+                    && let Some(first_key) = series_cache.keys().next().cloned()
+                {
+                    series_cache.remove(&first_key);
+                }
                 let series_nfo = super::nfo::discover_series_nfo(&root, &parsed.series_dir).await;
                 if let super::nfo::NfoOutcome::Invalid { path, message } = &series_nfo {
                     let issue = ScanIssue {
@@ -767,12 +773,14 @@ where
                     };
                     record_warning(&mut report, &mut current_batch_warnings, issue);
                 }
-                series_cache.insert(parsed.series_dir.clone(), (series_nfo, series_poster));
+                series_cache.insert(
+                    parsed.series_dir.clone(),
+                    std::sync::Arc::new((series_nfo, series_poster)),
+                );
             }
 
-            let (series_nfo, series_poster) =
-                series_cache.get(&parsed.series_dir).cloned().unwrap();
-            let (series_title, series_year, series_external_ids) = match &series_nfo {
+            let entry = series_cache.get(&parsed.series_dir).cloned().unwrap();
+            let (series_title, series_year, series_external_ids) = match &entry.0 {
                 super::nfo::NfoOutcome::Valid { metadata, .. } => (
                     metadata.title.clone().unwrap_or(parsed.series_raw_title),
                     metadata.year.or(parsed.series_year),
@@ -833,8 +841,8 @@ where
                 series_title: Some(series_title),
                 series_year,
                 series_external_ids: Some(series_external_ids),
-                series_editorial: Some(series_nfo),
-                series_poster,
+                series_editorial: Some(entry.0.clone()),
+                series_poster: entry.1.clone(),
                 season_number: Some(parsed.season_number),
                 episode_number: Some(parsed.episode_number),
             }

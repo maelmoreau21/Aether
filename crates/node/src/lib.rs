@@ -10,6 +10,7 @@ pub mod inventory;
 pub mod nfo;
 pub mod probe;
 pub mod scanner;
+pub mod server;
 pub mod stream;
 
 pub use files::{OpenedFile, confined_file, validate_library_root};
@@ -36,7 +37,7 @@ use std::{
     sync::atomic::AtomicBool,
 };
 
-/// In-process local Media Node service implementing the Core ↔ Node boundary for Milestone J1.
+/// In-process local Media Node service implementing the Core ↔ Node boundary for Milestone J1/P2.
 #[derive(Debug, Clone, Default)]
 pub struct LocalNode;
 
@@ -94,10 +95,21 @@ impl LocalNode {
         Ok((validated, opened))
     }
 
-    /// Execute an authorized `ReadGrant` issued by Core, streaming directly from the
-    /// confined `OpenedFile` handle without reopening by path.
+    /// Execute an authorized `ReadGrant` issued by Core for the local standalone Node.
     pub fn serve_grant<B>(
         &self,
+        grant: &ReadGrant,
+        req: &Request<B>,
+    ) -> impl std::future::Future<Output = Result<Response<BoxStreamBody>, NodeErrorCode>> + Send + 'static
+    {
+        self.serve_grant_for_node(NodeId::local(), grant, req)
+    }
+
+    /// Execute an authorized `ReadGrant` for a specific `expected_node_id`, streaming directly
+    /// from the confined `OpenedFile` handle without reopening by path.
+    pub fn serve_grant_for_node<B>(
+        &self,
+        expected_node_id: NodeId,
         grant: &ReadGrant,
         req: &Request<B>,
     ) -> impl std::future::Future<Output = Result<Response<BoxStreamBody>, NodeErrorCode>> + Send + 'static
@@ -111,7 +123,7 @@ impl LocalNode {
             let relative = Path::new(&grant.relative_path);
             match &grant.target {
                 ReadTarget::Asset(_) => {
-                    if grant.node_id != NodeId::local() {
+                    if grant.node_id != expected_node_id {
                         return Err(NodeErrorCode::UnknownAsset);
                     }
                     let opened = node
@@ -127,7 +139,7 @@ impl LocalNode {
                     expected_modified_ns,
                     ..
                 } => {
-                    if grant.node_id != NodeId::local() {
+                    if grant.node_id != expected_node_id {
                         return Err(NodeErrorCode::UnknownImage);
                     }
                     let opened = node

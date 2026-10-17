@@ -9,6 +9,7 @@ pub mod inventory;
 pub mod libraries;
 pub mod media;
 pub mod node;
+pub mod nodes;
 pub mod permissions;
 pub mod scans;
 
@@ -66,7 +67,10 @@ fn media_routes(inventory: node::Inventory) -> Router {
             "/api/v1/assets",
             get(|State(s): State<Arc<node::Inventory>>| async move { Json(s.descriptors()) }),
         )
-        .route("/api/v1/assets/{id}/content", get(node::content))
+        .route(
+            "/api/v1/assets/{id}/content",
+            get(node::content).head(node::content),
+        )
         .with_state(Arc::new(inventory))
 }
 
@@ -97,9 +101,14 @@ pub async fn secure_app_with_jobs(
     }
     let root = inventory.root().to_owned();
     let origin = auth.origin().to_owned();
+    let store_for_csp = auth.store.clone();
+    let replay_window = Arc::new(media_contracts::protocol::ReplayWindow::new());
     let media = media_routes(inventory)
         .route("/api/v1/media/{id}", get(indexed_descriptor))
-        .route("/api/v1/assets/{id}/image", get(indexed_image))
+        .route(
+            "/api/v1/assets/{id}/image",
+            get(indexed_image).head(indexed_image),
+        )
         .layer(axum::Extension(auth.store.clone()))
         .route_layer(middleware::from_fn_with_state(
             permissions::MediaAccess {
@@ -108,13 +117,15 @@ pub async fn secure_app_with_jobs(
             },
             permissions::require_media,
         ));
-    let protected = local_security(
+    let protected = local_security_with_store(
         public_routes(mode)
             .merge(media)
             .merge(scans::router(auth.clone(), root.clone(), jobs).await?)
             .merge(libraries::router(auth.clone(), root))
+            .merge(nodes::router(auth.clone(), replay_window))
             .merge(auth::router(auth)),
         origin,
+        Some(store_for_csp),
     );
     Ok(health_routes(mode).merge(protected))
 }
@@ -170,6 +181,14 @@ fn health_routes(mode: &'static str) -> Router {
             "/api/v1/health",
             get(move || async move { Json(serde_json::json!({"status":"ok", "mode":mode})) }),
         )
+        .route(
+            "/internal/v1/health",
+            get(move || async move { Json(serde_json::json!({"status":"ok", "mode":mode, "protocolVersion": media_contracts::protocol::PROTOCOL_VERSION})) }),
+        )
+        .route(
+            "/internal/v1/ready",
+            get(move || async move { Json(serde_json::json!({"ready":true, "mode":mode})) }),
+        )
         .layer(SetResponseHeaderLayer::overriding(
             header::X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),
@@ -195,29 +214,83 @@ fn public_routes(mode: &'static str) -> Router {
         )
 }
 
+#[cfg(feature = "fixture-bench")]
 fn local_security(router: Router, origin: String) -> Router {
+    local_security_with_store(router, origin, None)
+}
+
+fn local_security_with_store(
+    router: Router,
+    origin: String,
+    store: Option<identity::IdentityStore>,
+) -> Router {
     let host = origin
         .parse::<axum::http::Uri>()
         .ok()
         .and_then(|uri| uri.authority().map(|value| value.as_str().to_owned()));
+    let internal_host = std::env::var("MEDIA_CORE_INTERNAL_URL")
+        .ok()
+        .and_then(|u| u.parse::<axum::http::Uri>().ok())
+        .and_then(|uri| uri.authority().map(|value| value.as_str().to_owned()));
     router
         .layer(middleware::from_fn(move |req: Request, next: Next| {
             let host = host.clone();
+            let internal_host = internal_host.clone();
             let origin = origin.clone();
+            let store = store.clone();
             async move {
-                // Preserve the loopback-only origin boundary for the local Core.
-                if req.headers().get(header::HOST).and_then(|h| h.to_str().ok()) != host.as_deref()
+                let is_internal = req.uri().path().starts_with("/internal/v1/");
+                let has_internal_proto = req
+                    .headers()
+                    .get(media_contracts::protocol::HDR_PROTOCOL)
+                    .and_then(|v| v.to_str().ok())
+                    == Some(media_contracts::protocol::PROTOCOL_VERSION);
+                let req_host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok());
+                let host_ok = req_host == host.as_deref()
+                    || (is_internal && has_internal_proto)
+                    || (is_internal && internal_host.as_deref().is_some_and(|ih| req_host == Some(ih)));
+                if !host_ok
                     || req.headers().get("sec-fetch-site").is_some_and(|h| h == "cross-site")
                     || req.headers().get(header::ORIGIN).is_some_and(|h| h.as_bytes() != origin.as_bytes())
                 {
                     return StatusCode::FORBIDDEN.into_response();
                 }
-                next.run(req).await
+                let mut res = next.run(req).await;
+                let mut extra_origins = String::new();
+                if let Some(store) = &store
+                    && let Ok(urls) = sqlx::query_scalar::<_, String>(
+                        "SELECT DISTINCT public_url FROM media_nodes WHERE kind='remote' AND status='connected' AND public_url IS NOT NULL AND public_url != ''",
+                    )
+                    .fetch_all(&store.pool)
+                    .await
+                {
+                    for u in urls {
+                        if let Ok(parsed) = url::Url::parse(&u)
+                            && let Some(h) = parsed.host_str()
+                        {
+                            let scheme = parsed.scheme();
+                            let origin_str = if let Some(p) = parsed.port() {
+                                format!(" {scheme}://{h}:{p}")
+                            } else {
+                                format!(" {scheme}://{h}")
+                            };
+                            if !extra_origins.contains(&origin_str) {
+                                extra_origins.push_str(&origin_str);
+                            }
+                        }
+                    }
+                }
+                let csp = format!(
+                    "default-src 'none'; script-src 'self'; img-src 'self'{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; frame-ancestors 'none'"
+                );
+                if let Ok(val) = HeaderValue::from_str(&csp) {
+                    res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, val);
+                }
+                res
             }
         }))
         .layer(SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
-        .layer(SetResponseHeaderLayer::overriding(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; script-src 'self'; img-src 'self'; media-src 'self' blob:; connect-src 'self'; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; frame-ancestors 'none'")))
         .route("/bench.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("bench.js")) }))
 }
 

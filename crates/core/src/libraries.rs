@@ -31,6 +31,9 @@ pub(crate) struct Library {
     #[sqlx(skip)]
     pub user_ids: Vec<String>,
 }
+fn default_enabled() -> bool {
+    true
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct LibraryInput {
@@ -38,7 +41,9 @@ struct LibraryInput {
     kind: String,
     node_id: String,
     root: String,
+    #[serde(default = "default_enabled")]
     enabled: bool,
+    #[serde(default)]
     user_ids: Vec<String>,
 }
 
@@ -150,10 +155,31 @@ async fn roots(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     administrator(&state, &headers, false).await?;
-    let root = validate_library_root(&state.root, &state.root)
-        .await
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    Ok(Json(serde_json::json!({"roots":[root.to_string_lossy()]})))
+    let mut all_roots = Vec::new();
+    if let Ok(local_root) = validate_library_root(&state.root, &state.root).await {
+        all_roots.push(local_root.to_string_lossy().into_owned());
+    }
+    if let Ok(rows) = sqlx::query(
+        "SELECT roots_json FROM media_nodes WHERE kind='remote' AND status != 'revoked' ORDER BY name, id",
+    )
+    .fetch_all(&state.auth.store.pool)
+    .await
+    {
+        for r in rows {
+            let roots_json: String = r.get("roots_json");
+            if let Ok(parsed) = serde_json::from_str::<Vec<String>>(&roots_json) {
+                for p in parsed {
+                    if !all_roots.contains(&p) {
+                        all_roots.push(p);
+                    }
+                }
+            }
+        }
+    }
+    if all_roots.is_empty() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+    Ok(Json(serde_json::json!({"roots": all_roots})))
 }
 async fn create(
     State(state): State<LibraryState>,
@@ -180,18 +206,59 @@ async fn save(
     existing: bool,
 ) -> Result<Library, StatusCode> {
     input.name = input.name.trim().to_owned();
+    input.node_id = input.node_id.trim().to_owned();
     if input.name.is_empty()
         || input.name.chars().count() > 100
         || input.name.chars().any(char::is_control)
         || !matches!(input.kind.as_str(), "films" | "series")
-        || input.node_id != "local"
+        || input.node_id.is_empty()
         || input.user_ids.len() > 1000
     {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let root = validate_library_root(DiskPath::new(&input.root), &state.root)
+    let root = if input.node_id == "local" {
+        let validated = validate_library_root(DiskPath::new(&input.root), &state.root)
+            .await
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+        validated
+            .to_str()
+            .ok_or(StatusCode::BAD_REQUEST)?
+            .to_owned()
+    } else {
+        let node_row: Option<(String, String)> = sqlx::query_as(
+            "SELECT status, roots_json FROM media_nodes WHERE id=? AND kind='remote'",
+        )
+        .bind(&input.node_id)
+        .fetch_optional(&state.auth.store.pool)
         .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+        .map_err(database)?;
+        let Some((status, roots_json)) = node_row else {
+            return Err(StatusCode::BAD_REQUEST);
+        };
+        if status == "revoked" {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        let allowed_roots: Vec<String> =
+            serde_json::from_str(&roots_json).map_err(|_| StatusCode::BAD_REQUEST)?;
+        let requested_root = input.root.trim();
+        if requested_root.is_empty()
+            || requested_root.contains("..")
+            || requested_root.chars().any(char::is_control)
+        {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        let is_under_allowed = allowed_roots.iter().any(|allowed| {
+            let a = allowed.trim_end_matches(['/', '\\']);
+            let r = requested_root.trim_end_matches(['/', '\\']);
+            r == a
+                || r.strip_prefix(a)
+                    .is_some_and(|rest| rest.starts_with('/') || rest.starts_with('\\'))
+        });
+        if !is_under_allowed {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        requested_root.to_owned()
+    };
     input.user_ids.sort();
     input.user_ids.dedup();
     let mut tx = state.auth.store.pool.begin().await.map_err(database)?;
@@ -207,7 +274,6 @@ async fn save(
             return Err(StatusCode::BAD_REQUEST);
         }
     }
-    let root = root.to_str().ok_or(StatusCode::BAD_REQUEST)?.to_owned();
     if existing {
         let result =
             sqlx::query("UPDATE libraries SET name=?,kind=?,node_id=?,root=?,enabled=? WHERE id=?")

@@ -6,6 +6,7 @@ pub mod errors;
 pub mod ids;
 pub mod inventory;
 pub mod media;
+pub mod protocol;
 
 #[cfg(test)]
 mod tests {

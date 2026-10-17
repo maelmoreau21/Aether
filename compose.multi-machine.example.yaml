@@ -1,0 +1,112 @@
+# ==============================================================================
+# Aether Multi-Machine Deployment Example (Core on Machine A, Nodes on Machine B & C)
+# ==============================================================================
+# On untrusted networks or across LAN segments, terminate TLS on a reverse proxy
+# (Synology DSM Reverse Proxy, Caddy, Nginx, Traefik) or use a WireGuard/Tailscale mesh.
+# Never expose internal Node ports (`4101`, `4102`) directly to the public Internet.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# MACHINE A (e.g. Synology DS1522+ Primary — `https://media.example.lan`)
+# Run with: docker compose -f compose.core.yaml up -d
+# ------------------------------------------------------------------------------
+services:
+  aether-core:
+    image: aether-core:latest
+    container_name: aether-core
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      # Reverse proxy terminates TLS on 443 and forwards to 127.0.0.1:3000
+      - "127.0.0.1:3000:3000"
+    environment:
+      - MEDIA_MODE=distributed
+      - MEDIA_PORT=3000
+      - MEDIA_BIND_ADDR=0.0.0.0
+      - MEDIA_PUBLIC_URL=https://media.example.lan
+      - MEDIA_CORE_INTERNAL_URL=https://media.example.lan
+      - MEDIA_DB_PATH=/data/core.sqlite3
+      - MEDIA_WEB_DIST=/app/apps/web/build
+    volumes:
+      - /volume1/docker/aether-core/data:/data
+      - /volume1/docker/aether-core/backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:3000/internal/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+# ------------------------------------------------------------------------------
+# MACHINE B (e.g. Storage Host 1 — Films Node — `https://node-films.example.lan`)
+# Copy the service below into Machine B's `compose.yaml`
+# ------------------------------------------------------------------------------
+  aether-node-films:
+    image: aether-node:latest
+    container_name: aether-node-films
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      # Local reverse proxy or private mesh interface only — never expose on public WAN
+      - "127.0.0.1:4101:4101"
+    environment:
+      - MEDIA_NODE_PORT=4101
+      - MEDIA_NODE_BIND_ADDR=0.0.0.0
+      - MEDIA_NODE_NAME=NAS-1 Films
+      - MEDIA_NODE_PUBLIC_URL=https://node-films.example.lan
+      - MEDIA_NODE_DATA_DIR=/data
+      - MEDIA_NODE_ROOTS=/media/films
+      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_FILMS_PAIRING_TOKEN}
+    volumes:
+      - /volume1/docker/aether-node-films/data:/data
+      - /volume1/video/Films:/media/films:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:4101/internal/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+# ------------------------------------------------------------------------------
+# MACHINE C (e.g. Storage Host 2 — Series Node — `https://node-series.example.lan`)
+# Copy the service below into Machine C's `compose.yaml`
+# ------------------------------------------------------------------------------
+  aether-node-series:
+    image: aether-node:latest
+    container_name: aether-node-series
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "127.0.0.1:4102:4102"
+    environment:
+      - MEDIA_NODE_PORT=4102
+      - MEDIA_NODE_BIND_ADDR=0.0.0.0
+      - MEDIA_NODE_NAME=NAS-2 Séries
+      - MEDIA_NODE_PUBLIC_URL=https://node-series.example.lan
+      - MEDIA_NODE_DATA_DIR=/data
+      - MEDIA_NODE_ROOTS=/media/series
+      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_SERIES_PAIRING_TOKEN}
+    volumes:
+      - /volume1/docker/aether-node-series/data:/data
+      - /volume1/video/Series:/media/series:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:4102/internal/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

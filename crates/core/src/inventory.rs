@@ -21,7 +21,7 @@ pub async fn load_cache(
     library_id: &str,
 ) -> Result<HashMap<String, CachedFile>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT relative_path,size,modified_ns,probe_json FROM inventory_assets WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local')",
+        "SELECT relative_path,size,modified_ns,probe_json FROM inventory_assets WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked')",
     )
     .bind(library_id)
     .fetch_all(&store.pool)
@@ -52,7 +52,7 @@ pub async fn load_scan_cache(
     library_id: &str,
 ) -> Result<HashMap<String, CachedFile>, sqlx::Error> {
     let mut rows = sqlx::query(
-        "SELECT relative_path,size,modified_ns FROM inventory_assets WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local')",
+        "SELECT relative_path,size,modified_ns FROM inventory_assets WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked')",
     )
     .bind(library_id)
     .fetch(&store.pool);
@@ -75,7 +75,7 @@ pub async fn load_image_cache(
     store: &IdentityStore,
     library_id: &str,
 ) -> Result<HashMap<String, crate::node::images::LocalImage>, sqlx::Error> {
-    let mut rows = sqlx::query("SELECT i.* FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.library_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND l.node_id='local'")
+    let mut rows = sqlx::query("SELECT i.* FROM inventory_images i JOIN libraries l ON l.id=i.library_id JOIN media_nodes n ON n.id=l.node_id WHERE i.library_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked'")
         .bind(library_id).fetch(&store.pool);
     let mut cache = HashMap::new();
     while let Some(row) = rows.try_next().await? {
@@ -103,7 +103,7 @@ pub async fn ingest(
     let mut conn = store.pool.acquire().await?;
     let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
     let configured: Option<String> = sqlx::query_scalar(
-        "SELECT root FROM libraries WHERE id=? AND enabled=1 AND kind IN ('films', 'series') AND node_id='local'",
+        "SELECT l.root FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked'",
     )
     .bind(library_id)
     .fetch_optional(&mut *tx)
@@ -480,7 +480,7 @@ pub async fn publish_staged_scan(
     let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
 
     let configured: Option<(String, String)> = sqlx::query_as(
-        "SELECT root, kind FROM libraries WHERE id=? AND enabled=1 AND kind IN ('films', 'series') AND node_id='local'",
+        "SELECT l.root, l.kind FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked'",
     )
     .bind(library_id)
     .fetch_optional(&mut *tx)
@@ -1157,7 +1157,7 @@ pub async fn publish_staged_scan(
             for row in &chunk {
                 let relative_path: String = row.get("relative_path");
                 let file_identity_key: String = row.get("identity_key");
-                let identity_key = format!("{}\n{}", root.to_string_lossy(), file_identity_key);
+                let identity_key = format!("{}\n{}", root_snapshot, file_identity_key);
                 let title: String = row.get("title");
                 let year: Option<i64> = row.get("year");
                 let external_ids_json: String = row.get("external_ids_json");
@@ -1498,7 +1498,8 @@ pub async fn refresh_editorial_for_works(
              JOIN inventory_versions v ON v.id=s.version_id 
              JOIN inventory_editions e ON e.id=v.edition_id 
              JOIN libraries l ON l.id=s.library_id 
-             WHERE a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND l.node_id='local' AND e.work_id IN ("
+             JOIN media_nodes n ON n.id=l.node_id
+             WHERE a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND e.work_id IN ("
         );
         let mut separated = builder.separated(", ");
         for id in chunk {
@@ -1626,10 +1627,10 @@ pub async fn resource_library(
     let query = match kind {
         "work" => "SELECT library_id FROM inventory_works WHERE id=?",
         "image" => {
-            "SELECT i.library_id FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local'"
+            "SELECT i.library_id FROM inventory_images i JOIN libraries l ON l.id=i.library_id JOIN media_nodes n ON n.id=l.node_id WHERE i.id=? AND i.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked'"
         }
         "asset" | "media" => {
-            "SELECT a.library_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id WHERE a.id=? AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local'"
+            "SELECT a.library_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked'"
         }
         _ => return Ok(None),
     };
@@ -1645,6 +1646,9 @@ fn work(row: &sqlx::sqlite::SqliteRow) -> Value {
     let kind: String = row.try_get("kind").unwrap_or_else(|_| "film".to_string());
     let season_count: Option<i64> = row.try_get("season_count").ok().flatten();
     let episode_count: Option<i64> = row.try_get("episode_count").ok().flatten();
+    let node_id: Option<String> = row.try_get("node_id").ok().flatten();
+    let node_status: Option<String> = row.try_get("node_status").ok().flatten();
+    let node_available = node_status.as_deref().unwrap_or("connected") == "connected";
     let mut val = json!({
         "id": row.get::<String,_>("id"),
         "libraryId": row.get::<String,_>("library_id"),
@@ -1663,7 +1667,10 @@ fn work(row: &sqlx::sqlite::SqliteRow) -> Value {
         "metadataProvenance": metadata["provenance"].as_str().unwrap_or("local"),
         "metadataWarnings": metadata["warnings"].as_array().cloned().unwrap_or_default(),
         "synthetic": false,
-        "posterUrl": row.try_get::<Option<String>,_>("poster_url").ok().flatten()
+        "posterUrl": row.try_get::<Option<String>,_>("poster_url").ok().flatten(),
+        "nodeId": node_id.unwrap_or_else(|| "local".to_string()),
+        "nodeStatus": node_status.unwrap_or_else(|| "connected".to_string()),
+        "available": node_available
     });
     if kind == "series" {
         val["seasonCount"] = json!(season_count.unwrap_or(0));
@@ -1678,7 +1685,7 @@ pub async fn editorial_warnings(
     store: &IdentityStore,
     library_id: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    let rows = sqlx::query("SELECT w.editorial_json FROM inventory_works w WHERE w.library_id=? AND EXISTS(SELECT 1 FROM inventory_editions e JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=s.library_id WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND l.node_id='local') ORDER BY w.id")
+    let rows = sqlx::query("SELECT w.editorial_json FROM inventory_works w WHERE w.library_id=? AND EXISTS(SELECT 1 FROM inventory_editions e JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked') ORDER BY w.id")
         .bind(library_id).fetch_all(&store.pool).await?;
     let mut warnings = Vec::new();
     for row in rows {
@@ -1759,7 +1766,8 @@ pub async fn catalogue(
                    JOIN inventory_sources s ON s.version_id=v.id \
                    JOIN inventory_assets a ON a.source_id=s.id \
                    JOIN libraries l ON l.id=s.library_id \
-                   WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+                   JOIN media_nodes n ON n.id=l.node_id \
+                   WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND n.status != 'revoked' AND l.enabled=1 \
                  )",
             );
         }
@@ -1773,7 +1781,8 @@ pub async fn catalogue(
                    JOIN inventory_sources src ON src.version_id=v.id \
                    JOIN inventory_assets a ON a.source_id=src.id \
                    JOIN libraries l ON l.id=src.library_id \
-                   WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND l.node_id='local' AND l.enabled=1 \
+                   JOIN media_nodes n ON n.id=l.node_id \
+                   WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
                  )",
             );
         }
@@ -1786,7 +1795,8 @@ pub async fn catalogue(
                       JOIN inventory_sources s ON s.version_id=v.id \
                       JOIN inventory_assets a ON a.source_id=s.id \
                       JOIN libraries l ON l.id=s.library_id \
-                      WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+                      JOIN media_nodes n ON n.id=l.node_id \
+                      WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND n.status != 'revoked' AND l.enabled=1 \
                    )) \
                    OR \
                    (w.kind = 'series' AND EXISTS ( \
@@ -1797,7 +1807,8 @@ pub async fn catalogue(
                       JOIN inventory_sources src ON src.version_id=v.id \
                       JOIN inventory_assets a ON a.source_id=src.id \
                       JOIN libraries l ON l.id=src.library_id \
-                      WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND l.node_id='local' AND l.enabled=1 \
+                      JOIN media_nodes n ON n.id=l.node_id \
+                      WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
                    )) \
                  )",
             );
@@ -1822,7 +1833,7 @@ pub async fn catalogue(
     }
 
     let mut data_builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-        "SELECT w.*, \
+        "SELECT w.*, wl.node_id AS node_id, wn.status AS node_status, \
            CASE WHEN w.kind = 'series' THEN ( \
              SELECT COUNT(DISTINCT s.id) FROM inventory_seasons s \
              JOIN inventory_episodes ep ON ep.season_id=s.id \
@@ -1831,7 +1842,8 @@ pub async fn catalogue(
              JOIN inventory_sources src ON src.version_id=v.id \
              JOIN inventory_assets a ON a.source_id=src.id \
              JOIN libraries l ON l.id=src.library_id \
-             WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND l.node_id='local' AND l.enabled=1 \
+             JOIN media_nodes n ON n.id=l.node_id \
+             WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
            ) ELSE NULL END AS season_count, \
            CASE WHEN w.kind = 'series' THEN ( \
              SELECT COUNT(DISTINCT ep.id) FROM inventory_seasons s \
@@ -1841,14 +1853,18 @@ pub async fn catalogue(
              JOIN inventory_sources src ON src.version_id=v.id \
              JOIN inventory_assets a ON a.source_id=src.id \
              JOIN libraries l ON l.id=src.library_id \
-             WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND l.node_id='local' AND l.enabled=1 \
+             JOIN media_nodes n ON n.id=l.node_id \
+             WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
            ) ELSE NULL END AS episode_count, \
            (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
             FROM inventory_images i \
             JOIN libraries il ON il.id=i.library_id \
-            WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND il.node_id='local' \
+            JOIN media_nodes in_node ON in_node.id=il.node_id \
+            WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND in_node.status='connected' \
             ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url \
          FROM inventory_works w \
+         JOIN libraries wl ON wl.id=w.library_id \
+         JOIN media_nodes wn ON wn.id=wl.node_id \
          WHERE w.library_id IN (",
     );
     let mut separated = data_builder.separated(", ");
@@ -1872,7 +1888,8 @@ pub async fn catalogue(
                    JOIN inventory_sources s ON s.version_id=v.id \
                    JOIN inventory_assets a ON a.source_id=s.id \
                    JOIN libraries l ON l.id=s.library_id \
-                   WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+                   JOIN media_nodes n ON n.id=l.node_id \
+                   WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND n.status != 'revoked' AND l.enabled=1 \
                  ) ",
             );
         }
@@ -1886,7 +1903,8 @@ pub async fn catalogue(
                    JOIN inventory_sources src ON src.version_id=v.id \
                    JOIN inventory_assets a ON a.source_id=src.id \
                    JOIN libraries l ON l.id=src.library_id \
-                   WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND l.node_id='local' AND l.enabled=1 \
+                   JOIN media_nodes n ON n.id=l.node_id \
+                   WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
                  ) ",
             );
         }
@@ -1899,7 +1917,8 @@ pub async fn catalogue(
                       JOIN inventory_sources s ON s.version_id=v.id \
                       JOIN inventory_assets a ON a.source_id=s.id \
                       JOIN libraries l ON l.id=s.library_id \
-                      WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND l.node_id='local' AND l.enabled=1 \
+                      JOIN media_nodes n ON n.id=l.node_id \
+                      WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND n.status != 'revoked' AND l.enabled=1 \
                    )) \
                    OR \
                    (w.kind = 'series' AND EXISTS ( \
@@ -1910,7 +1929,8 @@ pub async fn catalogue(
                       JOIN inventory_sources src ON src.version_id=v.id \
                       JOIN inventory_assets a ON a.source_id=src.id \
                       JOIN libraries l ON l.id=src.library_id \
-                      WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND l.node_id='local' AND l.enabled=1 \
+                      JOIN media_nodes n ON n.id=l.node_id \
+                      WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
                    )) \
                  ) ",
             );
@@ -1952,7 +1972,8 @@ async fn load_work_editions(
          JOIN inventory_sources s ON s.version_id=v.id \
          JOIN inventory_assets a ON a.source_id=s.id \
          JOIN libraries l ON l.id=s.library_id \
-         WHERE e.work_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local' AND l.enabled=1 \
+         JOIN media_nodes n ON n.id=l.node_id \
+         WHERE e.work_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.enabled=1 \
          ORDER BY e.id, v.id, s.id, a.id",
     )
     .bind(work_id)
@@ -2037,7 +2058,8 @@ async fn load_series_editions(
          JOIN inventory_sources s ON s.version_id=v.id \
          JOIN inventory_assets a ON a.source_id=s.id \
          JOIN libraries l ON l.id=s.library_id \
-         WHERE se.series_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local' AND l.enabled=1 \
+         JOIN media_nodes n ON n.id=l.node_id \
+         WHERE se.series_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.enabled=1 \
          ORDER BY e.work_id, e.id, v.id, s.id, a.id",
     )
     .bind(series_id)
@@ -2138,11 +2160,15 @@ async fn load_series_editions(
 
 pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value>, sqlx::Error> {
     let Some(row) = sqlx::query(
-        "SELECT w.*, (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
-         FROM inventory_images i JOIN libraries il ON il.id=i.library_id \
-         WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND il.node_id='local' \
-         ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url \
-         FROM inventory_works w WHERE w.id=?",
+        "SELECT w.*, wl.node_id AS node_id, wn.status AS node_status, \
+         (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
+          FROM inventory_images i JOIN libraries il ON il.id=i.library_id JOIN media_nodes in_node ON in_node.id=il.node_id \
+          WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND in_node.status='connected' \
+          ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url \
+         FROM inventory_works w \
+         JOIN libraries wl ON wl.id=w.library_id \
+         JOIN media_nodes wn ON wn.id=wl.node_id \
+         WHERE w.id=?",
     )
     .bind(work_id)
     .fetch_optional(&store.pool)
@@ -2163,9 +2189,12 @@ pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value
         .await?;
 
         let ep_rows = sqlx::query(
-            "SELECT ep.season_id, ep.episode_number, w.* FROM inventory_seasons s \
+            "SELECT ep.season_id, ep.episode_number, w.*, wl.node_id AS node_id, wn.status AS node_status \
+             FROM inventory_seasons s \
              JOIN inventory_episodes ep ON ep.season_id=s.id \
              JOIN inventory_works w ON w.id=ep.work_id \
+             JOIN libraries wl ON wl.id=w.library_id \
+             JOIN media_nodes wn ON wn.id=wl.node_id \
              WHERE s.series_id=? \
              ORDER BY s.season_number ASC, ep.episode_number ASC",
         )
@@ -2233,9 +2262,32 @@ pub async fn descriptor(
     store: &IdentityStore,
     asset_id: &str,
 ) -> Result<Option<Value>, sqlx::Error> {
-    let row=sqlx::query("SELECT a.mime,a.probe_json,w.title FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id JOIN libraries l ON l.id=s.library_id WHERE a.id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local' AND l.enabled=1").bind(asset_id).fetch_optional(&store.pool).await?;
+    let row = sqlx::query(
+        "SELECT a.mime, a.probe_json, a.library_id, w.title, l.node_id \
+         FROM inventory_assets a \
+         JOIN inventory_sources s ON s.id=a.source_id \
+         JOIN inventory_versions v ON v.id=s.version_id \
+         JOIN inventory_editions e ON e.id=v.edition_id \
+         JOIN inventory_works w ON w.id=e.work_id \
+         JOIN libraries l ON l.id=s.library_id \
+         JOIN media_nodes n ON n.id=l.node_id \
+         WHERE a.id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.enabled=1",
+    )
+    .bind(asset_id)
+    .fetch_optional(&store.pool)
+    .await?;
     let Some(row) = row else { return Ok(None) };
     let probe = decode(row.get("probe_json"))?;
+    let library_id: String = row.get("library_id");
+    let node_id: String = row.get("node_id");
+    let node_rec = crate::nodes::load_node(store, &node_id).await?;
+    let node_status = node_rec
+        .as_ref()
+        .map(|n| n.status.clone())
+        .unwrap_or_else(|| "connected".to_owned());
+    let direct_info = node_rec.as_ref().and_then(|n| {
+        crate::nodes::build_direct_playback_url(n, &library_id, "asset", asset_id, "stream")
+    });
     let language = probe
         .streams
         .iter()
@@ -2248,13 +2300,37 @@ pub async fn descriptor(
         "eng" => "en",
         other => other,
     };
-    Ok(Some(
-        json!({"id":asset_id,"title":row.get::<String,_>("title"),"synthetic":false,"sources":[{"id":asset_id,"audioTrackId":"internal-default","language":language,"url":format!("/api/v1/assets/{asset_id}/content"),"mime":row.get::<String,_>("mime"),"tracks":probe.streams}],"subtitles":[]}),
-    ))
+    let relay_url = format!("/api/v1/assets/{asset_id}/content");
+    let mut source_obj = json!({
+        "id": asset_id,
+        "audioTrackId": "internal-default",
+        "language": language,
+        "url": relay_url,
+        "relayUrl": relay_url,
+        "nodeId": node_id,
+        "nodeStatus": node_status,
+        "mime": row.get::<String,_>("mime"),
+        "tracks": probe.streams
+    });
+    if let Some((direct_url, expires_at)) = direct_info {
+        source_obj["directUrl"] = json!(direct_url);
+        source_obj["tokenExpiresAt"] = json!(expires_at);
+    }
+    Ok(Some(json!({
+        "id": asset_id,
+        "title": row.get::<String,_>("title"),
+        "synthetic": false,
+        "nodeId": node_id,
+        "nodeStatus": node_status,
+        "available": node_status == "connected",
+        "sources": [source_obj],
+        "subtitles": []
+    })))
 }
 
 /// Authorization is enforced by the common route middleware before this helper.
-/// Resolves an authorized `ReadGrant` from SQLite and delegates confined handle streaming to `LocalNode`.
+/// Resolves an authorized `ReadGrant` from SQLite and delegates confined handle streaming to `LocalNode`
+/// or relays in 64 KiB chunks from a paired remote Node.
 pub async fn content(
     store: &IdentityStore,
     asset_id: &str,
@@ -2266,10 +2342,17 @@ pub async fn content(
         ids::{AssetId, LibraryId, NodeId},
         inventory::{ReadGrant, ReadTarget},
     };
-    let row = sqlx::query("SELECT a.library_id,a.relative_path,a.mime,l.root,l.node_id FROM inventory_assets a JOIN libraries l ON l.id=a.library_id JOIN inventory_sources s ON s.id=a.source_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local'")
-        .bind(asset_id)
-        .fetch_optional(&store.pool)
-        .await;
+    let row = sqlx::query(
+        "SELECT a.library_id,a.relative_path,a.mime,l.root,l.node_id \
+         FROM inventory_assets a \
+         JOIN libraries l ON l.id=a.library_id \
+         JOIN inventory_sources s ON s.id=a.source_id \
+         JOIN media_nodes n ON n.id=l.node_id \
+         WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked'",
+    )
+    .bind(asset_id)
+    .fetch_optional(&store.pool)
+    .await;
     let row = match row {
         Ok(Some(row)) => row,
         Ok(None) => {
@@ -2277,10 +2360,23 @@ pub async fn content(
         }
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_error"),
     };
+    let node_id_str: String = row.get("node_id");
+    if node_id_str != "local" {
+        drop(row);
+        let Some(rec) = crate::nodes::load_node(store, &node_id_str)
+            .await
+            .ok()
+            .flatten()
+        else {
+            return crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
+        };
+        let pq = format!("/internal/v1/node/assets/{asset_id}/content");
+        return crate::nodes::relay_from_remote_node(store, &rec, &pq, request).await;
+    }
     let grant = ReadGrant {
         target: ReadTarget::Asset(AssetId::from(asset_id)),
         library_id: LibraryId::from(row.get::<String, _>("library_id")),
-        node_id: NodeId::from(row.get::<String, _>("node_id")),
+        node_id: NodeId::from(node_id_str),
         root_snapshot: row.get("root"),
         relative_path: row.get("relative_path"),
         mime: row.get("mime"),
@@ -2300,7 +2396,7 @@ pub async fn content(
 
 /// Session/library checks run before this handler, including HEAD and conditionals.
 /// Resolves an authorized `ReadGrant` from SQLite and delegates confined handle validation
-/// and streaming to `LocalNode` without reopening by path.
+/// and streaming to `LocalNode` without reopening by path, or relays from a remote Node.
 pub async fn image(
     store: &IdentityStore,
     image_id: &str,
@@ -2312,10 +2408,16 @@ pub async fn image(
         ids::{ImageId, LibraryId, NodeId},
         inventory::{ReadGrant, ReadTarget},
     };
-    let row = sqlx::query("SELECT i.*,l.root,l.node_id FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND l.node_id='local'")
-        .bind(image_id)
-        .fetch_optional(&store.pool)
-        .await;
+    let row = sqlx::query(
+        "SELECT i.*,l.root,l.node_id \
+         FROM inventory_images i \
+         JOIN libraries l ON l.id=i.library_id \
+         JOIN media_nodes n ON n.id=l.node_id \
+         WHERE i.id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked'",
+    )
+    .bind(image_id)
+    .fetch_optional(&store.pool)
+    .await;
     let row = match row {
         Ok(Some(row)) => row,
         Ok(None) => {
@@ -2323,6 +2425,19 @@ pub async fn image(
         }
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_error"),
     };
+    let node_id_str: String = row.get("node_id");
+    if node_id_str != "local" {
+        drop(row);
+        let Some(rec) = crate::nodes::load_node(store, &node_id_str)
+            .await
+            .ok()
+            .flatten()
+        else {
+            return crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
+        };
+        let pq = format!("/internal/v1/node/assets/{image_id}/image");
+        return crate::nodes::relay_from_remote_node(store, &rec, &pq, request).await;
+    }
     let grant = ReadGrant {
         target: ReadTarget::Image {
             id: ImageId::from(image_id),
@@ -2330,7 +2445,7 @@ pub async fn image(
             expected_modified_ns: row.get("modified_ns"),
         },
         library_id: LibraryId::from(row.get::<String, _>("library_id")),
-        node_id: NodeId::from(row.get::<String, _>("node_id")),
+        node_id: NodeId::from(node_id_str),
         root_snapshot: row.get("root"),
         relative_path: row.get("relative_path"),
         mime: row.get("mime"),

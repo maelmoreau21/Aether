@@ -1,0 +1,87 @@
+# Audit indépendant de sortie P1 — 17 octobre 2026
+
+Cible : `develop`, commit `ba5ed8bc1095999cb34cd7202be9fb43a4656cb0`, arbre initial propre. Audit du code et exécution locale sous Windows ; aucune correction produit, migration, opération Git distante ou mise en service Docker/NAS.
+
+**Décision : sortie P1 non validée en l'état.** Films et Séries constituent un parcours standalone fonctionnel sur les fixtures testées. Corriger la disponibilité de l'authentification, l'isolation du cache et la sélection des métadonnées avant d'entamer l'implémentation multi-Node. Aucune refonte générale nécessaire. Les niveaux P0/P1/P2 ci-dessous sont les sévérités de cet audit, distinctes des phases produit.
+
+## P0 — Bloque le déploiement
+
+### A1. Chaque lecture authentifiée devient une écriture SQLite
+
+- **Emplacement :** `crates/core/src/auth.rs:100–111`, `identity.rs:62–94`, `inventory.rs:479`, `apps/web/src/lib/catalog/api.ts:19`.
+- **Preuve exécutée :** binaire actuel, base et session temporaires, `busy_timeout=15s`. `/api/v1/auth/me` : 200 en 0,003 s avant verrou ; pendant un `BEGIN IMMEDIATE` maintenu 30 s sur une seconde connexion : **500 après 16,388 s** ; après rollback : 200 en 0,028 s. `/health` reste 200 en 0,001 s. Session injectée dans la base de test, sans passer par le login ; le chemin réel `authenticate()` est exécuté. Une première tentative avec un cookie de test mal formé a été exclue de ces résultats.
+- **Cause :** `UPDATE sessions ... RETURNING` à chaque requête, avant toute lecture métier. WAL ne protège pas cet UPDATE de la concurrence avec la publication. Le pool de quatre connexions ne crée pas quatre écrivains ; plusieurs requêtes peuvent aussi en occuper les connexions en attente. Le timeout Web de 10 s expire avant la réponse observée. Augmenter le timeout SQLite à 45 s conserve l'indisponibilité côté utilisateur. Un corps média déjà ouvert peut continuer ; les nouvelles requêtes GET/HEAD/Range restent concernées.
+- **Impact :** indisponibilité authentifiée pendant une publication longue, alors que la santé du processus est verte. La durée d'une publication réelle dépend du stockage ; le verrou de 30 s a été imposé pour isoler son effet, pas présenté comme une nouvelle mesure d'ingestion.
+- **Correction minimale proposée :** valider chaque requête par un SELECT joint session/utilisateur actif, avec expiration absolue et inactive en base ; conserver les lectures RBAC actuelles et le calcul CSRF. Coalescer les mises à jour d'activité, par exemple une par session et par minute, dans un worker borné qui n'immobilise pas les connexions de lecture pendant les conflits. UPDATE conditionnel uniquement sur une session encore présente, active et non expirée ; aucun INSERT/recréation ni cache positif d'autorisation. Ne jamais ignorer une erreur du SELECT de sécurité. Le retard d'activité peut avancer légèrement une expiration inactive : le documenter et le tester, sans ajouter de grâce qui ressusciterait une session expirée. Une cadence seule avec UPDATE synchrone ne règle pas le problème lorsque le touch devient exigible.
+- **Acceptation :** sous verrou de 30 s, compte actif et session valide : `/me`, catalogue et nouveau Range répondent dans le budget choisi (cible locale <1 s). Après commit d'une révocation : requête suivante refusée. Tests dédiés expiration aux frontières, touch différé sans résurrection, rôle/droits modifiés, CSRF, saturation du worker et du pool. Logout et autres écritures peuvent toujours attendre le verrou : cette proposition réduit la contention, sans promettre la disponibilité des mutations pendant la publication.
+
+## P1 — À corriger avant multi-Node
+
+### A2. Cache de descripteurs partagé entre sessions, sans revalidation ni invalidation effective
+
+- **Emplacement :** `apps/web/src/lib/catalog/api.ts:20–25,37–79`, `apps/web/src/lib/auth/session.ts:10–35`, `Catalog.svelte:49–72`.
+- **Preuve :** `clearDescriptorCache()` n'a aucun appel de production. Logout, login et 401 modifient seulement le store de session. Le hit du Map retourne avant tout HTTP ; un 403 lève une erreur sans purge. Reproduction Node sur le TypeScript actuel transpilé : premier chargement autorisé, puis serveur simulé en 403 → deuxième chargement retourne les métadonnées précédentes, **un seul appel réseau total**. Autre reproduction : purge pendant une requête → sa réponse tardive repeuple le cache.
+- **Impact :** métadonnées du compte précédent réutilisables dans la même application après reconnexion ; révocation non prise en compte par le descripteur en cache et lancement trompeur. Les routes de contenu vérifient toujours les droits côté Core : ceci ne démontre pas un contournement du streaming ni l'accès aux octets révoqués. Une navigation avec rechargement complet perd naturellement ce Map, contrairement à une transition SPA.
+- **Correction minimale :** cache borné rattaché à une génération de session, purge sur logout/login/changement de session/401, annulation et rejet des réponses d'une ancienne génération. Sur 403 : éviction du descripteur, ou purge complète si sa bibliothèque n'est pas connue. Revalider le descripteur sélectionné au clic Lecture ; garder le préchargement au focus/survol et aucune boucle sur tous les épisodes. TTL seul ou clé par user_id seuls insuffisants pour révocation ou reconnexion du même compte. Les contenus déjà reçus ne peuvent évidemment pas être effacés d'un navigateur hostile.
+- **Acceptation :** A→logout→B sans rechargement, reconnexion A, 401, 403, retrait de bibliothèque et réponse tardive après purge. Aucun descripteur d'ancienne session réutilisé, aucun lancement après 403, aucune rafale de requêtes sur l'ensemble des épisodes.
+
+### A3. MAX indépendants fabriquent des métadonnées et affiches incohérentes
+
+- **Emplacement :** `crates/core/src/inventory.rs:602–615,677–702` ; identité commune possible dans `crates/node/src/scanner.rs:422–430`.
+- **Preuve exécutée :** migrations 0001–0011 appliquées en SQLite temporaire ; requête de production extraite et exécutée sur deux lignes du même `tvdb:42`. Entrées : `(Zulu,2020,a.png,900,image/png)` et `(Alpha,2026,z.jpg,100,image/jpeg)`. Résultat : **`(Zulu,2026,z.jpg,900,image/png)`**, absent des entrées. Deux dossiers portant le même identifiant externe peuvent produire ce groupe sans mutation concurrente des fichiers.
+- **Impact :** titre/année/editorial de provenances différentes ; chemin d'affiche associé à une autre taille ou un autre MIME, donc contrôle de fichier incohérent ou affiche refusée. Ce test isole l'agrégation SQL ; il ne prétend pas reproduire le parcours image complet. Quand toutes les lignes sont identiques, le cas courant fonctionne.
+- **Correction minimale :** choisir une ligne représentative déterministe pour le bloc de métadonnées ; sélectionner l'affiche par une règle de priorité puis chemin, en conservant ensemble chemin/taille/mtime/MIME/priorité. Signaler les conflits. Le GROUP BY des saisons, qui ne retourne que les deux clés de regroupement, est correct. Ni retour aux DISTINCT sur toutes les colonnes ni refonte du modèle nécessaires.
+- **Acceptation :** deux dossiers d'une même série avec NFO/affiches divergents, ordre d'ingestion inversé et rescan : choix stable, tuple provenant d'une seule source, UUID et versions conservés.
+
+### A4. Nouveau test navigateur incompatible avec le job CI Rust déclaré
+
+- **Emplacement :** `crates/core/tests/browser_series.rs:38,102–110`, `scripts/browser-series.cjs:1,10`, `.github/workflows/ci.yml:76–77,116–131`.
+- **Preuve statique :** contrairement aux quatre autres tests navigateur, `browser_series` n'est pas ignoré. Il charge `apps/web/node_modules/playwright`, Chrome installé et les assets Web. Le job Rust Ubuntu lance `cargo test --all-features` sans installer ces dépendances ni construire le Web. Le job frontend séparé ne partage pas son système de fichiers avec lui.
+- **Impact :** échec prévisible sur un runner vierge ; le succès local avec dépendances préexistantes ne prouve pas le succès GitHub. Aucun run GitHub consulté ou exécuté dans cet audit.
+- **Correction minimale :** rendre le test explicitement opt-in, comme ses voisins, puis prévoir un job navigateur équipé qui le lance ; ou préparer ses prérequis dans le job qui l'exécute. Documenter le navigateur et le build employés.
+- **Acceptation :** CI sur checkout propre, tests Rust sans dépendances Web implicites et job navigateur Films/Séries exécuté avec rapport conservé.
+
+### A5. Procédure Docker LAN HTTP contraire à la validation du Core
+
+- **Emplacement :** `docs/DEPLOYMENT_DOCKER.md:62–74`, commentaires des deux fichiers Compose ; `crates/core/src/auth.rs:75–81`.
+- **Preuve statique :** le guide prescrit `MEDIA_PUBLIC_URL=http://192.168.1.100:3000`. Le constructeur accepte HTTP uniquement pour localhost/loopback et renvoie `AuthConfigError::Origin` dans ce cas.
+- **Impact :** démarrage impossible en suivant cette procédure LAN ; la protection actuelle est cohérente, la procédure ne l'est pas.
+- **Correction minimale :** corriger le guide vers HTTPS pour le LAN et conserver HTTP loopback pour l'usage local. Aucune suppression du contrôle d'origine ni assouplissement des cookies demandé.
+- **Acceptation :** exemples documentés couverts par tests de configuration ; origine LAN HTTP rejetée explicitement, loopback HTTP et origine HTTPS acceptés.
+
+## P2 — Améliorations reportables
+
+### A6. Borne de 128 séries réelle, FIFO et absence de copies profondes non démontrées : elles sont fausses
+
+- **Emplacement :** `crates/node/src/scanner.rs:569–572,752–782,844–845`.
+- **Preuve statique :** à 128 entrées, suppression de `HashMap::keys().next()`, ordre arbitraire et non ordre d'insertion. Le clone de l'Arc est léger, mais `entry.0.clone()` recopie ensuite le `NfoOutcome` possédé dans chaque `ScannedFile`, avec ses chaînes et collections ; titre et identifiants sont aussi copiés. L'affiche recopie ses métadonnées, pas les pixels.
+- **Impact :** politique d'éviction non FIFO, réutilisation moins prévisible, allocations et sérialisation NFO répétées. Cela ne démontre ni fuite infinie du cache de séries ni corruption des épisodes. Lots, entrée NFO et nombre de séries cachées ont des bornes.
+- **Correction minimale :** rectifier les affirmations documentaires ; si FIFO est réellement voulu, ajouter une file des clés. Ne propager le partage du NFO jusqu'au lot que si une mesure d'allocations/RSS le justifie, en gardant le contrat sérialisé compatible.
+- **Acceptation éventuelle :** séquence de 129 séries vérifiant la première éviction ; mesure avec gros NFO et plusieurs tailles de bibliothèque avant toute optimisation supplémentaire.
+
+## Vérification P1 et portée des preuves
+
+| Domaine | Constat indépendant |
+|---|---|
+| SQLite et migrations | 11 fichiers additifs lus ; application séquentielle en SQLite temporaire réussie, foreign_key_check vide. Tables STRICT principales, FK, rôle contraint à administrator/user, marqueur de bootstrap permanent, WAL, inventaire séparant œuvre/édition/version/source/asset/piste. 0011 conserve films via kind par défaut. Les tests de migration/restart réussis ne constituent pas une matrice exhaustive de tous les états historiques 0001→0011. |
+| Identifiants/rescans | Code réutilise œuvres/saisons/assets et versions existantes si identité, racine et chemin correspondent ; permissions en tables séparées. Scénarios Films/Séries exercent rescan, multi-versions et redémarrage. Ce n'est pas une garantie de stabilité lors d'un renommage ou changement d'identité : des IDs peuvent changer dans ces cas. |
+| Streaming | Code sert le handle confiné ouvert, chunks 64 Kio, annulation par abandon du corps, GET/HEAD/Range 206/416 ; tests de bornes et substitution de chemins exécutés. Tests API de permissions couvrent les ressources dérivées. Pas de mesure RSS globale ni endurance de films longs ou de clients lents. Une révocation contrôle les nouvelles requêtes, sans retirer les octets déjà transmis. |
+| Sauvegarde/restauration | 9 tests réussis : snapshot WAL, utilisateurs/grants/UUID/métadonnées, cible existante, journaux résiduels, corruption, remplacement et échec préservant la sauvegarde. Restauration vers cible neuve. Pas de restauration Docker/NAS personnellement exécutée ; pas de garantie contre perte du volume contenant aussi ses backups. |
+| Taille des bibliothèques | Tests 10 000 films synthétiques et 200 épisodes disponibles et exécutés dans la suite. Scanner à lots avec backpressure ; cache technique O(nombre de fichiers), cache images, maps séries/saisons et ensembles d'œuvres restent proportionnels au catalogue. Détail série en 4 requêtes groupées, mais arborescence complète toujours O(épisodes) : suppression du N+1 et du préchargement massif des descripteurs, pas pagination des épisodes ni mémoire globale constante. Pas de preuve sur des milliers de séries/128 gros NFO ou sur NAS. |
+| Navigateur personnellement exécuté | Chrome 155.0.8059.40, Windows 10.0.26300, headless : Séries scan, chargement différé, saisons, lecture/pause/seek ; Films scan initial/incrémental, une œuvre/deux versions, lecture/pause/seek et vrai redémarrage. Rapports générés par les runners puis fichiers historiques remis en état pour ne pas mélanger les campagnes. Pas de nouvelle mesure PCM ni écoute humaine. |
+| Docker | Docker accessible, images locales présentes ; `docker compose config --quiet` réussit, avertissement deux fichiers Compose (compose.yaml choisi). Dockerfile/configuration lus : build statique, runtime Rust, non-root, médias ro. Aucune image construite ni conteneur lancé, conformément à l'interdiction de déploiement. Images existantes et récits antérieurs non retenus comme validation du commit audité. |
+| Compatibilité | Résultats AV1/Opus historiques MKV/MP4, Edge/Firefox et expériences Shaka seulement documentés pour leurs fixtures et profils. Les essais Chrome actuels ne valident pas Safari, appareil physique, changement natif des pistes internes, média arbitraire ou capacité de production. |
+
+Commandes personnellement exécutées et réussies : `cargo test --workspace`, `cargo test --all-features --test p0 --test catalog` (11 + 3 tests supplémentaires du banc), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `npm test` (19 tests/4 fichiers), `npm run check` (0 erreur/0 avertissement), `npm run lint`, `npm run build`, `cargo test --test browser_scanner -- --ignored --nocapture`, `docker compose config --quiet`. La suite workspace ignore quatre tests navigateur et un helper subprocess ; le navigateur Films a ensuite été exécuté explicitement, Séries est exécuté par défaut, le helper est exercé par son test parent. Les commandes npm ont été lancées depuis apps/web. Reproductions complémentaires : Python/SQLite + HTTP réel pour le verrou, requête SQL de production sur staging temporaire, TypeScript transpilé dans Node avec fetch simulé pour le cache. Aucun audit de dépendances ou scan de sécurité exhaustif revendiqué.
+
+## Plan P2 proposé — petits jalons indépendamment vérifiables
+
+Chaque étape s'arrête à ses critères d'acceptation ; aucun développement P2 effectué dans cet audit.
+
+1. **Fermer la sortie P1.** A1–A5, tests de non-régression ciblés, CI vierge et parcours Films/Séries. Accepter : disponibilité sous verrou 30 s, révocations effectives à la requête suivante après commit, cache isolé, métadonnées cohérentes, procédures reproductibles. A6 peut rester différé.
+2. **Appairer et révoquer un Node distant.** Un Core SQLite, contrat interne versionné, identité stable du Node, secret distinct, appairage initié par administrateur, TLS sur réseau non fiable. Migration additive remplaçant la contrainte actuelle `id='local'`, sans changer les UUID locaux. Accepter : deux machines, Node inconnu refusé, secret erroné/expiré/rejoué refusé, révocation effective, standalone inchangé.
+3. **Ingestion distante idempotente.** Réutiliser staging/publication, lots bornés, identité Node+bibliothèque, séquences et reprise explicites. Accepter : doublon, ordre incorrect, interruption/reprise, suppression et Node offline sans suppression prématurée ; mêmes UUID/versions après rescan ; zéro chemin disque fourni par le navigateur ; catalogue local toujours utilisable.
+4. **Streaming distant autorisé.** URL Node direct, autorisation bornée à Node/asset/action/expiration ; validation des droits actuels pour chaque nouvelle GET/HEAD/Range via Core si la révocation immédiate est conservée. Une simple capacité autonome avec TTL ne suffit pas à garantir cette propriété. Relais Core seulement si nécessaire. Accepter : replay/destinataire/asset/Range abusifs refusés, retrait de droits pris en compte après commit, perte réseau fail-closed, seek et annulation réels, débit et trafic Core/Node mesurés sur deux machines. Définir séparément le sort des flux déjà ouverts.
+5. **OIDC Authentik, indépendamment du transport média.** Code+PKCE, issuer/subject stables, signature/audience/nonce/state/redirects validés, sessions Core, cookies et CSRF ; récupération locale protégée conservée. Accepter : connexion et révocation, rotation de clés, panne IdP, collision d'email sans liaison implicite, aucun jeton localStorage ni promotion admin implicite ; mêmes parcours Films/Séries et permissions locales/distantes.
+
+SQLite et Core unique restent adaptés à ce périmètre ; aucun PostgreSQL, cache distribué, cluster ou nouveau moteur de lecture n'est justifié par ces constats.

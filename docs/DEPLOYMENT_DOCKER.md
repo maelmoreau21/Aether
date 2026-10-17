@@ -290,18 +290,18 @@ Pour restaurer après un incident ou changer de version, appliquez la procédure
 
 ---
 
-### Concurrence des écritures et limites du timeout SQLite
+### Concurrence des écritures et disponibilité des lectures authentifiées sous publication SQLite
 Lors de l'ingestion initiale d'une volumineuse bibliothèque (ex. 10 000 nouveaux médias), la transaction d'écriture exclusive de publication (`publish_staged_scan` via `BEGIN IMMEDIATE`) peut être maintenue active pendant environ 30 secondes.
 
-- **Lectures concurrentes non bloquées** : En mode SQLite WAL, les requêtes HTTP de lecture non authentifiées ou le streaming média HTTP Range ne subissent aucun blocage (latences `p50 ~ 7 ms`).
-- **Écritures concurrentes sur routes authentifiées** :
-  - **Comportement réel** : Chaque requête HTTP authentifiée exécute dans son middleware de session l'instruction `UPDATE sessions SET last_seen_at = unixepoch() WHERE ...`. Cette mise à jour constitue une **écriture SQLite**.
-  - **Verrouillage exclusif** : En raison du modèle mono-écrivain de SQLite, toute mise à jour de session arrivant pendant une publication massive doit acquérir le verrou d'écriture et se met en attente (`busy_timeout`).
-  - **Limites du timeout (`MEDIA_SQLITE_BUSY_TIMEOUT_SECS`)** :
-    - La valeur par défaut est de 15 secondes.
-    - Si une publication maintient le verrou d'écriture pendant 30 secondes, les requêtes authentifiées en attente au-delà de 15 secondes reçoivent l'erreur `SQLITE_BUSY (code 5 : database is locked)` renvoyant une réponse HTTP 500 (`internal_error`).
-    - Augmenter simplement le timeout (ex. à 45s ou 60s) évite l'échec immédiat mais contraint les requêtes HTTP du client à rester bloquées pendant 20 à 30 secondes avant de répondre.
-    - Ce compromis reflète le comportement transactionnel normal de SQLite WAL pour P1 (un seul écrivain à la fois). Les évolutions futures découpleront la mise à jour de l'horodatage de session de la transaction critique de scan.
+- **Lectures authentifiées et non authentifiées non bloquées (WAL)** :
+  - `AuthState::authenticate()` valide chaque requête via un `SELECT` SQLite en lecture seule joignant `sessions`, `users` et `local_credentials` (vérification de l'existence de la session, de l'expiration absolue 12 h, de l'expiration inactive 30 min et de l'état actif `disabled_at IS NULL`, sans aucun cache positif d'autorisation).
+  - En mode SQLite WAL, `/api/v1/auth/me`, la navigation dans le catalogue Films/Séries, les descripteurs d'épisodes et le streaming média HTTP Range n'attendent plus le verrou d'écriture (latences mesurées sous verrou `BEGIN IMMEDIATE` de 30 s : `p50 = 3,90 ms`, `p95 = 6,44 ms`, `p99 = 8,54 ms`, `0` erreur HTTP 500).
+- **Mise à jour d'activité de session regroupée et différée (`SessionToucher`)** :
+  - Le rafraîchissement de `sessions.last_seen_at` est coalescé par session (`TOUCH_INTERVAL_SECONDS = 60 s`) dans une file bornée (`MAX_PENDING_TOUCHES = 4096`) traitée par un worker unique par lots (`TOUCH_BATCH_SIZE = 64`).
+  - En cas de verrou d'écriture actif, le worker n'immobilise pas les connexions du pool (`busy_timeout` court de 15 ms par tentative puis backoff de 150 ms) et applique un `UPDATE` conditionnel dès la libération du verrou sans jamais ressusciter une session expirée ou révoquée.
+  - **Compromis fail-closed sur l'expiration glissante** : SQLite restant l'unique source de vérité d'autorisation, une activité survenant dans la dernière minute avant l'expiration d'inactivité de 30 min qui ne peut pas être persistée avant l'échéance (en raison d'un verrou d'écriture prolongé jusqu'au-delà de la limite de 30 min ou d'un redémarrage brutal avant flush) échoue de manière fermée (`401 Unauthorized`).
+- **Mutations explicites et `MEDIA_SQLITE_BUSY_TIMEOUT_SECS`** :
+  - Les routes d'écriture explicites (connexion `POST /api/v1/auth/login`, déconnexion `POST /api/v1/auth/logout`, création/modification de bibliothèque) doivent acquérir le verrou d'écriture SQLite et patientent jusqu'à `MEDIA_SQLITE_BUSY_TIMEOUT_SECS` (défaut 15 secondes).
 
 ---
 

@@ -29,12 +29,14 @@ COPY crates/node/Cargo.toml ./crates/node/
 COPY crates/core/Cargo.toml ./crates/core/
 
 # Scaffold dummy source hierarchy for dependency precompilation caching
-# Explicit test targets declared in crates/core/Cargo.toml (p0, catalog) must exist
-RUN mkdir -p crates/shared/src crates/node/src crates/core/src crates/core/src/bin crates/core/tests && \
+# Explicit test/bin targets declared in crates/node/Cargo.toml and crates/core/Cargo.toml must exist
+RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/src crates/core/src/bin crates/core/tests && \
     echo 'pub fn dummy() {}' > crates/shared/src/lib.rs && \
     echo 'pub fn dummy() {}' > crates/node/src/lib.rs && \
+    echo 'fn main() {}' > crates/node/src/bin/aether-node.rs && \
     echo 'pub fn dummy() {}' > crates/core/src/lib.rs && \
     echo 'fn main() {}' > crates/core/src/main.rs && \
+    echo 'fn main() {}' > crates/core/src/bin/aether-core.rs && \
     echo 'fn main() {}' > crates/core/src/bootstrap.rs && \
     echo 'fn main() {}' > crates/core/src/bin/backup.rs && \
     echo 'fn main() {}' > crates/core/src/bin/restore.rs && \
@@ -43,23 +45,107 @@ RUN mkdir -p crates/shared/src crates/node/src crates/core/src crates/core/src/b
 # Precompile workspace dependencies
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --locked --bin media-poc --bin media-bootstrap --bin media-backup --bin media-restore
+    cargo build --release --locked \
+        --bin media-poc \
+        --bin aether-core \
+        --bin aether-node \
+        --bin media-bootstrap \
+        --bin media-backup \
+        --bin media-restore
 
 # Copy actual workspace crates (shared contracts, node, and core with migrations)
 COPY crates/ ./crates/
 
 # Clean dummy binary/deps artifacts, recompile actual release binaries, and strip symbols
-RUN touch crates/shared/src/lib.rs crates/node/src/lib.rs crates/core/src/lib.rs crates/core/src/main.rs crates/core/src/bootstrap.rs crates/core/src/bin/backup.rs crates/core/src/bin/restore.rs && \
-    rm -f target/release/deps/*media_contracts* target/release/deps/*media_node* target/release/deps/*media_poc* target/release/deps/*media_bootstrap* target/release/deps/*media_backup* target/release/deps/*media_restore* target/release/media-poc target/release/media-bootstrap target/release/media-backup target/release/media-restore && \
-    cargo build --release --locked --bin media-poc --bin media-bootstrap --bin media-backup --bin media-restore && \
-    strip --strip-all target/release/media-poc target/release/media-bootstrap target/release/media-backup target/release/media-restore
+RUN touch crates/shared/src/lib.rs \
+          crates/node/src/lib.rs \
+          crates/node/src/bin/aether-node.rs \
+          crates/core/src/lib.rs \
+          crates/core/src/main.rs \
+          crates/core/src/bin/aether-core.rs \
+          crates/core/src/bootstrap.rs \
+          crates/core/src/bin/backup.rs \
+          crates/core/src/bin/restore.rs && \
+    rm -f target/release/deps/*media_contracts* \
+          target/release/deps/*media_node* \
+          target/release/deps/*aether_node* \
+          target/release/deps/*media_poc* \
+          target/release/deps/*aether_core* \
+          target/release/deps/*media_bootstrap* \
+          target/release/deps/*media_backup* \
+          target/release/deps/*media_restore* \
+          target/release/media-poc \
+          target/release/aether-core \
+          target/release/aether-node \
+          target/release/media-bootstrap \
+          target/release/media-backup \
+          target/release/media-restore && \
+    cargo build --release --locked \
+        --bin media-poc \
+        --bin aether-core \
+        --bin aether-node \
+        --bin media-bootstrap \
+        --bin media-backup \
+        --bin media-restore && \
+    strip --strip-all \
+        target/release/media-poc \
+        target/release/aether-core \
+        target/release/aether-node \
+        target/release/media-bootstrap \
+        target/release/media-backup \
+        target/release/media-restore
 
 # ==============================================================================
-# Stage 3: Minimal Linux x86_64 Runtime Environment
+# Stage 3: Distributed Core Runtime (`aether-core`)
 # ==============================================================================
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim AS runtime-core
 
-# Install system dependencies with zero desktop/recommended package bloat
+# Core does not mount or probe media files directly; no ffmpeg needed in Core-only image
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        tini \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 10001 aether \
+    && useradd --uid 10001 --gid 10001 --create-home --home-dir /app --shell /usr/sbin/nologin aether
+
+RUN mkdir -p /data /backups /app/apps/web/build \
+    && chown -R aether:aether /data /backups /app \
+    && chmod 0750 /data /backups \
+    && chmod 0755 /app
+
+COPY --from=rust-builder --chmod=0755 /build/target/release/aether-core /usr/local/bin/aether-core
+COPY --from=rust-builder --chmod=0755 /build/target/release/media-bootstrap /usr/local/bin/media-bootstrap
+COPY --from=rust-builder --chmod=0755 /build/target/release/media-backup /usr/local/bin/media-backup
+COPY --from=rust-builder --chmod=0755 /build/target/release/media-restore /usr/local/bin/media-restore
+COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
+
+ENV MEDIA_MODE=distributed \
+    MEDIA_PORT=3000 \
+    MEDIA_BIND_ADDR=0.0.0.0 \
+    MEDIA_DB_PATH=/data/core.sqlite3 \
+    MEDIA_WEB_DIST=/app/apps/web/build \
+    MEDIA_PUBLIC_URL=http://127.0.0.1:3000
+
+WORKDIR /app
+VOLUME ["/data", "/backups"]
+EXPOSE 3000
+USER aether:aether
+STOPSIGNAL SIGINT
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=3 \
+    CMD curl -f http://127.0.0.1:${MEDIA_PORT:-3000}/internal/v1/health || exit 1
+
+ENTRYPOINT ["tini", "--"]
+CMD ["aether-core"]
+
+# ==============================================================================
+# Stage 4: Distributed Media Node Runtime (`aether-node`)
+# ==============================================================================
+FROM debian:bookworm-slim AS runtime-node
+
+# Node performs ffprobe inspection, NFO/image validation, and confined HTTP Range streaming
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
@@ -67,29 +153,65 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tini \
     && rm -rf /var/lib/apt/lists/*
 
-# Create unprivileged non-root user and group aether (UID 10001, GID 10001)
 RUN groupadd --gid 10001 aether \
     && useradd --uid 10001 --gid 10001 --create-home --home-dir /app --shell /usr/sbin/nologin aether
 
-# Pre-create directory layout with exact permissions
-# /data: Writable persistent volume for SQLite (core.sqlite3, WAL, SHM) - mode 0750
-# /media: Mount root for read-only media libraries (:ro) - mode 0755
-# /app: Application directory housing static web assets - mode 0755
-RUN mkdir -p /data /media /app/apps/web/build \
+# /data: Persistent technical state for Node identity & operational inventory (outside /media)
+# /media: Mount root for read-only media libraries (:ro)
+RUN mkdir -p /data /media /app \
     && chown -R aether:aether /data /media /app \
     && chmod 0750 /data \
     && chmod 0755 /media /app
 
-# Copy stripped binaries from Rust builder stage to /usr/local/bin
+COPY --from=rust-builder --chmod=0755 /build/target/release/aether-node /usr/local/bin/aether-node
+
+ENV MEDIA_NODE_PORT=4000 \
+    MEDIA_NODE_BIND_ADDR=0.0.0.0 \
+    MEDIA_NODE_DATA_DIR=/data \
+    MEDIA_NODE_ROOTS=/media
+
+WORKDIR /app
+VOLUME ["/data"]
+EXPOSE 4000
+USER aether:aether
+STOPSIGNAL SIGINT
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=3 \
+    CMD curl -f http://127.0.0.1:${MEDIA_NODE_PORT:-4000}/internal/v1/health || exit 1
+
+ENTRYPOINT ["tini", "--"]
+CMD ["aether-node"]
+
+# ==============================================================================
+# Stage 5: Standalone All-in-One Runtime (`aether` — Default Target)
+# ==============================================================================
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        ffmpeg \
+        tini \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 10001 aether \
+    && useradd --uid 10001 --gid 10001 --create-home --home-dir /app --shell /usr/sbin/nologin aether
+
+RUN mkdir -p /data /backups /media /app/apps/web/build \
+    && chown -R aether:aether /data /backups /media /app \
+    && chmod 0750 /data /backups \
+    && chmod 0755 /media /app
+
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-poc /usr/local/bin/media-poc
+COPY --from=rust-builder --chmod=0755 /build/target/release/aether-core /usr/local/bin/aether-core
+COPY --from=rust-builder --chmod=0755 /build/target/release/aether-node /usr/local/bin/aether-node
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-bootstrap /usr/local/bin/media-bootstrap
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-backup /usr/local/bin/media-backup
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-restore /usr/local/bin/media-restore
+RUN ln -s /usr/local/bin/media-poc /usr/local/bin/aether
 
-# Copy static frontend distribution from Web builder stage
 COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
 
-# Application runtime environment defaults
 ENV MEDIA_PORT=3000 \
     MEDIA_BIND_ADDR=0.0.0.0 \
     MEDIA_DB_PATH=/data/core.sqlite3 \
@@ -97,19 +219,14 @@ ENV MEDIA_PORT=3000 \
     MEDIA_WEB_DIST=/app/apps/web/build \
     MEDIA_PUBLIC_URL=http://127.0.0.1:3000
 
-# Container topology & security directives
 WORKDIR /app
-VOLUME ["/data"]
+VOLUME ["/data", "/backups"]
 EXPOSE 3000
 USER aether:aether
-
-# Signal forwarding alignment: Docker stop triggers SIGINT to match tokio::signal::ctrl_c()
 STOPSIGNAL SIGINT
 
-# Healthcheck probe using internal loopback endpoint (resilient to external MEDIA_PUBLIC_URL)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://127.0.0.1:3000/api/v1/health || exit 1
 
-# Process init system & default command
 ENTRYPOINT ["tini", "--"]
 CMD ["media-poc"]

@@ -2,9 +2,30 @@ export interface CodecTrack {
   index?: number; codec_type?: string; codec_name?: string; channels?: number; channel_layout?: string;
   width?: number; height?: number; pix_fmt?: string; tags?: Record<string, string>;
 }
-export interface Source { id: string; audioTrackId: string; language: string; url: string; mime: string; tracks?: CodecTrack[] }
+export interface Source {
+  id: string;
+  audioTrackId: string;
+  language: string;
+  url: string;
+  directUrl?: string;
+  relayUrl?: string;
+  tokenExpiresAt?: number;
+  nodeId?: string;
+  nodeStatus?: 'connected' | 'disconnected' | 'revoked';
+  mime: string;
+  tracks?: CodecTrack[];
+}
 export interface Subtitle { id: string; language: string; label: string; url: string }
-export interface Media { id: string; title: string; synthetic?: boolean; sources: Source[]; subtitles: Subtitle[] }
+export interface Media {
+  id: string;
+  title: string;
+  synthetic?: boolean;
+  nodeId?: string;
+  nodeStatus?: 'connected' | 'disconnected' | 'revoked';
+  available?: boolean;
+  sources: Source[];
+  subtitles: Subtitle[];
+}
 export interface PlaybackState { position: number; duration: number; paused: boolean; volume: number; speed: number }
 export interface Player {
   load(media: Media): Promise<void>;

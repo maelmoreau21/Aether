@@ -24,12 +24,19 @@ rpassword = "7.5.4"
 zeroize = "1"
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10.9"
+bytes = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+url = "2"
 
 [dev-dependencies]
-http-body-util = "0.1"
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 tempfile = "3"
 
+[[bin]]
+name = "aether-core"
+path = "src/bin/aether-core.rs"
 
 [[bin]]
 name = "media-bootstrap"

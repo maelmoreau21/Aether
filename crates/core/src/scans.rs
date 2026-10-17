@@ -161,12 +161,20 @@ async fn start(
     if state.jobs.cancel.load(Ordering::Acquire) {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
-    let library: Option<(String, String)> = sqlx::query_as("SELECT root, kind FROM libraries WHERE id=? AND enabled=1 AND kind IN ('films', 'series') AND node_id='local' AND id NOT IN ('fixture-films','fixture-series')").bind(&id).fetch_optional(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let (root, kind) = library.ok_or(StatusCode::BAD_REQUEST)?;
-    node::LocalNode
-        .validate_root(std::path::Path::new(&root), &state.root)
-        .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let library: Option<(String, String, String)> = sqlx::query_as(
+        "SELECT l.root, l.kind, l.node_id FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
+    )
+    .bind(&id)
+    .fetch_optional(&state.auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let (root, kind, node_id) = library.ok_or(StatusCode::BAD_REQUEST)?;
+    if node_id == "local" {
+        node::LocalNode
+            .validate_root(std::path::Path::new(&root), &state.root)
+            .await
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+    }
     let result = sqlx::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES(?,'queued',0,0) ON CONFLICT(library_id) DO UPDATE SET status='queued',discovered=0,probed=0,reused=0,errors_json='[]',errors_count=0,warnings_count=0 WHERE scan_jobs.status NOT IN ('queued','running')").bind(&id).execute(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if result.rows_affected() == 0 {
         return Err(StatusCode::CONFLICT);
@@ -176,10 +184,38 @@ async fn start(
     let cancel = state.jobs.cancel.clone();
     let job_id = id.clone();
     let allowed_root = state.root.clone();
+    let core_origin = state.auth.origin().to_owned();
     let task = tokio::spawn(async move {
         let scan_id = uuid::Uuid::new_v4().to_string();
         let scan_id_err = scan_id.clone();
         let store_err = store.clone();
+        if node_id != "local" {
+            let _ = sqlx::query("UPDATE scan_jobs SET status='running' WHERE library_id=?")
+                .bind(&job_id)
+                .execute(&store.pool)
+                .await;
+            if let Err(err_msg) = crate::nodes::dispatch_remote_scan(
+                &store,
+                &core_origin,
+                &scan_id,
+                &job_id,
+                &node_id,
+                &kind,
+                &root,
+            )
+            .await
+            {
+                let _ = inventory::clean_staging(&store_err, &scan_id_err).await;
+                let errors_json = serde_json::to_string(&vec![format!("Scan échoué: {err_msg}")])
+                    .unwrap_or_else(|_| "[\"Scan échoué\"]".into());
+                let _ = sqlx::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=?")
+                    .bind(errors_json)
+                    .bind(&job_id)
+                    .execute(&store_err.pool)
+                    .await;
+            }
+            return;
+        }
         let result: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
             let _permit = slots.acquire().await?;
             if cancel.load(Ordering::Acquire) { return Err("Scan arrêté".into()); }

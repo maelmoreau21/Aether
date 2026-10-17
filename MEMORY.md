@@ -1,6 +1,45 @@
 # MEMORY.md — État et décisions Aether
 
-## 17 octobre 2026 — Clôture P1 (Audit A2 cookies, A4 CI navigateur, A5 documentation HTTPS) : Séquencement des mutations d'authentification, job CI Chrome dédié et documentation HTTPS/DSM
+## 17 octobre 2026 — Jalon P2 : Architecture distribuée Rust multi-Node et déploiement Docker réel validés
+
+- **Périmètre et validation réelle achevés** :
+  1. **Mode Standalone (`aether`) et Distribué (`aether-core` + plusieurs `aether-node`) pleinement fonctionnels** :
+     - Binaire `aether-core` (`crates/core/src/bin/aether-core.rs`) : API Core, RBAC (`administrator`/`user`), gestion SQLite persistante, catalogue global fédéré, relais borné de secours (chunks de 64 KiB), distribution du frontend statique SvelteKit sans runtime Node.js.
+     - Binaire `aether-node` (`crates/node/src/bin/aether-node.rs`) : Nœud média dédié, scan local borné (`scan_library_streaming`), persistance locale de son identité (`node_identity.json`) et de son inventaire (`node_inventory.json`), endpoints directs de streaming CORS (`/stream/v1/...`) protégés par `PlaybackToken`, zéro accès aux sessions Web utilisateur ou à SQLite.
+     - Protocole interne versionné `v1` (`crates/shared/src/protocol.rs`) : signatures mutuelles HMAC-SHA256, fenêtres anti-rejeu bornées (`ReplayWindow`), échange de clés éphémères lors de l'appairage initial, rotation et révocation cryptographiques strictes.
+  2. **Contrôle d'accès et streaming sécurisé direct / relais** :
+     - Capacité de streaming direct navigateur → Node via `PlaybackToken` HMAC signé (TTL 15 min, restreint à `target_kind="asset"` ou `"image"`, asset ID précis, action `"stream"`).
+     - Repli transparent sur relais Core (`/api/v1/assets/...`) lorsque le Node direct est inaccessible.
+     - En-têtes HTTP 206 Partial Content, Content-Range, Range bytes et HEAD préservés sans mise en RAM intégrale.
+     - Mise à jour dynamique de la politique CSP (`connect-src`, `media-src`, `img-src`) sur le Core pour autoriser dynamiquement les origines des Nodes connectés.
+  3. **Interface d'administration SvelteKit (`apps/web/src/routes/admin/libraries/+page.svelte`)** :
+     - Section dédiée à l'appairage des Nodes distants (nom, URL interne, URL publique optionnelle, jeton d'amorçage).
+     - Visualisation de l'état de chaque Node (`connected`, `disconnected`, `revoked`), clé active, racines exposées et bibliothèques associées.
+     - Actions administratives de reconnexion, rotation de secret et révocation.
+     - Création de bibliothèque liée à un Node spécifique avec choix parmi ses seules racines autorisées.
+     - Gestion gracieuse des déconnexions : conservation des œuvres au catalogue avec mention « Média temporairement indisponible (Media Node hors ligne) » et désactivation propre des boutons de lecture.
+  4. **Validation Docker 3 conteneurs réels & Chromium Playwright (`scripts/browser-distributed.cjs`)** :
+     - Stack Docker Compose distribuée (`compose.distributed.yaml`) exécutant `aether-core`, `aether-node-films` et `aether-node-series`.
+     - Appairage réussi des deux Nodes via l'interface d'administration.
+     - Création de la bibliothèque Films sur Node 1 et Séries sur Node 2.
+     - Scans distants par lots bornés complétés avec publication atomique dans le catalogue SQLite commun.
+     - Navigation et lecture réelle dans Chromium Headless :
+       - Film AV1+Opus streamé en direct depuis `http://127.0.0.1:4101/stream/v1/assets/...` avec pause et seek validés.
+       - Épisode Série AV1+Opus streamé en direct depuis `http://127.0.0.1:4102/stream/v1/assets/...` avec pause et seek validés.
+       - En-têtes `HTTP 206`, `Accept-Ranges: bytes` et `Content-Range: bytes 0-249149/249150` vérifiés.
+       - Preuves enregistrées dans `docs/evidence/2026-10-17/distributed/` (captures `01-nodes-paired.png`, `02-remote-scans-complete.png`, `03-catalog-films.png`, `04-film-direct-playback.png`, `05-episode-direct-playback.png`, et `report.json`).
+  5. **Mesures réelles de performances (environnement Docker Windows / WSL2 x86_64)** :
+     - Image `aether-core` : **173 Mo** ; image `aether-node` : **774 Mo** (incluant ffmpeg).
+     - Consommation mémoire active (RSS) : Core ~ **8.98 MiB**, Node Films ~ **2.43 MiB**, Node Séries ~ **2.29 MiB** (soit < 15 MiB cumulés pour l'ensemble du cluster multi-Node).
+     - CPU au repos / streaming : **0.01%**.
+     - Latence catalogue : **272 ms**.
+  6. **Qualité et tests** :
+     - `cargo fmt --check` : 0 diff.
+     - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+     - `cargo test --locked --workspace --all-features` : 100% succès (incluant le test d'intégration `distributed_multi_node.rs`).
+     - Frontend `npm run check`, `npm test` (33/33 tests passés), `npm run build` : 0 erreur, 0 avertissement.
+
+
 
 - **Clôture A2 — Vérification et séquencement des cookies `HttpOnly` lors des transitions de session (`apps/web/src/lib/auth/session.ts`, `crates/core/tests/browser_series.rs`, `scripts/browser-series.cjs`)** :
   - **Problème analysé** : bien que `authActionSeq` protégeât déjà le store JavaScript `session` contre les réponses obsolètes, les mutations HTTP concurrentes (`POST /api/v1/auth/logout`, `POST /api/v1/auth/login`) laissaient le moteur HTTP du navigateur appliquer les en-têtes `Set-Cookie` dans l'ordre d'arrivée réseau :

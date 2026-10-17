@@ -108,13 +108,15 @@
     </select>
   </label>
   <button
-    disabled={!versionIds.length || isLaunching}
+    disabled={!versionIds.length || isLaunching || episode.available === false}
     onclick={handlePlay}
     aria-label={`Lire ${episode.title}`}
   >
-    {isLaunching ? 'Chargement…' : '▶ Lecture'}
+    {episode.available === false ? 'Node indisponible' : isLaunching ? 'Chargement…' : '▶ Lecture'}
   </button>
-  {#if !versionIds.length}
+  {#if episode.available === false}
+    <span>Média temporairement indisponible (Media Node hors ligne).</span>
+  {:else if !versionIds.length}
     <span>Aucune version disponible.</span>
   {/if}
 </div>

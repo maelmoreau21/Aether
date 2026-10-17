@@ -224,9 +224,12 @@
     <section class="detail">
       <div class="detail-poster"><Poster work={detail} showMetadata={false} eager /></div>
       <div class="detail-copy"><p class="eyebrow">{detail.kind === 'series' ? 'SÉRIE' : 'FILM'}{detail.synthetic ? ' · DÉMONSTRATION' : ''}</p><h1>{detail.title}</h1><p class="metadata">{detail.year ?? 'Année non renseignée'}{detail.kind === 'series' ? ` · ${detail.seasonCount ?? 0} ${(detail.seasonCount ?? 0) > 1 ? 'saisons' : 'saison'} · ${detail.episodeCount ?? 0} ${(detail.episodeCount ?? 0) > 1 ? 'épisodes' : 'épisode'}` : ''}</p>{#if detail.genres?.length}<p class="metadata genres">{detail.genres.join(' · ')}</p>{/if}<p class="synopsis">{detail.description || 'Synopsis non renseigné.'}</p>
+      {#if detail.available === false}
+        <p class="error" role="status">Ce média est temporairement indisponible : le Media Node propriétaire ({detail.nodeId ?? 'distant'}) est actuellement hors ligne. L’œuvre reste conservée dans le catalogue.</p>
+      {/if}
       {#if detail.kind === 'film'}
         <div class="versions" aria-label="Versions disponibles">{#each playableMedia as item (item.id)}<button class="version-choice" aria-pressed={selected === item.id} aria-label={`Sélectionner la version ${sourceLabel(item)}`} onclick={() => selected = item.id}>{sourceLabel(item)}</button>{/each}</div>
-        <button class="hero-cta" disabled={!playableMedia.length && !allowedIds.length} onclick={openPlayer}><Icon name="play" size={18} />Lecture</button>
+        <button class="hero-cta" disabled={detail.available === false || (!playableMedia.length && !allowedIds.length)} onclick={openPlayer}><Icon name="play" size={18} />{detail.available === false ? 'Node indisponible' : 'Lecture'}</button>
         {#if !playableMedia.length && !allowedIds.length}<p class="unavailable">Aucune version disponible pour la lecture.</p>{/if}
       {/if}
       {#if mediaError}<p class="error" role="alert">{mediaError}</p>{/if}

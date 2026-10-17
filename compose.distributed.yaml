@@ -1,0 +1,134 @@
+# ==============================================================================
+# Aether Distributed Multi-Node Deployment - Docker Compose Configuration
+# ==============================================================================
+# Topology:
+#   - 1x `aether-core`: API, RBAC, SQLite global catalogue, static SvelteKit UI.
+#                       Does NOT mount or traverse any remote media directories.
+#   - 1x `aether-node-films`: Dedicated Media Node for Films (`/media/films:ro`).
+#   - 1x `aether-node-series`: Dedicated Media Node for Series (`/media/series:ro`).
+#
+# Target: Synology DS1522+ (AMD Ryzen Embedded R1600 x86_64, no iGPU) and Linux x86_64.
+# Zero mandatory video transcoding, zero PostgreSQL/Redis/Node.js runtime.
+# ==============================================================================
+
+services:
+  aether-core:
+    image: aether-core:latest
+    build:
+      context: .
+      target: runtime-core
+    container_name: aether-core
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "${MEDIA_CORE_BIND_HOST:-127.0.0.1}:${MEDIA_CORE_PORT:-3000}:3000"
+    environment:
+      - MEDIA_MODE=distributed
+      - MEDIA_PORT=3000
+      - MEDIA_BIND_ADDR=0.0.0.0
+      - MEDIA_PUBLIC_URL=${MEDIA_PUBLIC_URL:-http://127.0.0.1:3000}
+      - MEDIA_CORE_INTERNAL_URL=${MEDIA_CORE_INTERNAL_URL:-http://aether-core:3000}
+      - MEDIA_DB_PATH=/data/core.sqlite3
+      - MEDIA_WEB_DIST=/app/apps/web/build
+    volumes:
+      - aether_core_data:/data
+      - aether_core_backups:/backups
+    networks:
+      - aether_internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:3000/internal/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  aether-node-films:
+    image: aether-node:latest
+    build:
+      context: .
+      target: runtime-node
+    container_name: aether-node-films
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      # Loopback bound for direct browser -> Node streaming (`/stream/v1/...`) on local/proxied setups.
+      # Internal control endpoints (`/internal/v1/...`) require mutual HMAC-SHA256.
+      - "${MEDIA_NODE_FILMS_BIND_HOST:-127.0.0.1}:${MEDIA_NODE_FILMS_PORT:-4101}:4101"
+    environment:
+      - MEDIA_NODE_PORT=4101
+      - MEDIA_NODE_BIND_ADDR=0.0.0.0
+      - MEDIA_NODE_NAME=${MEDIA_NODE_FILMS_NAME:-Node Films}
+      - MEDIA_NODE_PUBLIC_URL=${MEDIA_NODE_FILMS_PUBLIC_URL:-http://127.0.0.1:4101}
+      - MEDIA_NODE_DATA_DIR=/data
+      - MEDIA_NODE_ROOTS=/media/films
+      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_FILMS_PAIRING_TOKEN:-pair-token-films-test}
+    volumes:
+      - aether_node_films_data:/data
+      - ${MEDIA_FILMS_DIR:-./target/docker_media/films}:/media/films:ro
+    networks:
+      - aether_internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:4101/internal/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  aether-node-series:
+    image: aether-node:latest
+    build:
+      context: .
+      target: runtime-node
+    container_name: aether-node-series
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "${MEDIA_NODE_SERIES_BIND_HOST:-127.0.0.1}:${MEDIA_NODE_SERIES_PORT:-4102}:4102"
+    environment:
+      - MEDIA_NODE_PORT=4102
+      - MEDIA_NODE_BIND_ADDR=0.0.0.0
+      - MEDIA_NODE_NAME=${MEDIA_NODE_SERIES_NAME:-Node Séries}
+      - MEDIA_NODE_PUBLIC_URL=${MEDIA_NODE_SERIES_PUBLIC_URL:-http://127.0.0.1:4102}
+      - MEDIA_NODE_DATA_DIR=/data
+      - MEDIA_NODE_ROOTS=/media/series
+      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_SERIES_PAIRING_TOKEN:-pair-token-series-test}
+    volumes:
+      - aether_node_series_data:/data
+      - ${MEDIA_SERIES_DIR:-./target/docker_media/series}:/media/series:ro
+    networks:
+      - aether_internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:4102/internal/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+networks:
+  aether_internal:
+    driver: bridge
+
+volumes:
+  aether_core_data:
+    name: aether_core_data
+  aether_core_backups:
+    name: aether_core_backups
+  aether_node_films_data:
+    name: aether_node_films_data
+  aether_node_series_data:
+    name: aether_node_series_data

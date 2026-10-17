@@ -103,10 +103,16 @@ impl IdentityStore {
         };
         // SQLx SQLite migration lock is a no-op: serialize the entire check/apply sequence.
         let mut conn = pool.acquire().await?;
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&mut *conn)
+            .await?;
         let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
         sqlx::migrate!("./migrations").run(&mut *tx).await?;
         crate::inventory::backfill_title_sort_unicode(&mut tx).await?;
         tx.commit().await?;
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *conn)
+            .await?;
         drop(conn);
         Ok(Self { pool })
     }

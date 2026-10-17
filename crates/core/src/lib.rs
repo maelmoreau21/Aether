@@ -139,10 +139,11 @@ async fn indexed_image(
 }
 
 async fn indexed_descriptor(
+    axum::Extension(identity): axum::Extension<auth::Authenticated>,
     axum::Extension(store): axum::Extension<identity::IdentityStore>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Response {
-    match inventory::descriptor(&store, &id).await {
+    match inventory::descriptor(&store, &id, &identity.token_hash).await {
         Ok(Some(media)) => Json(media).into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, "unknown_media"),
         Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),

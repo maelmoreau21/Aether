@@ -330,3 +330,15 @@ La validation de racine reste dans node.rs, sans scanner. Core autorise chaque
 requête via SQLite ; le catalogue éditorial reste une association Rust explicite
 jusqu'au scanner/ingestion. Un Node local, aucun transport distant ajouté.
 Voir docs/LIBRARIES_AND_SCANNER.md pour associations partagées et limites.
+
+## P2 — maintien des deux modes et transport interne
+
+Le standalone garde Core + LocalNode + Web dans un seul processus/conteneur.
+Le distribué garde un Core/SQLite et plusieurs Nodes Rust, chacun avec son
+inventaire et ses médias `ro`. Les accès directs et le relais restent proposés.
+Pour conserver la révocation P1, chaque nouvelle requête directe vérifie aussi
+son autorisation au Core ; le média reste envoyé par le Node au navigateur.
+L'indisponibilité Core refuse les nouvelles requêtes directes. La communication
+interne sortante partage un connecteur HTTPS vérifié et une politique explicite
+d'autorités/réseau ; la terminaison TLS peut être assurée par un proxy de confiance.
+Contrat, limites et preuves : [P2 Docker](docs/P2_DOCKER_VALIDATION.md).

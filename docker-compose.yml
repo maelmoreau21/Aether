@@ -52,7 +52,7 @@ services:
     environment:
       - MEDIA_PORT=3000
       - MEDIA_BIND_ADDR=0.0.0.0
-      - MEDIA_PUBLIC_URL=http://127.0.0.1:3000
+      - MEDIA_PUBLIC_URL=${MEDIA_PUBLIC_URL:-http://127.0.0.1:3000}
       - MEDIA_DB_PATH=/data/core.sqlite3
       - MEDIA_LIBRARY_ROOT=/media
       - MEDIA_WEB_DIST=/app/apps/web/build

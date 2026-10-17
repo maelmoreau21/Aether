@@ -28,9 +28,9 @@
     "librariesCreated": true,
     "remoteScansCompleted": true,
     "catalogLatencyMs": 272,
-    "filmVideoSrc": "http://127.0.0.1:4101/stream/v1/assets/def03257-19a2-4847-8991-fb8467f20f68/content?token=eyJ2IjoidjEiLCJraWQiOiJrZXktMTkzNDg1ZDc1ZThkNDhhZjkyYmYwNDYyMjI4MmU4MTMiLCJub2RlSWQiOiJub2RlLTU3MmJiYTM4LTI4OTAtNDM2ZS04ZWI0LTBlN2U1MWVjYTEyOSIsInRhcmdldEtpbmQiOiJhc3NldCIsInRhcmdldElkIjoiZGVmMDMyNTctMTlhMi00ODQ3LTg5OTEtZmI4NDY3ZjIwZjY4IiwibGlicmFyeUlkIjoiYjVlYTE3Y2EtZjhjZS00MTIwLTk0MGYtYjczOTQ2M2QxNmFmIiwiYWN0aW9uIjoic3RyZWFtIiwiaWF0IjoxNzkyMjYxMDA2LCJleHAiOjE3OTIyNjE5MDYsImp0aSI6IjIyNGZlMzE4MzVkZDQ5OGRiMDlkNWYxYzRhN2QzM2EzIn0.F-DnEs53gwU_2BpzJpyK-xoZikewEnErdwdq_97Q5uQ",
+    "filmVideoSrc": "http://127.0.0.1:4101/stream/v1/assets/def03257-19a2-4847-8991-fb8467f20f68/content",
     "filmPlaybackAndSeek": true,
-    "episodeVideoSrc": "http://127.0.0.1:4102/stream/v1/assets/bcc0cd13-1087-46c2-9452-814238332377/content?token=eyJ2IjoidjEiLCJraWQiOiJrZXktYTI5NDRhN2Y2MTBmNDRiOWJjZjkyODUxZjc2MmZmZmUiLCJub2RlSWQiOiJub2RlLTgzNGM4NzU2LTY2MWYtNGFlYS04YWI3LWIzNGJlMTAzYzE5MiIsInRhcmdldEtpbmQiOiJhc3NldCIsInRhcmdldElkIjoiYmNjMGNkMTMtMTA4Ny00NmMyLTk0NTItODE0MjM4MzMyMzc3IiwibGlicmFyeUlkIjoiNzA0OGE5NjEtYmRhZi00MmU0LWE1NGMtYjFkNzNjYmE2MjhiIiwiYWN0aW9uIjoic3RyZWFtIiwiaWF0IjoxNzkyMjYxMDA3LCJleHAiOjE3OTIyNjE5MDcsImp0aSI6ImFlNGRmMzRmMjY4MjQ4ZWViZTRhMDQ1NmQ4ZDgyZmVhIn0.d-r8SxvPv79i4ugzI8B5lLlbmIi__rT_XSH4JDPhyvk",
+    "episodeVideoSrc": "http://127.0.0.1:4102/stream/v1/assets/bcc0cd13-1087-46c2-9452-814238332377/content",
     "episodePlaybackAndSeek": true
   }
 }

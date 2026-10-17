@@ -1,3 +1,6 @@
+> Mise à jour sécurité P2 du 17 octobre : lire [le contrat et les preuves](P2_DOCKER_VALIDATION.md).
+> Les anciennes affirmations de sécurité distribuée ne prouvent pas HTTPS entre machines.
+
 # Déploiement d'Aether sur Synology DS1522+ (Standalone & Distribué P2)
 
 Ce guide fournit les instructions exactes pour installer et exploiter **Aether** sur un NAS **Synology DS1522+** (processeur AMD Ryzen Embedded R1600 `x86_64` sans iGPU) sous DSM 7.2+ avec **Container Manager** (ou `docker compose` en SSH), en coexistence totale et sans risque avec Jellyfin.
@@ -137,3 +140,104 @@ Pour accéder à Aether depuis vos appareils sur le LAN ou à distance :
    - Dans l'onglet **En-tête personnalisé**, vérifiez que l'en-tête `Host` est bien conservé.
 2. Configurez `MEDIA_PUBLIC_URL=https://media.votre-nas.lan:8443` dans `.env` et redémarrez `aether` / `aether-core`.
 3. Si vous utilisez des Nodes distants en lecture directe depuis le navigateur, exposez uniquement leurs routes de streaming derrière un proxy HTTPS dédié (ou laissez `publicUrl` vide lors de l'appairage pour que le Core relaie les flux en `64 KiB` via l'origine HTTPS principale sans ouvrir de port supplémentaire). **N'exposez jamais les ports internes `4101`/`4102` directement sur Internet.**
+
+## Procédure P2 après validation locale, sans déploiement automatique
+
+Conserver les volumes de données existants ; ne pas lancer `down -v`. Les deux
+modes restent utilisables. Le test local n'autorise aucun accès au NAS.
+
+### Préparer les images sur la machine de construction x86_64
+
+```sh
+docker build --target runtime -t aether:latest .
+docker build --target runtime-core -t aether-core:latest .
+docker build --target runtime-node -t aether-node:latest .
+docker save -o aether-images.tar aether:latest aether-core:latest aether-node:latest
+```
+
+Transférer manuellement l'archive sur le NAS et l'importer dans Container Manager
+ou avec `docker load -i aether-images.tar`. Aucun registre ou push requis. Le
+DS1522+ est x86_64 ; les tests de ce jalon ne prouvent pas une image arm64.
+
+### Standalone, un conteneur
+
+Copier `compose.yaml`, `.env.example` et les documents. Préparer `.env` en privé,
+régler `MEDIA_LIBRARY_DIR=/volume1/video` et `MEDIA_PUBLIC_URL` à l'origine HTTPS
+exacte pour un accès distant. Pour un essai local sur le NAS, garder l'origine
+loopback. Le volume nommé existant `aether_data` est conservé et les médias restent
+`:ro`. Ne pas réutiliser une base de production pour un essai.
+
+```sh
+docker compose -f compose.yaml up -d --no-build
+docker compose -f compose.yaml exec -it aether media-bootstrap
+```
+
+Le bootstrap est réservé à une base neuve ; une base déjà initialisée utilise son
+compte existant. Aucune identité par défaut. Le proxy DSM préserve Host et ne
+publie que l'origine HTTPS ; le port Core reste lié à `127.0.0.1`.
+
+### Distribué mono-hôte, bridge de confiance explicite
+
+Créer deux secrets distincts sans les afficher :
+
+```sh
+umask 077
+cp .env.example .env
+film_secret=$(openssl rand -hex 32)
+series_secret=$(openssl rand -hex 32)
+[ "$film_secret" != "$series_secret" ] || exit 1
+sed -i "s/^MEDIA_NODE_FILMS_PAIRING_TOKEN=.*/MEDIA_NODE_FILMS_PAIRING_TOKEN=$film_secret/" .env
+sed -i "s/^MEDIA_NODE_SERIES_PAIRING_TOKEN=.*/MEDIA_NODE_SERIES_PAIRING_TOKEN=$series_secret/" .env
+unset film_secret series_secret
+```
+
+Ne pas activer `set -x`. Sous PowerShell 7, `./scripts/new-pairing-secrets.ps1`
+produit le même fichier sans écraser une configuration existante. Régler ensuite
+les deux chemins médias et l'origine publique dans ce fichier privé. Le Compose
+exige les secrets, les Nodes refusent un secret non hexadécimal ou trop court.
+
+```sh
+docker compose -f compose.distributed.yaml up -d --no-build
+docker compose -f compose.distributed.yaml exec -it aether-core media-bootstrap
+```
+
+Dans l'administration, appairer Films avec `http://aether-node-films:4101`, Séries
+avec `http://aether-node-series:4102`, chacun avec son secret distinct. Créer les
+bibliothèques depuis les racines réellement annoncées puis scanner. Ce HTTP
+est limité au bridge du même hôte déclaré fiable dans le Compose.
+
+### Plusieurs machines, HTTPS obligatoire
+
+Utiliser les services correspondants de `compose.multi-machine.example.yaml`,
+un par machine. Remplacer tous les domaines par les domaines réels. Core doit
+mettre exactement `node-films.<domaine>:443,node-series.<domaine>:443` dans
+`MEDIA_INTERNAL_ALLOWED_AUTHORITIES`; chaque Node autorise seulement
+`media.<domaine>:443`. Garder `MEDIA_INTERNAL_TRUSTED_HTTP=false`.
+
+Chaque proxy écoute en HTTPS avec un certificat dont le SAN couvre son domaine.
+Si CA privée : monter `./ca.pem:/run/certs/internal-ca.pem:ro` dans Core et chaque
+Node, puis définir `MEDIA_INTERNAL_CA_FILE=/run/certs/internal-ca.pem` dans ces
+services. Ne jamais installer la clé privée de la CA dans les conteneurs.
+Le proxy Core doit transmettre `/internal/v1/core/*` aux Nodes autorisés et les
+routes publiques au navigateur ; le proxy Node transmet les routes internes
+uniquement au Core autorisé et `/stream/v1/*` aux clients autorisés. Filtrer les
+sources par pare-feu ; ne pas publier automatiquement les ports internes.
+
+Configurer `MEDIA_CORE_INTERNAL_URL=https://media.<domaine>` sur Core, appairer
+avec les deux origines HTTPS des Nodes. Pour le direct, leur URL publique doit
+être joignable en HTTPS par le navigateur, certificat approuvé aussi côté client.
+Pour le relais uniquement, vider aussi `MEDIA_NODE_PUBLIC_URL` dans le service Node,
+le recréer avec son volume existant, puis reconnecter le Node côté Core ; pour
+un premier appairage, garder également le champ URL publique vide. Le Core reste joignable
+par les Nodes pour valider les capacités directes : une panne Core refuse toute
+nouvelle requête directe. Les flux déjà ouverts suivent la politique P1.
+
+Dans les logs du proxy, exclure les queries de `/stream/v1/` : par exemple Nginx,
+utiliser `$uri` sans `$args` ni `$request_uri` pour cette location. Ne jamais
+partager `.env`, identités Node, cookies ou URLs porteuses complètes.
+
+Avant tout usage réel, refaire sur les machines cibles : appairage HTTPS, scan,
+film/épisode, direct/relais, arrêt/reconnexion, rotation et révocation hors ligne,
+puis restauration d'une sauvegarde sur volumes séparés. Le banc Docker local
+valide un transport TLS entre conteneurs, pas le pare-feu, DNS, proxy DSM ou le
+stockage du NAS réel.

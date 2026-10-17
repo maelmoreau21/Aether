@@ -775,7 +775,12 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .unwrap()
         .unwrap();
     let (poster_direct_url, _) = media_poc::nodes::build_direct_playback_url(
-        &node1_rec, &lib1_id, "image", img_id, "stream",
+        &node1_rec,
+        &lib1_id,
+        "image",
+        img_id,
+        "stream",
+        &sha256_hex(alice_raw_token.as_bytes()),
     )
     .expect("build direct image url");
     let parsed_poster = url::Url::parse(&poster_direct_url).unwrap();
@@ -981,6 +986,114 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     .await;
     assert_eq!(new_tok_st, StatusCode::PARTIAL_CONTENT);
 
+    // Direct requests also refresh activity through the same bounded P1 worker.
+    sqlx::query("UPDATE sessions SET last_seen_at=unixepoch()-120 WHERE token_hash=?")
+        .bind(sha256_hex(alice_raw_token.as_bytes()))
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (status, _, _) = http_request(&node1_url, Method::HEAD, &new_pq, &[], vec![]).await;
+    assert_eq!(status, StatusCode::OK);
+    auth.flush_session_touches().await;
+    let age: i64 =
+        sqlx::query_scalar("SELECT unixepoch()-last_seen_at FROM sessions WHERE token_hash=?")
+            .bind(sha256_hex(alice_raw_token.as_bytes()))
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert!(age < 60);
+
+    let current_record = media_poc::nodes::load_node(&store, &node1_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let current_token = new_parsed
+        .query_pairs()
+        .find(|(k, _)| k == "token")
+        .unwrap()
+        .1
+        .to_string();
+    let mut wrong_library = media_contracts::protocol::verify_playback_token(
+        &current_record.shared_secret,
+        &current_record.key_id,
+        &node1_id,
+        "asset",
+        &film_asset_id,
+        "stream",
+        &current_token,
+        unix_now(),
+    )
+    .unwrap();
+    wrong_library.library_id = LibraryId::new(&lib2_id);
+    let wrong_token = issue_playback_token(&current_record.shared_secret, &wrong_library).unwrap();
+    let (status, _, _) = http_request(
+        &node1_url,
+        Method::GET,
+        &format!("/stream/v1/assets/{film_asset_id}/content?token={wrong_token}"),
+        &[],
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    sqlx::query("UPDATE users SET disabled_at=unixepoch() WHERE id=?")
+        .bind(&alice_id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (status, _, _) = http_request(&node1_url, Method::GET, &new_pq, &[], vec![]).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    sqlx::query("UPDATE users SET disabled_at=NULL WHERE id=?")
+        .bind(&alice_id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    // Previously issued direct URLs obey live P1 permissions and session revocation.
+    sqlx::query("UPDATE libraries SET enabled=0 WHERE id=?")
+        .bind(&lib1_id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    for method in [Method::GET, Method::HEAD] {
+        let (status, _, _) = http_request(
+            &node1_url,
+            method,
+            &new_pq,
+            &[("range", "bytes=0-63")],
+            vec![],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+    sqlx::query("UPDATE libraries SET enabled=1 WHERE id=?")
+        .bind(&lib1_id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM library_permissions WHERE library_id=? AND user_id=?")
+        .bind(&lib1_id)
+        .bind(&alice_id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (status, _, _) = http_request(&node1_url, Method::GET, &new_pq, &[], vec![]).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    sqlx::query("INSERT INTO library_permissions(library_id,user_id) VALUES (?,?)")
+        .bind(&lib1_id)
+        .bind(&alice_id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM sessions WHERE token_hash=?")
+        .bind(sha256_hex(alice_raw_token.as_bytes()))
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (status, _, _) = http_request(&node1_url, Method::HEAD, &new_pq, &[], vec![]).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    sqlx::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES (?,?,unixepoch(),unixepoch(),unixepoch()+3600)")
+        .bind(sha256_hex(alice_raw_token.as_bytes())).bind(&alice_id).execute(store.pool()).await.unwrap();
+
     // Expired token rejection test on Node 1
     let node1_rec = media_poc::nodes::load_node(&store, &node1_id)
         .await
@@ -996,6 +1109,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         action: "stream".into(),
         iat: unix_now().saturating_sub(7200),
         exp: unix_now().saturating_sub(3600),
+        session_hash: String::new(),
         jti: "expired-nonce-test-0001".into(),
     };
     let expired_token = issue_playback_token(&node1_rec.shared_secret, &expired_claims).unwrap();

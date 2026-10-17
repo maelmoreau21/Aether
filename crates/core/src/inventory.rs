@@ -2261,6 +2261,7 @@ pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value
 pub async fn descriptor(
     store: &IdentityStore,
     asset_id: &str,
+    session_hash: &str,
 ) -> Result<Option<Value>, sqlx::Error> {
     let row = sqlx::query(
         "SELECT a.mime, a.probe_json, a.library_id, w.title, l.node_id \
@@ -2286,7 +2287,14 @@ pub async fn descriptor(
         .map(|n| n.status.clone())
         .unwrap_or_else(|| "connected".to_owned());
     let direct_info = node_rec.as_ref().and_then(|n| {
-        crate::nodes::build_direct_playback_url(n, &library_id, "asset", asset_id, "stream")
+        crate::nodes::build_direct_playback_url(
+            n,
+            &library_id,
+            "asset",
+            asset_id,
+            "stream",
+            session_hash,
+        )
     });
     let language = probe
         .streams

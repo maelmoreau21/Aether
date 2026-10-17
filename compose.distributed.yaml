@@ -28,6 +28,8 @@ services:
     ports:
       - "${MEDIA_CORE_BIND_HOST:-127.0.0.1}:${MEDIA_CORE_PORT:-3000}:3000"
     environment:
+      - MEDIA_INTERNAL_ALLOWED_AUTHORITIES=aether-core:3000,aether-node-films:4101,aether-node-series:4102
+      - MEDIA_INTERNAL_TRUSTED_HTTP=true
       - MEDIA_MODE=distributed
       - MEDIA_PORT=3000
       - MEDIA_BIND_ADDR=0.0.0.0
@@ -66,12 +68,14 @@ services:
       - "${MEDIA_NODE_FILMS_BIND_HOST:-127.0.0.1}:${MEDIA_NODE_FILMS_PORT:-4101}:4101"
     environment:
       - MEDIA_NODE_PORT=4101
+      - MEDIA_INTERNAL_ALLOWED_AUTHORITIES=aether-core:3000,aether-node-films:4101,aether-node-series:4102
+      - MEDIA_INTERNAL_TRUSTED_HTTP=true
       - MEDIA_NODE_BIND_ADDR=0.0.0.0
       - MEDIA_NODE_NAME=${MEDIA_NODE_FILMS_NAME:-Node Films}
-      - MEDIA_NODE_PUBLIC_URL=${MEDIA_NODE_FILMS_PUBLIC_URL:-http://127.0.0.1:4101}
+      - MEDIA_NODE_PUBLIC_URL=${MEDIA_NODE_FILMS_PUBLIC_URL-http://127.0.0.1:4101}
       - MEDIA_NODE_DATA_DIR=/data
       - MEDIA_NODE_ROOTS=/media/films
-      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_FILMS_PAIRING_TOKEN:-pair-token-films-test}
+      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_FILMS_PAIRING_TOKEN:?Generate a unique random pairing secret}
     volumes:
       - aether_node_films_data:/data
       - ${MEDIA_FILMS_DIR:-./target/docker_media/films}:/media/films:ro
@@ -101,12 +105,14 @@ services:
       - "${MEDIA_NODE_SERIES_BIND_HOST:-127.0.0.1}:${MEDIA_NODE_SERIES_PORT:-4102}:4102"
     environment:
       - MEDIA_NODE_PORT=4102
+      - MEDIA_INTERNAL_ALLOWED_AUTHORITIES=aether-core:3000,aether-node-films:4101,aether-node-series:4102
+      - MEDIA_INTERNAL_TRUSTED_HTTP=true
       - MEDIA_NODE_BIND_ADDR=0.0.0.0
       - MEDIA_NODE_NAME=${MEDIA_NODE_SERIES_NAME:-Node Séries}
-      - MEDIA_NODE_PUBLIC_URL=${MEDIA_NODE_SERIES_PUBLIC_URL:-http://127.0.0.1:4102}
+      - MEDIA_NODE_PUBLIC_URL=${MEDIA_NODE_SERIES_PUBLIC_URL-http://127.0.0.1:4102}
       - MEDIA_NODE_DATA_DIR=/data
       - MEDIA_NODE_ROOTS=/media/series
-      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_SERIES_PAIRING_TOKEN:-pair-token-series-test}
+      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_SERIES_PAIRING_TOKEN:?Generate a unique random pairing secret}
     volumes:
       - aether_node_series_data:/data
       - ${MEDIA_SERIES_DIR:-./target/docker_media/series}:/media/series:ro

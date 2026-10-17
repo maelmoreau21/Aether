@@ -20,6 +20,8 @@ RUN npm run build
 # ==============================================================================
 FROM rust:slim-bookworm AS rust-builder
 
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /build
 
 # Copy workspace manifests
@@ -95,6 +97,22 @@ RUN touch crates/shared/src/lib.rs \
         target/release/media-backup \
         target/release/media-restore
 
+# Keep the distribution ffprobe binary and its full dynamic dependency closure.
+# No codec/demuxer is rebuilt or disabled; unused GUI driver packages are omitted.
+FROM debian:bookworm-slim AS probe-runtime
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && mkdir -p /probe/usr/bin \
+    && cp /usr/bin/ffprobe /probe/usr/bin/ffprobe \
+    && ldd /usr/bin/ffprobe | awk '/=> \// {print $3} /^\s*\// {print $1}' | \
+       xargs -r -I '{}' cp -L --parents '{}' /probe \
+    && mkdir -p /probe/usr/share/media-probe \
+    && ffprobe -version > /probe/usr/share/media-probe/version.txt \
+    && dpkg-query -W > /probe/usr/share/media-probe/source-stage-packages.tsv
+
+# Preserve license notices for the copied distribution components.
+RUN find /usr/share/doc -name copyright -type f -exec cp --parents '{}' /probe \; \
+    && cp -a --parents /usr/share/common-licenses /probe
+
 # ==============================================================================
 # Stage 3: Distributed Core Runtime (`aether-core`)
 # ==============================================================================
@@ -149,9 +167,11 @@ FROM debian:bookworm-slim AS runtime-node
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        ffmpeg \
         tini \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=probe-runtime /probe/usr/ /usr/
+COPY --from=probe-runtime /probe/lib/ /usr/lib/
 
 RUN groupadd --gid 10001 aether \
     && useradd --uid 10001 --gid 10001 --create-home --home-dir /app --shell /usr/sbin/nologin aether

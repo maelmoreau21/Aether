@@ -20,7 +20,7 @@ use axum::{
     routing::{get, post},
 };
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
+use http_body_util::Full;
 use hyper_util::rt::TokioIo;
 use media_contracts::{
     errors::NodeErrorCode,
@@ -50,9 +50,7 @@ use std::{
         Arc, Mutex, RwLock,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
 };
-use tokio::net::TcpStream;
 
 #[derive(Debug, Clone)]
 pub struct NodeServerConfig {
@@ -150,6 +148,7 @@ impl NodeOperationalInventory {
 pub struct NodeServerState {
     pub config: NodeServerConfig,
     pub identity: Arc<RwLock<NodeIdentityState>>,
+    identity_changes: Arc<tokio::sync::Mutex<()>>,
     pub inventory: Arc<RwLock<NodeOperationalInventory>>,
     pub replay_window: Arc<ReplayWindow>,
     pub active_scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
@@ -221,6 +220,7 @@ impl NodeServerState {
         Ok(Self {
             config: updated_config,
             identity: Arc::new(RwLock::new(identity)),
+            identity_changes: Arc::new(tokio::sync::Mutex::new(())),
             inventory: Arc::new(RwLock::new(inventory)),
             replay_window: Arc::new(ReplayWindow::new()),
             active_scans: Arc::new(Mutex::new(HashMap::new())),
@@ -237,7 +237,25 @@ impl NodeServerState {
         let bytes = serde_json::to_vec_pretty(&snapshot)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         let path = self.config.data_dir.join("node_identity.json");
-        tokio::fs::write(path, bytes).await
+        let temporary = self.config.data_dir.join("node_identity.pending");
+        let mut options = tokio::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options.open(&temporary).await?;
+        use tokio::io::AsyncWriteExt;
+        file.write_all(&bytes).await?;
+        file.sync_all().await?;
+        drop(file);
+        tokio::fs::rename(temporary, path).await?;
+        #[cfg(unix)]
+        {
+            let directory = self.config.data_dir.clone();
+            tokio::task::spawn_blocking(move || std::fs::File::open(directory)?.sync_all())
+                .await
+                .map_err(io::Error::other)??;
+        }
+        Ok(())
     }
 
     pub async fn persist_inventory(&self) -> io::Result<()> {
@@ -475,6 +493,7 @@ fn signed_json_response<T: Serialize>(
         key_id,
         now,
         &res_nonce,
+        &sha256_hex(&body),
     );
     let mut res = Response::new(Body::from(body));
     *res.status_mut() = status;
@@ -506,6 +525,7 @@ async fn pair_node(
     State(state): State<NodeServerState>,
     Json(req): Json<PairNodeRequest>,
 ) -> Response {
+    let _identity_change = state.identity_changes.lock().await;
     if req.protocol_version != PROTOCOL_VERSION {
         return (
             StatusCode::BAD_REQUEST,
@@ -531,6 +551,8 @@ async fn pair_node(
     let mut candidate_tokens = Vec::new();
     if let Some(tok) = &state.config.bootstrap_token
         && !tok.is_empty()
+        && current.shared_secret.is_none()
+        && !current.revoked
     {
         candidate_tokens.push(tok.clone());
     }
@@ -691,6 +713,7 @@ async fn rotate_secret(
     uri: Uri,
     body: Bytes,
 ) -> Response {
+    let _identity_change = state.identity_changes.lock().await;
     let pq = uri
         .path_and_query()
         .map(|v| v.as_str())
@@ -716,7 +739,9 @@ async fn rotate_secret(
         guard.key_id = req.new_key_id.clone();
         guard.revoked = false;
     }
-    let _ = state.persist_identity().await;
+    if state.persist_identity().await.is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
     let res_ts = unix_now();
     let res_nonce = random_nonce_hex();
     let mutual_proof = compute_rotation_mutual_proof(
@@ -751,6 +776,7 @@ async fn revoke_node(
     uri: Uri,
     body: Bytes,
 ) -> Response {
+    let _identity_change = state.identity_changes.lock().await;
     let pq = uri
         .path_and_query()
         .map(|v| v.as_str())
@@ -771,7 +797,9 @@ async fn revoke_node(
         let mut guard = state.identity.write().unwrap_or_else(|e| e.into_inner());
         guard.revoked = true;
     }
-    let _ = state.persist_identity().await;
+    if state.persist_identity().await.is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
     let secret = identity.shared_secret.unwrap_or_default();
     signed_json_response(
         &secret,
@@ -1104,8 +1132,7 @@ pub async fn send_signed_http_request(
         .host_str()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing host"))?
         .to_owned();
-    let port = parsed.port_or_known_default().unwrap_or(80);
-    let addr = format!("{host}:{port}");
+
     let host_header = if let Some(p) = parsed.port() {
         format!("{host}:{p}")
     } else {
@@ -1127,9 +1154,7 @@ pub async fn send_signed_http_request(
         &body_sha,
     );
 
-    let stream = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(&addr))
-        .await
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connection timed out"))??;
+    let stream = crate::transport::connect(base_url).await?;
     let io = TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
         .await
@@ -1164,17 +1189,21 @@ pub async fn send_signed_http_request(
     let req = builder
         .body(Full::new(body))
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-    let res = sender.send_request(req).await.map_err(io::Error::other)?;
+    let res = crate::transport::send_request(&mut sender, req).await?;
     let status = res.status();
     let headers = res.headers().clone();
-    let collected = res
-        .into_body()
-        .collect()
-        .await
-        .map_err(io::Error::other)?
-        .to_bytes();
+    let collected = crate::transport::json_body(res.into_body()).await?;
 
-    if let Some(resp_sig) = headers.get(HDR_RES_SIGNATURE).and_then(|v| v.to_str().ok()) {
+    {
+        let resp_sig = headers
+            .get(HDR_RES_SIGNATURE)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "missing_response_signature",
+                )
+            })?;
         let resp_ts = headers
             .get(HDR_RES_TIMESTAMP)
             .and_then(|v| v.to_str().ok())
@@ -1193,6 +1222,7 @@ pub async fn send_signed_http_request(
             resp_ts,
             resp_nonce,
             resp_sig,
+            &sha256_hex(&collected),
             unix_now(),
         )
         .map_err(|reason| io::Error::new(io::ErrorKind::PermissionDenied, reason))?;
@@ -1218,25 +1248,29 @@ async fn internal_stream_asset(
         .map(|v| v.as_str())
         .unwrap_or("")
         .to_owned();
-    let (identity, _) = match verify_signed_core_call(&state, req.headers(), req.method(), &pq, b"")
-    {
-        Ok(ok) => ok,
-        Err(res) => return res,
-    };
+    let (identity, nonce) =
+        match verify_signed_core_call(&state, req.headers(), req.method(), &pq, b"") {
+            Ok(ok) => ok,
+            Err(res) => return res,
+        };
     let grant = {
         let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
         inv.grant_for_asset(&identity.node_id, &id)
     };
     let Some(grant) = grant else {
-        return node_error_response(NodeErrorCode::UnknownAsset, false);
+        return sign_stream_response(
+            node_error_response(NodeErrorCode::UnknownAsset, false),
+            &identity,
+            &nonce,
+        );
     };
     match state
         .local_node
-        .serve_grant_for_node(identity.node_id, &grant, &req)
+        .serve_grant_for_node(identity.node_id.clone(), &grant, &req)
         .await
     {
-        Ok(res) => convert_stream_response(res, false),
-        Err(code) => node_error_response(code, false),
+        Ok(res) => sign_stream_response(convert_stream_response(res, false), &identity, &nonce),
+        Err(code) => sign_stream_response(node_error_response(code, false), &identity, &nonce),
     }
 }
 
@@ -1251,25 +1285,29 @@ async fn internal_stream_image(
         .map(|v| v.as_str())
         .unwrap_or("")
         .to_owned();
-    let (identity, _) = match verify_signed_core_call(&state, req.headers(), req.method(), &pq, b"")
-    {
-        Ok(ok) => ok,
-        Err(res) => return res,
-    };
+    let (identity, nonce) =
+        match verify_signed_core_call(&state, req.headers(), req.method(), &pq, b"") {
+            Ok(ok) => ok,
+            Err(res) => return res,
+        };
     let grant = {
         let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
         inv.grant_for_image(&identity.node_id, &id)
     };
     let Some(grant) = grant else {
-        return node_error_response(NodeErrorCode::UnknownImage, false);
+        return sign_stream_response(
+            node_error_response(NodeErrorCode::UnknownImage, false),
+            &identity,
+            &nonce,
+        );
     };
     match state
         .local_node
-        .serve_grant_for_node(identity.node_id, &grant, &req)
+        .serve_grant_for_node(identity.node_id.clone(), &grant, &req)
         .await
     {
-        Ok(res) => convert_stream_response(res, false),
-        Err(code) => node_error_response(code, false),
+        Ok(res) => sign_stream_response(convert_stream_response(res, false), &identity, &nonce),
+        Err(code) => sign_stream_response(node_error_response(code, false), &identity, &nonce),
     }
 }
 
@@ -1305,7 +1343,7 @@ async fn direct_stream_asset(
     let Some(token) = query.token.as_deref() else {
         return cors_error_response(StatusCode::UNAUTHORIZED, "missing_playback_token");
     };
-    if let Err(reason) = verify_playback_token(
+    let claims = match verify_playback_token(
         secret,
         &identity.key_id,
         identity.node_id.as_str(),
@@ -1315,8 +1353,9 @@ async fn direct_stream_asset(
         token,
         unix_now(),
     ) {
-        return cors_error_response(StatusCode::FORBIDDEN, reason);
-    }
+        Ok(claims) => claims,
+        Err(reason) => return cors_error_response(StatusCode::FORBIDDEN, reason),
+    };
 
     let grant = {
         let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
@@ -1325,9 +1364,16 @@ async fn direct_stream_asset(
     let Some(grant) = grant else {
         return node_error_response(NodeErrorCode::UnknownAsset, true);
     };
+    if claims.library_id != grant.library_id
+        || post_signed_to_core(&state, "/internal/v1/core/playback/authorize", &claims)
+            .await
+            .is_err()
+    {
+        return cors_error_response(StatusCode::FORBIDDEN, "playback_authorization_denied");
+    }
     match state
         .local_node
-        .serve_grant_for_node(identity.node_id, &grant, &req)
+        .serve_grant_for_node(identity.node_id.clone(), &grant, &req)
         .await
     {
         Ok(res) => convert_stream_response(res, true),
@@ -1355,7 +1401,7 @@ async fn direct_stream_image(
     let Some(token) = query.token.as_deref() else {
         return cors_error_response(StatusCode::UNAUTHORIZED, "missing_playback_token");
     };
-    if let Err(reason) = verify_playback_token(
+    let claims = match verify_playback_token(
         secret,
         &identity.key_id,
         identity.node_id.as_str(),
@@ -1365,8 +1411,9 @@ async fn direct_stream_image(
         token,
         unix_now(),
     ) {
-        return cors_error_response(StatusCode::FORBIDDEN, reason);
-    }
+        Ok(claims) => claims,
+        Err(reason) => return cors_error_response(StatusCode::FORBIDDEN, reason),
+    };
 
     let grant = {
         let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
@@ -1375,9 +1422,16 @@ async fn direct_stream_image(
     let Some(grant) = grant else {
         return node_error_response(NodeErrorCode::UnknownImage, true);
     };
+    if claims.library_id != grant.library_id
+        || post_signed_to_core(&state, "/internal/v1/core/playback/authorize", &claims)
+            .await
+            .is_err()
+    {
+        return cors_error_response(StatusCode::FORBIDDEN, "playback_authorization_denied");
+    }
     match state
         .local_node
-        .serve_grant_for_node(identity.node_id, &grant, &req)
+        .serve_grant_for_node(identity.node_id.clone(), &grant, &req)
         .await
     {
         Ok(res) => convert_stream_response(res, true),
@@ -1419,6 +1473,8 @@ fn cors_error_response(status: StatusCode, reason: &'static str) -> Response {
 }
 
 fn apply_cors_headers(headers: &mut HeaderMap) {
+    headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     headers.insert(
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
         HeaderValue::from_static("*"),
@@ -1439,4 +1495,34 @@ fn apply_cors_headers(headers: &mut HeaderMap) {
         header::HeaderName::from_static("cross-origin-resource-policy"),
         HeaderValue::from_static("cross-origin"),
     );
+}
+
+fn sign_stream_response(
+    mut response: Response,
+    identity: &NodeIdentityState,
+    request_nonce: &str,
+) -> Response {
+    let now = unix_now();
+    let nonce = random_nonce_hex();
+    let digest = crate::transport::stream_metadata_digest(response.headers());
+    let signature = sign_internal_response(
+        identity.shared_secret.as_deref().unwrap_or(""),
+        request_nonce,
+        response.status().as_u16(),
+        identity.node_id.as_str(),
+        &identity.key_id,
+        now,
+        &nonce,
+        &digest,
+    );
+    for (key, value) in [
+        (HDR_RES_TIMESTAMP, now.to_string()),
+        (HDR_RES_NONCE, nonce),
+        (HDR_RES_SIGNATURE, signature),
+    ] {
+        if let Ok(value) = HeaderValue::from_str(&value) {
+            response.headers_mut().insert(key, value);
+        }
+    }
+    response
 }

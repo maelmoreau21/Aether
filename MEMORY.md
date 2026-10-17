@@ -1,5 +1,62 @@
 # MEMORY.md — État et décisions Aether
 
+## 17 octobre 2026 — P2 : transport fiabilisé, deux modes Docker revérifiés
+
+Cette entrée précise les annonces du premier jalon P2 ci-dessous. Pas de preuve
+NAS, LAN réel ou de deux machines physiques. `develop`, aucun commit/push/image
+publiée, aucun média personnel ni volume existant touché ; pas d'OIDC/P3/refonte.
+
+- Standalone `aether` conservé ; distribué Core + deux Nodes Rust conservé.
+  Connecteur interne commun : vrai TLS >=1.2, certificats/noms vérifiés, CA PEM
+  facultative, aucun repli clair ni redirection ; autorités exactes, DNS contrôlé
+  puis connexion aux adresses vérifiées. HTTP hors loopback exige un réseau
+  déclaré fiable et une autorité autorisée. URL publiques HTTPS sauf loopback.
+- MAC JSON obligatoires incluant SHA-256 du corps, appairage/rotation compris ;
+  corps <=8Mio et délais15s pour headers/corps de contrôle. Relais : métadonnées
+  signées et octets protégés par TLS ; pas de MAC de segment sur bridge HTTP.
+- Chaque nouveau GET/HEAD/Range direct vérifie Node/clé/asset/type/action,
+  bibliothèque/expiration puis session, compte et droits vivants au Core. Même
+  validation/activité coalescée que P1, aucun cache positif. Core indisponible =
+  refus ; corps déjà ouvert non coupé comme P1. Anciennes capacités invalidées
+  après retrait de droits/session/logout, désactivation, rotation/révocation.
+- Secrets Compose sans repli connu, générateur32 octets distincts sans affichage,
+  CLI Node >=24 octets hex. Bootstrap limité à une identité jamais appairée ;
+  persistance atomique/fsync et mutations sérialisées, erreurs non masquées.
+  Une URL publique vide retire l'annonce directe après recréation/reconnexion
+  du Node avec son volume conservé ; relais maintenu.
+- Vérifications : fmt, Clippy workspace/all-features/all-targets -D warnings ;
+  suite Rust124 réussis/0 échec/7 ignorés, TLS explicite4/4 (certificat valide,
+  nom/CA/expiration, unsigned/tamper/redirection, corps manquant borné). Web
+  check0/0, lint,33/33 tests et build Docker statique passent. Les cinq anciennes
+  suites navigateur Rust restent ignorées, nouveaux essais Chrome distincts.
+- Banc primaire `p2qa-ac9ace7487` :86 contrôles réels, bootstrap TTY, scans24 fichiers
+  AV1/Opus MKV+MP4 par bibliothèque, film/épisode, hash des flux, direct/relais,
+  HEAD/Range206/416/abandon, UUID après restart, arrêt/reconnexion, rotation durable,
+  logout, panne Core et révocation Node hors ligne après retour. Volumes jetables
+  nettoyés. HTTPS réel interne via terminateur de test, mauvaise origine SAN
+  refusée. Chrome155.0.8059.40 Windows10.0.26300 headless :8 parcours UI, pause/seek,
+  frames et octets audio décodés positifs. Navigateur HTTP loopback, pas d'écoute
+  humaine ni de certificat navigateur NAS/public validé.
+- Répétition `p2qa-d5094fc431` sur les mêmes IDs d'images :86 contrôles également
+  réussis, audit stdout+stderr incluant mots de passe, cookies, CSRF et queries
+  porteuses. Preuve complémentaire `p2-hardening/after-log-audit.json`.
+- Images finales non compressées : Node499846382 octets contre774419827 (-35,46%),
+  Core173355786, standalone827491643 (référence aether:test803065625). ffprobe5.1.9
+  identique par SHA-256 du binaire et des démuxeurs ; fermeture dynamique, licences
+  et inventaire conservés. Dépendances copiées mises à jour par rebuild, dpkg
+  runtime seul incomplet. Aucun gain de latence ou de taille standalone annoncé.
+- Mesures actives cgroup/CPU/scan/TTFB/réseau : `docs/P2_DOCKER_RESULTS.md`, preuves
+  `docs/evidence/2026-10-17/p2-hardening/`. Petites fixtures, charge lecture5s,
+  hôte partagé ; TLS/contrôle vivant ajoutent un coût, pas de promesse NAS/charge.
+- Limites : flux ouverts non coupés, dépendance au Core pour nouvelles requêtes,
+  panne pendant rotation pouvant demander une récupération opérateur ; aucune
+  rotation distribuée atomique revendiquée. Pas ARM64/autres navigateurs/DSM.
+  Windows : ne pas compiler pendant un test lançant media-poc.exe (verrou constaté,
+  puis suite sérialisée réussie). Guide `docs/DEPLOYMENT_SYNOLOGY.md` et contrat
+  `docs/P2_DOCKER_VALIDATION.md`. Prochain jalon : reproduction sur cibles après
+  autorisation explicite, sans déploiement NAS automatique, OIDC ou P3.
+
+
 ## 17 octobre 2026 — Jalon P2 : Architecture distribuée Rust multi-Node et déploiement Docker réel validés
 
 - **Périmètre et validation réelle achevés** :

@@ -37,6 +37,18 @@ Saisissez l'identifiant et confirmez le mot de passe masqué.
 L'amorçage est alors définitivement clos en base SQLite ; toute tentative ultérieure est rejetée.
 Connectez-vous ensuite sur [http://127.0.0.1:3000/app/login/](http://127.0.0.1:3000/app/login/).
 
+### Sauvegarde et restauration SQLite (WAL)
+Aether fournit deux outils natifs pour sauvegarder et restaurer la base sans arrêter le service :
+
+```bash
+# Sauvegarde cohérente à chaud (SQLite WAL via VACUUM INTO)
+docker compose exec aether media-backup /data/backups/backup.sqlite3
+
+# Restauration dans un volume vierge (ou après arrêt du conteneur)
+docker compose run --rm aether media-restore /data/backups/backup.sqlite3
+```
+Consultez la [documentation complète de sauvegarde et restauration](docs/DEPLOYMENT_DOCKER.md#7-sauvegarde-et-restauration-sqlite-wal-fiables) pour les procédures de reprise après sinistre sur Docker Compose et Synology DSM.
+
 ---
 
 ## 2. Spécificités Synology DS1522+
@@ -57,6 +69,7 @@ Le Synology DS1522+ embarque un processeur **AMD Ryzen Embedded R1600** (x86_64,
 | `MEDIA_BIND_ADDR` | `0.0.0.0` | Adresse d'écoute interne (`127.0.0.1` par défaut hors conteneur) |
 | `MEDIA_PUBLIC_URL` | `http://127.0.0.1:3000` | Origine publique validée pour `Host`, `Origin` et CSRF |
 | `MEDIA_DB_PATH` | `/data/core.sqlite3` | Chemin du fichier SQLite (volume persistant) |
+| `MEDIA_SQLITE_BUSY_TIMEOUT_SECS` | `15` | Délai d'attente max SQLite en cas de concurrence d'écriture (15s par défaut, 45s+ recommandé pour les très grandes bibliothèques 10k+) |
 | `MEDIA_LIBRARY_ROOT` | `/media` | Racine de montage en lecture seule des bibliothèques |
 | `MEDIA_WEB_DIST` | `/app/apps/web/build` | Répertoire des assets Web statiques SvelteKit |
 

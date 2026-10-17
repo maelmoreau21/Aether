@@ -59,15 +59,27 @@ pub struct IdentityStore {
 impl IdentityStore {
     /// Operator-controlled local file, never supplied by an HTTP request.
     pub async fn open(path: &Path) -> Result<Self, IdentityError> {
+        let busy_timeout = std::env::var("MEDIA_SQLITE_BUSY_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .map(Duration::from_secs)
+            .unwrap_or(Duration::from_secs(15));
+        Self::open_with_timeout(path, busy_timeout).await
+    }
+
+    pub async fn open_with_timeout(
+        path: &Path,
+        busy_timeout: Duration,
+    ) -> Result<Self, IdentityError> {
         let options = SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(true)
             .foreign_keys(true)
             .journal_mode(SqliteJournalMode::Wal)
-            .busy_timeout(Duration::from_secs(15));
+            .busy_timeout(busy_timeout);
         // Concurrent first opens may race on PRAGMA journal_mode=WAL before the
         // busy handler can wait. Retry only SQLite BUSY/LOCKED, never corruption,
-        // permissions or schema errors. Each attempt retains its 15-second timeout.
+        // permissions or schema errors. Each attempt retains its timeout.
         let mut retries = 0;
         let pool = loop {
             match SqlitePoolOptions::new()

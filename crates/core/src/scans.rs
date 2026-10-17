@@ -73,6 +73,7 @@ struct ScanState {
     jobs: Arc<ScanJobs>,
 }
 #[derive(Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
 struct Status {
     status: String,
     discovered: i64,
@@ -82,6 +83,8 @@ struct Status {
     errors: Vec<String>,
     #[serde(skip)]
     errors_json: String,
+    errors_count: i64,
+    warnings_count: i64,
 }
 pub async fn router(
     auth: AuthState,
@@ -89,7 +92,7 @@ pub async fn router(
     jobs: Arc<ScanJobs>,
 ) -> Result<Router, sqlx::Error> {
     // A stopped process cannot resume a probe. Keep its last inventory and report interruption.
-    sqlx::query("UPDATE scan_jobs SET status='error',errors_json='[\"Scan interrompu par un redémarrage\"]' WHERE status IN ('queued','running')").execute(&auth.store.pool).await?;
+    sqlx::query("UPDATE scan_jobs SET status='error',errors_json='[\"Scan interrompu par un redémarrage\"]',errors_count=1,warnings_count=0 WHERE status IN ('queued','running')").execute(&auth.store.pool).await?;
     sqlx::query("DELETE FROM scan_staging_files")
         .execute(&auth.store.pool)
         .await?;
@@ -129,7 +132,7 @@ async fn status(
         return Err(StatusCode::NOT_FOUND);
     }
     let mut status: Status = sqlx::query_as(
-        "SELECT status,discovered,probed,reused,errors_json FROM scan_jobs WHERE library_id=?",
+        "SELECT status,discovered,probed,reused,errors_json,errors_count,warnings_count FROM scan_jobs WHERE library_id=?",
     )
     .bind(id)
     .fetch_optional(&state.auth.store.pool)
@@ -142,6 +145,8 @@ async fn status(
         reused: 0,
         errors: vec![],
         errors_json: "[]".into(),
+        errors_count: 0,
+        warnings_count: 0,
     });
     status.errors = serde_json::from_str(&status.errors_json)
         .unwrap_or_else(|_| vec!["État de scan illisible".into()]);
@@ -162,7 +167,7 @@ async fn start(
         .validate_root(std::path::Path::new(&root), &state.root)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
-    let result = sqlx::query("INSERT INTO scan_jobs(library_id,status) VALUES(?,'queued') ON CONFLICT(library_id) DO UPDATE SET status='queued',discovered=0,probed=0,reused=0,errors_json='[]' WHERE scan_jobs.status NOT IN ('queued','running')").bind(&id).execute(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = sqlx::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES(?,'queued',0,0) ON CONFLICT(library_id) DO UPDATE SET status='queued',discovered=0,probed=0,reused=0,errors_json='[]',errors_count=0,warnings_count=0 WHERE scan_jobs.status NOT IN ('queued','running')").bind(&id).execute(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if result.rows_affected() == 0 {
         return Err(StatusCode::CONFLICT);
     }
@@ -210,19 +215,40 @@ async fn start(
 
             inventory::publish_staged_scan(&store, &scan_id, &job_id, &root, report.complete).await?;
             let conflicts = inventory::editorial_warnings(&store, &job_id).await?;
+            let total_errors = (report.errors_count as i64) + (conflicts.len() as i64);
+            let total_warnings = report.warnings_count as i64;
             let errors: Vec<String> = report.errors.iter().chain(report.warnings.iter()).map(|issue| format!("{}: {}", issue.relative_path, issue.message)).chain(conflicts).take(100).collect();
-            sqlx::query("UPDATE scan_jobs SET status=?,discovered=?,probed=?,reused=?,errors_json=? WHERE library_id=?")
-                .bind(if report.complete { "completed" } else { "error" }).bind(report.discovered as i64).bind(report.probed as i64).bind(report.reused as i64).bind(serde_json::to_string(&errors)?).bind(&job_id).execute(&store.pool).await?;
+
+            // Purge staging tables to strictly bound SQLite storage growth
+            let _ = inventory::clean_staging(&store, &scan_id).await;
+
+            sqlx::query("UPDATE scan_jobs SET status=?,discovered=?,probed=?,reused=?,errors_json=?,errors_count=?,warnings_count=? WHERE library_id=?")
+                .bind(if report.complete { "completed" } else { "error" })
+                .bind(report.discovered as i64)
+                .bind(report.probed as i64)
+                .bind(report.reused as i64)
+                .bind(serde_json::to_string(&errors)?)
+                .bind(total_errors)
+                .bind(total_warnings)
+                .bind(&job_id)
+                .execute(&store.pool)
+                .await?;
             Ok(())
         }.await;
         if let Err(e) = &result {
             eprintln!("[SCAN ERROR in job {}]: {:?}", job_id, e);
             let _ = inventory::clean_staging(&store_err, &scan_id_err).await;
-            let err_msg = format!("Scan échoué: {}", e);
+            let err_str = e.to_string();
+            let sanitized = if let Some(root_str) = allowed_root.to_str() {
+                err_str.replace(root_str, "/media")
+            } else {
+                err_str
+            };
+            let err_msg = format!("Scan échoué: {sanitized}");
             let errors_json = serde_json::to_string(&vec![err_msg])
                 .unwrap_or_else(|_| "[\"Scan échoué ou interrompu\"]".into());
             let _ =
-                sqlx::query("UPDATE scan_jobs SET status='error',errors_json=? WHERE library_id=?")
+                sqlx::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=?")
                     .bind(errors_json)
                     .bind(&job_id)
                     .execute(&store.pool)
@@ -239,7 +265,7 @@ async fn start(
     Ok((
         StatusCode::ACCEPTED,
         Json(
-            serde_json::json!({"status":"queued","discovered":0,"probed":0,"reused":0,"errors":[]}),
+            serde_json::json!({"status":"queued","discovered":0,"probed":0,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}),
         ),
     ))
 }

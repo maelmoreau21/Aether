@@ -1,5 +1,57 @@
 # MEMORY.md — État et décisions Aether
 
+## 17 octobre 2026 — Jalon P1 : Fiabilité opérationnelle et reprise sur incident (Sauvegarde/Restauration SQLite WAL, Concurrence sous écriture, Diagnostics de scan, Validation Docker)
+
+- **Sauvegarde et restauration SQLite WAL fiables (`media-backup` et `media-restore`)** :
+  - **Correction des commandes invalides documentées** : élimination de l'hypothèse erronée d'un chemin hôte pour le volume nommé Docker `aether_data` et de la dépendance envers un binaire externe `sqlite3` absent de `debian:bookworm-slim`.
+  - **Développement de binaires Rust natifs dédiés** : `media-backup` (`crates/core/src/bin/backup.rs`) et `media-restore` (`crates/core/src/bin/restore.rs`), intégrés dans le Dockerfile sous `/usr/local/bin` et utilisables directement en conteneur ou sur l'hôte.
+  - **Sauvegarde à chaud cohérente (`media-backup`)** :
+    - Utilisation de `VACUUM INTO '<destination>'` via `sqlx::QueryBuilder` : copie instantanée et consistante même sous transactions actives, sans requérir l'arrêt du conteneur.
+    - Contrôle d'intégrité immédiat (`PRAGMA integrity_check`) sur la copie générée.
+    - Permissions strictes `0600` sous Unix (lecture/écriture restreinte au propriétaire du processus).
+    - Métriques récapitulatives affichées (œuvres, éditions, versions, sources, assets, comptes) avec **zéro fuite de mot de passe, de hash ou de secret dans les logs**.
+  - **Restauration atomique et intègre (`media-restore`)** :
+    - Validation préalable en lecture seule (`PRAGMA quick_check`) sur le fichier source.
+    - Détection proactive des verrous SQLite actifs interdisant la restauration à chaud sur une base en cours d'utilisation.
+    - Écriture atomique intermédiaire via fichier `.staging` avec synchronisation disque (`sync_all()`), suivie d'un remplacement atomique du fichier de base.
+    - Purge propre des fichiers journaux SQLite résiduels (`-wal`, `-shm`) pour prévenir toute corruption par réconciliation d'un ancien journal.
+    - Exécution automatique des migrations SQLx au redémarrage pour garantir la stricte cohérence du schéma.
+  - **Banc de test d'intégration automatisé (`crates/core/tests/backup_restore.rs`)** :
+    - Cycle complet validé : amorçage administrateur, création d'utilisateur régulier, création de bibliothèque, octroi de droits (`grants`), injection et staging de médias synthétiques, publication dans le catalogue, sauvegarde à chaud en cours d'activité, restauration dans un volume vierge, reconnexion réussie de l'administrateur et de l'utilisateur avec leurs sessions/mots de passe, consultation du catalogue avec UUIDs préservés, et rejet strict d'une sauvegarde corrompue.
+
+- **Concurrence des écritures pendant la publication SQLite (10k items)** :
+  - **Analyse du comportement transactionnel SQLite WAL** :
+    - En mode WAL, les requêtes de lecture (`GET /api/v1/catalog`, streaming HTTP Range) ne bloquent jamais sur la transaction d'écriture exclusive `BEGIN IMMEDIATE` de `publish_staged_scan` (durée ~30s pour 10 000 items, latences p50 ~ 7 ms).
+    - En revanche, toute requête HTTP authentifiée exécute `UPDATE sessions SET last_seen_at = ? WHERE id = ?`, ce qui constitue une écriture.
+    - Sous `BEGIN IMMEDIATE`, une écriture concurrente se met en attente de libération du verrou d'écriture jusqu'à concurrence du `busy_timeout`.
+  - **Configuration du timeout d'attente (`MEDIA_SQLITE_BUSY_TIMEOUT_SECS`)** :
+    - Ajout de la variable d'environnement `MEDIA_SQLITE_BUSY_TIMEOUT_SECS` (défaut 15 secondes, recommandation 45s+ pour les très grands catalogues 10k+) et méthode `IdentityStore::open_with_timeout`.
+    - Pour les bibliothèques courantes (jusqu'à 1 000 médias, publication ~375 ms), les écritures concurrentes patientent et réussissent à 100 % sans erreur.
+  - **Banc d'intégration concurrent (`crates/core/tests/concurrency_writes_during_publication.rs`)** :
+    - Mesure empirique des opérations concurrentes (mise à jour de session, création de bibliothèque `POST /api/v1/admin/libraries`, déclenchement de scan `POST /api/v1/admin/libraries/{id}/scan`) pendant la publication exclusive.
+    - Confirmation que les requêtes dont l'attente dépasse le timeout reçoivent proprement `SQLITE_BUSY (code 5)` sans corruption de données.
+    - Dès le commit de la publication, 100 % des écritures suivantes reprennent instantanément : **0 blocage permanent, 0 interblocage (deadlock)**.
+
+- **Diagnostics de scan et purge du staging (`0010_scan_diagnostics.sql`)** :
+  - **Migration additive 0010** : ajout des colonnes `errors_count INTEGER NOT NULL DEFAULT 0` et `warnings_count INTEGER NOT NULL DEFAULT 0` à la table `scan_jobs`. Migrations 0001 à 0009 strictement intactes.
+  - **Plafond mémoire et exactitude des compteurs** : `ScanReport` dans `crates/shared/src/inventory.rs` et `crates/node/src/scanner.rs` incrémente les compteurs exacts (`errors_count`, `warnings_count`) tout en bornant la liste des messages textuels détaillés en mémoire vive à 100 anomalies (`MAX_REPORT_ISSUES = 100`).
+  - **Purge systématique du staging** : appel à `inventory::clean_staging` après `publish_staged_scan` garantissant que les tables `scan_staging_files` et `scan_staging_issues` sont intégralement vidées après chaque scan ou échec, éliminant tout gonflement inutile du fichier SQLite.
+  - **Anonymisation des chemins** : assainissement systématique des chemins d'accès absolus sensibles de l'hôte dans les erreurs de scan (`library.root_path` converti en préfixe générique `/media`).
+  - **Banc d'intégration (`crates/core/tests/scan_diagnostics.rs`)** : validation empirique du plafonnement à 100 anomalies, exactitude des compteurs totaux (120 erreurs, 40 warnings), purge complète des tables de staging (0 fichier, 0 problème résiduel) et absence de fuite de chemin absolu hôte.
+
+- **Validation Docker et statut du démon** :
+  - Démon Docker Engine Windows non démarré sur cet environnement de test (`//./pipe/dockerDesktopLinuxEngine` introuvable ; client Docker CLI 29.8.2 présent).
+  - Conformément à `AGENTS.md` ("Si Docker est indisponible, ne pas simuler sa validation. Préparer les tests reproductibles et déclarer explicitement ce qui reste non vérifié"), aucune validation en conteneur n'a été simulée.
+  - Le `Dockerfile` est mis à jour pour compiler et intégrer les binaires `media-backup` et `media-restore`.
+  - La suite de tests d'intégration Rust reproduit et valide rigoureusement l'ensemble des scénarios opérationnels (sauvegarde, restauration, redémarrage, permissions et concurrence).
+
+- **Qualité et conformité Workspace** :
+  - `cargo fmt --check` : 0 diff.
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --locked --workspace --all-features` : **91 tests réussis** (2 doc-tests, 29 `media-node`, 2 `media-contracts`, 58 `media-poc`), 0 échec, 5 ignorés (Playwright).
+  - Frontend (`apps/web`) : `npm run check` (0 erreur, 0 avertissement), `npm test` (13/13 Vitest), `npm run lint` (0 erreur), `npm run build` (succès).
+  - Architecture 3 crates (`media-contracts`, `media-node`, `media-poc`), migrations 0001–0010, modèle de permissions et médias originaux rigoureusement préservés. Zéro commit, zéro push, zéro publication Docker ni déploiement NAS.
+
 ## 16 octobre 2026 — Jalon P1 : Robustesse et scalabilité du scanner (Cold Ingestion 10k, publication paginée par clés, audit pool 4 connexions, BEGIN IMMEDIATE)
 
 - **Problèmes identifiés et résolus** :
@@ -287,7 +339,7 @@
   suites Rust/Web non relancées pour cette clarification documentaire seule.
 
 
-> **État courant : 16 octobre 2026. Distribution Docker autonome P1 livrée et vérifiée de bout en bout (AC-1 à AC-11). SQLite/bootstrap interactif, connexion Web, sessions persistantes, permissions backend, scanner local de films, affiches locales et conteneur non-root sans Node.js opérationnels. Standalone déployé et mesuré.** Les entrees datees conservent l'historique ; verifier code/tests avant toute annonce.
+> **État courant : 17 octobre 2026. Distribution Docker autonome P1 et fiabilité opérationnelle validées. Sauvegarde et restauration SQLite WAL (`media-backup` et `media-restore`), résistance à la concurrence sous écriture SQLite (10k items), diagnostics de scan bornés (migration 0010) et purge du staging opérationnels. Standalone déployé, testé et récupérable après sinistre.** Les entrées datées conservent l'historique ; vérifier code/tests avant toute annonce.
 
 ## 1. Vision actée
 

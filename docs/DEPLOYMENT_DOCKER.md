@@ -107,6 +107,7 @@ Pour un accès sécurisé depuis Internet ou votre domaine local en HTTPS :
 | `MEDIA_BIND_ADDR` | `0.0.0.0` | Adresse IP d'écoute à l'intérieur du conteneur |
 | `MEDIA_PUBLIC_URL` | `http://127.0.0.1:3000` | Origine publique canonique validée pour `Host`, `Origin` et cookies de session |
 | `MEDIA_DB_PATH` | `/data/core.sqlite3` | Chemin du fichier SQLite dans le volume persistant |
+| `MEDIA_SQLITE_BUSY_TIMEOUT_SECS` | `15` | Délai d'attente max sur verrou d'écriture SQLite avant erreur BUSY (45s+ recommandé sur 10k+ médias) |
 | `MEDIA_LIBRARY_ROOT` | `/media` | Racine absolue du dossier des bibliothèques montées en lecture seule |
 | `MEDIA_WEB_DIST` | `/app/apps/web/build` | Répertoire des assets Web statiques pré-compilés |
 
@@ -182,18 +183,94 @@ docker compose down
 - Les connexions SQLite sont vidées et le journal WAL est synchronisé.
 - Au redémarrage (`docker compose up -d`), les scans interrompus sont automatiquement marqués en état `error` avec le libellé `"Scan interrompu par un redémarrage"` et l'inventaire existant est intégralement préservé.
 
-### Sauvegarde et restauration
-Toutes les données applicatives (comptes, mots de passe hashés Argon2id, sessions, catalogue, droits) résident dans `/data/core.sqlite3`.
-- **Sauvegarde à froid** (recommandée) :
+### Sauvegarde et restauration fiables (SQLite WAL & Docker)
+Toutes les données applicatives (comptes administrateur/utilisateurs, hachages Argon2id, sessions, graphe média, catalogue, bibliothèques et autorisations) résident dans `/data/core.sqlite3` avec le journal WAL SQLite.
+
+> [!WARNING]
+> **Ne jamais effectuer de copie naïve du seul fichier `core.sqlite3` à chaud** : en mode SQLite WAL, les transactions récentes résident dans `core.sqlite3-wal` et un instantané fichier direct produit une base corrompue ou incomplète.
+> De plus, sur Synology DSM comme sur Linux standard, les volumes nommés Docker (ex. `aether_data`) sont gérés par le démon et ne se situent pas à un chemin arbitraire de l'hôte.
+
+Aether intègre deux binaires natifs dédiés, légers et autonomes : `media-backup` et `media-restore` (aucun service tiers ou dépendance externe requis).
+
+#### 1. Sauvegarde à chaud (cohérente WAL, sans coupure de service)
+Exécutable en direct sans interrompre les utilisateurs connectés ni le streaming en cours :
+```bash
+docker compose exec aether media-backup
+```
+Par défaut, la sauvegarde est enregistrée dans `/data/backups/core_backup_<timestamp>.sqlite3`. Vous pouvez également spécifier un chemin cible précis :
+```bash
+docker compose exec aether media-backup /data/backups/core_backup.sqlite3
+```
+- **Mécanisme** : Utilise l'instruction SQLite `VACUUM INTO`, créant un instantané transactionnel point-in-time compact, défragmenté, qui consolide tous les journaux WAL dans un fichier SQLite unifié.
+- **Sécurité et intégrité** :
+  - Exécute automatiquement `PRAGMA integrity_check` avant confirmation.
+  - Permissions strictes `0600` (`rw-------`) appliquées au fichier et `0750` au dossier.
+  - Zéro fuite de mots de passe, hachages ou secrets dans les journaux ou sorties terminal (uniquement le résumé des compteurs).
+
+#### 2. Sauvegarde à froid du volume Docker (Compose ou Synology Container Manager)
+Si vous préférez sauvegarder le volume Docker à froid lors d'une fenêtre de maintenance :
+- **Méthode 1 — Utilitaire `media-backup` hors ligne** :
   ```bash
-  docker compose stop
-  cp /volume1/docker/aether_data/core.sqlite3* /volume1/backups/
-  docker compose start
+  docker compose stop aether
+  docker compose run --rm aether media-backup /data/backups/core_backup.sqlite3
+  docker compose start aether
   ```
-- **Sauvegarde à chaud** via l'API SQLite :
+- **Méthode 2 — Instantané tar du volume Docker nommé** (universel sur Synology DSM et Linux) :
   ```bash
-  docker compose exec aether sqlite3 /data/core.sqlite3 ".backup '/data/backup.sqlite3'"
+  docker compose stop aether
+  docker run --rm -v aether_data:/data -v /volume1/backups:/backup alpine tar czf /backup/aether_data_$(date +%Y%m%d).tar.gz -C /data .
+  docker compose start aether
   ```
+
+#### 3. Restauration dans une installation neuve ou après incident
+Pour restaurer la base sur une nouvelle machine, un nouveau disque ou un volume Docker vierge :
+
+1. Créez le volume Docker vierge (si nécessaire) et lancez l'utilitaire de restauration :
+   ```bash
+   # Création du volume persistant
+   docker volume create aether_data
+
+   # Restauration atomique à partir d'un fichier de sauvegarde
+   docker compose run --rm -v /volume1/backups:/backup aether media-restore /backup/core_backup.sqlite3
+   ```
+   *Ou si vous utilisez une archive tar de volume :*
+   ```bash
+   docker run --rm -v aether_data:/data -v /volume1/backups:/backup alpine tar xzf /backup/aether_data_20261017.tar.gz -C /data
+   ```
+
+2. **Garanties opérationnelles de `media-restore`** :
+   - Validation stricte de l'intégrité SQLite (`PRAGMA integrity_check`) et contrôle de présence des tables requises avant toute altération du disque.
+   - Nettoyage automatique des anciens journaux `-wal` et `-shm` résiduels pour interdire toute relecture transactionnelle asynchrone incompatible.
+   - Remplacement atomique via fichier de staging (`core.sqlite3.restoring`) et rétablissement des permissions `0600`.
+   - Exécution idempotente des migrations et rattrapage Unicode pour garantir la cohérence du schéma.
+   - Préservation déterministe intégrale : identifiants UUID des œuvres, versions, pistes, comptes administrateur/utilisateurs et droits d'accès.
+   - Reconnexion immédiate : l'administrateur et les utilisateurs se reconnectent immédiatement avec leurs mots de passe originaux sans réinitialisation requise.
+
+3. Démarrez ensuite le service Aether :
+   ```bash
+   docker compose up -d
+   ```
+
+---
+
+### Concurrence des écritures pendant la publication SQLite
+Lors de l'ingestion initiale d'une volumineuse bibliothèque (ex. 10 000 nouveaux médias), la transaction d'écriture exclusive de publication (`publish_staged_scan` via `BEGIN IMMEDIATE`) peut être maintenue active pendant environ 30 secondes.
+
+- **Lectures concurrentes non bloquées** : En mode SQLite WAL, les requêtes HTTP de lecture (`GET /api/v1/catalog`, streaming HTTP Range, affiches locales) sont servies en isolation de snapshot sans jamais attendre ni bloquer l'écrivain (latences mesurées : `p50 = 7,29 ms`).
+- **Écritures concurrentes en attente** : Les opérations nécessitant une écriture (mise à jour de session `last_seen_at`, création ou édition de bibliothèques, déclenchement d'un nouveau scan) attendent la libération du verrou d'écriture via le gestionnaire SQLite Busy (`busy_timeout`).
+- **Délai `busy_timeout` et configuration** :
+  - Valeur par défaut : 15 secondes.
+  - En cas de premier scan massif (> 10 000 nouveaux médias simultanés), configurez `MEDIA_SQLITE_BUSY_TIMEOUT_SECS=45` ou `60` dans votre `compose.yaml` pour éviter les erreurs `SQLITE_BUSY (code 5 : database is locked)` sur les requêtes d'écriture concurrentes.
+- **Absence de blocage permanent** : Dès validation (`COMMIT`) de la transaction de publication, SQLite libère immédiatement le verrou d'écriture et toutes les opérations en attente aboutissent sans interblocage ni corruption.
+
+---
+
+### Diagnostics des scans et purge du staging
+Aether optimise l'espace disque et la clarté des diagnostics :
+- **Plafond mémoire et affichage borné** : Les 100 premières anomalies (erreurs d'analyse de conteneurs, XML NFO invalides, conflits de métadonnées) sont conservées et renvoyées dans le tableau `errors` de l'API `/api/v1/admin/libraries/{id}/scan` pour affichage dans l'interface web.
+- **Compteurs totaux fiables** : Les champs `errorsCount` et `warningsCount` indiquent le nombre total exact d'anomalies détectées lors de la passe, même lorsque celles-ci dépassent le plafond de 100 éléments.
+- **Purge systématique du staging** : Dès la fin de la publication atomique, les tables temporaires `scan_staging_files` et `scan_staging_issues` sont intégralement vidées (`DELETE FROM ...`), empêchant toute croissance non maîtrisée du fichier SQLite `/data/core.sqlite3`.
+- **Protection contre les fuites de chemins** : Les messages d'anomalie n'exposent que les chemins relatifs à la racine de la bibliothèque. Tout chemin absolu d'hôte système en cas d'erreur fatale est automatiquement assaini (`/media`).
 
 ---
 

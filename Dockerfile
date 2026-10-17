@@ -30,27 +30,29 @@ COPY crates/core/Cargo.toml ./crates/core/
 
 # Scaffold dummy source hierarchy for dependency precompilation caching
 # Explicit test targets declared in crates/core/Cargo.toml (p0, catalog) must exist
-RUN mkdir -p crates/shared/src crates/node/src crates/core/src crates/core/tests && \
+RUN mkdir -p crates/shared/src crates/node/src crates/core/src crates/core/src/bin crates/core/tests && \
     echo 'pub fn dummy() {}' > crates/shared/src/lib.rs && \
     echo 'pub fn dummy() {}' > crates/node/src/lib.rs && \
     echo 'pub fn dummy() {}' > crates/core/src/lib.rs && \
     echo 'fn main() {}' > crates/core/src/main.rs && \
     echo 'fn main() {}' > crates/core/src/bootstrap.rs && \
+    echo 'fn main() {}' > crates/core/src/bin/backup.rs && \
+    echo 'fn main() {}' > crates/core/src/bin/restore.rs && \
     touch crates/core/tests/p0.rs crates/core/tests/catalog.rs
 
 # Precompile workspace dependencies
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --locked --bin media-poc --bin media-bootstrap
+    cargo build --release --locked --bin media-poc --bin media-bootstrap --bin media-backup --bin media-restore
 
 # Copy actual workspace crates (shared contracts, node, and core with migrations)
 COPY crates/ ./crates/
 
 # Clean dummy binary/deps artifacts, recompile actual release binaries, and strip symbols
-RUN touch crates/shared/src/lib.rs crates/node/src/lib.rs crates/core/src/lib.rs crates/core/src/main.rs crates/core/src/bootstrap.rs && \
-    rm -f target/release/deps/*media_contracts* target/release/deps/*media_node* target/release/deps/*media_poc* target/release/deps/*media_bootstrap* target/release/media-poc target/release/media-bootstrap && \
-    cargo build --release --locked --bin media-poc --bin media-bootstrap && \
-    strip --strip-all target/release/media-poc target/release/media-bootstrap
+RUN touch crates/shared/src/lib.rs crates/node/src/lib.rs crates/core/src/lib.rs crates/core/src/main.rs crates/core/src/bootstrap.rs crates/core/src/bin/backup.rs crates/core/src/bin/restore.rs && \
+    rm -f target/release/deps/*media_contracts* target/release/deps/*media_node* target/release/deps/*media_poc* target/release/deps/*media_bootstrap* target/release/deps/*media_backup* target/release/deps/*media_restore* target/release/media-poc target/release/media-bootstrap target/release/media-backup target/release/media-restore && \
+    cargo build --release --locked --bin media-poc --bin media-bootstrap --bin media-backup --bin media-restore && \
+    strip --strip-all target/release/media-poc target/release/media-bootstrap target/release/media-backup target/release/media-restore
 
 # ==============================================================================
 # Stage 3: Minimal Linux x86_64 Runtime Environment
@@ -81,6 +83,8 @@ RUN mkdir -p /data /media /app/apps/web/build \
 # Copy stripped binaries from Rust builder stage to /usr/local/bin
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-poc /usr/local/bin/media-poc
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-bootstrap /usr/local/bin/media-bootstrap
+COPY --from=rust-builder --chmod=0755 /build/target/release/media-backup /usr/local/bin/media-backup
+COPY --from=rust-builder --chmod=0755 /build/target/release/media-restore /usr/local/bin/media-restore
 
 # Copy static frontend distribution from Web builder stage
 COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build

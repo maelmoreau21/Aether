@@ -33,3 +33,53 @@ export function sourceLabel(media: Media): string {
   const mime = media.sources[0]?.mime;
   return mime === 'video/mp4' ? 'MP4' : mime === 'video/x-matroska' ? 'MKV' : media.title;
 }
+
+const descriptorCache = new Map<string, Media>();
+let demoFetchPromise: Promise<Media[]> | null = null;
+
+export function clearDescriptorCache(): void {
+  descriptorCache.clear();
+  demoFetchPromise = null;
+}
+
+export function getCachedMedia(id: string): Media | undefined {
+  return descriptorCache.get(id);
+}
+
+export function cacheMedia(media: Media): void {
+  descriptorCache.set(media.id, media);
+}
+
+export async function fetchMediaDescriptor(id: string, signal?: AbortSignal): Promise<Media> {
+  const cached = descriptorCache.get(id);
+  if (cached) return cached;
+
+  if (id.startsWith('demo-')) {
+    if (!demoFetchPromise) {
+      const dummySignal = new AbortController().signal;
+      demoFetchPromise = request<{ media: Media[] }>('/api/v1/demo/media', signal ?? dummySignal)
+        .then(r => {
+          for (const item of r.media) {
+            descriptorCache.set(item.id, item);
+          }
+          return r.media;
+        })
+        .finally(() => {
+          demoFetchPromise = null;
+        });
+    }
+    await demoFetchPromise;
+    const found = descriptorCache.get(id);
+    if (found) return found;
+    throw new Error('Média de démonstration introuvable.');
+  }
+
+  const sig = signal ?? new AbortController().signal;
+  const item = await request<Media>(`/api/v1/media/${encodeURIComponent(id)}`, sig);
+  descriptorCache.set(item.id, item);
+  return item;
+}
+
+export async function fetchMediaDescriptors(ids: string[], signal?: AbortSignal): Promise<Media[]> {
+  return Promise.all(ids.map(id => fetchMediaDescriptor(id, signal)));
+}

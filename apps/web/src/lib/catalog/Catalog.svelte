@@ -1,9 +1,8 @@
 <script module lang="ts">
   const links = [{ key:'home', path:'/', label:'Accueil', symbol:'⌂' },{ key:'films', path:'films/', label:'Films', symbol:'▤' },{ key:'series', path:'series/', label:'Séries', symbol:'▥' },{ key:'search', path:'search/', label:'Recherche', symbol:'⌕' }] as const;
-  let demoMediaCache: Media[] | null = null;
 </script>
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import { DEFAULT_NAME, fetchBrandName } from '../config/brand';
@@ -13,7 +12,16 @@
   import ProfileMenu from '../ui/ProfileMenu.svelte';
   import Poster from './Poster.svelte';
   import EpisodePlayer from './EpisodePlayer.svelte';
-  import { request, playbackIds, sourceLabel, type Work, type CatalogPage } from './api';
+  import {
+    request,
+    playbackIds,
+    sourceLabel,
+    fetchMediaDescriptor,
+    fetchMediaDescriptors,
+    getCachedMedia,
+    type Work,
+    type CatalogPage
+  } from './api';
   let { section = 'home' }: { section?: 'home' | 'films' | 'series' | 'search' | 'settings' } = $props();
   let name = $state(DEFAULT_NAME);
   let media = $state<Media[]>([]);
@@ -35,6 +43,39 @@
   let ImmersivePlayerComponent = $state<typeof ImmersivePlayer>();
   let createPlayer = $state<PlayerFactory>();
   let playerLoading = false;
+  let launchingEpisodeId = $state<string | null>(null);
+  let episodeLaunchController: AbortController | null = null;
+
+  async function launchEpisode(episode: Work, versionId: string): Promise<void> {
+    if (episodeLaunchController) {
+      episodeLaunchController.abort();
+      episodeLaunchController = null;
+    }
+    const controller = new AbortController();
+    episodeLaunchController = controller;
+    launchingEpisodeId = episode.id;
+    mediaError = '';
+
+    try {
+      const item = await fetchMediaDescriptor(versionId, controller.signal);
+      if (controller.signal.aborted) return;
+      if (!media.some(m => m.id === item.id)) {
+        media = [...media, item];
+      }
+      playingEpisode = episode;
+      await tick();
+      immersive?.open(item);
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        mediaError = err instanceof Error ? err.message : 'Chargement de l’épisode impossible.';
+      }
+    } finally {
+      if (episodeLaunchController === controller) {
+        launchingEpisodeId = null;
+        episodeLaunchController = null;
+      }
+    }
+  }
 
   async function loadPlayer(): Promise<void> {
     if (ImmersivePlayerComponent && createPlayer) return;
@@ -90,16 +131,23 @@
           if ((currentSection === 'films' && work.kind !== 'film') || (currentSection === 'series' && work.kind !== 'series')) throw new Error('Ce média appartient à une autre bibliothèque.');
           await playerPromise;
           if (controller.signal.aborted) return;
-          detail = work; selected = playbackIds(work)[0] ?? ''; season = work.seasons?.[0]?.number ?? 1;
-          const ids = [...new Set([...playbackIds(work), ...(work.seasons ?? []).flatMap(season => season.episodes.flatMap(playbackIds))])];
-          try {
-            const demoPromise = ids.some(id => id.startsWith('demo-'))
-              ? (demoMediaCache ? Promise.resolve(demoMediaCache) : request<{media:Media[]}>('/api/v1/demo/media', controller.signal).then(r => { demoMediaCache = r.media; return r.media; }))
-              : Promise.resolve([]);
-            const indexedPromise = Promise.all(ids.filter(id => !id.startsWith('demo-')).map(id => request<Media>(`/api/v1/media/${encodeURIComponent(id)}`, controller.signal)));
-            const [demo, indexed] = await Promise.all([demoPromise, indexedPromise]);
-            if (!controller.signal.aborted) media = [...demo, ...indexed];
-          } catch (failure) { if (!controller.signal.aborted) mediaError = failure instanceof Error ? failure.message : 'Chargement des sources impossible.'; }
+          detail = work; season = work.seasons?.[0]?.number ?? 1;
+          if (work.kind === 'film') {
+            const ids = playbackIds(work);
+            selected = ids[0] ?? '';
+            try {
+              const items = await fetchMediaDescriptors(ids, controller.signal);
+              if (!controller.signal.aborted) media = items;
+            } catch (failure) {
+              if (!controller.signal.aborted) {
+                mediaError = failure instanceof Error ? failure.message : 'Chargement des sources impossible.';
+              }
+            }
+          } else {
+            selected = '';
+            const allEpisodeIds = (work.seasons ?? []).flatMap(s => s.episodes.flatMap(playbackIds));
+            media = allEpisodeIds.map(eid => getCachedMedia(eid)).filter((m): m is Media => m !== undefined);
+          }
         } else {
           const kinds = currentSection === 'films' ? ['film'] : currentSection === 'series' ? ['series'] : ['film','series'];
           const results = await Promise.all(kinds.map(kind => request<CatalogPage>(`/api/v1/catalog?${new URLSearchParams({ kind, q, sort:sorting, offset:String(start), limit:'24' })}`, controller.signal)));
@@ -112,7 +160,13 @@
       finally { if (!controller.signal.aborted) busy = false; }
     }
     void load();
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (episodeLaunchController) {
+        episodeLaunchController.abort();
+        episodeLaunchController = null;
+      }
+    };
   });
 </script>
 <svelte:head><title>{detail?.title ?? title} · {name}</title><meta name="description" content="Films et séries, chacun à leur place. Bibliothèques locales." /></svelte:head>
@@ -147,7 +201,7 @@
     {#if detail.kind === 'series'}
       <section class="shelf"><div class="section-heading"><h2>Épisodes</h2><label>Saison <select aria-label="Saison" bind:value={season}>{#each detail.seasons ?? [] as item (item.id)}<option value={item.number}>{item.title || (item.number === 0 ? 'Hors-série' : `Saison ${item.number}`)}</option>{/each}</select></label></div>
         {#each activeSeason?.episodes ?? [] as episode (episode.id)}
-          <article class="episode"><span class="episode-number">{String(episode.number).padStart(2,'0')}</span><div><h3>{episode.title}</h3><p>{episode.description}</p><EpisodePlayer {episode} {media} {immersive} onselect={() => playingEpisode = episode} /></div></article>
+          <article class="episode"><span class="episode-number">{String(episode.number).padStart(2,'0')}</span><div><h3>{episode.title}</h3><p>{episode.description}</p><EpisodePlayer {episode} {media} {immersive} isLaunching={launchingEpisodeId === episode.id} onlaunch={launchEpisode} onselect={() => playingEpisode = episode} /></div></article>
         {:else}<div class="empty">Aucun épisode disponible pour cette saison.</div>{/each}
       </section>
     {/if}

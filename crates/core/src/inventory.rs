@@ -600,12 +600,19 @@ pub async fn publish_staged_scan(
     if lib_kind == "series" {
         // Find all distinct series in staging
         let staged_series = sqlx::query(
-            "SELECT DISTINCT series_identity_key, series_title, series_year,
-                    series_external_ids_json, series_editorial_json,
-                    series_poster_path, series_poster_size, series_poster_modified_ns,
-                    series_poster_mime, series_poster_priority
+            "SELECT series_identity_key,
+                    MAX(series_title) AS series_title,
+                    MAX(series_year) AS series_year,
+                    MAX(series_external_ids_json) AS series_external_ids_json,
+                    MAX(series_editorial_json) AS series_editorial_json,
+                    MAX(series_poster_path) AS series_poster_path,
+                    MAX(series_poster_size) AS series_poster_size,
+                    MAX(series_poster_modified_ns) AS series_poster_modified_ns,
+                    MAX(series_poster_mime) AS series_poster_mime,
+                    MAX(series_poster_priority) AS series_poster_priority
              FROM scan_staging_files
-             WHERE scan_id=? AND series_identity_key IS NOT NULL",
+             WHERE scan_id=? AND series_identity_key IS NOT NULL
+             GROUP BY series_identity_key",
         )
         .bind(scan_id)
         .fetch_all(&mut *tx)
@@ -698,9 +705,11 @@ pub async fn publish_staged_scan(
 
         // Seasons
         let staged_seasons = sqlx::query(
-            "SELECT DISTINCT series_identity_key, season_number
+            "SELECT series_identity_key, season_number
              FROM scan_staging_files
-             WHERE scan_id=? AND series_identity_key IS NOT NULL AND season_number IS NOT NULL",
+             WHERE scan_id=? AND series_identity_key IS NOT NULL AND season_number IS NOT NULL
+             GROUP BY series_identity_key, season_number
+             ORDER BY series_identity_key, season_number",
         )
         .bind(scan_id)
         .fetch_all(&mut *tx)
@@ -1780,50 +1789,195 @@ async fn load_work_editions(
     pool: &sqlx::SqlitePool,
     work_id: &str,
 ) -> Result<Vec<Value>, sqlx::Error> {
-    let mut editions = vec![];
-    for edition in sqlx::query("SELECT id FROM inventory_editions WHERE work_id=?")
-        .bind(work_id)
-        .fetch_all(pool)
-        .await?
-    {
-        let edition_id: String = edition.get("id");
-        let mut versions = vec![];
-        for version in sqlx::query("SELECT id FROM inventory_versions WHERE edition_id=?")
-            .bind(&edition_id)
-            .fetch_all(pool)
-            .await?
-        {
-            let version_id: String = version.get("id");
-            let sources: Vec<_> = sqlx::query(
-                "SELECT s.id, a.id AS asset_id, a.relative_path 
-                 FROM inventory_sources s 
-                 JOIN inventory_assets a ON a.source_id=s.id 
-                 JOIN libraries l ON l.id=s.library_id 
-                 WHERE s.version_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local' AND l.enabled=1",
-            )
-            .bind(&version_id)
-            .fetch_all(pool)
-            .await?
-            .iter()
-            .map(|r| {
-                json!({
-                    "id": r.get::<String, _>("id"),
-                    "assetIds": [r.get::<String, _>("asset_id")],
-                    "playbackMediaId": r.get::<String, _>("asset_id")
-                })
-            })
-            .collect();
-            if !sources.is_empty() {
-                versions
-                    .push(json!({"id": version_id, "label": "Version locale", "sources": sources}));
+    let rows = sqlx::query(
+        "SELECT e.id AS edition_id, v.id AS version_id, s.id AS source_id, a.id AS asset_id \
+         FROM inventory_editions e \
+         JOIN inventory_versions v ON v.edition_id=e.id \
+         JOIN inventory_sources s ON s.version_id=v.id \
+         JOIN inventory_assets a ON a.source_id=s.id \
+         JOIN libraries l ON l.id=s.library_id \
+         WHERE e.work_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local' AND l.enabled=1 \
+         ORDER BY e.id, v.id, s.id, a.id",
+    )
+    .bind(work_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut editions = Vec::new();
+    let mut current_edition_id = String::new();
+    let mut current_version_id = String::new();
+    let mut current_versions = Vec::new();
+    let mut current_sources = Vec::new();
+
+    for row in rows {
+        let edition_id: String = row.get("edition_id");
+        let version_id: String = row.get("version_id");
+        let source_id: String = row.get("source_id");
+        let asset_id: String = row.get("asset_id");
+
+        if edition_id != current_edition_id {
+            if !current_sources.is_empty() {
+                current_versions.push(json!({
+                    "id": current_version_id,
+                    "label": "Version locale",
+                    "sources": std::mem::take(&mut current_sources)
+                }));
             }
+            if !current_versions.is_empty() {
+                editions.push(json!({
+                    "id": current_edition_id,
+                    "label": "Édition locale",
+                    "versions": std::mem::take(&mut current_versions)
+                }));
+            }
+            current_edition_id = edition_id;
+            current_version_id = version_id.clone();
+        } else if version_id != current_version_id {
+            if !current_sources.is_empty() {
+                current_versions.push(json!({
+                    "id": current_version_id,
+                    "label": "Version locale",
+                    "sources": std::mem::take(&mut current_sources)
+                }));
+            }
+            current_version_id = version_id.clone();
         }
-        if !versions.is_empty() {
-            editions
-                .push(json!({"id": edition_id, "label": "Édition locale", "versions": versions}));
-        }
+
+        current_sources.push(json!({
+            "id": source_id,
+            "assetIds": [asset_id.clone()],
+            "playbackMediaId": asset_id
+        }));
     }
+
+    if !current_sources.is_empty() {
+        current_versions.push(json!({
+            "id": current_version_id,
+            "label": "Version locale",
+            "sources": current_sources
+        }));
+    }
+    if !current_versions.is_empty() {
+        editions.push(json!({
+            "id": current_edition_id,
+            "label": "Édition locale",
+            "versions": current_versions
+        }));
+    }
+
     Ok(editions)
+}
+
+async fn load_series_editions(
+    pool: &sqlx::SqlitePool,
+    series_id: &str,
+) -> Result<HashMap<String, Vec<Value>>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT e.work_id, e.id AS edition_id, v.id AS version_id, s.id AS source_id, a.id AS asset_id \
+         FROM inventory_seasons se \
+         JOIN inventory_episodes ep ON ep.season_id=se.id \
+         JOIN inventory_editions e ON e.work_id=ep.work_id \
+         JOIN inventory_versions v ON v.edition_id=e.id \
+         JOIN inventory_sources s ON s.version_id=v.id \
+         JOIN inventory_assets a ON a.source_id=s.id \
+         JOIN libraries l ON l.id=s.library_id \
+         WHERE se.series_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND l.node_id='local' AND l.enabled=1 \
+         ORDER BY e.work_id, e.id, v.id, s.id, a.id",
+    )
+    .bind(series_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut map: HashMap<String, Vec<Value>> = HashMap::new();
+    let mut current_work_id = String::new();
+    let mut editions = Vec::new();
+    let mut current_edition_id = String::new();
+    let mut current_version_id = String::new();
+    let mut current_versions = Vec::new();
+    let mut current_sources = Vec::new();
+
+    for row in rows {
+        let work_id: String = row.get("work_id");
+        let edition_id: String = row.get("edition_id");
+        let version_id: String = row.get("version_id");
+        let source_id: String = row.get("source_id");
+        let asset_id: String = row.get("asset_id");
+
+        if work_id != current_work_id {
+            if !current_sources.is_empty() {
+                current_versions.push(json!({
+                    "id": current_version_id,
+                    "label": "Version locale",
+                    "sources": std::mem::take(&mut current_sources)
+                }));
+            }
+            if !current_versions.is_empty() {
+                editions.push(json!({
+                    "id": current_edition_id,
+                    "label": "Édition locale",
+                    "versions": std::mem::take(&mut current_versions)
+                }));
+            }
+            if !editions.is_empty() {
+                map.insert(current_work_id, std::mem::take(&mut editions));
+            }
+            current_work_id = work_id;
+            current_edition_id = edition_id;
+            current_version_id = version_id.clone();
+        } else if edition_id != current_edition_id {
+            if !current_sources.is_empty() {
+                current_versions.push(json!({
+                    "id": current_version_id,
+                    "label": "Version locale",
+                    "sources": std::mem::take(&mut current_sources)
+                }));
+            }
+            if !current_versions.is_empty() {
+                editions.push(json!({
+                    "id": current_edition_id,
+                    "label": "Édition locale",
+                    "versions": std::mem::take(&mut current_versions)
+                }));
+            }
+            current_edition_id = edition_id;
+            current_version_id = version_id.clone();
+        } else if version_id != current_version_id {
+            if !current_sources.is_empty() {
+                current_versions.push(json!({
+                    "id": current_version_id,
+                    "label": "Version locale",
+                    "sources": std::mem::take(&mut current_sources)
+                }));
+            }
+            current_version_id = version_id.clone();
+        }
+
+        current_sources.push(json!({
+            "id": source_id,
+            "assetIds": [asset_id.clone()],
+            "playbackMediaId": asset_id
+        }));
+    }
+
+    if !current_sources.is_empty() {
+        current_versions.push(json!({
+            "id": current_version_id,
+            "label": "Version locale",
+            "sources": current_sources
+        }));
+    }
+    if !current_versions.is_empty() {
+        editions.push(json!({
+            "id": current_edition_id,
+            "label": "Édition locale",
+            "versions": current_versions
+        }));
+    }
+    if !editions.is_empty() {
+        map.insert(current_work_id, editions);
+    }
+
+    Ok(map)
 }
 
 pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value>, sqlx::Error> {
@@ -1852,46 +2006,56 @@ pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value
         .fetch_all(&store.pool)
         .await?;
 
-        let mut seasons_val = Vec::new();
+        let ep_rows = sqlx::query(
+            "SELECT ep.season_id, ep.episode_number, w.* FROM inventory_seasons s \
+             JOIN inventory_episodes ep ON ep.season_id=s.id \
+             JOIN inventory_works w ON w.id=ep.work_id \
+             WHERE s.series_id=? \
+             ORDER BY s.season_number ASC, ep.episode_number ASC",
+        )
+        .bind(work_id)
+        .fetch_all(&store.pool)
+        .await?;
+
+        let mut editions_by_work = load_series_editions(&store.pool, work_id).await?;
+
+        let mut episodes_by_season: HashMap<String, Vec<Value>> = HashMap::new();
         let mut total_episodes = 0;
 
+        for ep_row in ep_rows {
+            let season_id: String = ep_row.get("season_id");
+            let ep_work_id: String = ep_row.get("id");
+            let ep_num: i64 = ep_row.get("episode_number");
+
+            if let Some(editions) = editions_by_work.remove(&ep_work_id)
+                && !editions.is_empty()
+            {
+                let mut ep_val = work(&ep_row);
+                ep_val["kind"] = json!("episode");
+                ep_val["number"] = json!(ep_num);
+                ep_val["editions"] = json!(editions);
+                episodes_by_season
+                    .entry(season_id)
+                    .or_default()
+                    .push(ep_val);
+                total_episodes += 1;
+            }
+        }
+
+        let mut seasons_val = Vec::new();
         for s_row in seasons_rows {
             let season_id: String = s_row.get("id");
             let season_num: i64 = s_row.get("season_number");
             let season_title: String = s_row.get("title");
 
-            let ep_rows = sqlx::query(
-                "SELECT ep.id as ep_id, ep.episode_number, w.* FROM inventory_episodes ep \
-                 JOIN inventory_works w ON w.id=ep.work_id \
-                 WHERE ep.season_id=? \
-                 ORDER BY ep.episode_number ASC",
-            )
-            .bind(&season_id)
-            .fetch_all(&store.pool)
-            .await?;
-
-            let mut episodes_val = Vec::new();
-            for ep_row in ep_rows {
-                let ep_work_id: String = ep_row.get("id");
-                let ep_num: i64 = ep_row.get("episode_number");
-                let editions = load_work_editions(&store.pool, &ep_work_id).await?;
-
-                if !editions.is_empty() {
-                    let mut ep_val = work(&ep_row);
-                    ep_val["kind"] = json!("episode");
-                    ep_val["number"] = json!(ep_num);
-                    ep_val["editions"] = json!(editions);
-                    episodes_val.push(ep_val);
-                    total_episodes += 1;
-                }
-            }
-
-            if !episodes_val.is_empty() {
+            if let Some(episodes) = episodes_by_season.remove(&season_id)
+                && !episodes.is_empty()
+            {
                 seasons_val.push(json!({
                     "id": season_id,
                     "number": season_num,
                     "title": season_title,
-                    "episodes": episodes_val
+                    "episodes": episodes
                 }));
             }
         }

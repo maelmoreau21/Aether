@@ -1,5 +1,58 @@
 # MEMORY.md — État et décisions Aether
 
+## 17 octobre 2026 — Jalon P1 : Performances et lecture finale des Séries (Chargement différé SvelteKit, suppression N+1 SQLite, borne mémoire du scanner, tests 200 épisodes, validation Chromium Playwright et conteneur Docker)
+
+- **Chargement différé frontend SvelteKit (`apps/web`)** :
+  - **Élimination du chargement anticipé massif** : dans `Catalog.svelte`, l'ouverture d'une série affichait les saisons et épisodes mais déclenchait auparavant la récupération en rafale de tous les `/api/v1/media/{id}` de ses épisodes. Ce comportement a été supprimé : la fiche série, le sélecteur de saisons et la liste d'épisodes s'affichent instantanément sans aucune requête média préliminaire.
+  - **Gestion dynamique des descripteurs (`api.ts` & `EpisodePlayer.svelte`)** :
+    - `fetchMediaDescriptor` / `fetchMediaDescriptors` avec cache de session en mémoire (`descriptorCache`) évitant les requêtes redondantes au cours de la navigation.
+    - Préchargement intelligent au survol/focus d'un épisode (`preloadMediaDescriptors`).
+    - Gestion robuste de l'annulation (`AbortController`) lors des changements rapides d'épisode pour annuler les requêtes en vol.
+    - Gestion explicite des erreurs (notamment HTTP 403 en cas de révocation des droits) avec notification à l'utilisateur.
+    - État de chargement visuel distinct ("Chargement…") sur l'épisode sollicité.
+    - Conservation intégrale de la sélection multi-versions et du lancement dans le lecteur immersif (`ImmersivePlayer.svelte`).
+    - Suite de tests unitaires Vitest dédiée (`apps/web/src/lib/catalog/api.test.ts`) validant le cache, le préchargement, l'avortement lors du zapping rapide et la gestion des 403 (19/19 tests passés).
+
+- **Optimisation SQLite et élimination du goulot N+1 (`crates/core/src/inventory.rs`)** :
+  - **Diagnostic sur 200 épisodes** : pour charger une série de 200 épisodes, `detail()` exécutait 1 requête œuvre + 1 requête saisons + 1 requête épisodes + 200 × 3 requêtes imbriquées (éditions, versions, sources), soit **~612 allers-retours SQL**.
+  - **Résolution groupée sans changement de contrat API** :
+    - Remplacement de `load_work_editions()` unitaire par une jointure SQL groupée `load_series_editions()` chargeant en une seule passe indexée toutes les éditions, versions, sources et assets de tous les épisodes de la série.
+    - Réduction drastique à exactement **4 requêtes SQL** au total pour toute la série.
+    - Temps de réponse mesuré sur une série de 200 épisodes et 10 saisons : **71,88 ms**.
+    - Vérification stricte que les épisodes rendus indisponibles (`available = 0`) sont proprement et immédiatement exclus du comptage et de l'arborescence.
+
+- **Mémoire du scanner Séries et staging SQLite (`crates/node/src/scanner.rs` & `crates/core/src/inventory.rs`)** :
+  - **Borne mémoire sur `series_cache`** : introduction d'une constante `MAX_SERIES_CACHE = 128` et d'une éviction des clés les plus anciennes pour empêcher une croissance mémoire infinie sur des bibliothèques comptant des milliers de séries.
+  - **Partage par `Arc` des métadonnées NFO et affiches** : utilisation de `Arc<(NfoOutcome, Option<LocalImage>)>` évitant le clonage profond des structures par épisode, tout en conservant 100 % de réutilisation sans relecture disque superflue au sein d'une série.
+  - **Optimisation de la publication staging** : remplacement des `SELECT DISTINCT` sur l'ensemble des colonnes par des `GROUP BY series_identity_key` et `GROUP BY series_identity_key, season_number`, éliminant les tables temporaires volumineuses lors de la publication atomique.
+  - **Audit de la taille limite NFO** : confirmation dans le code de `crates/node/src/nfo.rs` de la limite stricte de 1 Mo (`MAX_BYTES = 1024 * 1024` = 1 048 576 octets), alignée avec `docs/LIBRARY_SCANNING_PLAN.md`.
+
+- **Tests d'utilisation réelle et de validation bout-en-bout** :
+  - **Banc d'essai automatisé 200 épisodes (`crates/core/tests/series_performance.rs`)** :
+    - Série de 200 épisodes répartis sur 10 saisons (20 épisodes par saison).
+    - Multi-versions sur un épisode (S01E01 en MP4 et MKV) avec métadonnées NFO spécifiques.
+    - Navigation et cohérence des saisons 1 à 10.
+    - Exclusion immédiate d'un épisode indisponible (passage de 200 à 199 épisodes) et réintégration.
+    - Lecture du premier (S01E01 v1 & v2) et du dernier épisode (S10E20) via HEAD, GET Range (`bytes=0-63` : 64 octets, 206) et Seek (`bytes=1000-2000` : 1001 octets, 206).
+    - Révocation en direct des droits d'un utilisateur -> rejet HTTP 403 Forbidden immédiat avant lecture.
+    - Rescan incrémental ultra-rapide (560 ms, 0 probe, 201 fichiers réutilisés).
+    - Redémarrage SQLite avec vérification de l'intégrité du catalogue et non-régression totale des Films.
+  - **Test réel de lecture vidéo dans le navigateur compilé (`crates/core/tests/browser_series.rs` & `scripts/browser-series.cjs`)** :
+    - Exécution sous Chromium (v155.0.8059.40) avec Playwright sur le build de production SvelteKit statique servi par Core.
+    - Parcours validé : connexion admin -> création bibliothèque Séries -> scan -> clic fiche série -> preuve de zéro chargement média anticipé -> lecture vidéo S01E01 -> seek et pause -> retour accueil -> changement vers Saison 2 -> lecture vidéo S02E01 -> zéro violation CSP.
+  - **Test réel dans conteneur Docker (`scripts/test_docker_series.py`)** :
+    - Image Docker Debian Bookworm minimale `aether:test` (UID 10001, GID 10001).
+    - Montage `/data` (SQLite) et `/media` (lecture seule `:ro`).
+    - Bootstrap admin interactif via pipe Docker Engine (`media-bootstrap`).
+    - Connexion admin, création bibliothèque Séries, scan, consultation du catalogue (2 saisons, multi-version détectée), récupération du descripteur média AV1 + Opus, streaming HEAD et Range (206) validés.
+
+- **Qualité et conformité Workspace** :
+  - `cargo fmt --check` : 0 diff.
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --locked --workspace --all-features` : tous les tests unitaires et d'intégration réussis.
+  - `npm run check`, `npm run lint`, `npm test` (19/19 réussis), `npm run build` : 0 erreur, 0 avertissement.
+  - Zéro commit, zéro push, zéro déploiement.
+
 ## 17 octobre 2026 — Jalon P1 : Séries, saisons et épisodes réels (Reconnaissance, persistance SQLite additive 0011, métadonnées NFO locales, navigation multi-saison, streaming et validation Docker)
 
 - **Reconnaissance déterministe des séries et épisodes** :
@@ -27,7 +80,7 @@
     - Réutilisation des probes inchangés à 100 % au rescan (`reused = 1`), stabilité déterministe des UUIDs et suppression propre des épisodes retirés (`available = 0`).
 
 - **Métadonnées locales NFO et Affiches** :
-  - **Parseur XML sécurisé étendu (`crates/node/src/nfo.rs`)** : prise en charge des balises racines `<tvshow>` pour les séries et `<episodedetails>` pour les épisodes, tout en conservant les protections strictes (limite de taille 2 Mo, profondeur max 16, interdiction d'entités externes et encodage UTF-8 contrôlé).
+  - **Parseur XML sécurisé étendu (`crates/node/src/nfo.rs`)** : prise en charge des balises racines `<tvshow>` pour les séries et `<episodedetails>` pour les épisodes, tout en conservant les protections strictes (limite de taille 1 Mo — `MAX_BYTES = 1024 * 1024`, profondeur max 16, interdiction d'entités externes et encodage UTF-8 contrôlé).
   - **Résilience aux NFO invalides** : un NFO malformé génère un diagnostic d'anomalie sans faire échouer le scan, avec repli automatique sur les métadonnées inférées du dossier.
   - **Affiches locales de séries (`crates/node/src/images.rs`)** : découverte sécurisée de `poster.jpg`, `folder.png`, etc. dans le dossier de la série, avec validation d'en-tête et dimensions bornées.
 

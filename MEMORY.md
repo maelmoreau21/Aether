@@ -1,5 +1,36 @@
 # MEMORY.md — État et décisions Aether
 
+## 17 octobre 2026 — Correctif P0 (Audit A1) : Disponibilité de l'authentification et des lectures sous verrou SQLite de 30 s
+
+- **Séparation de la validation de session et de la mise à jour d'activité (`crates/core/src/auth.rs`)** :
+  - **Validation en lecture seule à chaque requête (`AuthState::authenticate`)** : remplacement du `UPDATE sessions SET last_seen_at=unixepoch() ... RETURNING user_id` synchrone par un unique `SELECT` SQLite en lecture seule joignant `sessions`, `users` et `local_credentials` (`WHERE s.token_hash = ? AND s.expires_at > unixepoch() AND s.last_seen_at > unixepoch() - ? AND u.disabled_at IS NULL`).
+  - **Zéro cache positif d'autorisation** : chaque requête vérifie en direct dans SQLite (snapshot WAL) l'existence de la session, l'expiration absolue (`12 h`), l'expiration par inactivité (`30 min`), le rôle actuel et l'absence de désactivation (`disabled_at IS NULL`). Toute déconnexion, révocation ou désactivation de compte prend effet dès la requête suivante.
+  - **Worker unique borné et coalescent (`SessionToucher`)** :
+    - Aucune tâche Tokio n'est créée par requête : un seul worker de fond par `AuthState` traite une table d'attente bornée (`MAX_PENDING_TOUCHES = 4096`) avec cadence de coalescence de `TOUCH_INTERVAL_SECONDS = 60 s` par session, micro-fenêtre de regroupement (`20 ms`) et écriture groupée par lots (`TOUCH_BATCH_SIZE = 64` sessions en un seul `UPDATE ... CASE token_hash ...`).
+    - L'`UPDATE` différé est strictement conditionnel (`expires_at > unixepoch() AND last_seen_at > unixepoch() - 1800 AND EXISTS(... disabled_at IS NULL)`) et borne l'horodatage à `MIN(unixepoch(), MAX(last_seen_at, ?))` : il ne peut ni ressusciter une session expirée, ni recréer une session révoquée/déconnectée.
+    - Lors d'un `POST /api/v1/auth/logout`, l'entrée en attente est immédiatement purgée avant et après le `DELETE FROM sessions`.
+    - Protection du pool de lecture sous conflit d'écriture : acquisition bornée (`50 ms`) et `PRAGMA busy_timeout = 15` (15 ms, restauré immédiatement à la valeur d'origine de la connexion) avec backoff de `150 ms` sur `SQLITE_BUSY`, évitant d'immobiliser les connexions du pool pendant un verrou `BEGIN IMMEDIATE` prolongé.
+  - **Compromis documenté sur la précision de l'expiration glissante (fail-closed)** :
+    - La coalescence à 60 s et la persistance asynchrone impliquent qu'un arrêt brutal avant flush ou un verrou d'écriture SQLite maintenu jusqu'au-delà de la 30e minute d'inactivité ne prolonge pas la session en mémoire au-delà du `last_seen_at` commité dans SQLite (`docs/LOCAL_SESSIONS.md`, `docs/DEPLOYMENT_DOCKER.md`). Ce choix fail-closed garantit l'absence totale de résurrection de session expirée.
+- **Mesures et tests sous verrou `BEGIN IMMEDIATE` de 30 secondes (`crates/core/tests/auth_under_sqlite_lock.rs` & `auth::tests`)** :
+  - Pendant un `BEGIN IMMEDIATE` maintenu 30 s sur la base SQLite (`busy_timeout` par défaut de 15 s), 120 requêtes authentifiées réelles avec sessions éligibles au rafraîchissement (`last_seen_at = unixepoch() - 120`) ont toutes réussi sans attendre la libération du verrou :
+    - `GET /api/v1/auth/me` (20 req) : **100 % HTTP 200**, `p50 = 0,99 ms`, `p95 = 1,50 ms`, `p99 = 1,86 ms` (contre HTTP 500 après 16,388 s avant correctif).
+    - `GET /api/v1/catalog?kind=film` (20 req) : **100 % HTTP 200**, `p50 = 4,84 ms`, `p95 = 6,47 ms`, `p99 = 7,97 ms`.
+    - `GET /api/v1/catalog?kind=series` + `/api/v1/catalog/{series_id}` (40 req) : **100 % HTTP 200**, `p50 = 4,61 ms`, `p95 = 6,63 ms`, `p99 = 8,54 ms`.
+    - `GET /api/v1/media/{episode_id}` (20 req) : **100 % HTTP 200**, `p50 = 3,47 ms`, `p95 = 5,92 ms`, `p99 = 10,31 ms`.
+    - `GET /api/v1/assets/{id}/content` Range `bytes=0-63` & `bytes=1000-2000` (20 req) : **100 % HTTP 206**, `p50 = 4,16 ms`, `p95 = 5,56 ms`, `p99 = 6,19 ms`.
+    - **Global (120 lectures authentifiées sous verrou 30 s)** : `p50 = 3,90 ms`, `p95 = 6,44 ms`, `p99 = 8,54 ms`, `max = 10,31 ms`.
+    - **Écritures SQLite** : `0` écriture commitée pendant le verrou (2 sessions coalescées en attente), puis **1 seul lot `UPDATE`** (`write_batches_succeeded = 1`, `rows_updated = 2`) dès la libération du verrou.
+  - Cas limites vérifiés par tests automatisés : 30 requêtes concurrentes du même utilisateur près de la limite d'expiration (`1795 s`) coalescées en 1 lot d'écriture ; non-résurrection d'une session expirée pendant un verrou ; saturation de la file bornée avec compteur `dropped_overflow` sans dégrader les lectures ; annulation immédiate au logout ; redémarrage avant persistance ; révocation immédiate de session et désactivation d'utilisateur (`disabled_at`).
+
+## 17 octobre 2026 — Audit indépendant de sortie P1 avant P2
+
+- Audit de `develop` à `ba5ed8bc1095999cb34cd7202be9fb43a4656cb0` : voir `docs/AUDIT_SORTIE_P1_2026-10-17.md`. Sortie P1 non validée ; aucune fonctionnalité corrigée ou ajoutée.
+- Reproductions indépendantes : verrou SQLite imposé 30 s → `/auth/me` 500 après 16,388 s (timeout configuré 15 s), santé 200 ; cache descripteurs réutilisé sans revalidation et repeuplé par réponse tardive ; MAX indépendants produisant un tuple de métadonnées absent des entrées.
+- Autres constats : test navigateur Séries sans prérequis dans le job CI Rust ; exemple LAN HTTP refusé par le Core ; cache 128 réellement borné mais non FIFO, NFO toujours cloné par épisode malgré Arc.
+- `cargo test --workspace`, formatage, Clippy, 19 tests Web, check/lint/build réussis. Chrome Films avec vrai redémarrage et Séries exécutés avec succès. Aucun build/run Docker, déploiement NAS, commit, push ou publication ; anciennes preuves navigateur remises en état après les runners. Les anciennes affirmations de lectures authentifiées toujours disponibles sous publication sont invalidées par cet audit.
+- Plan P2 proposé uniquement : fermer les corrections ciblées P1, puis appairage Node, ingestion distante, streaming autorisé et OIDC, un Core/SQLite conservés. Aucun passage P2 effectué.
+
 ## 17 octobre 2026 — Jalon P1 : Performances et lecture finale des Séries (Chargement différé SvelteKit, suppression N+1 SQLite, borne mémoire du scanner, tests 200 épisodes, validation Chromium Playwright et conteneur Docker)
 
 - **Chargement différé frontend SvelteKit (`apps/web`)** :

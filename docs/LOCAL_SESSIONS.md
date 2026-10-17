@@ -37,9 +37,30 @@ configuration. Les en-têtes Forwarded/X-Forwarded-* ne sont pas utilisés pour
 décider des cookies. Le Core ne termine pas TLS et reste lié au loopback :
 HTTPS nécessite une terminaison TLS de confiance avec Host conservé, à valider
 dans un futur jalon de déploiement. Aucun proxy n'a été installé ou publié ici.
-Expiration absolue 12 h et après 30 min sans requête authentifiée, contrôlées
-atomiquement dans SQLite ; une session expirée ne peut pas être réactivée.
-Le compte désactivé est refusé au prochain accès authentifié.
+Expiration absolue 12 h (`43 200 s`) et expiration par inactivité après 30 min (`1 800 s`)
+sans requête authentifiée, contrôlées à chaque requête directement dans SQLite via un
+`SELECT` joint (`sessions`, `users`, `local_credentials`) en mode WAL sans verrou d'écriture ;
+aucun cache d'autorisation positif n'est utilisé, de sorte qu'une déconnexion, révocation,
+modification de rôle ou désactivation de compte (`disabled_at IS NOT NULL`) est effective
+immédiatement dès la requête suivante.
+
+La mise à jour d'activité (`last_seen_at`) est découplée de la lecture d'authentification :
+- Un worker unique par `AuthState` regroupe les rafraîchissements par lots (`TOUCH_BATCH_SIZE = 64`)
+  depuis une file en mémoire bornée (`MAX_PENDING_TOUCHES = 4096`) avec cadence de coalescence
+  par session (`TOUCH_INTERVAL_SECONDS = 60 s`) et micro-fenêtre de regroupement (`20 ms`).
+- L'`UPDATE` SQLite est strictement conditionnel (`expires_at > unixepoch() AND last_seen_at > unixepoch() - 1800 AND disabled_at IS NULL`) :
+  une session déjà expirée ou révoquée ne peut jamais être prolongée ni ressuscitée.
+- Sous verrou d'écriture SQLite prolongé (ex. `BEGIN IMMEDIATE` maintenu 30 s lors d'une publication),
+  le worker utilise un `busy_timeout` court (`15 ms`) et un backoff (`150 ms`) sans immobiliser
+  les connexions de lecture du pool ; les lectures authentifiées (`/auth/me`, catalogue, descripteurs,
+  streaming Range) répondent immédiatement sur le snapshot WAL.
+- **Compromis explicite sur l'expiration glissante (choix fail-closed)** : en raison du seuil de
+  coalescence de 60 s et de la persistance différée, un arrêt brutal avant flush ou un verrou
+  d'écriture SQLite couvrant les toutes dernières secondes des 30 minutes d'inactivité ne prolonge
+  pas la session en mémoire au-delà du `last_seen_at` commité dans SQLite. Ce choix fail-closed
+  peut avancer l'expiration inactive d'au plus 60 s (ou de la durée du verrou si la session était
+  déjà à moins de 30 s de l'échéance), mais garantit qu'aucune session expirée ou révoquée n'est
+  jamais acceptée ni réactivée.
 
 Le jeton CSRF est dérivé du secret de session avec séparation de domaine ;
 il est transmis par l'API, conservé uniquement en mémoire Web et doit être fourni

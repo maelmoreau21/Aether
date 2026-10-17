@@ -69,6 +69,22 @@ La connexion exige Origin afin d'empêcher le login CSRF. Aucune session ni
 aucun jeton d'authentification n'est conservé dans localStorage.
 Une déconnexion révoque la session courante, pas toutes les connexions du compte.
 
+Côté frontend (`apps/web/src/lib/auth/session.ts` et `apps/web/src/lib/catalog/api.ts`),
+le cache en mémoire des descripteurs médias (`descriptorCache`, borné à 128 entrées) est
+strictement isolé par une génération de session monotone (`sessionGeneration`) :
+- Toute connexion (`login`), déconnexion (`logout`), expiration (`HTTP 401`) ou modification
+  du compte authentifié (`readSession`, `session.set`) incrémente la génération et purge
+  immédiatement le cache des descripteurs.
+- Les réponses tardives de requêtes ou préchargements initiés sous une génération antérieure
+  (ou avant un `clearDescriptorCache()`) sont ignorées à leur retour et ne peuvent jamais
+  repeupler le cache de la nouvelle session.
+- Un `HTTP 401` issu d'une ancienne génération reçu après une reconnexion est ignoré et ne
+  déconnecte pas la nouvelle session.
+- Un `HTTP 403` invalide immédiatement les descripteurs en cache pour la génération courante.
+- Le cache sert uniquement à accélérer l'affichage des libellés de versions et le préchargement
+  au survol/focus ; chaque lancement de lecture (`revalidateMediaDescriptor`) revalide les
+  droits auprès du serveur avant d'ouvrir le lecteur vidéo.
+
 ## Permissions et isolation P0
 
 Le constructeur `secure_app` du binaire impose une session puis le droit de

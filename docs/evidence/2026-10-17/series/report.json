@@ -9,6 +9,9 @@
     "seekAndPause": true,
     "seasonNavigation": true,
     "season2Playback": true,
+    "revokedPermission403": true,
+    "restoredPermissionPlayback": true,
+    "accountSwitchCacheIsolation": true,
     "cspErrors": []
   },
   "passed": true

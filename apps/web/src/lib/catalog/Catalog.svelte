@@ -16,12 +16,13 @@
     request,
     playbackIds,
     sourceLabel,
-    fetchMediaDescriptor,
     fetchMediaDescriptors,
+    revalidateMediaDescriptor,
     getCachedMedia,
     type Work,
     type CatalogPage
   } from './api';
+  import { session, getSessionGeneration } from '../auth/session';
   let { section = 'home' }: { section?: 'home' | 'films' | 'series' | 'search' | 'settings' } = $props();
   let name = $state(DEFAULT_NAME);
   let media = $state<Media[]>([]);
@@ -53,20 +54,25 @@
     }
     const controller = new AbortController();
     episodeLaunchController = controller;
+    const launchGen = getSessionGeneration();
     launchingEpisodeId = episode.id;
     mediaError = '';
 
     try {
-      const item = await fetchMediaDescriptor(versionId, controller.signal);
-      if (controller.signal.aborted) return;
-      if (!media.some(m => m.id === item.id)) {
-        media = [...media, item];
-      }
+      const item = await revalidateMediaDescriptor(versionId, controller.signal);
+      if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
+      const cachedForEpisode = playbackIds(episode)
+        .map(eid => (eid === item.id ? item : getCachedMedia(eid)))
+        .filter((m): m is Media => m !== undefined);
+      const otherMedia = media.filter(m => !cachedForEpisode.some(c => c.id === m.id));
+      media = [...otherMedia, ...cachedForEpisode];
       playingEpisode = episode;
       await tick();
+      if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
       immersive?.open(item);
     } catch (err) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
+        media = media.filter(m => m.id !== versionId && getCachedMedia(m.id) !== undefined);
         mediaError = err instanceof Error ? err.message : 'Chargement de l’épisode impossible.';
       }
     } finally {
@@ -105,9 +111,35 @@
   const playerMedia = $derived(detail?.kind === 'series' ? media.filter(item => episodeIds.includes(item.id)) : playableMedia);
   const activeSeason = $derived(detail?.seasons?.find(item => item.number === season));
   function detailUrl(work: Work) { return work.kind === 'series' ? resolve(`series/?work=${encodeURIComponent(work.id)}`) : resolve(`films/?work=${encodeURIComponent(work.id)}`); }
-  function openPlayer() {
+  async function openPlayer(): Promise<void> {
     const current = playableMedia.find(item => item.id === selected) ?? playableMedia[0];
-    if (current) immersive?.open(current);
+    const targetId = current?.id ?? (allowedIds.includes(selected) ? selected : allowedIds[0]);
+    if (!targetId) return;
+    if (episodeLaunchController) {
+      episodeLaunchController.abort();
+      episodeLaunchController = null;
+    }
+    const controller = new AbortController();
+    episodeLaunchController = controller;
+    const launchGen = getSessionGeneration();
+    mediaError = '';
+
+    try {
+      const item = await revalidateMediaDescriptor(targetId, controller.signal);
+      if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
+      media = [...media.filter(m => m.id !== item.id), item];
+      selected = item.id;
+      immersive?.open(item);
+    } catch (err) {
+      if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
+        media = media.filter(m => m.id !== targetId && getCachedMedia(m.id) !== undefined);
+        mediaError = err instanceof Error ? err.message : 'Chargement des sources impossible.';
+      }
+    } finally {
+      if (episodeLaunchController === controller) {
+        episodeLaunchController = null;
+      }
+    }
   }
   onMount(() => {
     const controller = new AbortController();
@@ -118,8 +150,11 @@
   });
   $effect(() => {
     const id = workId, q = query, sorting = order, start = offset, currentSection = section;
+    const activeSessionKey = $session ? `${$session.user.id}:${$session.csrfToken}` : 'anonymous';
+    void activeSessionKey;
+    const effectSessionGen = getSessionGeneration();
     const controller = new AbortController();
-    search = q; sort = sorting; busy = true; error = ''; mediaError = ''; detail = null; media = [];
+    search = q; sort = sorting; busy = true; error = ''; mediaError = ''; detail = null; media = []; films = []; series = []; totalFilms = 0; totalSeries = 0; playingEpisode = null;
     async function load() {
       try {
         if (currentSection === 'settings') return;
@@ -127,19 +162,19 @@
           if (currentSection !== 'films' && currentSection !== 'series') throw new Error('Ouvrez ce média depuis sa bibliothèque Films ou Séries.');
           const playerPromise = loadPlayer();
           const work = await request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}`, controller.signal);
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
           if ((currentSection === 'films' && work.kind !== 'film') || (currentSection === 'series' && work.kind !== 'series')) throw new Error('Ce média appartient à une autre bibliothèque.');
           await playerPromise;
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
           detail = work; season = work.seasons?.[0]?.number ?? 1;
           if (work.kind === 'film') {
             const ids = playbackIds(work);
             selected = ids[0] ?? '';
             try {
               const items = await fetchMediaDescriptors(ids, controller.signal);
-              if (!controller.signal.aborted) media = items;
+              if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) media = items;
             } catch (failure) {
-              if (!controller.signal.aborted) {
+              if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) {
                 mediaError = failure instanceof Error ? failure.message : 'Chargement des sources impossible.';
               }
             }
@@ -151,13 +186,13 @@
         } else {
           const kinds = currentSection === 'films' ? ['film'] : currentSection === 'series' ? ['series'] : ['film','series'];
           const results = await Promise.all(kinds.map(kind => request<CatalogPage>(`/api/v1/catalog?${new URLSearchParams({ kind, q, sort:sorting, offset:String(start), limit:'24' })}`, controller.signal)));
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
           films = []; series = []; totalFilms = 0; totalSeries = 0;
           catalogueNotice = [...new Set(results.map(result => result.notice).filter(Boolean))].join(' ');
           results.forEach((result, index) => { if (kinds[index] === 'film') { films = result.items; totalFilms = result.total; } else { series = result.items; totalSeries = result.total; } });
         }
-      } catch (e) { if (!controller.signal.aborted) error = e instanceof Error ? e.message : 'Connexion au catalogue impossible.'; }
-      finally { if (!controller.signal.aborted) busy = false; }
+      } catch (e) { if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) error = e instanceof Error ? e.message : 'Connexion au catalogue impossible.'; }
+      finally { if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) busy = false; }
     }
     void load();
     return () => {
@@ -191,8 +226,8 @@
       <div class="detail-copy"><p class="eyebrow">{detail.kind === 'series' ? 'SÉRIE' : 'FILM'}{detail.synthetic ? ' · DÉMONSTRATION' : ''}</p><h1>{detail.title}</h1><p class="metadata">{detail.year ?? 'Année non renseignée'}{detail.kind === 'series' ? ` · ${detail.seasonCount ?? 0} ${(detail.seasonCount ?? 0) > 1 ? 'saisons' : 'saison'} · ${detail.episodeCount ?? 0} ${(detail.episodeCount ?? 0) > 1 ? 'épisodes' : 'épisode'}` : ''}</p>{#if detail.genres?.length}<p class="metadata genres">{detail.genres.join(' · ')}</p>{/if}<p class="synopsis">{detail.description || 'Synopsis non renseigné.'}</p>
       {#if detail.kind === 'film'}
         <div class="versions" aria-label="Versions disponibles">{#each playableMedia as item (item.id)}<button class="version-choice" aria-pressed={selected === item.id} aria-label={`Sélectionner la version ${sourceLabel(item)}`} onclick={() => selected = item.id}>{sourceLabel(item)}</button>{/each}</div>
-        <button class="hero-cta" disabled={!playableMedia.length} onclick={openPlayer}><Icon name="play" size={18} />Lecture</button>
-        {#if !playableMedia.length}<p class="unavailable">Aucune version disponible pour la lecture.</p>{/if}
+        <button class="hero-cta" disabled={!playableMedia.length && !allowedIds.length} onclick={openPlayer}><Icon name="play" size={18} />Lecture</button>
+        {#if !playableMedia.length && !allowedIds.length}<p class="unavailable">Aucune version disponible pour la lecture.</p>{/if}
       {/if}
       {#if mediaError}<p class="error" role="alert">{mediaError}</p>{/if}
       {#if detail.synthetic}<p class="detail-note">Fiche de démonstration.</p>{/if}

@@ -1,5 +1,23 @@
 # MEMORY.md — État et décisions Aether
 
+## 17 octobre 2026 — Correctif P1 (Audit A2) : Isolation par génération de session, invalidation 401/403 et revalidation au lancement du cache frontend
+
+- **Isolation par génération de session sans dépendance circulaire (`apps/web/src/lib/auth/session.ts` & `apps/web/src/lib/catalog/api.ts`)** :
+  - `session.ts` maintient un compteur monotone de génération de session (`getSessionGeneration()`) et notifie de manière unidirectionnelle les écouteurs enregistrés (`onSessionGenerationChange`) sans importer le module catalogue.
+  - La génération est incrémentée et le cache `descriptorCache` (borné à `MAX_DESCRIPTOR_CACHE_SIZE = 128` entrées) est immédiatement purgé lors de chaque `login()`, `logout()`, expiration `HTTP 401`, changement de compte ou de jeton CSRF (`readSession()`, `session.set()`, `session.update()`).
+  - Un compteur de génération de cache (`cacheGeneration`) empêche toute requête asynchrone ou préchargement encore en vol au moment d'une déconnexion, d'un changement de compte ou d'un appel à `clearDescriptorCache()` de repeupler `descriptorCache` lorsque sa réponse arrive tardivement.
+  - Aucune donnée de session ni de cache n'est écrite dans `localStorage`.
+- **Gestion sécurisée des erreurs HTTP 401 et HTTP 403 (`apps/web/src/lib/catalog/api.ts`)** :
+  - **Protection contre les anciens HTTP 401 (`invalidateSession(expectedGeneration)`)** : chaque requête capture la génération de session au départ. Si un `HTTP 401` tardif issu de la session A arrive après la connexion d'un compte B (nouvelle génération), il est ignoré pour l'état d'authentification et ne déconnecte pas B ni ne vide son cache. En revanche, un `HTTP 401` appartenant à la génération courante invalide immédiatement la session, purge `descriptorCache` et redirige vers `login/`.
+  - **Purge sur HTTP 403** : tout `HTTP 403` reçu dans la génération courante purge `descriptorCache` (les descripteurs `Media` ne portant pas `libraryId`) et incrémente `cacheGeneration` pour invalider les descripteurs de la bibliothèque révoquée.
+- **Revalidation systématique des droits avant lecture (`Catalog.svelte` & `EpisodePlayer.svelte`)** :
+  - Le cache accélère l'affichage des libellés de versions (`MP4`, `MKV`) et le préchargement au survol/focus (`prefetchVersions`), sans déclencher de chargement massif à l'ouverture d'une fiche série (0 requête `/api/v1/media/` à l'ouverture).
+  - Au clic sur **Lecture** (épisode via `launchEpisode` ou film via `openPlayer`), `revalidateMediaDescriptor` (`fetchMediaDescriptor(id, signal, { revalidate: true })`) interroge systématiquement le serveur avant d'ouvrir `ImmersivePlayer`. Un retrait de droits (`HTTP 403`) bloque l'ouverture du lecteur, purge le cache et affiche l'alerte d'accès refusé ; dès le rétablissement des droits, un nouveau clic sur **Lecture** réussit immédiatement.
+- **Vérifications et tests exécutés** :
+  - Vitest (`npm test` dans `apps/web`) : **28/28 tests réussis** (4 fichiers : `api.test.ts` 13/13, `session.test.ts` 6/6, `native.test.ts` 6/6, `track-labels.test.ts` 3/3) couvrant A → cache → logout → B, changement direct de compte, requête A en vol terminée après connexion B, ancien 401 après connexion B, 401 courant, 403 après révocation puis rétablissement des droits, zapping rapide avec `AbortController`, purge pendant un préchargement, éviction bornée à 128 entrées et absence de requêtes massives.
+  - `npm run check` (0 erreur, 0 avertissement), `npm run lint` (0 erreur), `npm run build` (succès).
+  - Test navigateur réel Chromium (`cargo test --test browser_series -- --nocapture`, Chrome `155.0.8059.40` headless) : parcours complet validé incluant 0 requête média à l'ouverture de la série, lecture S01E01 et S02E01, rejet HTTP 403 au lancement malgré descripteur en cache (`revokedPermission403: true`), reprise de lecture après rétablissement des droits (`restoredPermissionPlayback: true`) et changement de compte SPA A → logout → B sans rechargement de page avec preuve de purge du cache (`accountSwitchCacheIsolation: true`).
+
 ## 17 octobre 2026 — Correctif P0 (Audit A1) : Disponibilité de l'authentification et des lectures sous verrou SQLite de 30 s
 
 - **Séparation de la validation de session et de la mise à jour d'activité (`crates/core/src/auth.rs`)** :

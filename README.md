@@ -72,7 +72,7 @@ Le Synology DS1522+ embarque un processeur **AMD Ryzen Embedded R1600** (x86_64,
 |---|---|---|
 | `MEDIA_PORT` | `3000` | Port d'écoute interne du serveur HTTP |
 | `MEDIA_BIND_ADDR` | `0.0.0.0` | Adresse d'écoute interne (`127.0.0.1` par défaut hors conteneur) |
-| `MEDIA_PUBLIC_URL` | `http://127.0.0.1:3000` | Origine publique validée pour `Host`, `Origin` et CSRF |
+| `MEDIA_PUBLIC_URL` | `http://127.0.0.1:3000` | Origine publique canonique (`https://...` pour LAN/Internet, ou `http://` uniquement sur loopback `127.0.0.1`/`localhost`/`[::1]`) |
 | `MEDIA_DB_PATH` | `/data/core.sqlite3` | Chemin du fichier SQLite (volume persistant) |
 | `MEDIA_SQLITE_BUSY_TIMEOUT_SECS` | `15` | Délai d'attente max SQLite en cas de concurrence d'écriture (15s par défaut, 45s+ recommandé pour les très grandes bibliothèques 10k+) |
 | `MEDIA_LIBRARY_ROOT` | `/media` | Racine de montage en lecture seule des bibliothèques |
@@ -82,13 +82,13 @@ Le Synology DS1522+ embarque un processeur **AMD Ryzen Embedded R1600** (x86_64,
 
 ## 4. Exposition réseau & Proxy Inverse HTTPS
 
-- **Liaison locale sécurisée par défaut** : `compose.yaml` lie le port hôte sur `"127.0.0.1:3000:3000"` pour éviter toute exposition non authentifiée sur le LAN.
-- **Accès LAN direct** : Ajustez le port sur `"0.0.0.0:3000:3000"` et définissez `MEDIA_PUBLIC_URL=http://<IP_NAS>:3000`.
-- **Proxy Inverse HTTPS (Nginx, Synology DSM, Caddy)** :
-  1. Conservez la liaison locale `127.0.0.1:3000:3000`.
-  2. Définissez `MEDIA_PUBLIC_URL=https://aether.mondomaine.fr`.
-  3. **Obligatoire** : Configurez le proxy inverse pour relayer l'en-tête `Host` du client (`proxy_set_header Host $host;`).
-  4. La sonde interne `/api/v1/health` est découplée de `MEDIA_PUBLIC_URL` et continue de répondre 200 OK aux vérifications Docker en boucle locale.
+- **HTTP limité strictement au loopback (développement/test local)** : `compose.yaml` lie le port hôte sur `"127.0.0.1:3000:3000"` avec `MEDIA_PUBLIC_URL=http://127.0.0.1:3000`. `AuthState::new()` refuse toute origine `http://` hors loopback (ex. `http://192.168.1.100:3000` est rejeté au démarrage avec `AuthConfigError::Origin`).
+- **Accès LAN distant ou Internet via Proxy Inverse HTTPS (Synology DSM, Nginx, Caddy)** :
+  1. Conservez la liaison locale `"127.0.0.1:3000:3000"` sur le conteneur.
+  2. Définissez `MEDIA_PUBLIC_URL` sur l'origine HTTPS canonique exacte (ex. `https://aether.mondomaine.fr` ou `https://aether.nas.lan:8443`).
+  3. **Obligatoire** : Configurez le proxy inverse de confiance pour conserver l'en-tête `Host` exact du client (`proxy_set_header Host $http_host;` sous Nginx, automatique via le Proxy inverse de Synology DSM).
+  4. En mode `https://`, le cookie de session `media_session` active automatiquement l'attribut `Secure` (`HttpOnly; SameSite=Strict; Secure`) et le Core vérifie strictement `Host`, `Origin`, `Sec-Fetch-Site` et `x-csrf-token`.
+  5. La sonde interne `/api/v1/health` est découplée de `MEDIA_PUBLIC_URL` et continue de répondre `200 OK` aux vérifications Docker en boucle locale.
 
 ---
 

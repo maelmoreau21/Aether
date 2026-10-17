@@ -12,6 +12,8 @@
     "revokedPermission403": true,
     "restoredPermissionPlayback": true,
     "accountSwitchCacheIsolation": true,
+    "delayedLogoutDoesNotWipeNewLoginCookie": true,
+    "concurrentLoginsSequencedCorrectly": true,
     "cspErrors": []
   },
   "passed": true

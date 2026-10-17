@@ -112,16 +112,25 @@ describe('cookie based authentication client', () => {
     expect(get(session)).toEqual(secondUser);
   });
 
-  it('prevents a slow logout from session A from wiping out a newer login of session B', async () => {
+  it('sequences login of session B strictly after a slow logout of session A so logout Set-Cookie cannot wipe B cookie', async () => {
     let resolveLogoutA!: (value: Response) => void;
+    const events: string[] = [];
     const fetchMock = vi.fn().mockImplementation((url: string) => {
       if (url === '/api/v1/auth/logout') {
+        events.push('logout-A-request');
         return new Promise<Response>(resolve => {
-          resolveLogoutA = resolve;
+          resolveLogoutA = (res: Response) => {
+            events.push('logout-A-response');
+            resolve(res);
+          };
         });
       }
       if (url === '/api/v1/auth/login') {
-        return Promise.resolve(Response.json(secondUser));
+        events.push('login-B-request');
+        return Promise.resolve().then(() => {
+          events.push('login-B-response');
+          return Response.json(secondUser);
+        });
       }
       return Promise.reject(new Error('unexpected url'));
     });
@@ -129,18 +138,108 @@ describe('cookie based authentication client', () => {
 
     session.set(current);
     const logoutPromise = logout(current);
+    const loginPromise = login('viewer', 'secret2');
 
-    // User B logs in before A's logout response comes back
-    await login('viewer', 'secret2');
-    const genB = getSessionGeneration();
-    expect(get(session)).toEqual(secondUser);
+    // Flush microtasks: logout request is in flight, login B must NOT have sent its HTTP request yet
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(events).toEqual(['logout-A-request']);
 
-    // Now A's logout finishes
+    // Now A's delayed logout response arrives -> login B is dispatched only after logout A completes
     resolveLogoutA(new Response(null, { status: 204 }));
+    await Promise.all([logoutPromise, loginPromise]);
+
+    expect(events).toEqual([
+      'logout-A-request',
+      'logout-A-response',
+      'login-B-request',
+      'login-B-response'
+    ]);
+    expect(get(session)).toEqual(secondUser);
+  });
+
+  it('sequences two concurrent logins so a slow first login response cannot arrive after and overwrite the second login cookie', async () => {
+    let resolveLoginA!: (value: Response) => void;
+    const events: string[] = [];
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/v1/auth/login') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { login?: string };
+        if (body.login === 'operator') {
+          events.push('login-A-request');
+          return new Promise<Response>(resolve => {
+            resolveLoginA = (res: Response) => {
+              events.push('login-A-response');
+              resolve(res);
+            };
+          });
+        }
+        if (body.login === 'viewer') {
+          events.push('login-B-request');
+          return Promise.resolve().then(() => {
+            events.push('login-B-response');
+            return Response.json(secondUser);
+          });
+        }
+      }
+      return Promise.reject(new Error('unexpected url'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const loginAPromise = login('operator', 'secret1');
+    const loginBPromise = login('viewer', 'secret2');
+
+    // Flush microtasks: login B must wait for login A's HTTP response before sending its own request
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(events).toEqual(['login-A-request']);
+
+    resolveLoginA(Response.json(current));
+    await Promise.all([loginAPromise, loginBPromise]);
+
+    expect(events).toEqual([
+      'login-A-request',
+      'login-A-response',
+      'login-B-request',
+      'login-B-response'
+    ]);
+    expect(get(session)).toEqual(secondUser);
+  });
+
+  it('waits for an in-flight auth mutation before readSession queries /api/v1/auth/me', async () => {
+    let resolveLogoutA!: (value: Response) => void;
+    const events: string[] = [];
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === '/api/v1/auth/logout') {
+        events.push('logout-request');
+        return new Promise<Response>(resolve => {
+          resolveLogoutA = (res: Response) => {
+            events.push('logout-response');
+            resolve(res);
+          };
+        });
+      }
+      if (url === '/api/v1/auth/me') {
+        events.push('me-request');
+        return Promise.resolve(new Response(null, { status: 401 }));
+      }
+      return Promise.reject(new Error('unexpected url'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    session.set(current);
+    const logoutPromise = logout(current);
+    const mePromise = readSession();
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(events).toEqual(['logout-request']);
+
+    resolveLogoutA(new Response(null, { status: 204 }));
+    const result = await mePromise;
     await logoutPromise;
 
-    // Session B must remain active and generation must not be overwritten
-    expect(get(session)).toEqual(secondUser);
-    expect(getSessionGeneration()).toBe(genB);
+    expect(events).toEqual(['logout-request', 'logout-response', 'me-request']);
+    expect(result).toBeNull();
+    expect(get(session)).toBeNull();
   });
 });

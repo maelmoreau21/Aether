@@ -1,0 +1,356 @@
+<script lang="ts">
+  import { resolve } from '$app/paths';
+  import type { Work } from '../catalog/api';
+  import Icon from './Icon.svelte';
+
+  let {
+    featured = null,
+    onPlay
+  }: {
+    featured?: Work | null;
+    onPlay?: (work: Work) => void;
+  } = $props();
+
+  const base = $derived(resolve('/').replace(/\/$/, ''));
+  const detailUrl = $derived(
+    featured
+      ? featured.kind === 'series'
+        ? resolve(`series/?work=${encodeURIComponent(featured.id)}`)
+        : resolve(`films/?work=${encodeURIComponent(featured.id)}`)
+      : resolve('films/')
+  );
+</script>
+
+<section class="hero-banner" class:has-featured={!!featured} aria-label="Média en vedette">
+  <!-- Backdrop Background -->
+  <div class="backdrop-wrapper" aria-hidden="true">
+    {#if featured?.posterUrl}
+      <img
+        class="backdrop-img"
+        src={featured.posterUrl}
+        alt=""
+        loading="eager"
+        decoding="async"
+      />
+    {:else}
+      <div
+        class="backdrop-art"
+        style:background-image="url('{base}/images/cinematic-horizon.png')"
+      ></div>
+    {/if}
+    <div class="backdrop-gradient-vignette"></div>
+    <div class="backdrop-gradient-bottom"></div>
+  </div>
+
+  <div class="hero-content">
+    <div class="hero-meta-row">
+      <span class="hero-eyebrow">
+        {#if featured}
+          <Icon name="sparkles" size={12} />
+          <span>{featured.kind === 'series' ? 'SÉRIE DU MOMENT' : 'FILM EN VEDETTE'}</span>
+        {:else}
+          <span>LE CINÉMA, CHEZ VOUS</span>
+        {/if}
+      </span>
+
+      {#if featured?.year}
+        <span class="meta-pill">{featured.year}</span>
+      {/if}
+      {#if featured?.rating}
+        <span class="meta-pill rating-pill">
+          <Icon name="star" size={12} />
+          {featured.rating.toFixed(1)}
+        </span>
+      {/if}
+      {#if featured?.mpaa}
+        <span class="meta-pill mpaa-pill">{featured.mpaa}</span>
+      {/if}
+      {#if featured?.kind === 'series'}
+        <span class="meta-pill">
+          {featured.seasonCount ?? 0} {(featured.seasonCount ?? 0) > 1 ? 'saisons' : 'saison'}
+        </span>
+      {/if}
+    </div>
+
+    <h1 class="hero-title">
+      {#if featured}
+        {featured.title}
+      {:else}
+        Une envie de cinéma.<br />
+        <span class="hero-title-accent">Une place pour chaque histoire.</span>
+      {/if}
+    </h1>
+
+    {#if featured?.outline}
+      <p class="hero-outline">« {featured.outline} »</p>
+    {/if}
+
+    <p class="hero-synopsis">
+      {#if featured}
+        {featured.plot || featured.description || 'Découvrez cette œuvre en lecture directe haute fidélité.'}
+      {:else}
+        Retrouvez vos films préférés et explorez vos séries en lecture directe haute fidélité. Sans transcodage forcé, vos médias sont diffusés dans leur format d’origine.
+      {/if}
+    </p>
+
+    <div class="hero-actions">
+      {#if featured}
+        {#if onPlay}
+          <button
+            type="button"
+            class="btn-primary"
+            onclick={() => onPlay(featured)}
+            disabled={featured.available === false}
+          >
+            <Icon name="play" size={20} />
+            <span>Lire</span>
+          </button>
+        {:else}
+          <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- detailUrl already resolved -->
+          <a class="btn-primary" href={detailUrl}>
+            <Icon name="play" size={20} />
+            <span>Lire</span>
+          </a>
+        {/if}
+
+        <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- detailUrl already resolved -->
+        <a class="btn-secondary" href={detailUrl}>
+          <Icon name="info" size={20} />
+          <span>Plus d'infos</span>
+        </a>
+      {:else}
+        <a class="btn-primary" href={resolve('films/')}>
+          <Icon name="film" size={18} />
+          <span>Explorer les films</span>
+        </a>
+        <a class="btn-secondary" href={resolve('series/')}>
+          <Icon name="tv" size={18} />
+          <span>Voir les séries</span>
+        </a>
+      {/if}
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero-banner {
+    position: relative;
+    min-height: clamp(400px, 52vh, 600px);
+    display: flex;
+    align-items: flex-end;
+    padding: clamp(32px, 5vw, 64px) var(--page-gutter);
+    margin: 0 calc(-1 * var(--page-gutter)) 24px;
+    border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+    overflow: hidden;
+  }
+
+  .backdrop-wrapper {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    overflow: hidden;
+  }
+
+  .backdrop-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 25%;
+    filter: brightness(0.65) saturate(1.1);
+    transform: scale(1.02);
+  }
+
+  .backdrop-art {
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center 48%;
+    filter: brightness(0.6) saturate(0.9);
+  }
+
+  .backdrop-gradient-vignette {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 75% 30%, transparent 20%, rgba(9, 10, 16, 0.7) 70%, #090a10 100%),
+                linear-gradient(90deg, #090a10 0%, rgba(9, 10, 16, 0.85) 45%, transparent 100%);
+  }
+
+  .backdrop-gradient-bottom {
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 65%;
+    background: linear-gradient(180deg, transparent 0%, rgba(9, 10, 16, 0.85) 60%, #090a10 100%);
+  }
+
+  .hero-content {
+    position: relative;
+    z-index: 2;
+    max-width: 680px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .hero-meta-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .hero-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.16em;
+    color: var(--color-accent);
+    background: rgba(167, 139, 250, 0.12);
+    border: 1px solid rgba(167, 139, 250, 0.25);
+    padding: 4px 10px;
+    border-radius: var(--radius-pill);
+    backdrop-filter: blur(8px);
+  }
+
+  .meta-pill {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text);
+    background: rgba(255, 255, 255, 0.08);
+    padding: 3px 8px;
+    border-radius: var(--radius-xs);
+    backdrop-filter: blur(8px);
+  }
+
+  .rating-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.15);
+    border: 1px solid rgba(251, 191, 36, 0.25);
+  }
+
+  .mpaa-pill {
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .hero-title {
+    font-family: var(--font-display);
+    font-size: clamp(32px, 4.5vw, 56px);
+    font-weight: 750;
+    line-height: 1.1;
+    letter-spacing: -0.04em;
+    color: var(--color-text-bright);
+    margin: 0;
+    text-shadow: 0 4px 18px rgba(0, 0, 0, 0.8);
+  }
+
+  .hero-title-accent {
+    font-style: italic;
+    font-weight: 500;
+    background: linear-gradient(135deg, #ffffff 40%, var(--color-accent) 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-outline {
+    font-size: 15px;
+    font-style: italic;
+    color: var(--color-accent-hover);
+    margin: 0;
+    opacity: 0.95;
+  }
+
+  .hero-synopsis {
+    font-size: clamp(13.5px, 1.2vw, 15px);
+    line-height: 1.6;
+    color: #cbd5e1;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+  }
+
+  .hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 48px;
+    padding: 0 26px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--color-text-bright);
+    color: #0b0c13;
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+    transition: all var(--transition-fast);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: #ffffff;
+    transform: translateY(-2px);
+    box-shadow: 0 10px 28px rgba(255, 255, 255, 0.25);
+  }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 48px;
+    padding: 0 22px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    color: var(--color-text-bright);
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all var(--transition-fast);
+  }
+
+  .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.3);
+    transform: translateY(-2px);
+  }
+
+  @media (max-width: 768px) {
+    .hero-banner {
+      min-height: 360px;
+      padding: 24px var(--page-gutter);
+      margin-bottom: 16px;
+    }
+
+    .hero-actions {
+      width: 100%;
+    }
+
+    .btn-primary, .btn-secondary {
+      flex: 1;
+      min-height: 44px;
+      padding: 0 16px;
+      font-size: 13px;
+    }
+  }
+</style>

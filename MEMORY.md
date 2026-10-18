@@ -1,4 +1,32 @@
 # MEMORY.md — État et décisions Aether
+## 18 octobre 2026 — Refonte complète de l'interface utilisateur (Design system, Accueil immersif, Catalogues, Lecteur, Administration)
+
+- Périmètre : Refonte frontend complète de `apps/web` inspirée visuellement des plateformes modernes (Netflix, Disney+, HBO Max) et ergonomiquement de Jellyfin. Aucun changement backend, aucune modification d'infrastructure, de Traefik, de Docker ou de fonctionnalités raw AV1/Opus.
+- Design system & Composants :
+  - Palette sombre cinématique (`tokens.css`), surfaces étagées, flous de verre (glassmorphism), accent améthyste (`#a78bfa`), skeletons scintillants (`Skeleton.svelte`), palette d'icônes SVG optimisée (`Icon.svelte`).
+  - Navigation supérieure adhésive (`Navbar.svelte`) avec indicateurs d'onglets, barre de recherche rétractable, menu profil intégré et tiroir responsive mobile accessible au clavier.
+  - Carrousel horizontal ergonomique (`MediaShelf.svelte`) avec défilement fluide et commandes tactiles / boutons chevrons.
+  - Bannière héro cinématique (`HeroBanner.svelte`) avec média mis en avant, badges techniques, synopsis et boutons d'action rapide (« Lire », « Plus d'infos »).
+  - Cartes d'affiches (`Poster.svelte`) au ratio 2:3 avec badges d'état de visionnage, barre de progression et survol soigné.
+  - Cartes 16:9 « Continuer à regarder » (`ContinueWatching.svelte`) avec vignette de prévisualisation, temps restant et reprise instantanée.
+- Découpage modulaire du Catalogue :
+  - `Catalog.svelte` transformé d'un composant monolithique de 1 715 lignes en un orchestrateur propre et maintenable.
+  - Découpage en sous-composants spécialisés : `CatalogHome.svelte` (Hero, Continuer à regarder, Nouveautés films/séries, rayons par genre), `CatalogGrid.svelte` (grille avec filtres par genre, tris et recherche réactive), `FilmDetail.svelte` (fiche détaillée, sélecteur d'édition/version, specs techniques), `SeriesDetail.svelte` (fiche série, sélecteur de saisons, liste d'épisodes et EpisodePlayer), `SettingsView.svelte` (profil utilisateur, liaison SSO OIDC et préférences de lecture).
+- Lecteur multimédia (`ImmersivePlayer.svelte` et `PlayerControls.svelte`) :
+  - Modernisation visuelle : barre supérieure en verre dépoli, bouton retour, carte de fin d'épisode avec compte à rebours, indicateur de chargement rotatif élégant.
+  - Barre de progression précise avec infobulle temporelle, curseur de volume rétractable, menu contextuel des pistes audio / sous-titres et réglages d'offsets préservés.
+  - Moteur de lecture natif intact : conservation absolue de la position, de la pause, du plein écran, des flux AV1 + Opus internes et externes, du sous-titrage forcé FR / VTT / ASS et de l'enchaînement d'épisodes.
+- Administration modulaire (`admin/libraries/+page.svelte`) :
+  - Découpage en sous-composants : `AdminOverview.svelte` (KPIs temps réel, état Core, santé système), `AdminLibraries.svelte` (liste des bibliothèques, suivi des scans incrémentaux, formulaire d'ajout/modification), `AdminNodes.svelte` (supervision des Media Nodes, actions de reconnexion/rotation/révocation et formulaire d'appairage HMAC), `AdminUsers.svelte` (matrice RBAC des autorisations et comptes), `AdminOidc.svelte` (statut SSO OpenID Connect).
+  - Préservation intégrale des contrats de test : ancres d'identification, sélecteurs d'entrées (`#library-name`, `#library-kind`, `#library-node`, `#library-root`, `#pair-node-*`), compteurs de scan et boutons d'action.
+- Vérifications qualité & tests automatisés :
+  - `npm run check` : 0 erreur, 0 avertissement.
+  - `npm run lint` : 0 erreur.
+  - `npm test` : 48/48 tests unitaires réussis.
+  - `npm run build` : Compilation statique SvelteKit réussie (`@sveltejs/adapter-static`).
+  - `cargo test --workspace` : 100 % des tests de l'espace de travail réussis (contrats d'API, sécurité, permissions, scans, nœuds distribués et redémarrage).
+- Statut Git : modifications locales prêtes, aucun commit ni push effectué conformément aux consignes.
+
 ## 18 octobre 2026 — Pistes internes préparées, offsets et récence persistante
 
 - Départ develop propre ; modifications locales uniquement. Aucun commit/push,

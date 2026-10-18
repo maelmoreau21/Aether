@@ -1,6 +1,38 @@
 # MEMORY.md — État et décisions Aether
 
-## 18 octobre 2026 — Correction CI navigateur : Synchronisation des sous-titres intégrés, alerte 403 Séries et répertoires de preuves (`browser-scanner.cjs`, `browser-series.cjs`, `browser_scanner.rs`, `browser_series.rs`, `SeriesDetail.svelte`, `Catalog.svelte`)
+## 18 octobre 2026 — Refonte de la page de connexion SSO et redirection de la racine (`apps/web`, `crates/core/src/lib.rs`, `crates/core/src/oidc.rs`)
+
+- **Diagnostic du problème `{"error":"authentication_required"}`** :
+  - Lors de l'accès navigateur initial à la racine du serveur (`GET /`), Axum acheminait la requête vers le routeur `media_routes` qui déclarait `route("/", get(|| async { Html(include_str!("bench.html")) }))`.
+  - Le routeur `media` étant protégé par le middleware de permissions `permissions::require_media`, toute requête anonyme sans session valide était rejetée avec un code `HTTP 401 Unauthorized` et une réponse JSON brute `{"error":"authentication_required"}` au lieu d'amener l'utilisateur sur l'interface graphique de connexion.
+- **Corrections backend (`crates/core`)** :
+  - `crates/core/src/lib.rs` :
+    - Déplacement de la page de banc de test synthétique `bench.html` vers `/bench`.
+    - Ajout dans `public_routes` d'une redirection explicite (`307 Temporary Redirect`) de `/` vers `/app/`.
+    - Accompagnement de `/app/` par `ServeDir` pour servir le bundle statique de l'application SvelteKit.
+  - `crates/core/src/oidc.rs` :
+    - Enrichissement de `GET /api/v1/auth/oidc/status` avec le champ `provider` détecté automatiquement (Authentik, Keycloak, Dex, Pocket ID ou SSO générique) en préservant le booléen canonique `enabled`.
+  - `crates/core/tests/static_web.rs` :
+    - Validation du contrat de redirection de `/` vers `/app/`.
+- **Refonte de la page de connexion (`apps/web/src/routes/login/+page.svelte`)** :
+  - **Design system cinématographique** : conteneur centré en verre dépoli (glassmorphism), halos lumineux ambiants (`ambient-glow`), icônes vectorielles contextuelles (`Icon.svelte`), typographie soignée et alignée sur la charte Aether.
+  - **Prise en charge SSO de premier plan** :
+    - Lorsque le SSO est activé, affichage d'un bouton d'action principal dédié (`Se connecter avec SSO`) avec icône de bouclier de sécurité, badge du fournisseur détecté et indicateur de progression.
+    - Séparateur visuel élégant (« ou avec un identifiant local »).
+    - Gestion robuste des erreurs : décodage des codes d'erreur IdP et OIDC (`local_administrator_required`, `oidc_invalid_response`, `oidc_group_denied`, `oidc_account_disabled`, `oidc_provider_unavailable`, etc.) et affichage d'une bannière d'alerte claire avec `role="alert"`.
+    - Prise en charge des erreurs transmises par paramètres d'URL (`?error=...`).
+  - **Authentification locale préservée** :
+    - Formulaire d'identifiant et mot de passe ergonomique avec icônes intégrées, placeholders, autocomplétion sécurisée.
+    - Maintien strict de la conformité avec les tests Playwright (`page.getByRole('button', { name: 'Se connecter avec SSO', exact: true })`, `page.getByLabel('Identifiant', { exact: true })`, `page.getByLabel('Mot de passe', { exact: true })`, `page.getByRole('button', { name: 'Se connecter', exact: true })`).
+- **Validation & Tests** :
+  - `cargo test --locked --workspace` : 100% réussi (toutes les suites : `media_contracts`, `media_node`, `media_poc`, tests d'intégration, scans, sécurité).
+  - `cargo clippy --all-targets -- -D warnings` : 0 warning.
+  - `cargo fmt --check` : 0 diff.
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web run lint` : 0 erreur.
+  - `npm --prefix apps/web test` : 48/48 tests réussis.
+  - `npm --prefix apps/web run build` : build statique réussi.
+
 
 - **Problème diagnostiqué** :
   - **Échec 1 (`browser_scanner`, sous-titres)** : timeout de 30s à la ligne 129 de `scripts/browser-scanner.cjs`. La position de lecture lors du test de la piste forcée intégrée (`internal-4`, cue 2 de 4.0s à 5.0s) était fixée à `v.currentTime = 4`. Sur les runners Linux sans accélération matérielle, la recherche (seek) dépose l'horloge sur la trame vidéo précédente (~3.958s). La vidéo étant en pause, le cue n'était jamais actif dans `activeCues`. Alignement appliqué sur `v.currentTime = 4.25` (standard utilisé dans `browser-p1.cjs`, `mse-checks.cjs`, `player-comparison-checks.cjs` et `remux-checks.cjs`), et vérification tolérante de la présence du texte dans l'ensemble des `activeCues`.

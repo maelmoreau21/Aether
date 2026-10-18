@@ -1,5 +1,60 @@
 # MEMORY.md — État et décisions Aether
 
+## 18 octobre 2026 — Finalisation P2, premier jalon CI/GHCR local
+
+- État initial personnellement vérifié : branche `develop`, aucun changement
+  local. Aucun commit, push, publication ou déploiement existant autorisé/exécuté.
+- Les deux runs fournis (`39106868858`, `39106868272`, SHA `1deb03f...`)
+  échouent avant tout job. API GitHub : zéro job et zéro check-run.
+  `actionlint 1.7.12` reproduit `publish.yml:70` invalide (heredoc shell hors
+  indentation YAML) et sa propagation à l'appel depuis `ci.yml:248`.
+- CI corrigée : job actionlint, Rust workspace/all-features/all-targets strict,
+  RustSec sans permissions d'écriture ni exception d'audit, SvelteKit et Chrome
+  maintenus, trois builds Docker linux/amd64 obligatoires avant publication.
+  Les cas Rust sont séquentiels pour éviter la concurrence CPU/disque entre
+  fixtures 1k/10k ; les tâches des tests de concurrence restent concurrentes.
+- Publication uniquement par `workflow_call` après tous les jobs CI.
+  Lancement manuel via CI complète, aucun paramètre permettant d'étiqueter un
+  autre SHA comme main/develop. Checkout du SHA testé, tags branche/latest
+  (latest main seulement) et SHA complet, labels OCI, téléchargement par digest
+  et vérification de l'association Packages au dépôt préparés dans le workflow.
+- Blocages locaux supplémentaires corrigés : anciens sélecteurs/compteurs
+  Chromium après refonte UI ; `rsa 0.9.10` refusé par RustSec, remplacé en passant
+  jsonwebtoken de RustCrypto à AWS-LC (déjà utilisé par TLS). Aucun contrôle
+  de signature/claim supprimé, aucune modification de l'interface produit.
+- Vérifié sur les images finales : trois builds réussis ; Node
+  **157 703 722 octets**, Core 181 143 960, standalone 842 377 478. Node avec
+  ffprobe, sans commande ffmpeg ni `libav*.so` ; matrice probe 8/8 réussie.
+- Web : check Svelte/TypeScript 0/0, lint, 35 tests et build réussis ; npm audit
+  sans vulnérabilité. Clippy strict et actionlint réussis ; 4/4 tests TLS réels.
+- Chromium Films avec scan/incrémental/lecture/seek/pause et redémarrage Core,
+  Séries avec navigation/droits/isolation sessions : succès. Banc Docker final :
+  **86 contrôles**, deux Nodes, direct/relais, HEAD/Range, rotation/révocation,
+  reconnexion/redémarrage, médias inchangés et logs sans secrets. Navigateur
+  standalone et distribué : succès. OIDC synthétique : succès dans les deux
+  modes après changement cryptographique ; aucun nouveau fournisseur réel validé.
+- Échecs intermédiaires conservés comme limites : timeout du scan 1000 sous
+  forte concurrence de tests/builds ; erreur Windows 1455 (mémoire virtuelle)
+  lors de la recompilation parallèle. Relance finale Rust avec `-j 1` et
+  `--test-threads=1`, sans élargir les timeouts ni désactiver un test.
+- Relance finale `cargo test --locked --workspace --all-features -j 1 --
+  --test-threads=1` : **129 réussis, zéro échec, 7 ignorés explicites**. Les
+  navigateurs et le test TLS ignorés dans cette suite sont exécutés séparément
+  pour les parcours concernés ci-dessus ; les autres tests ignorés ne sont pas
+  présentés comme passés. `cargo audit --no-fetch` confirme zéro vulnérabilité
+  avec la base RustSec mise à jour ce jour (297 dépendances).
+- Lectures anonymes des trois manifests GHCR `:develop` refusées (`403` lors
+  de la demande de token). Cela ne prouve ni absence ni visibilité privée.
+  CLI gh non authentifiée ; connecteur GitHub limité pour les réglages admin.
+  CI distante, publication réelle et réglages Packages restent non confirmés.
+- Documentation/reproduction : `docs/CI_GHCR.md`, preuves nouvelles sous
+  `docs/evidence/2026-10-18/p2-ci/`. Les preuves historiques sont conservées.
+  Tous les conteneurs/volumes/réseaux créés pour ce jalon ont été nettoyés.
+- **P2 non terminée.** Aucun PostgreSQL 18, OIDC générique étendu, Traefik/HTTP3,
+  migration SQL, multi-Core ou développement P3+ livré par ce jalon. Prochaine
+  étape : autorisation explicite de commit/push sur develop et publication CI
+  pour satisfaire le premier critère distant, puis poursuivre l'ordre demandé.
+
 ## 18 octobre 2026 — Amélioration des interfaces utilisateur et administrateur
 
 - **Branche `develop`**, Svelte 5 runes (`$state`, `$derived`, `$effect`), build statique SvelteKit (`@sveltejs/adapter-static`), zéro dépendance frontend superflue ajoutée, isolation stricte des sessions et RBAC (`administrator` et `user` uniquement).

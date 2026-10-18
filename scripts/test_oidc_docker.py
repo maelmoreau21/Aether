@@ -8,6 +8,7 @@ import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import json
+import os
 from pathlib import Path
 import secrets
 import subprocess
@@ -90,7 +91,7 @@ server=ThreadingHTTPServer(('0.0.0.0',48889),Provider)
 threading.Thread(target=server.serve_forever,daemon=True).start()
 (WORK/'proxy.py').write_text(PROXY)
 try:
-    for mode,image in [('standalone','aether:oidc-qa'),('distributed','aether-core:oidc-qa')]:
+    for mode,image in [('standalone',os.environ.get('MEDIA_TEST_STANDALONE_IMAGE','aether:oidc-qa')),('distributed',os.environ.get('MEDIA_TEST_CORE_IMAGE','aether-core:oidc-qa'))]:
         name=PREFIX+'-'+mode
         env={'MEDIA_PUBLIC_URL':'http://127.0.0.1:48887','MEDIA_PORT':'3000','MEDIA_BIND_ADDR':'0.0.0.0','MEDIA_DB_PATH':'/data/core.sqlite3','MEDIA_WEB_DIST':'/app/apps/web/build','MEDIA_OIDC_ENABLED':'true','MEDIA_OIDC_ISSUER':ISSUER,'MEDIA_OIDC_CLIENT_ID':'docker-client','MEDIA_OIDC_CLIENT_SECRET':SECRET,'MEDIA_OIDC_USER_GROUPS':'media-users','MEDIA_MODE':mode}
         envfile=WORK/(mode+'.env');envfile.write_text('\n'.join(k+'='+v for k,v in env.items()))

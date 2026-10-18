@@ -291,9 +291,9 @@ def main():
     original = {str(p.relative_to(media)): hashlib.sha256(p.read_bytes()).hexdigest() for p in media.rglob("*") if p.is_file()}
     FIXTURE_HASHES.update(original.values())
     docker("network", "create", NETWORK)
-    node_image = "aether-node:latest" if BASELINE else "aether-node:p2-qa"
-    core_image = "aether-core:latest" if BASELINE else "aether-core:p2-qa"
-    standalone_image = "aether:test" if BASELINE else "aether:p2-qa"
+    node_image = os.environ.get("MEDIA_TEST_NODE_IMAGE", "aether-node:latest" if BASELINE else "aether-node:p2-qa")
+    core_image = os.environ.get("MEDIA_TEST_CORE_IMAGE", "aether-core:latest" if BASELINE else "aether-core:p2-qa")
+    standalone_image = os.environ.get("MEDIA_TEST_STANDALONE_IMAGE", "aether:test" if BASELINE else "aether:p2-qa")
     REPORT["image_bytes"] = {image: int(docker("image", "inspect", image, "--format", "{{.Size}}")) for image in [node_image, core_image, standalone_image]}
     REPORT["image_ids"] = {image: docker("image", "inspect", image, "--format", "{{.Id}}") for image in [node_image, core_image, standalone_image]}
     REPORT["docker_server"] = docker("version", "--format", "{{.Server.Version}}")

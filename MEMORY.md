@@ -1,5 +1,21 @@
 # MEMORY.md — État et décisions Aether
 
+## 18 octobre 2026 — Optimisation majeure du workflow CI GitHub Actions (`.github/workflows/ci.yml`)
+
+- **Objectif** : Réduire drastiquement le temps d'exécution de la CI (~6 min 40 s initialement) sans compromettre les vérifications de sécurité, les contrats ni la rigueur des tests.
+- **Optimisations appliquées (`.github/workflows/ci.yml`)** :
+  1. **Cache des fixtures synthétiques (`actions/cache@v4`)** :
+     - Mise en cache du dossier `tests/fixtures/generated` (13 Mo) sous la clé `fixtures-p0-p1-${{ hashFiles(...) }}` dans les jobs `rust` et `browser`.
+     - Lorsque les scripts de génération n'ont pas changé (`cache-hit == 'true'`), l'installation d'apt-get ffmpeg et l'encodage lourd de 6 scripts FFmpeg (AV1 10-bit, Opus 5.1/stéréo, segments MSE, manifestes DASH, remux) sont ignorés. Gain estimé : ~1 min 30 s par job.
+  2. **Parallélisation sélective des tests unitaires (`cargo test`)** :
+     - Séparation de l'exécution des tests unitaires (`cargo test --lib --bins`) et des tests d'intégration (`cargo test --test '*' -- --test-threads=1`).
+     - Les tests unitaires (28 tests dans `media-poc`, 35 dans `media-node`, 10 dans `media-contracts`) bénéficient de la pleine parallélisation sur les CPU du runner (durée réduite de ~101s à ~4s pour `media-poc`).
+     - Les tests d'intégration lourds conservent `--test-threads=1` pour garantir l'absence d'interférence sur les bancs de 10k entrées et les verrous SQLite. Gain estimé : ~1 min 35 s.
+  3. **Audit de sécurité accéléré (`rustsec/audit-check@v1.4.1`)** :
+     - Remplacement de la compilation depuis les sources `cargo install cargo-audit --locked` (~90s) par l'action officielle `rustsec/audit-check` utilisant un binaire précompilé (~5s). Gain estimé : ~1 min 30 s.
+- **Validation** :
+  - Validation syntaxique et schéma GitHub Actions avec `actionlint` (code de sortie 0).
+
 ## 18 octobre 2026 — Résilience du canal de contrôle des Media Nodes outbound (`crates/core/src/nodes.rs`, `node_enrollment_and_relay.rs`)
 
 - **Problème diagnostiqué en CI GitHub Actions** :

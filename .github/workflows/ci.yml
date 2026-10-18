@@ -52,27 +52,41 @@ jobs:
       - name: Cache des dépendances Cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Installer FFmpeg (génération des fixtures synthétiques)
+      - name: Cache des fixtures synthétiques
+        id: cache-fixtures
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/generated
+          key: fixtures-p0-p1-${{ hashFiles('scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
+
+      - name: Installer FFmpeg (si fixtures non cachées)
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./scripts/generate-fixtures.ps1
 
       - name: Préparer le remux linguistique (pistes FR/EN)
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./scripts/prepare-language-remux.ps1
 
       - name: Générer les fixtures représentatives (10-bit / 5.1)
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
         run: python3 scripts/generate-representative-fixtures.py
 
       - name: Préparer les segments MSE
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
         run: python3 scripts/prepare-mse.py
 
       - name: Préparer les manifestes DASH
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
         run: python3 scripts/prepare-dash.py
 
       - name: Prepare P1 fixture sources
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
         run: python3 scripts/prepare-p1.py
 
       - name: Valider les métriques de comparaison des lecteurs
@@ -90,10 +104,13 @@ jobs:
       - name: Analyse statique stricte (cargo clippy)
         run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
 
-      - name: Exécuter les tests (cargo test)
+      - name: Exécuter les tests unitaires (cargo test --lib --bins)
+        run: cargo test --locked --workspace --all-features --lib --bins
+
+      - name: Exécuter les tests d'intégration (cargo test --test '*')
         # Les fixtures 1k/10k partagent CPU et disque du runner ; chaque test de
         # concurrence conserve ses propres tâches concurrentes et ses assertions.
-        run: cargo test --locked --workspace --all-features -- --test-threads=1
+        run: cargo test --locked --workspace --all-features --test '*' -- --test-threads=1
 
       - name: Contrats PostgreSQL 18 (HTTP, OIDC, deux Nodes)
         env:
@@ -113,13 +130,10 @@ jobs:
       - name: Récupérer le code source
         uses: actions/checkout@v4
 
-      - name: Installer la toolchain Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Installer cargo-audit
-        run: cargo install cargo-audit --locked
-      - name: Lancer l'audit de sécurité RustSec
-        run: cargo audit
+      - name: Audit de sécurité des dépendances RustSec
+        uses: rustsec/audit-check@v1.4.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================================================================
   # 3. Vérifications et tests Frontend (SvelteKit)
@@ -201,24 +215,34 @@ jobs:
           npm run build
           test -f build/index.html
 
-      - name: Purger les fixtures et preuves navigateur préexistantes
+      - name: Purger les preuves navigateur préexistantes
         run: |
-          rm -rf tests/fixtures/generated
           rm -rf docs/evidence/2026-10-16/scanner
           rm -rf docs/evidence/2026-10-17/series
 
+      - name: Cache des fixtures synthétiques
+        id: cache-fixtures
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/generated
+          key: fixtures-p0-p1-${{ hashFiles('scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
+
       - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./scripts/generate-fixtures.ps1
 
       - name: Préparer le remux linguistique (pistes FR/EN)
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./scripts/prepare-language-remux.ps1
 
       - name: Générer les fixtures représentatives (10-bit / 5.1)
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
         run: python3 scripts/generate-representative-fixtures.py
 
       - name: Préparer les sources P1 (clips MKV / MP4 FR/EN)
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
         run: python3 scripts/prepare-p1.py
 
       - name: Exécuter le parcours navigateur Films (scan, incrémental, lecture, seek, redémarrage Core)
@@ -304,4 +328,3 @@ jobs:
       contents: read
       packages: write
     uses: ./.github/workflows/publish.yml
-

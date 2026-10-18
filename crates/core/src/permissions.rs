@@ -79,6 +79,7 @@ pub async fn require_media(
                         .or_else(|| value.strip_suffix("/image"))
                         .or_else(|| value.split_once("/subtitles/").map(|(id, _)| id))
                         .or_else(|| value.split_once("/audio/").map(|(id, _)| id))
+                        .or_else(|| value.split_once("/prepared/").map(|(id, _)| id))
                 })
             })
             .unwrap_or("");

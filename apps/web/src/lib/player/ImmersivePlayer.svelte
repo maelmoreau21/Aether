@@ -21,6 +21,9 @@
   let notice = $state('');
   let audio = $state('');
   let preferredLanguage = 'fr';
+  let preferredAudio: { mediaId: string; trackId: string } | undefined;
+  let audioOffset = $state(0);
+  let subtitleOffset = $state(0);
   let subtitle = $state<string | null>(null);
   let subtitlePreference: SubtitlePreference | undefined;
   let menu = $state<Menu>(null);
@@ -67,10 +70,11 @@
     try {
       await engine.load(media);
       if (current !== generation) return;
-      const source = media.sources.find(source => source.language === preferredLanguage) ?? media.sources.find(source => source.language === 'fr') ?? media.sources[0];
+      const source = media.sources.find(source => preferredAudio?.mediaId === media.id && source.audioTrackId === preferredAudio.trackId) ?? media.sources.find(source => source.language === preferredLanguage) ?? media.sources.find(source => source.language === 'fr') ?? media.sources[0];
       if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
       if (source.language !== preferredLanguage) notice = 'Votre langue précédente est indisponible. Première source disponible sélectionnée.';
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
+      engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
       await engine.selectSubtitle(usableSubtitle); subtitle = usableSubtitle;
       if (!restore && media.workId && !media.synthetic) {
@@ -89,9 +93,14 @@
   }
   export function open(media: Media) {
     if (opened) return;
-    preferredLanguage = 'fr'; subtitlePreference = undefined;
+    preferredLanguage = 'fr'; subtitlePreference = undefined; preferredAudio = undefined; audioOffset = 0; subtitleOffset = 0;
     try {
       const scope = $session?.user.id ?? 'fixture';
+      const track = JSON.parse(localStorage.getItem(`media_audio_track_${scope}`) ?? 'null');
+      if (track && typeof track.mediaId === 'string' && typeof track.trackId === 'string') preferredAudio = track;
+      const offsets = JSON.parse(localStorage.getItem(`media_offsets_${scope}`) ?? 'null');
+      if (Number.isFinite(offsets?.audio) && Math.abs(offsets.audio) <= 30) audioOffset = offsets.audio;
+      if (Number.isFinite(offsets?.subtitle) && Math.abs(offsets.subtitle) <= 30) subtitleOffset = offsets.subtitle;
       preferredLanguage = localStorage.getItem(`media_audio_${scope}`) ?? localStorage.getItem('media_pref_audio') ?? 'fr';
       const saved = JSON.parse(localStorage.getItem(`media_subtitle_${scope}`) ?? 'null') as SubtitlePreference | null;
       if (saved && typeof saved.enabled === 'boolean' && (saved.language === undefined || typeof saved.language === 'string')) subtitlePreference = saved;
@@ -160,7 +169,8 @@
   function seek(value: number) { if (!busy) { engine?.seek(value); sync(); wake(); } }
   function selectAudio(id: string) {
     void action(async player => { await player.selectAudio(id); audio = id; preferredLanguage = active?.sources.find(source => source.audioTrackId === id)?.language ?? preferredLanguage;
-      try { localStorage.setItem(`media_audio_${$session?.user.id ?? 'fixture'}`, preferredLanguage); } catch { /* Optional preference. */ }
+      preferredAudio = { mediaId: active?.id ?? '', trackId: id };
+      try { localStorage.setItem(`media_audio_track_${$session?.user.id ?? 'fixture'}`, JSON.stringify(preferredAudio)); localStorage.setItem(`media_audio_${$session?.user.id ?? 'fixture'}`, preferredLanguage); } catch { /* Optional preference. */ }
     });
   }
   function selectSubtitle(id: string | null) { void action(async player => {
@@ -169,6 +179,13 @@
     subtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
     try { localStorage.setItem(`media_subtitle_${$session?.user.id ?? 'fixture'}`, JSON.stringify(subtitlePreference)); } catch { /* Optional preference. */ }
   }); }
+  function offset(kind: 'audio' | 'subtitle', value: number) {
+    if (!Number.isFinite(value) || Math.abs(value) > 30) return;
+    if (kind === 'audio') { audioOffset = value; engine?.setAudioOffset?.(value); }
+    else { subtitleOffset = value; engine?.setSubtitleOffset?.(value); }
+    try { localStorage.setItem(`media_offsets_${$session?.user.id ?? 'fixture'}`, JSON.stringify({ audio: audioOffset, subtitle: subtitleOffset })); } catch { /* Optional preference. */ }
+    wake();
+  }
   function selectSource(id: string) {
     if (!engine || busy || id === active?.id) return;
     const media = catalogue.find(media => media.id === id);
@@ -228,7 +245,7 @@
     {#if busy}<div class="loading" role="status"><span class="loader"></span>Préparation de votre séance…</div>{/if}
     {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, playback); }}>Réessayer explicitement</button></div>{/if}
     <p class="fullscreen-notice" role="status">{notice}</p>
-    {#if active}<PlayerControls bind:this={controls} bind:menu state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
+    {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
       onPlay={togglePlayback} onVolume={volume} onMute={mute} onSeek={seek} onAudio={selectAudio} onSubtitle={selectSubtitle} onSource={selectSource}
       onSpeed={speed => action(player => player.setSpeed(speed))} onFullscreen={toggleFullscreen} onWake={wake} />{/if}
   </div>

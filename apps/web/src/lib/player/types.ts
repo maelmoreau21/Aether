@@ -15,6 +15,8 @@ export interface Source {
   mime: string;
   tracks?: CodecTrack[];
   externalAudioUrl?: string;
+  prepare?: boolean;
+  label?: string;
   audioOffsetSeconds?: number;
 }
 export interface Subtitle { id: string; language: string; label: string; url: string; forced?: boolean; sdh?: boolean; sourceFormat?: string }
@@ -39,6 +41,8 @@ export interface Player {
   selectSubtitle(id: string | null): Promise<void>;
   setVolume(volume: number): void;
   setSpeed(speed: number): void;
+  setAudioOffset?(seconds: number): void;
+  setSubtitleOffset?(seconds: number): void;
   state(): PlaybackState;
   destroy(): void;
 }

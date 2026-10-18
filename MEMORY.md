@@ -1,4 +1,77 @@
 # MEMORY.md — État et décisions Aether
+## 18 octobre 2026 — Pistes internes préparées, offsets et récence persistante
+
+- Départ develop propre ; modifications locales uniquement. Aucun commit/push,
+  déploiement, changement Docker/Traefik/NAS ni média personnel utilisé/modifié.
+- Node : préparation facultative par FFmpeg 9.0.2 local (protocole fd), entrée par
+  handle confiné avec whitelist fd/pipe + MKV/MP4. AV1 copié vers fMP4 vidéo seul,
+  chaque Opus interne copié vers Ogg. SHA-256 des charges utiles de tous les
+  paquets comparés dans MKV/MP4 ; métadonnées de conteneur distinguées des paquets.
+- Core : source originale conservée, choix Opus internes par index réel, sous-titres
+  intégrés SubRip/WebVTT/mov_text/ASS/SSA extraits en WebVTT. Droits live avant
+  GET/HEAD/Range ; tests 200/206/416, 401, 403 après révocation, 422 piste invalide.
+  Pas de chemin navigateur ; refus si taille/mtime du média ne correspond plus au scan.
+- Commutation entre audios préparés : même élément et URL vidéo, position/pause,
+  volume/vitesse et plein écran conservés. Le premier passage depuis l'original
+  remplace sa source à position conservée. Courte pause possible ; pas de gapless.
+- ASS/SSA externe : repli texte borné, colonnes Events, temps/virgules/sauts de ligne,
+  markup échappé. Styles, placements, dessins, karaoké et animations non reproduits :
+  ne pas annoncer un rendu libass. Sous-titres forcés FR/manuels existants conservés.
+- Offsets audio et sous-titres -30..+30 s, positif = retarder. Audio préparé/externe
+  seulement ; silence avant départ d'une piste retardée. Choix précis par asset,
+  langue et offsets mémorisés par compte sur le navigateur, sans synchronisation
+  entre appareils. Réglages accessibles depuis les menus au clavier.
+- Migration 0016 additive SQLite et PostgreSQL : added_at de première insertion,
+  ancien catalogue NULL sans date inventée, stable au rescan/redémarrage. Tris
+  titre/année/date, inconnus en dernier ; accueil trié par ajout décroissant,
+  date disponible sur la fiche. Pas de nouvelle exécution PostgreSQL ce jalon.
+- Bornes : une préparation simultanée, aucune file non bornée ; 120 s, 64 entrées,
+  24 Gio/instance (16 Gio vidéo, 1 Gio audio, 4 Mio sous-titres). Cache déjà prêt
+  accessible pendant une autre préparation. Saturation = échec explicite, pas
+  d'éviction d'un film actif. FFmpeg facultatif/non ajouté aux images existantes.
+- Validation exécutée : cargo test --locked --workspace -j 1 -- --test-threads=1 :
+  127 réussis, 8 ignorés explicites ; cargo fmt --check et cargo clippy --locked
+  --workspace --all-targets -- -D warnings réussis. Contrat distribué existant
+  à deux Nodes, sessions, sauvegarde/restauration, scans et séries inclus.
+- Web : npm run check (0 erreur/avertissement), npm run lint, npm test (48/48),
+  npm run build réussis. git diff --check réussi.
+- Chrome 155.0.8059.40, Windows 10.0.26300 headless : cargo test --locked --test
+  browser_scanner -- --ignored --nocapture réussi (40,41 s), MP4 puis MKV après
+  vrai redémarrage Core. Signaux FR/EN ~662/~990 Hz distingués, quatre changements
+  chacun, ASS texte visible, sous-titre interne forcé et offset négatif rendus,
+  accès clavier au réglage, SRT/VTT, audio externe, pause/seek/reprise et vu/non vu.
+- Même test avec MEDIA_TEST_LONG=1 : réussi en 249,71 s. Copies synthétiques de
+  90 min (5400,009 s MP4 / 5400,008 s MKV), seeks 1/2700/5380 s, commutations
+  en pause et en lecture, 60 s observées par conteneur sans interruption ; écart
+  d'horloges 67,23..72,84 ms, sans dérive progressive sur cette minute. Requête
+  audio interrompue puis reprise explicite à position conservée. Ce n'est pas une
+  coupure réelle de streaming réseau ni une observation continue de 90 minutes.
+- Régression navigateur séries : MEDIA_REPORT_DIR=docs/evidence/2026-10-18/
+  player-series-regression puis cargo test --locked --test browser_series --
+  --ignored --nocapture : 1/1 réussi en 38,66 s. Suivant manuel/automatique opt-in,
+  inter-saisons, plein écran, lecture/seek/pause, droits révoqués/restaurés et
+  isolation des comptes/cookies conservés.
+- Originaux synthétiques comparés par SHA-256 après les tests. Aucun fichier
+  personnel connecté. JS heap échantillonné, pas de preuve RSS/fuite mémoire,
+  de sortie physique 5.1/10 bits, de Safari/Firefox ou de mobile physique.
+- Échecs intermédiaires du banc conservés sous player-long : ancien élément audio
+  observé avant fin de commutation, commandes masquées après inactivité, Tab fermant
+  le menu, statut vu activé légitimement après seek en fin. Attentes corrigées sans
+  retries masquant un échec. Comparaison de paquets limitée aux data_hash : les
+  side-data de conteneur peuvent différer lors du remux.
+- Arrêt brutal : les caches temporaires peuvent rester orphelins (31 répertoires,
+  1 703 262 315 octets issus des premiers essais). Nettoyage demandé par l'agent
+  refusé automatiquement avec « blocked by policy », aucune suppression effectuée.
+  Les tests navigateur finaux isolent TMPDIR/TEMP/TMP dans leur dossier jetable ;
+  ces 31 répertoires restent stables après les deux derniers parcours. La borne
+  de cache par instance n'est pas une garantie globale entre arrêts brutaux.
+- Limites restantes : moteur ASS complet, audios internes hors Opus, sous-titres
+  bitmap, packaging distant, purge durable des caches, endurance/RSS, miniatures
+  d'épisodes et raw. P3/P4 non déclarés finalisés. Prochain petit jalon : rendu ASS
+  complet puis préparation distante/caches avant élargissement ergonomique.
+- Contrat : docs/PLAYER_TRACK_PREPARATION.md. Preuves : docs/evidence/2026-10-18/
+  player-finalization/, player-long/ et player-verification.json.
+
 ## 18 octobre 2026 — Premier parcours P3 pistes externes et P4 séances/séries
 
 - Départ vérifié : `develop`, arbre propre. Priorité fonctionnalités ; aucun travail NAS,

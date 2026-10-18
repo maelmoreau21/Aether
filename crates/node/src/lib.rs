@@ -9,6 +9,7 @@ pub mod files;
 pub mod images;
 pub mod inventory;
 pub mod nfo;
+pub mod packaging;
 pub mod probe;
 pub mod scanner;
 pub mod server;

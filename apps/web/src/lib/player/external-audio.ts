@@ -42,6 +42,7 @@ export class ExternalAudio {
     if (Math.abs(this.audio.currentTime - target) > .15) this.audio.currentTime = target;
     if (!this.video.paused && !this.video.seeking && !this.waiting && this.audio.paused) void this.audio.play().catch(this.error);
   };
+  setOffset(seconds: number) { if (Number.isFinite(seconds) && Math.abs(seconds) <= 30) { this.offset = seconds; this.resync(); } }
   async load(url: string) {
     if (!this.audio.canPlayType('audio/ogg; codecs="opus"')) throw new Error('Ce navigateur ne déclare pas la lecture Ogg/Opus externe.');
     await new Promise<void>((resolve, reject) => {
@@ -62,6 +63,7 @@ export class ExternalAudio {
   }
   async play() {
     this.settings();
+    if (this.video.currentTime < this.offset) { this.audio.pause(); return; }
     const target = Math.max(0, this.video.currentTime - this.offset);
     if (Number.isFinite(this.audio.duration) && target >= this.audio.duration) throw new Error('La piste audio externe se termine avant cette position.');
     if (Math.abs(this.audio.currentTime - target) > .15) this.audio.currentTime = target;

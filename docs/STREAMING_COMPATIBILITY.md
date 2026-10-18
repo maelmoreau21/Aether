@@ -417,3 +417,29 @@ l'échantillon, de film long, de réseau instable ou de restitution physique 5.1
 ASS/SSA, sélection arbitraire de pistes internes et raw ne sont pas déclarés
 lisibles. Les anciens résultats MSE/Shaka ci-dessous restent des expériences
 séparées, pas des capacités automatiquement intégrées à ce moteur natif.
+
+
+## 18 octobre 2026 — pistes internes préparées (premier parcours local)
+
+Chrome 155.0.8059.40, Windows 10.0.26300, headless : sources synthétiques AV1
+10 bits + Opus FR 5.1 / EN 2.0, MP4 puis MKV après vrai redémarrage Core.
+Quatre changements FR/EN par conteneur ; signal décodé distingué par WebAudio
+(~662 Hz FR dans le mélange 5.1, ~990 Hz EN). Plein écran et URL vidéo conservés
+entre pistes préparées. ASS externe rendu comme texte sur deux lignes, SRT/VTT,
+pause/seek et progression vérifiés. Capture ASS inspectée visuellement.
+Preuves : `evidence/2026-10-18/player-finalization/`.
+
+FFmpeg local facultatif, vidéo copiée et Opus extrait en Ogg ; aucune preuve
+nouvelle de packaging distant, libass, sortie physique 5.1 ou autre navigateur.
+Contrat et limites : [préparation des pistes](PLAYER_TRACK_PREPARATION.md).
+Les essais longs sont consignés séparément dans `player-long/` ; ne pas confondre
+une minute observée sur un fichier de 90 minutes avec 90 minutes continues.
+
+Validation longue finale : `MEDIA_TEST_LONG=1` avec le test `browser_scanner`,
+1/1 réussi en 249,71 s. Fichiers synthétiques de 90 minutes, seeks 1/2700/5380 s,
+60 secondes observées par conteneur, écart d'horloges 67,23..72,84 ms. Requête audio
+interrompue et reprise explicite, offsets, sous-titres, progression et vu/non vu.
+Le test court final (40,41 s) vérifie aussi le rendu du sous-titre intégré forcé,
+l'offset négatif et l'accès clavier. Régression séries (38,66 s) réussie : suivant
+manuel/automatique opt-in et inter-saisons, permissions/isolation des comptes.
+Résumé machine : `evidence/2026-10-18/player-verification.json`.

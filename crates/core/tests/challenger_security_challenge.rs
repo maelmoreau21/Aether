@@ -167,12 +167,13 @@ async fn challenge_healthcheck_host_permutations_and_info_leak_audit() {
 
         assert_eq!(json["status"], "ok");
         assert_eq!(json["mode"], "standalone-local");
+        assert!(json["version"].is_string());
 
-        // Strict verification: only status and mode are present in JSON response
+        // Strict verification: only status, mode and version are present in JSON response
         let obj = json.as_object().unwrap();
         assert_eq!(
             obj.len(),
-            2,
+            3,
             "Unexpected extra fields in healthcheck payload: {:?}",
             obj
         );

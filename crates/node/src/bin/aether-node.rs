@@ -85,7 +85,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node_id = state.node_id();
     println!("aether-node ({node_id}) listening on http://{bind}");
 
-    // Periodic heartbeat push to Core when paired
+    let core_url = std::env::var("MEDIA_CORE_URL")
+        .or_else(|_| std::env::var("MEDIA_CORE_INTERNAL_URL"))
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    let enrollment_token = std::env::var("MEDIA_NODE_ENROLLMENT_TOKEN")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+
+    let is_paired = state
+        .identity
+        .read()
+        .map(|id| id.shared_secret.is_some() && !id.revoked)
+        .unwrap_or(false);
+
+    if !is_paired {
+        if let (Some(c_url), Some(token)) = (&core_url, &enrollment_token) {
+            println!("Attempting auto-enrollment with Core at {c_url}...");
+            match media_node::server::enroll_with_core(c_url, token, &state).await {
+                Ok(_) => {
+                    println!("Node successfully enrolled with Core! Durable identity saved.");
+                }
+                Err(err) => {
+                    eprintln!("Failed to enroll with Core: {err}");
+                }
+            }
+        }
+    } else if let Some(c_url) = &core_url {
+        let changed = {
+            let mut id = state.identity.write().unwrap_or_else(|e| e.into_inner());
+            if id.core_internal_url.as_deref() != Some(c_url.as_str()) {
+                id.core_internal_url = Some(c_url.clone());
+                true
+            } else {
+                false
+            }
+        };
+        if changed {
+            let _ = state.persist_identity().await;
+        }
+    }
+
+    // Outbound persistent bi-directional control channel
+    let channel_state = state.clone();
+    media_node::server::start_channel_worker(channel_state);
+
+    // Periodic heartbeat push to Core when paired (legacy/fallback)
     let hb_state = state.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15));

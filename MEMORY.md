@@ -1,5 +1,10 @@
 # MEMORY.md — État et décisions Aether
 
+## 18 octobre 2026 — Correction des échecs CI (Clippy Linux & téléchargement FFmpeg Docker)
+
+- **Correction Clippy (`collapsible_if`)** : dans [scanner_performance.rs](file:///c:/Users/Mael/Documents/GitHub/Aether/crates/core/tests/scanner_performance.rs), la section Linux (`/proc/self/statm`) utilisait deux blocs `if` imbriqués, signalés par Clippy sur l'environnement Linux de GitHub Actions. Remplacé par `parts.get(1).and_then(...)` sans imbrication.
+- **Résilience build Docker `probe-runtime`** : l'étape `RUN curl ... ffmpeg.org ... | tar` échouait avec `curl: (6) Could not resolve host: ffmpeg.org` lors des builds distants. [Dockerfile](file:///c:/Users/Mael/Documents/GitHub/Aether/Dockerfile) a été mis à jour avec retries (`--retry 3 --retry-delay 2 --retry-connrefused`), écriture dans un fichier temporaire avant décompression, et bascule de secours transparente sur le miroir officiel GitHub (`github.com/FFmpeg/FFmpeg/archive/refs/tags/n${FFMPEG_VERSION}.tar.gz`).
+
 ## 18 octobre 2026 — Finalisation P2, premier jalon CI/GHCR local
 
 - État initial personnellement vérifié : branche `develop`, aucun changement

@@ -35,8 +35,7 @@
   <div id="profile-menu" class="profile-popover" popover="auto" bind:this={panel} ontoggle={toggled} onfocusout={focusLeft}>
     <div class="profile-heading"><span class="avatar"><Icon name="profile" size={18} /></span><div><strong>{$session?.user.login}</strong><p>{$session?.user.role === 'administrator' ? 'Administrateur' : 'Utilisateur'}</p></div></div>
     <nav aria-label="Menu profil">
-      <button class="profile-entry" disabled aria-describedby="profile-planned"><Icon name="profile" size={17} /><span>Mon profil</span><small>Bientôt</small></button>
-      <span id="profile-planned" class="sr-only">Avatar, identité, mot de passe et préférences personnelles de langue, audio et sous-titres : bientôt.</span>
+      <a class="profile-entry" href={resolve('settings/')} onclick={() => panel.hidePopover()}><Icon name="profile" size={17} /><span>Mon profil</span><Icon name="chevron" size={13} /></a>
       <a class="profile-entry" href={resolve('settings/')} onclick={() => panel.hidePopover()}><Icon name="settings" size={17} /><span>Paramètres</span><Icon name="chevron" size={13} /></a>
       {#if $session?.user.role === 'administrator'}<a class="profile-entry" href={resolve('admin/libraries/')} onclick={() => panel.hidePopover()}><Icon name="settings" size={17} /><span>Administration</span><Icon name="chevron" size={13} /></a>{/if}
       <button class="profile-entry" disabled={busy} onclick={signOut}><span>{busy ? 'Déconnexion…' : 'Se déconnecter'}</span></button>
@@ -62,7 +61,6 @@
   .profile-entry { display:flex; align-items:center; gap:12px; width:100%; min-height:46px; padding:12px; border:0; border-radius:8px; background:transparent; color:var(--color-text); font-size:12px; text-align:left; }
   .profile-entry>span { flex:1; }
   .profile-entry:disabled { opacity:1; color:var(--color-muted); cursor:default; }
-  small { padding:3px 6px; border:1px solid var(--color-line); border-radius:4px; font-size:9px; color:var(--color-muted); }
   .profile-entry:hover:not(:disabled),.profile-entry:focus-visible { background:var(--color-accent-soft); color:var(--color-accent-hover); }
   .menu-notice { padding:4px 12px; line-height:1.7; }.error { color:var(--color-danger); }.profile-heading>div { min-width:0; overflow-wrap:anywhere; }.profile-caption { max-width:150px; overflow:hidden; text-overflow:ellipsis; }
   a.profile-entry:active { background:#34294b; }

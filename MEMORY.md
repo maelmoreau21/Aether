@@ -1,6 +1,33 @@
 # MEMORY.md — État et décisions Aether
 
-## 18 octobre 2026 — Prévalidation Authentik réel : configuration fournisseur bloquante
+## 18 octobre 2026 — Amélioration des interfaces utilisateur et administrateur
+
+- **Branche `develop`**, Svelte 5 runes (`$state`, `$derived`, `$effect`), build statique SvelteKit (`@sveltejs/adapter-static`), zéro dépendance frontend superflue ajoutée, isolation stricte des sessions et RBAC (`administrator` et `user` uniquement).
+- **Console d'administration unifiée (`/app/admin/libraries/`)** :
+  - **Tableau de bord Core & Nodes** : indicateurs de santé du Core (`/api/v1/health`, statut opérationnel, mode standalone ou distribué, base SQLite WAL intègre, protection CSRF active) et synthèse KPI (statut Core, ratio Nodes connectés/hors ligne, total bibliothèques Films/Séries, total fichiers découverts, analysés et erreurs).
+  - **Gestion des bibliothèques & Polyvalence** : association possible de plusieurs bibliothèques de types distincts (Films et Séries) au même Media Node grâce au filtrage dynamique des racines autorisées (`#library-node`, `#library-root`). Affichage du badge de type, état actif/inactif, racine exposée et utilisateurs autorisés. Alerte visuelle dédiée si le Media Node associé est hors ligne ("Média temporairement indisponible").
+  - **Progression des scans avec compteurs réels** : métriques précises synchronisées (`discovered`, `probed`, `reused`, `errorsCount`, `warningsCount`), animation et indicateur d'état (`queued`, `running`, `completed`, `error`), et accordéon détaillé des erreurs de scan (`errors`) préservant l'intégrité des chemins.
+  - **Gestion des Media Nodes** : inventaire complet des nœuds locaux et distants (`AdminNodeView`), statuts dynamiques (`connected`, `disconnected`, `revoked`), affichage des URLs interne et publique de streaming direct, clé active, racines autorisées, formulaires d'appairage sécurisé HMAC (`#pair-node-*`) et actions d'administration (`reconnect`, `rotate-secret`, `revoke`).
+  - **Comptes et matrice des autorisations RBAC** : tableau des comptes existants (`AuthUser`), distinction claire des comptes locaux (Argon2id) et SSO Authentik (`sso-<UUID>`), attribution explicite des droits bibliothèque par bibliothèque.
+  - **Section SSO Authentik (OIDC)** : panneau de supervision interrogeant `/api/v1/admin/oidc` (état activé/désactivé, issuer URL, Client ID, URI de redirection, groupes autorisés) et rappel des consignes de sécurité (absence de compte invité, maintien de l'administrateur local de secours).
+- **Interface Utilisateur (`/`, `/films`, `/series`, `/search`, `/settings`)** :
+  - **Page d'accueil & Rayons** : bannière d'accueil claire et ergonomique avec boutons d'accès rapide, sections "Films récemment ajoutés", "Séries récemment ajoutées", et emplacements préparés non-fictifs pour "Reprendre la lecture", "Continuer les séries en cours" et "Favoris" (accompagnés d'explications transparentes).
+  - **Recherche & Filtres de catalogue** : champ de recherche avec bouton d'effacement rapide, filtres par type (Tous les médias, Films uniquement, Séries uniquement) et tri alphabétique (Titre A-Z / Z-A), compteurs de résultats précis et pagination accessible.
+  - **Fiches Films et Séries enrichies** : affichage du titre original (si différent), note par étoiles (`rating`), classification d'âge / MPAA, date de première diffusion, badges de genres, citation d'accroche (`outline`), résumé complet (`plot`), étiquette de provenance des métadonnées (NFO local ou scan) et avertissements éventuels.
+  - **Inspecteur technique vidéo/audio réel** : carte technique affichant les flux réels analysés par ffprobe (codec vidéo AV1/HEVC/H.264, badge de résolution 4K Ultra HD/1080p Full HD/720p HD, profil couleur 10 bits, codecs audio Opus/AAC/AC3 avec disposition stéréo ou 5.1, conteneurs MKV/MP4 et pistes de sous-titres WebVTT).
+  - **Sélecteur de saisons et épisodes** : maintien strict du chargement différé (zéro requête `/api/v1/media/` à l'ouverture de la fiche), sélecteur de saisons avec décompte d'épisodes, et liste détaillée des épisodes avec numérotation, synopsis et bouton de lecture directe (`aria-label="Lire <Titre>"`).
+  - **Lecteur immersif clarifié (`PlayerControls.svelte`)** : boutons de saut temporel (-10s / +10s), calcul du temps restant glissant, sélection fluide des langues audio et des sous-titres, bascule plein écran et contrôles au clavier/tactiles.
+  - **Profil et paramètres du compte (`/settings/`)** : carte d'identité utilisateur (login, UUID, rôle, type de compte, sécurité de session), gestion de la liaison SSO (`OidcSettings`), et préférences de lecture personnalisées (langue audio et affichage des sous-titres mémorisés localement).
+- **Vérifications et conformité** :
+  - `npm run check` : 0 erreur, 0 avertissement.
+  - `npm run lint` : 0 erreur, 0 warning.
+  - `npm test` : 35/35 tests Vitest réussis (incluant nouveaux tests de labels et résolutions).
+  - `npm run build` : compilation statique SvelteKit sans erreur (`@sveltejs/adapter-static`).
+  - `cargo fmt --check` : 0 diff.
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --locked --workspace --all-features` : 100 % des tests Rust du workspace réussis.
+  - Zéro commit, zéro push, zéro publication sans autorisation explicite.
+
 
 - Fichier utilisateur dans Téléchargements lu sans afficher les valeurs Client ID
   ou Client Secret ; aucun secret copié dans le dépôt ou transmis au fournisseur.

@@ -1672,6 +1672,7 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
         "kind": kind,
         "title": row.get::<String,_>("title"),
         "year": row.get::<Option<i64>,_>("year"),
+        "addedAt": row.try_get::<Option<i64>,_>("added_at").ok().flatten(),
         "description": metadata["plot"].as_str().or_else(||metadata["outline"].as_str()).unwrap_or("Média local indexé"),
         "plot": metadata["plot"],
         "genres": metadata["genres"].as_array().cloned().unwrap_or_default(),
@@ -1960,10 +1961,25 @@ pub async fn catalogue(
         }
     }
 
-    if sort == "title-desc" {
-        data_builder.push("ORDER BY w.title_sort DESC, w.id DESC ");
-    } else {
-        data_builder.push("ORDER BY w.title_sort ASC, w.id ASC ");
+    match sort {
+        "title-desc" => {
+            data_builder.push("ORDER BY w.title_sort DESC, w.id DESC ");
+        }
+        "year-asc" => {
+            data_builder.push("ORDER BY w.year IS NULL, w.year ASC, w.title_sort, w.id ");
+        }
+        "year-desc" => {
+            data_builder.push("ORDER BY w.year IS NULL, w.year DESC, w.title_sort, w.id ");
+        }
+        "added-desc" => {
+            data_builder.push("ORDER BY w.added_at IS NULL, w.added_at DESC, w.title_sort, w.id ");
+        }
+        "added-asc" => {
+            data_builder.push("ORDER BY w.added_at IS NULL, w.added_at ASC, w.title_sort, w.id ");
+        }
+        _ => {
+            data_builder.push("ORDER BY w.title_sort ASC, w.id ASC ");
+        }
     }
 
     data_builder.push("LIMIT ");
@@ -2345,6 +2361,7 @@ pub async fn descriptor(
     let mut source_obj = json!({
         "id": asset_id,
         "audioTrackId": "internal-default",
+        "label": "original",
         "language": language,
         "url": relay_url,
         "relayUrl": relay_url,
@@ -2357,7 +2374,7 @@ pub async fn descriptor(
         source_obj["directUrl"] = json!(direct_url);
         source_obj["tokenExpiresAt"] = json!(expires_at);
     }
-    let subtitles = subtitle_descriptors(
+    let mut subtitles = subtitle_descriptors(
         asset_id,
         row.get::<Option<String>, _>("subtitles_json").as_deref(),
     )?;
@@ -2368,6 +2385,62 @@ pub async fn descriptor(
     )
     .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
     let mut sources = vec![source_obj.clone()];
+    // Optional preparation is restricted to known codecs; original source stays available.
+    if node_id == "local"
+        && probe.streams.iter().any(|t| {
+            t.codec_type.as_deref() == Some("video") && t.codec_name.as_deref() == Some("av1")
+        })
+    {
+        for track in probe.streams.iter().filter(|t| {
+            t.codec_type.as_deref() == Some("audio") && t.codec_name.as_deref() == Some("opus")
+        }) {
+            let language = track
+                .tags
+                .get("language")
+                .and_then(Value::as_str)
+                .unwrap_or("und");
+            let language = match language {
+                "fra" | "fre" => "fr",
+                "eng" => "en",
+                other => other,
+            };
+            sources.push(json!({
+                "id": format!("{asset_id}-internal-{}", track.index),
+                "audioTrackId": format!("internal-{}", track.index), "language": language,
+                "url": format!("/api/v1/assets/{asset_id}/prepared/video"),
+                "externalAudioUrl": format!("/api/v1/assets/{asset_id}/prepared/audio-{}", track.index),
+                "prepare": true, "label": "interne", "mime": "video/mp4", "tracks": [track]
+            }));
+        }
+        for track in probe.streams.iter().filter(|t| {
+            t.codec_type.as_deref() == Some("subtitle")
+                && matches!(
+                    t.codec_name.as_deref(),
+                    Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text")
+                )
+        }) {
+            let language = track
+                .tags
+                .get("language")
+                .and_then(Value::as_str)
+                .unwrap_or("und");
+            let language = match language {
+                "fra" | "fre" => "fr",
+                "eng" => "en",
+                other => other,
+            };
+            let forced = track
+                .details
+                .get("disposition")
+                .and_then(|d| d.get("forced"))
+                .and_then(Value::as_i64)
+                == Some(1);
+            subtitles.push(json!({ "id": format!("internal-{}", track.index), "language": language,
+                "label": format!("{}{} · intégrés (texte)", language.to_uppercase(), if forced { " forcés" } else { "" }),
+                "forced": forced, "sourceFormat": track.codec_name,
+                "url": format!("/api/v1/assets/{asset_id}/prepared/subtitle-{}", track.index) }));
+        }
+    }
     for (index, track) in audios.iter().enumerate() {
         let mut source = source_obj.clone();
         // External audio is authorized through Core; the existing video can remain direct.
@@ -2393,6 +2466,100 @@ pub async fn descriptor(
         "sources": sources,
         "subtitles": subtitles
     })))
+}
+
+/// Authorized, inventory-resolved local preparation; unsupported remote packaging is explicit.
+pub async fn prepared(
+    store: &IdentityStore,
+    preparations: &media_node::packaging::Preparations,
+    asset_id: &str,
+    component: &str,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use axum::{body::Body, http::StatusCode, response::Response};
+    use media_node::packaging::Component;
+    let row = query("SELECT a.relative_path,a.size,a.modified_ns,a.probe_json,l.root,l.node_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND n.status != 'revoked'")
+        .bind(asset_id).fetch_optional(&store.pool).await;
+    let row = match row {
+        Ok(Some(row)) => row,
+        Ok(None) => return crate::error(StatusCode::NOT_FOUND, "asset_unavailable"),
+        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+    };
+    if row.get::<String, _>("node_id") != "local" {
+        return crate::error(
+            StatusCode::NOT_IMPLEMENTED,
+            "remote_preparation_unavailable",
+        );
+    }
+    let probe = match decode(row.get("probe_json")) {
+        Ok(probe) => probe,
+        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
+    };
+    let selected = if component == "video"
+        && probe.streams.iter().any(|t| {
+            t.codec_type.as_deref() == Some("video") && t.codec_name.as_deref() == Some("av1")
+        }) {
+        Some(Component::Video)
+    } else if let Some(index) = component
+        .strip_prefix("audio-")
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        probe
+            .streams
+            .iter()
+            .find(|t| {
+                t.index == index
+                    && t.codec_type.as_deref() == Some("audio")
+                    && t.codec_name.as_deref() == Some("opus")
+            })
+            .map(|_| Component::Audio(index))
+    } else if let Some(index) = component
+        .strip_prefix("subtitle-")
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        probe
+            .streams
+            .iter()
+            .find(|t| {
+                t.index == index
+                    && t.codec_type.as_deref() == Some("subtitle")
+                    && matches!(
+                        t.codec_name.as_deref(),
+                        Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text")
+                    )
+            })
+            .map(|_| Component::Subtitle(index))
+    } else {
+        None
+    };
+    let Some(selected) = selected else {
+        return crate::error(StatusCode::UNPROCESSABLE_ENTITY, "unsupported_track");
+    };
+    let opened = preparations
+        .prepare(
+            std::path::Path::new(&row.get::<String, _>("root")),
+            std::path::Path::new(&row.get::<String, _>("relative_path")),
+            row.get::<i64, _>("size") as u64,
+            &row.get::<String, _>("modified_ns"),
+            selected,
+        )
+        .await;
+    let opened = match opened {
+        Ok(file) => file,
+        Err(_) => {
+            return crate::error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "preparation_failed_ffmpeg_required_or_cache_busy",
+            );
+        }
+    };
+    match media_node::serve_opened(opened, &request, selected.mime()).await {
+        Ok(response) => {
+            let (parts, body) = response.into_parts();
+            Response::from_parts(parts, Body::new(body))
+        }
+        Err(_) => crate::error(StatusCode::INTERNAL_SERVER_ERROR, "prepared_stream_failed"),
+    }
 }
 
 pub(crate) fn audio_operational_id(
@@ -2838,6 +3005,25 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(after_0008, after_0007);
+        sqlx::raw_sql(include_str!("../migrations/0016_catalogue_added_at.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let historical: Option<i64> =
+            query_scalar("SELECT added_at FROM inventory_works WHERE id='stable'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            historical, None,
+            "migration must not invent historical dates"
+        );
+        query("INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort) VALUES('new','lib','new','New',2026,'{}','new')").execute(&pool).await.unwrap();
+        let added: i64 = query_scalar("SELECT added_at FROM inventory_works WHERE id='new'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(added > 0);
     }
     #[tokio::test]
     async fn nfo_refresh_preserves_graph_technical_data_and_invalid_snapshot() {
@@ -2979,6 +3165,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(first["total"], 1);
+        assert!(first["items"][0]["addedAt"].as_i64().is_some_and(|n| n > 0));
         let work_id = first["items"][0]["id"].as_str().unwrap();
         let initial = detail(&store, work_id).await.unwrap().unwrap();
         ingest(&store, "lib", Path::new("/movies"), &report)

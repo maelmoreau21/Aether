@@ -25,8 +25,10 @@
     onSource,
     onSpeed,
     onFullscreen,
+    audioOffset = 0, subtitleOffset = 0, onAudioOffset, onSubtitleOffset,
     onWake
   }: {
+    audioOffset?: number; subtitleOffset?: number; onAudioOffset?: (value: number) => void; onSubtitleOffset?: (value: number) => void;
     state: PlaybackState;
     media: Media;
     catalogue: Media[];
@@ -53,7 +55,7 @@
   let hoverTime = $state<number | null>(null);
 
   const source = $derived(media.sources.find(source => source.audioTrackId === audio) ?? media.sources[0]);
-  const videoTracks = $derived(source?.tracks?.filter(track => track.codec_type === 'video') ?? []);
+  const videoTracks = $derived((source?.tracks?.some(track => track.codec_type === 'video') ? source.tracks : media.sources[0]?.tracks)?.filter(track => track.codec_type === 'video') ?? []);
   const remainingTime = $derived(Math.max(0, (playback.duration || 0) - (playback.position || 0)));
 
   const title = $derived(
@@ -86,7 +88,7 @@
     menu = value;
     onWake();
     await tick();
-    const items = panel ? Array.from(panel.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]:not(:disabled)')) : [];
+    const items = panel ? Array.from(panel.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]:not(:disabled), [role="menuitem"]:not(:disabled)')) : [];
     const target = panel?.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="true"]:not(:disabled)') ?? items[0];
     if (target) {
       for (const item of items) item.tabIndex = -1;
@@ -106,7 +108,8 @@
       closeMenu();
       return;
     }
-    const items = Array.from(panel!.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]:not(:disabled)'));
+    if (event.target instanceof HTMLInputElement) return;
+    const items = Array.from(panel!.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]:not(:disabled), [role="menuitem"]:not(:disabled)'));
     if (items.length === 0) return;
     const index = items.indexOf(document.activeElement as HTMLButtonElement);
     if (['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
@@ -164,6 +167,11 @@
             </button>
           {/each}
         </div>
+        <button role="menuitem" tabindex="-1" disabled={busy || !source?.externalAudioUrl} onclick={() => panel?.querySelector<HTMLInputElement>('input')?.focus()}>Régler le décalage audio</button>
+        <label class="offset-control">Décalage audio (s)
+          <input aria-label="Décalage audio en secondes" type="number" min="-30" max="30" step="0.05" value={audioOffset} disabled={busy || !source?.externalAudioUrl} onchange={(e) => onAudioOffset?.(e.currentTarget.valueAsNumber)} />
+        </label>
+        <p class="menu-note">Positif : retarder. Appliqué aux pistes préparées et externes.</p>
       {:else if menu === 'subtitles'}
         <div role="group" aria-label="Pistes de sous-titres">
           <button
@@ -195,6 +203,11 @@
             </button>
           {/each}
         </div>
+        <button role="menuitem" tabindex="-1" disabled={busy} onclick={() => panel?.querySelector<HTMLInputElement>('input')?.focus()}>Régler le décalage des sous-titres</button>
+        <label class="offset-control">Décalage sous-titres (s)
+          <input aria-label="Décalage sous-titres en secondes" type="number" min="-30" max="30" step="0.05" value={subtitleOffset} disabled={busy} onchange={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} />
+        </label>
+        <p class="menu-note">Positif : retarder. ASS/SSA : texte, styles avancés non reproduits.</p>
       {:else if menu === 'video'}
         <div role="group" aria-label="Piste vidéo de la source active">
           <p class="menu-section" role="presentation">Piste vidéo active</p>
@@ -210,7 +223,7 @@
             </div>
           {/each}
           <p class="menu-note" role="note">
-            Conteneur : {containerLabel(source?.mime)} · Décodage matériel direct dans le navigateur.
+            Conteneur : {containerLabel(source?.mime)} · Décodage assuré par le navigateur.
           </p>
         </div>
         <div role="separator" class="menu-separator"></div>
@@ -400,6 +413,8 @@
 </div>
 
 <style>
+  .offset-control { display: flex; align-items: center; gap: 1rem; padding: .75rem; }
+  .offset-control input { width: 6rem; color: inherit; background: #202020; border: 1px solid #666; border-radius: .25rem; padding: .4rem; }
   .player-controls {
     position: absolute;
     z-index: 4;

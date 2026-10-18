@@ -1,0 +1,140 @@
+{
+  "browser": "155.0.8059.40",
+  "os": "10.0.26300",
+  "headless": true,
+  "restart": false,
+  "results": {
+    "scan": true,
+    "incremental": true,
+    "internalSwitches": [
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.58583068847656,
+        "url": "http://127.0.0.1:14287/api/v1/assets/f755b75a-5467-4265-b495-f08bb0c5760e/prepared/video",
+        "time": 0.679698,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.03939056396484,
+        "url": "http://127.0.0.1:14287/api/v1/assets/f755b75a-5467-4265-b495-f08bb0c5760e/prepared/video",
+        "time": 1.036184,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.57926940917969,
+        "url": "http://127.0.0.1:14287/api/v1/assets/f755b75a-5467-4265-b495-f08bb0c5760e/prepared/video",
+        "time": 1.387605,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.04946899414062,
+        "url": "http://127.0.0.1:14287/api/v1/assets/f755b75a-5467-4265-b495-f08bb0c5760e/prepared/video",
+        "time": 1.733804,
+        "fullscreen": true
+      }
+    ],
+    "long": {
+      "duration": 5400.009,
+      "seeks": [
+        {
+          "target": 1,
+          "passed": true
+        },
+        {
+          "target": 2700,
+          "passed": true
+        },
+        {
+          "target": 5380,
+          "passed": true
+        }
+      ],
+      "playbackSamples": [
+        {
+          "time": 2705.012124,
+          "drift": 0.05373599999984435,
+          "paused": false
+        },
+        {
+          "time": 2710.020589,
+          "drift": 0.05372699999998076,
+          "paused": false
+        },
+        {
+          "time": 2715.027288,
+          "drift": 0.05370100000027378,
+          "paused": false
+        },
+        {
+          "time": 2720.040623,
+          "drift": 0.053857999999763706,
+          "paused": false
+        },
+        {
+          "time": 2725.045268,
+          "drift": 0.05374200000005658,
+          "paused": false
+        },
+        {
+          "time": 2730.060196,
+          "drift": 0.05385900000010224,
+          "paused": false
+        },
+        {
+          "time": 2735.067736,
+          "drift": 0.053598999999849184,
+          "paused": false
+        },
+        {
+          "time": 2740.078118,
+          "drift": 0.05375000000003638,
+          "paused": false
+        },
+        {
+          "time": 2745.083452,
+          "drift": 0.05375800000001618,
+          "paused": false
+        },
+        {
+          "time": 2750.090054,
+          "drift": 0.05378199999995559,
+          "paused": false
+        },
+        {
+          "time": 2755.099719,
+          "drift": 0.05375800000001618,
+          "paused": false
+        },
+        {
+          "time": 2760.107274,
+          "drift": 0.053659000000152446,
+          "paused": false
+        }
+      ],
+      "jsHeap": {
+        "before": 9563724,
+        "after": 6050696
+      }
+    },
+    "assTextFallback": true
+  },
+  "failure": "locator.fill: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByLabel('Décalage sous-titres en secondes', { exact: true })\u001b[22m\n\n    at C:\\Users\\Mael\\Documents\\GitHub\\Aether\\scripts\\browser-scanner.cjs:110:76",
+  "diagnostic": {
+    "notice": "",
+    "video": {
+      "time": 32.239254,
+      "paused": false
+    },
+    "audio": {
+      "time": 32.1589,
+      "paused": false
+    }
+  }
+}

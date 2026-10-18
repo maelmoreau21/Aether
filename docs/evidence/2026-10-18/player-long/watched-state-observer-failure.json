@@ -1,0 +1,152 @@
+{
+  "browser": "155.0.8059.40",
+  "os": "10.0.26300",
+  "headless": true,
+  "restart": false,
+  "results": {
+    "scan": true,
+    "incremental": true,
+    "internalSwitches": [
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.5875015258789,
+        "url": "http://127.0.0.1:2300/api/v1/assets/1252ad9b-3b68-4a41-b3e9-519e88d6cf4c/prepared/video",
+        "time": 0.684811,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.0368423461914,
+        "url": "http://127.0.0.1:2300/api/v1/assets/1252ad9b-3b68-4a41-b3e9-519e88d6cf4c/prepared/video",
+        "time": 1.082597,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.58293151855469,
+        "url": "http://127.0.0.1:2300/api/v1/assets/1252ad9b-3b68-4a41-b3e9-519e88d6cf4c/prepared/video",
+        "time": 1.446696,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.04421997070312,
+        "url": "http://127.0.0.1:2300/api/v1/assets/1252ad9b-3b68-4a41-b3e9-519e88d6cf4c/prepared/video",
+        "time": 1.779365,
+        "fullscreen": true
+      }
+    ],
+    "long": {
+      "duration": 5400.009,
+      "seeks": [
+        {
+          "target": 1,
+          "passed": true
+        },
+        {
+          "target": 2700,
+          "passed": true
+        },
+        {
+          "target": 5380,
+          "passed": true
+        }
+      ],
+      "playbackSamples": [
+        {
+          "time": 2705.017283,
+          "drift": 0.06286100000033912,
+          "paused": false
+        },
+        {
+          "time": 2710.027618,
+          "drift": 0.06289700000024823,
+          "paused": false
+        },
+        {
+          "time": 2715.03322,
+          "drift": 0.06299199999966731,
+          "paused": false
+        },
+        {
+          "time": 2720.040958,
+          "drift": 0.06300800000008167,
+          "paused": false
+        },
+        {
+          "time": 2725.059582,
+          "drift": 0.0629399999997986,
+          "paused": false
+        },
+        {
+          "time": 2730.073147,
+          "drift": 0.06271700000024794,
+          "paused": false
+        },
+        {
+          "time": 2735.080267,
+          "drift": 0.06309199999986959,
+          "paused": false
+        },
+        {
+          "time": 2740.087311,
+          "drift": 0.062818000000334,
+          "paused": false
+        },
+        {
+          "time": 2745.094437,
+          "drift": 0.06273300000020754,
+          "paused": false
+        },
+        {
+          "time": 2750.098787,
+          "drift": 0.06260799999972733,
+          "paused": false
+        },
+        {
+          "time": 2755.108755,
+          "drift": 0.06271600000036415,
+          "paused": false
+        },
+        {
+          "time": 2760.11762,
+          "drift": 0.06279600000016217,
+          "paused": false
+        }
+      ],
+      "jsHeap": {
+        "before": 10015404,
+        "after": 6194604
+      },
+      "interruptedAudioRequestRecovered": true
+    },
+    "assTextFallback": true,
+    "signedOffsets": true,
+    "externalTracks": {
+      "container": "MP4",
+      "srtRendered": true,
+      "webvttRendered": true,
+      "externalOpusPcm": 0.48198217153549194,
+      "audioVideoSync": true,
+      "pausedSeek": true,
+      "subtitlesOff": true
+    }
+  },
+  "captionLayout": {
+    "line": 70,
+    "snapToLines": false
+  },
+  "failure": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Marquer comme vu', exact: true })\u001b[22m\n\n    at C:\\Users\\Mael\\Documents\\GitHub\\Aether\\scripts\\browser-scanner.cjs:164:73",
+  "diagnostic": {
+    "notice": "",
+    "video": {
+      "time": 0,
+      "paused": true
+    },
+    "audio": {}
+  }
+}

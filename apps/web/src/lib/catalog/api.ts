@@ -8,6 +8,7 @@ export interface Work {
   id: string; kind: 'film' | 'series' | 'episode'; title: string; year: number | null;
   description: string; libraryId: string; synthetic: boolean; number?: number;
   posterUrl?: string | null;
+  addedAt?: number | null;
   nodeId?: string;
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';
   available?: boolean;

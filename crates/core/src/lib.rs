@@ -110,6 +110,10 @@ pub async fn secure_app_with_jobs(
     let replay_window = Arc::new(media_contracts::protocol::ReplayWindow::new());
     let media = media_routes(inventory)
         .route(
+            "/api/v1/assets/{id}/prepared/{component}",
+            get(indexed_prepared).head(indexed_prepared),
+        )
+        .route(
             "/api/v1/assets/{id}/audio/{index}",
             get(indexed_audio).head(indexed_audio),
         )
@@ -122,6 +126,9 @@ pub async fn secure_app_with_jobs(
             "/api/v1/assets/{id}/image",
             get(indexed_image).head(indexed_image),
         )
+        .layer(axum::Extension(Arc::new(
+            media_node::packaging::Preparations::default(),
+        )))
         .layer(axum::Extension(auth.store.clone()))
         .route_layer(middleware::from_fn_with_state(
             permissions::MediaAccess {
@@ -151,6 +158,15 @@ async fn indexed_subtitle(
     request: Request,
 ) -> Response {
     inventory::subtitle(&store, &id, index, request).await
+}
+
+async fn indexed_prepared(
+    axum::Extension(preparations): axum::Extension<Arc<media_node::packaging::Preparations>>,
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path((id, component)): axum::extract::Path<(String, String)>,
+    request: Request,
+) -> Response {
+    inventory::prepared(&store, &preparations, &id, &component, request).await
 }
 
 async fn indexed_audio(

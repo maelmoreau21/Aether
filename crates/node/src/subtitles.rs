@@ -91,6 +91,9 @@ fn stamp(ms: u64) -> String {
 
 /// Normalize text cues. Markup is escaped, never interpreted as HTML/ASS commands.
 pub fn to_webvtt(text: &str, format: &str) -> Result<String, &'static str> {
+    if matches!(format, "ass" | "ssa") {
+        return ass_to_webvtt(text);
+    }
     if !matches!(format, "srt" | "vtt") {
         return Err(
             "ASS/SSA styling and positioning require a dedicated renderer; sidecar not playable",
@@ -160,6 +163,91 @@ pub fn to_webvtt(text: &str, format: &str) -> Result<String, &'static str> {
         return Err("subtitle contains no timed cues");
     }
     Ok(output)
+}
+
+/// Text fallback only: ASS animation, drawings, fonts and positioning are not reproduced.
+/// Respect the declared Events columns and preserve commas inside the final Text field.
+fn ass_to_webvtt(text: &str) -> Result<String, &'static str> {
+    if text.contains('\0') {
+        return Err("subtitle contains NUL");
+    }
+    let mut events = false;
+    let mut columns: Vec<String> = Vec::new();
+    let mut srt = String::new();
+    let mut count = 0;
+    for line in text.trim_start_matches('\u{feff}').lines().map(str::trim) {
+        if line.starts_with('[') {
+            events = line.eq_ignore_ascii_case("[Events]");
+            continue;
+        }
+        if !events {
+            continue;
+        }
+        if let Some(format) = line.strip_prefix("Format:") {
+            columns = format
+                .split(',')
+                .map(|s| s.trim().to_ascii_lowercase())
+                .collect();
+            if columns.last().map(String::as_str) != Some("text") || columns.len() > 32 {
+                return Err("ASS Text must be the last event field");
+            }
+        }
+        let Some(dialogue) = line.strip_prefix("Dialogue:") else {
+            continue;
+        };
+        let start = columns
+            .iter()
+            .position(|s| s == "start")
+            .ok_or("ASS Start field missing")?;
+        let end = columns
+            .iter()
+            .position(|s| s == "end")
+            .ok_or("ASS End field missing")?;
+        let fields: Vec<_> = dialogue.trim().splitn(columns.len(), ',').collect();
+        if fields.len() != columns.len() {
+            return Err("invalid ASS event");
+        }
+        let time = |s: &str| -> Result<u64, &'static str> {
+            let s = s.trim();
+            let (head, fraction) = s.rsplit_once('.').ok_or("invalid ASS timestamp")?;
+            if fraction.len() != 2 || !fraction.bytes().all(|b| b.is_ascii_digit()) {
+                return Err("invalid ASS centiseconds");
+            }
+            timestamp(&format!("{head}.{fraction}0"))
+        };
+        let a = time(fields[start])?;
+        let b = time(fields[end])?;
+        let mut payload = String::new();
+        let mut override_tag = false;
+        for c in fields.last().ok_or("ASS Text missing")?.chars() {
+            match c {
+                '{' if !override_tag => override_tag = true,
+                '}' if override_tag => override_tag = false,
+                _ if !override_tag => payload.push(c),
+                _ => {}
+            }
+        }
+        if override_tag {
+            return Err("unclosed ASS override");
+        }
+        let payload = payload
+            .replace("\\N", "\n")
+            .replace("\\n", "\n")
+            .replace("\\h", "\u{a0}");
+        if payload.trim().is_empty() {
+            continue;
+        }
+        count += 1;
+        srt.push_str(&format!(
+            "{count}\n{} --> {}\n{payload}\n\n",
+            stamp(a),
+            stamp(b)
+        ));
+        if srt.len() > MAX_TOTAL_BYTES || count > 20000 {
+            return Err("ASS exceeds subtitle limits");
+        }
+    }
+    to_webvtt(&srt, "srt")
 }
 
 pub async fn discover(root: &Path, video: &Path) -> (Vec<ExternalSubtitle>, Vec<ScanIssue>) {
@@ -276,7 +364,14 @@ pub async fn discover_with_folder(
                     language.to_uppercase(),
                     if forced { " forcés" } else { "" },
                     if sdh { " SDH" } else { "" },
-                    extension.to_uppercase()
+                    if matches!(extension.as_str(), "ass" | "ssa") {
+                        format!(
+                            "{} (texte, styles non reproduits)",
+                            extension.to_uppercase()
+                        )
+                    } else {
+                        extension.to_uppercase()
+                    }
                 ),
                 language,
                 forced,
@@ -303,6 +398,22 @@ pub async fn discover_with_folder(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ass_and_ssa_text_fallback_preserves_times_commas_and_escapes() {
+        for format in ["ass", "ssa"] {
+            let vtt = to_webvtt("[Script Info]\nTitle: Test\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.25,0:00:03.50,Default,,0,0,0,,{\\i1}Bonjour, monde{\\i0}\\N<script> & suite", format).unwrap();
+            assert!(vtt.contains("00:00:01.250 --> 00:00:03.500"));
+            assert!(vtt.contains("Bonjour, monde\n&lt;script&gt; &amp; suite"));
+            assert!(!vtt.contains("\\i1"));
+        }
+        assert!(
+            to_webvtt(
+                "[Events]\nFormat: Start, End, Text\nDialogue: 0:00:03.00,0:00:01.00,wrong",
+                "ass"
+            )
+            .is_err()
+        );
+    }
     #[test]
     fn conversion_validates_times_and_escapes_markup() {
         assert_eq!(

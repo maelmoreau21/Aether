@@ -7,6 +7,10 @@ export class NativePlayer implements Player {
   private source?: Source;
   private externalAudio?: ExternalAudio;
   private subtitle: string | null = null;
+  private audioOffset = 0;
+  private subtitleOffset = 0;
+  private cueTimes = new WeakMap<TextTrackCue, [number, number]>();
+  private preparation?: AbortController;
   private busy = false;
   private destroyed = false;
   private cancel?: () => void;
@@ -42,9 +46,36 @@ export class NativePlayer implements Player {
     if (!source) throw new Error('Aucune source disponible pour ce média.');
     await this.replace(source, 0, true);
   }
+  private async prepareUrl(url: string) {
+    const controller = new AbortController(); this.preparation = controller;
+    const timeout = setTimeout(() => controller.abort(), 125000);
+    try {
+      const response = await fetch(url, { method: 'HEAD', signal: controller.signal });
+      if (!response.ok) throw new Error('Préparation impossible : FFmpeg requis sur le Node, format incompatible ou cache occupé/plein. Réessayez explicitement.');
+    } finally { clearTimeout(timeout); if (this.preparation === controller) this.preparation = undefined; }
+    if (this.destroyed) throw new Error('Lecteur fermé.');
+  }
   private async replace(source: Source, position: number, paused: boolean) {
     if (this.busy || this.destroyed) throw new Error('Lecteur indisponible pendant le changement de source.');
     this.busy = true;
+    const previous = this.source;
+    this.video.pause();
+    try {
+      if (source.prepare) {
+        if (previous?.url !== source.url) await this.prepareUrl(source.url);
+        if (source.externalAudioUrl) await this.prepareUrl(source.externalAudioUrl);
+      }
+      // Independent Opus track switch: keep the same video element, URL and timeline.
+      if (previous?.url === source.url && source.externalAudioUrl) {
+        this.externalAudio?.destroy(); this.externalAudio = undefined;
+        this.externalAudio = new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.onError);
+        await this.externalAudio.load(source.externalAudioUrl);
+        this.source = source;
+        if (!paused) await this.play();
+        return;
+      }
+    } catch (error) { this.busy = false; throw error; }
+    finally { if (this.source === source) this.busy = false; }
     this.source = undefined;
     const { volume, speed } = this.state();
     this.video.pause();
@@ -114,7 +145,7 @@ export class NativePlayer implements Player {
       }
       this.source = source;
       if (source.externalAudioUrl) {
-        this.externalAudio = new ExternalAudio(this.video, source.audioOffsetSeconds ?? 0, this.onError);
+        this.externalAudio = new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.onError);
         await this.externalAudio.load(source.externalAudioUrl);
       }
       await this.selectSubtitle(this.subtitle);
@@ -144,10 +175,14 @@ export class NativePlayer implements Player {
     track.addEventListener('load', () => {
       // Keep text above the custom controls instead of under their gradient.
       for (const cue of Array.from(track.track.cues ?? [])) {
+        this.cueTimes.set(cue, [cue.startTime, cue.endTime]);
+        this.shiftCue(cue);
         if (typeof VTTCue !== 'undefined' && cue instanceof VTTCue) { cue.snapToLines = false; cue.line = 70; }
       }
     }, { once: true });
     track.addEventListener('error', () => this.onError('Échec du chargement des sous-titres WebVTT.'), { once: true });
+    if (subtitle.url.includes('/prepared/')) await this.prepareUrl(subtitle.url);
+    if (this.destroyed || this.subtitle !== id) return;
     track.src = subtitle.url;
     this.video.append(track);
     track.track.mode = 'showing';
@@ -168,9 +203,26 @@ export class NativePlayer implements Player {
   pause() { this.video.pause(); }
   seek(position: number) { if (Number.isFinite(position)) this.video.currentTime = Math.max(0, Math.min(position, this.video.duration || 0)); }
   setVolume(volume: number) { this.video.volume = Math.max(0, Math.min(1, volume)); }
+  setAudioOffset(seconds: number) {
+    if (!Number.isFinite(seconds) || Math.abs(seconds) > 30) return;
+    this.audioOffset = seconds;
+    this.externalAudio?.setOffset(seconds + (this.source?.audioOffsetSeconds ?? 0));
+  }
+  private shiftCue(cue: TextTrackCue) {
+    const times = this.cueTimes.get(cue);
+    if (!times) return;
+    cue.startTime = Math.max(0, times[0] + this.subtitleOffset);
+    cue.endTime = Math.max(cue.startTime + .001, times[1] + this.subtitleOffset);
+  }
+  setSubtitleOffset(seconds: number) {
+    if (!Number.isFinite(seconds) || Math.abs(seconds) > 30) return;
+    this.subtitleOffset = seconds;
+    for (const track of Array.from(this.video.textTracks)) for (const cue of Array.from(track.cues ?? [])) this.shiftCue(cue);
+  }
   setSpeed(speed: number) { if ([0.5, 1, 1.5, 2].includes(speed)) this.video.playbackRate = speed; }
   destroy() {
     this.destroyed = true;
+    this.preparation?.abort();
     this.cancel?.();
     this.clearStall();
     this.externalAudio?.destroy(); this.externalAudio = undefined;

@@ -1,5 +1,12 @@
 # Pistes externes et séances utilisateur — 18 octobre 2026
 
+## Extension lecteur et catalogue
+
+Le nouveau parcours local ajoute les pistes Opus internes préparées, les sous-titres
+intégrés textuels, le repli texte ASS/SSA, les offsets signés et la date d'ajout
+persistante. Les limites historiques ci-dessous sont remplacées uniquement pour
+ces parcours : [contrat et limites actuels](PLAYER_TRACK_PREPARATION.md).
+
 ## Parcours implémenté
 
 Le Node associe les fichiers du même dossier par **stem vidéo exact et unique**.

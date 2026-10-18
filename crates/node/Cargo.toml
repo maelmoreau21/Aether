@@ -23,6 +23,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal
 url = "2.5"
 tokio-native-tls = "0.3.1"
 uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
 
 [[bin]]
 name = "aether-node"
@@ -32,5 +33,4 @@ path = "src/bin/aether-node.rs"
 rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"] }
 
 [dev-dependencies]
-tempfile = "3"
 tower = { version = "0.5", features = ["util"] }

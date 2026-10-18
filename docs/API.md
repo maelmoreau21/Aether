@@ -260,3 +260,20 @@ Voir [le contrat détaillé et les commandes](P2_DOCKER_VALIDATION.md).
   ressource interdite `403`. L'utilisateur est issu de la session, jamais du JSON.
 
 Contrat et limites : [P3/P4](P3_P4_FEATURES.md).
+
+
+## Préparation locale des pistes — 18 octobre 2026
+
+`GET|HEAD /api/v1/assets/{id}/prepared/{component}` : session et droits bibliothèque
+actuels obligatoires, y compris Range. `component` = `video` (AV1 vers fMP4 sans
+audio), `audio-{index}` (Opus vers Ogg) ou `subtitle-{index}` (texte vers WebVTT).
+Indices validés dans le probe inventorié, jamais un chemin. 200/206/416 selon
+Range, 401 anonyme, 403 sans droits, 422 piste absente/incompatible, 503 en cas
+FFmpeg absent, préparation occupée/expirée ou saturation du cache. Remote : 501.
+Une HEAD peut préparer le cache et prend jusqu'à 120 s ; le frontend attend
+125 s et permet de fermer le lecteur pour annuler son attente. Le descripteur
+expose `prepare: true` pour les sources concernées. Dépendance facultative,
+bornes et limites : [préparation](PLAYER_TRACK_PREPARATION.md).
+
+Catalogue : `sort=year-asc|year-desc|added-asc|added-desc` en plus des tris titre.
+`addedAt` est un timestamp Unix ou NULL si la date historique est inconnue.

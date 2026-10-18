@@ -1,0 +1,154 @@
+{
+  "browser": "155.0.8059.40",
+  "os": "10.0.26300",
+  "headless": true,
+  "restart": true,
+  "results": {
+    "internalSwitches": [
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.57381439208984,
+        "url": "http://127.0.0.1:63486/api/v1/assets/caaf4f54-3cf1-4cb3-bce8-ebdabb2afeb4/prepared/video",
+        "time": 0.814977,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.03759002685547,
+        "url": "http://127.0.0.1:63486/api/v1/assets/caaf4f54-3cf1-4cb3-bce8-ebdabb2afeb4/prepared/video",
+        "time": 1.210291,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.57337951660156,
+        "url": "http://127.0.0.1:63486/api/v1/assets/caaf4f54-3cf1-4cb3-bce8-ebdabb2afeb4/prepared/video",
+        "time": 1.611046,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.02665710449219,
+        "url": "http://127.0.0.1:63486/api/v1/assets/caaf4f54-3cf1-4cb3-bce8-ebdabb2afeb4/prepared/video",
+        "time": 2.019223,
+        "fullscreen": true
+      }
+    ],
+    "long": {
+      "duration": 5400.008,
+      "seeks": [
+        {
+          "target": 1,
+          "passed": true
+        },
+        {
+          "target": 2700,
+          "passed": true
+        },
+        {
+          "target": 5380,
+          "passed": true
+        }
+      ],
+      "playbackSamples": [
+        {
+          "time": 2705.009929,
+          "drift": 0.06788099999994301,
+          "paused": false
+        },
+        {
+          "time": 2710.022169,
+          "drift": 0.06739199999992707,
+          "paused": false
+        },
+        {
+          "time": 2715.063016,
+          "drift": 0.06729500000028565,
+          "paused": false
+        },
+        {
+          "time": 2720.076077,
+          "drift": 0.06773100000009435,
+          "paused": false
+        },
+        {
+          "time": 2725.087155,
+          "drift": 0.06767300000001342,
+          "paused": false
+        },
+        {
+          "time": 2730.096688,
+          "drift": 0.06760299999996278,
+          "paused": false
+        },
+        {
+          "time": 2735.106787,
+          "drift": 0.0676130000001649,
+          "paused": false
+        },
+        {
+          "time": 2740.11837,
+          "drift": 0.06744400000025053,
+          "paused": false
+        },
+        {
+          "time": 2745.129955,
+          "drift": 0.06723499999998239,
+          "paused": false
+        },
+        {
+          "time": 2750.142371,
+          "drift": 0.06760200000007899,
+          "paused": false
+        },
+        {
+          "time": 2755.1535,
+          "drift": 0.06739299999981085,
+          "paused": false
+        },
+        {
+          "time": 2760.168539,
+          "drift": 0.0674909999997908,
+          "paused": false
+        }
+      ],
+      "jsHeap": {
+        "before": 7018264,
+        "after": 5408304
+      },
+      "interruptedAudioRequestRecovered": true
+    },
+    "assTextFallback": true,
+    "signedOffsets": true,
+    "externalTracks": {
+      "container": "MKV",
+      "srtRendered": true,
+      "webvttRendered": true,
+      "externalOpusPcm": 0.048629406839609146,
+      "audioVideoSync": true,
+      "pausedSeek": true,
+      "subtitlesOff": true
+    },
+    "progress": {
+      "saved": true,
+      "resumed": true,
+      "manualWatched": true,
+      "manualUnwatched": true
+    },
+    "catalogue": true,
+    "singleWorkTwoVersions": true,
+    "playback": true,
+    "seek": true,
+    "pause": true,
+    "cspErrors": []
+  },
+  "captionLayout": {
+    "line": 70,
+    "snapToLines": false
+  },
+  "passed": true
+}

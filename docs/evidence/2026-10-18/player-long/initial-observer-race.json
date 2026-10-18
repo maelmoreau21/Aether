@@ -1,0 +1,40 @@
+{
+  "browser": "155.0.8059.40",
+  "os": "10.0.26300",
+  "headless": true,
+  "restart": false,
+  "results": {
+    "scan": true,
+    "incremental": true,
+    "internalSwitches": [
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.58686828613281,
+        "url": "http://127.0.0.1:62799/api/v1/assets/b416679b-5b50-484f-bbd3-a7dfdb10abc1/prepared/video",
+        "time": 0.683214,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.041748046875,
+        "url": "http://127.0.0.1:62799/api/v1/assets/b416679b-5b50-484f-bbd3-a7dfdb10abc1/prepared/video",
+        "time": 1.07736,
+        "fullscreen": true
+      }
+    ]
+  },
+  "failure": "page.evaluate: InvalidStateError: Failed to execute 'createMediaElementSource' on 'AudioContext': HTMLMediaElement already connected previously to a different MediaElementSourceNode.\n    at eval (eval at evaluate (:370:30), <anonymous>:3:65)\n    at async <anonymous>:396:30\n    at C:\\Users\\Mael\\Documents\\GitHub\\Aether\\scripts\\browser-scanner.cjs:61:33",
+  "diagnostic": {
+    "notice": "",
+    "video": {
+      "time": 1.154764,
+      "paused": true
+    },
+    "audio": {
+      "time": 0,
+      "paused": true
+    }
+  }
+}

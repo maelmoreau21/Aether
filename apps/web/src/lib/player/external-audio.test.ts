@@ -17,6 +17,14 @@ function setup() {
   return { video, audio, error, bridge };
 }
 describe('independent audio timeline',()=>{
+  it('applies signed offsets without playing delayed audio before its start',async()=>{
+    vi.useFakeTimers(); const {video,audio,bridge}=setup(); await bridge.load('/audio');
+    bridge.setOffset(2); await video.play(); await bridge.play(); expect(audio.paused).toBe(true);
+    video.currentTime=3; await vi.advanceTimersByTimeAsync(100); expect(audio.currentTime).toBe(1); expect(audio.paused).toBe(false);
+    bridge.setOffset(-1); expect(audio.currentTime).toBe(4);
+    bridge.setOffset(NaN); expect(audio.currentTime).toBe(4);
+    bridge.destroy(); expect(vi.getTimerCount()).toBe(0);
+  });
   it('follows seeking, pauses, speed and volume without playing internal audio',async()=>{
     vi.useFakeTimers();const {video,audio,bridge}=setup();await bridge.load('/authorized/audio');
     expect(video.muted).toBe(true);video.currentTime=4;video.dispatchEvent(new Event('seeked'));

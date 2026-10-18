@@ -124,7 +124,7 @@
   const base = $derived(resolve('/').replace(/\/$/, ''));
   const workId = $derived(page.url.searchParams.get('work') ?? '');
   const query = $derived(page.url.searchParams.get('q') ?? '');
-  const order = $derived(page.url.searchParams.get('sort') === 'title-desc' ? 'title-desc' : 'title-asc');
+  const order = $derived(['title-asc', 'title-desc', 'year-asc', 'year-desc', 'added-asc', 'added-desc'].includes(page.url.searchParams.get('sort') ?? '') ? page.url.searchParams.get('sort')! : section === 'home' ? 'added-desc' : 'title-asc');
   const offset = $derived(Math.max(0, Number(page.url.searchParams.get('offset')) || 0));
   const title = $derived(section === 'settings' ? 'Paramètres' : links.find(link => link.key === section)?.label ?? 'Accueil');
   const allowedIds = $derived(detail ? playbackIds(detail) : []);
@@ -665,6 +665,9 @@
           <span class="prov-tag">
             Provenance : {detail.metadataProvenance === 'nfo' ? 'Fichier NFO local' : 'Indexation automatique'}
           </span>
+          {#if detail.addedAt}
+            <span class="prov-tag">Ajouté le {new Date(detail.addedAt * 1000).toLocaleDateString('fr-FR')}</span>
+          {/if}
           {#if detail.premiered}
             <span class="prov-tag">Date de première diffusion : {detail.premiered}</span>
           {/if}
@@ -805,6 +808,10 @@
           <select id="catalog-sort" name="sort" bind:value={sort}>
             <option value="title-asc">Titre · A à Z</option>
             <option value="title-desc">Titre · Z à A</option>
+            <option value="year-desc">Année · plus récente</option>
+            <option value="year-asc">Année · plus ancienne</option>
+            <option value="added-desc">Ajout · plus récent</option>
+            <option value="added-asc">Ajout · plus ancien</option>
           </select>
         </div>
 

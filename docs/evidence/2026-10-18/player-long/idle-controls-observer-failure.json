@@ -1,0 +1,139 @@
+{
+  "browser": "155.0.8059.40",
+  "os": "10.0.26300",
+  "headless": true,
+  "restart": false,
+  "results": {
+    "scan": true,
+    "incremental": true,
+    "internalSwitches": [
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.57715606689453,
+        "url": "http://127.0.0.1:63827/api/v1/assets/92c9a453-a5b8-41b9-9d18-884a7e20116f/prepared/video",
+        "time": 0.691272,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.0489501953125,
+        "url": "http://127.0.0.1:63827/api/v1/assets/92c9a453-a5b8-41b9-9d18-884a7e20116f/prepared/video",
+        "time": 1.051301,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.57456970214844,
+        "url": "http://127.0.0.1:63827/api/v1/assets/92c9a453-a5b8-41b9-9d18-884a7e20116f/prepared/video",
+        "time": 1.415539,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.04642486572266,
+        "url": "http://127.0.0.1:63827/api/v1/assets/92c9a453-a5b8-41b9-9d18-884a7e20116f/prepared/video",
+        "time": 1.767407,
+        "fullscreen": true
+      }
+    ],
+    "long": {
+      "duration": 5400.009,
+      "seeks": [
+        {
+          "target": 1,
+          "passed": true
+        },
+        {
+          "target": 2700,
+          "passed": true
+        },
+        {
+          "target": 5380,
+          "passed": true
+        }
+      ],
+      "playbackSamples": [
+        {
+          "time": 2705.012423,
+          "drift": 0.06400900000016918,
+          "paused": false
+        },
+        {
+          "time": 2710.02298,
+          "drift": 0.06414500000028056,
+          "paused": false
+        },
+        {
+          "time": 2715.029995,
+          "drift": 0.06399400000009337,
+          "paused": false
+        },
+        {
+          "time": 2720.037971,
+          "drift": 0.06411600000001272,
+          "paused": false
+        },
+        {
+          "time": 2725.056042,
+          "drift": 0.06385900000032052,
+          "paused": false
+        },
+        {
+          "time": 2730.064816,
+          "drift": 0.06390499999997701,
+          "paused": false
+        },
+        {
+          "time": 2735.073175,
+          "drift": 0.06399599999986094,
+          "paused": false
+        },
+        {
+          "time": 2740.082805,
+          "drift": 0.06421899999986636,
+          "paused": false
+        },
+        {
+          "time": 2745.090073,
+          "drift": 0.06384799999977986,
+          "paused": false
+        },
+        {
+          "time": 2750.101438,
+          "drift": 0.0638890000000174,
+          "paused": false
+        },
+        {
+          "time": 2755.114782,
+          "drift": 0.06385799999998198,
+          "paused": false
+        },
+        {
+          "time": 2760.127047,
+          "drift": 0.06381599999986065,
+          "paused": false
+        }
+      ],
+      "jsHeap": {
+        "before": 9101528,
+        "after": 6249196
+      }
+    }
+  },
+  "failure": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('[data-menu=\"audio\"]')\u001b[22m\n\u001b[2m    - locator resolved to <button data-menu=\"audio\" aria-label=\"Audio\" aria-haspopup=\"menu\" aria-expanded=\"false\" class=\"svelte-18q7nx4\">…</button>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <button tabindex=\"-1\" class=\"video-interaction svelte-1iz8pob\" aria-label=\"Afficher ou masquer les commandes\"></button> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <button tabindex=\"-1\" class=\"video-interaction svelte-1iz8pob\" aria-label=\"Afficher ou masquer les commandes\"></button> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    57 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m       - element is visible, enabled and stable\u001b[22m\n\u001b[2m       - scrolling into view if needed\u001b[22m\n\u001b[2m       - done scrolling\u001b[22m\n\u001b[2m       - <button tabindex=\"-1\" class=\"video-interaction svelte-1iz8pob\" aria-label=\"Afficher ou masquer les commandes\"></button> intercepts pointer events\u001b[22m\n\u001b[2m     - retrying click action\u001b[22m\n\u001b[2m       - waiting 500ms\u001b[22m\n\n    at C:\\Users\\Mael\\Documents\\GitHub\\Aether\\scripts\\browser-scanner.cjs:102:49",
+  "diagnostic": {
+    "notice": "",
+    "video": {
+      "time": 2790.187043,
+      "paused": false
+    },
+    "audio": {
+      "time": 2790.123076,
+      "paused": false
+    }
+  }
+}

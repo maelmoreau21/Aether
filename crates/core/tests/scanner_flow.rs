@@ -227,6 +227,55 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(media["synthetic"], false);
+        for component in ["video", "audio-1", "audio-2", "subtitle-4"] {
+            let tracks = media["sources"][0]["tracks"].as_array().unwrap();
+            if component != "video" {
+                let index: u64 = component.split('-').nth(1).unwrap().parse().unwrap();
+                if !tracks.iter().any(|t| t["index"] == index) {
+                    continue;
+                }
+            }
+            let url = format!("/api/v1/assets/{asset}/prepared/{component}");
+            for (method, range, expected) in [
+                ("HEAD", None, StatusCode::OK),
+                ("GET", Some("bytes=0-5"), StatusCode::PARTIAL_CONTENT),
+                (
+                    "GET",
+                    Some("bytes=999999999999-"),
+                    StatusCode::RANGE_NOT_SATISFIABLE,
+                ),
+            ] {
+                let (status, _, bytes, _) =
+                    request(&app, method, &url, &cookie, None, Value::Null, range).await;
+                assert_eq!(status, expected, "{component} {method}");
+                if method == "HEAD" {
+                    assert!(bytes.is_empty());
+                }
+                if range == Some("bytes=0-5") {
+                    assert_eq!(bytes.len(), 6);
+                }
+            }
+            assert_eq!(
+                request(&app, "GET", &url, "", None, Value::Null, None)
+                    .await
+                    .0,
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        assert_eq!(
+            request(
+                &app,
+                "GET",
+                &format!("/api/v1/assets/{asset}/prepared/audio-999"),
+                &cookie,
+                None,
+                Value::Null,
+                None
+            )
+            .await
+            .0,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
         let source = &media["sources"][0];
         let tracks = source["tracks"].as_array().unwrap();
         let video = tracks.iter().find(|t| t["codec_type"] == "video").unwrap();
@@ -380,6 +429,20 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
         .execute(&pool)
         .await
         .unwrap();
+    assert_eq!(
+        request(
+            &app,
+            "HEAD",
+            &format!("/api/v1/assets/{subtitle_asset}/prepared/video"),
+            &cookie,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
     assert_eq!(
         request(&app, "GET", &subtitle_url, &cookie, None, Value::Null, None)
             .await

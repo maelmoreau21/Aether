@@ -170,7 +170,9 @@ pub async fn list(
     if !matches!(query.kind.as_deref(), None | Some("film" | "series"))
         || !matches!(
             query.sort.as_deref(),
-            None | Some("title-asc" | "title-desc")
+            None | Some(
+                "title-asc" | "title-desc" | "year-asc" | "year-desc" | "added-asc" | "added-desc"
+            )
         )
         || !(1..=100).contains(&limit)
         || query.q.as_ref().is_some_and(|q| q.len() > 200)

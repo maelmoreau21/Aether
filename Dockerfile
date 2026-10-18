@@ -97,21 +97,47 @@ RUN touch crates/shared/src/lib.rs \
         target/release/media-backup \
         target/release/media-restore
 
-# Keep the distribution ffprobe binary and its full dynamic dependency closure.
-# No codec/demuxer is rebuilt or disabled; unused GUI driver packages are omitted.
+# Minimal ffprobe build for Media Node discovery.
+# Builds a stripped, hardened ffprobe binary with native demuxers, parsers, and decoders.
+# All encoders, muxers, filters, graphics/GUI libraries, and hardware accelerators are omitted.
+# Dynamically links exclusively against libc6/libm, eliminating hundreds of megabytes of unused packages.
 FROM debian:bookworm-slim AS probe-runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
-    && mkdir -p /probe/usr/bin \
-    && cp /usr/bin/ffprobe /probe/usr/bin/ffprobe \
-    && ldd /usr/bin/ffprobe | awk '/=> \// {print $3} /^\s*\// {print $1}' | \
-       xargs -r -I '{}' cp -L --parents '{}' /probe \
-    && mkdir -p /probe/usr/share/media-probe \
-    && ffprobe -version > /probe/usr/share/media-probe/version.txt \
-    && dpkg-query -W > /probe/usr/share/media-probe/source-stage-packages.tsv
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        pkg-config \
+        yasm \
+    && rm -rf /var/lib/apt/lists/*
 
-# Preserve license notices for the copied distribution components.
-RUN find /usr/share/doc -name copyright -type f -exec cp --parents '{}' /probe \; \
-    && cp -a --parents /usr/share/common-licenses /probe
+ARG FFMPEG_VERSION=6.1.2
+RUN curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" | tar -xJ -C /tmp \
+    && cd "/tmp/ffmpeg-${FFMPEG_VERSION}" \
+    && ./configure \
+        --prefix=/probe \
+        --disable-programs \
+        --enable-ffprobe \
+        --disable-doc \
+        --disable-avdevice \
+        --disable-swscale \
+        --disable-postproc \
+        --disable-network \
+        --disable-encoders \
+        --disable-muxers \
+        --disable-devices \
+        --disable-filters \
+        --disable-hwaccels \
+        --enable-protocol=file,pipe,fd \
+        --disable-debug \
+        --enable-small \
+    && make -j$(nproc) \
+    && make install \
+    && strip --strip-all /probe/bin/ffprobe \
+    && mkdir -p /probe/share/media-probe \
+    && /probe/bin/ffprobe -version > /probe/share/media-probe/version.txt \
+    && cp COPYING.LGPLv2.1 /probe/share/media-probe/LICENSE \
+    && cp -r /usr/share/common-licenses /probe/share/media-probe/common-licenses \
+    && rm -rf "/tmp/ffmpeg-${FFMPEG_VERSION}"
 
 # ==============================================================================
 # Stage 3: Distributed Core Runtime (`aether-core`)
@@ -170,8 +196,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tini \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=probe-runtime /probe/usr/ /usr/
-COPY --from=probe-runtime /probe/lib/ /usr/lib/
+COPY --from=probe-runtime --chmod=0755 /probe/bin/ffprobe /usr/local/bin/ffprobe
+RUN ln -s /usr/local/bin/ffprobe /usr/bin/ffprobe
+COPY --from=probe-runtime /probe/share/media-probe /usr/share/media-probe
 
 RUN groupadd --gid 10001 aether \
     && useradd --uid 10001 --gid 10001 --create-home --home-dir /app --shell /usr/sbin/nologin aether

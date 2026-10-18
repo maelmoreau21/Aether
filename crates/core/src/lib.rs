@@ -1,5 +1,6 @@
 //! Local Core: persistent authentication and isolated synthetic media inventory.
 pub mod auth;
+pub mod oidc;
 pub mod backup;
 use media_contracts::brand;
 mod catalog;
@@ -99,6 +100,7 @@ pub async fn secure_app_with_jobs(
     } else {
         libraries::initialize_local(&auth.store).await?;
     }
+    let oidc = oidc::router(auth.clone())?;
     let root = inventory.root().to_owned();
     let origin = auth.origin().to_owned();
     let store_for_csp = auth.store.clone();
@@ -123,7 +125,8 @@ pub async fn secure_app_with_jobs(
             .merge(scans::router(auth.clone(), root.clone(), jobs).await?)
             .merge(libraries::router(auth.clone(), root))
             .merge(nodes::router(auth.clone(), replay_window))
-            .merge(auth::router(auth)),
+            .merge(auth::router(auth))
+            .merge(oidc),
         origin,
         Some(store_for_csp),
     );
@@ -250,9 +253,15 @@ fn local_security_with_store(
                 let host_ok = req_host == host.as_deref()
                     || (is_internal && has_internal_proto)
                     || (is_internal && internal_host.as_deref().is_some_and(|ih| req_host == Some(ih)));
+                // Only the exact OIDC callback accepts a cross-site top-level GET.
+                // Its single-use state is bound to an HttpOnly browser cookie.
+                let oidc_callback = req.method() == axum::http::Method::GET
+                    && req.uri().path() == "/api/v1/auth/oidc/callback"
+                    && req.headers().get("sec-fetch-mode").is_none_or(|v| v == "navigate")
+                    && req.headers().get("sec-fetch-dest").is_none_or(|v| v == "document");
                 if !host_ok
-                    || req.headers().get("sec-fetch-site").is_some_and(|h| h == "cross-site")
-                    || req.headers().get(header::ORIGIN).is_some_and(|h| h.as_bytes() != origin.as_bytes())
+                    || (!oidc_callback && req.headers().get("sec-fetch-site").is_some_and(|h| h == "cross-site"))
+                    || (!oidc_callback && req.headers().get(header::ORIGIN).is_some_and(|h| h.as_bytes() != origin.as_bytes()))
                 {
                     return StatusCode::FORBIDDEN.into_response();
                 }

@@ -185,7 +185,7 @@ pub async fn load_node(
     store: &IdentityStore,
     node_id: &str,
 ) -> Result<Option<MediaNodeRecord>, sqlx::Error> {
-    sqlx::query_as::<_, MediaNodeRecord>(
+    crate::database::query_as::<_, MediaNodeRecord>(
         "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at FROM media_nodes WHERE id=?",
     )
     .bind(node_id)
@@ -194,19 +194,19 @@ pub async fn load_node(
 }
 
 pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView>, sqlx::Error> {
-    let records: Vec<MediaNodeRecord> = sqlx::query_as(
+    let records: Vec<MediaNodeRecord> = crate::database::query_as(
         "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at FROM media_nodes ORDER BY CASE WHEN id='local' THEN 0 ELSE 1 END, name, id",
     )
     .fetch_all(&store.pool)
     .await?;
 
-    let libs = sqlx::query(
+    let libs = crate::database::query(
         "SELECT id, name, kind, node_id, root, enabled FROM libraries ORDER BY name, id",
     )
     .fetch_all(&store.pool)
     .await?;
 
-    let scans = sqlx::query(
+    let scans = crate::database::query(
         "SELECT j.library_id, j.status, j.discovered, j.probed, j.reused, j.errors_count, j.warnings_count, l.node_id FROM scan_jobs j JOIN libraries l ON l.id = j.library_id",
     )
     .fetch_all(&store.pool)
@@ -223,7 +223,7 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
                 name: r.get("name"),
                 kind: r.get("kind"),
                 root: r.get("root"),
-                enabled: r.get("enabled"),
+                enabled: r.get::<i64, _>("enabled") != 0,
             })
             .collect();
         let node_scans = scans
@@ -393,7 +393,7 @@ async fn pair_node_admin(
     let roots_json = serde_json::to_string(&pair_res.roots).unwrap_or_else(|_| "[]".to_owned());
     let now = unix_now();
 
-    sqlx::query(
+    crate::database::query(
         "INSERT INTO media_nodes(id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at)
          VALUES(?, ?, 'remote', ?, ?, 'connected', ?, ?, ?, ?, ?, NULL)
          ON CONFLICT(id) DO UPDATE SET
@@ -475,7 +475,7 @@ async fn reconnect_node(
                     .public_url
                     .or(rec.public_url)
                     .and_then(|u| validate_public_url(&u).ok());
-                sqlx::query(
+                crate::database::query(
                     "UPDATE media_nodes SET status='connected', roots_json=?, public_url=?, last_seen_at=? WHERE id=?",
                 )
                 .bind(roots_json)
@@ -486,17 +486,19 @@ async fn reconnect_node(
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             } else {
-                sqlx::query("UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=?")
-                    .bind(now)
-                    .bind(&id)
-                    .execute(&state.auth.store.pool)
-                    .await
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                crate::database::query(
+                    "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=?",
+                )
+                .bind(now)
+                .bind(&id)
+                .execute(&state.auth.store.pool)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             }
             let _ = sync_all_libraries_for_node(&state.auth.store, &id).await;
         }
         Err(_) => {
-            sqlx::query(
+            crate::database::query(
                 "UPDATE media_nodes SET status='disconnected' WHERE id=? AND status != 'revoked'",
             )
             .bind(&id)
@@ -566,7 +568,7 @@ async fn rotate_node_secret(
     }
 
     let now = unix_now();
-    sqlx::query(
+    crate::database::query(
         "UPDATE media_nodes SET key_id=?, shared_secret=?, status='connected', last_seen_at=? WHERE id=?",
     )
     .bind(&new_key_id)
@@ -620,7 +622,7 @@ async fn revoke_node_admin(
     let now = unix_now();
     let revoked_key_id = format!("revoked-{}", uuid::Uuid::new_v4().simple());
     let wiped_secret = random_secret_hex();
-    sqlx::query(
+    crate::database::query(
         "UPDATE media_nodes SET status='revoked', key_id=?, shared_secret=?, revoked_at=? WHERE id=?",
     )
     .bind(&revoked_key_id)
@@ -632,7 +634,7 @@ async fn revoke_node_admin(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Mark any running scan jobs on this Node's libraries as interrupted
-    sqlx::query(
+    crate::database::query(
         "UPDATE scan_jobs SET status='error', errors_json='[\"Node révoqué pendant le scan\"]', errors_count=1 WHERE library_id IN (SELECT id FROM libraries WHERE node_id=?) AND status IN ('queued','running')",
     )
     .bind(&id)
@@ -731,7 +733,7 @@ async fn verify_signed_node_call(
         .check_and_record(&rec.id, &nonce, timestamp, now)
         .map_err(|reason| error(StatusCode::UNAUTHORIZED, reason))?;
 
-    let _ = sqlx::query(
+    let _ = crate::database::query(
         "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",
     )
     .bind(now)
@@ -805,7 +807,7 @@ async fn receive_node_heartbeat(
     if let Ok(hb) = serde_json::from_slice::<HeartbeatPayload>(&body) {
         let roots_json =
             serde_json::to_string(&hb.roots).unwrap_or_else(|_| rec.roots_json.clone());
-        let _ = sqlx::query(
+        let _ = crate::database::query(
             "UPDATE media_nodes SET status='connected', roots_json=?, last_seen_at=? WHERE id=? AND status != 'revoked'",
         )
         .bind(roots_json)
@@ -844,15 +846,15 @@ async fn receive_scan_batch(
     }
 
     // Verify library belongs to this Node
-    let owns_lib: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM libraries WHERE id=? AND node_id=? AND enabled=1)",
+    let owns_lib: i64 = crate::database::query_scalar(
+        "SELECT CAST(EXISTS(SELECT 1 FROM libraries WHERE id=? AND node_id=? AND enabled=1) AS INTEGER)",
     )
     .bind(sub.library_id.as_str())
     .bind(&rec.id)
     .fetch_one(&state.auth.store.pool)
     .await
-    .unwrap_or(false);
-    if !owns_lib {
+    .unwrap_or(0);
+    if owns_lib == 0 {
         return error(StatusCode::FORBIDDEN, "library_not_owned_by_node");
     }
 
@@ -898,21 +900,22 @@ async fn receive_scan_complete(
     let lib_id = comp.library_id.as_str();
 
     // Update library root to canonical root_snapshot reported by the Node if needed
-    let lib_row: Option<(String,)> =
-        sqlx::query_as("SELECT root FROM libraries WHERE id=? AND node_id=? AND enabled=1")
-            .bind(lib_id)
-            .bind(&rec.id)
-            .fetch_optional(&state.auth.store.pool)
-            .await
-            .ok()
-            .flatten();
+    let lib_row: Option<(String,)> = crate::database::query_as(
+        "SELECT root FROM libraries WHERE id=? AND node_id=? AND enabled=1",
+    )
+    .bind(lib_id)
+    .bind(&rec.id)
+    .fetch_optional(&state.auth.store.pool)
+    .await
+    .ok()
+    .flatten();
     if lib_row.is_none() {
         let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
         return error(StatusCode::FORBIDDEN, "library_not_owned_by_node");
     }
 
     if !comp.root_snapshot.is_empty() {
-        let _ = sqlx::query("UPDATE libraries SET root=? WHERE id=? AND node_id=?")
+        let _ = crate::database::query("UPDATE libraries SET root=? WHERE id=? AND node_id=?")
             .bind(&comp.root_snapshot)
             .bind(lib_id)
             .bind(&rec.id)
@@ -932,7 +935,7 @@ async fn receive_scan_complete(
     {
         eprintln!("[REMOTE SCAN PUBLISH ERROR in {lib_id}]: {err:?}");
         let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
-        let _ = sqlx::query(
+        let _ = crate::database::query(
             "UPDATE scan_jobs SET status='error', errors_json='[\"Échec de publication du scan distant\"]', errors_count=1 WHERE library_id=?",
         )
         .bind(lib_id)
@@ -947,7 +950,7 @@ async fn receive_scan_complete(
     let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
 
     let errors_json = serde_json::to_string(&conflicts).unwrap_or_else(|_| "[]".to_owned());
-    let _ = sqlx::query(
+    let _ = crate::database::query(
         "UPDATE scan_jobs SET status=?, discovered=?, probed=?, reused=?, errors_json=?, errors_count=?, warnings_count=0 WHERE library_id=?",
     )
     .bind(if comp.finished.complete { "completed" } else { "error" })
@@ -993,7 +996,7 @@ async fn receive_scan_fail(
     let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
     let err_json = serde_json::to_string(&vec![format!("Scan Node échoué: {}", fail.message)])
         .unwrap_or_else(|_| "[\"Scan Node échoué\"]".to_owned());
-    let _ = sqlx::query(
+    let _ = crate::database::query(
         "UPDATE scan_jobs SET status='error', errors_json=?, errors_count=1 WHERE library_id=?",
     )
     .bind(err_json)
@@ -1013,13 +1016,13 @@ pub async fn build_library_inventory_sync(
     store: &IdentityStore,
     library_id: &str,
 ) -> Result<LibraryInventorySync, sqlx::Error> {
-    let root: String = sqlx::query_scalar("SELECT root FROM libraries WHERE id=?")
+    let root: String = crate::database::query_scalar("SELECT root FROM libraries WHERE id=?")
         .bind(library_id)
         .fetch_optional(&store.pool)
         .await?
         .unwrap_or_default();
 
-    let asset_rows = sqlx::query(
+    let asset_rows = crate::database::query(
         "SELECT a.id, a.library_id, s.root_snapshot, a.relative_path, a.mime, a.size, a.modified_ns
          FROM inventory_assets a
          JOIN inventory_sources s ON s.id = a.source_id
@@ -1042,7 +1045,7 @@ pub async fn build_library_inventory_sync(
         });
     }
 
-    let image_rows = sqlx::query(
+    let image_rows = crate::database::query(
         "SELECT id, library_id, root_snapshot, relative_path, mime, size, modified_ns
          FROM inventory_images
          WHERE library_id=? AND available=1",
@@ -1086,7 +1089,7 @@ pub async fn sync_all_libraries_for_node(
         return Ok(());
     };
     let lib_ids: Vec<String> =
-        sqlx::query_scalar("SELECT id FROM libraries WHERE node_id=? AND enabled=1")
+        crate::database::query_scalar("SELECT id FROM libraries WHERE node_id=? AND enabled=1")
             .bind(node_id)
             .fetch_all(&store.pool)
             .await
@@ -1188,7 +1191,7 @@ pub async fn dispatch_remote_scan(
     .await
     {
         Ok(_) => {
-            let _ = sqlx::query(
+            let _ = crate::database::query(
                 "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",
             )
             .bind(unix_now())
@@ -1198,7 +1201,7 @@ pub async fn dispatch_remote_scan(
             Ok(())
         }
         Err(err) => {
-            let _ = sqlx::query(
+            let _ = crate::database::query(
                 "UPDATE media_nodes SET status='disconnected' WHERE id=? AND status != 'revoked'",
             )
             .bind(node_id)
@@ -1280,7 +1283,7 @@ pub async fn relay_from_remote_node(
     let stream = match media_node::transport::connect(base_url).await {
         Ok(s) => s,
         _ => {
-            let _ = sqlx::query(
+            let _ = crate::database::query(
                 "UPDATE media_nodes SET status='disconnected' WHERE id=? AND status != 'revoked'",
             )
             .bind(&rec.id)
@@ -1343,7 +1346,7 @@ pub async fn relay_from_remote_node(
     let upstream_res = match media_node::transport::send_request(&mut sender, upstream_req).await {
         Ok(r) => r,
         Err(_) => {
-            let _ = sqlx::query(
+            let _ = crate::database::query(
                 "UPDATE media_nodes SET status='disconnected' WHERE id=? AND status != 'revoked'",
             )
             .bind(&rec.id)
@@ -1353,7 +1356,7 @@ pub async fn relay_from_remote_node(
         }
     };
 
-    let _ = sqlx::query(
+    let _ = crate::database::query(
         "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",
     )
     .bind(now)
@@ -1599,7 +1602,7 @@ async fn authorize_playback(
         inventory::resource_library(&state.auth.store, &claims.target_kind, &claims.target_id)
             .await;
     let valid_target = matches!(library, Ok(Some(ref l)) if l == claims.library_id.as_str());
-    let allowed = sqlx::query_scalar::<_, i64>(
+    let allowed = crate::database::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM sessions s JOIN users u ON u.id=s.user_id JOIN libraries l ON l.id=? \
          WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-1800 \
          AND u.disabled_at IS NULL AND l.enabled=1 AND l.node_id=? \

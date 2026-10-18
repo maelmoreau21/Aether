@@ -1,3 +1,5 @@
+> PostgreSQL 18 optionnel en cours de validation : moteur explicite, migrations indépendantes et premier contrat HTTP commun réussi sur SQLite et PostgreSQL. Voir [PostgreSQL](docs/POSTGRESQL.md) et MEMORY.md ; P2 reste ouvert.
+
 > CI/GHCR (18 octobre 2026) : validation YAML réparée localement, publication
 > réutilisable conditionnée à tous les contrôles et aux trois builds Docker.
 > JWT utilise AWS-LC ; aucun changement de schéma ni de modes de déploiement.

@@ -11,7 +11,7 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{Connection, Row};
+use sqlx::Row;
 use std::path::{Path as DiskPath, PathBuf};
 
 #[derive(Clone)]
@@ -27,6 +27,7 @@ pub(crate) struct Library {
     pub kind: String,
     pub node_id: String,
     pub root: String,
+    #[sqlx(try_from = "crate::database::DbBool")]
     pub enabled: bool,
     #[sqlx(skip)]
     pub user_ids: Vec<String>,
@@ -84,20 +85,21 @@ pub async fn initialize(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let root = validate_library_root(root, root).await?;
     let mut connection = store.pool.acquire().await?;
-    let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-    let initialized: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM library_initialization)")
-            .fetch_one(&mut *tx)
-            .await?;
-    if !initialized {
+    let mut tx = crate::database::begin_write(&mut connection).await?;
+    let initialized: i64 = crate::database::query_scalar(
+        "SELECT CAST(EXISTS(SELECT 1 FROM library_initialization) AS INTEGER)",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if initialized == 0 {
         for (id, name, kind) in [
             ("fixture-films", "Films de test", "films"),
             ("fixture-series", "Séries de test", "series"),
         ] {
-            sqlx::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES (?,?,?,'local',?,1)")
+            crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES (?,?,?,'local',?,1)")
                 .bind(id).bind(name).bind(kind).bind(root.to_string_lossy().as_ref()).execute(&mut *tx).await?;
         }
-        sqlx::query("INSERT INTO library_initialization(singleton) VALUES(1)")
+        crate::database::query("INSERT INTO library_initialization(singleton) VALUES(1)")
             .execute(&mut *tx)
             .await?;
     }
@@ -107,23 +109,28 @@ pub async fn initialize(
 
 /// A real local library starts empty: experimental fixture libraries are never seeded.
 pub async fn initialize_local(store: &IdentityStore) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT OR IGNORE INTO library_initialization(singleton) VALUES(1)")
-        .execute(&store.pool)
-        .await?;
+    crate::database::query(
+        "INSERT INTO library_initialization(singleton) VALUES(1) ON CONFLICT(singleton) DO NOTHING",
+    )
+    .execute(&store.pool)
+    .await?;
     Ok(())
 }
 async fn load(store: &IdentityStore) -> Result<Vec<Library>, StatusCode> {
     // Same transaction gives a coherent configuration/grants snapshot.
     let mut tx = store.pool.begin().await.map_err(database)?;
-    let mut libraries: Vec<Library> =
-        sqlx::query_as("SELECT id,name,kind,node_id,root,enabled FROM libraries ORDER BY name,id")
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(database)?;
-    let grants = sqlx::query("SELECT library_id,user_id FROM library_permissions ORDER BY user_id")
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(database)?;
+    let mut libraries: Vec<Library> = crate::database::query_as(
+        "SELECT id,name,kind,node_id,root,enabled FROM libraries ORDER BY name,id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(database)?;
+    let grants = crate::database::query(
+        "SELECT library_id,user_id FROM library_permissions ORDER BY user_id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(database)?;
     for grant in grants {
         let id: String = grant.get("library_id");
         if let Some(library) = libraries.iter_mut().find(|l| l.id == id) {
@@ -147,7 +154,7 @@ async fn users(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     administrator(&state, &headers, false).await?;
-    let users: Vec<AuthUser> = sqlx::query_as("SELECT u.id,COALESCE(c.login,'sso-' || u.id) AS login,u.role FROM users u LEFT JOIN local_credentials c ON c.user_id=u.id WHERE u.disabled_at IS NULL ORDER BY c.login").fetch_all(&state.auth.store.pool).await.map_err(database)?;
+    let users: Vec<AuthUser> = crate::database::query_as("SELECT u.id,COALESCE(c.login,'sso-' || u.id) AS login,u.role FROM users u LEFT JOIN local_credentials c ON c.user_id=u.id WHERE u.disabled_at IS NULL ORDER BY c.login").fetch_all(&state.auth.store.pool).await.map_err(database)?;
     Ok(Json(serde_json::json!({"users":users})))
 }
 async fn roots(
@@ -159,7 +166,7 @@ async fn roots(
     if let Ok(local_root) = validate_library_root(&state.root, &state.root).await {
         all_roots.push(local_root.to_string_lossy().into_owned());
     }
-    if let Ok(rows) = sqlx::query(
+    if let Ok(rows) = crate::database::query(
         "SELECT roots_json FROM media_nodes WHERE kind='remote' AND status != 'revoked' ORDER BY name, id",
     )
     .fetch_all(&state.auth.store.pool)
@@ -225,7 +232,7 @@ async fn save(
             .ok_or(StatusCode::BAD_REQUEST)?
             .to_owned()
     } else {
-        let node_row: Option<(String, String)> = sqlx::query_as(
+        let node_row: Option<(String, String)> = crate::database::query_as(
             "SELECT status, roots_json FROM media_nodes WHERE id=? AND kind='remote'",
         )
         .bind(&input.node_id)
@@ -263,51 +270,54 @@ async fn save(
     input.user_ids.dedup();
     let mut tx = state.auth.store.pool.begin().await.map_err(database)?;
     for user in &input.user_ids {
-        let valid: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND role='user' AND disabled_at IS NULL)",
+        let valid: i64 = crate::database::query_scalar(
+            "SELECT CAST(EXISTS(SELECT 1 FROM users WHERE id=? AND role='user' AND disabled_at IS NULL) AS INTEGER)",
         )
         .bind(user)
         .fetch_one(&mut *tx)
         .await
         .map_err(database)?;
-        if !valid {
+        if valid == 0 {
             return Err(StatusCode::BAD_REQUEST);
         }
     }
     if existing {
-        let result =
-            sqlx::query("UPDATE libraries SET name=?,kind=?,node_id=?,root=?,enabled=? WHERE id=?")
-                .bind(&input.name)
-                .bind(&input.kind)
-                .bind(&input.node_id)
-                .bind(&root)
-                .bind(input.enabled)
-                .bind(&id)
-                .execute(&mut *tx)
-                .await
-                .map_err(database)?;
+        let result = crate::database::query(
+            "UPDATE libraries SET name=?,kind=?,node_id=?,root=?,enabled=? WHERE id=?",
+        )
+        .bind(&input.name)
+        .bind(&input.kind)
+        .bind(&input.node_id)
+        .bind(&root)
+        .bind(i64::from(input.enabled))
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(database)?;
         if result.rows_affected() == 0 {
             return Err(StatusCode::NOT_FOUND);
         }
-        sqlx::query("DELETE FROM library_permissions WHERE library_id=?")
+        crate::database::query("DELETE FROM library_permissions WHERE library_id=?")
             .bind(&id)
             .execute(&mut *tx)
             .await
             .map_err(database)?;
     } else {
-        sqlx::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,?,?,?,?)")
-            .bind(&id)
-            .bind(&input.name)
-            .bind(&input.kind)
-            .bind(&input.node_id)
-            .bind(&root)
-            .bind(input.enabled)
-            .execute(&mut *tx)
-            .await
-            .map_err(database)?;
+        crate::database::query(
+            "INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,?,?,?,?)",
+        )
+        .bind(&id)
+        .bind(&input.name)
+        .bind(&input.kind)
+        .bind(&input.node_id)
+        .bind(&root)
+        .bind(i64::from(input.enabled))
+        .execute(&mut *tx)
+        .await
+        .map_err(database)?;
     }
     for user in &input.user_ids {
-        sqlx::query("INSERT INTO library_permissions(library_id,user_id) VALUES(?,?)")
+        crate::database::query("INSERT INTO library_permissions(library_id,user_id) VALUES(?,?)")
             .bind(&id)
             .bind(user)
             .execute(&mut *tx)
@@ -338,7 +348,7 @@ mod tests {
             .unwrap();
         initialize(&store, &root).await.unwrap();
         let user = "synthetic-user".to_owned();
-        sqlx::query("INSERT INTO users(id,role) VALUES(?,'user')")
+        crate::database::query("INSERT INTO users(id,role) VALUES(?,'user')")
             .bind(&user)
             .execute(&store.pool)
             .await
@@ -488,15 +498,15 @@ mod http_tests {
             ("admin", "administrator", "a".repeat(64)),
             ("reader", "user", "b".repeat(64)),
         ] {
-            sqlx::query("INSERT INTO users(id,role) VALUES(?,?)")
+            crate::database::query("INSERT INTO users(id,role) VALUES(?,?)")
                 .bind(id)
                 .bind(role)
                 .execute(&store.pool)
                 .await
                 .unwrap();
-            sqlx::query("INSERT INTO local_credentials(user_id,login,password_hash) VALUES(?,?,'unused-test-hash')").bind(id).bind(id).execute(&store.pool).await.unwrap();
+            crate::database::query("INSERT INTO local_credentials(user_id,login,password_hash) VALUES(?,?,'unused-test-hash')").bind(id).bind(id).execute(&store.pool).await.unwrap();
             let hash = format!("{:x}", Sha256::digest(raw.as_bytes()));
-            sqlx::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,unixepoch(),unixepoch(),unixepoch()+3600)").bind(hash).bind(id).execute(&store.pool).await.unwrap();
+            crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,unixepoch(),unixepoch(),unixepoch()+3600)").bind(hash).bind(id).execute(&store.pool).await.unwrap();
             cookies.push(format!("media_session={raw}"));
         }
         let csrf = format!(
@@ -579,12 +589,13 @@ mod http_tests {
         let updated = json(updated).await;
         assert_eq!(updated["enabled"], false);
         assert_eq!(updated["userIds"], serde_json::json!([]));
-        let grants: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM library_permissions WHERE library_id=?")
-                .bind(id)
-                .fetch_one(&store.pool)
-                .await
-                .unwrap();
+        let grants: i64 = crate::database::query_scalar(
+            "SELECT count(*) FROM library_permissions WHERE library_id=?",
+        )
+        .bind(id)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
         assert_eq!(grants, 0);
         assert_eq!(
             request(

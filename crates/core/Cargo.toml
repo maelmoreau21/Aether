@@ -17,7 +17,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["fs", "set-header"] }
 
-sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "sqlite-bundled", "postgres", "any", "migrate", "macros"] }
 futures-util = "0.3"
 argon2 = { version = "0.6.0", features = ["zeroize"] }
 rpassword = "7.5.4"

@@ -1,4 +1,4 @@
-//! Local authentication. Session secrets never enter SQLite or application logs.
+//! Local authentication. Session secrets never enter the database or application logs.
 use crate::identity::{IdentityError, IdentityStore, Role};
 use argon2::{
     Algorithm, Argon2, Params, Version,
@@ -13,6 +13,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sqlx::Connection;
 use std::{
     collections::HashMap,
     sync::{
@@ -116,7 +117,7 @@ enum FlushError {
 }
 
 impl SessionToucher {
-    fn new(pool: sqlx::SqlitePool, interval_seconds: i64, max_pending: usize) -> Arc<Self> {
+    fn new(pool: sqlx::AnyPool, interval_seconds: i64, max_pending: usize) -> Arc<Self> {
         let shared = Arc::new(TouchShared {
             pending: Mutex::new(HashMap::new()),
             notify: Notify::new(),
@@ -136,7 +137,7 @@ impl SessionToucher {
         Arc::new(Self { shared })
     }
 
-    async fn worker_loop(pool: sqlx::SqlitePool, shared: Arc<TouchShared>) {
+    async fn worker_loop(pool: sqlx::AnyPool, shared: Arc<TouchShared>) {
         loop {
             if shared.closed.load(Ordering::Acquire) || pool.is_closed() {
                 shared.flush_done.notify_waiters();
@@ -229,32 +230,49 @@ impl SessionToucher {
         }
     }
 
-    async fn flush_batch(
-        pool: &sqlx::SqlitePool,
-        batch: &[(String, i64)],
-    ) -> Result<u64, FlushError> {
+    async fn flush_batch(pool: &sqlx::AnyPool, batch: &[(String, i64)]) -> Result<u64, FlushError> {
         let mut conn = match tokio::time::timeout(Duration::from_millis(50), pool.acquire()).await {
             Ok(Ok(conn)) => conn,
             Ok(Err(sqlx::Error::PoolTimedOut)) | Err(_) => return Err(FlushError::BusyOrTimeout),
             Ok(Err(_)) => return Err(FlushError::Permanent),
         };
-        let orig_timeout: i64 = sqlx::query_scalar("PRAGMA busy_timeout")
-            .fetch_one(&mut *conn)
-            .await
-            .unwrap_or(15_000);
-        let _ = sqlx::query("PRAGMA busy_timeout = 15")
-            .execute(&mut *conn)
-            .await;
+        let sqlite = conn.backend_name() == "SQLite";
+        let orig_timeout: i64 = if sqlite {
+            crate::database::query_scalar("PRAGMA busy_timeout")
+                .fetch_one(&mut *conn)
+                .await
+                .unwrap_or(15_000)
+        } else {
+            0
+        };
+        if sqlite {
+            let _ = crate::database::query("PRAGMA busy_timeout = 15")
+                .execute(&mut *conn)
+                .await;
+        }
+        let mut tx = conn.begin().await.map_err(|_| FlushError::Permanent)?;
+        if !sqlite {
+            crate::database::query("SET LOCAL lock_timeout = '15ms'")
+                .execute(&mut *tx)
+                .await
+                .map_err(|_| FlushError::Permanent)?;
+        }
 
-        let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        let mut qb = sqlx::QueryBuilder::<sqlx::Any>::new(
             "UPDATE sessions SET last_seen_at = CASE token_hash ",
         );
         for (token_hash, seen_at) in batch {
             qb.push("WHEN ");
             qb.push_bind(token_hash);
-            qb.push(" THEN MIN(unixepoch(), MAX(last_seen_at, ");
+            qb.push(
+                " THEN CASE WHEN last_seen_at > unixepoch() THEN unixepoch() WHEN last_seen_at > ",
+            );
             qb.push_bind(*seen_at);
-            qb.push(")) ");
+            qb.push(" THEN last_seen_at ELSE CASE WHEN unixepoch() < ");
+            qb.push_bind(*seen_at);
+            qb.push(" THEN unixepoch() ELSE ");
+            qb.push_bind(*seen_at);
+            qb.push(" END END ");
         }
         qb.push("ELSE last_seen_at END WHERE token_hash IN (");
         let mut separated = qb.separated(", ");
@@ -268,10 +286,25 @@ impl SessionToucher {
             " AND EXISTS(SELECT 1 FROM users WHERE users.id = sessions.user_id AND disabled_at IS NULL)",
         );
 
-        let result = qb.build().execute(&mut *conn).await;
-        let mut restore_qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new("PRAGMA busy_timeout = ");
-        restore_qb.push(orig_timeout.max(0));
-        let _ = restore_qb.build().execute(&mut *conn).await;
+        use sqlx::Execute;
+        let mut built = qb.build();
+        let args = built.take_arguments().map_err(|_| FlushError::Permanent)?;
+        let sql = crate::database::normalize_sql(built.sql().as_str());
+        let result = sqlx::query_with(sqlx::AssertSqlSafe(sql), args.unwrap_or_default())
+            .execute(&mut *tx)
+            .await;
+        let result = match result {
+            Ok(result) => tx.commit().await.map(|_| result),
+            Err(error) => {
+                let _ = tx.rollback().await;
+                Err(error)
+            }
+        };
+        if sqlite {
+            let mut restore_qb = sqlx::QueryBuilder::<sqlx::Any>::new("PRAGMA busy_timeout = ");
+            restore_qb.push(orig_timeout.max(0));
+            let _ = restore_qb.build().execute(&mut *conn).await;
+        }
 
         match result {
             Ok(res) => Ok(res.rows_affected()),
@@ -279,8 +312,11 @@ impl SessionToucher {
             Err(sqlx::Error::Database(err)) => {
                 let is_busy = err
                     .code()
-                    .and_then(|c| c.parse::<i32>().ok())
-                    .is_some_and(|code| matches!(code & 0xff, 5 | 6))
+                    .is_some_and(|code| code == "55P03" || code == "57014")
+                    || err
+                        .code()
+                        .and_then(|c| c.parse::<i32>().ok())
+                        .is_some_and(|code| matches!(code & 0xff, 5 | 6))
                     || {
                         let msg = err.message().to_ascii_lowercase();
                         msg.contains("busy") || msg.contains("locked")
@@ -416,7 +452,7 @@ impl AuthState {
     pub(crate) async fn session_from_hash(&self, token_hash: &str) -> Result<AuthUser, StatusCode> {
         // Validate session, user, role, active state, absolute expiry and idle expiry
         // via a pure SQLite read (WAL snapshot) so authenticated reads never block on write locks.
-        let row: Option<(String, String, Role, i64, i64)> = sqlx::query_as(
+        let row: Option<(String, String, Role, i64, i64)> = crate::database::query_as(
             "SELECT u.id, COALESCE(c.login, 'sso-' || u.id), u.role, s.last_seen_at, unixepoch() \
              FROM sessions s \
              JOIN users u ON u.id = s.user_id \
@@ -501,7 +537,7 @@ async fn login(
         return failure(StatusCode::TOO_MANY_REQUESTS, "try_later");
     };
     // Single bounded row: shared budget across all account names, durable across restarts.
-    let allowed=sqlx::query_scalar::<_,i64>("INSERT INTO login_throttle(singleton,window_started,attempts) VALUES(1,unixepoch(),1) ON CONFLICT(singleton) DO UPDATE SET window_started=CASE WHEN window_started<=unixepoch()-60 THEN unixepoch() ELSE window_started END, attempts=CASE WHEN window_started<=unixepoch()-60 THEN 1 ELSE attempts+1 END WHERE window_started<=unixepoch()-60 OR attempts<10 RETURNING attempts").fetch_optional(&state.store.pool).await;
+    let allowed=crate::database::query_scalar::<_,i64>("INSERT INTO login_throttle(singleton,window_started,attempts) VALUES(1,unixepoch(),1) ON CONFLICT(singleton) DO UPDATE SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<10 RETURNING login_throttle.attempts").fetch_optional(&state.store.pool).await;
     match allowed {
         Ok(Some(_)) => {}
         Ok(None) => return failure(StatusCode::TOO_MANY_REQUESTS, "try_later"),
@@ -510,7 +546,7 @@ async fn login(
     if input.login.len() > 64 || input.password.len() > 512 {
         return failure(StatusCode::UNAUTHORIZED, "invalid_credentials");
     }
-    let row=sqlx::query_as::<_,(String,String)>("SELECT c.user_id,c.password_hash FROM local_credentials c JOIN users u ON u.id=c.user_id WHERE c.login=? AND u.disabled_at IS NULL").bind(&input.login).fetch_optional(&state.store.pool).await;
+    let row=crate::database::query_as::<_,(String,String)>("SELECT c.user_id,c.password_hash FROM local_credentials c JOIN users u ON u.id=c.user_id WHERE c.login=? AND u.disabled_at IS NULL").bind(&input.login).fetch_optional(&state.store.pool).await;
     let row = match row {
         Ok(r) => r,
         Err(_) => return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
@@ -538,7 +574,7 @@ async fn login(
     };
     let raw = random_token();
     // Opportunistic bounded-state cleanup; no secret material is persisted.
-    if sqlx::query(
+    if crate::database::query(
         "DELETE FROM sessions WHERE expires_at<=unixepoch() OR last_seen_at<=unixepoch()-?",
     )
     .bind(IDLE_SECONDS)
@@ -548,7 +584,7 @@ async fn login(
     {
         return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
     }
-    if sqlx::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+? FROM users WHERE id=? AND disabled_at IS NULL").bind(hash(&raw)).bind(ABSOLUTE_SECONDS).bind(&id).execute(&state.store.pool).await.is_err(){return failure(StatusCode::INTERNAL_SERVER_ERROR,"internal_error")}
+    if crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+? FROM users WHERE id=? AND disabled_at IS NULL").bind(hash(&raw)).bind(ABSOLUTE_SECONDS).bind(&id).execute(&state.store.pool).await.is_err(){return failure(StatusCode::INTERNAL_SERVER_ERROR,"internal_error")}
     let mut auth_headers = HeaderMap::new();
     if let Ok(value) = HeaderValue::from_str(&format!("{COOKIE}={raw}")) {
         auth_headers.insert(header::COOKIE, value);
@@ -586,7 +622,7 @@ async fn logout(State(state): State<AuthState>, headers: HeaderMap) -> Response 
         return failure(s, "forbidden");
     }
     state.toucher.shared.cancel(&identity.token_hash);
-    if sqlx::query("DELETE FROM sessions WHERE token_hash=?")
+    if crate::database::query("DELETE FROM sessions WHERE token_hash=?")
         .bind(&identity.token_hash)
         .execute(&state.store.pool)
         .await
@@ -646,7 +682,6 @@ mod tests {
     use super::*;
     use axum::{body::Body, http::Request};
     use http_body_util::BodyExt;
-    use sqlx::Connection;
     use tower::ServiceExt;
     const ORIGIN: &str = "http://127.0.0.1:3000";
     const PASSWORD: &str = "synthetic auth test password";
@@ -737,7 +772,7 @@ mod tests {
         let (second_cookie, _) = sign_in(&state).await;
         assert_ne!(cookie, second_cookie);
         let raw = cookie.split('=').nth(1).unwrap();
-        let hashes: Vec<String> = sqlx::query_scalar("SELECT token_hash FROM sessions")
+        let hashes: Vec<String> = crate::database::query_scalar("SELECT token_hash FROM sessions")
             .fetch_all(&state.store.pool)
             .await
             .unwrap();
@@ -801,7 +836,7 @@ mod tests {
             "UPDATE sessions SET expires_at=0",
         ] {
             let (cookie, _) = sign_in(&reopened).await;
-            sqlx::query(query)
+            crate::database::query(query)
                 .execute(&reopened.store.pool)
                 .await
                 .unwrap();
@@ -813,7 +848,7 @@ mod tests {
             ));
         }
         let (cookie, _) = sign_in(&reopened).await;
-        sqlx::query("UPDATE users SET disabled_at=unixepoch()")
+        crate::database::query("UPDATE users SET disabled_at=unixepoch()")
             .execute(&reopened.store.pool)
             .await
             .unwrap();
@@ -857,7 +892,7 @@ mod tests {
             bodies.push(response.into_body().collect().await.unwrap().to_bytes());
         }
         assert_eq!(bodies[0], bodies[1]);
-        sqlx::query("UPDATE login_throttle SET attempts=8")
+        crate::database::query("UPDATE login_throttle SET attempts=8")
             .execute(&state.store.pool)
             .await
             .unwrap();
@@ -914,7 +949,7 @@ mod tests {
             .status(),
             StatusCode::TOO_MANY_REQUESTS
         );
-        sqlx::query("UPDATE login_throttle SET window_started=0")
+        crate::database::query("UPDATE login_throttle SET window_started=0")
             .execute(&restarted.store.pool)
             .await
             .unwrap();
@@ -983,13 +1018,15 @@ mod tests {
 
         // 2. Activity near idle expiration boundary (last_seen_at = now - 1795s, 5s before 1800s limit):
         // 30 concurrent requests from the same user coalesce into 1 single SQLite write batch.
-        sqlx::query("UPDATE sessions SET last_seen_at = unixepoch() - 1795 WHERE token_hash = ?")
-            .bind(&token_hash)
-            .execute(&store.pool)
-            .await
-            .unwrap();
+        crate::database::query(
+            "UPDATE sessions SET last_seen_at = unixepoch() - 1795 WHERE token_hash = ?",
+        )
+        .bind(&token_hash)
+        .execute(&store.pool)
+        .await
+        .unwrap();
         let before_seen: i64 =
-            sqlx::query_scalar("SELECT last_seen_at FROM sessions WHERE token_hash = ?")
+            crate::database::query_scalar("SELECT last_seen_at FROM sessions WHERE token_hash = ?")
                 .bind(&token_hash)
                 .fetch_one(&store.pool)
                 .await
@@ -1010,7 +1047,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         let after_seen: i64 =
-            sqlx::query_scalar("SELECT last_seen_at FROM sessions WHERE token_hash = ?")
+            crate::database::query_scalar("SELECT last_seen_at FROM sessions WHERE token_hash = ?")
                 .bind(&token_hash)
                 .fetch_one(&store.pool)
                 .await
@@ -1029,7 +1066,7 @@ mod tests {
         // 3. Delayed touch never revives a session that expired while SQLite was write-locked:
         let expired_raw = "e".repeat(64);
         let expired_hash = hash(&expired_raw);
-        sqlx::query(
+        crate::database::query(
             "INSERT INTO sessions(token_hash, user_id, created_at, last_seen_at, expires_at) \
              VALUES(?, ?, unixepoch() - 2000, unixepoch() - 1790, unixepoch() + 3600)",
         )
@@ -1040,7 +1077,7 @@ mod tests {
         .unwrap();
 
         let mut lock_conn = store.pool.acquire().await.unwrap();
-        let lock_tx = lock_conn.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        let lock_tx = crate::database::begin_write(&mut lock_conn).await.unwrap();
 
         let exp_headers = HeaderMap::from_iter([(
             header::COOKIE,
@@ -1053,11 +1090,13 @@ mod tests {
         drop(lock_conn);
 
         // Simulate session crossing the 1800s boundary before worker flushes
-        sqlx::query("UPDATE sessions SET last_seen_at = unixepoch() - 1805 WHERE token_hash = ?")
-            .bind(&expired_hash)
-            .execute(&store.pool)
-            .await
-            .unwrap();
+        crate::database::query(
+            "UPDATE sessions SET last_seen_at = unixepoch() - 1805 WHERE token_hash = ?",
+        )
+        .bind(&expired_hash)
+        .execute(&store.pool)
+        .await
+        .unwrap();
         state.flush_session_touches().await;
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(
@@ -1070,7 +1109,7 @@ mod tests {
 
         // 4. Queue saturation (max_pending = 4) under write lock:
         let mut lock_conn = store.pool.acquire().await.unwrap();
-        let lock_tx = lock_conn.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        let lock_tx = crate::database::begin_write(&mut lock_conn).await.unwrap();
 
         for i in 0..8u8 {
             let tok = format!("{:02x}", i).repeat(32);
@@ -1095,13 +1134,15 @@ mod tests {
         assert_eq!(state.touch_stats().pending_count, 0);
 
         // 5. Logout while an activity update is pending:
-        sqlx::query("UPDATE sessions SET last_seen_at = unixepoch() - 300 WHERE token_hash = ?")
-            .bind(&token_hash)
-            .execute(&store.pool)
-            .await
-            .unwrap();
+        crate::database::query(
+            "UPDATE sessions SET last_seen_at = unixepoch() - 300 WHERE token_hash = ?",
+        )
+        .bind(&token_hash)
+        .execute(&store.pool)
+        .await
+        .unwrap();
         let mut lock_conn = store.pool.acquire().await.unwrap();
-        let lock_tx = lock_conn.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        let lock_tx = crate::database::begin_write(&mut lock_conn).await.unwrap();
         assert!(state.authenticate(&headers).await.is_ok());
         assert_eq!(state.touch_stats().pending_count, 1);
         lock_tx.rollback().await.unwrap();
@@ -1143,13 +1184,15 @@ mod tests {
             header::COOKIE,
             HeaderValue::from_str(&restart_cookie).unwrap(),
         )]);
-        sqlx::query("UPDATE sessions SET last_seen_at = unixepoch() - 1790 WHERE token_hash = ?")
-            .bind(&restart_hash)
-            .execute(&store.pool)
-            .await
-            .unwrap();
+        crate::database::query(
+            "UPDATE sessions SET last_seen_at = unixepoch() - 1790 WHERE token_hash = ?",
+        )
+        .bind(&restart_hash)
+        .execute(&store.pool)
+        .await
+        .unwrap();
         let persisted_before_restart: i64 =
-            sqlx::query_scalar("SELECT last_seen_at FROM sessions WHERE token_hash = ?")
+            crate::database::query_scalar("SELECT last_seen_at FROM sessions WHERE token_hash = ?")
                 .bind(&restart_hash)
                 .fetch_one(&store.pool)
                 .await
@@ -1157,7 +1200,7 @@ mod tests {
 
         // Hold write lock so touch stays in memory, then simulate abrupt restart before flush
         let mut lock_conn = store.pool.acquire().await.unwrap();
-        let lock_tx = lock_conn.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        let lock_tx = crate::database::begin_write(&mut lock_conn).await.unwrap();
         assert!(state.authenticate(&restart_headers).await.is_ok());
         assert_eq!(state.touch_stats().pending_count, 1);
         drop(state);
@@ -1170,7 +1213,7 @@ mod tests {
             .await
             .unwrap();
         let persisted_after_restart: i64 =
-            sqlx::query_scalar("SELECT last_seen_at FROM sessions WHERE token_hash = ?")
+            crate::database::query_scalar("SELECT last_seen_at FROM sessions WHERE token_hash = ?")
                 .bind(&restart_hash)
                 .fetch_one(&reopened_store.pool)
                 .await
@@ -1243,7 +1286,7 @@ mod tests {
             assert!(set_cookie.ends_with("; Secure"));
 
             // Reset login throttle before testing login on this HTTPS origin
-            sqlx::query("DELETE FROM login_throttle")
+            crate::database::query("DELETE FROM login_throttle")
                 .execute(&store.pool)
                 .await
                 .unwrap();

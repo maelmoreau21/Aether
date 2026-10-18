@@ -14,7 +14,6 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, jwk::JwkSet};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
-use sqlx::Connection;
 use std::{sync::Arc, time::Duration};
 use url::Url;
 use zeroize::Zeroizing;
@@ -278,9 +277,9 @@ impl Oidc {
             .try_acquire()
             .map_err(|_| deny(StatusCode::TOO_MANY_REQUESTS, "try_later"))?;
         let c = self.config()?;
-        let rescue: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users u JOIN local_credentials c ON c.user_id=u.id WHERE u.role='administrator' AND u.disabled_at IS NULL)")
+        let rescue: i64 = crate::database::query_scalar("SELECT CAST(EXISTS(SELECT 1 FROM users u JOIN local_credentials c ON c.user_id=u.id WHERE u.role='administrator' AND u.disabled_at IS NULL) AS INTEGER)")
             .fetch_one(&self.auth.store.pool).await.map_err(db)?;
-        if !rescue {
+        if rescue == 0 {
             return Err(deny(StatusCode::FORBIDDEN, "local_administrator_required"));
         }
         let d = self.discover().await?;
@@ -289,11 +288,11 @@ impl Oidc {
         let nonce = auth::random_token();
         let verifier = auth::random_token();
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-        sqlx::query("DELETE FROM oidc_flows WHERE expires_at<=unixepoch()")
+        crate::database::query("DELETE FROM oidc_flows WHERE expires_at<=unixepoch()")
             .execute(&self.auth.store.pool)
             .await
             .map_err(db)?;
-        let result = sqlx::query("INSERT INTO oidc_flows(state_hash,browser_hash,nonce,verifier,link_session_hash,expires_at) SELECT ?,?,?,?,?,unixepoch()+300 WHERE (SELECT count(*) FROM oidc_flows)<256")
+        let result = crate::database::query("INSERT INTO oidc_flows(state_hash,browser_hash,nonce,verifier,link_session_hash,expires_at) SELECT ?,?,?,?,?,unixepoch()+300 WHERE (SELECT count(*) FROM oidc_flows)<256")
             .bind(auth::hash(&state)).bind(auth::hash(&browser)).bind(&nonce).bind(&verifier).bind(link_session).execute(&self.auth.store.pool).await.map_err(db)?;
         if result.rows_affected() != 1 {
             return Err(deny(StatusCode::TOO_MANY_REQUESTS, "try_later"));
@@ -367,7 +366,7 @@ impl Oidc {
         }
         let browser = flow_token(headers).ok_or_else(invalid)?;
         // Atomic consume, bound to browser and deadline, even for provider errors.
-        let flow: Flow = sqlx::query_as("DELETE FROM oidc_flows WHERE state_hash=? AND browser_hash=? AND expires_at>unixepoch() RETURNING browser_hash,nonce,verifier,link_session_hash")
+        let flow: Flow = crate::database::query_as("DELETE FROM oidc_flows WHERE state_hash=? AND browser_hash=? AND expires_at>unixepoch() RETURNING browser_hash,nonce,verifier,link_session_hash")
             .bind(auth::hash(&q.state)).bind(auth::hash(browser)).fetch_optional(&self.auth.store.pool).await.map_err(db)?.ok_or_else(invalid)?;
         if flow.browser_hash != auth::hash(browser) || q.error.is_some() {
             return Err(invalid());
@@ -395,21 +394,22 @@ impl Oidc {
             return Err(deny(StatusCode::FORBIDDEN, "oidc_group_denied"));
         }
         let mut conn = self.auth.store.pool.acquire().await.map_err(db)?;
-        let mut tx = conn.begin_with("BEGIN IMMEDIATE").await.map_err(db)?;
+        let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
         let linked_user: Option<String> = if let Some(ref session_hash) = flow.link_session_hash {
-            Some(sqlx::query_scalar("SELECT s.user_id FROM sessions s JOIN users u ON u.id=s.user_id JOIN local_credentials c ON c.user_id=u.id WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-1800 AND u.disabled_at IS NULL")
+            Some(crate::database::query_scalar("SELECT s.user_id FROM sessions s JOIN users u ON u.id=s.user_id JOIN local_credentials c ON c.user_id=u.id WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-1800 AND u.disabled_at IS NULL")
                 .bind(session_hash).fetch_optional(&mut *tx).await.map_err(db)?
                 .ok_or_else(|| deny(StatusCode::UNAUTHORIZED,"link_session_expired"))?)
         } else {
             None
         };
-        let existing: Option<String> =
-            sqlx::query_scalar("SELECT user_id FROM oidc_identities WHERE issuer=? AND subject=?")
-                .bind(&c.issuer)
-                .bind(&claims.sub)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(db)?;
+        let existing: Option<String> = crate::database::query_scalar(
+            "SELECT user_id FROM oidc_identities WHERE issuer=? AND subject=?",
+        )
+        .bind(&c.issuer)
+        .bind(&claims.sub)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db)?;
         let user = match (existing, linked_user) {
             (Some(id), Some(link)) if id != link => {
                 return Err(deny(StatusCode::CONFLICT, "oidc_identity_already_linked"));
@@ -417,14 +417,14 @@ impl Oidc {
             (Some(id), _) => id,
             (None, target) => {
                 let id = target.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                sqlx::query(
+                crate::database::query(
                     "INSERT INTO users(id,role) VALUES (?,'user') ON CONFLICT(id) DO NOTHING",
                 )
                 .bind(&id)
                 .execute(&mut *tx)
                 .await
                 .map_err(db)?;
-                let result = sqlx::query(
+                let result = crate::database::query(
                     "INSERT INTO oidc_identities(issuer,subject,user_id) VALUES (?,?,?)",
                 )
                 .bind(&c.issuer)
@@ -439,13 +439,13 @@ impl Oidc {
             }
         };
         let raw = auth::random_token();
-        let created=sqlx::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+43200 FROM users WHERE id=? AND disabled_at IS NULL").bind(auth::hash(&raw)).bind(&user).execute(&mut *tx).await.map_err(db)?;
+        let created=crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+43200 FROM users WHERE id=? AND disabled_at IS NULL").bind(auth::hash(&raw)).bind(&user).execute(&mut *tx).await.map_err(db)?;
         if created.rows_affected() != 1 {
             return Err(deny(StatusCode::FORBIDDEN, "oidc_account_disabled"));
         }
         // Rotate the original local session after linking; local credential is preserved.
         if let Some(old) = flow.link_session_hash {
-            sqlx::query("DELETE FROM sessions WHERE token_hash=?")
+            crate::database::query("DELETE FROM sessions WHERE token_hash=?")
                 .bind(old)
                 .execute(&mut *tx)
                 .await
@@ -501,7 +501,7 @@ async fn link(
         return Err(invalid());
     }
     // Reuse local login's persistent global rate limit before expensive Argon2 work.
-    let allowed=sqlx::query_scalar::<_,i64>("INSERT INTO login_throttle(singleton,window_started,attempts) VALUES(1,unixepoch(),1) ON CONFLICT(singleton) DO UPDATE SET attempts=CASE WHEN window_started<=unixepoch()-60 THEN 1 ELSE attempts+1 END, window_started=CASE WHEN window_started<=unixepoch()-60 THEN unixepoch() ELSE window_started END RETURNING attempts").fetch_one(&s.auth.store.pool).await.map_err(db)?;
+    let allowed=crate::database::query_scalar::<_,i64>("INSERT INTO login_throttle(singleton,window_started,attempts) VALUES(1,unixepoch(),1) ON CONFLICT(singleton) DO UPDATE SET attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END, window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END RETURNING login_throttle.attempts").fetch_one(&s.auth.store.pool).await.map_err(db)?;
     if allowed > 10 {
         return Err(deny(StatusCode::TOO_MANY_REQUESTS, "try_later"));
     }
@@ -511,13 +511,14 @@ async fn link(
         .clone()
         .try_acquire_owned()
         .map_err(|_| deny(StatusCode::TOO_MANY_REQUESTS, "try_later"))?;
-    let encoded: String =
-        sqlx::query_scalar("SELECT password_hash FROM local_credentials WHERE user_id=?")
-            .bind(&identity.user.id)
-            .fetch_optional(&s.auth.store.pool)
-            .await
-            .map_err(db)?
-            .ok_or_else(invalid)?;
+    let encoded: String = crate::database::query_scalar(
+        "SELECT password_hash FROM local_credentials WHERE user_id=?",
+    )
+    .bind(&identity.user.id)
+    .fetch_optional(&s.auth.store.pool)
+    .await
+    .map_err(db)?
+    .ok_or_else(invalid)?;
     let password = Zeroizing::new(input.password);
     let ok = tokio::task::spawn_blocking(move || {
         let _permit = permit;
@@ -611,9 +612,28 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
         let temp = tempfile::tempdir().unwrap();
-        let store = crate::identity::IdentityStore::open(&temp.path().join("core.sqlite"))
-            .await
-            .unwrap();
+        // Test-only opt-in: the same provider/security cases run against PostgreSQL.
+        // Each fixture receives an isolated schema in the disposable test database.
+        let store = if let Ok(raw_url) = std::env::var("MEDIA_TEST_POSTGRES_URL") {
+            sqlx::any::install_default_drivers();
+            let admin = sqlx::AnyPool::connect(&raw_url).await.unwrap();
+            let schema = format!("oidc_{}", uuid::Uuid::new_v4().simple());
+            crate::database::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
+                .execute(&admin)
+                .await
+                .unwrap();
+            admin.close().await;
+            let mut url = url::Url::parse(&raw_url).unwrap();
+            url.query_pairs_mut()
+                .append_pair("options", &format!("-csearch_path={schema}"));
+            crate::identity::IdentityStore::open_postgres(url.as_str())
+                .await
+                .unwrap()
+        } else {
+            crate::identity::IdentityStore::open(&temp.path().join("core.sqlite"))
+                .await
+                .unwrap()
+        };
         store
             .bootstrap("rescue", Zeroizing::new(PASSWORD.into()))
             .await
@@ -697,7 +717,7 @@ mod tests {
         let now = jsonwebtoken::get_current_timestamp();
         *f.provider.claims.lock().unwrap() = serde_json::json!({"iss":f.provider.issuer,"sub":"subject-1","aud":"client","iat":now,"exp":now+300,"nonce":nonce,"groups":["media-users"],"email":"rescue@example.test","role":"administrator"});
         let verifier: String =
-            sqlx::query_scalar("SELECT verifier FROM oidc_flows WHERE state_hash=?")
+            crate::database::query_scalar("SELECT verifier FROM oidc_flows WHERE state_hash=?")
                 .bind(auth::hash(&pairs["state"]))
                 .fetch_one(&f.s.auth.store.pool)
                 .await
@@ -758,7 +778,7 @@ mod tests {
         .await;
         assert_eq!(me["user"]["role"], "user");
         let id = me["user"]["id"].as_str().unwrap();
-        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM users")
+        let count: i64 = crate::database::query_scalar("SELECT count(*) FROM users")
             .fetch_one(&f.s.auth.store.pool)
             .await
             .unwrap();
@@ -771,12 +791,12 @@ mod tests {
         let (cookie, state) = begin(&f).await;
         let r = finish(&f, &cookie, &state).await;
         assert_eq!(r.status(), StatusCode::OK);
-        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM users")
+        let count: i64 = crate::database::query_scalar("SELECT count(*) FROM users")
             .fetch_one(&f.s.auth.store.pool)
             .await
             .unwrap();
         assert_eq!(count, 2);
-        sqlx::query("UPDATE users SET role='administrator' WHERE id=?")
+        crate::database::query("UPDATE users SET role='administrator' WHERE id=?")
             .bind(id)
             .execute(&f.s.auth.store.pool)
             .await
@@ -794,7 +814,7 @@ mod tests {
         )
         .await;
         assert_eq!(now["user"]["role"], "administrator");
-        sqlx::query("UPDATE users SET role='user',disabled_at=unixepoch() WHERE id=?")
+        crate::database::query("UPDATE users SET role='user',disabled_at=unixepoch() WHERE id=?")
             .bind(id)
             .execute(&f.s.auth.store.pool)
             .await
@@ -950,7 +970,7 @@ mod tests {
             StatusCode::UNAUTHORIZED
         );
         let (cookie, state) = begin(&f).await;
-        sqlx::query("UPDATE oidc_flows SET expires_at=0")
+        crate::database::query("UPDATE oidc_flows SET expires_at=0")
             .execute(&f.s.auth.store.pool)
             .await
             .unwrap();
@@ -1064,12 +1084,12 @@ mod tests {
             finish(&f, &cookie, &state).await.status(),
             StatusCode::UNAUTHORIZED
         ); // nonce differs
-        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM users")
+        let count: i64 = crate::database::query_scalar("SELECT count(*) FROM users")
             .fetch_one(&f.s.auth.store.pool)
             .await
             .unwrap();
         assert_eq!(count, 1);
-        sqlx::query("UPDATE sessions SET last_seen_at=0")
+        crate::database::query("UPDATE sessions SET last_seen_at=0")
             .execute(&f.s.auth.store.pool)
             .await
             .unwrap();
@@ -1139,7 +1159,7 @@ mod tests {
         f.provider.claims.lock().unwrap()["sub"] =
             serde_json::json!("different-subject-same-email");
         assert_eq!(finish(&f, &cookie, &state).await.status(), StatusCode::OK);
-        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM users")
+        let count: i64 = crate::database::query_scalar("SELECT count(*) FROM users")
             .fetch_one(&f.s.auth.store.pool)
             .await
             .unwrap();

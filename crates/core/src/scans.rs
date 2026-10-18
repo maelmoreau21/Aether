@@ -92,11 +92,11 @@ pub async fn router(
     jobs: Arc<ScanJobs>,
 ) -> Result<Router, sqlx::Error> {
     // A stopped process cannot resume a probe. Keep its last inventory and report interruption.
-    sqlx::query("UPDATE scan_jobs SET status='error',errors_json='[\"Scan interrompu par un redémarrage\"]',errors_count=1,warnings_count=0 WHERE status IN ('queued','running')").execute(&auth.store.pool).await?;
-    sqlx::query("DELETE FROM scan_staging_files")
+    crate::database::query("UPDATE scan_jobs SET status='error',errors_json='[\"Scan interrompu par un redémarrage\"]',errors_count=1,warnings_count=0 WHERE status IN ('queued','running')").execute(&auth.store.pool).await?;
+    crate::database::query("DELETE FROM scan_staging_files")
         .execute(&auth.store.pool)
         .await?;
-    sqlx::query("DELETE FROM scan_staging_issues")
+    crate::database::query("DELETE FROM scan_staging_issues")
         .execute(&auth.store.pool)
         .await?;
     Ok(Router::new()
@@ -123,15 +123,17 @@ async fn status(
     headers: HeaderMap,
 ) -> Result<Json<Status>, StatusCode> {
     authorize(&state, &headers, false).await?;
-    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM libraries WHERE id=?)")
-        .bind(&id)
-        .fetch_one(&state.auth.store.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if !exists {
+    let exists: i64 = crate::database::query_scalar(
+        "SELECT CAST(EXISTS(SELECT 1 FROM libraries WHERE id=?) AS INTEGER)",
+    )
+    .bind(&id)
+    .fetch_one(&state.auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if exists == 0 {
         return Err(StatusCode::NOT_FOUND);
     }
-    let mut status: Status = sqlx::query_as(
+    let mut status: Status = crate::database::query_as(
         "SELECT status,discovered,probed,reused,errors_json,errors_count,warnings_count FROM scan_jobs WHERE library_id=?",
     )
     .bind(id)
@@ -161,7 +163,7 @@ async fn start(
     if state.jobs.cancel.load(Ordering::Acquire) {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
-    let library: Option<(String, String, String)> = sqlx::query_as(
+    let library: Option<(String, String, String)> = crate::database::query_as(
         "SELECT l.root, l.kind, l.node_id FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
     )
     .bind(&id)
@@ -175,7 +177,7 @@ async fn start(
             .await
             .map_err(|_| StatusCode::BAD_REQUEST)?;
     }
-    let result = sqlx::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES(?,'queued',0,0) ON CONFLICT(library_id) DO UPDATE SET status='queued',discovered=0,probed=0,reused=0,errors_json='[]',errors_count=0,warnings_count=0 WHERE scan_jobs.status NOT IN ('queued','running')").bind(&id).execute(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = crate::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES(?,'queued',0,0) ON CONFLICT(library_id) DO UPDATE SET status='queued',discovered=0,probed=0,reused=0,errors_json='[]',errors_count=0,warnings_count=0 WHERE scan_jobs.status NOT IN ('queued','running')").bind(&id).execute(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if result.rows_affected() == 0 {
         return Err(StatusCode::CONFLICT);
     }
@@ -190,10 +192,11 @@ async fn start(
         let scan_id_err = scan_id.clone();
         let store_err = store.clone();
         if node_id != "local" {
-            let _ = sqlx::query("UPDATE scan_jobs SET status='running' WHERE library_id=?")
-                .bind(&job_id)
-                .execute(&store.pool)
-                .await;
+            let _ =
+                crate::database::query("UPDATE scan_jobs SET status='running' WHERE library_id=?")
+                    .bind(&job_id)
+                    .execute(&store.pool)
+                    .await;
             if let Err(err_msg) = crate::nodes::dispatch_remote_scan(
                 &store,
                 &core_origin,
@@ -208,7 +211,7 @@ async fn start(
                 let _ = inventory::clean_staging(&store_err, &scan_id_err).await;
                 let errors_json = serde_json::to_string(&vec![format!("Scan échoué: {err_msg}")])
                     .unwrap_or_else(|_| "[\"Scan échoué\"]".into());
-                let _ = sqlx::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=?")
+                let _ = crate::database::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=?")
                     .bind(errors_json)
                     .bind(&job_id)
                     .execute(&store_err.pool)
@@ -219,7 +222,7 @@ async fn start(
         let result: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
             let _permit = slots.acquire().await?;
             if cancel.load(Ordering::Acquire) { return Err("Scan arrêté".into()); }
-            sqlx::query("UPDATE scan_jobs SET status='running' WHERE library_id=?").bind(&job_id).execute(&store.pool).await?;
+            crate::database::query("UPDATE scan_jobs SET status='running' WHERE library_id=?").bind(&job_id).execute(&store.pool).await?;
             let root = node::LocalNode.validate_root(std::path::Path::new(&root), &allowed_root).await?;
             let cache = inventory::load_scan_cache(&store, &job_id).await?;
             let images = inventory::load_image_cache(&store, &job_id).await?;
@@ -259,7 +262,7 @@ async fn start(
             // Purge staging tables to strictly bound SQLite storage growth
             let _ = inventory::clean_staging(&store, &scan_id).await;
 
-            sqlx::query("UPDATE scan_jobs SET status=?,discovered=?,probed=?,reused=?,errors_json=?,errors_count=?,warnings_count=? WHERE library_id=?")
+            crate::database::query("UPDATE scan_jobs SET status=?,discovered=?,probed=?,reused=?,errors_json=?,errors_count=?,warnings_count=? WHERE library_id=?")
                 .bind(if report.complete { "completed" } else { "error" })
                 .bind(report.discovered as i64)
                 .bind(report.probed as i64)
@@ -285,7 +288,7 @@ async fn start(
             let errors_json = serde_json::to_string(&vec![err_msg])
                 .unwrap_or_else(|_| "[\"Scan échoué ou interrompu\"]".into());
             let _ =
-                sqlx::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=?")
+                crate::database::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=?")
                     .bind(errors_json)
                     .bind(&job_id)
                     .execute(&store.pool)
@@ -332,7 +335,7 @@ mod tests {
             )
             .await
             .unwrap();
-        sqlx::query("INSERT INTO libraries VALUES('films','Films','films','local',?,1)")
+        crate::database::query("INSERT INTO libraries VALUES('films','Films','films','local',?,1)")
             .bind(root.to_str().unwrap())
             .execute(&store.pool)
             .await
@@ -417,7 +420,7 @@ mod tests {
                 .err(),
             Some(StatusCode::SERVICE_UNAVAILABLE)
         );
-        sqlx::query("UPDATE scan_jobs SET status='running'")
+        crate::database::query("UPDATE scan_jobs SET status='running'")
             .execute(&store.pool)
             .await
             .unwrap();
@@ -425,7 +428,7 @@ mod tests {
             .await
             .unwrap();
         let status: String =
-            sqlx::query_scalar("SELECT status FROM scan_jobs WHERE library_id='films'")
+            crate::database::query_scalar("SELECT status FROM scan_jobs WHERE library_id='films'")
                 .fetch_one(&store.pool)
                 .await
                 .unwrap();

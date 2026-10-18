@@ -32,8 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .unwrap_or_else(|_| "3000".into())
         .parse()?;
     let bind_addr = parse_bind_addr()?;
-    let db_path = media_poc::identity::configured_path(&root)?;
-    let database = media_poc::identity::IdentityStore::open(&db_path).await?;
+    let database = media_poc::identity::IdentityStore::open_configured(&root).await?;
     let inventory = Inventory::local(root).await?;
 
     let listener = tokio::net::TcpListener::bind(SocketAddrV4::new(bind_addr, port)).await?;

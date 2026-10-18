@@ -27,6 +27,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .unwrap_or_else(|| "tests/fixtures/generated".into());
 
+    match std::env::var("MEDIA_DB_ENGINE").as_deref() {
+        Ok("postgres") => {
+            if allow_replace {
+                return Err(
+                    "PostgreSQL backups reject --replace; choose a new archive path".into(),
+                );
+            }
+            let target = target_arg.ok_or("PostgreSQL backup requires an explicit TARGET_PATH")?;
+            let url = std::env::var("MEDIA_DB_URL").map_err(|_| "MEDIA_DB_URL is required")?;
+            let size = media_poc::postgres_backup::backup(&url, &target, Some(&media_root)).await?;
+            println!("PostgreSQL custom archive completed successfully ({size} bytes).");
+            return Ok(());
+        }
+        Ok("sqlite") | Err(std::env::VarError::NotPresent) => {}
+        _ => return Err("MEDIA_DB_ENGINE must be sqlite or postgres".into()),
+    }
+
     let db_path = media_poc::identity::configured_path(&media_root)?;
 
     let target_path = if let Some(path) = target_arg {

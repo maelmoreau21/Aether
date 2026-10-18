@@ -221,9 +221,30 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     let core_port = core_listener.local_addr().unwrap().port();
     let core_origin = format!("http://127.0.0.1:{core_port}");
 
-    let store = IdentityStore::open(&core_dir.join("core.sqlite"))
-        .await
-        .expect("open core sqlite");
+    let store = if let Ok(raw) = std::env::var("MEDIA_TEST_POSTGRES_URL") {
+        let raw = Zeroizing::new(raw);
+        let pool = sqlx::PgPool::connect(&raw)
+            .await
+            .expect("temporary PostgreSQL");
+        let schema = format!("distributed_{}", uuid::Uuid::new_v4().simple());
+        media_poc::database::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut url = url::Url::parse(&raw).unwrap();
+        url.query_pairs_mut()
+            .append_pair("options", &format!("-csearch_path={schema}"));
+        let url = Zeroizing::new(url.to_string());
+        pool.close().await;
+        // This suite must point at a disposable PostgreSQL test database.
+        IdentityStore::open_postgres(&url)
+            .await
+            .expect("open core postgres")
+    } else {
+        IdentityStore::open(&core_dir.join("core.sqlite"))
+            .await
+            .expect("open core sqlite")
+    };
     store
         .bootstrap(
             "admin-dist",
@@ -422,12 +443,12 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         (&alice_id, "alice", &alice_raw_token),
         (&bob_id, "bob", &bob_raw_token),
     ] {
-        sqlx::query("INSERT INTO users(id, role) VALUES (?, 'user')")
+        media_poc::database::query("INSERT INTO users(id, role) VALUES (?, 'user')")
             .bind(uid)
             .execute(store.pool())
             .await
             .unwrap();
-        sqlx::query(
+        media_poc::database::query(
             "INSERT INTO local_credentials(user_id, login, password_hash) VALUES (?, ?, 'unused-test-hash')",
         )
         .bind(uid)
@@ -436,7 +457,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .await
         .unwrap();
         let tok_hash = sha256_hex(raw_tok.as_bytes());
-        sqlx::query(
+        media_poc::database::query(
             "INSERT INTO sessions(token_hash, user_id, created_at, last_seen_at, expires_at) VALUES (?, ?, unixepoch(), unixepoch(), unixepoch() + 3600)",
         )
         .bind(tok_hash)
@@ -987,20 +1008,23 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     assert_eq!(new_tok_st, StatusCode::PARTIAL_CONTENT);
 
     // Direct requests also refresh activity through the same bounded P1 worker.
-    sqlx::query("UPDATE sessions SET last_seen_at=unixepoch()-120 WHERE token_hash=?")
-        .bind(sha256_hex(alice_raw_token.as_bytes()))
-        .execute(store.pool())
-        .await
-        .unwrap();
+    media_poc::database::query(
+        "UPDATE sessions SET last_seen_at=unixepoch()-120 WHERE token_hash=?",
+    )
+    .bind(sha256_hex(alice_raw_token.as_bytes()))
+    .execute(store.pool())
+    .await
+    .unwrap();
     let (status, _, _) = http_request(&node1_url, Method::HEAD, &new_pq, &[], vec![]).await;
     assert_eq!(status, StatusCode::OK);
     auth.flush_session_touches().await;
-    let age: i64 =
-        sqlx::query_scalar("SELECT unixepoch()-last_seen_at FROM sessions WHERE token_hash=?")
-            .bind(sha256_hex(alice_raw_token.as_bytes()))
-            .fetch_one(store.pool())
-            .await
-            .unwrap();
+    let age: i64 = media_poc::database::query_scalar(
+        "SELECT unixepoch()-last_seen_at FROM sessions WHERE token_hash=?",
+    )
+    .bind(sha256_hex(alice_raw_token.as_bytes()))
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
     assert!(age < 60);
 
     let current_record = media_poc::nodes::load_node(&store, &node1_id)
@@ -1035,21 +1059,21 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    sqlx::query("UPDATE users SET disabled_at=unixepoch() WHERE id=?")
+    media_poc::database::query("UPDATE users SET disabled_at=unixepoch() WHERE id=?")
         .bind(&alice_id)
         .execute(store.pool())
         .await
         .unwrap();
     let (status, _, _) = http_request(&node1_url, Method::GET, &new_pq, &[], vec![]).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    sqlx::query("UPDATE users SET disabled_at=NULL WHERE id=?")
+    media_poc::database::query("UPDATE users SET disabled_at=NULL WHERE id=?")
         .bind(&alice_id)
         .execute(store.pool())
         .await
         .unwrap();
 
     // Previously issued direct URLs obey live P1 permissions and session revocation.
-    sqlx::query("UPDATE libraries SET enabled=0 WHERE id=?")
+    media_poc::database::query("UPDATE libraries SET enabled=0 WHERE id=?")
         .bind(&lib1_id)
         .execute(store.pool())
         .await
@@ -1065,12 +1089,12 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
-    sqlx::query("UPDATE libraries SET enabled=1 WHERE id=?")
+    media_poc::database::query("UPDATE libraries SET enabled=1 WHERE id=?")
         .bind(&lib1_id)
         .execute(store.pool())
         .await
         .unwrap();
-    sqlx::query("DELETE FROM library_permissions WHERE library_id=? AND user_id=?")
+    media_poc::database::query("DELETE FROM library_permissions WHERE library_id=? AND user_id=?")
         .bind(&lib1_id)
         .bind(&alice_id)
         .execute(store.pool())
@@ -1078,20 +1102,20 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .unwrap();
     let (status, _, _) = http_request(&node1_url, Method::GET, &new_pq, &[], vec![]).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    sqlx::query("INSERT INTO library_permissions(library_id,user_id) VALUES (?,?)")
+    media_poc::database::query("INSERT INTO library_permissions(library_id,user_id) VALUES (?,?)")
         .bind(&lib1_id)
         .bind(&alice_id)
         .execute(store.pool())
         .await
         .unwrap();
-    sqlx::query("DELETE FROM sessions WHERE token_hash=?")
+    media_poc::database::query("DELETE FROM sessions WHERE token_hash=?")
         .bind(sha256_hex(alice_raw_token.as_bytes()))
         .execute(store.pool())
         .await
         .unwrap();
     let (status, _, _) = http_request(&node1_url, Method::HEAD, &new_pq, &[], vec![]).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    sqlx::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES (?,?,unixepoch(),unixepoch(),unixepoch()+3600)")
+    media_poc::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES (?,?,unixepoch(),unixepoch(),unixepoch()+3600)")
         .bind(sha256_hex(alice_raw_token.as_bytes())).bind(&alice_id).execute(store.pool()).await.unwrap();
 
     // Expired token rejection test on Node 1

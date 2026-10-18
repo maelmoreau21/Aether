@@ -1,14 +1,15 @@
 //! Local identity persistence. No HTTP routes, sessions or OIDC implementation.
 use argon2::{Algorithm, Argon2, Params, Version, password_hash::PasswordHasher};
-use sqlx::{
-    Connection, SqlitePool,
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
-};
+use sqlx::{AnyPool, any::AnyPoolOptions};
 use std::{path::Path, time::Duration};
 use zeroize::Zeroizing;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IdentityError {
+    #[error(
+        "invalid database configuration: use MEDIA_DB_ENGINE=sqlite (default) or postgres with MEDIA_DB_URL"
+    )]
+    Configuration,
     #[error("database operation failed")]
     Database(#[from] sqlx::Error),
     #[error("database migration failed")]
@@ -35,6 +36,23 @@ pub enum Role {
     Administrator,
     User,
 }
+impl sqlx::Type<sqlx::Any> for Role {
+    fn type_info() -> sqlx::any::AnyTypeInfo {
+        <String as sqlx::Type<sqlx::Any>>::type_info()
+    }
+    fn compatible(ty: &sqlx::any::AnyTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Any>>::compatible(ty)
+    }
+}
+impl<'r> sqlx::Decode<'r, sqlx::Any> for Role {
+    fn decode(value: sqlx::any::AnyValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
+        match <String as sqlx::Decode<sqlx::Any>>::decode(value)?.as_str() {
+            "administrator" => Ok(Self::Administrator),
+            "user" => Ok(Self::User),
+            _ => Err("invalid persisted role".into()),
+        }
+    }
+}
 impl Role {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -54,9 +72,49 @@ pub struct User {
 
 #[derive(Clone)]
 pub struct IdentityStore {
-    pub(crate) pool: SqlitePool,
+    pub(crate) pool: AnyPool,
 }
 impl IdentityStore {
+    /// Explicit external PostgreSQL connection; never transfers SQLite data.
+    pub async fn open_postgres(url: &str) -> Result<Self, IdentityError> {
+        sqlx::any::install_default_drivers();
+        let parsed = url::Url::parse(url).map_err(|_| IdentityError::Configuration)?;
+        if !matches!(parsed.scheme(), "postgres" | "postgresql") {
+            return Err(IdentityError::Configuration);
+        }
+        let pool = AnyPoolOptions::new()
+            .max_connections(4)
+            .connect(url)
+            .await?;
+        sqlx::migrate!("./migrations-postgres").run(&pool).await?;
+        let mut conn = pool.acquire().await?;
+        crate::inventory::backfill_title_sort_unicode(&mut conn).await?;
+        drop(conn);
+        Ok(Self { pool })
+    }
+
+    pub async fn open_configured(media_root: &Path) -> Result<Self, IdentityError> {
+        match std::env::var("MEDIA_DB_ENGINE")
+            .as_deref()
+            .unwrap_or("sqlite")
+        {
+            "sqlite" => {
+                if std::env::var("MEDIA_DB_URL").is_ok_and(|value| !value.is_empty()) {
+                    return Err(IdentityError::Configuration);
+                }
+                let path = configured_path(media_root).map_err(|_| IdentityError::Configuration)?;
+                Self::open(&path).await
+            }
+            "postgres" => {
+                let url = zeroize::Zeroizing::new(
+                    std::env::var("MEDIA_DB_URL").map_err(|_| IdentityError::Configuration)?,
+                );
+                Self::open_postgres(&url).await
+            }
+            _ => Err(IdentityError::Configuration),
+        }
+    }
+
     /// Operator-controlled local file, never supplied by an HTTP request.
     pub async fn open(path: &Path) -> Result<Self, IdentityError> {
         let busy_timeout = std::env::var("MEDIA_SQLITE_BUSY_TIMEOUT_SECS")
@@ -71,20 +129,39 @@ impl IdentityStore {
         path: &Path,
         busy_timeout: Duration,
     ) -> Result<Self, IdentityError> {
-        let options = SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(true)
-            .foreign_keys(true)
-            .journal_mode(SqliteJournalMode::Wal)
-            .busy_timeout(busy_timeout);
+        sqlx::any::install_default_drivers();
+        // An opaque URL preserves Windows drive letters, spaces and Unicode.
+        let filename = path.to_str().ok_or(IdentityError::Configuration)?;
+        let encoded: String = filename
+            .as_bytes()
+            .iter()
+            .map(|b| format!("%{b:02X}"))
+            .collect();
+        let database_url = format!("sqlite:{encoded}?mode=rwc");
         // Concurrent first opens may race on PRAGMA journal_mode=WAL before the
         // busy handler can wait. Retry only SQLite BUSY/LOCKED, never corruption,
         // permissions or schema errors. Each attempt retains its timeout.
         let mut retries = 0;
         let pool = loop {
-            match SqlitePoolOptions::new()
+            match AnyPoolOptions::new()
                 .max_connections(4)
-                .connect_with(options.clone())
+                .after_connect(move |conn, _| {
+                    Box::pin(async move {
+                        crate::database::query("PRAGMA foreign_keys = ON")
+                            .execute(&mut *conn)
+                            .await?;
+                        let timeout = sqlx::AssertSqlSafe(format!(
+                            "PRAGMA busy_timeout = {}",
+                            busy_timeout.as_millis()
+                        ));
+                        crate::database::query(timeout).execute(&mut *conn).await?;
+                        crate::database::query("PRAGMA journal_mode = WAL")
+                            .execute(&mut *conn)
+                            .await?;
+                        Ok(())
+                    })
+                })
+                .connect(&database_url)
                 .await
             {
                 Ok(pool) => break pool,
@@ -103,14 +180,14 @@ impl IdentityStore {
         };
         // SQLx SQLite migration lock is a no-op: serialize the entire check/apply sequence.
         let mut conn = pool.acquire().await?;
-        sqlx::query("PRAGMA foreign_keys = OFF")
+        crate::database::query("PRAGMA foreign_keys = OFF")
             .execute(&mut *conn)
             .await?;
-        let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx = crate::database::begin_write(&mut conn).await?;
         sqlx::migrate!("./migrations").run(&mut *tx).await?;
         crate::inventory::backfill_title_sort_unicode(&mut tx).await?;
         tx.commit().await?;
-        sqlx::query("PRAGMA foreign_keys = ON")
+        crate::database::query("PRAGMA foreign_keys = ON")
             .execute(&mut *conn)
             .await?;
         drop(conn);
@@ -118,19 +195,19 @@ impl IdentityStore {
     }
 
     pub async fn user(&self, id: &str) -> Result<Option<User>, IdentityError> {
-        Ok(
-            sqlx::query_as("SELECT id, role, created_at, disabled_at FROM users WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?,
+        Ok(crate::database::query_as(
+            "SELECT id, role, created_at, disabled_at FROM users WHERE id = ?",
         )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?)
     }
 
     pub async fn close(&self) {
         self.pool.close().await;
     }
 
-    pub fn pool(&self) -> &SqlitePool {
+    pub fn pool(&self) -> &AnyPool {
         &self.pool
     }
 
@@ -164,9 +241,9 @@ impl IdentityStore {
         .map_err(|_| IdentityError::Worker)??;
         let mut connection = self.pool.acquire().await?;
         // Acquire SQLite's writer lock BEFORE reading state, across connections/processes.
-        let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-        let closed: i64 = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM bootstrap_state) OR EXISTS(SELECT 1 FROM users)",
+        let mut tx = crate::database::begin_write(&mut connection).await?;
+        let closed: i64 = crate::database::query_scalar(
+            "SELECT CAST((EXISTS(SELECT 1 FROM bootstrap_state) OR EXISTS(SELECT 1 FROM users)) AS INTEGER)",
         )
         .fetch_one(&mut *tx)
         .await?;
@@ -174,12 +251,12 @@ impl IdentityStore {
             return Err(IdentityError::AlreadyInitialized);
         }
         let id = uuid::Uuid::new_v4().to_string();
-        sqlx::query("INSERT INTO users(id, role) VALUES (?, ?)")
+        crate::database::query("INSERT INTO users(id, role) VALUES (?, ?)")
             .bind(&id)
             .bind(Role::Administrator.as_str())
             .execute(&mut *tx)
             .await?;
-        sqlx::query(
+        crate::database::query(
             "INSERT INTO local_credentials(user_id, login, password_hash) VALUES (?, ?, ?)",
         )
         .bind(&id)
@@ -187,7 +264,7 @@ impl IdentityStore {
         .bind(hash)
         .execute(&mut *tx)
         .await?;
-        sqlx::query("INSERT INTO bootstrap_state(singleton) VALUES (1)")
+        crate::database::query("INSERT INTO bootstrap_state(singleton) VALUES (1)")
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;

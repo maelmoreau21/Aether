@@ -21,6 +21,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .unwrap_or_else(|| "tests/fixtures/generated".into());
 
+    match std::env::var("MEDIA_DB_ENGINE").as_deref() {
+        Ok("postgres") => {
+            if args.next().is_some() || backup_path == std::path::Path::new("--replace") {
+                return Err("PostgreSQL usage: media-restore BACKUP_PATH; target is MEDIA_DB_URL, must be empty; stop Core first".into());
+            }
+            let url = std::env::var("MEDIA_DB_URL").map_err(|_| "MEDIA_DB_URL is required")?;
+            media_poc::postgres_backup::restore(&url, &backup_path, Some(&media_root)).await?;
+            println!("PostgreSQL database restored successfully. Core can now be started.");
+            return Ok(());
+        }
+        Ok("sqlite") | Err(std::env::VarError::NotPresent) => {}
+        _ => return Err("MEDIA_DB_ENGINE must be sqlite or postgres".into()),
+    }
+
     let target_path = if let Some(target_arg) = args.next() {
         PathBuf::from(target_arg)
     } else {

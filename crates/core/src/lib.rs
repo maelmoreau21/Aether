@@ -30,8 +30,8 @@ use std::sync::Arc;
 use tower_http::set_header::SetResponseHeaderLayer;
 
 fn media_routes(inventory: node::Inventory) -> Router {
-    Router::new()
-        .route("/bench", get(|| async { Html(include_str!("bench.html")) }))
+    let is_bench = inventory.is_fixture_bench();
+    let mut router = Router::new()
         .route("/api/v1/demo/media", get(demo::media))
         .route("/api/v1/catalog", get(catalog::list))
         .route("/api/v1/catalog/{id}", get(catalog::detail))
@@ -74,8 +74,13 @@ fn media_routes(inventory: node::Inventory) -> Router {
         .route(
             "/api/v1/assets/{id}/content",
             get(node::content).head(node::content),
-        )
-        .with_state(Arc::new(inventory))
+        );
+    if is_bench {
+        router = router.route("/", get(|| async { Html(include_str!("bench.html")) }));
+    } else {
+        router = router.route("/bench", get(|| async { Html(include_str!("bench.html")) }));
+    }
+    router.with_state(Arc::new(inventory))
 }
 
 /// Production constructor: authentication precedes all media/resource handlers.
@@ -261,11 +266,7 @@ fn health_routes(mode: &'static str) -> Router {
 }
 
 fn public_routes(mode: &'static str) -> Router {
-    Router::new()
-        .route(
-            "/",
-            get(|| async { axum::response::Redirect::temporary("/app/") }),
-        )
+    let mut router = Router::new()
         .nest_service(
             "/app",
             tower_http::services::ServeDir::new(configured_web_dist())
@@ -280,7 +281,14 @@ fn public_routes(mode: &'static str) -> Router {
                     "version": media_contracts::version::current_version()
                 }))
             }),
-        )
+        );
+    if mode != "localhost-fixtures" {
+        router = router.route(
+            "/",
+            get(|| async { axum::response::Redirect::temporary("/app/") }),
+        );
+    }
+    router
 }
 
 #[cfg(feature = "fixture-bench")]

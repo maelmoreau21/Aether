@@ -2,138 +2,89 @@ name: Publication Docker GHCR
 
 on:
   workflow_call:
-  workflow_dispatch:
-    inputs:
-      target_branch:
-        description: "Branche cible (main ou develop)"
-        required: true
-        default: "develop"
-        type: choice
-        options:
-          - develop
-          - main
 
 permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: ghcr-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-and-publish:
-    name: Construire et publier les images Docker
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: aether
+            target: runtime
+          - image: aether-core
+            target: runtime-core
+          - image: aether-node
+            target: runtime-node
     steps:
-      - name: Récupérer le code source
-        uses: actions/checkout@v4
-
-      - name: Configurer Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Connexion au registre GitHub Container Registry (GHCR)
-        uses: docker/login-action@v3
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Déterminer les tags immuables et de branche
+      - uses: docker/metadata-action@v5
         id: meta
-        shell: bash
+        with:
+          images: ghcr.io/maelmoreau21/${{ matrix.image }}
+          tags: |
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,format=long
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+      - name: Vérifier le téléchargement et le rattachement de l'image publiée
+        env:
+          IMAGE: ghcr.io/maelmoreau21/${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          EXPECTED_SOURCE: ${{ github.server_url }}/${{ github.repository }}
+          EXPECTED_REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
-
-          # Déterminer la référence effective (workflow_call vs workflow_dispatch)
-          REF="${GITHUB_REF:-}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.target_branch }}" ]; then
-            REF="refs/heads/${{ github.event.inputs.target_branch }}"
-          fi
-
-          SHA="${GITHUB_SHA}"
-          SHORT_SHA="${SHA:0:7}"
-          TAG_SHA="sha-${SHORT_SHA}"
-          TAG_FULL_SHA="sha-${SHA}"
-
-          TAG_BRANCH=""
-          IS_LATEST="false"
-
-          if [ "$REF" = "refs/heads/main" ]; then
-            TAG_BRANCH="main"
-            IS_LATEST="true"
-          elif [ "$REF" = "refs/heads/develop" ]; then
-            TAG_BRANCH="develop"
-            IS_LATEST="false"
-          else
-            echo "::error::Branche non autorisée pour la publication: $REF"
-            exit 1
-          fi
-
-          AETHER_TAGS=$(cat <<EOF
-ghcr.io/maelmoreau21/aether:${TAG_BRANCH}
-ghcr.io/maelmoreau21/aether:${TAG_SHA}
-ghcr.io/maelmoreau21/aether:${TAG_FULL_SHA}
-EOF
-)
-
-          CORE_TAGS=$(cat <<EOF
-ghcr.io/maelmoreau21/aether-core:${TAG_BRANCH}
-ghcr.io/maelmoreau21/aether-core:${TAG_SHA}
-ghcr.io/maelmoreau21/aether-core:${TAG_FULL_SHA}
-EOF
-)
-
-          NODE_TAGS=$(cat <<EOF
-ghcr.io/maelmoreau21/aether-node:${TAG_BRANCH}
-ghcr.io/maelmoreau21/aether-node:${TAG_SHA}
-ghcr.io/maelmoreau21/aether-node:${TAG_FULL_SHA}
-EOF
-)
-
-          if [ "$IS_LATEST" = "true" ]; then
-            AETHER_TAGS="${AETHER_TAGS}"$'\n'"ghcr.io/maelmoreau21/aether:latest"
-            CORE_TAGS="${CORE_TAGS}"$'\n'"ghcr.io/maelmoreau21/aether-core:latest"
-            NODE_TAGS="${NODE_TAGS}"$'\n'"ghcr.io/maelmoreau21/aether-node:latest"
-          fi
-
-          {
-            echo "aether_tags<<EOF"
-            echo "$AETHER_TAGS"
-            echo "EOF"
-            echo "core_tags<<EOF"
-            echo "$CORE_TAGS"
-            echo "EOF"
-            echo "node_tags<<EOF"
-            echo "$NODE_TAGS"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Construire et publier ghcr.io/maelmoreau21/aether (Standalone)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: runtime
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.aether_tags }}
-          cache-from: type=gha,scope=aether
-          cache-to: type=gha,mode=max,scope=aether
-
-      - name: Construire et publier ghcr.io/maelmoreau21/aether-core (Core)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: runtime-core
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.core_tags }}
-          cache-from: type=gha,scope=aether
-          cache-to: type=gha,mode=max,scope=aether
-
-      - name: Construire et publier ghcr.io/maelmoreau21/aether-node (Node)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: runtime-node
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.node_tags }}
-          cache-from: type=gha,scope=aether
-          cache-to: type=gha,mode=max,scope=aether
+          ref="${IMAGE}@${DIGEST}"
+          docker pull "$ref"
+          test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$ref")" = "$EXPECTED_SOURCE"
+          test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")" = "$EXPECTED_REVISION"
+      - name: Vérifier le runtime Node optimisé
+        if: matrix.target == 'runtime-node'
+        env:
+          IMAGE: ghcr.io/maelmoreau21/${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          ref="${IMAGE}@${DIGEST}"
+          docker run --rm --entrypoint sh "$ref" -ec '
+            ffprobe -version >/dev/null
+            ! command -v ffmpeg
+            test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
+          '
+          test "$(docker inspect --format '{{.Size}}' "$ref")" -lt 200000000
+      - name: Vérifier l'association du package au dépôt sur GitHub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          repository=$(gh api "/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${PACKAGE}" --jq '.repository.full_name')
+          test "$repository" = "$GITHUB_REPOSITORY"

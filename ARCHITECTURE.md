@@ -1,3 +1,9 @@
+> CI/GHCR (18 octobre 2026) : validation YAML réparée localement, publication
+> réutilisable conditionnée à tous les contrôles et aux trois builds Docker.
+> JWT utilise AWS-LC ; aucun changement de schéma ni de modes de déploiement.
+> Validation distante/publication encore en attente d'autorisation explicite.
+> Contrat et limites : [CI/GHCR](docs/CI_GHCR.md). PostgreSQL 18 reste non implémenté.
+>
 > Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités
 > issuer/subject et sessions Core communes aux deux modes Docker.
 > Contrat, configuration et limites : [OIDC](docs/OIDC.md). Les exclusions OIDC

@@ -1,0 +1,393 @@
+{
+  "run": "p2qa-59ce823e86",
+  "success": true,
+  "transport": "HTTPS via test TLS terminator",
+  "docker_server": "29.8.2",
+  "image_bytes": {
+    "aether-node:p2-final-qa": 157703722,
+    "aether-core:p2-final-qa": 181143960,
+    "aether:p2-final-qa": 842377478
+  },
+  "image_ids": {
+    "aether-node:p2-final-qa": "sha256:1c660985902d947e8d299bd0b4668d3bd1b23ee72d8324a8758a4cb64155af67",
+    "aether-core:p2-final-qa": "sha256:dc8aed6445104f5a61feca52594cab5a309ce40eefad9104a624b65367b4c329",
+    "aether:p2-final-qa": "sha256:fcf7b9812e90a970de285fc77d7ad21d13c56746591845ecdf128205d986b409"
+  },
+  "checks": [
+    "login http://127.0.0.1:13000",
+    "Docker HTTPS hostname mismatch rejected",
+    "pair films",
+    "create films",
+    "pair series",
+    "create series",
+    "scan accepted (202)",
+    "scan without media errors",
+    "scan accepted (202)",
+    "scan without media errors",
+    "catalog available",
+    "film and episode indexed",
+    "descriptor available",
+    "full stream",
+    "stream matches original fixture hash",
+    "HEAD",
+    "Range exact bytes",
+    "invalid Range",
+    "request after cancellation",
+    "descriptor available",
+    "full stream",
+    "stream matches original fixture hash",
+    "HEAD",
+    "Range exact bytes",
+    "invalid Range",
+    "request after cancellation",
+    "descriptor available",
+    "full stream",
+    "stream matches original fixture hash",
+    "HEAD",
+    "Range exact bytes",
+    "invalid Range",
+    "request after cancellation",
+    "descriptor available",
+    "full stream",
+    "stream matches original fixture hash",
+    "HEAD",
+    "Range exact bytes",
+    "invalid Range",
+    "request after cancellation",
+    "login http://127.0.0.1:13000",
+    "catalog available",
+    "distributed restart persists IDs",
+    "stopped Node disconnected",
+    "Node reconnect",
+    "secret rotation",
+    "old token after rotation",
+    "rotated identity persists across Node restart",
+    "Core outage fails closed for direct playback",
+    "direct playback recovers after Core restart",
+    "logout",
+    "old token after logout",
+    "login http://127.0.0.1:13000",
+    "offline Node revoke",
+    "offline revoke denies old token after restart",
+    "login http://127.0.0.1:13001",
+    "standalone create films",
+    "standalone create series",
+    "scan accepted (202)",
+    "scan without media errors",
+    "scan accepted (202)",
+    "scan without media errors",
+    "catalog available",
+    "descriptor available",
+    "full stream",
+    "stream matches original fixture hash",
+    "HEAD",
+    "Range exact bytes",
+    "invalid Range",
+    "request after cancellation",
+    "descriptor available",
+    "full stream",
+    "stream matches original fixture hash",
+    "HEAD",
+    "Range exact bytes",
+    "invalid Range",
+    "request after cancellation",
+    "login http://127.0.0.1:13001",
+    "catalog available",
+    "standalone restart persists IDs",
+    "all media unchanged",
+    "container logs contain no credentials or playback query",
+    "container logs contain no credentials or playback query",
+    "container logs contain no credentials or playback query",
+    "container logs contain no credentials or playback query",
+    "container logs contain no credentials or playback query"
+  ],
+  "phases": {
+    "distributed_scan": {
+      "seconds": 1.024411999998847,
+      "containers": {
+        "core": {
+          "memory_current": 15953920,
+          "memory_peak_since_start": 73891840,
+          "cpu_usec": 941702,
+          "rx_bytes": 214520,
+          "tx_bytes": 46106,
+          "sampled_peak_bytes": 12763136,
+          "cpu_seconds": 0.213781,
+          "cpu_one_core_percent": 20.868654408601287,
+          "rx_delta": 198525,
+          "tx_delta": 35258,
+          "rx_bytes_per_second": 193794.09846841256,
+          "tx_bytes_per_second": 34417.7928412003
+        },
+        "films": {
+          "memory_current": 7004160,
+          "memory_peak_since_start": 10985472,
+          "cpu_usec": 330153,
+          "rx_bytes": 17740,
+          "tx_bytes": 92239,
+          "sampled_peak_bytes": 4403200,
+          "cpu_seconds": 0.257407,
+          "cpu_one_core_percent": 25.127292534672545,
+          "rx_delta": 15087,
+          "tx_delta": 90926,
+          "rx_bytes_per_second": 14727.472930829568,
+          "tx_bytes_per_second": 88759.21016163647
+        },
+        "series": {
+          "memory_current": 6844416,
+          "memory_peak_since_start": 10760192,
+          "cpu_usec": 252982,
+          "rx_bytes": 18286,
+          "tx_bytes": 97955,
+          "sampled_peak_bytes": 2871296,
+          "cpu_seconds": 0.196475,
+          "cpu_one_core_percent": 19.179295049279112,
+          "rx_delta": 16066,
+          "tx_delta": 96683,
+          "rx_bytes_per_second": 15683.14311040683,
+          "tx_bytes_per_second": 94379.01937902799
+        },
+        "tls": {
+          "memory_current": 14589952,
+          "memory_peak_since_start": 18829312,
+          "cpu_usec": 417892,
+          "rx_bytes": 218716,
+          "tx_bytes": 229481,
+          "sampled_peak_bytes": 13877248,
+          "cpu_seconds": 0.058191,
+          "cpu_one_core_percent": 5.680429358506684,
+          "rx_delta": 211174,
+          "tx_delta": 219220,
+          "rx_bytes_per_second": 206141.66956286892,
+          "tx_bytes_per_second": 213995.931324747
+        }
+      }
+    },
+    "distributed_direct": {
+      "seconds": 5.894077800010564,
+      "containers": {
+        "core": {
+          "memory_current": 16486400,
+          "memory_peak_since_start": 73891840,
+          "cpu_usec": 1317121,
+          "rx_bytes": 342323,
+          "tx_bytes": 217793,
+          "sampled_peak_bytes": 16826368,
+          "cpu_seconds": 0.293819,
+          "cpu_one_core_percent": 4.984986794702191,
+          "rx_delta": 116248,
+          "tx_delta": 119668,
+          "rx_bytes_per_second": 19722.847906722855,
+          "tx_bytes_per_second": 20303.091350403538
+        },
+        "films": {
+          "memory_current": 10395648,
+          "memory_peak_since_start": 14897152,
+          "cpu_usec": 2461984,
+          "rx_bytes": 226640,
+          "tx_bytes": 9205143,
+          "sampled_peak_bytes": 10977280,
+          "cpu_seconds": 2.084365,
+          "cpu_one_core_percent": 35.363717119517226,
+          "rx_delta": 208900,
+          "tx_delta": 9112904,
+          "rx_bytes_per_second": 35442.35537570027,
+          "tx_bytes_per_second": 1546111.929500433
+        },
+        "series": {
+          "memory_current": 8257536,
+          "memory_peak_since_start": 12824576,
+          "cpu_usec": 2409878,
+          "rx_bytes": 225734,
+          "tx_bytes": 8939409,
+          "sampled_peak_bytes": 8888320,
+          "cpu_seconds": 2.138758,
+          "cpu_one_core_percent": 36.286558687707966,
+          "rx_delta": 207448,
+          "tx_delta": 8841454,
+          "rx_bytes_per_second": 35196.00640487443,
+          "tx_bytes_per_second": 1500057.226931099
+        },
+        "tls": {
+          "memory_current": 13860864,
+          "memory_peak_since_start": 18829312,
+          "cpu_usec": 848570,
+          "rx_bytes": 486240,
+          "tx_bytes": 612121,
+          "sampled_peak_bytes": 14471168,
+          "cpu_seconds": 0.410814,
+          "cpu_one_core_percent": 6.969945323749608,
+          "rx_delta": 267524,
+          "tx_delta": 382640,
+          "rx_bytes_per_second": 45388.61024188051,
+          "tx_bytes_per_second": 64919.40096198157
+        }
+      }
+    },
+    "distributed_relay": {
+      "seconds": 5.936734899994917,
+      "containers": {
+        "core": {
+          "memory_current": 19509248,
+          "memory_peak_since_start": 73891840,
+          "cpu_usec": 5660034,
+          "rx_bytes": 16623504,
+          "tx_bytes": 16368573,
+          "sampled_peak_bytes": 19374080,
+          "cpu_seconds": 4.324905,
+          "cpu_one_core_percent": 72.84989262369965,
+          "rx_delta": 16281181,
+          "tx_delta": 16150780,
+          "rx_bytes_per_second": 2742447.030945232,
+          "tx_bytes_per_second": 2720481.9268608117
+        },
+        "films": {
+          "memory_current": 10780672,
+          "memory_peak_since_start": 14897152,
+          "cpu_usec": 2751868,
+          "rx_bytes": 285919,
+          "tx_bytes": 17228977,
+          "sampled_peak_bytes": 10706944,
+          "cpu_seconds": 0.273101,
+          "cpu_one_core_percent": 4.600188564933796,
+          "rx_delta": 59279,
+          "tx_delta": 8023834,
+          "rx_bytes_per_second": 9985.118250783062,
+          "tx_bytes_per_second": 1351556.7285995656
+        },
+        "series": {
+          "memory_current": 8798208,
+          "memory_peak_since_start": 12824576,
+          "cpu_usec": 2775583,
+          "rx_bytes": 284059,
+          "tx_bytes": 16883672,
+          "sampled_peak_bytes": 9265152,
+          "cpu_seconds": 0.3465,
+          "cpu_one_core_percent": 5.836541564291453,
+          "rx_delta": 58325,
+          "tx_delta": 7944263,
+          "rx_bytes_per_second": 9824.423859662309,
+          "tx_bytes_per_second": 1338153.569903686
+        },
+        "tls": {
+          "memory_current": 14237696,
+          "memory_peak_since_start": 18829312,
+          "cpu_usec": 1367635,
+          "rx_bytes": 16633521,
+          "tx_bytes": 16881812,
+          "sampled_peak_bytes": 14598144,
+          "cpu_seconds": 0.499835,
+          "cpu_one_core_percent": 8.419358593903661,
+          "rx_delta": 16147281,
+          "tx_delta": 16269691,
+          "rx_bytes_per_second": 2719892.5456506107,
+          "tx_bytes_per_second": 2740511.6236559474
+        }
+      }
+    },
+    "standalone_scan": {
+      "seconds": 3.948375899984967,
+      "containers": {
+        "standalone": {
+          "memory_current": 83648512,
+          "memory_peak_since_start": 97660928,
+          "cpu_usec": 3897538,
+          "rx_bytes": 34263,
+          "tx_bytes": 35992,
+          "sampled_peak_bytes": 94216192,
+          "cpu_seconds": 3.391793,
+          "cpu_one_core_percent": 85.90349768908563,
+          "rx_delta": 31046,
+          "tx_delta": 32654,
+          "rx_bytes_per_second": 7862.979814084622,
+          "tx_bytes_per_second": 8270.235870937295
+        }
+      }
+    },
+    "standalone_stream": {
+      "seconds": 5.201482500007842,
+      "containers": {
+        "standalone": {
+          "memory_current": 84774912,
+          "memory_peak_since_start": 97660928,
+          "cpu_usec": 5262222,
+          "rx_bytes": 542376,
+          "tx_bytes": 81158695,
+          "sampled_peak_bytes": 85778432,
+          "cpu_seconds": 1.270992,
+          "cpu_one_core_percent": 24.435187468151316,
+          "rx_delta": 496558,
+          "tx_delta": 81074692,
+          "rx_bytes_per_second": 95464.70645614041,
+          "tx_bytes_per_second": 15586843.174013903
+        }
+      }
+    }
+  },
+  "scans": [
+    {
+      "seconds": 0.5566834000055678,
+      "discovered": 24,
+      "probed": 24,
+      "reused": 0
+    },
+    {
+      "seconds": 0.4460988000209909,
+      "discovered": 24,
+      "probed": 24,
+      "reused": 0
+    },
+    {
+      "seconds": 2.1069614999869373,
+      "discovered": 24,
+      "probed": 24,
+      "reused": 0
+    },
+    {
+      "seconds": 1.8196825000050012,
+      "discovered": 24,
+      "probed": 24,
+      "reused": 0
+    }
+  ],
+  "api_ttfb_ms": [
+    9.590899979230016,
+    12.3639999947045,
+    6.74280000384897,
+    4.905000008875504
+  ],
+  "stream_ttfb_ms": [
+    78.17210000939667,
+    81.25679998192936,
+    137.87789997877553,
+    58.201000007102266,
+    20.0372000108473,
+    4.63589999708347
+  ],
+  "read_load": [
+    {
+      "mode": "direct",
+      "seconds": 5.131180099997437,
+      "requests": 68,
+      "payload_bytes": 16857948,
+      "ttfb_p50_ms": 63.2661999843549,
+      "ttfb_p95_ms": 112.33809997793287
+    },
+    {
+      "mode": "relay",
+      "seconds": 5.112170500011416,
+      "requests": 60,
+      "payload_bytes": 14874660,
+      "ttfb_p50_ms": 74.14969999808818,
+      "ttfb_p95_ms": 117.90470001869835
+    },
+    {
+      "mode": "relay",
+      "seconds": 5.008207800012315,
+      "requests": 324,
+      "payload_bytes": 79921728,
+      "ttfb_p50_ms": 5.8327000006102026,
+      "ttfb_p95_ms": 29.054600017843768
+    }
+  ]
+}

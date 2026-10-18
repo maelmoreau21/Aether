@@ -26,7 +26,7 @@ const fs = require('node:fs');
         await page.locator('.media-card').first().click();
         const play = kind === 'series'
           ? page.getByRole('button', { name: /^Lire / }).first()
-          : page.locator('button').filter({ hasText: /Lecture|Lire/ }).first();
+          : page.getByRole('button', { name: 'Lancer le film', exact: true });
         const playbackStart = performance.now();
         await play.click();
         await page.waitForFunction(() => (document.querySelector('video')?.currentTime ?? 0) > .1, null, { timeout: 30000 });

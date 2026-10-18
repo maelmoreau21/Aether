@@ -1,3 +1,8 @@
+> Images et mises à jour : [CI/GHCR](CI_GHCR.md) décrit les tags, contrôles,
+> commandes d'installation et retour arrière. Les images distantes ne sont pas
+> encore confirmées. Pour les deux modes Docker existants, consulter
+> [le guide Docker](DEPLOYMENT_DOCKER.md) ; le texte prototype ci-dessous est historique.
+
 # Exécution du prototype
 
 Ce jalon s'exécute localement via les commandes du README. Aucun Compose,

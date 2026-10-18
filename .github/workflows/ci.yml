@@ -9,14 +9,19 @@ on:
     branches:
       - main
       - develop
+  workflow_dispatch:
 
 permissions:
   contents: read
-  # Requis pour rustsec/audit-check si publication d'annotations
-  checks: write
-  issues: write
 
 jobs:
+  workflows:
+    name: Validation des workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker://rhysd/actionlint:1.7.12
+
   # =========================================================================
   # 1. Vérifications et tests Rust (Core & Node)
   # =========================================================================
@@ -71,10 +76,12 @@ jobs:
         run: cargo fmt --check
 
       - name: Analyse statique stricte (cargo clippy)
-        run: cargo clippy --locked --all-features --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
 
       - name: Exécuter les tests (cargo test)
-        run: cargo test --locked --all-features
+        # Les fixtures 1k/10k partagent CPU et disque du runner ; chaque test de
+        # concurrence conserve ses propres tâches concurrentes et ses assertions.
+        run: cargo test --locked --workspace --all-features -- --test-threads=1
 
   # =========================================================================
   # 2. Audit de sécurité des dépendances Rust
@@ -86,10 +93,13 @@ jobs:
       - name: Récupérer le code source
         uses: actions/checkout@v4
 
+      - name: Installer la toolchain Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Installer cargo-audit
+        run: cargo install cargo-audit --locked
       - name: Lancer l'audit de sécurité RustSec
-        uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo audit
 
   # =========================================================================
   # 3. Vérifications et tests Frontend (SvelteKit)
@@ -198,30 +208,25 @@ jobs:
         run: cargo test --locked --test browser_series -- --ignored --nocapture
 
       - name: Vérifier la génération fraîche des rapports et captures navigateur
+        shell: python
         run: |
-          node -e '
-            const fs = require("node:fs");
-            const assert = require("node:assert/strict");
-            for (const file of [
+          import json
+          from pathlib import Path
+          for file in [
               "docs/evidence/2026-10-16/scanner/report.json",
               "docs/evidence/2026-10-16/scanner/report-restart.json",
               "docs/evidence/2026-10-17/series/report.json"
-            ]) {
-              assert.equal(fs.existsSync(file), true, `Missing fresh report: ${file}`);
-              const report = JSON.parse(fs.readFileSync(file, "utf8"));
-              assert.equal(report.passed, true, `Report did not pass: ${file}`);
-            }
-            for (const img of [
+          ]:
+              assert json.loads(Path(file).read_text())["passed"] is True, file
+          for img in [
               "docs/evidence/2026-10-16/scanner/scan.png",
               "docs/evidence/2026-10-16/scanner/playback.png",
               "docs/evidence/2026-10-16/scanner/playback-restart.png",
               "docs/evidence/2026-10-17/series/admin-scan.png",
               "docs/evidence/2026-10-17/series/series-detail.png",
               "docs/evidence/2026-10-17/series/immersive-playback.png"
-            ]) {
-              assert.equal(fs.existsSync(img), true, `Missing fresh screenshot: ${img}`);
-            }
-          '
+          ]:
+              assert Path(img).is_file(), img
 
       - name: Archiver les rapports et captures navigateur
         if: always()
@@ -233,18 +238,48 @@ jobs:
             docs/evidence/2026-10-16/scanner/
             docs/evidence/2026-10-17/series/
 
+  images:
+    name: Image Docker (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [runtime, runtime-core, runtime-node]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: media-ci:${{ matrix.target }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+      - name: Vérifier le runtime Node optimisé avant publication
+        if: matrix.target == 'runtime-node'
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh media-ci:runtime-node -ec '
+            ffprobe -version >/dev/null
+            ! command -v ffmpeg
+            test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
+          '
+          test "$(docker inspect --format '{{.Size}}' media-ci:runtime-node)" -lt 200000000
+
   # =========================================================================
   # 5. Publication des images Docker sur GHCR
-  # Uniquement sur push (main ou develop) après réussite complète des tests.
+  # Push ou lancement manuel de CI (main/develop), après tous les contrôles.
   # Les pull requests non fiables ne publient jamais d'image.
   # =========================================================================
   publish:
     name: Publication Docker GHCR
-    needs: [rust, security-audit, frontend, browser]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    needs: [workflows, rust, security-audit, frontend, browser, images]
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     permissions:
       contents: read
       packages: write
     uses: ./.github/workflows/publish.yml
-    secrets: inherit
 

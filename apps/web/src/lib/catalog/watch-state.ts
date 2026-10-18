@@ -23,9 +23,20 @@ export function loadHistory(force = false): Promise<void> {
 }
 export async function markWatched(workId: string, watched: boolean) {
   const generation = getSessionGeneration();
-  const progress = await readProgress(workId);
-  if (generation !== getSessionGeneration()) return;
-  if (!progress.duration) throw new Error('Durée inconnue : le média doit être analysé avant de le marquer.');
-  await writeProgress({ ...progress, watched, position: watched ? progress.duration : 0 });
-  if (generation === getSessionGeneration()) await loadHistory(true);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const progress = await readProgress(workId);
+    if (generation !== getSessionGeneration()) return;
+    if (!progress.duration) throw new Error('Durée inconnue : le média doit être analysé avant de le marquer.');
+    try {
+      await writeProgress({ ...progress, watched, position: watched ? progress.duration : 0 });
+      if (generation === getSessionGeneration()) await loadHistory(true);
+      return;
+    } catch (err) {
+      if (attempt < 2 && err instanceof Error && err.message.includes('La progression a changé')) {
+        await new Promise(r => setTimeout(r, 100));
+        continue;
+      }
+      throw err;
+    }
+  }
 }

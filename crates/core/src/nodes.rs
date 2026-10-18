@@ -12,7 +12,7 @@ use axum::{
     body::Body,
     extract::{DefaultBodyLimit, Path as AxumPath, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header},
-    response::Response,
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use bytes::Bytes;
@@ -23,22 +23,42 @@ use media_contracts::{
     ids::{AssetId, ImageId, LibraryId, NodeId, ScanId},
     inventory::BatchAck,
     protocol::{
-        DEFAULT_PLAYBACK_TOKEN_TTL_SECS, HDR_BODY_SHA256, HDR_KEY_ID, HDR_NODE_ID, HDR_NONCE,
-        HDR_PROTOCOL, HDR_RES_NONCE, HDR_RES_SIGNATURE, HDR_RES_TIMESTAMP, HDR_SIGNATURE,
-        HDR_TIMESTAMP, HeartbeatPayload, LibraryInventorySync, NodeInventoryAssetEntry,
+        DEFAULT_PLAYBACK_TOKEN_TTL_SECS, EnrollNodeRequest, EnrollNodeResponse, HDR_BODY_SHA256,
+        HDR_KEY_ID, HDR_NODE_ID, HDR_NONCE, HDR_PROTOCOL, HDR_RES_NONCE, HDR_RES_SIGNATURE,
+        HDR_RES_TIMESTAMP, HDR_SIGNATURE, HDR_TIMESTAMP, HeartbeatPayload, LibraryInventorySync,
+        MAX_CLOCK_SKEW_SECS, NodeCommandEnvelope, NodeCommandType, NodeInventoryAssetEntry,
         NodeInventoryImageEntry, NodeStatus, PROTOCOL_VERSION, PairNodeRequest, PairNodeResponse,
         PlaybackTokenClaims, RemoteBatchSubmission, RemoteScanCompleteResponse,
         RemoteScanCompletion, RemoteScanFailure, RemoteScanStartRequest, ReplayWindow,
-        RotateSecretRequest, RotateSecretResponse, compute_pairing_mutual_proof,
-        compute_pairing_proof, compute_rotation_mutual_proof, constant_time_eq,
-        derive_paired_secret, issue_playback_token, random_nonce_hex, random_secret_hex,
+        RotateSecretRequest, RotateSecretResponse, StreamRelayRequest,
+        compute_enrollment_mutual_proof, compute_pairing_mutual_proof, compute_pairing_proof,
+        compute_rotation_mutual_proof, constant_time_eq, derive_paired_secret,
+        generate_enrollment_token, issue_playback_token, random_nonce_hex, random_secret_hex,
         sha256_hex, sign_internal_request, sign_internal_response, unix_now,
         verify_internal_request, verify_internal_response,
     },
 };
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::{io, sync::Arc};
+use std::{
+    collections::HashMap,
+    io,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
+use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
+
+pub struct RelayStreamResponse {
+    pub status: StatusCode,
+    pub headers: HeaderMap,
+    pub body: Body,
+}
+
+pub static ACTIVE_CHANNELS: LazyLock<RwLock<HashMap<String, mpsc::Sender<NodeCommandEnvelope>>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+pub static PENDING_STREAMS: LazyLock<Mutex<HashMap<String, oneshot::Sender<RelayStreamResponse>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Clone)]
 pub struct NodesState {
@@ -55,6 +75,7 @@ pub struct MediaNodeRecord {
     pub public_url: Option<String>,
     pub status: String,
     pub version: Option<String>,
+    pub connection_mode: String,
     pub key_id: String,
     pub shared_secret: String,
     pub roots_json: String,
@@ -95,6 +116,7 @@ pub struct AdminNodeView {
     pub public_url: Option<String>,
     pub status: String,
     pub version: Option<String>,
+    pub connection_mode: String,
     pub key_id: String,
     pub roots: Vec<String>,
     pub paired_at: i64,
@@ -114,6 +136,13 @@ pub struct PairNodeAdminInput {
     pub pairing_token: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateEnrollmentTokenInput {
+    #[serde(default)]
+    pub expires_in_secs: Option<i64>,
+}
+
 pub fn router(auth: AuthState, replay_window: Arc<ReplayWindow>) -> Router {
     let state = NodesState {
         auth,
@@ -121,6 +150,15 @@ pub fn router(auth: AuthState, replay_window: Arc<ReplayWindow>) -> Router {
     };
     Router::new()
         .route("/api/v1/admin/nodes", get(list_nodes))
+        .route(
+            "/api/v1/admin/nodes/enrollment-tokens",
+            post(generate_enrollment_token_admin).get(list_enrollment_tokens_admin),
+        )
+        .route(
+            "/api/v1/admin/nodes/enrollment-tokens/{id}",
+            axum::routing::delete(delete_enrollment_token_admin),
+        )
+        .route("/api/v1/nodes/enroll", post(enroll_node))
         .route("/api/v1/admin/nodes/pair", post(pair_node_admin))
         .route("/api/v1/admin/nodes/{id}/reconnect", post(reconnect_node))
         .route(
@@ -129,6 +167,11 @@ pub fn router(auth: AuthState, replay_window: Arc<ReplayWindow>) -> Router {
         )
         .route("/api/v1/admin/nodes/{id}/revoke", post(revoke_node_admin))
         .route("/internal/v1/core/heartbeat", post(receive_node_heartbeat))
+        .route("/internal/v1/core/nodes/{id}/channel", post(node_channel))
+        .route(
+            "/internal/v1/core/nodes/{id}/stream-uplink/{stream_id}",
+            post(receive_stream_uplink),
+        )
         .route(
             "/internal/v1/core/playback/authorize",
             post(authorize_playback),
@@ -188,7 +231,7 @@ pub async fn load_node(
     node_id: &str,
 ) -> Result<Option<MediaNodeRecord>, sqlx::Error> {
     crate::database::query_as::<_, MediaNodeRecord>(
-        "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version FROM media_nodes WHERE id=?",
+        "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version, connection_mode FROM media_nodes WHERE id=?",
     )
     .bind(node_id)
     .fetch_optional(&store.pool)
@@ -197,7 +240,7 @@ pub async fn load_node(
 
 pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView>, sqlx::Error> {
     let records: Vec<MediaNodeRecord> = crate::database::query_as(
-        "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version FROM media_nodes ORDER BY CASE WHEN id='local' THEN 0 ELSE 1 END, name, id",
+        "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version, connection_mode FROM media_nodes ORDER BY CASE WHEN id='local' THEN 0 ELSE 1 END, name, id",
     )
     .fetch_all(&store.pool)
     .await?;
@@ -248,6 +291,20 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
             rec.version.clone()
         };
 
+        let conn_mode = if rec.id == "local" {
+            "local".to_owned()
+        } else if rec.public_url.is_some() {
+            "direct".to_owned()
+        } else if rec.connection_mode.is_empty() {
+            if rec.base_url.is_some() {
+                "inbound".to_owned()
+            } else {
+                "outbound".to_owned()
+            }
+        } else {
+            rec.connection_mode.clone()
+        };
+
         views.push(AdminNodeView {
             id: rec.id,
             name: rec.name,
@@ -256,6 +313,7 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
             public_url: rec.public_url,
             status: rec.status,
             version: node_version,
+            connection_mode: conn_mode,
             key_id: rec.key_id,
             roots,
             paired_at: rec.paired_at,
@@ -403,14 +461,15 @@ async fn pair_node_admin(
     let now = unix_now();
 
     crate::database::query(
-        "INSERT INTO media_nodes(id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version)
-         VALUES(?, ?, 'remote', ?, ?, 'connected', ?, ?, ?, ?, ?, NULL, ?)
+        "INSERT INTO media_nodes(id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version, connection_mode)
+         VALUES(?, ?, 'remote', ?, ?, 'connected', ?, ?, ?, ?, ?, NULL, ?, 'inbound')
          ON CONFLICT(id) DO UPDATE SET
             name=excluded.name,
             kind='remote',
             base_url=excluded.base_url,
             public_url=excluded.public_url,
             status='connected',
+            connection_mode='inbound',
             key_id=excluded.key_id,
             shared_secret=excluded.shared_secret,
             roots_json=excluded.roots_json,
@@ -445,6 +504,370 @@ async fn pair_node_admin(
     Ok((StatusCode::CREATED, Json(view)))
 }
 
+async fn generate_enrollment_token_admin(
+    State(state): State<NodesState>,
+    headers: HeaderMap,
+    input: Option<Json<CreateEnrollmentTokenInput>>,
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+    require_admin(&state, &headers, true).await?;
+    let (token_plaintext, token_hash) = generate_enrollment_token();
+    let token_id = format!("tok-{}", uuid::Uuid::new_v4().simple());
+    let now = unix_now();
+    let ttl = input
+        .and_then(|Json(i)| i.expires_in_secs)
+        .unwrap_or(3600)
+        .clamp(60, 86400 * 7);
+    let expires_at = now + ttl;
+
+    crate::database::query(
+        "INSERT INTO node_enrollment_tokens (id, token_hash, created_at, expires_at, used_at, used_by_node_id)
+         VALUES (?, ?, ?, ?, NULL, NULL)",
+    )
+    .bind(&token_id)
+    .bind(&token_hash)
+    .bind(now)
+    .bind(expires_at)
+    .execute(&state.auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let core_url = std::env::var("MEDIA_CORE_INTERNAL_URL")
+        .or_else(|_| std::env::var("MEDIA_CORE_URL"))
+        .unwrap_or_else(|_| state.auth.origin().to_owned());
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "tokenId": token_id,
+            "token": token_plaintext,
+            "createdAt": now,
+            "expiresAt": expires_at,
+            "coreUrl": core_url
+        })),
+    ))
+}
+
+async fn list_enrollment_tokens_admin(
+    State(state): State<NodesState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    require_admin(&state, &headers, false).await?;
+    let now = unix_now();
+    let rows = crate::database::query(
+        "SELECT id, created_at, expires_at, used_at, used_by_node_id FROM node_enrollment_tokens WHERE expires_at > ? AND used_at IS NULL ORDER BY created_at DESC",
+    )
+    .bind(now)
+    .fetch_all(&state.auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let tokens: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.get::<String, _>("id"),
+                "createdAt": r.get::<i64, _>("created_at"),
+                "expiresAt": r.get::<i64, _>("expires_at"),
+                "used": r.get::<Option<i64>, _>("used_at").is_some(),
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({ "tokens": tokens })))
+}
+
+async fn delete_enrollment_token_admin(
+    State(state): State<NodesState>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    require_admin(&state, &headers, true).await?;
+    crate::database::query("DELETE FROM node_enrollment_tokens WHERE id=?")
+        .bind(&id)
+        .execute(&state.auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn enroll_node(
+    State(state): State<NodesState>,
+    Json(req): Json<EnrollNodeRequest>,
+) -> Result<(StatusCode, Json<EnrollNodeResponse>), (StatusCode, Json<serde_json::Value>)> {
+    if req.protocol_version != PROTOCOL_VERSION {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "unsupported_protocol_version" })),
+        ));
+    }
+    let now = unix_now();
+    if (now - req.timestamp).abs() > MAX_CLOCK_SKEW_SECS {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "timestamp_out_of_range" })),
+        ));
+    }
+    let token = req.enrollment_token.trim();
+    if !token.starts_with("mnet_") || token.len() < 40 || token.len() > 128 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "invalid_enrollment_token_format" })),
+        ));
+    }
+
+    let token_hash = sha256_hex(token.as_bytes());
+    let requested_id = req
+        .node_id
+        .as_ref()
+        .map(|n| n.as_str().trim().to_owned())
+        .filter(|s| !s.is_empty() && s != "local" && s.len() <= 128);
+    let final_node_id =
+        requested_id.unwrap_or_else(|| format!("node-{}", uuid::Uuid::new_v4().simple()));
+
+    // Atomically claim the single-use token:
+    let update_res = crate::database::query(
+        "UPDATE node_enrollment_tokens SET used_at=?, used_by_node_id=? WHERE token_hash=? AND used_at IS NULL AND expires_at > ?",
+    )
+    .bind(now)
+    .bind(&final_node_id)
+    .bind(&token_hash)
+    .bind(now)
+    .execute(&state.auth.store.pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "database_error" }))))?;
+
+    if update_res.rows_affected() == 0 {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "invalid_or_expired_enrollment_token" })),
+        ));
+    }
+
+    let core_secret_half = random_secret_hex();
+    let key_id = format!("key-{}", uuid::Uuid::new_v4().simple());
+    let derived_secret = derive_paired_secret(token, &core_secret_half, &req.node_secret_half);
+
+    let explicit_public_url = match req
+        .public_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(u) => validate_public_url(u).ok(),
+        None => None,
+    };
+    let connection_mode = if explicit_public_url.is_some() {
+        "direct"
+    } else {
+        "outbound"
+    };
+
+    let name = req.name.trim();
+    let final_name = if name.is_empty() {
+        final_node_id.clone()
+    } else {
+        name.to_owned()
+    };
+    let roots_json = serde_json::to_string(&req.roots).unwrap_or_else(|_| "[]".to_owned());
+
+    crate::database::query(
+        "INSERT INTO media_nodes (id, name, kind, base_url, public_url, status, version, connection_mode, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at)
+         VALUES (?, ?, 'remote', NULL, ?, 'connected', ?, ?, ?, ?, ?, ?, ?, NULL)
+         ON CONFLICT(id) DO UPDATE SET
+            name=excluded.name,
+            kind='remote',
+            public_url=excluded.public_url,
+            status='connected',
+            version=excluded.version,
+            connection_mode=excluded.connection_mode,
+            key_id=excluded.key_id,
+            shared_secret=excluded.shared_secret,
+            roots_json=excluded.roots_json,
+            last_seen_at=excluded.last_seen_at,
+            revoked_at=NULL",
+    )
+    .bind(&final_node_id)
+    .bind(&final_name)
+    .bind(&explicit_public_url)
+    .bind(req.version.as_deref())
+    .bind(connection_mode)
+    .bind(&key_id)
+    .bind(&derived_secret)
+    .bind(&roots_json)
+    .bind(now)
+    .bind(now)
+    .execute(&state.auth.store.pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "database_error" }))))?;
+
+    let res_nonce = random_nonce_hex();
+    let mutual_proof = compute_enrollment_mutual_proof(
+        &derived_secret,
+        &req.nonce,
+        &final_node_id,
+        &key_id,
+        &core_secret_half,
+        now,
+        &res_nonce,
+    );
+
+    let core_origin = std::env::var("MEDIA_CORE_INTERNAL_URL")
+        .or_else(|_| std::env::var("MEDIA_CORE_URL"))
+        .unwrap_or_else(|_| state.auth.origin().to_owned());
+
+    Ok((
+        StatusCode::CREATED,
+        Json(EnrollNodeResponse {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+            version: Some(media_contracts::version::current_version().to_string()),
+            node_id: NodeId::new(&final_node_id),
+            key_id,
+            core_secret_half,
+            core_origin,
+            timestamp: now,
+            nonce: res_nonce,
+            mutual_proof,
+        }),
+    ))
+}
+
+async fn node_channel(
+    State(state): State<NodesState>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    let pq = uri
+        .path_and_query()
+        .map(|v| v.as_str())
+        .unwrap_or("/internal/v1/core/nodes/channel");
+    let (rec, nonce) =
+        match verify_signed_node_call(&state, &headers, &Method::POST, pq, &body).await {
+            Ok(v) => v,
+            Err(res) => return res,
+        };
+    if rec.status == NodeStatus::Revoked.as_str() {
+        return error(StatusCode::FORBIDDEN, "node_revoked");
+    }
+
+    let hb: Result<HeartbeatPayload, _> = serde_json::from_slice(&body);
+    let now = unix_now();
+    if let Ok(ref h) = hb {
+        let roots_json = serde_json::to_string(&h.roots).unwrap_or_else(|_| rec.roots_json.clone());
+        let _ = crate::database::query(
+            "UPDATE media_nodes SET status='connected', last_seen_at=?, roots_json=?, version=COALESCE(?, version) WHERE id=? AND status != 'revoked'",
+        )
+        .bind(now)
+        .bind(roots_json)
+        .bind(h.version.as_deref())
+        .bind(&id)
+        .execute(&state.auth.store.pool)
+        .await;
+    } else {
+        let _ = crate::database::query(
+            "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",
+        )
+        .bind(now)
+        .bind(&id)
+        .execute(&state.auth.store.pool)
+        .await;
+    }
+
+    let (tx, mut rx) = mpsc::channel::<NodeCommandEnvelope>(8);
+    ACTIVE_CHANNELS.write().await.insert(id.clone(), tx);
+
+    let command = match tokio::time::timeout(Duration::from_secs(25), rx.recv()).await {
+        Ok(Some(cmd)) => cmd,
+        _ => NodeCommandEnvelope {
+            command_id: "ping".to_owned(),
+            command_type: NodeCommandType::Ping,
+            payload: serde_json::Value::Null,
+        },
+    };
+
+    signed_core_response(&rec, &nonce, StatusCode::OK, &command)
+}
+
+async fn receive_stream_uplink(
+    State(state): State<NodesState>,
+    AxumPath((id, stream_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Body,
+) -> Response {
+    let pq = uri
+        .path_and_query()
+        .map(|v| v.as_str())
+        .unwrap_or("/internal/v1/core/nodes/stream-uplink");
+    let rec = match load_node(&state.auth.store, &id).await {
+        Ok(Some(r)) => r,
+        _ => return error(StatusCode::UNAUTHORIZED, "unknown_node"),
+    };
+    if rec.status == NodeStatus::Revoked.as_str() {
+        return error(StatusCode::FORBIDDEN, "node_revoked");
+    }
+
+    let digest = media_node::transport::stream_metadata_digest(&headers);
+    let req_ts = headers
+        .get(HDR_TIMESTAMP)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let req_nonce = headers
+        .get(HDR_NONCE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let req_sig = headers
+        .get(HDR_SIGNATURE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let req_kid = headers
+        .get(HDR_KEY_ID)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if req_kid != rec.key_id {
+        return error(StatusCode::UNAUTHORIZED, "invalid_key_id");
+    }
+
+    if verify_internal_request(
+        &rec.shared_secret,
+        "node-to-core",
+        Method::POST.as_str(),
+        pq,
+        &id,
+        &rec.key_id,
+        req_ts,
+        req_nonce,
+        &digest,
+        req_sig,
+        unix_now(),
+    )
+    .is_err()
+    {
+        return error(StatusCode::UNAUTHORIZED, "invalid_signature");
+    }
+
+    let stream_status = headers
+        .get("x-media-stream-status")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u16>().ok())
+        .and_then(|s| StatusCode::from_u16(s).ok())
+        .unwrap_or(StatusCode::OK);
+
+    let sender = PENDING_STREAMS.lock().await.remove(&stream_id);
+    if let Some(tx) = sender {
+        let _ = tx.send(RelayStreamResponse {
+            status: stream_status,
+            headers: headers.clone(),
+            body,
+        });
+        StatusCode::OK.into_response()
+    } else {
+        error(StatusCode::NOT_FOUND, "stream_not_found")
+    }
+}
+
 async fn reconnect_node(
     State(state): State<NodesState>,
     AxumPath(id): AxumPath<String>,
@@ -461,7 +884,48 @@ async fn reconnect_node(
     if rec.status == NodeStatus::Revoked.as_str() {
         return Err(StatusCode::CONFLICT);
     }
-    let base_url = rec.base_url.as_deref().ok_or(StatusCode::BAD_REQUEST)?;
+    let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(&id);
+    if is_channel_active {
+        let now = unix_now();
+        crate::database::query(
+            "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=?",
+        )
+        .bind(now)
+        .bind(&id)
+        .execute(&state.auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        let _ = sync_all_libraries_for_node(&state.auth.store, &id).await;
+
+        let views = load_admin_nodes(&state.auth.store)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return views
+            .into_iter()
+            .find(|n| n.id == id)
+            .map(Json)
+            .ok_or(StatusCode::NOT_FOUND);
+    }
+
+    let Some(base_url) = rec.base_url.as_deref() else {
+        crate::database::query(
+            "UPDATE media_nodes SET status='disconnected' WHERE id=? AND status != 'revoked'",
+        )
+        .bind(&id)
+        .execute(&state.auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        let views = load_admin_nodes(&state.auth.store)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return views
+            .into_iter()
+            .find(|n| n.id == id)
+            .map(Json)
+            .ok_or(StatusCode::NOT_FOUND);
+    };
 
     let hb_res = media_node::server::send_signed_http_request(
         base_url,
@@ -546,7 +1010,6 @@ async fn rotate_node_secret(
     if rec.status == NodeStatus::Revoked.as_str() {
         return Err(StatusCode::CONFLICT);
     }
-    let base_url = rec.base_url.as_deref().ok_or(StatusCode::BAD_REQUEST)?;
 
     let new_key_id = format!("key-{}", uuid::Uuid::new_v4().simple());
     let new_secret = random_secret_hex();
@@ -558,9 +1021,51 @@ async fn rotate_node_secret(
         timestamp: unix_now(),
         nonce: random_nonce_hex(),
     };
-    let body = serde_json::to_vec(&req_payload).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Note: Node signs its response with new_secret/new_key_id, so we use a custom call or accept the response proof
+    let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(&id);
+    if is_channel_active {
+        let cmd = NodeCommandEnvelope {
+            command_id: format!("rotate-{new_key_id}"),
+            command_type: NodeCommandType::RotateSecret,
+            payload: serde_json::to_value(&req_payload).unwrap_or_default(),
+        };
+        let sent = {
+            let channels = ACTIVE_CHANNELS.read().await;
+            if let Some(sender) = channels.get(&id) {
+                sender.send(cmd).await.is_ok()
+            } else {
+                false
+            }
+        };
+        if sent {
+            let now = unix_now();
+            crate::database::query(
+                "UPDATE media_nodes SET key_id=?, shared_secret=?, status='connected', last_seen_at=? WHERE id=?",
+            )
+            .bind(&new_key_id)
+            .bind(&new_secret)
+            .bind(now)
+            .bind(&id)
+            .execute(&state.auth.store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            let views = load_admin_nodes(&state.auth.store)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            return views
+                .into_iter()
+                .find(|n| n.id == id)
+                .map(Json)
+                .ok_or(StatusCode::NOT_FOUND);
+        }
+    }
+
+    let Some(base_url) = rec.base_url.as_deref() else {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    };
+
+    let body = serde_json::to_vec(&req_payload).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let res_bytes = send_signed_rotation_request(
         base_url,
         &NodeId::new(&rec.id),
@@ -615,7 +1120,21 @@ async fn revoke_node_admin(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    // Best-effort notify Node of revocation
+    // Best-effort notify Node of revocation via channel or HTTP
+    {
+        let channels = ACTIVE_CHANNELS.read().await;
+        if let Some(sender) = channels.get(&id) {
+            let _ = sender
+                .send(NodeCommandEnvelope {
+                    command_id: format!("revoke-{}", unix_now()),
+                    command_type: NodeCommandType::Revoke,
+                    payload: serde_json::Value::Null,
+                })
+                .await;
+        }
+    }
+    ACTIVE_CHANNELS.write().await.remove(&id);
+
     if let Some(base_url) = rec.base_url.as_deref() {
         let _ = media_node::server::send_signed_http_request(
             base_url,
@@ -1119,9 +1638,10 @@ pub async fn sync_all_libraries_for_node(
     if rec.status != NodeStatus::Connected.as_str() {
         return Ok(());
     }
-    let Some(base_url) = rec.base_url.as_deref() else {
+    let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(node_id);
+    if !is_channel_active && rec.base_url.is_none() {
         return Ok(());
-    };
+    }
     let lib_ids: Vec<String> =
         crate::database::query_scalar("SELECT id FROM libraries WHERE node_id=? AND enabled=1")
             .bind(node_id)
@@ -1135,19 +1655,35 @@ pub async fn sync_all_libraries_for_node(
         if sync.assets.is_empty() && sync.images.is_empty() {
             continue;
         }
-        let body = serde_json::to_vec(&sync).map_err(io::Error::other)?;
-        let _ = media_node::server::send_signed_http_request(
-            base_url,
-            "core-to-node",
-            Method::POST,
-            "/internal/v1/node/inventory-sync",
-            &NodeId::new(&rec.id),
-            &rec.key_id,
-            &rec.shared_secret,
-            None,
-            Bytes::from(body),
-        )
-        .await;
+
+        if is_channel_active {
+            let cmd = NodeCommandEnvelope {
+                command_id: format!("sync-{}", sync.library_id),
+                command_type: NodeCommandType::SyncInventory,
+                payload: serde_json::to_value(&sync).unwrap_or_default(),
+            };
+            let channels = ACTIVE_CHANNELS.read().await;
+            if let Some(sender) = channels.get(node_id) {
+                let _ = sender.send(cmd).await;
+                continue;
+            }
+        }
+
+        if let Some(base_url) = rec.base_url.as_deref() {
+            let body = serde_json::to_vec(&sync).map_err(io::Error::other)?;
+            let _ = media_node::server::send_signed_http_request(
+                base_url,
+                "core-to-node",
+                Method::POST,
+                "/internal/v1/node/inventory-sync",
+                &NodeId::new(&rec.id),
+                &rec.key_id,
+                &rec.shared_secret,
+                None,
+                Bytes::from(body),
+            )
+            .await;
+        }
     }
     Ok(())
 }
@@ -1168,10 +1704,6 @@ pub async fn dispatch_remote_scan(
     if rec.status == NodeStatus::Revoked.as_str() {
         return Err("Ce Node est révoqué".to_owned());
     }
-    let base_url = rec
-        .base_url
-        .as_deref()
-        .ok_or_else(|| "URL interne du Node manquante".to_owned())?;
 
     let core_internal_url = std::env::var("MEDIA_CORE_INTERNAL_URL")
         .ok()
@@ -1208,6 +1740,37 @@ pub async fn dispatch_remote_scan(
         batch_size: 32,
         cached_files,
         cached_images,
+    };
+
+    let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(node_id);
+    if is_channel_active {
+        let cmd = NodeCommandEnvelope {
+            command_id: format!("scan-{scan_id}"),
+            command_type: NodeCommandType::Scan,
+            payload: serde_json::to_value(&start_req).unwrap_or_default(),
+        };
+        let sent = {
+            let channels = ACTIVE_CHANNELS.read().await;
+            if let Some(sender) = channels.get(node_id) {
+                sender.send(cmd).await.is_ok()
+            } else {
+                false
+            }
+        };
+        if sent {
+            let _ = crate::database::query(
+                "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",
+            )
+            .bind(unix_now())
+            .bind(node_id)
+            .execute(&store.pool)
+            .await;
+            return Ok(());
+        }
+    }
+
+    let Some(base_url) = rec.base_url.as_deref() else {
+        return Err("Media Node hors ligne (en attente de connexion sortante)".to_owned());
     };
 
     let body = serde_json::to_vec(&start_req).map_err(|e| e.to_string())?;
@@ -1297,6 +1860,87 @@ pub async fn relay_from_remote_node(
     if rec.status == NodeStatus::Revoked.as_str() {
         return error(StatusCode::SERVICE_UNAVAILABLE, "node_revoked");
     }
+
+    let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(&rec.id);
+    if is_channel_active || rec.base_url.is_none() {
+        let is_image = path_and_query.contains("/image");
+        let target_kind = if is_image { "image" } else { "asset" };
+        let parts: Vec<&str> = path_and_query
+            .split('?')
+            .next()
+            .unwrap_or("")
+            .split('/')
+            .collect();
+        let target_id = parts
+            .iter()
+            .position(|&p| p == "assets")
+            .and_then(|idx| parts.get(idx + 1))
+            .copied()
+            .unwrap_or("");
+
+        let range = request
+            .headers()
+            .get(header::RANGE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let stream_id = format!("str-{}", uuid::Uuid::new_v4().simple());
+        let (tx, rx) = tokio::sync::oneshot::channel::<RelayStreamResponse>();
+        PENDING_STREAMS.lock().await.insert(stream_id.clone(), tx);
+
+        let cmd = NodeCommandEnvelope {
+            command_id: format!("cmd-{}", uuid::Uuid::new_v4().simple()),
+            command_type: NodeCommandType::StreamRelay,
+            payload: serde_json::to_value(StreamRelayRequest {
+                stream_id: stream_id.clone(),
+                target_kind: target_kind.to_owned(),
+                target_id: target_id.to_owned(),
+                range,
+            })
+            .unwrap_or_default(),
+        };
+
+        let sent = {
+            let channels = ACTIVE_CHANNELS.read().await;
+            if let Some(sender) = channels.get(&rec.id) {
+                sender.send(cmd).await.is_ok()
+            } else {
+                false
+            }
+        };
+
+        if sent {
+            match tokio::time::timeout(Duration::from_secs(15), rx).await {
+                Ok(Ok(stream_res)) => {
+                    let mut out = Response::new(stream_res.body);
+                    *out.status_mut() = stream_res.status;
+                    for header_name in [
+                        header::CONTENT_TYPE,
+                        header::CONTENT_LENGTH,
+                        header::CONTENT_RANGE,
+                        header::ACCEPT_RANGES,
+                        header::CACHE_CONTROL,
+                    ] {
+                        if let Some(val) = stream_res.headers.get(&header_name) {
+                            out.headers_mut().insert(header_name, val.clone());
+                        }
+                    }
+                    return out;
+                }
+                _ => {
+                    PENDING_STREAMS.lock().await.remove(&stream_id);
+                    if rec.base_url.is_none() {
+                        return error(StatusCode::GATEWAY_TIMEOUT, "stream_timeout");
+                    }
+                }
+            }
+        } else {
+            PENDING_STREAMS.lock().await.remove(&stream_id);
+            if rec.base_url.is_none() {
+                return error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
+            }
+        }
+    }
+
     let Some(base_url) = rec.base_url.as_deref() else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
     };

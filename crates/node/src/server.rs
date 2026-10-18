@@ -28,16 +28,17 @@ use media_contracts::{
     inventory::{CachedFile, InventoryBatch, ReadGrant, ReadTarget, ScanFailed, ScanFinished},
     media::LocalImage,
     protocol::{
-        HDR_BODY_SHA256, HDR_KEY_ID, HDR_NODE_ID, HDR_NONCE, HDR_PROTOCOL, HDR_RES_NONCE,
-        HDR_RES_SIGNATURE, HDR_RES_TIMESTAMP, HDR_SIGNATURE, HDR_TIMESTAMP, HeartbeatPayload,
-        LibraryInventorySync, NodeInventoryAssetEntry, NodeInventoryImageEntry, PROTOCOL_VERSION,
+        EnrollNodeRequest, EnrollNodeResponse, HDR_BODY_SHA256, HDR_KEY_ID, HDR_NODE_ID, HDR_NONCE,
+        HDR_PROTOCOL, HDR_RES_NONCE, HDR_RES_SIGNATURE, HDR_RES_TIMESTAMP, HDR_SIGNATURE,
+        HDR_TIMESTAMP, HeartbeatPayload, LibraryInventorySync, NodeCommandEnvelope,
+        NodeCommandType, NodeInventoryAssetEntry, NodeInventoryImageEntry, PROTOCOL_VERSION,
         PairNodeRequest, PairNodeResponse, RemoteBatchSubmission, RemoteScanCompleteResponse,
         RemoteScanCompletion, RemoteScanFailure, RemoteScanStartRequest, ReplayWindow,
-        RotateSecretRequest, RotateSecretResponse, compute_pairing_mutual_proof,
-        compute_pairing_proof, compute_rotation_mutual_proof, constant_time_eq,
-        derive_paired_secret, random_nonce_hex, random_secret_hex, sha256_hex,
-        sign_internal_request, sign_internal_response, unix_now, verify_internal_request,
-        verify_internal_response, verify_playback_token,
+        RotateSecretRequest, RotateSecretResponse, StreamRelayRequest,
+        compute_enrollment_mutual_proof, compute_pairing_mutual_proof, compute_pairing_proof,
+        compute_rotation_mutual_proof, constant_time_eq, derive_paired_secret, random_nonce_hex,
+        random_secret_hex, sha256_hex, sign_internal_request, sign_internal_response, unix_now,
+        verify_internal_request, verify_internal_response, verify_playback_token,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -50,6 +51,7 @@ use std::{
         Arc, Mutex, RwLock,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 
 #[derive(Debug, Clone)]
@@ -1556,4 +1558,475 @@ fn sign_stream_response(
         }
     }
     response
+}
+
+/// Self-enroll this Node with Core using a single-use enrollment token.
+pub async fn enroll_with_core(
+    core_url: &str,
+    enrollment_token: &str,
+    state: &NodeServerState,
+) -> io::Result<()> {
+    let _identity_change = state.identity_changes.lock().await;
+    let (node_id, name, public_url) = {
+        let guard = state.identity.read().unwrap_or_else(|e| e.into_inner());
+        (
+            guard.node_id.clone(),
+            guard.name.clone(),
+            guard.public_url.clone(),
+        )
+    };
+
+    let node_secret_half = random_secret_hex();
+    let nonce = random_nonce_hex();
+    let now = unix_now();
+    let roots: Vec<String> = state
+        .config
+        .allowed_roots
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+
+    let req = EnrollNodeRequest {
+        protocol_version: PROTOCOL_VERSION.to_owned(),
+        version: Some(media_contracts::version::current_version().to_string()),
+        enrollment_token: enrollment_token.to_owned(),
+        node_id: Some(node_id.clone()),
+        name,
+        roots,
+        public_url,
+        node_secret_half: node_secret_half.clone(),
+        timestamp: now,
+        nonce: nonce.clone(),
+    };
+
+    let body =
+        serde_json::to_vec(&req).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    let parsed =
+        url::Url::parse(core_url).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing host"))?
+        .to_owned();
+    let host_header = if let Some(p) = parsed.port() {
+        format!("{host}:{p}")
+    } else {
+        host.clone()
+    };
+
+    let stream = crate::transport::connect(core_url).await?;
+    let io = TokioIo::new(stream);
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
+        .await
+        .map_err(io::Error::other)?;
+    tokio::spawn(async move {
+        let _ = conn.await;
+    });
+
+    let http_req = hyper::Request::builder()
+        .method(Method::POST)
+        .uri("/api/v1/nodes/enroll")
+        .header(header::HOST, host_header)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(HDR_PROTOCOL, PROTOCOL_VERSION)
+        .body(Full::new(Bytes::from(body)))
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+    let res = crate::transport::send_request(&mut sender, http_req).await?;
+    let status = res.status();
+    let bytes = crate::transport::json_body(res.into_body()).await?;
+
+    if !status.is_success() {
+        return Err(io::Error::other(format!(
+            "Enrollment failed with HTTP {}: {}",
+            status.as_u16(),
+            String::from_utf8_lossy(&bytes)
+        )));
+    }
+
+    let enroll_res: EnrollNodeResponse = serde_json::from_slice(&bytes)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    let derived_secret = derive_paired_secret(
+        enrollment_token,
+        &enroll_res.core_secret_half,
+        &node_secret_half,
+    );
+
+    let expected_mutual = compute_enrollment_mutual_proof(
+        &derived_secret,
+        &nonce,
+        enroll_res.node_id.as_str(),
+        &enroll_res.key_id,
+        &enroll_res.core_secret_half,
+        enroll_res.timestamp,
+        &enroll_res.nonce,
+    );
+
+    if !constant_time_eq(
+        expected_mutual.as_bytes(),
+        enroll_res.mutual_proof.as_bytes(),
+    ) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "invalid enrollment mutual proof",
+        ));
+    }
+
+    {
+        let mut guard = state.identity.write().unwrap_or_else(|e| e.into_inner());
+        guard.node_id = enroll_res.node_id;
+        guard.key_id = enroll_res.key_id;
+        guard.shared_secret = Some(derived_secret);
+        guard.core_internal_url = Some(core_url.to_string());
+        guard.revoked = false;
+    }
+
+    state.persist_identity().await?;
+    Ok(())
+}
+
+/// Maintain persistent outbound control connection to Core. Automatically reconnects.
+pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut backoff = Duration::from_secs(1);
+        loop {
+            let identity = state
+                .identity
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            if identity.revoked
+                || identity.shared_secret.is_none()
+                || identity.core_internal_url.is_none()
+            {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+
+            let core_url = identity.core_internal_url.clone().unwrap();
+            let secret = identity.shared_secret.clone().unwrap();
+            let active_scans = state
+                .active_scans
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .len() as u32;
+            let indexed_assets = state
+                .inventory
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .assets
+                .len();
+            let roots: Vec<String> = state
+                .config
+                .allowed_roots
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+
+            let hb = HeartbeatPayload {
+                protocol_version: PROTOCOL_VERSION.to_owned(),
+                version: Some(media_contracts::version::current_version().to_string()),
+                node_id: identity.node_id.clone(),
+                roots,
+                public_url: identity.public_url.clone(),
+                active_scans,
+                indexed_assets,
+                timestamp: unix_now(),
+            };
+
+            let body = serde_json::to_vec(&hb).unwrap_or_default();
+            let path = format!(
+                "/internal/v1/core/nodes/{}/channel",
+                identity.node_id.as_str()
+            );
+
+            match send_signed_http_request(
+                &core_url,
+                "node-to-core",
+                Method::POST,
+                &path,
+                &identity.node_id,
+                &identity.key_id,
+                &secret,
+                None,
+                Bytes::from(body),
+            )
+            .await
+            {
+                Ok((status, _headers, resp_bytes)) => {
+                    backoff = Duration::from_secs(1);
+                    if status.is_success() {
+                        let Ok(cmd) = serde_json::from_slice::<NodeCommandEnvelope>(&resp_bytes)
+                        else {
+                            continue;
+                        };
+                        match cmd.command_type {
+                            NodeCommandType::Ping => {}
+                            NodeCommandType::Scan => {
+                                if let Ok(scan_req) =
+                                    serde_json::from_value::<RemoteScanStartRequest>(cmd.payload)
+                                {
+                                    let bg_state = state.clone();
+                                    tokio::spawn(async move {
+                                        handle_channel_scan(bg_state, scan_req).await;
+                                    });
+                                }
+                            }
+                            NodeCommandType::SyncInventory => {
+                                if let Ok(sync) =
+                                    serde_json::from_value::<LibraryInventorySync>(cmd.payload)
+                                {
+                                    {
+                                        let mut inv = state
+                                            .inventory
+                                            .write()
+                                            .unwrap_or_else(|e| e.into_inner());
+                                        inv.apply_library_sync(sync);
+                                    }
+                                    let _ = state.persist_inventory().await;
+                                }
+                            }
+                            NodeCommandType::RotateSecret => {
+                                if let Ok(rot) =
+                                    serde_json::from_value::<RotateSecretRequest>(cmd.payload)
+                                {
+                                    {
+                                        let mut guard = state
+                                            .identity
+                                            .write()
+                                            .unwrap_or_else(|e| e.into_inner());
+                                        guard.shared_secret = Some(rot.new_secret);
+                                        guard.key_id = rot.new_key_id;
+                                    }
+                                    let _ = state.persist_identity().await;
+                                }
+                            }
+                            NodeCommandType::Revoke => {
+                                {
+                                    let mut guard =
+                                        state.identity.write().unwrap_or_else(|e| e.into_inner());
+                                    guard.revoked = true;
+                                }
+                                {
+                                    let mut scans = state
+                                        .active_scans
+                                        .lock()
+                                        .unwrap_or_else(|e| e.into_inner());
+                                    for cancel in scans.values() {
+                                        cancel.store(true, Ordering::SeqCst);
+                                    }
+                                    scans.clear();
+                                }
+                                let _ = state.persist_identity().await;
+                            }
+                            NodeCommandType::StreamRelay => {
+                                if let Ok(relay_req) =
+                                    serde_json::from_value::<StreamRelayRequest>(cmd.payload)
+                                {
+                                    let bg_state = state.clone();
+                                    tokio::spawn(async move {
+                                        handle_channel_stream_relay(bg_state, relay_req).await;
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(_err) => {
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(Duration::from_secs(5));
+                }
+            }
+        }
+    })
+}
+
+async fn handle_channel_scan(state: NodeServerState, req: RemoteScanStartRequest) {
+    let mut validated_root = None;
+    for allowed in &state.config.allowed_roots {
+        if let Ok(valid) = crate::validate_library_root(Path::new(&req.root), allowed).await {
+            validated_root = Some(valid);
+            break;
+        }
+    }
+    let Some(canonical_root) = validated_root else {
+        return;
+    };
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut scans = state.active_scans.lock().unwrap_or_else(|e| e.into_inner());
+        scans.insert(req.scan_id.as_str().to_owned(), cancel.clone());
+    }
+    run_remote_scan_task(state, req, canonical_root, cancel).await;
+}
+
+async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayRequest) {
+    let identity = state
+        .identity
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    if identity.revoked || identity.shared_secret.is_none() || identity.core_internal_url.is_none()
+    {
+        return;
+    }
+    let core_url = identity.core_internal_url.as_ref().unwrap();
+
+    let grant = if req.target_kind == "image" {
+        state
+            .inventory
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .grant_for_image(&identity.node_id, &req.target_id)
+    } else {
+        state
+            .inventory
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .grant_for_asset(&identity.node_id, &req.target_id)
+    };
+
+    let Some(grant) = grant else {
+        let _ = send_stream_uplink_error(
+            &state,
+            core_url,
+            &identity,
+            &req.stream_id,
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+        return;
+    };
+
+    let mut builder = hyper::Request::builder().method(Method::GET);
+    if let Some(ref r) = req.range {
+        builder = builder.header(header::RANGE, r);
+    }
+    let synthetic_req = builder.body(Body::empty()).unwrap_or_default();
+
+    match state
+        .local_node
+        .serve_grant_for_node(identity.node_id.clone(), &grant, &synthetic_req)
+        .await
+    {
+        Ok(serve_res) => {
+            let (parts, body) = serve_res.into_parts();
+            let axum_res = Response::from_parts(parts, Body::new(body));
+            let _ = send_stream_uplink_body(&state, core_url, &identity, &req.stream_id, axum_res)
+                .await;
+        }
+        Err(code) => {
+            let status = match code {
+                NodeErrorCode::UnknownAsset | NodeErrorCode::UnknownImage => StatusCode::NOT_FOUND,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            let _ =
+                send_stream_uplink_error(&state, core_url, &identity, &req.stream_id, status).await;
+        }
+    }
+}
+
+async fn send_stream_uplink_body(
+    _state: &NodeServerState,
+    core_url: &str,
+    identity: &NodeIdentityState,
+    stream_id: &str,
+    serve_res: Response,
+) -> io::Result<()> {
+    let parsed =
+        url::Url::parse(core_url).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing host"))?
+        .to_owned();
+    let host_header = if let Some(p) = parsed.port() {
+        format!("{host}:{p}")
+    } else {
+        host.clone()
+    };
+
+    let path = format!(
+        "/internal/v1/core/nodes/{}/stream-uplink/{}",
+        identity.node_id.as_str(),
+        stream_id
+    );
+    let now = unix_now();
+    let nonce = random_nonce_hex();
+    let secret = identity.shared_secret.as_deref().unwrap_or("");
+
+    let mut headers_to_send = HeaderMap::new();
+    headers_to_send.insert(
+        header::HeaderName::from_static("x-media-stream-status"),
+        HeaderValue::from_str(&serve_res.status().as_u16().to_string()).unwrap(),
+    );
+    for name in [
+        header::CONTENT_TYPE,
+        header::CONTENT_LENGTH,
+        header::CONTENT_RANGE,
+        header::ACCEPT_RANGES,
+        header::CACHE_CONTROL,
+    ] {
+        if let Some(v) = serve_res.headers().get(&name) {
+            headers_to_send.insert(name, v.clone());
+        }
+    }
+
+    let digest = crate::transport::stream_metadata_digest(&headers_to_send);
+    let sig = sign_internal_request(
+        secret,
+        "node-to-core",
+        "POST",
+        &path,
+        identity.node_id.as_str(),
+        &identity.key_id,
+        now,
+        &nonce,
+        &digest,
+    );
+
+    let stream = crate::transport::connect(core_url).await?;
+    let io = TokioIo::new(stream);
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
+        .await
+        .map_err(io::Error::other)?;
+    tokio::spawn(async move {
+        let _ = conn.await;
+    });
+
+    let mut builder = hyper::Request::builder()
+        .method(Method::POST)
+        .uri(&path)
+        .header(header::HOST, host_header)
+        .header(HDR_PROTOCOL, PROTOCOL_VERSION)
+        .header(HDR_NODE_ID, identity.node_id.as_str())
+        .header(HDR_KEY_ID, &identity.key_id)
+        .header(HDR_TIMESTAMP, now.to_string())
+        .header(HDR_NONCE, &nonce)
+        .header(HDR_BODY_SHA256, &digest)
+        .header(HDR_SIGNATURE, sig);
+
+    for (k, v) in headers_to_send {
+        if let Some(key) = k {
+            builder = builder.header(key, v);
+        }
+    }
+
+    let req = builder
+        .body(serve_res.into_body())
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let _ = sender.send_request(req).await.map_err(io::Error::other)?;
+    Ok(())
+}
+
+async fn send_stream_uplink_error(
+    state: &NodeServerState,
+    core_url: &str,
+    identity: &NodeIdentityState,
+    stream_id: &str,
+    status: StatusCode,
+) -> io::Result<()> {
+    let mut res = Response::new(Body::empty());
+    *res.status_mut() = status;
+    send_stream_uplink_body(state, core_url, identity, stream_id, res).await
 }

@@ -93,6 +93,74 @@ pub struct PairNodeResponse {
     pub mutual_proof: String,
 }
 
+/// Node -> Core self-enrollment request (`POST /api/v1/nodes/enroll`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollNodeRequest {
+    pub protocol_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    pub enrollment_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<NodeId>,
+    pub name: String,
+    pub roots: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_url: Option<String>,
+    pub node_secret_half: String,
+    pub timestamp: i64,
+    pub nonce: String,
+}
+
+/// Core -> Node self-enrollment response.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollNodeResponse {
+    pub protocol_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    pub node_id: NodeId,
+    pub key_id: String,
+    pub core_secret_half: String,
+    pub core_origin: String,
+    pub timestamp: i64,
+    pub nonce: String,
+    /// HMAC-SHA256(derived_secret, "enroll-res\n{req_nonce}\n{node_id}\n{key_id}\n{core_secret_half}\n{timestamp}\n{nonce}")
+    pub mutual_proof: String,
+}
+
+/// Core -> Node command types sent over outbound channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeCommandType {
+    Ping,
+    Scan,
+    SyncInventory,
+    RotateSecret,
+    Revoke,
+    StreamRelay,
+}
+
+/// Core -> Node command envelope sent as response to channel poll.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeCommandEnvelope {
+    pub command_id: String,
+    pub command_type: NodeCommandType,
+    pub payload: serde_json::Value,
+}
+
+/// Core -> Node request to stream asset/image chunk via outbound uplink.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamRelayRequest {
+    pub stream_id: String,
+    pub target_kind: String,
+    pub target_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<String>,
+}
+
 /// Core -> Node or Node -> Core heartbeat payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -358,6 +426,31 @@ pub fn compute_pairing_mutual_proof(
         "pair-res\n{req_nonce}\n{node_id}\n{key_id}\n{node_secret_half}\n{timestamp}\n{nonce}"
     );
     hmac_sha256_hex(derived_secret, &msg)
+}
+
+pub fn compute_enrollment_mutual_proof(
+    derived_secret: &str,
+    req_nonce: &str,
+    node_id: &str,
+    key_id: &str,
+    core_secret_half: &str,
+    timestamp: i64,
+    nonce: &str,
+) -> String {
+    let msg = format!(
+        "enroll-res\n{req_nonce}\n{node_id}\n{key_id}\n{core_secret_half}\n{timestamp}\n{nonce}"
+    );
+    hmac_sha256_hex(derived_secret, &msg)
+}
+
+pub fn generate_enrollment_token() -> (String, String) {
+    let raw = format!(
+        "mnet_{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let hash = sha256_hex(raw.as_bytes());
+    (raw, hash)
 }
 
 pub fn compute_rotation_mutual_proof(
@@ -820,5 +913,55 @@ mod tests {
         }"#;
         let hb2: HeartbeatPayload = serde_json::from_str(modern_json).unwrap();
         assert_eq!(hb2.version.as_deref(), Some("0.1.0-beta"));
+    }
+
+    #[test]
+    fn enrollment_token_generation_and_mutual_proof_verification() {
+        let (token, hash) = generate_enrollment_token();
+        assert!(token.starts_with("mnet_"));
+        assert_eq!(hash, sha256_hex(token.as_bytes()));
+
+        let core_half = random_secret_hex();
+        let node_half = random_secret_hex();
+        let derived = derive_paired_secret(&token, &core_half, &node_half);
+
+        let req_nonce = random_nonce_hex();
+        let res_nonce = random_nonce_hex();
+        let now = unix_now();
+        let proof = compute_enrollment_mutual_proof(
+            &derived, &req_nonce, "node-123", "key-456", &core_half, now, &res_nonce,
+        );
+
+        let expected = compute_enrollment_mutual_proof(
+            &derived, &req_nonce, "node-123", "key-456", &core_half, now, &res_nonce,
+        );
+        assert!(constant_time_eq(proof.as_bytes(), expected.as_bytes()));
+
+        let bad = compute_enrollment_mutual_proof(
+            "bad-secret",
+            &req_nonce,
+            "node-123",
+            "key-456",
+            &core_half,
+            now,
+            &res_nonce,
+        );
+        assert!(!constant_time_eq(proof.as_bytes(), bad.as_bytes()));
+    }
+
+    #[test]
+    fn command_envelope_serialization_round_trip() {
+        let cmd = NodeCommandEnvelope {
+            command_id: "cmd-1".to_owned(),
+            command_type: NodeCommandType::StreamRelay,
+            payload: serde_json::json!({
+                "streamId": "str-99",
+                "targetKind": "asset",
+                "targetId": "asset-1"
+            }),
+        };
+        let serialized = serde_json::to_string(&cmd).unwrap();
+        let deserialized: NodeCommandEnvelope = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(cmd, deserialized);
     }
 }

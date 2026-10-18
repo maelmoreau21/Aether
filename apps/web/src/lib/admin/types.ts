@@ -12,6 +12,20 @@ export const nodeStatusLabels = {
   revoked: 'Révoqué'
 } as const;
 
+export const connectionModeLabels: Record<string, string> = {
+  outbound: 'Relais sortant (NAT)',
+  direct: 'Direct HTTPS',
+  inbound: 'Entrant direct (Legacy)'
+};
+
+export interface EnrollmentToken {
+  tokenId: string;
+  token: string;
+  createdAt: number;
+  expiresAt: number;
+  coreUrl: string;
+}
+
 export interface Library {
   id: string;
   name: string;
@@ -58,6 +72,7 @@ export interface AdminNode {
   publicUrl?: string | null;
   status: 'connected' | 'disconnected' | 'revoked';
   version?: string | null;
+  connectionMode?: 'outbound' | 'direct' | 'inbound' | string | null;
   keyId: string;
   roots: string[];
   pairedAt: number;

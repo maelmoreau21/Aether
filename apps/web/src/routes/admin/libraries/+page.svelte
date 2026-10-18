@@ -8,7 +8,7 @@
   import { session, type AuthUser } from '../../../lib/auth/session';
   import ProfileMenu from '../../../lib/ui/ProfileMenu.svelte';
   import Icon from '../../../lib/ui/Icon.svelte';
-  import type { Library, Scan, AdminNode, OidcAdminStatus, CoreHealth } from '../../../lib/admin/types';
+  import type { Library, Scan, AdminNode, OidcAdminStatus, CoreHealth, EnrollmentToken } from '../../../lib/admin/types';
   import AdminOverview from '../../../lib/admin/AdminOverview.svelte';
   import AdminLibraries from '../../../lib/admin/AdminLibraries.svelte';
   import AdminNodes from '../../../lib/admin/AdminNodes.svelte';
@@ -196,6 +196,18 @@
     } finally {
       pairing = false;
     }
+  }
+
+  async function generateEnrollmentToken(): Promise<EnrollmentToken> {
+    if (!$session || !administrator) throw new Error('Action non autorisée.');
+    return await request<EnrollmentToken>('/api/v1/admin/nodes/enrollment-tokens', {
+      method: 'POST',
+      headers: {
+        'x-csrf-token': $session.csrfToken,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ expiresInSecs: 900 })
+    });
   }
 
   async function nodeAction(targetNode: AdminNode, action: 'reconnect' | 'rotate-secret' | 'revoke') {
@@ -415,6 +427,7 @@
         bind:pairToken
         onpair={pairNode}
         onnodeaction={nodeAction}
+        ongeneratetoken={generateEnrollmentToken}
       />
 
       <!-- Section 4: Users & RBAC Permissions -->

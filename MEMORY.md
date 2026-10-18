@@ -1,4 +1,68 @@
 # MEMORY.md — État et décisions Aether
+
+## 18 octobre 2026 — Refonte de l'appairage des Media Nodes (Initiation sortante, tokens éphémères, canal bidirectionnel NAT-proof et streaming relais)
+
+- **Périmètre & Objectif** :
+  - Refonte complète de la méthode de connexion des Media Nodes au Core : passage d'un modèle où le Core devait contacter un port entrant sur le Node à un modèle où **le Core génère une invitation et le Node initie lui-même la connexion sortante vers le Core**.
+  - Permet d'installer un Media Node sur n'importe quelle machine distante (derrière une box, un routeur ou un NAT de FAI), sans devoir ouvrir de port, configurer de redirection de port (port-forwarding) ou disposer d'une IP publique.
+  - Gestion native de plusieurs bibliothèques (Films et Séries) par un seul et même Node (`MEDIA_NODE_ROOTS: /media/films;/media/series`).
+  - Streaming direct en HTTPS prioritaire lorsque le Node dispose d'une URL publique (`public_url`), sinon streaming relais sans mise en mémoire tampon intégrale (chunked streaming zero-copy) transitant par la liaison sortante du Node vers le Core.
+  - Préservation intégrale et rétrocompatible du mode d'appairage direct historique (`POST /api/v1/admin/nodes/pair`).
+
+- **Sécurité & Cycle de vie des jetons** :
+  - Jetons d'invitation générés côté Core : préfixe `mnet_`, 32 octets aléatoires CSPRNG encodés en hexadécimal (total 69 caractères), durée de validité limitée (15 minutes par défaut).
+  - Seul le hash SHA-256 du jeton est conservé en base (`token_hash`), aucun jeton en clair dans les tables ni dans les logs.
+  - Consommation atomique à usage unique : `UPDATE node_enrollment_tokens SET used_at=?, used_by_node_id=? WHERE token_hash=? AND used_at IS NULL AND expires_at > ?`. Rejet strict avec `401 Unauthorized` pour tout jeton inconnu, expiré ou déjà consommé.
+  - Preuve mutuelle HMAC-SHA256 (`compute_enrollment_mutual_proof`) et dérivation de secret partagé durable (`derive_paired_secret`) combinant le jeton, une moitié de secret générée par le Node et une moitié générée par le Core.
+  - Le Node persiste ses identifiants durables (`node_id`, `key_id`, `shared_secret`, `core_internal_url`) dans son volume persistant (`node_identity.json`). Reconnexion automatique au redémarrage sans nouvel appairage.
+  - Rotation de secret (`POST /api/v1/admin/nodes/{id}/rotate-secret`) et révocation (`POST /api/v1/admin/nodes/{id}/revoke`) transmises instantanément sur le canal de contrôle.
+
+- **Protocole & Canal de communication bidirectionnel (`/channel`)** :
+  - `crates/shared/src/protocol.rs` :
+    - Nouveaux types : `EnrollNodeRequest`, `EnrollNodeResponse`, `NodeCommandEnvelope`, `NodeCommandType` (`Ping`, `Scan`, `SyncInventory`, `RotateSecret`, `Revoke`, `StreamRelay`), `StreamRelayRequest`.
+    - Fonctions : `generate_enrollment_token()`, `compute_enrollment_mutual_proof()`.
+  - Canal de contrôle persistant : le Node maintient une requête sortante authentifiée par signature HMAC vers `/internal/v1/core/nodes/{id}/channel`. En cas de commande en attente (Scan, Sync, Rotate, Revoke, StreamRelay), le Core y répond immédiatement avec le `NodeCommandEnvelope` ; sinon timeout à 25s avec `NodeCommandType::Ping`.
+  - Reconnexion automatique avec backoff exponentiel (1s à 5s) en cas de coupure réseau ou de redémarrage du Core.
+
+- **Relais multimédia NAT-proof à mémoire bornée (`/stream-uplink/{stream_id}`)** :
+  - Lorsqu'un client sollicite la lecture d'un asset (`GET /api/v1/assets/{id}/content`) situé sur un Node en mode `outbound`, le Core envoie une commande `StreamRelay` avec un `stream_id` éphémère via le canal.
+  - Le Node établit aussitôt une requête sortante `POST /internal/v1/core/nodes/{id}/stream-uplink/{stream_id}` avec le corps de flux chunked (morceaux de 64 KiB), les entêtes de range/content-range et la signature d'intégrité des métadonnées (`stream_metadata_digest`).
+  - Le Core associe le flux montant directement au flux descendant HTTP de l'utilisateur via `tokio::sync::oneshot` sans aucun chargement du fichier en RAM.
+
+- **Base de données & Migrations** :
+  - Migration additive `0018_node_enrollment.sql` (SQLite dans `crates/core/migrations/` et PostgreSQL dans `crates/core/migrations-postgres/`) :
+    - Création de la table `node_enrollment_tokens` (`id`, `token_hash`, `created_at`, `expires_at`, `used_at`, `used_by_node_id`).
+    - Ajout de la colonne `connection_mode TEXT NOT NULL DEFAULT 'outbound'` à `media_nodes`.
+
+- **Composant Node (`crates/node`)** :
+  - `crates/node/src/bin/aether-node.rs` : support de `MEDIA_CORE_URL` et `MEDIA_NODE_ENROLLMENT_TOKEN`. Si unpaired au démarrage, appel automatique de `enroll_with_core`. Démarrage systématique du worker `start_channel_worker`. Découpage des racines `MEDIA_NODE_ROOTS` par `;` et `:`.
+  - `crates/node/src/server.rs` : implémentation de `enroll_with_core`, `start_channel_worker`, `handle_channel_scan`, `handle_channel_stream_relay`, `send_stream_uplink_body` et `send_stream_uplink_error`.
+
+- **Interface Administrateur SvelteKit (`apps/web`)** :
+  - `apps/web/src/lib/admin/types.ts` : ajout de `connectionMode` sur `AdminNode`, libellés `connectionModeLabels` et interface `EnrollmentToken`.
+  - `apps/web/src/lib/admin/AdminNodes.svelte` :
+    - Bouton principal « **Ajouter un Node** ».
+    - Modal d'enrôlement affichant le jeton temporaire généré, bouton de copie rapide du jeton et extrait `docker-compose.yml` complet prérempli avec les variables d'environnement (`MEDIA_CORE_URL`, `MEDIA_NODE_NAME`, `MEDIA_NODE_ENROLLMENT_TOKEN`, `MEDIA_NODE_ROOTS`).
+    - Badges de mode de connexion sur chaque carte de Media Node (`Relais sortant (NAT)`, `Direct HTTPS`, `Entrant direct (Legacy)`).
+    - Affichage de l'état (connecté/déconnecté), dernière activité, dossiers multimédias, bibliothèques associées, et actions Reconnecter, Renouveler secret, Révoquer.
+    - Préservation du formulaire d'appairage direct historique dans un panneau rétractable.
+
+- **Validation & Tests** :
+  - Nouveau test d'intégration complet `crates/core/tests/node_enrollment_and_relay.rs` (100% réussi) :
+    - Génération de token admin, validation format `mnet_`.
+    - Rejet des tokens malformés (400) et forgés (401).
+    - Auto-enrôlement du Node distant en mode sortant sans port d'écoute public.
+    - Rejet de la réutilisation du même jeton (usage unique strict).
+    - Établissement du canal persistant et réception de battements de cœur.
+    - Enregistrement de bibliothèques multiples.
+    - Déclenchement de scan distant par le Core via le canal sortant du Node, remontée de batchs et publication catalogue.
+    - Streaming de média en direct via le relais sortant avec `206 Partial Content` (Range seek) sans mise en cache RAM intégrale.
+    - Rotation du secret partagé et révocation du Node via le canal.
+  - Suites de tests existantes : `distributed_multi_node` (1/1 réussi), `challenger_security_challenge` (4/4 réussis), `version_and_nodes` (2/2 réussis), `media-contracts` (10/10 réussis).
+  - Contrôle qualité : `cargo clippy --all-targets -- -D warnings` (0 avertissement), `cargo fmt --check` (0 diff).
+  - Frontend : `npm run check` (0 erreur, 0 avertissement), `npm test` (48/48 tests réussis).
+  - Règle AGENTS.md respectée : aucun commit, aucun push, aucune image poussée sur Git.
+
 ## 18 octobre 2026 — Versionnement unifié (0.1.0 / 0.1.0-beta) et visibilité des versions des Media Nodes
 
 - **Périmètre & Objectif** :

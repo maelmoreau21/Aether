@@ -31,7 +31,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 fn media_routes(inventory: node::Inventory) -> Router {
     Router::new()
-        .route("/", get(|| async { Html(include_str!("bench.html")) }))
+        .route("/bench", get(|| async { Html(include_str!("bench.html")) }))
         .route("/api/v1/demo/media", get(demo::media))
         .route("/api/v1/catalog", get(catalog::list))
         .route("/api/v1/catalog/{id}", get(catalog::detail))
@@ -262,6 +262,10 @@ fn health_routes(mode: &'static str) -> Router {
 
 fn public_routes(mode: &'static str) -> Router {
     Router::new()
+        .route(
+            "/",
+            get(|| async { axum::response::Redirect::temporary("/app/") }),
+        )
         .nest_service(
             "/app",
             tower_http::services::ServeDir::new(configured_web_dist())

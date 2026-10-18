@@ -47,6 +47,25 @@ async fn static_web_serves_custom_dist_and_applies_security_headers() {
 
     let router = secure_app(inventory, 3000, auth).await.unwrap();
 
+    // 0. Request to / -> redirects to /app/
+    let req = Request::builder()
+        .uri("/")
+        .header(header::HOST, "127.0.0.1:3000")
+        .body(Body::empty())
+        .unwrap();
+    let res = router.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/app/");
+
+    // 0b. Request to /app
+    let req = Request::builder()
+        .uri("/app")
+        .header(header::HOST, "127.0.0.1:3000")
+        .body(Body::empty())
+        .unwrap();
+    let res = router.clone().oneshot(req).await.unwrap();
+    assert!(res.status().is_redirection() || res.status() == StatusCode::OK);
+
     // 1. Request to /app/ -> returns 200 OK with custom index.html content
     let req = Request::builder()
         .uri("/app/")

@@ -270,7 +270,26 @@ fn routes(state: Oidc) -> Router {
 }
 
 async fn public_status(State(s): State<Oidc>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({"enabled": s.config.is_some()}))
+    if let Some(c) = &s.config {
+        let issuer_lower = c.issuer.to_lowercase();
+        let provider = if issuer_lower.contains("authentik") {
+            "Authentik"
+        } else if issuer_lower.contains("keycloak") {
+            "Keycloak"
+        } else if issuer_lower.contains("dex") {
+            "Dex"
+        } else if issuer_lower.contains("pocket-id") || issuer_lower.contains("pocketid") {
+            "Pocket ID"
+        } else {
+            "SSO"
+        };
+        Json(serde_json::json!({
+            "enabled": true,
+            "provider": provider
+        }))
+    } else {
+        Json(serde_json::json!({"enabled": false}))
+    }
 }
 
 async fn admin_status(State(s): State<Oidc>, headers: HeaderMap) -> Result<Json<Status>, Error> {

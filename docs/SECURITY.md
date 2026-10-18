@@ -1,4 +1,56 @@
-# Sécurité du banc local P0
+> Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités
+> issuer/subject et sessions Core communes aux deux modes Docker.
+> Contrat, configuration et limites : [OIDC](OIDC.md). Les exclusions OIDC
+> dans les jalons historiques ci-dessous ne décrivent plus ce parcours.
+
+> Jalon J1 (`ARCHITECTURE_ROADMAP.md`, 16 octobre 2026) : confinement et streaming
+> sur descripteur de fichier ouvert (`OpenedFile` dans `crates/node`). Sous Linux/Docker,
+> traversée relative confinée via `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV)`
+> avec repli `openat(O_NOFOLLOW)` composant par composant ; sous Windows, ouverture avec
+> `FILE_FLAG_OPEN_REPARSE_POINT`, rejet immédiat de l'attribut `FILE_ATTRIBUTE_REPARSE_POINT` (`0x400`)
+> et vérification d'identité de handle (`verify_unchanged`). Le streaming HTTP (`GET`, `HEAD`, `Range`
+> par blocs de 64 Kio), la lecture NFO et le décodage d'affiches lisent directement depuis le
+> descripteur ouvert sans réouverture par chemin (`ServeFile` retiré des routes médias/images).
+> L'analyse `ffprobe` (`probe_opened` / `probe_file`) consomme également directement le descripteur
+> déjà ouvert et confiné transmis sur son entrée standard (`-`, `protocol_whitelist` restreint à `fd,pipe`),
+> interdisant tout accès au protocole `file:` et éliminant le risque de substitution transitoire du chemin (TOCTOU).
+>
+> Extension P1 affiches locales Films : inventaire séparé, route image avec
+> session/droits et repli Web. État actuel : [LOCAL_FILM_POSTERS.md](LOCAL_FILM_POSTERS.md).
+> Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
+
+> Mise à jour scanner Films P1 : inventaire SQLite et bibliothèques locales
+> autorisées par MEDIA_LIBRARY_ROOT. Jobs session/rôle/CSRF, contrôle des droits
+> avant GET/HEAD/Range, refus liens et points de réanalyse Windows. Voir
+> [LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md).
+>
+> Mise à jour P1 bibliothèques : droits explicites SQLite et administration
+> session/rôle/CSRF livrés sur fixtures. Les restrictions administrator seule
+> ci-dessous sont historiques. Voir [LIBRARIES_AND_SCANNER.md](LIBRARIES_AND_SCANNER.md).
+
+# Sécurité du Core local et historique du banc P0
+
+NFO Films : XML local non fiable, quick-xml sans résolveur, DTD/entités externes
+rejetées, UTF-8 strict, limites1Mio/profondeur16/champs16Kio/64genres, confinement
+symlink/reparse existant et rendu texte échappé. Aucun champ ne devient chemin
+ou URL consulté ; aucune modification des médias/NFO. Le risque TOCTOU reste
+explicite. Détails et tests : [LOCAL_FILM_NFO.md](LOCAL_FILM_NFO.md).
+
+## État actuel — 16 octobre 2026
+
+Le binaire exige désormais une session SQLite et une permission backend pour
+les routes catalogue et média, y compris HEAD, Range, sous-titres et expériences
+MSE/DASH. Connexion Argon2id, sessions hachées/révocables, expirations, CSRF et
+limitation persistante des tentatives : [LOCAL_SESSIONS.md](LOCAL_SESSIONS.md).
+Seul l'administrateur accède à l'inventaire synthétique ; `user` est refusé
+jusqu'au prochain jalon de permissions explicites par bibliothèque.
+Le texte ci-dessous décrit les jalons historiques et leurs limites persistantes
+(notamment fixtures uniquement et confinement non atomique). Ses mentions
+« aucune authentification » ne décrivent plus le binaire actuel.
+Le constructeur sans auth est réservé à la feature de test `fixture-bench` ;
+le binaire ne l'utilise jamais. Pas de médias personnels ni de publication validée.
+
+## Historique du banc local P0
 
 Le binaire écoute exclusivement sur `127.0.0.1`, sans option pour ouvrir le LAN.
 Il vérifie Host, Origin et Sec-Fetch-Site, n'autorise pas CORS et applique une CSP
@@ -15,13 +67,35 @@ la vérification canonique puis l'ouverture ne sont pas atomiques face à un
 écrivain local hostile (TOCTOU). Ce point doit être traité avant les bibliothèques
 réelles ; le banc ne prétend pas sécuriser un stockage modifiable par un adversaire.
 
-ffprobe est un adaptateur temporaire externe, résolu depuis un PATH de confiance,
-lancé sans shell, protocoles limités à file, démuxeurs limités, plafond par
-allocation 64 MiB, sortie JSON limitée à 1 MiB, délai 10 s et kill-on-drop.
-Ce n'est pas un sandbox de parseur hostile ni une borne de RSS totale.
-FFmpeg ne s'exécute que pour la préparation et les vérifications hors serveur.
-Les probes publics retirent `format.filename` ; seuls des médias générés sans
-secrets sont autorisés. Aucune clé, identité OIDC ou mot de passe n'est créé.
+ffprobe est un adaptateur de découverte exécuté en sous-processus externe sans shell,
+consommant directement le descripteur/handle de fichier déjà ouvert et confiné transmis
+sur son entrée standard (`-`, via `Stdio::from(file)`), avec rembobinage préalable.
+Ses protocoles sont strictement restreints à `fd,pipe` (`-protocol_whitelist fd,pipe`),
+interdisant catégoriquement l'ouverture de chemins arbitraires (`file:`), de références
+externes (atomes MOV `dref`, segments Matroska externes) ou de ressources réseau (`http:`, `https:`).
+Le protocole effectivement mobilisé par ffprobe sur stdin est `fd:`. Ce protocole conserve
+la capacité de repositionnement (`lseek` sous Unix, `SetFilePointer` sous Windows) lorsque le
+descripteur pointe vers un fichier régulier du système de fichiers (à la différence d'un pipe
+anonyme non seekable). Cette capacité permet à ffprobe d'accéder directement aux atomes `moov`
+situés en fin de fichier dans les conteneurs MP4 non fragmentés sans nécessiter de réouverture par chemin.
+
+**Limite de sécurité documentée (Sandbox OS vs Whitelist applicative)** :
+Une liste blanche de protocoles FFmpeg (`-protocol_whitelist fd,pipe`) opère au niveau applicatif
+interne de `libavformat` ; **elle ne constitue pas un sandbox de sécurité au niveau du système d'exploitation**.
+Elle n'impose aucun filtrage des appels système (seccomp) ni d'isolation de l'espace de noms au processus fils `ffprobe`.
+Si un parseur C (`libavcodec` / `libavformat`) présentait une vulnérabilité de corruption mémoire (débordement
+de tas, entier non vérifié), le code attaquant s'exécuterait avec les privilèges de l'utilisateur hôte du processus.
+La défense en profondeur repose donc sur le confinement système complémentaire :
+1. Exécution sous Docker avec utilisateur non-privilégié dédié `aether` (`UID:GID 10001:10001`).
+2. Abandon strict de toutes les capacités Linux (`cap_drop: ALL`).
+3. Interdiction de toute élévation de privilèges (`no-new-privileges: true`).
+4. Montage des médias en lecture seule (`:ro`).
+5. Borne mémoire stricte par allocation (`-max_alloc 67108864`).
+6. Borne d'analyse (`-probesize 5000000`, `-analyzeduration 5000000`).
+7. Délai d'exécution maximal de 10 secondes avec terminaison forcée (`kill_on_drop(true)`).
+8. Plafond de capture de sortie standard limité à 1 Mio (`take(1_048_577)`).
+9. Contrôle d'intégrité avant et après exécution (`OpenedFile::verify_unchanged_sync`), détectant toute modification ou altération concurrente sur le disque.
+Les sorties publiques éliminent systématiquement `format.filename`.
 
 HTTP s'appuie sur ServeFile, chunks 64 KiB, lecture asynchrone et abandon du corps
 pour annuler l'I/O. Test sur copie temporaire portée à 1 GiB ; cela ne mesure pas
@@ -71,3 +145,31 @@ accès à de vraies bibliothèques.
 La refonte visuelle P1 ajoute img-src self à la CSP pour l'illustration originale
 et les SVG locaux. Aucune image tierce/data, aucun script distant ni
 assouplissement d'origine ajouté. Tests de violations CSP après refonte réussis.
+
+## Bootstrap P1 local
+
+Le bootstrap est une CLI interactive autorisée par l'accès OS, jamais une API
+publique. Argon2id, transaction SQLite et marqueur durable : [LOCAL_ADMIN.md](LOCAL_ADMIN.md).
+L'identité persistée ne rend pas le prototype multi-utilisateur : sessions,
+CSRF, limitation des connexions et RBAC restent requis avant les médias privés.
+
+## P2 — transport et révocation, 17 octobre 2026
+
+Le contrat courant remplace les mentions historiques « Node futur » pour les
+chemins réalisés : [P2 Docker](P2_DOCKER_VALIDATION.md). TLS vérifié pour chaque
+URL HTTPS ; HTTP interne uniquement en loopback ou vers une autorité explicitement
+autorisée dans un réseau déclaré fiable. Les URL publiques porteuses de capacités
+refusent HTTP hors loopback. Aucun suivi de redirection ; DNS contrôlé puis
+connexion à l'adresse contrôlée. Les réseaux physiques/DSM restent à tester.
+
+Le MAC de contrôle lie désormais les octets des réponses JSON. Le relais lie ses
+métadonnées par signature et ses octets par TLS sur les liens non fiables. Ne pas
+confondre cela avec un MAC de contenu indépendant du transport sur un bridge HTTP.
+
+Chaque nouvelle requête directe consulte les droits et la session vivants du
+Core, sans cache positif, et réutilise la coalescence d'activité P1. La perte du
+Core bloque la requête. Un flux déjà ouvert n'est pas interrompu, comme en P1.
+Les URL sont porteuses : expurger leurs queries dans tout proxy/journal. Les
+anciens rapports synthétiques conservés ont été expurgés sans changer les
+observations de lecture ; aucune nouvelle preuve n'est déduite de ces anciens
+rapports. L'amorçage ne peut plus reconstituer une identité déjà appairée.

@@ -1,0 +1,1308 @@
+//! Local authentication. Session secrets never enter SQLite or application logs.
+use crate::identity::{IdentityError, IdentityStore, Role};
+use argon2::{
+    Algorithm, Argon2, Params, Version,
+    password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash},
+};
+use axum::{
+    Json, Router,
+    extract::{DefaultBodyLimit, State},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::Duration,
+};
+use tokio::sync::{Notify, Semaphore};
+use zeroize::Zeroizing;
+
+const ABSOLUTE_SECONDS: i64 = 12 * 60 * 60;
+const IDLE_SECONDS: i64 = 30 * 60;
+const TOUCH_INTERVAL_SECONDS: i64 = 60;
+const MAX_PENDING_TOUCHES: usize = 4096;
+const TOUCH_BATCH_SIZE: usize = 64;
+const TOUCH_COALESCE_MS: u64 = 20;
+const TOUCH_RETRY_BACKOFF_MS: u64 = 150;
+const COOKIE: &str = "media_session";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SessionTouchStats {
+    pub pending_count: usize,
+    pub write_batches_succeeded: u64,
+    pub rows_updated: u64,
+    pub write_conflicts: u64,
+    pub dropped_overflow: u64,
+}
+
+struct TouchShared {
+    pending: Mutex<HashMap<String, i64>>,
+    notify: Notify,
+    flush_done: Notify,
+    closed: AtomicBool,
+    interval_seconds: i64,
+    max_pending: usize,
+    write_batches_succeeded: AtomicU64,
+    rows_updated: AtomicU64,
+    write_conflicts: AtomicU64,
+    dropped_overflow: AtomicU64,
+}
+
+impl TouchShared {
+    fn record(&self, token_hash: &str, now: i64) {
+        let mut pending = match self.pending.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(existing) = pending.get_mut(token_hash) {
+            if now > *existing {
+                *existing = now;
+            }
+            return;
+        }
+        if pending.len() >= self.max_pending {
+            self.dropped_overflow.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        pending.insert(token_hash.to_owned(), now);
+        drop(pending);
+        self.notify.notify_one();
+    }
+
+    fn cancel(&self, token_hash: &str) {
+        let mut pending = match self.pending.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        pending.remove(token_hash);
+    }
+
+    fn stats(&self) -> SessionTouchStats {
+        let pending_count = match self.pending.lock() {
+            Ok(guard) => guard.len(),
+            Err(poisoned) => poisoned.into_inner().len(),
+        };
+        SessionTouchStats {
+            pending_count,
+            write_batches_succeeded: self.write_batches_succeeded.load(Ordering::Relaxed),
+            rows_updated: self.rows_updated.load(Ordering::Relaxed),
+            write_conflicts: self.write_conflicts.load(Ordering::Relaxed),
+            dropped_overflow: self.dropped_overflow.load(Ordering::Relaxed),
+        }
+    }
+}
+
+struct SessionToucher {
+    shared: Arc<TouchShared>,
+}
+
+impl Drop for SessionToucher {
+    fn drop(&mut self) {
+        self.shared.closed.store(true, Ordering::Release);
+        self.shared.notify.notify_one();
+    }
+}
+
+enum FlushError {
+    BusyOrTimeout,
+    Permanent,
+}
+
+impl SessionToucher {
+    fn new(pool: sqlx::SqlitePool, interval_seconds: i64, max_pending: usize) -> Arc<Self> {
+        let shared = Arc::new(TouchShared {
+            pending: Mutex::new(HashMap::new()),
+            notify: Notify::new(),
+            flush_done: Notify::new(),
+            closed: AtomicBool::new(false),
+            interval_seconds: interval_seconds.max(1),
+            max_pending: max_pending.max(1),
+            write_batches_succeeded: AtomicU64::new(0),
+            rows_updated: AtomicU64::new(0),
+            write_conflicts: AtomicU64::new(0),
+            dropped_overflow: AtomicU64::new(0),
+        });
+        let worker_shared = shared.clone();
+        tokio::spawn(async move {
+            Self::worker_loop(pool, worker_shared).await;
+        });
+        Arc::new(Self { shared })
+    }
+
+    async fn worker_loop(pool: sqlx::SqlitePool, shared: Arc<TouchShared>) {
+        loop {
+            if shared.closed.load(Ordering::Acquire) || pool.is_closed() {
+                shared.flush_done.notify_waiters();
+                break;
+            }
+            let notified = shared.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+
+            let is_empty = match shared.pending.lock() {
+                Ok(guard) => guard.is_empty(),
+                Err(poisoned) => poisoned.into_inner().is_empty(),
+            };
+            if is_empty {
+                notified.await;
+                if shared.closed.load(Ordering::Acquire) || pool.is_closed() {
+                    shared.flush_done.notify_waiters();
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(TOUCH_COALESCE_MS)).await;
+            }
+
+            let batch: Vec<(String, i64)> = {
+                let guard = match shared.pending.lock() {
+                    Ok(g) => g,
+                    Err(p) => p.into_inner(),
+                };
+                guard
+                    .iter()
+                    .take(TOUCH_BATCH_SIZE)
+                    .map(|(k, v)| (k.clone(), *v))
+                    .collect()
+            };
+            if batch.is_empty() {
+                shared.flush_done.notify_waiters();
+                continue;
+            }
+
+            match Self::flush_batch(&pool, &batch).await {
+                Ok(rows_affected) => {
+                    shared
+                        .write_batches_succeeded
+                        .fetch_add(1, Ordering::Relaxed);
+                    shared
+                        .rows_updated
+                        .fetch_add(rows_affected, Ordering::Relaxed);
+                    {
+                        let mut guard = match shared.pending.lock() {
+                            Ok(g) => g,
+                            Err(p) => p.into_inner(),
+                        };
+                        for (token_hash, flushed_at) in &batch {
+                            if let Some(&current_at) = guard.get(token_hash)
+                                && current_at.saturating_sub(*flushed_at) < shared.interval_seconds
+                            {
+                                guard.remove(token_hash);
+                            }
+                        }
+                    }
+                    shared.flush_done.notify_waiters();
+                }
+                Err(FlushError::BusyOrTimeout) => {
+                    shared.write_conflicts.fetch_add(1, Ordering::Relaxed);
+                    shared.flush_done.notify_waiters();
+                    if shared.closed.load(Ordering::Acquire) || pool.is_closed() {
+                        break;
+                    }
+                    let sleep_notified = shared.notify.notified();
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_millis(TOUCH_RETRY_BACKOFF_MS)) => {}
+                        _ = sleep_notified, if shared.closed.load(Ordering::Acquire) => break,
+                    }
+                }
+                Err(FlushError::Permanent) => {
+                    {
+                        let mut guard = match shared.pending.lock() {
+                            Ok(g) => g,
+                            Err(p) => p.into_inner(),
+                        };
+                        for (token_hash, _) in &batch {
+                            guard.remove(token_hash);
+                        }
+                    }
+                    shared.flush_done.notify_waiters();
+                    if pool.is_closed() || shared.closed.load(Ordering::Acquire) {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    async fn flush_batch(
+        pool: &sqlx::SqlitePool,
+        batch: &[(String, i64)],
+    ) -> Result<u64, FlushError> {
+        let mut conn = match tokio::time::timeout(Duration::from_millis(50), pool.acquire()).await {
+            Ok(Ok(conn)) => conn,
+            Ok(Err(sqlx::Error::PoolTimedOut)) | Err(_) => return Err(FlushError::BusyOrTimeout),
+            Ok(Err(_)) => return Err(FlushError::Permanent),
+        };
+        let orig_timeout: i64 = sqlx::query_scalar("PRAGMA busy_timeout")
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap_or(15_000);
+        let _ = sqlx::query("PRAGMA busy_timeout = 15")
+            .execute(&mut *conn)
+            .await;
+
+        let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "UPDATE sessions SET last_seen_at = CASE token_hash ",
+        );
+        for (token_hash, seen_at) in batch {
+            qb.push("WHEN ");
+            qb.push_bind(token_hash);
+            qb.push(" THEN MIN(unixepoch(), MAX(last_seen_at, ");
+            qb.push_bind(*seen_at);
+            qb.push(")) ");
+        }
+        qb.push("ELSE last_seen_at END WHERE token_hash IN (");
+        let mut separated = qb.separated(", ");
+        for (token_hash, _) in batch {
+            separated.push_bind(token_hash);
+        }
+        separated
+            .push_unseparated(") AND expires_at > unixepoch() AND last_seen_at > unixepoch() - ");
+        qb.push_bind(IDLE_SECONDS);
+        qb.push(
+            " AND EXISTS(SELECT 1 FROM users WHERE users.id = sessions.user_id AND disabled_at IS NULL)",
+        );
+
+        let result = qb.build().execute(&mut *conn).await;
+        let mut restore_qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new("PRAGMA busy_timeout = ");
+        restore_qb.push(orig_timeout.max(0));
+        let _ = restore_qb.build().execute(&mut *conn).await;
+
+        match result {
+            Ok(res) => Ok(res.rows_affected()),
+            Err(sqlx::Error::PoolTimedOut) => Err(FlushError::BusyOrTimeout),
+            Err(sqlx::Error::Database(err)) => {
+                let is_busy = err
+                    .code()
+                    .and_then(|c| c.parse::<i32>().ok())
+                    .is_some_and(|code| matches!(code & 0xff, 5 | 6))
+                    || {
+                        let msg = err.message().to_ascii_lowercase();
+                        msg.contains("busy") || msg.contains("locked")
+                    };
+                if is_busy {
+                    Err(FlushError::BusyOrTimeout)
+                } else {
+                    Err(FlushError::Permanent)
+                }
+            }
+            Err(_) => Err(FlushError::Permanent),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct AuthState {
+    pub(crate) store: IdentityStore,
+    origin: Arc<str>,
+    pub(crate) secure: bool,
+    dummy_hash: Arc<str>,
+    pub(crate) workers: Arc<Semaphore>,
+    toucher: Arc<SessionToucher>,
+}
+#[derive(Debug, thiserror::Error)]
+pub enum AuthConfigError {
+    #[error("public origin must be HTTPS or HTTP on loopback, without path or credentials")]
+    Origin,
+    #[error(transparent)]
+    Identity(#[from] IdentityError),
+}
+#[derive(Clone, Serialize, sqlx::FromRow)]
+pub struct AuthUser {
+    pub id: String,
+    pub login: String,
+    #[serde(serialize_with = "serialize_role")]
+    pub role: Role,
+}
+fn serialize_role<S: serde::Serializer>(role: &Role, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(role.as_str())
+}
+#[derive(Clone)]
+pub struct Authenticated {
+    pub user: AuthUser,
+    pub csrf_token: String,
+    pub(crate) token_hash: String,
+}
+#[derive(Deserialize)]
+struct Login {
+    login: String,
+    password: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdentityResponse {
+    user: AuthUser,
+    csrf_token: String,
+}
+
+impl AuthState {
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+    pub fn touch_stats(&self) -> SessionTouchStats {
+        self.toucher.shared.stats()
+    }
+    pub async fn flush_session_touches(&self) {
+        let notified = self.toucher.shared.flush_done.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if self.toucher.shared.stats().pending_count == 0 {
+            return;
+        }
+        self.toucher.shared.notify.notify_one();
+        let _ = tokio::time::timeout(Duration::from_secs(2), notified).await;
+    }
+    pub async fn new(store: IdentityStore, origin: String) -> Result<Self, AuthConfigError> {
+        Self::new_with_touch_config(store, origin, TOUCH_INTERVAL_SECONDS, MAX_PENDING_TOUCHES)
+            .await
+    }
+    pub async fn new_with_touch_config(
+        store: IdentityStore,
+        origin: String,
+        touch_interval_seconds: i64,
+        max_pending_touches: usize,
+    ) -> Result<Self, AuthConfigError> {
+        let uri: axum::http::Uri = origin.parse().map_err(|_| AuthConfigError::Origin)?;
+        let scheme = uri.scheme_str().ok_or(AuthConfigError::Origin)?;
+        let host = uri.host().ok_or(AuthConfigError::Origin)?;
+        if uri.authority().is_none_or(|a| a.as_str().contains('@'))
+            || uri.path_and_query().is_some_and(|p| p.as_str() != "/")
+            || !(scheme == "https"
+                || (scheme == "http" && matches!(host, "127.0.0.1" | "localhost" | "[::1]")))
+        {
+            return Err(AuthConfigError::Origin);
+        }
+        let secure = scheme == "https";
+        let origin = origin.trim_end_matches('/').to_owned();
+        let dummy_hash = tokio::task::spawn_blocking(|| {
+            let params = Params::new(65536, 3, 1, Some(32)).map_err(|_| IdentityError::Hash)?;
+            Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+                .hash_password(random_token().as_bytes())
+                .map(|h| h.to_string())
+                .map_err(|_| IdentityError::Hash)
+        })
+        .await
+        .map_err(|_| IdentityError::Worker)??;
+        let toucher = SessionToucher::new(
+            store.pool.clone(),
+            touch_interval_seconds,
+            max_pending_touches,
+        );
+        Ok(Self {
+            store,
+            origin: origin.into(),
+            secure,
+            dummy_hash: dummy_hash.into(),
+            workers: Arc::new(Semaphore::new(2)),
+            toucher,
+        })
+    }
+    pub async fn authenticate(&self, headers: &HeaderMap) -> Result<Authenticated, StatusCode> {
+        let raw = session_token(headers).ok_or(StatusCode::UNAUTHORIZED)?;
+        let token_hash = hash(raw);
+        let user = self.session_from_hash(&token_hash).await?;
+        Ok(Authenticated {
+            user,
+            csrf_token: csrf(raw),
+            token_hash,
+        })
+    }
+    /// Internal capability checks share live validation and coalesced activity with P1.
+    pub(crate) async fn session_from_hash(&self, token_hash: &str) -> Result<AuthUser, StatusCode> {
+        // Validate session, user, role, active state, absolute expiry and idle expiry
+        // via a pure SQLite read (WAL snapshot) so authenticated reads never block on write locks.
+        let row: Option<(String, String, Role, i64, i64)> = sqlx::query_as(
+            "SELECT u.id, COALESCE(c.login, 'sso-' || u.id), u.role, s.last_seen_at, unixepoch() \
+             FROM sessions s \
+             JOIN users u ON u.id = s.user_id \
+             LEFT JOIN local_credentials c ON c.user_id = u.id \
+             WHERE s.token_hash = ? \
+               AND s.expires_at > unixepoch() \
+               AND s.last_seen_at > unixepoch() - ? \
+               AND u.disabled_at IS NULL",
+        )
+        .bind(token_hash)
+        .bind(IDLE_SECONDS)
+        .fetch_optional(&self.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let (id, login, role, last_seen_at, now) = row.ok_or(StatusCode::UNAUTHORIZED)?;
+        if now.saturating_sub(last_seen_at) >= self.toucher.shared.interval_seconds {
+            self.toucher.shared.record(token_hash, now);
+        }
+        Ok(AuthUser { id, login, role })
+    }
+    pub fn require_csrf(
+        &self,
+        headers: &HeaderMap,
+        identity: &Authenticated,
+    ) -> Result<(), StatusCode> {
+        self.check_origin(headers)?;
+        let provided = headers
+            .get("x-csrf-token")
+            .and_then(|v| v.to_str().ok())
+            .ok_or(StatusCode::FORBIDDEN)?;
+        // Hash both equal-length values to avoid comparing unbounded attacker input.
+        if provided.len() != 64
+            || !constant_equal(
+                hash(provided).as_bytes(),
+                hash(&identity.csrf_token).as_bytes(),
+            )
+        {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        Ok(())
+    }
+    pub(crate) fn check_origin(&self, headers: &HeaderMap) -> Result<(), StatusCode> {
+        if headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) != Some(&self.origin)
+            || headers
+                .get("sec-fetch-site")
+                .is_some_and(|v| v == "cross-site")
+        {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        Ok(())
+    }
+    pub(crate) fn cookie(&self, token: &str, max_age: i64) -> String {
+        format!(
+            "{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{}",
+            if self.secure { "; Secure" } else { "" }
+        )
+    }
+}
+pub fn router(state: AuthState) -> Router {
+    Router::new()
+        .route("/api/v1/auth/login", post(login))
+        .route("/api/v1/auth/me", get(me))
+        .route("/api/v1/auth/logout", post(logout))
+        .layer(DefaultBodyLimit::max(4096))
+        .with_state(state)
+}
+pub async fn authenticate(
+    state: &AuthState,
+    headers: &HeaderMap,
+) -> Result<Authenticated, StatusCode> {
+    state.authenticate(headers).await
+}
+async fn login(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(input): Json<Login>,
+) -> Response {
+    if let Err(status) = state.check_origin(&headers) {
+        return failure(status, "forbidden");
+    }
+    let Ok(_permit) = state.workers.clone().try_acquire_owned() else {
+        return failure(StatusCode::TOO_MANY_REQUESTS, "try_later");
+    };
+    // Single bounded row: shared budget across all account names, durable across restarts.
+    let allowed=sqlx::query_scalar::<_,i64>("INSERT INTO login_throttle(singleton,window_started,attempts) VALUES(1,unixepoch(),1) ON CONFLICT(singleton) DO UPDATE SET window_started=CASE WHEN window_started<=unixepoch()-60 THEN unixepoch() ELSE window_started END, attempts=CASE WHEN window_started<=unixepoch()-60 THEN 1 ELSE attempts+1 END WHERE window_started<=unixepoch()-60 OR attempts<10 RETURNING attempts").fetch_optional(&state.store.pool).await;
+    match allowed {
+        Ok(Some(_)) => {}
+        Ok(None) => return failure(StatusCode::TOO_MANY_REQUESTS, "try_later"),
+        Err(_) => return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
+    }
+    if input.login.len() > 64 || input.password.len() > 512 {
+        return failure(StatusCode::UNAUTHORIZED, "invalid_credentials");
+    }
+    let row=sqlx::query_as::<_,(String,String)>("SELECT c.user_id,c.password_hash FROM local_credentials c JOIN users u ON u.id=c.user_id WHERE c.login=? AND u.disabled_at IS NULL").bind(&input.login).fetch_optional(&state.store.pool).await;
+    let row = match row {
+        Ok(r) => r,
+        Err(_) => return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
+    };
+    let encoded = row
+        .as_ref()
+        .map(|r| r.1.clone())
+        .unwrap_or_else(|| state.dummy_hash.to_string());
+    let password = Zeroizing::new(input.password);
+    let verified = tokio::task::spawn_blocking(move || {
+        // Keep the permit inside the worker even if its HTTP caller disconnects.
+        let _permit = _permit;
+        let Ok(parsed) = PasswordHash::new(&encoded) else {
+            return false;
+        };
+        encoded.starts_with("$argon2id$")
+            && Argon2::default()
+                .verify_password(password.as_bytes(), &parsed)
+                .is_ok()
+    })
+    .await
+    .unwrap_or(false);
+    let Some((id, _)) = row.filter(|_| verified) else {
+        return failure(StatusCode::UNAUTHORIZED, "invalid_credentials");
+    };
+    let raw = random_token();
+    // Opportunistic bounded-state cleanup; no secret material is persisted.
+    if sqlx::query(
+        "DELETE FROM sessions WHERE expires_at<=unixepoch() OR last_seen_at<=unixepoch()-?",
+    )
+    .bind(IDLE_SECONDS)
+    .execute(&state.store.pool)
+    .await
+    .is_err()
+    {
+        return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
+    }
+    if sqlx::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+? FROM users WHERE id=? AND disabled_at IS NULL").bind(hash(&raw)).bind(ABSOLUTE_SECONDS).bind(&id).execute(&state.store.pool).await.is_err(){return failure(StatusCode::INTERNAL_SERVER_ERROR,"internal_error")}
+    let mut auth_headers = HeaderMap::new();
+    if let Ok(value) = HeaderValue::from_str(&format!("{COOKIE}={raw}")) {
+        auth_headers.insert(header::COOKIE, value);
+    }
+    let identity = match state.authenticate(&auth_headers).await {
+        Ok(i) => i,
+        Err(s) => return failure(s, "invalid_credentials"),
+    };
+    let mut response = Json(IdentityResponse {
+        user: identity.user,
+        csrf_token: identity.csrf_token,
+    })
+    .into_response();
+    if let Ok(cookie) = HeaderValue::from_str(&state.cookie(&raw, ABSOLUTE_SECONDS)) {
+        response.headers_mut().insert(header::SET_COOKIE, cookie);
+    }
+    response
+}
+async fn me(State(state): State<AuthState>, headers: HeaderMap) -> Response {
+    match state.authenticate(&headers).await {
+        Ok(i) => Json(IdentityResponse {
+            user: i.user,
+            csrf_token: i.csrf_token,
+        })
+        .into_response(),
+        Err(s) => failure(s, "authentication_required"),
+    }
+}
+async fn logout(State(state): State<AuthState>, headers: HeaderMap) -> Response {
+    let identity = match state.authenticate(&headers).await {
+        Ok(i) => i,
+        Err(s) => return failure(s, "authentication_required"),
+    };
+    if let Err(s) = state.require_csrf(&headers, &identity) {
+        return failure(s, "forbidden");
+    }
+    state.toucher.shared.cancel(&identity.token_hash);
+    if sqlx::query("DELETE FROM sessions WHERE token_hash=?")
+        .bind(&identity.token_hash)
+        .execute(&state.store.pool)
+        .await
+        .is_err()
+    {
+        return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
+    }
+    state.toucher.shared.cancel(&identity.token_hash);
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    if let Ok(cookie) = HeaderValue::from_str(&state.cookie("", 0)) {
+        response.headers_mut().insert(header::SET_COOKIE, cookie);
+    }
+    response
+}
+fn failure(status: StatusCode, code: &str) -> Response {
+    (status, Json(serde_json::json!({"error":code}))).into_response()
+}
+pub(crate) fn random_token() -> String {
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
+}
+pub(crate) fn hash(raw: &str) -> String {
+    format!("{:x}", Sha256::digest(raw.as_bytes()))
+}
+fn csrf(raw: &str) -> String {
+    hash(&format!("csrf:{raw}"))
+}
+fn constant_equal(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |d, (a, b)| d | (a ^ b)) == 0
+}
+fn session_token(headers: &HeaderMap) -> Option<&str> {
+    let mut found = None;
+    for value in headers.get_all(header::COOKIE) {
+        for pair in value.to_str().ok()?.split(';') {
+            let Some((name, value)) = pair.trim().split_once('=') else {
+                continue;
+            };
+            if name == COOKIE {
+                if found.is_some()
+                    || value.len() != 64
+                    || !value.bytes().all(|b| b.is_ascii_hexdigit())
+                {
+                    return None;
+                }
+                found = Some(value);
+            }
+        }
+    }
+    found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, http::Request};
+    use http_body_util::BodyExt;
+    use sqlx::Connection;
+    use tower::ServiceExt;
+    const ORIGIN: &str = "http://127.0.0.1:3000";
+    const PASSWORD: &str = "synthetic auth test password";
+    async fn setup() -> (tempfile::TempDir, AuthState) {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("auth.sqlite3"))
+            .await
+            .unwrap();
+        store
+            .bootstrap("admin", Zeroizing::new(PASSWORD.into()))
+            .await
+            .unwrap();
+        let state = AuthState::new(store, ORIGIN.into()).await.unwrap();
+        (temp, state)
+    }
+    async fn request(
+        state: &AuthState,
+        path: &str,
+        method: &str,
+        cookie: Option<&str>,
+        origin: Option<&str>,
+        csrf: Option<&str>,
+        body: serde_json::Value,
+    ) -> Response {
+        let mut req = Request::builder()
+            .uri(path)
+            .method(method)
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(v) = cookie {
+            req = req.header(header::COOKIE, v)
+        }
+        if let Some(v) = origin {
+            req = req.header(header::ORIGIN, v)
+        }
+        if let Some(v) = csrf {
+            req = req.header("x-csrf-token", v)
+        }
+        router(state.clone())
+            .oneshot(req.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap()
+    }
+    async fn sign_in(state: &AuthState) -> (String, String) {
+        let response = request(
+            state,
+            "/api/v1/auth/login",
+            "POST",
+            None,
+            Some(ORIGIN),
+            None,
+            serde_json::json!({"login":"admin","password":PASSWORD}),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let cookie = response.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        assert!(cookie.contains("HttpOnly; SameSite=Strict"));
+        assert!(!cookie.contains("Secure"));
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(body["user"]["role"], "administrator");
+        (
+            cookie.split(';').next().unwrap().into(),
+            body["csrfToken"].as_str().unwrap().into(),
+        )
+    }
+    #[tokio::test]
+    async fn login_persistence_expiry_csrf_and_revocation() {
+        let (temp, state) = setup().await;
+        assert_eq!(
+            request(
+                &state,
+                "/api/v1/auth/me",
+                "GET",
+                None,
+                None,
+                None,
+                serde_json::json!(null)
+            )
+            .await
+            .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let (cookie, csrf) = sign_in(&state).await;
+        let (second_cookie, _) = sign_in(&state).await;
+        assert_ne!(cookie, second_cookie);
+        let raw = cookie.split('=').nth(1).unwrap();
+        let hashes: Vec<String> = sqlx::query_scalar("SELECT token_hash FROM sessions")
+            .fetch_all(&state.store.pool)
+            .await
+            .unwrap();
+        assert!(hashes.contains(&hash(raw)));
+        assert_eq!(hashes.len(), 2);
+        assert_ne!(hashes[0], raw);
+        state.store.close().await;
+        let reopened = AuthState::new(
+            IdentityStore::open(&temp.path().join("auth.sqlite3"))
+                .await
+                .unwrap(),
+            ORIGIN.into(),
+        )
+        .await
+        .unwrap();
+        let headers =
+            HeaderMap::from_iter([(header::COOKIE, HeaderValue::from_str(&cookie).unwrap())]);
+        assert!(reopened.authenticate(&headers).await.is_ok());
+        for (origin, token) in [
+            (None, Some(csrf.as_str())),
+            (Some("https://attacker.invalid"), Some(csrf.as_str())),
+            (Some(ORIGIN), None),
+            (Some(ORIGIN), Some("wrong")),
+        ] {
+            assert_eq!(
+                request(
+                    &reopened,
+                    "/api/v1/auth/logout",
+                    "POST",
+                    Some(&cookie),
+                    origin,
+                    token,
+                    serde_json::json!(null)
+                )
+                .await
+                .status(),
+                StatusCode::FORBIDDEN
+            );
+        }
+        assert!(reopened.authenticate(&headers).await.is_ok());
+        assert_eq!(
+            request(
+                &reopened,
+                "/api/v1/auth/logout",
+                "POST",
+                Some(&cookie),
+                Some(ORIGIN),
+                Some(&csrf),
+                serde_json::json!(null)
+            )
+            .await
+            .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(matches!(
+            reopened.authenticate(&headers).await,
+            Err(StatusCode::UNAUTHORIZED)
+        ));
+        for query in [
+            "UPDATE sessions SET last_seen_at=0",
+            "UPDATE sessions SET expires_at=0",
+        ] {
+            let (cookie, _) = sign_in(&reopened).await;
+            sqlx::query(query)
+                .execute(&reopened.store.pool)
+                .await
+                .unwrap();
+            let headers =
+                HeaderMap::from_iter([(header::COOKIE, HeaderValue::from_str(&cookie).unwrap())]);
+            assert!(matches!(
+                reopened.authenticate(&headers).await,
+                Err(StatusCode::UNAUTHORIZED)
+            ));
+        }
+        let (cookie, _) = sign_in(&reopened).await;
+        sqlx::query("UPDATE users SET disabled_at=unixepoch()")
+            .execute(&reopened.store.pool)
+            .await
+            .unwrap();
+        let headers =
+            HeaderMap::from_iter([(header::COOKIE, HeaderValue::from_str(&cookie).unwrap())]);
+        assert!(matches!(
+            reopened.authenticate(&headers).await,
+            Err(StatusCode::UNAUTHORIZED)
+        ));
+    }
+    #[tokio::test]
+    async fn generic_credentials_durable_throttle_and_origin() {
+        let (temp, state) = setup().await;
+        assert_eq!(
+            request(
+                &state,
+                "/api/v1/auth/login",
+                "POST",
+                None,
+                None,
+                None,
+                serde_json::json!({"login":"admin","password":PASSWORD})
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        let mut bodies = Vec::new();
+        for login in ["admin", "missing"] {
+            let response = request(
+                &state,
+                "/api/v1/auth/login",
+                "POST",
+                None,
+                Some(ORIGIN),
+                None,
+                serde_json::json!({"login":login,"password":"wrong"}),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            bodies.push(response.into_body().collect().await.unwrap().to_bytes());
+        }
+        assert_eq!(bodies[0], bodies[1]);
+        sqlx::query("UPDATE login_throttle SET attempts=8")
+            .execute(&state.store.pool)
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                request(
+                    &state,
+                    "/api/v1/auth/login",
+                    "POST",
+                    None,
+                    Some(ORIGIN),
+                    None,
+                    serde_json::json!({"login":"missing","password":"wrong"})
+                )
+                .await
+                .status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        assert_eq!(
+            request(
+                &state,
+                "/api/v1/auth/login",
+                "POST",
+                None,
+                Some(ORIGIN),
+                None,
+                serde_json::json!({"login":"admin","password":PASSWORD})
+            )
+            .await
+            .status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        state.store.close().await;
+        let restarted = AuthState::new(
+            IdentityStore::open(&temp.path().join("auth.sqlite3"))
+                .await
+                .unwrap(),
+            ORIGIN.into(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            request(
+                &restarted,
+                "/api/v1/auth/login",
+                "POST",
+                None,
+                Some(ORIGIN),
+                None,
+                serde_json::json!({"login":"admin","password":PASSWORD})
+            )
+            .await
+            .status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        sqlx::query("UPDATE login_throttle SET window_started=0")
+            .execute(&restarted.store.pool)
+            .await
+            .unwrap();
+        sign_in(&restarted).await;
+        assert!(
+            AuthState::new(restarted.store.clone(), "http://192.168.1.2:3000".into())
+                .await
+                .is_err()
+        );
+        let secure = AuthState::new(restarted.store.clone(), "https://media.example".into())
+            .await
+            .unwrap();
+        assert!(secure.cookie("test", 100).ends_with("; Secure"));
+        let permit1 = restarted.workers.clone().acquire_owned().await.unwrap();
+        let permit2 = restarted.workers.clone().acquire_owned().await.unwrap();
+        assert_eq!(
+            request(
+                &restarted,
+                "/api/v1/auth/login",
+                "POST",
+                None,
+                Some(ORIGIN),
+                None,
+                serde_json::json!({"login":"admin","password":PASSWORD})
+            )
+            .await
+            .status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        drop((permit1, permit2));
+    }
+
+    #[tokio::test]
+    async fn edge_cases_coalescing_expiry_saturation_logout_and_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("auth_edges.sqlite3");
+        let store = IdentityStore::open(&db_path).await.unwrap();
+        let admin_id = store
+            .bootstrap("admin", Zeroizing::new(PASSWORD.into()))
+            .await
+            .unwrap();
+        // Configure max_pending_touches = 4 to test saturation and backpressure deterministically.
+        let state = AuthState::new_with_touch_config(store.clone(), ORIGIN.into(), 60, 4)
+            .await
+            .unwrap();
+        let (cookie, csrf) = sign_in(&state).await;
+        let raw = cookie.split('=').nth(1).unwrap();
+        let token_hash = hash(raw);
+        let headers =
+            HeaderMap::from_iter([(header::COOKIE, HeaderValue::from_str(&cookie).unwrap())]);
+
+        // 1. Fresh session (< 60s old): 20 concurrent requests cause 0 SQLite writes.
+        let mut tasks = Vec::new();
+        for _ in 0..20 {
+            let s = state.clone();
+            let h = headers.clone();
+            tasks.push(tokio::spawn(
+                async move { s.authenticate(&h).await.unwrap() },
+            ));
+        }
+        for t in tasks {
+            assert_eq!(t.await.unwrap().user.role, Role::Administrator);
+        }
+        assert_eq!(state.touch_stats().write_batches_succeeded, 0);
+        assert_eq!(state.touch_stats().pending_count, 0);
+
+        // 2. Activity near idle expiration boundary (last_seen_at = now - 1795s, 5s before 1800s limit):
+        // 30 concurrent requests from the same user coalesce into 1 single SQLite write batch.
+        sqlx::query("UPDATE sessions SET last_seen_at = unixepoch() - 1795 WHERE token_hash = ?")
+            .bind(&token_hash)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let before_seen: i64 =
+            sqlx::query_scalar("SELECT last_seen_at FROM sessions WHERE token_hash = ?")
+                .bind(&token_hash)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+
+        let mut concurrent = Vec::new();
+        for _ in 0..30 {
+            let s = state.clone();
+            let h = headers.clone();
+            concurrent.push(tokio::spawn(
+                async move { s.authenticate(&h).await.unwrap() },
+            ));
+        }
+        for t in concurrent {
+            t.await.unwrap();
+        }
+        state.flush_session_touches().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let after_seen: i64 =
+            sqlx::query_scalar("SELECT last_seen_at FROM sessions WHERE token_hash = ?")
+                .bind(&token_hash)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert!(
+            after_seen > before_seen + 1700,
+            "Session near expiration must be refreshed to current unixepoch"
+        );
+        assert_eq!(
+            state.touch_stats().write_batches_succeeded,
+            1,
+            "30 concurrent requests must coalesce into exactly 1 SQLite write batch"
+        );
+        assert_eq!(state.touch_stats().rows_updated, 1);
+
+        // 3. Delayed touch never revives a session that expired while SQLite was write-locked:
+        let expired_raw = "e".repeat(64);
+        let expired_hash = hash(&expired_raw);
+        sqlx::query(
+            "INSERT INTO sessions(token_hash, user_id, created_at, last_seen_at, expires_at) \
+             VALUES(?, ?, unixepoch() - 2000, unixepoch() - 1790, unixepoch() + 3600)",
+        )
+        .bind(&expired_hash)
+        .bind(&admin_id)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        let mut lock_conn = store.pool.acquire().await.unwrap();
+        let lock_tx = lock_conn.begin_with("BEGIN IMMEDIATE").await.unwrap();
+
+        let exp_headers = HeaderMap::from_iter([(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("{COOKIE}={expired_raw}")).unwrap(),
+        )]);
+        // Still valid during the lock (1790 < 1800) -> queues touch in memory
+        assert!(state.authenticate(&exp_headers).await.is_ok());
+        assert_eq!(state.touch_stats().pending_count, 1);
+        lock_tx.rollback().await.unwrap();
+        drop(lock_conn);
+
+        // Simulate session crossing the 1800s boundary before worker flushes
+        sqlx::query("UPDATE sessions SET last_seen_at = unixepoch() - 1805 WHERE token_hash = ?")
+            .bind(&expired_hash)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        state.flush_session_touches().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            matches!(
+                state.authenticate(&exp_headers).await,
+                Err(StatusCode::UNAUTHORIZED)
+            ),
+            "Deferred touch must NEVER revive an already-expired session"
+        );
+
+        // 4. Queue saturation (max_pending = 4) under write lock:
+        let mut lock_conn = store.pool.acquire().await.unwrap();
+        let lock_tx = lock_conn.begin_with("BEGIN IMMEDIATE").await.unwrap();
+
+        for i in 0..8u8 {
+            let tok = format!("{:02x}", i).repeat(32);
+            state.toucher.shared.record(&hash(&tok), 2_000_000_000);
+        }
+        let stats_under_lock = state.touch_stats();
+        assert_eq!(
+            stats_under_lock.pending_count, 4,
+            "Queue must be strictly bounded to 4"
+        );
+        assert_eq!(
+            stats_under_lock.dropped_overflow, 4,
+            "Overflow touches beyond capacity must be dropped with backpressure counter"
+        );
+        // Reads still succeed immediately while queue is saturated and DB is write-locked!
+        assert!(state.authenticate(&headers).await.is_ok());
+
+        lock_tx.rollback().await.unwrap();
+        drop(lock_conn);
+        state.flush_session_touches().await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(state.touch_stats().pending_count, 0);
+
+        // 5. Logout while an activity update is pending:
+        sqlx::query("UPDATE sessions SET last_seen_at = unixepoch() - 300 WHERE token_hash = ?")
+            .bind(&token_hash)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let mut lock_conn = store.pool.acquire().await.unwrap();
+        let lock_tx = lock_conn.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        assert!(state.authenticate(&headers).await.is_ok());
+        assert_eq!(state.touch_stats().pending_count, 1);
+        lock_tx.rollback().await.unwrap();
+        drop(lock_conn);
+
+        assert_eq!(
+            request(
+                &state,
+                "/api/v1/auth/logout",
+                "POST",
+                Some(&cookie),
+                Some(ORIGIN),
+                Some(&csrf),
+                serde_json::json!(null),
+            )
+            .await
+            .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            state.touch_stats().pending_count,
+            0,
+            "Logout must immediately cancel pending touch"
+        );
+        state.flush_session_touches().await;
+        assert!(
+            matches!(
+                state.authenticate(&headers).await,
+                Err(StatusCode::UNAUTHORIZED)
+            ),
+            "Logged-out session must remain revoked after flush"
+        );
+
+        // 6. Server restart before activity persistence (unflushed touch in memory):
+        let (restart_cookie, _) = sign_in(&state).await;
+        let restart_raw = restart_cookie.split('=').nth(1).unwrap();
+        let restart_hash = hash(restart_raw);
+        let restart_headers = HeaderMap::from_iter([(
+            header::COOKIE,
+            HeaderValue::from_str(&restart_cookie).unwrap(),
+        )]);
+        sqlx::query("UPDATE sessions SET last_seen_at = unixepoch() - 1790 WHERE token_hash = ?")
+            .bind(&restart_hash)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let persisted_before_restart: i64 =
+            sqlx::query_scalar("SELECT last_seen_at FROM sessions WHERE token_hash = ?")
+                .bind(&restart_hash)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+
+        // Hold write lock so touch stays in memory, then simulate abrupt restart before flush
+        let mut lock_conn = store.pool.acquire().await.unwrap();
+        let lock_tx = lock_conn.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        assert!(state.authenticate(&restart_headers).await.is_ok());
+        assert_eq!(state.touch_stats().pending_count, 1);
+        drop(state);
+        lock_tx.rollback().await.unwrap();
+        drop(lock_conn);
+        store.close().await;
+
+        let reopened_store = IdentityStore::open(&db_path).await.unwrap();
+        let reopened_state = AuthState::new(reopened_store.clone(), ORIGIN.into())
+            .await
+            .unwrap();
+        let persisted_after_restart: i64 =
+            sqlx::query_scalar("SELECT last_seen_at FROM sessions WHERE token_hash = ?")
+                .bind(&restart_hash)
+                .fetch_one(&reopened_store.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            persisted_before_restart, persisted_after_restart,
+            "Unpersisted in-memory touch is discarded on abrupt restart"
+        );
+        // Because persisted last_seen_at is still < 1800s old, session remains valid after restart
+        assert!(reopened_state.authenticate(&restart_headers).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn origin_configuration_http_loopback_http_lan_and_https_matrix() {
+        let (_temp, base_state) = setup().await;
+        let store = base_state.store.clone();
+
+        // 1. HTTP loopback origins (127.0.0.1, localhost, [::1], with or without trailing slash) are accepted
+        for (input, canonical) in [
+            ("http://127.0.0.1:3000", "http://127.0.0.1:3000"),
+            ("http://127.0.0.1:3000/", "http://127.0.0.1:3000"),
+            ("http://localhost:3000", "http://localhost:3000"),
+            ("http://[::1]:3000", "http://[::1]:3000"),
+        ] {
+            let state = AuthState::new(store.clone(), input.into()).await.unwrap();
+            assert_eq!(state.origin(), canonical);
+            assert!(!state.cookie("tok", 300).contains("; Secure"));
+        }
+
+        // 2. HTTP LAN and non-loopback origins are explicitly rejected with AuthConfigError::Origin
+        for rejected in [
+            "http://192.168.1.100:3000",
+            "http://10.0.0.10:3000",
+            "http://172.16.0.5:3000",
+            "http://0.0.0.0:3000",
+            "http://nas.local:3000",
+            "http://aether.mondomaine.fr",
+            "https://admin@aether.mondomaine.fr",
+            "https://aether.mondomaine.fr/app",
+            "https://aether.mondomaine.fr?foo=bar",
+            "ws://127.0.0.1:3000",
+        ] {
+            assert!(
+                matches!(
+                    AuthState::new(store.clone(), rejected.into()).await,
+                    Err(AuthConfigError::Origin)
+                ),
+                "Expected AuthConfigError::Origin for {rejected}"
+            );
+        }
+
+        // 3. HTTPS LAN / Internet origins (standard port 443 and custom port e.g. 8443 on Synology DSM) are accepted
+        for (input, canonical) in [
+            (
+                "https://aether.mondomaine.fr",
+                "https://aether.mondomaine.fr",
+            ),
+            (
+                "https://aether.mondomaine.fr/",
+                "https://aether.mondomaine.fr",
+            ),
+            ("https://aether.nas.lan:8443", "https://aether.nas.lan:8443"),
+            ("https://192.168.1.100:8443", "https://192.168.1.100:8443"),
+            ("https://[::1]:8443", "https://[::1]:8443"),
+        ] {
+            let state = AuthState::new(store.clone(), input.into()).await.unwrap();
+            assert_eq!(state.origin(), canonical);
+            let set_cookie = state.cookie("tok", 300);
+            assert!(set_cookie.contains("HttpOnly; SameSite=Strict"));
+            assert!(set_cookie.ends_with("; Secure"));
+
+            // Reset login throttle before testing login on this HTTPS origin
+            sqlx::query("DELETE FROM login_throttle")
+                .execute(&store.pool)
+                .await
+                .unwrap();
+
+            // Login with exact canonical HTTPS Origin succeeds and emits a Secure cookie
+            let login_res = request(
+                &state,
+                "/api/v1/auth/login",
+                "POST",
+                None,
+                Some(canonical),
+                None,
+                serde_json::json!({"login":"admin","password":PASSWORD}),
+            )
+            .await;
+            assert_eq!(login_res.status(), StatusCode::OK);
+            let raw_set_cookie = login_res.headers()[header::SET_COOKIE]
+                .to_str()
+                .unwrap()
+                .to_owned();
+            assert!(raw_set_cookie.ends_with("; Secure"));
+            let cookie_pair = raw_set_cookie.split(';').next().unwrap().to_owned();
+            let body: serde_json::Value =
+                serde_json::from_slice(&login_res.into_body().collect().await.unwrap().to_bytes())
+                    .unwrap();
+            let csrf_tok = body["csrfToken"].as_str().unwrap().to_owned();
+
+            // Mismatched scheme (http:// instead of https://) or mismatched port is rejected with 403
+            let wrong_scheme = canonical.replacen("https://", "http://", 1);
+            assert_eq!(
+                request(
+                    &state,
+                    "/api/v1/auth/logout",
+                    "POST",
+                    Some(&cookie_pair),
+                    Some(&wrong_scheme),
+                    Some(&csrf_tok),
+                    serde_json::json!(null),
+                )
+                .await
+                .status(),
+                StatusCode::FORBIDDEN
+            );
+
+            // Exact canonical HTTPS Origin + valid CSRF token succeeds
+            assert_eq!(
+                request(
+                    &state,
+                    "/api/v1/auth/logout",
+                    "POST",
+                    Some(&cookie_pair),
+                    Some(canonical),
+                    Some(&csrf_tok),
+                    serde_json::json!(null),
+                )
+                .await
+                .status(),
+                StatusCode::NO_CONTENT
+            );
+        }
+    }
+}

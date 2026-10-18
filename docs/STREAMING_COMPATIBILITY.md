@@ -1,5 +1,17 @@
 # Compatibilité observée — P0 natif et limite de sélection audio
 
+## Scanner Films P1 — 16 octobre 2026
+
+Chrome155.0.8059.40 / Windows10.0.26300 headless : MP4 AV1 10bits + Opus FR
+synthétique copié dans une bibliothèque locale, découvert/indexé puis lu dans
+le lecteur natif existant. Progression temporelle, pause et seek4s vérifiés,
+ainsi que catalogue et nouvelle lecture après arrêt/relance réel du Core avec
+la même SQLite. Aucun probe au deuxième scan des deux fichiers inchangés.
+Rapports et captures : [evidence/2026-10-16/scanner/](evidence/2026-10-16/scanner/).
+Ce parcours n'ajoute pas de preuve PCM/audio physique, de compatibilité MKV
+générale, de commutation des pistes internes ou de résultat Edge/Firefox/Safari.
+Les fichiers MKV multipistes sont inspectés par les tests Node/SQLite séparés.
+
 Le jalon **10 bits/5.1/sous-titres** figure en fin de document. Les premières
 sections restent les preuves des fixtures 8 bits/mono.
 

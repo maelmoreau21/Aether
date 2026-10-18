@@ -9,14 +9,19 @@ on:
     branches:
       - main
       - develop
+  workflow_dispatch:
 
 permissions:
   contents: read
-  # Requis pour rustsec/audit-check si publication d'annotations
-  checks: write
-  issues: write
 
 jobs:
+  workflows:
+    name: Validation des workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker://rhysd/actionlint:1.7.12
+
   # =========================================================================
   # 1. Vérifications et tests Rust (Core & Node)
   # =========================================================================
@@ -71,10 +76,12 @@ jobs:
         run: cargo fmt --check
 
       - name: Analyse statique stricte (cargo clippy)
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
 
       - name: Exécuter les tests (cargo test)
-        run: cargo test --locked
+        # Les fixtures 1k/10k partagent CPU et disque du runner ; chaque test de
+        # concurrence conserve ses propres tâches concurrentes et ses assertions.
+        run: cargo test --locked --workspace --all-features -- --test-threads=1
 
   # =========================================================================
   # 2. Audit de sécurité des dépendances Rust
@@ -86,10 +93,13 @@ jobs:
       - name: Récupérer le code source
         uses: actions/checkout@v4
 
+      - name: Installer la toolchain Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Installer cargo-audit
+        run: cargo install cargo-audit --locked
       - name: Lancer l'audit de sécurité RustSec
-        uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo audit
 
   # =========================================================================
   # 3. Vérifications et tests Frontend (SvelteKit)
@@ -124,8 +134,152 @@ jobs:
       - name: Linting (ESLint / Prettier)
         run: npm run lint
 
-      - name: Tests unitaires frontend (Vitest / Playwright)
+      - name: Tests unitaires frontend (Vitest)
         run: npm test
 
       - name: Build statique servi par Rust
         run: npm run build
+
+  # =========================================================================
+  # 4. Parcours navigateur réels (Films & Séries sous Chrome headless)
+  # =========================================================================
+  browser:
+    name: Navigateur Chrome (Films & Séries)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Installer la toolchain Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache des dépendances Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Installer FFmpeg (génération des fixtures et ffprobe)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Installer les dépendances npm du frontend
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Installer Google Chrome (channel 'chrome') et ses dépendances système via Playwright
+        working-directory: apps/web
+        run: npx playwright install --with-deps chrome
+
+      - name: Construire le frontend SvelteKit statique
+        working-directory: apps/web
+        run: |
+          rm -rf build
+          npm run build
+          test -f build/index.html
+
+      - name: Purger les fixtures et preuves navigateur préexistantes
+        run: |
+          rm -rf tests/fixtures/generated
+          rm -rf docs/evidence/2026-10-16/scanner
+          rm -rf docs/evidence/2026-10-17/series
+
+      - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
+        shell: pwsh
+        run: ./scripts/generate-fixtures.ps1
+
+      - name: Préparer le remux linguistique (pistes FR/EN)
+        shell: pwsh
+        run: ./scripts/prepare-language-remux.ps1
+
+      - name: Générer les fixtures représentatives (10-bit / 5.1)
+        run: python3 scripts/generate-representative-fixtures.py
+
+      - name: Préparer les sources P1 (clips MKV / MP4 FR/EN)
+        run: python3 scripts/prepare-p1.py
+
+      - name: Exécuter le parcours navigateur Films (scan, incrémental, lecture, seek, redémarrage Core)
+        run: cargo test --locked --test browser_scanner -- --ignored --nocapture
+
+      - name: Exécuter le parcours navigateur Séries (scan, saisons, lecture, 403, transition cookies HttpOnly)
+        run: cargo test --locked --test browser_series -- --ignored --nocapture
+
+      - name: Vérifier la génération fraîche des rapports et captures navigateur
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          for file in [
+              "docs/evidence/2026-10-16/scanner/report.json",
+              "docs/evidence/2026-10-16/scanner/report-restart.json",
+              "docs/evidence/2026-10-17/series/report.json"
+          ]:
+              assert json.loads(Path(file).read_text())["passed"] is True, file
+          for img in [
+              "docs/evidence/2026-10-16/scanner/scan.png",
+              "docs/evidence/2026-10-16/scanner/playback.png",
+              "docs/evidence/2026-10-16/scanner/playback-restart.png",
+              "docs/evidence/2026-10-17/series/admin-scan.png",
+              "docs/evidence/2026-10-17/series/series-detail.png",
+              "docs/evidence/2026-10-17/series/immersive-playback.png"
+          ]:
+              assert Path(img).is_file(), img
+
+      - name: Archiver les rapports et captures navigateur
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence-films-series
+          if-no-files-found: error
+          path: |
+            docs/evidence/2026-10-16/scanner/
+            docs/evidence/2026-10-17/series/
+
+  images:
+    name: Image Docker (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [runtime, runtime-core, runtime-node]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: media-ci:${{ matrix.target }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+      - name: Vérifier le runtime Node optimisé avant publication
+        if: matrix.target == 'runtime-node'
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh media-ci:runtime-node -ec '
+            ffprobe -version >/dev/null
+            ! command -v ffmpeg
+            test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
+          '
+          test "$(docker inspect --format '{{.Size}}' media-ci:runtime-node)" -lt 200000000
+
+  # =========================================================================
+  # 5. Publication des images Docker sur GHCR
+  # Push ou lancement manuel de CI (main/develop), après tous les contrôles.
+  # Les pull requests non fiables ne publient jamais d'image.
+  # =========================================================================
+  publish:
+    name: Publication Docker GHCR
+    needs: [workflows, rust, security-audit, frontend, browser, images]
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish.yml
+

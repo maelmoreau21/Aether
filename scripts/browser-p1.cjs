@@ -14,7 +14,7 @@ function hashes() {
   try {
     browser = await (report.channel==='firefox'?firefoxAdapter():playwrightAdapter());
     report.browser=browser.version; report.driver=browser.driver;
-    await browser.goto('http://127.0.0.1:3000/app/');
+    await browser.goto('http://127.0.0.1:3000/app/films/?work=fixture-film');
     await browser.evaluate(async()=>{
       const until = async (fn, label) => {const end=Date.now()+12000;while(!fn()){if(Date.now()>end)throw new Error('Timeout '+label+' '+document.querySelector('[role=alert]')?.textContent);await new Promise(r=>setTimeout(r,20));}};
       const v=document.querySelector('video');
@@ -23,17 +23,20 @@ function hashes() {
         if(label==='Source'&&!document.querySelector('dialog').open){document.querySelector(`[aria-label="Sélectionner la version ${value.endsWith('mkv')?'MKV':'MP4'}"]`).click();return;}
         const map={Audio:['audio','data-audio-id'], 'Sous-titres':['subtitles','data-subtitle-id'], Source:['video','data-source-id'], Vitesse:['speed','data-speed']};
         const [menu,attr]=map[label];document.querySelector(`[data-menu="${menu}"]`).click();await new Promise(r=>setTimeout(r,0));
-        const button=document.querySelector(`[${attr}="${value||'off'}"]`);if(!button||button.disabled)throw new Error('Missing usable choice '+label+' '+value);button.click();
+        const button=document.querySelector(`[${attr}="${value||'off'}"]`);if(!button||button.disabled)throw new Error('Missing usable choice '+label+' '+value);if(label==='Audio'){
+          const video=document.querySelector('video');window.p1test.lastAudioPosition=video.currentTime;window.p1test.lastAudioRestore=null;
+          video.addEventListener('seeked',()=>{window.p1test.lastAudioRestore=video.currentTime;},{once:true});
+        }button.click();
       };
       const ready=async()=>{await new Promise(r=>setTimeout(r,30));await until(()=>document.querySelector('dialog').open&&!document.querySelector('button[aria-label="Audio"]').disabled&&!document.querySelector('.loading'),'ready');};
       const seek=async time=>{const input=document.querySelector('input[aria-label="Position"]');input.value=time;input.dispatchEvent(new Event('input',{bubbles:true}));await until(()=>!v.seeking&&Math.abs(v.currentTime-time)<.15,'seek');};
       window.p1test={until,v,select,ready,seek};
-      await until(()=>document.querySelectorAll('.media-card').length===2,'catalogue hydration');
+      await until(()=>document.querySelectorAll('.version-choice').length===2,'catalogue hydration');
     });
     for (const container of (process.env.MEDIA_TEST_CONTAINER ? [process.env.MEDIA_TEST_CONTAINER] : ['mkv','mp4'])) {
       await browser.evaluate(container=>window.p1test.select('Source','demo-'+container),container);
       await browser.click('.hero-cta');
-      await browser.evaluate(async()=>{await window.p1test.ready();window.p1test.v.pause();});
+      await browser.evaluate(async()=>{await window.p1test.ready();window.p1test.v.pause();await window.p1test.select('Audio','audio-fr');await window.p1test.ready();await window.p1test.seek(0);});
       await browser.evaluate(()=>{const v=document.querySelector('video');
         if(!window.p1test.context){
           const context=new AudioContext(),source=context.createMediaElementSource(v),splitter=context.createChannelSplitter(6);
@@ -61,8 +64,10 @@ function hashes() {
         const paused={position:v.currentTime,paused:v.paused,volume:v.volume,speed:v.playbackRate};
         if(!paused.paused||Math.abs(paused.position-4.25)>.15||paused.volume!==.4||paused.speed!==window.p1test.testSpeed)throw new Error('Paused state lost '+JSON.stringify(paused));
         await v.play();const en=await stable('en');
-        const before=v.currentTime;await select('Audio','audio-fr');await ready();const restored=v.currentTime;
-        if(v.paused||Math.abs(restored-before)>.4)throw new Error('Playing state/position lost');
+        // Keep enough of the 12s fixture for a real menu-driven active switch.
+        v.pause();await seek(1);await v.play();await stable('en');
+        await select('Audio','audio-fr');const before=window.p1test.lastAudioPosition;await ready();const restored=window.p1test.lastAudioRestore;const afterReadyPosition=v.currentTime;
+        if(v.paused||restored===null||Math.abs(restored-before)>.15)throw new Error('Playing state/position lost '+JSON.stringify({before,restored,paused:v.paused,ended:v.ended,src:v.currentSrc}));
         const frAgain=await stable('fr');
         v.pause();await seek(4.25);
         const subtitles=[];
@@ -72,7 +77,7 @@ function hashes() {
         await select('Audio','audio-en');await ready();await until(()=>Array.from(v.textTracks).some(t=>t.mode==='showing'&&Array.from(t.activeCues||[]).some(c=>c.text==='EN FULL CUE 2')),'manual subtitle retained');
         await select('Sous-titres','');await ready();if(Array.from(v.textTracks).some(t=>t.mode==='showing'))throw new Error('Subtitle not off');
         await seek(.5);await v.play();const enAfterBackward=await stable('en');v.pause();await seek(8.7);await v.play();await stable('en');await until(()=>v.ended,'end');
-        return {container,fr,en,frAgain,enAfterBackward,pixels:colors.size,paused,playingPositionError:restored-before,subtitles,manualSubtitleRetained:true,ended:v.ended};
+        return {container,fr,en,frAgain,enAfterBackward,pixels:colors.size,paused,playingPositionError:restored-before,afterReadyPosition,subtitles,manualSubtitleRetained:true,ended:v.ended};
       },container);
       report.results.push(result);
       if (container !== (process.env.MEDIA_TEST_CONTAINER || 'mp4')) await browser.evaluate(()=>document.querySelector('.return').click());

@@ -1,0 +1,395 @@
+{
+  "run": "p2qa-d5094fc431",
+  "baseline": false,
+  "transport": "HTTPS via test TLS terminator",
+  "phases": {
+    "distributed_scan": {
+      "seconds": 4.916757400002098,
+      "containers": {
+        "core": {
+          "memory_current": 14069760,
+          "memory_peak_since_start": 72908800,
+          "cpu_usec": 1092512,
+          "rx_bytes": 239758,
+          "tx_bytes": 78925,
+          "sampled_peak_bytes": 12591104,
+          "cpu_seconds": 0.465063,
+          "cpu_one_core_percent": 9.458733920852016,
+          "rx_delta": 223721,
+          "tx_delta": 67945,
+          "rx_bytes_per_second": 45501.736571323316,
+          "tx_bytes_per_second": 13819.06701355064
+        },
+        "films": {
+          "memory_current": 7307264,
+          "memory_peak_since_start": 19570688,
+          "cpu_usec": 1748483,
+          "rx_bytes": 17890,
+          "tx_bytes": 91813,
+          "sampled_peak_bytes": 7032832,
+          "cpu_seconds": 1.703168,
+          "cpu_one_core_percent": 34.6400658287365,
+          "rx_delta": 14973,
+          "tx_delta": 90500,
+          "rx_bytes_per_second": 3045.299733518195,
+          "tx_bytes_per_second": 18406.439984197998
+        },
+        "series": {
+          "memory_current": 7098368,
+          "memory_peak_since_start": 20041728,
+          "cpu_usec": 1974797,
+          "rx_bytes": 18298,
+          "tx_bytes": 97727,
+          "sampled_peak_bytes": 13606912,
+          "cpu_seconds": 1.93407,
+          "cpu_one_core_percent": 39.3362910278871,
+          "rx_delta": 15768,
+          "tx_delta": 96455,
+          "rx_bytes_per_second": 3206.991664871094,
+          "tx_bytes_per_second": 19617.604073765942
+        },
+        "tls": {
+          "memory_current": 14241792,
+          "memory_peak_since_start": 18280448,
+          "cpu_usec": 516901,
+          "rx_bytes": 218062,
+          "tx_bytes": 228707,
+          "sampled_peak_bytes": 14618624,
+          "cpu_seconds": 0.164127,
+          "cpu_one_core_percent": 3.338114668824823,
+          "rx_delta": 210520,
+          "tx_delta": 218446,
+          "rx_bytes_per_second": 42816.83696655649,
+          "tx_bytes_per_second": 44428.87501423332
+        }
+      }
+    },
+    "distributed_direct": {
+      "seconds": 6.009565699991072,
+      "containers": {
+        "core": {
+          "memory_current": 15106048,
+          "memory_peak_since_start": 72908800,
+          "cpu_usec": 1419088,
+          "rx_bytes": 364298,
+          "tx_bytes": 247586,
+          "sampled_peak_bytes": 14766080,
+          "cpu_seconds": 0.277366,
+          "cpu_one_core_percent": 4.615408397988095,
+          "rx_delta": 112985,
+          "tx_delta": 116642,
+          "rx_bytes_per_second": 18800.85943650934,
+          "tx_bytes_per_second": 19409.389267542792
+        },
+        "films": {
+          "memory_current": 9256960,
+          "memory_peak_since_start": 19570688,
+          "cpu_usec": 3789856,
+          "rx_bytes": 218073,
+          "tx_bytes": 8434943,
+          "sampled_peak_bytes": 9191424,
+          "cpu_seconds": 2.022794,
+          "cpu_one_core_percent": 33.659570441221824,
+          "rx_delta": 200183,
+          "tx_delta": 8343130,
+          "rx_bytes_per_second": 33310.72659714785,
+          "tx_bytes_per_second": 1388308.3098687807
+        },
+        "series": {
+          "memory_current": 11714560,
+          "memory_peak_since_start": 20041728,
+          "cpu_usec": 4007813,
+          "rx_bytes": 219603,
+          "tx_bytes": 8572920,
+          "sampled_peak_bytes": 10723328,
+          "cpu_seconds": 2.012953,
+          "cpu_one_core_percent": 33.49581484736893,
+          "rx_delta": 201305,
+          "tx_delta": 8475193,
+          "rx_bytes_per_second": 33497.428940713486,
+          "tx_bytes_per_second": 1410283.7747514087
+        },
+        "tls": {
+          "memory_current": 14147584,
+          "memory_peak_since_start": 18403328,
+          "cpu_usec": 1003073,
+          "rx_bytes": 478659,
+          "tx_bytes": 601540,
+          "sampled_peak_bytes": 14413824,
+          "cpu_seconds": 0.468204,
+          "cpu_one_core_percent": 7.790978972086046,
+          "rx_delta": 260597,
+          "tx_delta": 372833,
+          "rx_bytes_per_second": 43363.699310315744,
+          "tx_bytes_per_second": 62039.9241164056
+        }
+      }
+    },
+    "distributed_relay": {
+      "seconds": 5.906051500001922,
+      "containers": {
+        "core": {
+          "memory_current": 18595840,
+          "memory_peak_since_start": 72908800,
+          "cpu_usec": 5587482,
+          "rx_bytes": 20002788,
+          "tx_bytes": 19719623,
+          "sampled_peak_bytes": 19017728,
+          "cpu_seconds": 4.153509,
+          "cpu_one_core_percent": 70.32632546462978,
+          "rx_delta": 19638490,
+          "tx_delta": 19472037,
+          "rx_bytes_per_second": 3325147.0970061147,
+          "tx_bytes_per_second": 3296963.6312845666
+        },
+        "films": {
+          "memory_current": 9240576,
+          "memory_peak_since_start": 19570688,
+          "cpu_usec": 4039507,
+          "rx_bytes": 285290,
+          "tx_bytes": 18114149,
+          "sampled_peak_bytes": 9220096,
+          "cpu_seconds": 0.233194,
+          "cpu_one_core_percent": 3.948390900416702,
+          "rx_delta": 67217,
+          "tx_delta": 9679206,
+          "rx_bytes_per_second": 11381.038583896216,
+          "tx_bytes_per_second": 1638862.4447309424
+        },
+        "series": {
+          "memory_current": 10895360,
+          "memory_peak_since_start": 20041728,
+          "cpu_usec": 4301463,
+          "rx_bytes": 286731,
+          "tx_bytes": 18202392,
+          "sampled_peak_bytes": 15237120,
+          "cpu_seconds": 0.276964,
+          "cpu_one_core_percent": 4.689495172873278,
+          "rx_delta": 67128,
+          "tx_delta": 9629472,
+          "rx_bytes_per_second": 11365.96929437174,
+          "tx_bytes_per_second": 1630441.590290377
+        },
+        "tls": {
+          "memory_current": 14196736,
+          "memory_peak_since_start": 18829312,
+          "cpu_usec": 1508396,
+          "rx_bytes": 19999546,
+          "tx_bytes": 20222731,
+          "sampled_peak_bytes": 14434304,
+          "cpu_seconds": 0.490262,
+          "cpu_one_core_percent": 8.301011259381001,
+          "rx_delta": 19520887,
+          "tx_delta": 19621191,
+          "rx_bytes_per_second": 3305234.8087370466,
+          "tx_bytes_per_second": 3322218.067348992
+        }
+      }
+    },
+    "standalone_scan": {
+      "seconds": 3.498611899995012,
+      "containers": {
+        "standalone": {
+          "memory_current": 10473472,
+          "memory_peak_since_start": 73089024,
+          "cpu_usec": 3600449,
+          "rx_bytes": 29847,
+          "tx_bytes": 31230,
+          "sampled_peak_bytes": 18243584,
+          "cpu_seconds": 3.087251,
+          "cpu_one_core_percent": 88.2421682726341,
+          "rx_delta": 26520,
+          "tx_delta": 27892,
+          "rx_bytes_per_second": 7580.1491443042905,
+          "tx_bytes_per_second": 7972.304673187605
+        }
+      }
+    },
+    "standalone_stream": {
+      "seconds": 5.239626900001895,
+      "containers": {
+        "standalone": {
+          "memory_current": 11784192,
+          "memory_peak_since_start": 73089024,
+          "cpu_usec": 4790029,
+          "rx_bytes": 532078,
+          "tx_bytes": 80790229,
+          "sampled_peak_bytes": 12238848,
+          "cpu_seconds": 1.14238,
+          "cpu_one_core_percent": 21.802697440147636,
+          "rx_delta": 490676,
+          "tx_delta": 80710988,
+          "rx_bytes_per_second": 93647.12590505682,
+          "tx_bytes_per_second": 15403957.102359867
+        }
+      }
+    }
+  },
+  "checks": [
+    "login http://127.0.0.1:13000",
+    "Docker HTTPS hostname mismatch rejected",
+    "pair films",
+    "create films",
+    "pair series",
+    "create series",
+    "scan accepted (202)",
+    "scan without media errors",
+    "scan accepted (202)",
+    "scan without media errors",
+    "catalog available",
+    "film and episode indexed",
+    "descriptor available",
+    "full stream",
+    "stream matches original fixture hash",
+    "HEAD",
+    "Range exact bytes",
+    "invalid Range",
+    "request after cancellation",
+    "descriptor available",
+    "full stream",
+    "stream matches original fixture hash",
+    "HEAD",
+    "Range exact bytes",
+    "invalid Range",
+    "request after cancellation",
+    "descriptor available",
+    "full stream",
+    "stream matches original fixture hash",
+    "HEAD",
+    "Range exact bytes",
+    "invalid Range",
+    "request after cancellation",
+    "descriptor available",
+    "full stream",
+    "stream matches original fixture hash",
+    "HEAD",
+    "Range exact bytes",
+    "invalid Range",
+    "request after cancellation",
+    "login http://127.0.0.1:13000",
+    "catalog available",
+    "distributed restart persists IDs",
+    "stopped Node disconnected",
+    "Node reconnect",
+    "secret rotation",
+    "old token after rotation",
+    "rotated identity persists across Node restart",
+    "Core outage fails closed for direct playback",
+    "direct playback recovers after Core restart",
+    "logout",
+    "old token after logout",
+    "login http://127.0.0.1:13000",
+    "offline Node revoke",
+    "offline revoke denies old token after restart",
+    "login http://127.0.0.1:13001",
+    "standalone create films",
+    "standalone create series",
+    "scan accepted (202)",
+    "scan without media errors",
+    "scan accepted (202)",
+    "scan without media errors",
+    "catalog available",
+    "descriptor available",
+    "full stream",
+    "stream matches original fixture hash",
+    "HEAD",
+    "Range exact bytes",
+    "invalid Range",
+    "request after cancellation",
+    "descriptor available",
+    "full stream",
+    "stream matches original fixture hash",
+    "HEAD",
+    "Range exact bytes",
+    "invalid Range",
+    "request after cancellation",
+    "login http://127.0.0.1:13001",
+    "catalog available",
+    "standalone restart persists IDs",
+    "all media unchanged",
+    "container logs contain no credentials or playback query",
+    "container logs contain no credentials or playback query",
+    "container logs contain no credentials or playback query",
+    "container logs contain no credentials or playback query",
+    "container logs contain no credentials or playback query"
+  ],
+  "image_bytes": {
+    "aether-node:p2-qa": 499846382,
+    "aether-core:p2-qa": 173355786,
+    "aether:p2-qa": 827491643
+  },
+  "image_ids": {
+    "aether-node:p2-qa": "sha256:5d6ba1dcdb0d6917f2e393f4a600ac8d15ae54ae9d8fa9b1c7d838227616f510",
+    "aether-core:p2-qa": "sha256:7d4c76bb93e5887803514f15e11116c6d5fa1110aad02adb6e9acd0bdede68db",
+    "aether:p2-qa": "sha256:73e5a27be33054370f70b63397912bc9c66b303a7eab4783c4391924d2726efb"
+  },
+  "docker_server": "29.8.2",
+  "scans": [
+    {
+      "seconds": 2.2532937999931164,
+      "discovered": 24,
+      "probed": 24,
+      "reused": 0
+    },
+    {
+      "seconds": 2.625531800003955,
+      "discovered": 24,
+      "probed": 24,
+      "reused": 0
+    },
+    {
+      "seconds": 1.7931244999927003,
+      "discovered": 24,
+      "probed": 24,
+      "reused": 0
+    },
+    {
+      "seconds": 1.6860329000046477,
+      "discovered": 24,
+      "probed": 24,
+      "reused": 0
+    }
+  ],
+  "api_ttfb_ms": [
+    4.125500010559335,
+    18.15129999886267,
+    10.84390000323765,
+    5.597100011073053
+  ],
+  "stream_ttfb_ms": [
+    145.39499999955297,
+    56.11819998011924,
+    65.4289000085555,
+    80.80989998416044,
+    6.23759999871254,
+    23.07460000156425
+  ],
+  "read_load": [
+    {
+      "mode": "direct",
+      "seconds": 5.109319800016237,
+      "requests": 64,
+      "payload_bytes": 15787008,
+      "ttfb_p50_ms": 64.86949999816716,
+      "ttfb_p95_ms": 116.8963999953121
+    },
+    {
+      "mode": "relay",
+      "seconds": 5.083417999994708,
+      "requests": 74,
+      "payload_bytes": 18253728,
+      "ttfb_p50_ms": 60.30140002258122,
+      "ttfb_p95_ms": 90.64420001232065
+    },
+    {
+      "mode": "relay",
+      "seconds": 5.033155299985083,
+      "requests": 322,
+      "payload_bytes": 79428384,
+      "ttfb_p50_ms": 5.525500018848106,
+      "ttfb_p95_ms": 27.63769999728538
+    }
+  ],
+  "success": true,
+  "work_directory": "C:\\Users\\Mael\\Documents\\GitHub\\Aether\\target\\p2qa-d5094fc431"
+}

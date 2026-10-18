@@ -1,4 +1,31 @@
+> Extension P1 affiches locales Films : inventaire séparé, route image avec
+> session/droits et repli Web. État actuel : [LOCAL_FILM_POSTERS.md](LOCAL_FILM_POSTERS.md).
+> Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
+
 # Périmètre du premier jalon P0
+
+## Jalon réalisé : premier scanner Films local (16 octobre 2026)
+
+Découverte MKV/MP4 par le Node, probes réutilisés, inventaire SQLite distinct
+Work/Edition/Version/Source/Asset/Track, catalogue et lecteur existants raccordés,
+jobs administrateur/CSRF et permissions par bibliothèque. Démonstration sur
+fichiers synthétiques après vrai redémarrage Core, sans déclaration de P1 complet.
+Séries/NFO/images/pistes externes/OIDC/multi-Node différés. Voir
+[LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md) pour le contrat réalisé ; les
+restrictions « fixtures uniquement/pas de scanner » des jalons suivants sont
+historiques.
+
+## Clarification du 16 octobre 2026
+
+SQLite/bootstrap et sessions existent désormais ; les mentions sans auth dans
+les jalons historiques ci-dessous ne décrivent plus le binaire actuel.
+Web = interface/administration ; Core = catalogue SQLite/comptes/permissions ;
+Media Node = dossiers locaux/scan/analyse/streaming. Chaque bibliothèque possède
+un Node et une racine explicite. Scanner indépendant de Radarr/Sonarr, compatible
+avec dossiers manuels et conventions ARR. Le Core ne scanne pas les disques
+ distants. P1 conserve un Node local unique : administration/permissions avant
+scanner réel. Voir [LIBRARIES_AND_SCANNER.md](LIBRARIES_AND_SCANNER.md).
+
 
 Document créé le 15 octobre 2026 : absent dans le dépôt initial.
 Les règles `AGENTS.md`, `ARCHITECTURE.md` et `PROMPT_DEMARRAGE_IA.md` priment.
@@ -29,3 +56,24 @@ Pause/lecture/seek/volume/vitesse, FR/EN avec position conservée, WebVTT/off,
 erreurs explicites. Aucun nouveau moteur, auth/catalogue réel ou DB anticipé.
 Décision et preuves : P1_WEB_INTEGRATION.md. La suite est le bootstrap admin local
 sécurisé, puis les bibliothèques ro autorisées.
+
+## Premier jalon catalogue P1 autorisé (15 octobre 2026)
+
+Navigation Accueil / Films / Séries / Recherche / Paramètres, listes séparées,
+fiche film et parcours série → saison → épisode → lecteur immersif conservé.
+Le catalogue vient d'une API avec recherche, tri et pagination ; seules les
+fixtures sont associées explicitement au modèle Work / Edition / MediaVersion /
+MediaSource / Asset / Track. Deux copies MKV/MP4 ne créent pas deux films.
+Les bibliothèques sont identifiées séparément, sans gestion de dossiers réelle.
+
+Ne pas afficher d'année, d'affiche réelle, d'historique, de récence ou de
+recommandation inventée. Les états indisponibles sont expliqués. Ce parcours
+ne clôture pas P1 autonome : bootstrap local, sessions/RBAC et SQLite restent
+prérequis avant tout dossier personnel en lecture seule. Aucun nouvel essai
+codec ou remplacement de lecteur n'est inclus. Voir CATALOGUE_P1.md.
+
+Ce jalon de fixtures a été vérifié localement : 15 tests Rust, check Web 0/0,
+lint, 8 tests Vitest, build et parcours navigateur Chrome headless catalogue /
+lecteur réussis. États vides/erreurs et pagination simulée bornée vérifiés,
+captures desktop/mobile inspectées. Aucun nouveau résultat Edge/Firefox/Safari,
+mobile physique ou NAS ; pas de preuve de charge ni de bibliothèque personnelle.

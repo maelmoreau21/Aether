@@ -1,0 +1,39 @@
+{
+  "run": "oidcqa-1b68b66aa9",
+  "provider": "synthetic OIDC RS256, actual HTTP discovery/token/JWKS",
+  "modes": [
+    {
+      "mode": "standalone",
+      "browser": "155.0.8059.40",
+      "os": "10.0.26300",
+      "checks": [
+        "SSO button",
+        "PKCE code exchange",
+        "Core session cookie HttpOnly Strict",
+        "logout",
+        "same subject same user",
+        "local rescue login",
+        "admin status",
+        "no localStorage token",
+        "no JS error"
+      ]
+    },
+    {
+      "mode": "distributed",
+      "browser": "155.0.8059.40",
+      "os": "10.0.26300",
+      "checks": [
+        "SSO button",
+        "PKCE code exchange",
+        "Core session cookie HttpOnly Strict",
+        "logout",
+        "same subject same user",
+        "local rescue login",
+        "admin status",
+        "no localStorage token",
+        "no JS error"
+      ]
+    }
+  ],
+  "success": true
+}

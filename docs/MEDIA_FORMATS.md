@@ -1,5 +1,28 @@
 # Modèle média — P0 et suite
 
+NFO Films : métadonnées éditoriales séparées du probe, candidates par asset et
+sélection/provenance au niveau Work, sans réidentification ni fusion par ID NFO.
+Migration0005 additive ; [LOCAL_FILM_NFO.md](LOCAL_FILM_NFO.md).
+
+## Inventaire Films persistant P1
+
+Migration0004 implémente Work/Edition/MediaVersion/MediaSource/Asset/Track, sans
+fusion au titre. Une version/source par fichier, édition locale neutre ; piste
+identifiée par UUID et index réel de flux, métadonnées ffprobe conservées en JSON.
+Le descripteur normalise fra/fre→fr et eng→en ; les tags techniques restent bruts.
+L'index complet paquets/cues et la normalisation générale BCP47 restent différés.
+Voir [LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md). Les paragraphes « modèle futur »
+ci-dessous décrivent l'état antérieur et les éléments encore hors de ce jalon.
+
+## Association bibliothèque et Node — 16 octobre 2026
+
+Contrat cible : Library possède un Node unique et une racine explicite ; chaque
+MediaSource appartient à cette bibliothèque et au même Node. Le Node analyse
+les conteneurs et pistes, puis fournit l'inventaire au Core. Aucun modèle
+persistant ajouté ici : administration et permissions précèdent le scanner.
+Voir [LIBRARIES_AND_SCANNER.md](LIBRARIES_AND_SCANNER.md).
+
+
 Jalon représentatif ajouté : AV1 Main `yuv420p10le` SDR BT.709, FR Opus 5.1
 et EN stéréo, trois sous-titres intégrés. Les probes conservent layout,
 initial_padding et init codec ; le PCM canal par canal est vérifié séparément.

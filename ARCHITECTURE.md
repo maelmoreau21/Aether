@@ -1,4 +1,42 @@
+> CI/GHCR (18 octobre 2026) : validation YAML réparée localement, publication
+> réutilisable conditionnée à tous les contrôles et aux trois builds Docker.
+> JWT utilise AWS-LC ; aucun changement de schéma ni de modes de déploiement.
+> Validation distante/publication encore en attente d'autorisation explicite.
+> Contrat et limites : [CI/GHCR](docs/CI_GHCR.md). PostgreSQL 18 reste non implémenté.
+>
+> Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités
+> issuer/subject et sessions Core communes aux deux modes Docker.
+> Contrat, configuration et limites : [OIDC](docs/OIDC.md). Les exclusions OIDC
+> dans les jalons historiques ci-dessous ne décrivent plus ce parcours.
+
+> Extension P1 affiches locales Films : inventaire séparé, route image avec
+> session/droits et repli Web. État actuel : [LOCAL_FILM_POSTERS.md](docs/LOCAL_FILM_POSTERS.md).
+> Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
+
 # ARCHITECTURE.md — Architecture cible Aether
+
+Jalon J1 (`docs/ARCHITECTURE_ROADMAP.md`, 16 octobre 2026) : découpage effectif du
+workspace Rust en trois crates (`crates/core`, `crates/node`, `crates/shared`),
+aucune dépendance de `media-node` vers `media-poc` ou `sqlx`, et confinement +
+streaming/lecture de descripteurs ouverts (`OpenedFile`) sans réouverture par chemin
+(`openat2` sous Linux / `FILE_FLAG_OPEN_REPARSE_POINT` et vérification d'identité de
+handle sous Windows).
+
+Extension P1 NFO Films : parsing borné et découverte dans le Node interne,
+instantanés éditoriaux/choix Work transactionnels dans Core/SQLite (migration0005).
+Le probe technique et le lecteur restent distincts. Voir [LOCAL_FILM_NFO.md](docs/LOCAL_FILM_NFO.md).
+
+Mise à jour scanner Films P1 (16 octobre 2026) : inventaire relationnel SQLite,
+jobs locaux et lecture native autorisée implémentés. Le parcours des fichiers
+reste dans le Node interne, l'ingestion et le catalogue dans le Core. Le mode
+`MEDIA_LIBRARY_ROOT` démarre sans fixtures. État/limites :
+[LOCAL_FILM_SCANNER.md](docs/LOCAL_FILM_SCANNER.md). Les mentions antérieures
+« pas de scanner » ci-dessous sont historiques.
+
+État local du 16 octobre 2026 : connexion/session SQLite ajoutées au Core existant,
+permissions communes avant les routes catalogue/média et séparation du banc P0
+par feature de test. Voir `docs/LOCAL_SESSIONS.md`. Aucun Node distant, OIDC ou
+gestion de bibliothèques personnelles ajouté ; les sections cibles restent futures.
 
 > **Architecture cible, pas un état de livraison.** Un banc P0 expérimental et le changement FR/EN par remux sont testés localement ; les composants produit ci-dessous restent des intentions. Voir `MEMORY.md` et les preuves de compatibilité pour l'état réel.
 
@@ -48,13 +86,41 @@ Les réplicas Web partagent la même API et le même catalogue. Le mode autonome
 
 **Web (`apps/web`)** : SvelteKit, navigation, accessibilité, lecteur et préférences ; reçoit des **descripteurs de lecture** sans chemins NAS ; aucune autorisation de sécurité finale dans le navigateur. Statique et séparable.
 
-**Core (`crates/core`)** : API versionnée, compte local/OIDC, deux rôles `administrator|user`, bibliothèques/permissions, catalogue global, métadonnées, statut des Nodes, progression, découverte des pistes, émission de sessions de lecture autorisées et stratégie de source.
+**Core (`crates/core`)** : API versionnée, compte local/OIDC, deux rôles `administrator|user`, bibliothèques/permissions, catalogue global en SQLite, métadonnées reçues du Node, statut des Nodes, progression, émission de sessions de lecture autorisées et stratégie de source. Le Core ne parcourt pas les disques d'un Node distant et ne découvre pas lui-même les pistes.
 
 **Node (`crates/node`)** : bibliothèques montées `ro`, scan local, analyse conteneurs/codecs/pistes, indexation locale, streaming des fichiers ou segments autorisés, refus des accès par chemin arbitraire, health/heartbeat, reprise en cas de Core indisponible. Ne connaît pas les identifiants/mots de passe d'utilisateurs.
 
 **Media (`crates/media`)** : lecture des informations Matroska / ISO BMFF, index et timebases, descriptions de pistes ; plus tard association d'assets séparés, remux/packaging bornés et éventuellement interprétation de flux élémentaires.
 
 **Shared (`crates/shared`)** : types versionnés, IDs, erreurs, feature/protocol version. **Aucune dépendance circulaire**.
+
+### Bibliothèques et scanner — décision du 16 octobre 2026
+
+Chaque bibliothèque dépend d'un seul Media Node et d'une racine explicitement
+configurée sur ce Node : Films → Node local → `/Films`, Séries → Node local →
+`/Séries`. Ces chemins sont des exemples, jamais des valeurs implicites.
+P1 conserve exactement un Node local dans le processus standalone ; plusieurs
+bibliothèques peuvent lui appartenir. Aucune implémentation multi-Node P2 ici.
+
+Le Media Node est seul responsable du parcours récursif des racines autorisées,
+de l'identification films/séries/saisons/épisodes, de l'analyse réelle MKV/MP4 et
+de toutes leurs pistes, de la détection des sous-titres externes et de
+l'exploitation des NFO/images locaux. Il doit accepter les organisations
+manuelles comme les structures Radarr/Sonarr, sans dépendre de ces applications,
+de leur API, de leur base ou de leur présence. Les cas ambigus doivent être
+signalés, pas fusionnés arbitrairement. Détecter un sous-titre externe ne prouve
+pas sa lecture ; les formats externes avancés/raw restent dans leur jalon P3.
+
+Le Core reçoit l'inventaire du Node et gère le catalogue global et les droits.
+Le Web administre la configuration via le Core ; aucun chemin libre dans une
+requête de lecture. Le Node résout uniquement les assets de son inventaire,
+sous la racine autorisée, après contrôle backend. Médias, NFO, images et
+sous-titres restent en lecture seule ; caches et données sont séparés.
+
+Le jalon en cours reste administration et permissions sur fixtures, avant le
+véritable scanner. Les contrats cibles et critères futurs sont détaillés dans
+[docs/LIBRARIES_AND_SCANNER.md](docs/LIBRARIES_AND_SCANNER.md) ; aucune capacité
+de scan de bibliothèques réelles n'est déclarée livrée par cette décision.
 
 ## 4. Modèle de données conceptuel
 
@@ -232,3 +298,58 @@ Tokens CSS partagés et composants de présentation légers dans apps/web/src/li
 L'écran principal reste client de Player et de l'API démo existante ; pas de
 couplage visuel au remux ou à Shaka/MSE. Illustration originale locale ; la
 fixture de lecture reste explicitement une mire. Voir docs/UI_DIRECTION.md.
+
+### Lecteur immersif P1
+
+L’ancien lecteur encadré est remplacé par ImmersivePlayer (cycle de vie/plein écran)
+et PlayerControls (présentation et callbacks), reliés par Player/PlaybackState et
+PlayerFactory. NativePlayer et API média inchangés. Voir docs/IMMERSIVE_PLAYER.md.
+
+### Premier catalogue P1 de fixtures (15 octobre 2026)
+
+Le Core ajoute `/api/v1/catalog` et `/api/v1/catalog/{id}` : associations
+explicites Work / Edition / MediaVersion / MediaSource vers les assets et Tracks
+déjà inventoriés. Films et séries sont séparés ; une série expose saisons et
+épisodes, sans aplatir ses épisodes dans les films. Recherche, tri et pagination
+bornée passent par l'API. Ces associations de fixtures ne sont pas persistées.
+
+Le Web ajoute cinq routes statiques et des fiches par paramètre `work`, avec
+composants de catalogue séparés de l'API et du moteur Player existant. Le build
+externalise le bootstrap de chaque page pour les accès directs sous CSP.
+Pas de SQLite, scanner ou comptes ajouté : les bibliothèques personnelles
+restent bloquées avant bootstrap, sessions et autorisation backend.
+Périmètre vérifié et prochaine étape : docs/CATALOGUE_P1.md.
+
+Validation locale : 15 tests Rust, check Web 0/0, lint, 8 tests Vitest et build
+réussis ; parcours catalogue et non-régression lecteur sous Chrome headless
+réussis, dont accès directs sous CSP et pagination simulée bornée à 24 cartes.
+Preuves docs/evidence/2026-10-15/catalogue/. Cela ne mesure pas un vrai catalogue
+à grande échelle et n'autorise pas de bibliothèque personnelle.
+
+## Jalon identité local P1 livré le 16 octobre 2026
+
+Le module identity du Core persiste les comptes avec SQLx/SQLite, applique les
+migrations embarquées et fournit un bootstrap CLI local. La séparation compte /
+credential local prépare les futurs liens OIDC par issuer+subject et sessions
+par user_id ; ces mécanismes ne sont pas implémentés. Aucun nouvel endpoint.
+Voir docs/LOCAL_ADMIN.md et MEMORY.md pour preuves et limites.
+
+## Bibliothèques locales P1 — 16 octobre 2026
+
+Registre Library/Node/grants SQLite et administration Web implémentés sur fixtures.
+La validation de racine reste dans node.rs, sans scanner. Core autorise chaque
+requête via SQLite ; le catalogue éditorial reste une association Rust explicite
+jusqu'au scanner/ingestion. Un Node local, aucun transport distant ajouté.
+Voir docs/LIBRARIES_AND_SCANNER.md pour associations partagées et limites.
+
+## P2 — maintien des deux modes et transport interne
+
+Le standalone garde Core + LocalNode + Web dans un seul processus/conteneur.
+Le distribué garde un Core/SQLite et plusieurs Nodes Rust, chacun avec son
+inventaire et ses médias `ro`. Les accès directs et le relais restent proposés.
+Pour conserver la révocation P1, chaque nouvelle requête directe vérifie aussi
+son autorisation au Core ; le média reste envoyé par le Node au navigateur.
+L'indisponibilité Core refuse les nouvelles requêtes directes. La communication
+interne sortante partage un connecteur HTTPS vérifié et une politique explicite
+d'autorités/réseau ; la terminaison TLS peut être assurée par un proxy de confiance.
+Contrat, limites et preuves : [P2 Docker](docs/P2_DOCKER_VALIDATION.md).

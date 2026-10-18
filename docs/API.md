@@ -1,4 +1,28 @@
+> Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités
+> issuer/subject et sessions Core communes aux deux modes Docker.
+> Contrat, configuration et limites : [OIDC](OIDC.md). Les exclusions OIDC
+> dans les jalons historiques ci-dessous ne décrivent plus ce parcours.
+
+> Extension P1 affiches locales Films : inventaire séparé, route image avec
+> session/droits et repli Web. État actuel : [LOCAL_FILM_POSTERS.md](LOCAL_FILM_POSTERS.md).
+> Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
+
 # API expérimentale du banc P0
+
+## Clarification du 16 octobre 2026
+
+Contrat cible : chaque bibliothèque possède un Media Node et une racine explicite.
+Le Node scanne/analyse et fournit son inventaire ; le Core gère catalogue SQLite
+et permissions. Aucun endpoint de scan ou CRUD ajouté. Administration et droits
+sur fixtures d'abord, scanner ensuite, un Node local unique en P1.
+Voir [LIBRARIES_AND_SCANNER.md](LIBRARIES_AND_SCANNER.md).
+
+
+**État courant du 16 octobre 2026 :** les routes catalogue, assets, streaming,
+sous-titres et expériences ci-dessous exigent maintenant une session et la
+permission de lecture des fixtures. Les anciens exemples sans cookie concernent
+le banc isolé. Connexion, identité, déconnexion, cookies, erreurs et CSRF :
+[LOCAL_SESSIONS.md](LOCAL_SESSIONS.md).
 
 Base exacte par défaut : `http://127.0.0.1:3000`. Contrat du banc uniquement,
 pas un contrat de sessions de lecture du futur produit. Pas de chemins disque
@@ -115,3 +139,100 @@ GET/HEAD /api/v1/demo/subtitles/{name} : fr-full.vtt/fr-forced.vtt/en-full.vtt,
 text/vtt UTF8, autres noms404. Ressource préparée absente404. POST405, origine
 tierce403. Ce contrat localhost sans authentification ne permet aucune bibliothèque
 réelle. Voir P1_WEB_INTEGRATION.md pour tests et limites.
+
+## P1 — Catalogue de fixtures (15 octobre 2026)
+
+Contrat ajouté, toujours sans authentification et limité à localhost :
+
+| Méthode et route | Contrat |
+| --- | --- |
+| GET `/api/v1/catalog` | `{items,total,offset,limit,mode,notice}` ; œuvres `film` et `series` uniquement dans la liste |
+| GET `/api/v1/catalog/{id}` | Fiche Work, `editions` et `seasons` ; épisode accessible par son ID explicite |
+
+Liste : `kind=film|series` facultatif ; `q` facultatif (200 octets maximum),
+recherche de sous-chaîne insensible à la casse après trim ;
+`sort=title-asc|title-desc` (défaut ascendant), `offset` entier positif ou nul
+(défaut 0), `limit=1..100` (défaut 24). Paramètre inconnu, valeur invalide ou
+requête non décodable : 400 JSON `error=invalid_catalog_query`.
+Liste sans fixture préparée : 200, `items=[]`, `total=0` et notice explicite.
+Fiche inconnue ou fixtures absentes : 404 JSON `error=unknown_work`.
+POST refusé par le routage (405) ; les protections Host/Origin/cross-site restent
+applicables (403). Aucun chemin physique dans ce contrat.
+
+Work : `id,kind,title,year,description,libraryId,synthetic`, avec compteurs
+`seasonCount,episodeCount` lorsqu'applicables. `year=null` sur les fixtures.
+Une fiche de série expose `seasons:[{id,number,title,episodes}]` ; chaque épisode
+porte sa propre identité Work, son numéro et ses éditions. Une édition contient
+`id,label,versions` ; une version `id,label,sources` ; une source
+`id,assetIds,playbackMediaId`. `playbackMediaId` référence le descripteur existant
+de `/api/v1/demo/media`, qui fournit URLs et Tracks. Aucun endpoint de session
+autorisée, scan ou création de bibliothèque n'est ajouté.
+
+`fixture-film` associe explicitement MKV et MP4 ; `fixture-series` regroupe une
+saison et `fixture-episode-1` réutilisant la même mire. Ces IDs sont fixes,
+pas issus d'une base, d'une fusion de titres ou d'un fournisseur de métadonnées.
+Voir `CATALOGUE_P1.md` pour les parcours, tests et prérequis de sécurité.
+
+Validation locale : suite Rust 15 tests réussis ; parcours du catalogue sous
+Chrome 155.0.8059.40 Windows headless, états vides injectés, 503/réessai, fiche
+404 et pagination simulée 72 œuvres bornée à 24 cartes vérifiés.
+Preuves `evidence/2026-10-15/catalogue/`. Ces essais ne valident pas un scanner,
+une persistance SQLite ou les droits d'accès d'un futur catalogue personnel.
+
+## P1 — persistance et bootstrap local
+
+SQLite/SQLx et création du premier administrateur par CLI locale sont décrits
+dans [LOCAL_ADMIN.md](LOCAL_ADMIN.md). La connexion et les sessions sécurisées
+sont décrites dans [LOCAL_SESSIONS.md](LOCAL_SESSIONS.md). Fixtures uniquement
+sur loopback ; aucune bibliothèque personnelle ajoutée.
+
+## Administration bibliothèques P1 (fixtures)
+
+- GET `/api/v1/admin/libraries` : `{libraries:[{id,name,kind,nodeId,root,enabled,userIds}]}`.
+- POST même route : 201 et bibliothèque. PUT `/api/v1/admin/libraries/{id}` : 200.
+  JSON `{name,kind:"films"|"series",nodeId:"local",root,enabled,userIds:[]}`.
+  Nom 1..100 caractères, au plus 1000 comptes user actifs ; doublons normalisés.
+  PUT remplace configuration et droits atomiquement ; aucun scan.
+- GET `/api/v1/admin/users` : `{users:[{id,login,role}]}` actifs.
+- GET `/api/v1/admin/roots` : `{roots:[racineCanonique]}` privée administrateur.
+
+Session administrator requise ; Origin exact et x-csrf-token pour mutations.
+401 sans session, 403 rôle/CSRF, 400 configuration, 404 modification ID absent.
+Erreurs de structure JSON suivant Axum. Les routes média/catalogue vérifient
+session et bibliothèque active/autorisée avant GET/HEAD/Range.
+
+## Scanner Films local P1
+
+Extension NFO : les mêmes routes exposent `originalTitle`, `plot`, `outline`,
+`premiered`, `genres`, `rating`, `mpaa`, `externalIds`, `metadataProvenance` et
+`metadataWarnings`. Titre/année/description utilisent les métadonnées éditoriales.
+Aucun chemin NFO public ni nouvelle route ; voir [LOCAL_FILM_NFO.md](LOCAL_FILM_NFO.md).
+
+Contrat réalisé : [LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md#jobs-et-api).
+POST/GET `/api/v1/admin/libraries/{id}/scan`, états persistants et compteurs ;
+POST réservé administrator avec CSRF, doublon409. Catalogue existant sur
+inventaire SQLite, mode local-library, mêmes paramètres de recherche/tri/pagination.
+GET `/api/v1/media/{assetId}` fournit le descripteur natif directement ;
+GET/HEAD/Range `/api/v1/assets/{assetId}/content` garde les droits bibliothèque.
+Media contient aussi `synthetic` (true pour les démos, false pour l'inventaire).
+Configuration publique mode standalone-local avec MEDIA_LIBRARY_ROOT ; mode
+localhost-fixtures conservé pour le banc expérimental isolé.
+
+## P2 — contrôle interne de chaque requête directe (17 octobre 2026)
+
+POST `/internal/v1/core/playback/authorize` reçoit des `PlaybackTokenClaims`
+JSON, signés par le Node avec les mêmes en-têtes de protocole que ses callbacks.
+Node/key/time/nonce/digest sont vérifiés avant toute lecture de droits. Le Core
+vérifie la ressource, sa bibliothèque et son Node, la session encore active,
+le compte, le rôle actuel et les permissions. Le contrôle de session et sa
+coalescence d'activité sont ceux de P1. 200 `{"authorized":true}` uniquement
+si tout est valide, sinon refus ; les réponses de décision sont signées avec
+le digest des octets JSON. Identité Node invalide : refus avant décision.
+Aucun cache positif et aucun jeton brut de session dans le contrat.
+
+Les réponses d'appairage, rotation et autres réponses de contrôle incluent
+également le digest du corps dans le MAC. Une ancienne réponse sans ce digest
+n'est pas acceptée. Les clients internes ne suivent pas les redirections.
+Les capacités de lecture publique exigent HTTPS, sauf pour les origines loopback
+des tests locaux. Les URL historiques non conformes retombent sur le relais.
+Voir [le contrat détaillé et les commandes](P2_DOCKER_VALIDATION.md).

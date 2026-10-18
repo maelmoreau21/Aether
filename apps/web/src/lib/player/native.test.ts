@@ -25,6 +25,11 @@ describe('native source replacement', () => {
     expect(video.volume).toBe(0.4); expect(video.playbackRate).toBe(1.5);
     await expect(player.selectAudio('de')).rejects.toThrow('absente'); expect(video.src).toBe('/en'); expect(video.loads).toBe(2);
   });
+  it('opens an indexed source with unknown language without claiming French audio', async () => {
+    const { video, player } = setup();
+    await player.load({ ...media, sources: [{ ...media.sources[0], language: 'und', url: '/indexed' }] });
+    expect(video.src).toBe('/indexed');
+  });
   it('resumes only an active presentation and refuses concurrent replacements', async () => {
     const { video, player } = setup(); await player.load(media); await player.play(); video.currentTime = 5;
     const change = player.selectAudio('en');

@@ -115,7 +115,7 @@ def main():
         report['subtitles'] = []
         for ordinal, name in enumerate(['fr-full', 'fr-forced', 'en-full']):
             target = output/f'{name}.vtt'
-            run('ffmpeg', '-hide_banner', '-v', 'error', '-n', '-i', source, '-map', f'0:s:{ordinal}', '-c:s', 'webvtt', target)
+            run('ffmpeg', '-hide_banner', '-v', 'error', '-n', '-copyts', '-i', source, '-map', f'0:s:{ordinal}', '-c:s', 'webvtt', target)
             source_cues = cues((source.parent/f'{name}.srt').read_text(encoding='utf8'))
             output_cues = cues(target.read_text(encoding='utf8'))
             if source_cues != output_cues or len(output_cues) != 4:

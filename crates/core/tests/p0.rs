@@ -89,6 +89,46 @@ async fn mse_fixed_inventory_ranges_and_errors() {
 }
 
 #[tokio::test]
+async fn mse_subtitles_exact_timing_and_no_preroll_drift() {
+    let verified_dir = root().join("mse/verified");
+    for (filename, expected_label) in [
+        ("fr-full.vtt", "FR COMPLET"),
+        ("fr-forced.vtt", "FR FORCE"),
+        ("en-full.vtt", "EN FULL"),
+    ] {
+        let path = verified_dir.join(filename);
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("Failed to read {}: {e}", path.display()));
+
+        let expected_cues = [
+            ("00:02.000 --> 00:02.500", 1),
+            ("00:04.000 --> 00:05.000", 2),
+            ("00:06.000 --> 00:06.500", 3),
+            ("00:09.000 --> 00:09.500", 4),
+        ];
+
+        for (expected_timing, cue_num) in expected_cues {
+            assert!(
+                content.contains(expected_timing),
+                "{filename} must contain exact timing '{expected_timing}' (regression test: no preroll drift such as +7ms)"
+            );
+            let expected_text = format!("{expected_label} CUE {cue_num}");
+            assert!(
+                content.contains(&expected_text),
+                "{filename} must contain cue text '{expected_text}'"
+            );
+        }
+
+        // Explicit regression check: ensure no +7ms offset from Opus lookahead / container start time
+        // Without -copyts, FFmpeg 6.1 shifted subtitle timestamps by -start_time (+7ms).
+        assert!(
+            !content.contains("00:02.007"),
+            "{filename} must not contain +7ms shifted timestamps from Opus preroll delay"
+        );
+    }
+}
+
+#[tokio::test]
 async fn dash_fixed_inventory_and_manifest_ranges() {
     let app = router().await;
     let script = app

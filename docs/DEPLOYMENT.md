@@ -1,3 +1,8 @@
+> Images et mises à jour : [CI/GHCR](CI_GHCR.md) décrit les tags, contrôles,
+> commandes d'installation et retour arrière. Les images distantes ne sont pas
+> encore confirmées. Pour les deux modes Docker existants, consulter
+> [le guide Docker](DEPLOYMENT_DOCKER.md) ; le texte prototype ci-dessous est historique.
+
 # Exécution du prototype
 
 Ce jalon s'exécute localement via les commandes du README. Aucun Compose,
@@ -9,3 +14,9 @@ Le futur standalone placera les bibliothèques sur volumes `:ro`, les données,
 caches et miniatures séparément. L'administration locale sécurisée précédera
 toute exposition ; HTTP local et cookies/SSO devront être documentés et testés
 avant P1/P2. Aucune migration ni conversion de médias existants n'est effectuée.
+
+## SQLite et bootstrap local P1
+
+Désormais un dossier privé de données SQLite est requis pour démarrer le Core.
+Instructions : [LOCAL_ADMIN.md](LOCAL_ADMIN.md). Aucun service DB externe.
+La création du premier admin ne rend pas le prototype publiable.

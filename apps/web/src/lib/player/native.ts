@@ -35,8 +35,8 @@ export class NativePlayer implements Player {
   async load(media: Media) {
     this.media = media;
     this.subtitle = null;
-    const source = media.sources.find(s => s.language === 'fr');
-    if (!source) throw new Error('Aucune source française explicitement disponible.');
+    const source = media.sources.find(s => s.language === 'fr') ?? media.sources[0];
+    if (!source) throw new Error('Aucune source disponible pour ce média.');
     await this.replace(source, 0, true);
   }
   private async replace(source: Source, position: number, paused: boolean) {
@@ -48,15 +48,26 @@ export class NativePlayer implements Player {
     this.clearStall();
     // Hide obsolete captions before the new resource is ready.
     this.video.querySelectorAll('track').forEach(track => track.remove());
-    try {
-      await new Promise<void>((resolve, reject) => {
+    const nowSecs = Math.floor(Date.now() / 1000);
+    const hasFreshDirect = Boolean(
+      source.directUrl && (!source.tokenExpiresAt || source.tokenExpiresAt > nowSecs + 5)
+    );
+    const primaryUrl = hasFreshDirect && source.directUrl ? source.directUrl : source.url;
+    const fallbackUrl =
+      hasFreshDirect && (source.relayUrl ?? source.url) !== primaryUrl
+        ? (source.relayUrl ?? source.url)
+        : undefined;
+
+    const loadCandidate = (candidateUrl: string) =>
+      new Promise<void>((resolve, reject) => {
         const finish = (error?: Error) => {
           clearTimeout(timer);
           this.video.removeEventListener('loadedmetadata', metadata);
           this.video.removeEventListener('seeked', seeked);
           this.video.removeEventListener('error', failed);
           this.cancel = undefined;
-          if (error) reject(error); else resolve();
+          if (error) reject(error);
+          else resolve();
         };
         const seeked = () => finish();
         const metadata = () => {
@@ -66,15 +77,37 @@ export class NativePlayer implements Player {
           if (target > 0) this.video.currentTime = target;
           else finish();
         };
-        const failed = () => finish(new Error(`Source ${source.language.toUpperCase()} illisible : réseau, conteneur ou codec non pris en charge.`));
-        const timer = setTimeout(() => finish(new Error('Chargement ou seek expiré après 10 secondes. Réessayez explicitement.')), 10000);
+        const failed = () =>
+          finish(
+            new Error(
+              `Source ${source.language.toUpperCase()} illisible : réseau, conteneur ou codec non pris en charge.`
+            )
+          );
+        const timer = setTimeout(
+          () =>
+            finish(
+              new Error('Chargement ou seek expiré après 10 secondes. Réessayez explicitement.')
+            ),
+          10000
+        );
         this.cancel = () => finish(new Error('Lecteur fermé.'));
         this.video.addEventListener('loadedmetadata', metadata);
         this.video.addEventListener('seeked', seeked);
         this.video.addEventListener('error', failed);
-        this.video.src = source.url;
+        this.video.src = candidateUrl;
         this.video.load();
       });
+
+    try {
+      try {
+        await loadCandidate(primaryUrl);
+      } catch (primaryErr) {
+        if (fallbackUrl && !this.destroyed) {
+          await loadCandidate(fallbackUrl);
+        } else {
+          throw primaryErr;
+        }
+      }
       this.source = source;
       await this.selectSubtitle(this.subtitle);
       if (!paused) await this.play();

@@ -1,0 +1,55 @@
+{
+  "browser": "155.0.8059.40",
+  "os": "10.0.26300",
+  "tests": [
+    {
+      "kind": "films",
+      "forcedRelay": false,
+      "startupMs": 1071.1336000000001,
+      "source": "http://127.0.0.1:13001/api/v1/assets/e9a16a70-d7ef-4c11-8c46-62f7efd78839/content",
+      "currentTime": 2,
+      "width": 320,
+      "height": 180,
+      "frames": 59,
+      "audioDecodedBytes": 19758,
+      "paused": true
+    },
+    {
+      "kind": "series",
+      "forcedRelay": false,
+      "startupMs": 338.1397999999999,
+      "source": "http://127.0.0.1:13001/api/v1/assets/b5b30973-2633-435d-9b9a-7b6267021f58/content",
+      "currentTime": 2,
+      "width": 320,
+      "height": 180,
+      "frames": 59,
+      "audioDecodedBytes": 19608,
+      "paused": true
+    },
+    {
+      "kind": "films",
+      "forcedRelay": true,
+      "startupMs": 326.28200000000015,
+      "source": "http://127.0.0.1:13001/api/v1/assets/e9a16a70-d7ef-4c11-8c46-62f7efd78839/content",
+      "currentTime": 2,
+      "width": 320,
+      "height": 180,
+      "frames": 59,
+      "audioDecodedBytes": 19608,
+      "paused": true
+    },
+    {
+      "kind": "series",
+      "forcedRelay": true,
+      "startupMs": 359.5542999999998,
+      "source": "http://127.0.0.1:13001/api/v1/assets/b5b30973-2633-435d-9b9a-7b6267021f58/content",
+      "currentTime": 2,
+      "width": 320,
+      "height": 180,
+      "frames": 59,
+      "audioDecodedBytes": 19758,
+      "paused": true
+    }
+  ],
+  "success": true
+}

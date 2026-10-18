@@ -1,0 +1,40 @@
+{
+  "browser": "155.0.8059.40",
+  "os": "10.0.26300",
+  "headless": true,
+  "results": [
+    {
+      "width": 390,
+      "invalidLogin": true,
+      "login": true,
+      "httpOnlyCookie": true,
+      "avatarIdentity": true,
+      "administratorMenu": true,
+      "libraryCreateEditDisable": true,
+      "catalog": true,
+      "playback": true,
+      "seek": true,
+      "reload": true,
+      "logout": true,
+      "anonymousRange401": true,
+      "cspErrors": []
+    },
+    {
+      "width": 1440,
+      "invalidLogin": true,
+      "login": true,
+      "httpOnlyCookie": true,
+      "avatarIdentity": true,
+      "administratorMenu": true,
+      "libraryCreateEditDisable": true,
+      "catalog": true,
+      "playback": true,
+      "seek": true,
+      "reload": true,
+      "logout": true,
+      "anonymousRange401": true,
+      "cspErrors": []
+    }
+  ],
+  "passed": true
+}

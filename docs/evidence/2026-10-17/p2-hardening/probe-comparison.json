@@ -1,0 +1,10 @@
+{
+  "aether-node:latest": {
+    "binary_sha256": "0e598fe6d247bfe63757f5c839dc145a166b3f876f2875ca88a306a5b8ec5a58",
+    "demuxers_sha256": "9e44a3e8ed279abd90ef08609c21fbd59168131b8f2febf0719d1de980a6e67b"
+  },
+  "aether-node:p2-qa": {
+    "binary_sha256": "0e598fe6d247bfe63757f5c839dc145a166b3f876f2875ca88a306a5b8ec5a58",
+    "demuxers_sha256": "9e44a3e8ed279abd90ef08609c21fbd59168131b8f2febf0719d1de980a6e67b"
+  }
+}

@@ -1,0 +1,123 @@
+# ==============================================================================
+# Aether Distributed Multi-Node Deployment - Docker Compose Configuration
+# ==============================================================================
+# Topology:
+#   - 1x `aether-core`: API, RBAC, SQLite global catalogue, static SvelteKit UI.
+#                       Does NOT mount or traverse any remote media directories.
+#   - 1x `aether-node`: Polyvalent Media Node handling both Films and Series
+#                       (`/media/films:ro` and `/media/series:ro`).
+#                       Multiple libraries of different types (Films, Series) can be
+#                       configured on this single Node via the administration UI.
+#
+# Target: Synology DS1522+ (AMD Ryzen Embedded R1600 x86_64, no iGPU) and Linux x86_64.
+# Zero mandatory video transcoding, zero PostgreSQL/Redis/Node.js runtime.
+#
+# Image Tags:
+# - Default: latest (ghcr.io/maelmoreau21/aether-*:latest) -> stable release from main
+# - Development: develop (ghcr.io/maelmoreau21/aether-*:develop) -> latest develop branch
+# - Override with AETHER_TAG env variable: AETHER_TAG=develop docker compose -f compose.distributed.yaml up -d
+# - Local developer build: docker compose -f compose.distributed.yaml build OR up -d --build
+# ==============================================================================
+
+services:
+  aether-core:
+    image: ghcr.io/maelmoreau21/aether-core:${AETHER_TAG:-latest}
+    build:
+      context: .
+      target: runtime-core
+    container_name: aether-core
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "${MEDIA_CORE_BIND_HOST:-127.0.0.1}:${MEDIA_CORE_PORT:-3000}:3000"
+    environment:
+      - MEDIA_INTERNAL_ALLOWED_AUTHORITIES=aether-core:3000,aether-node:4101
+      - MEDIA_INTERNAL_TRUSTED_HTTP=true
+      - MEDIA_MODE=distributed
+      - MEDIA_PORT=3000
+      - MEDIA_BIND_ADDR=0.0.0.0
+      - MEDIA_PUBLIC_URL=${MEDIA_PUBLIC_URL:-http://127.0.0.1:3000}
+      - MEDIA_CORE_INTERNAL_URL=${MEDIA_CORE_INTERNAL_URL:-http://aether-core:3000}
+      - MEDIA_DB_PATH=/data/core.sqlite3
+      - MEDIA_WEB_DIST=/app/apps/web/build
+      - MEDIA_OIDC_ENABLED=${MEDIA_OIDC_ENABLED:-false}
+      - MEDIA_OIDC_ISSUER=${MEDIA_OIDC_ISSUER:-}
+      - MEDIA_OIDC_CLIENT_ID=${MEDIA_OIDC_CLIENT_ID:-}
+      - MEDIA_OIDC_CLIENT_SECRET=${MEDIA_OIDC_CLIENT_SECRET:-}
+      - MEDIA_OIDC_USER_GROUPS=${MEDIA_OIDC_USER_GROUPS:-}
+    volumes:
+      - aether_core_data:/data
+      - aether_core_backups:/backups
+    networks:
+      - aether_internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:3000/internal/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  aether-node:
+    image: ghcr.io/maelmoreau21/aether-node:${AETHER_TAG:-latest}
+    build:
+      context: .
+      target: runtime-node
+    container_name: aether-node
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      # Loopback bound for direct browser -> Node streaming (`/stream/v1/...`) on local/proxied setups.
+      # Internal control endpoints (`/internal/v1/...`) require mutual HMAC-SHA256.
+      - "${MEDIA_NODE_BIND_HOST:-127.0.0.1}:${MEDIA_NODE_PORT:-4101}:4101"
+    environment:
+      - MEDIA_NODE_PORT=4101
+      - MEDIA_INTERNAL_ALLOWED_AUTHORITIES=aether-core:3000,aether-node:4101
+      - MEDIA_INTERNAL_TRUSTED_HTTP=true
+      - MEDIA_NODE_BIND_ADDR=0.0.0.0
+      - MEDIA_NODE_NAME=${MEDIA_NODE_NAME:-Node Principal}
+      - MEDIA_NODE_PUBLIC_URL=${MEDIA_NODE_PUBLIC_URL-http://127.0.0.1:4101}
+      - MEDIA_NODE_DATA_DIR=/data
+      # Polyvalent Node: multiple media roots separated by semicolon (;).
+      # The admin can configure both Films and Series libraries on this same Node from the UI.
+      - MEDIA_NODE_ROOTS=/media/films;/media/series
+      - MEDIA_NODE_PAIRING_TOKEN=${MEDIA_NODE_PAIRING_TOKEN:?Generate a unique random pairing secret}
+    volumes:
+      - aether_node_data:/data
+      - ${MEDIA_FILMS_DIR:-./target/docker_media/films}:/media/films:ro
+      - ${MEDIA_SERIES_DIR:-./target/docker_media/series}:/media/series:ro
+    networks:
+      - aether_internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:4101/internal/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # Note for scaling with multiple independent Nodes:
+  # Additional independent Nodes can be added (e.g., `aether-node-remote` or `aether-node-2`),
+  # each with its own persistent data volume (e.g. `aether_node_2_data`), separate port,
+  # dedicated pairing secret, and added to MEDIA_INTERNAL_ALLOWED_AUTHORITIES.
+  # No Node is artificially restricted to a single media type.
+
+networks:
+  aether_internal:
+    driver: bridge
+
+volumes:
+  aether_core_data:
+    name: aether_core_data
+  aether_core_backups:
+    name: aether_core_backups
+  aether_node_data:
+    name: aether_node_data

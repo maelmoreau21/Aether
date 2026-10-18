@@ -999,21 +999,6 @@ async fn test_1000_synthetic_files_scan_and_rescan() {
     // (Testing the full streaming scanner, folder discovery, batch staging, and publication without 1,000 ffprobe child processes)
     let probe_json = r#"{"streams":[{"index":0,"codec_name":"h264","codec_type":"video","pix_fmt":"yuv420p"},{"index":1,"codec_name":"aac","codec_type":"audio","channels":2,"tags":{"language":"eng"}}],"format":{"format_name":"mov,mp4,m4a,3gp,3g2,mj2","duration":"5.000"}}"#;
 
-    // Read metadata of first file to know size
-    let meta =
-        tokio::fs::metadata(films.join("Synth1000 Movie 0000 (2024) [tmdb-20000]/movie.mp4"))
-            .await
-            .unwrap();
-    let size = meta.len() as i64;
-    let modified_ns = match meta
-        .modified()
-        .ok()
-        .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-    {
-        Some(d) => d.as_nanos().to_string(),
-        None => "0".to_string(),
-    };
-
     let mut tx = store.pool().begin().await.unwrap();
     for i in 0..file_count {
         let work_id = format!("work-1000-{:04}", i);
@@ -1026,6 +1011,17 @@ async fn test_1000_synthetic_files_scan_and_rescan() {
             i,
             20000 + i
         );
+
+        let file_meta = tokio::fs::metadata(films.join(&rel_path)).await.unwrap();
+        let size = file_meta.len() as i64;
+        let modified_ns = match file_meta
+            .modified()
+            .ok()
+            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+        {
+            Some(d) => d.as_nanos().to_string(),
+            None => "0".to_string(),
+        };
 
         sqlx::query("INSERT INTO inventory_works(id, library_id, identity_key, title, year, external_ids_json, editorial_json, title_sort, kind) VALUES(?, ?, ?, ?, 2024, '{}', '{}', ?, 'film')")
             .bind(&work_id)

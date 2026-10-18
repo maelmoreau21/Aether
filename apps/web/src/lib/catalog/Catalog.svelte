@@ -436,6 +436,7 @@
         work={detail}
         bind:season
         {media}
+        {mediaError}
         {immersive}
         {launchingEpisodeId}
         onLaunchEpisode={launchEpisode}

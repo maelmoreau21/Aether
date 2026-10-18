@@ -6,8 +6,18 @@
   let name = $state(DEFAULT_NAME);
   let identifier = $state('');
   let password = $state('');
+  let ssoEnabled = $state(false);
   let busy = $state(false);
   let error = $state('');
+  async function sso() {
+    busy = true; error = '';
+    try {
+      const response = await fetch('/api/v1/auth/oidc/start', { method: 'POST', credentials: 'same-origin' });
+      if (!response.ok) throw new Error('Le SSO est indisponible. Réessayez ou utilisez votre compte local.');
+      const data: { url: string } = await response.json();
+      window.location.assign(data.url);
+    } catch (failure) { error = failure instanceof Error ? failure.message : 'Connexion SSO indisponible.'; busy = false; }
+  }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (busy) return;
@@ -18,6 +28,7 @@
   }
   $effect(() => {
     const controller = new AbortController();
+    fetch('/api/v1/auth/oidc/status', { signal: controller.signal }).then(r => r.ok ? r.json() : { enabled: false }).then(data => { ssoEnabled = data.enabled === true; }).catch(() => {});
     fetchBrandName(controller.signal).then(brandName => { name = brandName; });
     return () => controller.abort();
   });
@@ -35,6 +46,7 @@
       {#if error}<p class="error" role="alert">{error}</p>{/if}
       <button type="submit" disabled={busy}>{busy ? 'Connexion en cours…' : 'Se connecter'}<span aria-hidden="true">→</span></button>
     </form>
+    {#if ssoEnabled}<button type="button" onclick={sso} disabled={busy}>Se connecter avec SSO</button>{/if}
     <p class="help">Utilisez le compte local créé lors de l’installation.</p>
   </section>
   <footer>Votre cinéma, autrement.</footer>

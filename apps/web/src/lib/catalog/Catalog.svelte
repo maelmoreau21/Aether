@@ -11,6 +11,7 @@
   import Icon from '../ui/Icon.svelte';
   import ProfileMenu from '../ui/ProfileMenu.svelte';
   import Poster from './Poster.svelte';
+  import OidcSettings from '../auth/OidcSettings.svelte';
   import EpisodePlayer from './EpisodePlayer.svelte';
   import {
     request,
@@ -214,6 +215,7 @@
 <main id="main-content" tabindex="-1">
   {#if section === 'settings'}
     <div class="page-heading"><p class="eyebrow">VOTRE ESPACE</p><h1>Paramètres</h1><p>Vos réglages personnels de l’application.</p></div>
+    <OidcSettings />
     <section class="settings-panel"><h2>Réglages personnels</h2><p>Les réglages personnels de l’application seront disponibles prochainement.</p><button disabled>Réglages personnels · Bientôt</button></section>
   {:else if busy}
     <div class="page-heading"><p class="eyebrow">{title}</p><h1>Votre médiathèque</h1></div><div class="empty" role="status">Chargement du catalogue…</div>

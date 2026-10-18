@@ -45,6 +45,11 @@ services:
       - MEDIA_CORE_INTERNAL_URL=${MEDIA_CORE_INTERNAL_URL:-http://aether-core:3000}
       - MEDIA_DB_PATH=/data/core.sqlite3
       - MEDIA_WEB_DIST=/app/apps/web/build
+      - MEDIA_OIDC_ENABLED=${MEDIA_OIDC_ENABLED:-false}
+      - MEDIA_OIDC_ISSUER=${MEDIA_OIDC_ISSUER:-}
+      - MEDIA_OIDC_CLIENT_ID=${MEDIA_OIDC_CLIENT_ID:-}
+      - MEDIA_OIDC_CLIENT_SECRET=${MEDIA_OIDC_CLIENT_SECRET:-}
+      - MEDIA_OIDC_USER_GROUPS=${MEDIA_OIDC_USER_GROUPS:-}
     volumes:
       - aether_core_data:/data
       - aether_core_backups:/backups

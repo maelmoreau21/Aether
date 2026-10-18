@@ -1,5 +1,89 @@
 # MEMORY.md — État et décisions Aether
 
+## 18 octobre 2026 — Prévalidation Authentik réel : configuration fournisseur bloquante
+
+- Fichier utilisateur dans Téléchargements lu sans afficher les valeurs Client ID
+  ou Client Secret ; aucun secret copié dans le dépôt ou transmis au fournisseur.
+- Domaine Authentik réel joignable : racine et flow de connexion HTTP200.
+  Découverte `/application/o/aether/.well-known/openid-configuration` : HTTP404.
+  Autorisation avec le Client ID fourni et un callback loopback de prévalidation :
+  HTTP400, « Client ID Error: The client identifier (client_id) is missing or invalid. »
+- Aucun code ni jeton demandé au token endpoint, aucune connexion utilisateur,
+  aucune modification Authentik ou déploiement. Le secret n'est donc pas validé.
+- À corriger côté fournisseur : existence/association application slug `aether`
+  et client ID correspondant. URI de retour enregistrée et groupe utilisateur
+  autorisé à confirmer par l'utilisateur. Groupe d'application = catégorie UI,
+  pas preuve d'un groupe d'autorisation dans les claims.
+- Preuve sans secrets : `docs/evidence/2026-10-18/oidc/real-provider-preflight.json`.
+  La validation de connexion réelle reste ouverte malgré les tests synthétiques.
+
+## 18 octobre 2026 — Précontrôle Authentik réel, connexion encore bloquée
+
+- Configuration fournie dans un fichier du dossier Téléchargements ; secret lu
+  uniquement dans le processus de test, jamais affiché ni copié dans le dépôt.
+- Découverte réelle accessible, issuer conforme au fichier, JWKS RSA accessible,
+  RS256 et PKCE S256 annoncés. Fournisseur confidentiel.
+- Autorisation réelle avec callback local jetable
+  `http://127.0.0.1:48887/api/v1/auth/oidc/callback` : HTTP400, URI refusée.
+- Un unique essai token endpoint avec code volontairement inexistant pour
+  contrôler l'authentification client : HTTP400 `invalid_client`. Pas de code
+  utilisateur échangé, pas de jeton obtenu, pas de compte ni configuration IdP
+  modifiés. Aucune connexion complète réelle validée.
+- Demandes envoyées à l'utilisateur : autoriser l'URI locale exacte, confirmer
+  le groupe d'utilisateurs du claim groups (distinct du classement application),
+  vérifier client ID et mettre à jour le secret dans le fichier local.
+- Preuves sans secret ni origine privée :
+  `docs/evidence/2026-10-18/oidc/authentik-preflight.json`.
+
+## 18 octobre 2026 — SSO OIDC Authentik, sessions Core communes
+
+- `develop`, jalon limité à OIDC. Code confidentiel + PKCE S256,
+  découverte issuer par fournisseur, RS256/JWKS frais à chaque callback,
+  contrôles issuer/aud/azp/exp/iat/sub/nonce et state unique lié à un cookie
+  navigateur HttpOnly/Secure/Lax de 5 min. Échange de code dans Core uniquement.
+- Migration `0013_oidc.sql` : `(issuer,subject)` unique, liaison par compte et
+  issuer unique, flux temporaires bornés SQLite. Aucun rapprochement par email,
+  aucun jeton OIDC persistant/localStorage/Node. Session Core existante réutilisée
+  (12 h absolues, 30 min inactive, rôle/désactivation vivants, logout/CSRF).
+- Mapping explicite `MEDIA_OIDC_USER_GROUPS` → nouveaux comptes `user`, sans
+  permission de bibliothèque ni promotion administrateur. Comptes SSO listés
+  dans l'administration des permissions sous `sso-<UUID>`.
+- Liaison locale dans Paramètres : session + Origin/CSRF + mot de passe Argon2,
+  puis authentification OIDC ; revalidation transactionnelle de la session,
+  conflits refusés et rotation de la session locale. Mot de passe local conservé.
+  Un administrateur local actif est requis avant d'initier OIDC.
+- Bouton login conditionné par `/auth/oidc/status`, état administrateur sans
+  secret, variables Core seulement dans les deux Compose et `.env.example`.
+  Instructions exactes Authentik / URI de retour / limites : `docs/OIDC.md`.
+- Retour cross-site : callback GET/navigation document uniquement, avec
+  state/cookie ; document de fin et script externe de même origine avant
+  `/app/`. Le premier essai avec 303 simple a montré le refus cross-site sur
+  `/app/` ; corrigé sans élargir l'exception et sans changer le cookie Strict.
+- Vérifications : suite Rust workspace/all-features 128 succès, 7 ignorés,
+  avant la correction finale du callback ; après correction, 4 tests OIDC
+  réussis et Clippy final strict réussi. Web check 0/0, lint, 33 tests, build
+  réussis ; fmt et diff --check réussis. Non-régression finale sécurité/permissions/
+  distribué (challenger_security_challenge, permissions, distributed_multi_node) :
+  7/7 réussis. Images Docker standalone/Core
+  construites et Compose validés avec secret jetable.
+- Banc navigateur Docker final `oidcqa-1b68b66aa9` : succès standalone ET
+  distribué, Chrome155.0.8059.40 / Windows10.0.26300 headless. Découverte,
+  échange PKCE réel, cookies, logout, reconnexion UUID stable, login local,
+  état administrateur, permissions SSO visibles et absence de tokens Web/erreurs
+  JS/CSP. Provider synthétique RSA uniquement. Rapport :
+  `docs/evidence/2026-10-18/oidc/docker-browser.json`.
+- Limites : pas d'instance Authentik réelle fournie/validée ; pas de preuve
+  NAS/public/Firefox/Safari/charge. Désactivation Core immédiate ; désactivation
+  ou retrait de groupe chez l'IdP pris en compte au prochain login OIDC, pas
+  de back-channel logout/introspection ni fermeture de session Authentik au
+  logout Core. Comptes locaux de secours conservés.
+- Aucune commande de commit/push/publication/déploiement existant exécutée par
+  l'agent. Changement externe concurrent de HEAD vers `8bb97d0` durant le jalon :
+  ce commit ffprobe a inclus certains changements OIDC partiels déjà présents
+  (Cargo/migration/auth/lib), alors que `oidc.rs` restait non suivi. Historique
+  préservé ; ne pas considérer ce commit seul comme une livraison compilable
+  OIDC. Le résultat à relire comprend aussi les changements du working tree.
+
 ## 18 octobre 2026 — Réduction drastique de l'image Docker Media Node (`aether-node`) de 500 Mo à 158 Mo (-68,4 %)
 
 - **Diagnostic des couches et dépendances de l'image `aether-node`** :

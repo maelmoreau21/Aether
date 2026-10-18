@@ -63,6 +63,11 @@ services:
       - MEDIA_DB_PATH=/data/core.sqlite3
       - MEDIA_LIBRARY_ROOT=/media
       - MEDIA_WEB_DIST=/app/apps/web/build
+      - MEDIA_OIDC_ENABLED=${MEDIA_OIDC_ENABLED:-false}
+      - MEDIA_OIDC_ISSUER=${MEDIA_OIDC_ISSUER:-}
+      - MEDIA_OIDC_CLIENT_ID=${MEDIA_OIDC_CLIENT_ID:-}
+      - MEDIA_OIDC_CLIENT_SECRET=${MEDIA_OIDC_CLIENT_SECRET:-}
+      - MEDIA_OIDC_USER_GROUPS=${MEDIA_OIDC_USER_GROUPS:-}
     volumes:
       # Persistent application state & SQLite database (WAL mode)
       - aether_data:/data

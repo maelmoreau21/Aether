@@ -1,7 +1,7 @@
 //! Local Core: persistent authentication and isolated synthetic media inventory.
 pub mod auth;
-pub mod oidc;
 pub mod backup;
+pub mod oidc;
 use media_contracts::brand;
 mod catalog;
 mod demo;

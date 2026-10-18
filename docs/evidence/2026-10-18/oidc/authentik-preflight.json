@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-18",
+  "provider": "user-supplied Authentik; origin omitted",
+  "discovery": "accessible, issuer matches supplied issuer",
+  "jwks": "accessible, RSA",
+  "supported_signing_algorithms": [
+    "RS256"
+  ],
+  "supported_pkce": [
+    "plain",
+    "S256"
+  ],
+  "local_callback": "http://127.0.0.1:48887/api/v1/auth/oidc/callback",
+  "authorization_probe": {
+    "http_status": 400,
+    "redirect_uri_rejected": true
+  },
+  "confidential_client_probe": {
+    "http_status": 400,
+    "oauth_error": "invalid_client",
+    "authorization_code": "intentionally invalid, no real user code"
+  },
+  "full_login_verified": false,
+  "secrets_logged_or_copied_to_repo": false
+}

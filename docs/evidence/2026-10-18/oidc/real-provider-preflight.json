@@ -1,0 +1,18 @@
+{
+  "provider": "Authentik real",
+  "issuer": "https://authentik.dfmag.fr/application/o/aether/",
+  "credentials_source": "user-supplied Downloads text file (values omitted)",
+  "root_status": 200,
+  "discovery_status": 404,
+  "authorization_with_supplied_client_id_status": 400,
+  "authorization_error": "Client ID Error: The client identifier (client_id) is missing or invalid.",
+  "local_redirect_used_for_preflight": "http://127.0.0.1:48887/api/v1/auth/oidc/callback",
+  "tokens_requested": false,
+  "client_secret_transmitted": false,
+  "provider_configuration_changed": false,
+  "result": "blocked_by_provider_configuration",
+  "missing_information": [
+    "confirmed registered redirect URI",
+    "explicit allowed user group"
+  ]
+}

@@ -77,10 +77,14 @@
   interface OidcAdminStatus {
     enabled: boolean;
     issuer?: string | null;
-    client_id?: string | null;
-    redirect_uri?: string | null;
-    user_groups?: string[];
-    local_login_enabled?: boolean;
+    clientId?: string | null;
+    redirectUri?: string | null;
+    scopes?: string | null;
+    groupsClaim?: string | null;
+    requireGroup?: boolean;
+    userGroups?: string[];
+    endSessionEndpoint?: string | null;
+    localLoginEnabled?: boolean;
   }
 
   interface CoreHealth {
@@ -437,7 +441,7 @@
       <a href="#libraries-section">📁 Bibliothèques & Scans</a>
       <a href="#nodes-section">🖥️ Media Nodes</a>
       <a href="#users-section">👥 Utilisateurs & Droits</a>
-      <a href="#sso-section">🔐 SSO Authentik (OIDC)</a>
+      <a href="#sso-section">🔐 SSO (OpenID Connect)</a>
     </nav>
 
     {#if loading}
@@ -851,7 +855,7 @@
                     </td>
                     <td>
                       <span class="badge" data-status={isSso ? 'disconnected' : 'connected'}>
-                        {isSso ? 'SSO Authentik' : 'Compte local'}
+                        {isSso ? 'SSO (OIDC)' : 'Compte local'}
                       </span>
                     </td>
                     <td>
@@ -880,9 +884,9 @@
         </div>
       </section>
 
-      <!-- Section 5: SSO Authentik (OIDC) -->
+      <!-- Section 5: SSO OpenID Connect (OIDC) -->
       <section id="sso-section" class="dashboard-section" aria-labelledby="sso-heading">
-        <h2 id="sso-heading" class="section-title">Authentification SSO (OpenID Connect / Authentik)</h2>
+        <h2 id="sso-heading" class="section-title">Authentification SSO (OpenID Connect)</h2>
         
         <div class="card">
           <div class="card-header">
@@ -900,28 +904,32 @@
               </div>
               <div>
                 <span class="detail-label">Identifiant client (Client ID)</span>
-                <span class="detail-value"><code>{oidcStatus.client_id ?? 'Non renseigné'}</code></span>
+                <span class="detail-value"><code>{oidcStatus.clientId ?? 'Non renseigné'}</code></span>
               </div>
               <div>
                 <span class="detail-label">URI de redirection Core</span>
-                <span class="detail-value"><code>{oidcStatus.redirect_uri ?? 'Non renseigné'}</code></span>
+                <span class="detail-value"><code>{oidcStatus.redirectUri ?? 'Non renseigné'}</code></span>
               </div>
               <div>
-                <span class="detail-label">Groupes autorisés (claim groups)</span>
+                <span class="detail-label">Groupes autorisés (claim {oidcStatus.groupsClaim ?? 'groups'})</span>
                 <span class="detail-value">
-                  {oidcStatus.user_groups?.length ? oidcStatus.user_groups.join(', ') : 'Tous les utilisateurs'}
+                  {oidcStatus.userGroups?.length ? oidcStatus.userGroups.join(', ') : (oidcStatus.requireGroup ? 'Aucun groupe configuré' : 'Tous les utilisateurs authentifiés')}
                 </span>
               </div>
             </div>
           {:else}
             <p class="muted">
-              Le protocole OIDC n'est pas encore configuré sur cette instance. Pour activer l'authentification avec Authentik, définissez les variables d'environnement requises sur le Core :
+              Le protocole OIDC n'est pas encore configuré sur cette instance. Compatible avec Authentik, Keycloak, Dex, Pocket ID et tout fournisseur standardisé. Définissez les variables d'environnement requises sur le Core :
             </p>
-            <pre class="env-code"><code>MEDIA_OIDC_ISSUER_URL=https://authentik.lan/application/o/aether/
+            <pre class="env-code"><code>MEDIA_OIDC_ENABLED=true
+MEDIA_OIDC_ISSUER=https://auth.example.com/realms/media/
 MEDIA_OIDC_CLIENT_ID=votre-client-id
 MEDIA_OIDC_CLIENT_SECRET=votre-secret
-MEDIA_OIDC_REDIRECT_URI=https://votre-domaine/api/v1/auth/oidc/callback
-MEDIA_OIDC_USER_GROUPS=aether-users</code></pre>
+MEDIA_OIDC_USER_GROUPS=media-users
+# Facultatifs :
+# MEDIA_OIDC_SCOPES=openid profile email
+# MEDIA_OIDC_GROUPS_CLAIM=groups
+# MEDIA_OIDC_REQUIRE_GROUP=true</code></pre>
           {/if}
 
           <div class="security-note">
@@ -929,7 +937,7 @@ MEDIA_OIDC_USER_GROUPS=aether-users</code></pre>
             <div>
               <strong>Sécurité RBAC garantie :</strong>
               <p>
-                L'authentification OIDC utilise le flux sécurisé <em>Authorization Code + PKCE</em>. Les utilisateurs authentifiés via Authentik sont automatiquement créés avec le rôle <code>user</code>, sans aucun droit d'accès implicite sur les bibliothèques. L'administrateur local conserve toujours un accès direct de secours.
+                L'authentification OIDC utilise le flux sécurisé <em>Authorization Code + PKCE</em>. Les utilisateurs authentifiés via SSO sont automatiquement créés avec le rôle <code>user</code>, sans aucun droit d'accès implicite sur les bibliothèques. L'administrateur local conserve toujours un accès direct de secours.
               </p>
             </div>
           </div>

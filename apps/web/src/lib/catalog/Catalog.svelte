@@ -388,7 +388,7 @@
           <div>
             <span class="label">Type d’authentification</span>
             <span class="val">
-              {$session?.user.login.startsWith('sso-') ? 'SSO Authentik (OpenID Connect)' : 'Compte local (hash Argon2id)'}
+              {$session?.user.login.startsWith('sso-') ? 'SSO (OpenID Connect)' : 'Compte local (hash Argon2id)'}
             </span>
           </div>
           <div>
@@ -409,7 +409,7 @@
 
       <!-- OIDC Settings -->
       <section class="card oidc-card" aria-labelledby="sso-settings-heading">
-        <h2 id="sso-settings-heading" class="card-title">Liaison Authentik (SSO)</h2>
+        <h2 id="sso-settings-heading" class="card-title">Liaison de compte SSO (OpenID Connect)</h2>
         <OidcSettings />
       </section>
 

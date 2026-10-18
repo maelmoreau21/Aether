@@ -5,6 +5,35 @@
 
 # Vérification affiches Films — 16 octobre 2026
 
+## Extension P3/P4 — 18 octobre 2026
+
+Depuis la racine :
+
+```powershell
+cargo fmt --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+npm run check --prefix apps/web
+npm run lint --prefix apps/web
+npm test --prefix apps/web
+npm run build --prefix apps/web
+cargo test --locked -p media-poc --test browser_scanner --test browser_series -- --ignored --nocapture
+./scripts/test-postgres.ps1
+./scripts/raw-poc.ps1
+```
+
+Le scénario `browser_scanner` prépare lui-même ses sidecars synthétiques,
+exerce MP4 + `.opus` avant redémarrage puis MKV + `.ogg` après redémarrage,
+avec SRT forcé et WebVTT, signal PCM externe, seek/pause, reprise et vu/non vu.
+`browser_series` vérifie l'épisode suivant, l'opt-in automatique inter-saisons,
+le placement mobile des commandes et les refus d'accès/changements de compte.
+Les tests HTTP communs SQLite/PostgreSQL couvrent CSRF, conflit de révision,
+isolation utilisateur, seconde session, révocation et Range des sous-titres.
+Le test distribué vérifie aussi les vrais octets Ogg servis par un Node distant.
+Les limites navigateur et raw restent celles de [P3/P4](P3_P4_FEATURES.md).
+
+## Vérifications historiques
+
 - Validation finale : cargo fmt --check ; cargo clippy --locked --all-features
   --all-targets -- -D warnings ; cargo test --locked --all-features réussis :
   50 tests réussis,5 ignorés (4 navigateurs explicites et helper subprocess).

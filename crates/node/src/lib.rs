@@ -4,6 +4,7 @@
 //!
 //! This crate has zero dependency on `media-poc` (Core), `sqlx`, or Core users/sessions/permissions.
 
+pub mod external_audio;
 pub mod files;
 pub mod images;
 pub mod inventory;
@@ -12,6 +13,7 @@ pub mod probe;
 pub mod scanner;
 pub mod server;
 pub mod stream;
+pub mod subtitles;
 pub mod transport;
 
 pub use files::{OpenedFile, confined_file, validate_library_root};

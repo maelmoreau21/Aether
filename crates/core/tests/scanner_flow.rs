@@ -128,6 +128,13 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
     tokio::fs::copy(generated.join("p1/clip-mp4-en.mp4"), &mp4)
         .await
         .unwrap();
+    let sidecar = film.join("version-mp4.fr.forced.srt");
+    tokio::fs::write(
+        &sidecar,
+        "1\n00:00:00,000 --> 00:00:10,000\nBonjour externe",
+    )
+    .await
+    .unwrap();
     tokio::fs::copy(&mp4, other.join("Private Film (2025).mp4"))
         .await
         .unwrap();
@@ -244,11 +251,60 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
                     .count(),
                 3
             );
+        } else {
+            assert_eq!(media["subtitles"][0]["language"], "fr");
+            assert_eq!(media["subtitles"][0]["forced"], true);
+            let url = media["subtitles"][0]["url"].as_str().unwrap();
+            assert!(!media.to_string().contains("relative_path"));
+            for (method, range, expected) in [
+                ("GET", None, StatusCode::OK),
+                ("HEAD", None, StatusCode::OK),
+                ("GET", Some("bytes=0-5"), StatusCode::PARTIAL_CONTENT),
+                (
+                    "GET",
+                    Some("bytes=999999-"),
+                    StatusCode::RANGE_NOT_SATISFIABLE,
+                ),
+            ] {
+                let (status, _, bytes, _) =
+                    request(&app, method, url, &cookie, None, Value::Null, range).await;
+                assert_eq!(status, expected);
+                if method == "HEAD" {
+                    assert!(bytes.is_empty());
+                }
+                if range == Some("bytes=0-5") {
+                    assert_eq!(bytes, b"WEBVTT");
+                }
+            }
+            assert_eq!(
+                request(&app, "GET", url, "", None, Value::Null, None)
+                    .await
+                    .0,
+                StatusCode::UNAUTHORIZED
+            );
         }
     }
+    tokio::fs::write(
+        &sidecar,
+        "1\n00:00:00,000 --> 00:00:10,000\nTexte actualisé",
+    )
+    .await
+    .unwrap();
     let second = scan(&app, &library, &cookie, csrf).await;
     assert_eq!(second["reused"], 2);
     assert_eq!(second["probed"], 1); // invalid input is retried, successful unchanged media is not
+    let subtitle_asset: String = media_poc::database::query_scalar("SELECT a.id FROM inventory_assets a JOIN inventory_subtitles t ON t.asset_id=a.id WHERE a.relative_path LIKE '%version-mp4.mp4'")
+        .fetch_one(store.pool()).await.unwrap();
+    let subtitle_url = format!("/api/v1/assets/{subtitle_asset}/subtitles/0");
+    assert!(
+        String::from_utf8(
+            request(&app, "GET", &subtitle_url, &cookie, None, Value::Null, None)
+                .await
+                .2
+        )
+        .unwrap()
+        .contains("Texte actualisé")
+    );
     let (_, again, _, _) = request(
         &app,
         "GET",
@@ -260,6 +316,22 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
     )
     .await;
     assert_eq!(again, detail, "stable IDs and no duplicate versions");
+    tokio::fs::remove_file(&sidecar).await.unwrap();
+    assert_eq!(
+        request(&app, "GET", &subtitle_url, &cookie, None, Value::Null, None)
+            .await
+            .0,
+        StatusCode::OK,
+        "published snapshot survives until rescan"
+    );
+    scan(&app, &library, &cookie, csrf).await;
+    assert_eq!(
+        request(&app, "GET", &subtitle_url, &cookie, None, Value::Null, None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND,
+        "rescan removes deleted sidecar even with reused video probe"
+    );
     drop(app);
     store.close().await;
     let store = IdentityStore::open(&db).await.unwrap();
@@ -308,6 +380,12 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
         .execute(&pool)
         .await
         .unwrap();
+    assert_eq!(
+        request(&app, "GET", &subtitle_url, &cookie, None, Value::Null, None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
     sqlx::query("INSERT INTO library_permissions(library_id,user_id) VALUES(?,?)")
         .bind(&private)
         .bind(&user)

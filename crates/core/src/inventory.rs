@@ -463,6 +463,14 @@ pub async fn stage_batch(
         .bind(file.episode_number.map(i64::from))
         .execute(&mut *tx)
         .await?;
+
+        query("UPDATE scan_staging_files SET subtitles_json=?,audios_json=? WHERE scan_id=? AND relative_path=?")
+            .bind(json!(file.subtitles).to_string())
+            .bind(json!(file.audios).to_string())
+            .bind(scan_id)
+            .bind(&file.relative_path)
+            .execute(&mut *tx)
+            .await?;
     }
 
     tx.commit().await
@@ -1463,6 +1471,12 @@ pub async fn publish_staged_scan(
 
     refresh_editorial_for_works(&mut tx, &affected_work_ids).await?;
 
+    // Publish text snapshots atomically with assets, including unchanged video files.
+    query("INSERT INTO inventory_subtitles(asset_id,subtitles_json) SELECT a.id,f.subtitles_json FROM scan_staging_files f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE SET subtitles_json=excluded.subtitles_json")
+        .bind(scan_id).execute(&mut *tx).await?;
+    query("INSERT INTO inventory_audio(asset_id,audios_json) SELECT a.id,f.audios_json FROM scan_staging_files f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE SET audios_json=excluded.audios_json")
+        .bind(scan_id).execute(&mut *tx).await?;
+
     query("DELETE FROM scan_staging_files WHERE scan_id=?")
         .bind(scan_id)
         .execute(&mut *tx)
@@ -2281,8 +2295,10 @@ pub async fn descriptor(
     session_hash: &str,
 ) -> Result<Option<Value>, sqlx::Error> {
     let row = query(
-        "SELECT a.mime, a.probe_json, a.library_id, w.title, l.node_id \
+        "SELECT a.mime, a.probe_json, a.library_id, w.title, w.id AS work_id, l.node_id, t.subtitles_json, au.audios_json \
          FROM inventory_assets a \
+         LEFT JOIN inventory_subtitles t ON t.asset_id=a.id \
+         LEFT JOIN inventory_audio au ON au.asset_id=a.id \
          JOIN inventory_sources s ON s.id=a.source_id \
          JOIN inventory_versions v ON v.id=s.version_id \
          JOIN inventory_editions e ON e.id=v.edition_id \
@@ -2341,16 +2357,206 @@ pub async fn descriptor(
         source_obj["directUrl"] = json!(direct_url);
         source_obj["tokenExpiresAt"] = json!(expires_at);
     }
+    let subtitles = subtitle_descriptors(
+        asset_id,
+        row.get::<Option<String>, _>("subtitles_json").as_deref(),
+    )?;
+    let audios: Vec<media_contracts::inventory::ExternalAudio> = serde_json::from_str(
+        row.get::<Option<String>, _>("audios_json")
+            .as_deref()
+            .unwrap_or("[]"),
+    )
+    .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+    let mut sources = vec![source_obj.clone()];
+    for (index, track) in audios.iter().enumerate() {
+        let mut source = source_obj.clone();
+        // External audio is authorized through Core; the existing video can remain direct.
+        source["id"] = json!(format!("{asset_id}-audio-{index}"));
+        source["audioTrackId"] = json!(format!("external-{index}"));
+        source["language"] = json!(track.language);
+        source["externalAudioUrl"] = json!(format!(
+            "/api/v1/assets/{asset_id}/audio/{}",
+            audio_operational_id(asset_id, track)
+        ));
+        source["audioOffsetSeconds"] = json!(track.offset_seconds);
+        source["tracks"] = json!(track.probe.streams);
+        sources.push(source);
+    }
     Ok(Some(json!({
         "id": asset_id,
         "title": row.get::<String,_>("title"),
+        "workId": row.get::<String,_>("work_id"),
         "synthetic": false,
         "nodeId": node_id,
         "nodeStatus": node_status,
         "available": node_status == "connected",
-        "sources": [source_obj],
-        "subtitles": []
+        "sources": sources,
+        "subtitles": subtitles
     })))
+}
+
+pub(crate) fn audio_operational_id(
+    asset_id: &str,
+    track: &media_contracts::inventory::ExternalAudio,
+) -> String {
+    let identity = json!([track.relative_path, track.size, track.modified_ns]).to_string();
+    let hash = media_contracts::protocol::sha256_hex(identity.as_bytes());
+    format!("sidecar-{asset_id}-{}", &hash[..32])
+}
+
+pub async fn audio(
+    store: &IdentityStore,
+    asset_id: &str,
+    key: &str,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use axum::{body::Body, http::StatusCode, response::Response};
+    let row = query("SELECT au.audios_json,l.root,l.node_id FROM inventory_audio au JOIN inventory_assets a ON a.id=au.asset_id JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND n.status != 'revoked'")
+        .bind(asset_id).fetch_optional(&store.pool).await;
+    let row = match row {
+        Ok(Some(row)) => row,
+        Ok(None) => return crate::error(StatusCode::NOT_FOUND, "audio_unavailable"),
+        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+    };
+    let tracks: Vec<media_contracts::inventory::ExternalAudio> =
+        match serde_json::from_str(&row.get::<String, _>("audios_json")) {
+            Ok(tracks) => tracks,
+            Err(_) => {
+                return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "audio_inventory_invalid");
+            }
+        };
+    let Some(track) = tracks
+        .iter()
+        .find(|track| audio_operational_id(asset_id, track) == key)
+    else {
+        return crate::error(StatusCode::NOT_FOUND, "unknown_audio");
+    };
+    let node_id: String = row.get("node_id");
+    if node_id != "local" {
+        let Some(node) = crate::nodes::load_node(store, &node_id)
+            .await
+            .ok()
+            .flatten()
+        else {
+            return crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
+        };
+        let path = format!("/internal/v1/node/assets/{key}/content");
+        return crate::nodes::relay_from_remote_node(store, &node, &path, request).await;
+    }
+    let root: String = row.get("root");
+    let opened = match crate::node::LocalNode
+        .open_media(Path::new(&root), Path::new(&track.relative_path))
+        .await
+    {
+        Ok(opened) if opened.size() == track.size && opened.modified_ns() == track.modified_ns => {
+            opened
+        }
+        _ => return crate::error(StatusCode::NOT_FOUND, "audio_changed_rescan_required"),
+    };
+    match media_node::serve_opened(opened, &request, "audio/ogg").await {
+        Ok(response) => {
+            let (parts, body) = response.into_parts();
+            Response::from_parts(parts, Body::new(body))
+        }
+        Err(_) => crate::error(StatusCode::INTERNAL_SERVER_ERROR, "audio_stream_failed"),
+    }
+}
+
+fn subtitle_descriptors(asset_id: &str, text: Option<&str>) -> Result<Vec<Value>, sqlx::Error> {
+    let tracks: Vec<media_contracts::inventory::ExternalSubtitle> =
+        serde_json::from_str(text.unwrap_or("[]")).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+    Ok(tracks
+        .iter()
+        .enumerate()
+        .map(|(index, track)| {
+            json!({
+                "id": format!("external-{index}"), "language": track.language, "label": track.label,
+                "forced": track.forced, "sdh": track.sdh, "sourceFormat": track.source_format,
+                "url": format!("/api/v1/assets/{asset_id}/subtitles/{index}")
+            })
+        })
+        .collect())
+}
+
+/// Session and live library permissions run in the common media middleware.
+pub async fn subtitle(
+    store: &IdentityStore,
+    asset_id: &str,
+    index: usize,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use axum::{
+        body::Body,
+        http::{StatusCode, header},
+        response::Response,
+    };
+    let value: Result<Option<String>, _> = query_scalar("SELECT t.subtitles_json FROM inventory_subtitles t JOIN inventory_assets a ON a.id=t.asset_id JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND l.root=s.root_snapshot AND n.status != 'revoked'")
+        .bind(asset_id).fetch_optional(&store.pool).await;
+    let tracks: Vec<media_contracts::inventory::ExternalSubtitle> = match value {
+        Ok(Some(text)) => match serde_json::from_str(&text) {
+            Ok(tracks) => tracks,
+            Err(_) => {
+                return crate::error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "subtitle_inventory_invalid",
+                );
+            }
+        },
+        Ok(None) => return crate::error(StatusCode::NOT_FOUND, "subtitle_unavailable"),
+        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+    };
+    let Some(track) = tracks.get(index) else {
+        return crate::error(StatusCode::NOT_FOUND, "unknown_subtitle");
+    };
+    let bytes = track.webvtt.as_bytes();
+    let mut response = Response::new(Body::empty());
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("text/vtt; charset=utf-8"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, no-store"),
+    );
+    response.headers_mut().insert(
+        header::ACCEPT_RANGES,
+        axum::http::HeaderValue::from_static("bytes"),
+    );
+    let range = request.headers().get(header::RANGE);
+    let selected = match range {
+        Some(value) => match value
+            .to_str()
+            .ok()
+            .and_then(|s| media_node::parse_single_range(s, bytes.len() as u64))
+        {
+            Some(range) => {
+                *response.status_mut() = StatusCode::PARTIAL_CONTENT;
+                response.headers_mut().insert(
+                    header::CONTENT_RANGE,
+                    format!("bytes {}-{}/{}", range.start, range.end, bytes.len())
+                        .parse()
+                        .unwrap(),
+                );
+                &bytes[range.start as usize..=range.end as usize]
+            }
+            None => {
+                *response.status_mut() = StatusCode::RANGE_NOT_SATISFIABLE;
+                response.headers_mut().insert(
+                    header::CONTENT_RANGE,
+                    format!("bytes */{}", bytes.len()).parse().unwrap(),
+                );
+                return response;
+            }
+        },
+        None => bytes,
+    };
+    response
+        .headers_mut()
+        .insert(header::CONTENT_LENGTH, selected.len().into());
+    if request.method() != axum::http::Method::HEAD {
+        *response.body_mut() = Body::from(selected.to_vec());
+    }
+    response
 }
 
 /// Authorization is enforced by the common route middleware before this helper.
@@ -2642,7 +2848,7 @@ mod tests {
             .execute(&store.pool)
             .await
             .unwrap();
-        let mut report = ScanReport { files: vec![ScannedFile {
+        let mut report = ScanReport { files: vec![ScannedFile { audios: Vec::new(), subtitles: Vec::new(),
             relative_path: "Film (2026)/film.mp4".into(), size: 42, modified_ns: "100".into(),
             title: "Film".into(), year: Some(2026), identity_key: "folder:Film (2026)".into(),
             external_ids: Default::default(), mime: "video/mp4".into(),
@@ -2745,6 +2951,8 @@ mod tests {
             .unwrap();
         let probe:Probe=serde_json::from_value(json!({"streams":[{"index":0,"codec_type":"video","codec_name":"av1","pix_fmt":"yuv420p10le"},{"index":1,"codec_type":"audio","codec_name":"opus","tags":{"language":"fra"}}],"format":{"duration":"2"}})).unwrap();
         let file = |path: &str| ScannedFile {
+            audios: Vec::new(),
+            subtitles: Vec::new(),
             relative_path: path.into(),
             size: 42,
             modified_ns: "100".into(),

@@ -1264,6 +1264,33 @@ async fn internal_stream_asset(
             &nonce,
         );
     };
+    if id.starts_with("sidecar-") {
+        let expected = {
+            let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
+            inv.assets
+                .get(&id)
+                .map(|entry| (entry.size, entry.modified_ns.clone()))
+        };
+        let opened = state
+            .local_node
+            .open_media(
+                Path::new(&grant.root_snapshot),
+                Path::new(&grant.relative_path),
+            )
+            .await;
+        let response = match (opened, expected) {
+            (Ok(opened), Some((size, modified)))
+                if opened.size() == size && opened.modified_ns() == modified =>
+            {
+                match crate::serve_opened(opened, &req, "audio/ogg").await {
+                    Ok(response) => convert_stream_response(response, false),
+                    Err(_) => node_error_response(NodeErrorCode::StreamError, false),
+                }
+            }
+            _ => node_error_response(NodeErrorCode::UnavailableAsset, false),
+        };
+        return sign_stream_response(response, &identity, &nonce);
+    }
     match state
         .local_node
         .serve_grant_for_node(identity.node_id.clone(), &grant, &req)

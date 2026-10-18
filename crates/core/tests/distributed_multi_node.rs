@@ -100,6 +100,23 @@ async fn populate_test_libraries(films_root: &Path, series_root: &Path) {
         .await
         .expect("copy film mp4");
     tokio::fs::write(
+        film_dir.join("Horizon Stellaire (2025).fr.forced.srt"),
+        "1\n00:00:00,000 --> 00:00:10,000\nSous-titre du Node distant",
+    )
+    .await
+    .unwrap();
+    assert!(
+        tokio::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-nostdin", "-i"])
+            .arg(&mp4_src)
+            .args(["-map", "0:a:0", "-vn", "-c:a", "copy"])
+            .arg(film_dir.join("Horizon Stellaire (2025).en.opus"))
+            .status()
+            .await
+            .unwrap()
+            .success()
+    );
+    tokio::fs::write(
         film_dir.join("movie.nfo"),
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <movie>
@@ -694,6 +711,47 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .await;
         assert_eq!(md_st, StatusCode::OK);
         let md: Value = serde_json::from_slice(&md_body).unwrap();
+        if asset_id == &film_asset_id {
+            let subtitle = md["subtitles"][0]["url"].as_str().unwrap();
+            let (status, _, bytes) = http_request(
+                &core_origin,
+                Method::GET,
+                subtitle,
+                &[("cookie", &alice_cookie)],
+                vec![],
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(String::from_utf8_lossy(&bytes).contains("Node distant"));
+            let audio = md["sources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find_map(|s| s["externalAudioUrl"].as_str())
+                .unwrap();
+            let (status, _, bytes) = http_request(
+                &core_origin,
+                Method::GET,
+                audio,
+                &[("cookie", &alice_cookie), ("range", "bytes=0-3")],
+                vec![],
+            )
+            .await;
+            assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+            assert_eq!(bytes.as_ref(), b"OggS");
+            assert_eq!(
+                http_request(
+                    &core_origin,
+                    Method::GET,
+                    audio,
+                    &[("cookie", &bob_cookie)],
+                    vec![]
+                )
+                .await
+                .0,
+                StatusCode::FORBIDDEN
+            );
+        }
         assert_eq!(md["available"], true);
         let src = &md["sources"][0];
         let direct_url = src["directUrl"].as_str().expect("directUrl present");

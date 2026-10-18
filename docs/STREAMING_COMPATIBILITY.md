@@ -400,3 +400,20 @@ puis répétitions séquentielles et seeks avant/arrière dans une même présen
 Ni solution définitive, ni P1, ni Video.js validés.
 
 Validation finale Node : 10 tests politique + 2 suites statistiques =12/12, exit0. Syntaxe des cinq scripts modifiés vérifiée. Le dernier ajustement distinguant audioId/marge0 est couvert unitairement ; pas de nouvelle matrice navigateur après cet ajustement.
+# Pistes externes — observation du 18 octobre 2026
+
+Chrome 155.0.8059.40, Windows 10.0.26300, headless : fixture synthétique AV1
+10 bits + Opus de 12 secondes, MP4 puis MKV, sidecars `.opus`/`.ogg` extraits
+sans réencodage, SRT français forcé et WebVTT anglais. Après scan puis scan
+avec probes vidéo réutilisés, le lecteur
+affiche les cues SRT converties (capture inspectée), décode un signal PCM audio
+externe non nul (pic environ 0,048) et suit la vidéo après pause/seek à 4 s
+(écart observé inférieur à 300 ms). Désactivation des sous-titres, sauvegarde,
+réouverture avec reprise et marquage vu/non vu passent avant et après redémarrage.
+
+Preuves : `evidence/2026-10-18/external-tracks/`. La vidéo et les audios originaux
+restent inchangés. Aucun remux de lecture, aucune preuve de synchronisation à
+l'échantillon, de film long, de réseau instable ou de restitution physique 5.1.
+ASS/SSA, sélection arbitraire de pistes internes et raw ne sont pas déclarés
+lisibles. Les anciens résultats MSE/Shaka ci-dessous restent des expériences
+séparées, pas des capacités automatiquement intégrées à ce moteur natif.

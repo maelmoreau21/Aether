@@ -14,6 +14,7 @@ pub mod media;
 pub mod node;
 pub mod nodes;
 pub mod permissions;
+pub mod progress;
 pub mod scans;
 
 use axum::{
@@ -108,6 +109,14 @@ pub async fn secure_app_with_jobs(
     let store_for_csp = auth.store.clone();
     let replay_window = Arc::new(media_contracts::protocol::ReplayWindow::new());
     let media = media_routes(inventory)
+        .route(
+            "/api/v1/assets/{id}/audio/{index}",
+            get(indexed_audio).head(indexed_audio),
+        )
+        .route(
+            "/api/v1/assets/{id}/subtitles/{index}",
+            get(indexed_subtitle).head(indexed_subtitle),
+        )
         .route("/api/v1/media/{id}", get(indexed_descriptor))
         .route(
             "/api/v1/assets/{id}/image",
@@ -127,12 +136,29 @@ pub async fn secure_app_with_jobs(
             .merge(scans::router(auth.clone(), root.clone(), jobs).await?)
             .merge(libraries::router(auth.clone(), root))
             .merge(nodes::router(auth.clone(), replay_window))
+            .merge(progress::router(auth.clone()))
             .merge(auth::router(auth))
             .merge(oidc),
         origin,
         Some(store_for_csp),
     );
     Ok(health_routes(mode).merge(protected))
+}
+
+async fn indexed_subtitle(
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path((id, index)): axum::extract::Path<(String, usize)>,
+    request: Request,
+) -> Response {
+    inventory::subtitle(&store, &id, index, request).await
+}
+
+async fn indexed_audio(
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path((id, index)): axum::extract::Path<(String, String)>,
+    request: Request,
+) -> Response {
+    inventory::audio(&store, &id, &index, request).await
 }
 
 async fn indexed_image(

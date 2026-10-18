@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-18",
+  "branch": "develop",
+  "rustWorkspace": {
+    "command": "cargo test --workspace --locked",
+    "passed": 125,
+    "ignored": 8,
+    "failed": 0
+  },
+  "rustQuality": {
+    "commands": ["cargo fmt --check", "cargo clippy --workspace --all-targets --locked -- -D warnings", "git diff --check"],
+    "passed": true
+  },
+  "web": {
+    "commands": ["npm run check --prefix apps/web", "npm run lint --prefix apps/web", "npm test --prefix apps/web", "npm run build --prefix apps/web"],
+    "typeErrors": 0,
+    "typeWarnings": 0,
+    "unitTestsPassed": 45,
+    "passed": true
+  },
+  "browser": {
+    "command": "cargo test --locked -p media-poc --test browser_scanner --test browser_series -- --ignored --nocapture",
+    "passed": true,
+    "reports": ["external-tracks/report.json", "external-tracks/report-restart.json", "p4-series/report.json"],
+    "limits": "Chrome 155 Windows headless, synthetic 12-second media; no physical multichannel output or long-media proof"
+  },
+  "postgres18": {
+    "command": "./scripts/test-postgres.ps1",
+    "passed": true,
+    "suites": ["postgres18_http_contract_and_reopen", "oidc::tests (5)", "distributed_core_and_two_remote_nodes_end_to_end"]
+  },
+  "rawPoc": {
+    "command": "./scripts/raw-poc.ps1",
+    "report": "raw-poc/report.json",
+    "integrated": false
+  },
+  "productionMediaModified": false,
+  "committed": false,
+  "pushed": false,
+  "deployed": false
+}

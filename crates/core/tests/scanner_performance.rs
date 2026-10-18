@@ -521,6 +521,8 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
             .map(|j| {
                 let idx = chunk * 100 + j;
                 ScannedFile {
+                    audios: Vec::new(),
+                    subtitles: Vec::new(),
                     relative_path: format!("film_{:06}/movie.mkv", idx),
                     identity_key: format!("synth:{:06}", idx),
                     title: format!("Synthetic #{:06}", idx),
@@ -586,6 +588,8 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
             .map(|j| {
                 let idx = chunk * 100 + j;
                 ScannedFile {
+                    audios: Vec::new(),
+                    subtitles: Vec::new(),
                     relative_path: format!("film_{:06}/movie.mkv", idx),
                     identity_key: format!("synth:{:06}", idx),
                     title: format!("Synthetic #{:06}", idx),
@@ -734,6 +738,8 @@ async fn test_scan_cancellation_and_restart_recovery() {
         scan_id: scan_id.clone().into(),
         sequence: 0,
         files: vec![ScannedFile {
+            audios: Vec::new(),
+            subtitles: Vec::new(),
             relative_path: "orphan.mkv".into(),
             identity_key: "orphan".into(),
             title: "Orphan Movie".into(),
@@ -1238,6 +1244,8 @@ async fn test_10000_new_synthetic_media_cold_ingestion_benchmark() {
                 };
 
                 ScannedFile {
+                    audios: Vec::new(),
+                    subtitles: Vec::new(),
                     relative_path: rel,
                     identity_key: format!("tmdb:{}", 100000 + idx),
                     title,
@@ -1407,6 +1415,8 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
     let scan_id1 = uuid::Uuid::new_v4().to_string();
     let files1: Vec<ScannedFile> = (0..initial_count)
         .map(|i| ScannedFile {
+            audios: Vec::new(),
+            subtitles: Vec::new(),
             relative_path: format!("movie_{:03}/movie.mkv", i),
             identity_key: format!("tmdb:{}", 20000 + i),
             title: format!("Original Movie {:03}", i),
@@ -1478,6 +1488,8 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
     // 0..20 unchanged
     for i in 0..20 {
         files2.push(ScannedFile {
+            audios: Vec::new(),
+            subtitles: Vec::new(),
             relative_path: format!("movie_{:03}/movie.mkv", i),
             identity_key: format!("tmdb:{}", 20000 + i),
             title: format!("Original Movie {:03}", i),
@@ -1507,6 +1519,8 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
     // 20..40 modified
     for i in 20..40 {
         files2.push(ScannedFile {
+            audios: Vec::new(),
+            subtitles: Vec::new(),
             relative_path: format!("movie_{:03}/movie.mkv", i),
             identity_key: format!("tmdb:{}", 20000 + i),
             title: format!("Original Movie {:03}", i),
@@ -1536,6 +1550,8 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
     // 40..60 modified NFO
     for i in 40..60 {
         files2.push(ScannedFile {
+            audios: Vec::new(),
+            subtitles: Vec::new(),
             relative_path: format!("movie_{:03}/movie.mkv", i),
             identity_key: format!("tmdb:{}", 20000 + i),
             title: format!("Updated Title {:03}", i),
@@ -1565,6 +1581,8 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
     // 60..70 deleted poster
     for i in 60..70 {
         files2.push(ScannedFile {
+            audios: Vec::new(),
+            subtitles: Vec::new(),
             relative_path: format!("movie_{:03}/movie.mkv", i),
             identity_key: format!("tmdb:{}", 20000 + i),
             title: format!("Original Movie {:03}", i),
@@ -1599,6 +1617,8 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
     // 90..100 unchanged
     for i in 90..100 {
         files2.push(ScannedFile {
+            audios: Vec::new(),
+            subtitles: Vec::new(),
             relative_path: format!("movie_{:03}/movie.mkv", i),
             identity_key: format!("tmdb:{}", 20000 + i),
             title: format!("Original Movie {:03}", i),
@@ -1628,6 +1648,8 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
     // 100..120 new
     for i in 100..120 {
         files2.push(ScannedFile {
+            audios: Vec::new(),
+            subtitles: Vec::new(),
             relative_path: format!("movie_{:03}/movie.mkv", i),
             identity_key: format!("tmdb:{}", 20000 + i),
             title: format!("Brand New Movie {:03}", i),
@@ -1863,6 +1885,8 @@ async fn test_sqlite_pool_audit_and_concurrent_reads_during_publication() {
             .map(|j| {
                 let idx = chunk * 100 + j;
                 ScannedFile {
+                    audios: Vec::new(),
+                    subtitles: Vec::new(),
                     relative_path: format!("audit_synth_{:04}/movie.mkv", idx),
                     identity_key: format!("synth:audit:{:04}", idx),
                     title: format!("Audit Synth #{:04}", idx),
@@ -2028,6 +2052,8 @@ async fn test_crash_cancellation_permissions_and_rollback() {
         scan_id: scan_id.clone().into(),
         sequence: 1,
         files: vec![ScannedFile {
+            audios: Vec::new(),
+            subtitles: Vec::new(),
             relative_path: "uncommitted.mkv".into(),
             identity_key: "uncommitted".into(),
             title: "Uncommitted Movie".into(),
@@ -2144,6 +2170,8 @@ async fn test_crash_cancellation_permissions_and_rollback() {
         scan_id: scan_id_ok.clone().into(),
         sequence: 1,
         files: vec![ScannedFile {
+            audios: Vec::new(),
+            subtitles: Vec::new(),
             relative_path: "file1.mkv".into(),
             identity_key: "file1".into(),
             title: "File 1".into(),

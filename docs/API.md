@@ -236,3 +236,27 @@ n'est pas acceptée. Les clients internes ne suivent pas les redirections.
 Les capacités de lecture publique exigent HTTPS, sauf pour les origines loopback
 des tests locaux. Les URL historiques non conformes retombent sur le relais.
 Voir [le contrat détaillé et les commandes](P2_DOCKER_VALIDATION.md).
+# Extension pistes externes et progression — 18 octobre 2026
+
+- `GET /api/v1/media/{asset}` ajoute `workId`, les `subtitles` externes
+  (`id/language/label/forced/sdh/sourceFormat/url`) et des choix audio dans
+  `sources` (`externalAudioUrl/audioOffsetSeconds`, métadonnées réelles de piste).
+- `GET|HEAD /api/v1/assets/{asset}/subtitles/{index}` : WebVTT normalisé du
+  dernier scan publié. `GET|HEAD .../audio/{track}` : Ogg/Opus inventorié,
+  local ou relais distant. Session et permissions live avant chaque requête ;
+  `200/206/416`, index absent `404`, absence de session `401`, refus `403`.
+  Aucun chemin disque accepté en paramètre.
+  La clé audio est opaque et dépend du fichier inventorié (chemin privé haché,
+  taille, mtime), pas de l'ordre des pistes : une ancienne URL échoue si la
+  piste change, au lieu de sélectionner une autre piste après rescan.
+- `GET /api/v1/progress` : historique du compte courant, 100 œuvres maximum,
+  filtré par permissions live, avec titre, genre d'œuvre et série parente.
+- `GET /api/v1/progress/{work}` : position, durée, `watched`, `revision` ;
+  révision zéro si pas encore de séance. Durée connue fournie pour marquage manuel.
+- `PUT /api/v1/progress/{work}` : JSON
+  `{position,duration,watched,expectedRevision}` ; session et CSRF requis.
+  Position/durée finies, `0 <= position <= duration <= 604800`, durée positive.
+  Succès `200` avec nouvel état/révision ; conflit `409`, entrée invalide `422`,
+  ressource interdite `403`. L'utilisateur est issu de la session, jamais du JSON.
+
+Contrat et limites : [P3/P4](P3_P4_FEATURES.md).

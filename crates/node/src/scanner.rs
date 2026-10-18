@@ -21,6 +21,7 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct FolderVideos {
     entries: Vec<(Option<OsString>, String)>,
+    pub(crate) sidecar_paths: Vec<PathBuf>,
 }
 
 impl FolderVideos {
@@ -32,8 +33,19 @@ impl FolderVideos {
         };
         let mut read_dir = tokio::fs::read_dir(dir_path).await?;
         let mut entries = Vec::new();
+        let mut sidecar_paths = Vec::new();
         while let Some(entry) = read_dir.next_entry().await? {
             let p = entry.path();
+            if p.extension().and_then(|s| s.to_str()).is_some_and(|s| {
+                ["mkv", "mp4", "opus", "ogg", "srt", "vtt", "ass", "ssa"]
+                    .iter()
+                    .any(|e| s.eq_ignore_ascii_case(e))
+            }) {
+                if sidecar_paths.len() >= 10000 {
+                    return Err(io::Error::other("directory sidecar limit exceeded"));
+                }
+                sidecar_paths.push(p.clone());
+            }
             if p.extension()
                 .and_then(|s| s.to_str())
                 .is_some_and(|s| s.eq_ignore_ascii_case("mkv") || s.eq_ignore_ascii_case("mp4"))
@@ -46,7 +58,10 @@ impl FolderVideos {
                 entries.push((stem, key));
             }
         }
-        Ok(Self { entries })
+        Ok(Self {
+            entries,
+            sidecar_paths,
+        })
     }
 
     pub fn all_match_identity(&self, key: &str) -> bool {
@@ -738,6 +753,18 @@ where
         }
         let folder_videos = folder_cache.get(&parent);
 
+        // Sidecars must be refreshed even when the video probe is reused.
+        let (subtitles, subtitle_issues) =
+            super::subtitles::discover_with_folder(&root, relative, folder_videos).await;
+        for issue in subtitle_issues {
+            record_warning(&mut report, &mut current_batch_warnings, issue);
+        }
+        let (audios, audio_issues) =
+            super::external_audio::discover(&root, relative, folder_videos).await;
+        for issue in audio_issues {
+            record_warning(&mut report, &mut current_batch_warnings, issue);
+        }
+
         let scanned_file = if kind == "series" {
             let Some(parsed) = parse_series_episode(relative) else {
                 let issue = ScanIssue {
@@ -820,6 +847,8 @@ where
             );
 
             ScannedFile {
+                audios,
+                subtitles,
                 poster: None,
                 editorial: episode_editorial,
                 relative_path,
@@ -871,6 +900,8 @@ where
                 record_warning(&mut report, &mut current_batch_warnings, issue);
             }
             ScannedFile {
+                audios,
+                subtitles,
                 poster,
                 editorial,
                 relative_path,
@@ -900,7 +931,14 @@ where
         };
         current_batch_files.push(scanned_file);
 
-        if current_batch_files.len() >= batch_size {
+        if current_batch_files.len() >= batch_size
+            || current_batch_files
+                .iter()
+                .flat_map(|f| &f.subtitles)
+                .map(|s| s.webvtt.len())
+                .sum::<usize>()
+                >= 512 * 1024
+        {
             sequence += 1;
             let batch = InventoryBatch {
                 scan_id: media_contracts::ids::ScanId::from(format!("seq-{sequence}")),

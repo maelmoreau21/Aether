@@ -105,6 +105,8 @@ async fn test_concurrent_writes_during_sqlite_publication_and_timeout_behavior()
             .map(|j| {
                 let idx = chunk * 100 + j;
                 ScannedFile {
+                    audios: Vec::new(),
+                    subtitles: Vec::new(),
                     relative_path: format!("movie_{:04}/movie.mkv", idx),
                     identity_key: format!("synth:write:{:04}", idx),
                     title: format!("Synth Write #{:04}", idx),
@@ -259,21 +261,24 @@ async fn test_concurrent_writes_during_sqlite_publication_and_timeout_behavior()
         .await
         .unwrap();
 
-    // Acquire exclusive write lock and hold it for 400ms
+    // Hold the lock until the contender has actually completed. Fixed sleeps
+    // race on loaded runners and can release it before the contender is scheduled.
+    let (locked_tx, locked_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
     let lock_holder = tokio::spawn({
         let store_holder = store.clone();
         async move {
             let mut conn = store_holder.pool().acquire().await.unwrap();
             let tx = conn.begin_with("BEGIN IMMEDIATE").await.unwrap();
-            tokio::time::sleep(Duration::from_millis(400)).await;
+            locked_tx.send(()).unwrap();
+            release_rx.await.unwrap();
             tx.rollback().await.unwrap();
         }
     });
 
-    // Give lock_holder 50ms to acquire the write lock
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    locked_rx.await.unwrap();
 
-    // Try to acquire write lock with the short_store (100ms timeout < 400ms hold)
+    // The short_store must exhaust its 100ms busy timeout while the lock is held.
     let timed_out_write = async {
         let mut conn = short_store.pool().acquire().await?;
         let tx = conn.begin_with("BEGIN IMMEDIATE").await?;
@@ -294,6 +299,7 @@ async fn test_concurrent_writes_during_sqlite_publication_and_timeout_behavior()
     );
     println!("Expected busy timeout verified: {err_str}");
 
+    release_tx.send(()).unwrap();
     lock_holder.await.unwrap();
 
     // 4. Verify absence of permanent deadlock (absence de blocage permanent):

@@ -84,6 +84,8 @@ async fn test_sqlite_wal_backup_and_restore_preserves_users_grants_uuids_and_met
     let scan_id = uuid::Uuid::new_v4().to_string();
     let files: Vec<ScannedFile> = (0..5)
         .map(|i| ScannedFile {
+            audios: Vec::new(),
+            subtitles: Vec::new(),
             relative_path: format!("movie_{i}/movie.mkv"),
             identity_key: format!("tmdb:{}", 10000 + i),
             title: format!("Film Test {i}"),

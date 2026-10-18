@@ -51,11 +51,37 @@ async fn browser_scanner_persists_and_plays_after_core_restart() {
         let input = root.join(format!(
             "tests/fixtures/generated/p1/clip-{extension}-fr.{extension}"
         ));
-        let output = film.join(format!("Scanner Film (2026).{extension}"));
+        let output = film.join(format!("Scanner Film (2026) {extension}.{extension}"));
         let bytes = std::fs::read(input).unwrap();
         std::fs::write(&output, &bytes).unwrap();
         originals.push((output, bytes));
     }
+    for container in ["mp4", "mkv"] {
+        std::fs::write(
+            film.join(format!("Scanner Film (2026) {container}.fr.forced.srt")),
+            "1\n00:00:00,000 --> 00:00:12,000\nSous-titre externe français forcé",
+        )
+        .unwrap();
+        std::fs::write(
+            film.join(format!("Scanner Film (2026) {container}.en.vtt")),
+            "WEBVTT\n\n00:00:00.000 --> 00:00:12.000\nExternal WebVTT subtitle",
+        )
+        .unwrap();
+    }
+    let audio = tokio::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-nostdin", "-i"])
+        .arg(film.join("Scanner Film (2026) mp4.mp4"))
+        .args(["-vn", "-c:a", "copy"])
+        .arg(film.join("Scanner Film (2026) mp4.en.opus"))
+        .status()
+        .await
+        .unwrap();
+    assert!(audio.success());
+    std::fs::copy(
+        film.join("Scanner Film (2026) mp4.en.opus"),
+        film.join("Scanner Film (2026) mkv.en.ogg"),
+    )
+    .unwrap();
     let db = temp.path().join("scanner.sqlite3");
     let store = IdentityStore::open(&db).await.unwrap();
     store

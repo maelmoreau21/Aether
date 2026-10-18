@@ -1,5 +1,17 @@
 # Modèle média — P0 et suite
 
+## Extension P3 du 18 octobre 2026
+
+Les sources vidéo conservent leur identité existante. Un scan peut leur associer
+des instantanés de sous-titres SRT/WebVTT et des audios Ogg/Opus indépendants,
+avec détection stricte des ambiguïtés. Les sidecars sont séparés des Tracks
+internes du probe et restent privés côté inventaire. Le descripteur public
+ne transforme pas tous les flux détectés en choix de lecture natifs.
+Les migrations additives 0014 existent dans les deux moteurs SQL ; la 0015
+ajoute la progression par utilisateur et Work. Pas de transfert de base ni de
+réidentification des œuvres existantes. Contrat, limites, raw et validations :
+[P3/P4](P3_P4_FEATURES.md).
+
 NFO Films : métadonnées éditoriales séparées du probe, candidates par asset et
 sélection/provenance au niveau Work, sans réidentification ni fusion par ID NFO.
 Migration0005 additive ; [LOCAL_FILM_NFO.md](LOCAL_FILM_NFO.md).

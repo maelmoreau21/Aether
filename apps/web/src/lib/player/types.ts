@@ -14,10 +14,13 @@ export interface Source {
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';
   mime: string;
   tracks?: CodecTrack[];
+  externalAudioUrl?: string;
+  audioOffsetSeconds?: number;
 }
-export interface Subtitle { id: string; language: string; label: string; url: string }
+export interface Subtitle { id: string; language: string; label: string; url: string; forced?: boolean; sdh?: boolean; sourceFormat?: string }
 export interface Media {
   id: string;
+  workId?: string;
   title: string;
   synthetic?: boolean;
   nodeId?: string;

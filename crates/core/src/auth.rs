@@ -302,7 +302,7 @@ pub struct AuthState {
     origin: Arc<str>,
     pub(crate) secure: bool,
     dummy_hash: Arc<str>,
-    workers: Arc<Semaphore>,
+    pub(crate) workers: Arc<Semaphore>,
     toucher: Arc<SessionToucher>,
 }
 #[derive(Debug, thiserror::Error)]

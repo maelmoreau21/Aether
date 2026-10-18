@@ -147,7 +147,7 @@ async fn users(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     administrator(&state, &headers, false).await?;
-    let users: Vec<AuthUser> = sqlx::query_as("SELECT u.id,c.login,u.role FROM users u JOIN local_credentials c ON c.user_id=u.id WHERE u.disabled_at IS NULL ORDER BY c.login").fetch_all(&state.auth.store.pool).await.map_err(database)?;
+    let users: Vec<AuthUser> = sqlx::query_as("SELECT u.id,COALESCE(c.login,'sso-' || u.id) AS login,u.role FROM users u LEFT JOIN local_credentials c ON c.user_id=u.id WHERE u.disabled_at IS NULL ORDER BY c.login").fetch_all(&state.auth.store.pool).await.map_err(database)?;
     Ok(Json(serde_json::json!({"users":users})))
 }
 async fn roots(

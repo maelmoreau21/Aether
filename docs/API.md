@@ -1,3 +1,8 @@
+> Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités
+> issuer/subject et sessions Core communes aux deux modes Docker.
+> Contrat, configuration et limites : [OIDC](OIDC.md). Les exclusions OIDC
+> dans les jalons historiques ci-dessous ne décrivent plus ce parcours.
+
 > Extension P1 affiches locales Films : inventaire séparé, route image avec
 > session/droits et repli Web. État actuel : [LOCAL_FILM_POSTERS.md](LOCAL_FILM_POSTERS.md).
 > Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.

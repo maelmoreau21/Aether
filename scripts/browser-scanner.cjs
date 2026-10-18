@@ -177,6 +177,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('.hero-cta').click();
     await page.waitForFunction(()=>{const v=document.querySelector('video');return !v.paused && v.currentTime>3.8 && v.currentTime<7;});
     await page.keyboard.press('Shift'); await page.locator('button.return').click();
+    await page.waitForFunction(()=>!document.querySelector('dialog#player')?.hasAttribute('open'));
+    await page.waitForFunction(async()=>{ const r=await fetch('/api/v1/progress'); const data=await r.json(); return data.items.some(item=>item.position>3.8); });
     // Seeking near the end of a long media can legitimately set watched automatically.
     if (long && await page.getByRole('button',{name:'Marquer non vu',exact:true}).isVisible()) await page.getByRole('button',{name:'Marquer non vu',exact:true}).click();
     await page.getByRole('button',{name:'Marquer comme vu',exact:true}).click();

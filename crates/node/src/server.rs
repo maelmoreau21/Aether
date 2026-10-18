@@ -316,6 +316,7 @@ pub fn app_with_state(state: NodeServerState) -> Router {
 struct HealthBody {
     status: &'static str,
     protocol_version: &'static str,
+    version: &'static str,
     node_id: NodeId,
     paired: bool,
     revoked: bool,
@@ -330,6 +331,7 @@ async fn health(State(state): State<NodeServerState>) -> impl IntoResponse {
     Json(HealthBody {
         status: "ok",
         protocol_version: PROTOCOL_VERSION,
+        version: media_contracts::version::current_version(),
         node_id: id.node_id,
         paired: id.shared_secret.is_some(),
         revoked: id.revoked,
@@ -637,6 +639,7 @@ async fn pair_node(
         .collect();
     let resp = PairNodeResponse {
         protocol_version: PROTOCOL_VERSION.to_owned(),
+        version: Some(media_contracts::version::current_version().to_string()),
         node_id: current.node_id.clone(),
         roots,
         public_url: current.public_url,
@@ -689,6 +692,7 @@ async fn node_heartbeat(
         .collect();
     let payload = HeartbeatPayload {
         protocol_version: PROTOCOL_VERSION.to_owned(),
+        version: Some(media_contracts::version::current_version().to_string()),
         node_id: identity.node_id.clone(),
         roots,
         public_url: identity.public_url.clone(),

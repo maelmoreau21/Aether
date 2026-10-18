@@ -1,4 +1,49 @@
 # MEMORY.md — État et décisions Aether
+## 18 octobre 2026 — Versionnement unifié (0.1.0 / 0.1.0-beta) et visibilité des versions des Media Nodes
+
+- **Périmètre & Objectif** :
+  - Mise en place d'un système de versionnement automatique et unifié pour les 3 conteneurs et exécutables du projet :
+    - `aether` (mode standalone tout-en-un)
+    - `aether-core` (service Core distribué)
+    - `aether-node` (service Media Node distribué)
+  - Base de version fixée à `"0.1.0"`.
+  - Détection automatique de branche : lorsque le projet est compilé sur la branche `develop` (ou via variable/build-arg `GIT_BRANCH=develop` / `GITHUB_REF_NAME=develop`), la version est automatiquement qualifiée en `"0.1.0-beta"`. Sur `main` ou tags de version, elle reste en `"0.1.0"`. Surchargeable à l'exécution via la variable générique `MEDIA_VERSION` (ou `AETHER_VERSION`).
+  - Prise en compte du décalage de mise à jour des Media Nodes distants : les nœuds ne sont pas tous mis à jour simultanément. Le protocole interne, le stockage Core et l'interface Web permettent désormais de visualiser immédiatement la version de chaque Media Node.
+- **Backend Rust & Protocoles** :
+  - `crates/shared` :
+    - `crates/shared/build.rs` : script de compilation qui évalue la branche git courante (ou variable d'environnement CI/Docker) et génère la constante `AETHER_APP_VERSION` (`0.1.0-beta` sur develop, `0.1.0` sinon).
+    - `crates/shared/src/version.rs` : module exposant `current_version() -> &'static str`, prenant en compte la surcharge à chaud par `MEDIA_VERSION` ou la constante compilée.
+    - `crates/shared/src/protocol.rs` : enrichissement rétrocompatible de `PairNodeResponse` et `HeartbeatPayload` avec le champ optionnel `version: Option<String>` (`#[serde(default, skip_serializing_if = "Option::is_none")]`).
+  - `crates/node` :
+    - `/internal/v1/health` inclut désormais le champ `version`.
+    - Les réponses d'appairage (`pair_node`) et de pulsation périodique (`node_heartbeat` et background task dans `aether-node.rs`) transmettent la version du composant.
+    - CLI `aether-node --version` / `-V` / `-v` affiche `aether-node <version>` et quitte immédiatement avec code 0.
+  - `crates/core` :
+    - CLI `aether --version` et `aether-core --version` affichent leur version respective et quittent avec code 0.
+    - Routes publiques et de santé `/api/v1/health`, `/internal/v1/health` et `/api/v1/config` exposent la clé `"version"`.
+    - Migrations additives `0017_node_version.sql` (SQLite dans `crates/core/migrations/` et PostgreSQL dans `crates/core/migrations-postgres/`) ajoutant la colonne `version TEXT` à la table `media_nodes`.
+    - `crates/core/src/nodes.rs` : persistance de la version reçue lors de l'appairage (`pair_node_admin`), de la reconnexion (`reconnect_node`) et des pulsations (`receive_node_heartbeat`). Préservation rétrocompatible en cas de nœud legacy ne transmettant pas de version (`COALESCE(?, version)`).
+    - `AdminNodeView` expose `version` : pour le nœud `local`, il reflète toujours la version du runtime Core en cours ; pour les nœuds distants, il reflète la version réelle du nœud.
+- **Frontend SvelteKit (`apps/web`)** :
+  - `apps/web/src/lib/admin/types.ts` : ajout de `version?: string | null` sur `AdminNode` et `version?: string` sur `CoreHealth`.
+  - `apps/web/src/lib/admin/AdminNodes.svelte` : badge de version stylisé et immédiatement visible sur chaque carte de Media Node (`v0.1.0-beta`, `v0.1.0` ou `v?` si nœud antérieur non versionné).
+  - `apps/web/src/lib/admin/AdminOverview.svelte` : affichage de la version du Core dans les détails techniques et détection d'hétérogénéité des versions de nœuds dans les KPIs avec alerte visuelle si plusieurs versions coexistent.
+- **Docker, CI et GHCR** :
+  - `Dockerfile` : support de l'argument de build `ARG GIT_BRANCH=develop` et précompilation dummy avec génération de `crates/shared/build.rs`.
+  - `.github/workflows/ci.yml` : passage du build-arg `GIT_BRANCH=${{ github.ref_name }}` sur la matrice de construction des 3 images Docker (`runtime`, `runtime-core`, `runtime-node`).
+  - `.github/workflows/publish.yml` : transmission du build-arg `GIT_BRANCH=${{ github.ref_name }}` et étape de vérification automatique `docker run --rm "$ref" "$BINARY" --version`.
+- **Validation & Tests** :
+  - Tests unitaires et d'intégration `media-contracts` : 8/8 réussis, incluant validation de la version `0.1.0-beta` sur develop et compatibilité rétrocompatible des charges utiles.
+  - Tests `media-node` : 38/38 réussis, vérification `--version`.
+  - Nouveau test d'intégration `crates/core/tests/version_and_nodes.rs` : 2/2 réussis, validant l'exposition de version sur `/health`, `/config`, le nœud local, et la persistance/mise à jour dynamique des versions de nœuds distants sur heartbeat et reconnexion.
+  - Test distribué multi-nœuds `crates/core/tests/distributed_multi_node.rs` : 100 % réussi.
+  - Validation du contrat SQLite/PostgreSQL `crates/core/tests/postgres.rs` : réussi.
+  - Formatage `cargo fmt --check` : 0 diff.
+  - Clippy strict `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 warning.
+  - Frontend : `npm run check` (0 erreur, 0 avertissement), `npm test` (48/48 réussis), `npm run lint` (0 erreur), `npm run build` (build statique réussi).
+  - Workflows GitHub Actions : validés par `actionlint` sous Docker sans erreur.
+  - Règle respectée : aucun commit, aucun push, aucune image poussée sur Git/registre.
+
 ## 18 octobre 2026 — Refonte complète de l'interface utilisateur (Design system, Accueil immersif, Catalogues, Lecteur, Administration)
 
 - Périmètre : Refonte frontend complète de `apps/web` inspirée visuellement des plateformes modernes (Netflix, Disney+, HBO Max) et ergonomiquement de Jellyfin. Aucun changement backend, aucune modification d'infrastructure, de Traefik, de Docker ou de fonctionnalités raw AV1/Opus.

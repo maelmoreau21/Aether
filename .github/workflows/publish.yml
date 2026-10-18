@@ -49,6 +49,8 @@ jobs:
           context: .
           target: ${{ matrix.target }}
           platforms: linux/amd64
+          build-args: |
+            GIT_BRANCH=${{ github.ref_name }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -80,6 +82,15 @@ jobs:
             test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
           '
           test "$(docker inspect --format '{{.Size}}' "$ref")" -lt 200000000
+      - name: Vérifier la commande version du conteneur
+        env:
+          IMAGE: ghcr.io/maelmoreau21/${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          BINARY: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          ref="${IMAGE}@${DIGEST}"
+          docker run --rm "$ref" "$BINARY" --version
       - name: Vérifier l'association du package au dépôt sur GitHub
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

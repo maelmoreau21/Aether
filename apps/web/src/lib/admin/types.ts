@@ -57,6 +57,7 @@ export interface AdminNode {
   baseUrl?: string | null;
   publicUrl?: string | null;
   status: 'connected' | 'disconnected' | 'revoked';
+  version?: string | null;
   keyId: string;
   roots: string[];
   pairedAt: number;
@@ -82,4 +83,5 @@ export interface OidcAdminStatus {
 export interface CoreHealth {
   status: string;
   mode: string;
+  version?: string;
 }

@@ -7,6 +7,7 @@ pub mod ids;
 pub mod inventory;
 pub mod media;
 pub mod protocol;
+pub mod version;
 
 #[cfg(test)]
 mod tests {

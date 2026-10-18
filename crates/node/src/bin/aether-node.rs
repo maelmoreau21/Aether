@@ -5,6 +5,18 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    if args
+        .iter()
+        .any(|a| a == "--version" || a == "-V" || a == "-v")
+    {
+        println!(
+            "aether-node {}",
+            media_contracts::version::current_version()
+        );
+        return Ok(());
+    }
+
     let bind_str = match std::env::var("MEDIA_NODE_BIND") {
         Ok(b) if !b.trim().is_empty() => b,
         _ => {
@@ -106,6 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .collect();
             let payload = media_contracts::protocol::HeartbeatPayload {
                 protocol_version: media_contracts::protocol::PROTOCOL_VERSION.to_owned(),
+                version: Some(media_contracts::version::current_version().to_string()),
                 node_id: id.node_id,
                 roots,
                 public_url: id.public_url,

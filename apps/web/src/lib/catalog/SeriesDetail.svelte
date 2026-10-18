@@ -11,6 +11,7 @@
     work,
     season = $bindable(1),
     media = [],
+    mediaError = '',
     immersive,
     launchingEpisodeId = null,
     onLaunchEpisode,
@@ -19,6 +20,7 @@
     work: Work;
     season: number;
     media: Media[];
+    mediaError?: string;
     immersive?: ImmersivePlayer;
     launchingEpisodeId?: string | null;
     onLaunchEpisode: (episode: Work, versionId: string) => Promise<void>;
@@ -97,6 +99,13 @@
               <strong>Média temporairement indisponible</strong>
               <p>Le Media Node propriétaire (<code>{work.nodeId ?? 'distant'}</code>) est actuellement hors ligne. L’œuvre reste indexée au catalogue et sera immédiatement lisible dès le retour du nœud.</p>
             </div>
+          </div>
+        {/if}
+
+        {#if mediaError}
+          <div class="error-banner" role="alert">
+            <Icon name="alert" size={18} />
+            <span>{mediaError}</span>
           </div>
         {/if}
 
@@ -491,6 +500,18 @@
     border: 1px dashed var(--color-line);
     color: var(--color-subtle);
     text-align: center;
+  }
+
+  .error-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    background: rgba(248, 113, 113, 0.12);
+    border: 1px solid rgba(248, 113, 113, 0.25);
+    color: var(--color-danger);
+    font-size: 13px;
   }
 
   .empty-episodes-box p {

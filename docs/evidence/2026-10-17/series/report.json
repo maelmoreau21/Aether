@@ -7,6 +7,11 @@
     "deferredMediaLoading": true,
     "episode1Playback": true,
     "seekAndPause": true,
+    "nextEpisode": {
+      "manual": true,
+      "automaticOptIn": true,
+      "crossSeason": true
+    },
     "seasonNavigation": true,
     "season2Playback": true,
     "revokedPermission403": true,

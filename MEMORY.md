@@ -1,18 +1,23 @@
 # MEMORY.md — État et décisions Aether
 
-## 18 octobre 2026 — Correction CI navigateur : Synchronisation des sous-titres intégrés et répertoires de preuves (`browser-scanner.cjs`, `browser-series.cjs`, `browser_scanner.rs`, `browser_series.rs`)
+## 18 octobre 2026 — Correction CI navigateur : Synchronisation des sous-titres intégrés, alerte 403 Séries et répertoires de preuves (`browser-scanner.cjs`, `browser-series.cjs`, `browser_scanner.rs`, `browser_series.rs`, `SeriesDetail.svelte`, `Catalog.svelte`)
 
 - **Problème diagnostiqué** :
-  - Échec du test `browser_scanner_persists_and_plays_after_core_restart` sur GitHub Actions (Linux headless Chrome) avec un timeout de 30s à la ligne 129 de `scripts/browser-scanner.cjs`.
-  - Cause racine #1 : la position de lecture lors de la vérification de la piste de sous-titre forcé intégrée (`internal-4`, cue 2 de 4.0s à 5.0s) était fixée à exactement `v.currentTime = 4`. Sur les runners Linux sans accélération matérielle, la recherche (seek) dépose l'horloge média sur la trame vidéo immédiatement antérieure (ex. ~3.958s), située juste avant le début du cue. La vidéo étant en pause, le cue n'était jamais actif dans `activeCues`. Alignement appliqué sur `v.currentTime = 4.25` (standard utilisé dans `browser-p1.cjs`, `mse-checks.cjs`, `player-comparison-checks.cjs` et `remux-checks.cjs`), et vérification tolérante de la présence du texte dans l'ensemble des `activeCues`.
-  - Cause racine #2 : `scripts/browser-scanner.cjs` et `scripts/browser-series.cjs` écrivaient par défaut dans des sous-dossiers `2026-10-18/` lorsqu'aucune variable `MEDIA_REPORT_DIR` n'était fournie, alors que `.github/workflows/ci.yml` vérifie et archive strictement `docs/evidence/2026-10-16/scanner/` et `docs/evidence/2026-10-17/series/`.
+  - **Échec 1 (`browser_scanner`)** : timeout de 30s à la ligne 129 de `scripts/browser-scanner.cjs`. La position de lecture lors du test de la piste forcée intégrée (`internal-4`, cue 2 de 4.0s à 5.0s) était fixée à `v.currentTime = 4`. Sur les runners Linux sans accélération matérielle, la recherche (seek) dépose l'horloge sur la trame vidéo précédente (~3.958s). La vidéo étant en pause, le cue n'était jamais actif dans `activeCues`. Alignement appliqué sur `v.currentTime = 4.25` (standard utilisé dans `browser-p1.cjs`, `mse-checks.cjs`, `player-comparison-checks.cjs` et `remux-checks.cjs`), et vérification tolérante de la présence du texte dans l'ensemble des `activeCues`.
+  - **Échec 2 (`browser_series`)** : timeout de 30s à la ligne 152 de `scripts/browser-series.cjs` attendant `getByRole('alert')` contenant `/n’a pas accès à cette ressource/` lors de la simulation d'un HTTP 403. Lors de la refactorisation de `Catalog.svelte` extrayant `SeriesDetail.svelte`, la prop `mediaError` et son rendu `<div class="error-banner" role="alert">` avaient été conservés dans `FilmDetail.svelte` mais omis dans `SeriesDetail.svelte`. L'erreur levée par `revalidateMediaDescriptor` était capturée par `Catalog.svelte` mais jamais affichée dans la vue série.
+  - **Échec 3 (Archive CI)** : `scripts/browser-scanner.cjs` et `scripts/browser-series.cjs` écrivaient par défaut dans des sous-dossiers `2026-10-18/` lorsqu'aucune variable `MEDIA_REPORT_DIR` n'était fournie, alors que `.github/workflows/ci.yml` vérifie et archive strictement `docs/evidence/2026-10-16/scanner/` et `docs/evidence/2026-10-17/series/`.
 - **Corrections apportées** :
+  - `apps/web/src/lib/catalog/SeriesDetail.svelte` : ajout de la prop `mediaError`, affichage du bloc `<div class="error-banner" role="alert">` et styles associés.
+  - `apps/web/src/lib/catalog/Catalog.svelte` : transmission de `mediaError` à `<SeriesDetail {mediaError} ... />`.
   - `scripts/browser-scanner.cjs` : calage temporel `currentTime = 4.25` pour les sous-titres forcés et rétablissement du répertoire par défaut à `docs/evidence/2026-10-16/scanner`.
   - `scripts/browser-series.cjs` : rétablissement du répertoire par défaut à `docs/evidence/2026-10-17/series`.
   - `crates/core/tests/browser_scanner.rs` et `crates/core/tests/browser_series.rs` : propagation explicite de `MEDIA_REPORT_DIR` au processus Node si la variable d'environnement est définie.
 - **Validation** :
-  - `cargo test --locked --test browser_scanner -- --ignored --nocapture` : 100% réussi (les deux passes avec et sans redémarrage passent avec succès).
-  - Preuves générées et vérifiées dans `docs/evidence/2026-10-16/scanner/` (`scan.png`, `playback.png`, `playback-restart.png`, `report.json`, `report-restart.json`).
+  - `cargo test --locked --test browser_scanner -- --ignored --nocapture` : 100% réussi.
+  - `cargo test --locked --test browser_series -- --ignored --nocapture` : 100% réussi (`revokedPermission403`, `restoredPermissionPlayback`, `accountSwitchCacheIsolation`, `crossSeason`, etc.).
+  - Validation Python des preuves CI : toutes les assertions de présence et de succès passent (`report.json`, captures `.png`).
+  - `npm run check` (TypeScript/Svelte) : 0 erreur, 0 avertissement.
+  - `npm test` (vitest) : 48/48 tests réussis.
   - `cargo fmt --check` et `cargo clippy --all-targets -- -D warnings` : 0 erreur, 0 avertissement.
 
 ## 18 octobre 2026 — Refonte de l'appairage des Media Nodes (Initiation sortante, tokens éphémères, canal bidirectionnel NAT-proof et streaming relais)

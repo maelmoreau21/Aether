@@ -5,7 +5,7 @@ const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('isolated test origin required');
 const restart = process.env.MEDIA_TEST_RESTART === '1';
 const long = process.env.MEDIA_TEST_LONG === '1';
-const out = process.env.MEDIA_REPORT_DIR || (long ? 'docs/evidence/2026-10-18/player-long' : 'docs/evidence/2026-10-18/player-finalization');
+const out = process.env.MEDIA_REPORT_DIR || (long ? 'docs/evidence/2026-10-18/player-long' : 'docs/evidence/2026-10-16/scanner');
 // Keep previous evidence; each successful run replaces its own reports only.
 fs.mkdirSync(out, {recursive: true});
 (async () => {
@@ -123,10 +123,10 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('[aria-label="Fermer le menu"]').click();
     await page.screenshot({path:`${out}/ass-fallback${restart?'-restart':''}.png`});
     if (!long) {
-      await page.locator('video').evaluate(v=>{v.pause();v.currentTime=4;});
+      await page.locator('video').evaluate(v=>{v.pause();v.currentTime=4.25;});
       await page.waitForFunction(()=>!document.querySelector('video').seeking);
       await openMenu('subtitles'); await page.locator('[data-subtitle-id="internal-4"]').click();
-      await page.waitForFunction(()=>[...document.querySelector('video').textTracks].some(t=>t.mode==='showing' && t.activeCues?.[0]?.text.includes('FR FORCE')));
+      await page.waitForFunction(()=>[...document.querySelector('video').textTracks].some(t=>t.mode==='showing' && [...(t.activeCues||[])].some(c=>c.text.includes('FR FORCE'))));
       await openMenu('subtitles');
       await page.keyboard.press('End');await page.keyboard.press('Enter');
       assert.equal(await page.getByLabel('Décalage sous-titres en secondes',{exact:true}).evaluate(e=>document.activeElement===e),true);

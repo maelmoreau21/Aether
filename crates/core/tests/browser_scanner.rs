@@ -129,14 +129,15 @@ async fn browser_scanner_persists_and_plays_after_core_restart() {
     drop(listener);
     for restart in [false, true] {
         let mut child = start(&root, &db, &library, port).await;
-        let result = tokio::process::Command::new("node")
-            .arg("scripts/browser-scanner.cjs")
+        let mut cmd = tokio::process::Command::new("node");
+        cmd.arg("scripts/browser-scanner.cjs")
             .env("MEDIA_TEST_ORIGIN", format!("http://127.0.0.1:{port}"))
             .env("MEDIA_TEST_RESTART", if restart { "1" } else { "0" })
-            .current_dir(&root)
-            .status()
-            .await
-            .unwrap();
+            .current_dir(&root);
+        if let Ok(dir) = std::env::var("MEDIA_REPORT_DIR") {
+            cmd.env("MEDIA_REPORT_DIR", dir);
+        }
+        let result = cmd.status().await.unwrap();
         child.kill().await.unwrap();
         assert!(
             result.success(),

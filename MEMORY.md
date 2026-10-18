@@ -1,5 +1,19 @@
 # MEMORY.md — État et décisions Aether
 
+## 18 octobre 2026 — Résilience du canal de contrôle des Media Nodes outbound (`crates/core/src/nodes.rs`, `node_enrollment_and_relay.rs`)
+
+- **Problème diagnostiqué en CI GitHub Actions** :
+  - Échec du test `test_node_enrollment_outbound_channel_and_streaming_relay` sur l'étape 13 (rotation du secret) avec assertion `503 == 200`.
+  - Cause : en mode sortant (`outbound`), le Node communique avec le Core via des requêtes HTTP de long-polling. À la fin de l'étape 12 (streaming relais), la commande `StreamRelay` était consommée et le récepteur du canal Axum était libéré. Lorsque l'étape 13 déclenchait immédiatement `POST /api/v1/admin/nodes/{id}/rotate-secret`, le Core vérifiait `ACTIVE_CHANNELS` qui contenait encore le `Sender` obsolète du long-polling précédent. La transmission échouait immédiatement et, le Node n'ayant pas de `base_url` entrant, le Core renvoyait prématurément `503 Service Unavailable` sans attendre que la requête de long-polling suivante du Node n'arrive.
+- **Corrections backend (`crates/core/src/nodes.rs`)** :
+  - Nettoyage automatique des canaux fermés dans le handler `node_channel` dès la fin du long-polling (`if let Some(s) = channels.get(&id) && s.is_closed() { channels.remove(&id); }`).
+  - Boucle d'attente résiliente (jusqu'à 3s avec scrutation non-bloquante toutes les 40ms) dans `rotate_node_secret` et `relay_stream_from_node` pour les nœuds sortants, absorbant de façon fluide la transition réseau entre deux requêtes de long-polling.
+  - Ajout d'une micro-pause de 150ms dans le test d'intégration pour laisser le worker cycler proprement après un streaming relais.
+- **Validation** :
+  - `cargo test -p media-poc --test node_enrollment_and_relay` : 100% réussi.
+  - `cargo clippy --all-targets -- -D warnings` : 0 warning.
+  - `cargo fmt --check` : 0 diff.
+
 ## 18 octobre 2026 — Assistant d'initialisation premier lancement (Web Bootstrap) et association administrateur local/SSO
 
 - **Contexte & Demande utilisateur** :

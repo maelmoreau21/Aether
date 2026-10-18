@@ -786,6 +786,15 @@ async fn node_channel(
         },
     };
 
+    {
+        let mut channels = ACTIVE_CHANNELS.write().await;
+        if let Some(s) = channels.get(&id)
+            && s.is_closed()
+        {
+            channels.remove(&id);
+        }
+    }
+
     signed_core_response(&rec, &nonce, StatusCode::OK, &command)
 }
 
@@ -1022,43 +1031,59 @@ async fn rotate_node_secret(
         nonce: random_nonce_hex(),
     };
 
-    let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(&id);
-    if is_channel_active {
-        let cmd = NodeCommandEnvelope {
-            command_id: format!("rotate-{new_key_id}"),
-            command_type: NodeCommandType::RotateSecret,
-            payload: serde_json::to_value(&req_payload).unwrap_or_default(),
-        };
-        let sent = {
+    let is_outbound = rec.base_url.is_none();
+    let mut sent = false;
+    let deadline = if is_outbound {
+        tokio::time::Instant::now() + Duration::from_millis(3000)
+    } else {
+        tokio::time::Instant::now() + Duration::from_millis(100)
+    };
+
+    while tokio::time::Instant::now() <= deadline {
+        let channel_sender = {
             let channels = ACTIVE_CHANNELS.read().await;
-            if let Some(sender) = channels.get(&id) {
-                sender.send(cmd).await.is_ok()
-            } else {
-                false
-            }
+            channels.get(&id).cloned()
         };
-        if sent {
-            let now = unix_now();
-            crate::database::query(
-                "UPDATE media_nodes SET key_id=?, shared_secret=?, status='connected', last_seen_at=? WHERE id=?",
-            )
-            .bind(&new_key_id)
-            .bind(&new_secret)
-            .bind(now)
-            .bind(&id)
-            .execute(&state.auth.store.pool)
+        if let Some(sender) = channel_sender
+            && !sender.is_closed()
+        {
+            let cmd = NodeCommandEnvelope {
+                command_id: format!("rotate-{new_key_id}"),
+                command_type: NodeCommandType::RotateSecret,
+                payload: serde_json::to_value(&req_payload).unwrap_or_default(),
+            };
+            if sender.send(cmd).await.is_ok() {
+                sent = true;
+                break;
+            }
+        }
+        if !is_outbound {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(40)).await;
+    }
+
+    if sent {
+        let now = unix_now();
+        crate::database::query(
+            "UPDATE media_nodes SET key_id=?, shared_secret=?, status='connected', last_seen_at=? WHERE id=?",
+        )
+        .bind(&new_key_id)
+        .bind(&new_secret)
+        .bind(now)
+        .bind(&id)
+        .execute(&state.auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        let views = load_admin_nodes(&state.auth.store)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-            let views = load_admin_nodes(&state.auth.store)
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            return views
-                .into_iter()
-                .find(|n| n.id == id)
-                .map(Json)
-                .ok_or(StatusCode::NOT_FOUND);
-        }
+        return views
+            .into_iter()
+            .find(|n| n.id == id)
+            .map(Json)
+            .ok_or(StatusCode::NOT_FOUND);
     }
 
     let Some(base_url) = rec.base_url.as_deref() else {
@@ -1887,26 +1912,43 @@ pub async fn relay_from_remote_node(
         let (tx, rx) = tokio::sync::oneshot::channel::<RelayStreamResponse>();
         PENDING_STREAMS.lock().await.insert(stream_id.clone(), tx);
 
-        let cmd = NodeCommandEnvelope {
-            command_id: format!("cmd-{}", uuid::Uuid::new_v4().simple()),
-            command_type: NodeCommandType::StreamRelay,
-            payload: serde_json::to_value(StreamRelayRequest {
-                stream_id: stream_id.clone(),
-                target_kind: target_kind.to_owned(),
-                target_id: target_id.to_owned(),
-                range,
-            })
-            .unwrap_or_default(),
+        let is_outbound = rec.base_url.is_none();
+        let mut sent = false;
+        let deadline = if is_outbound {
+            tokio::time::Instant::now() + Duration::from_millis(3000)
+        } else {
+            tokio::time::Instant::now() + Duration::from_millis(100)
         };
 
-        let sent = {
-            let channels = ACTIVE_CHANNELS.read().await;
-            if let Some(sender) = channels.get(&rec.id) {
-                sender.send(cmd).await.is_ok()
-            } else {
-                false
+        while tokio::time::Instant::now() <= deadline {
+            let channel_sender = {
+                let channels = ACTIVE_CHANNELS.read().await;
+                channels.get(&rec.id).cloned()
+            };
+            if let Some(sender) = channel_sender
+                && !sender.is_closed()
+            {
+                let cmd = NodeCommandEnvelope {
+                    command_id: format!("cmd-{}", uuid::Uuid::new_v4().simple()),
+                    command_type: NodeCommandType::StreamRelay,
+                    payload: serde_json::to_value(StreamRelayRequest {
+                        stream_id: stream_id.clone(),
+                        target_kind: target_kind.to_owned(),
+                        target_id: target_id.to_owned(),
+                        range: range.clone(),
+                    })
+                    .unwrap_or_default(),
+                };
+                if sender.send(cmd).await.is_ok() {
+                    sent = true;
+                    break;
+                }
             }
-        };
+            if !is_outbound {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
 
         if sent {
             match tokio::time::timeout(Duration::from_secs(15), rx).await {

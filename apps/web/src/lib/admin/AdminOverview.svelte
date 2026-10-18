@@ -32,6 +32,10 @@
   const totalErrorsCount = $derived(
     Object.values(scans).reduce((acc, s) => acc + (s.errorsCount ?? s.errors?.length ?? 0), 0)
   );
+
+  const distinctNodeVersions = $derived(
+    Array.from(new Set(nodes.map(n => n.version || 'inconnue')))
+  );
 </script>
 
 <section id="overview" class="dashboard-section" aria-labelledby="overview-heading">
@@ -74,6 +78,9 @@
         {:else}
           <span class="ok-text">✓ Tous les nœuds connectés</span>
         {/if}
+        {#if distinctNodeVersions.length > 1}
+          · <span class="warn-text">Versions hétérogènes ({distinctNodeVersions.map(v => `v${v}`).join(', ')})</span>
+        {/if}
       </span>
     </div>
 
@@ -115,6 +122,10 @@
       <span class="badge" data-status="connected">Prêt pour streaming AV1/Opus</span>
     </div>
     <div class="details-grid">
+      <div class="detail-item">
+        <span class="detail-label">Version Aether</span>
+        <span class="detail-value"><code>{coreHealth?.version ? `v${coreHealth.version}` : 'v0.1.0-beta'}</code></span>
+      </div>
       <div class="detail-item">
         <span class="detail-label">Base de données</span>
         <span class="detail-value">SQLite WAL intégrée (transactions sécurisées)</span>

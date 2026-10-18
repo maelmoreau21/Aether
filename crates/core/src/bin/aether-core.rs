@@ -16,6 +16,18 @@ fn parse_bind_addr() -> Result<Ipv4Addr, std::io::Error> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let args: Vec<String> = std::env::args().collect();
+    if args
+        .iter()
+        .any(|a| a == "--version" || a == "-V" || a == "-v")
+    {
+        println!(
+            "aether-core {}",
+            media_contracts::version::current_version()
+        );
+        return Ok(());
+    }
+
     let library_root = std::env::var("MEDIA_LIBRARY_ROOT")
         .ok()
         .filter(|s| !s.trim().is_empty());

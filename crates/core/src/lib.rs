@@ -227,11 +227,24 @@ fn health_routes(mode: &'static str) -> Router {
     Router::new()
         .route(
             "/api/v1/health",
-            get(move || async move { Json(serde_json::json!({"status":"ok", "mode":mode})) }),
+            get(move || async move {
+                Json(serde_json::json!({
+                    "status": "ok",
+                    "mode": mode,
+                    "version": media_contracts::version::current_version()
+                }))
+            }),
         )
         .route(
             "/internal/v1/health",
-            get(move || async move { Json(serde_json::json!({"status":"ok", "mode":mode, "protocolVersion": media_contracts::protocol::PROTOCOL_VERSION})) }),
+            get(move || async move {
+                Json(serde_json::json!({
+                    "status": "ok",
+                    "mode": mode,
+                    "protocolVersion": media_contracts::protocol::PROTOCOL_VERSION,
+                    "version": media_contracts::version::current_version()
+                }))
+            }),
         )
         .route(
             "/internal/v1/ready",
@@ -257,7 +270,11 @@ fn public_routes(mode: &'static str) -> Router {
         .route(
             "/api/v1/config",
             get(move || async move {
-                Json(serde_json::json!({"name": brand::DEFAULT_NAME, "mode":mode}))
+                Json(serde_json::json!({
+                    "name": brand::DEFAULT_NAME,
+                    "mode": mode,
+                    "version": media_contracts::version::current_version()
+                }))
             }),
         )
 }

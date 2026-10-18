@@ -81,6 +81,8 @@ pub struct PairNodeRequest {
 #[serde(rename_all = "camelCase")]
 pub struct PairNodeResponse {
     pub protocol_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
     pub node_id: NodeId,
     pub roots: Vec<String>,
     pub public_url: Option<String>,
@@ -96,6 +98,8 @@ pub struct PairNodeResponse {
 #[serde(rename_all = "camelCase")]
 pub struct HeartbeatPayload {
     pub protocol_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
     pub node_id: NodeId,
     pub roots: Vec<String>,
     pub public_url: Option<String>,
@@ -788,5 +792,33 @@ mod tests {
             ),
             Err("expired_playback_token")
         );
+    }
+
+    #[test]
+    fn node_payloads_support_optional_version_field_backward_compatibly() {
+        // Without version field (legacy payload)
+        let legacy_json = r#"{
+            "protocolVersion": "v1",
+            "nodeId": "test-node",
+            "roots": ["/media"],
+            "activeScans": 0,
+            "indexedAssets": 5,
+            "timestamp": 123456
+        }"#;
+        let hb: HeartbeatPayload = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(hb.version, None);
+
+        // With version field
+        let modern_json = r#"{
+            "protocolVersion": "v1",
+            "version": "0.1.0-beta",
+            "nodeId": "test-node",
+            "roots": ["/media"],
+            "activeScans": 0,
+            "indexedAssets": 5,
+            "timestamp": 123456
+        }"#;
+        let hb2: HeartbeatPayload = serde_json::from_str(modern_json).unwrap();
+        assert_eq!(hb2.version.as_deref(), Some("0.1.0-beta"));
     }
 }

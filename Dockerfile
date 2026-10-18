@@ -20,6 +20,11 @@ RUN npm run build
 # ==============================================================================
 FROM rust:slim-bookworm AS rust-builder
 
+ARG GIT_BRANCH=develop
+ARG MEDIA_VERSION=""
+ENV GIT_BRANCH=${GIT_BRANCH}
+ENV MEDIA_VERSION=${MEDIA_VERSION}
+
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -34,6 +39,7 @@ COPY crates/core/Cargo.toml ./crates/core/
 # Explicit test/bin targets declared in crates/node/Cargo.toml and crates/core/Cargo.toml must exist
 RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/src crates/core/src/bin crates/core/tests && \
     echo 'pub fn dummy() {}' > crates/shared/src/lib.rs && \
+    echo 'fn main() { println!("cargo:rustc-env=AETHER_APP_VERSION=0.1.0"); }' > crates/shared/build.rs && \
     echo 'pub fn dummy() {}' > crates/node/src/lib.rs && \
     echo 'fn main() {}' > crates/node/src/bin/aether-node.rs && \
     echo 'pub fn dummy() {}' > crates/core/src/lib.rs && \
@@ -60,6 +66,7 @@ COPY crates/ ./crates/
 
 # Clean dummy binary/deps artifacts, recompile actual release binaries, and strip symbols
 RUN touch crates/shared/src/lib.rs \
+          crates/shared/build.rs \
           crates/node/src/lib.rs \
           crates/node/src/bin/aether-node.rs \
           crates/core/src/lib.rs \

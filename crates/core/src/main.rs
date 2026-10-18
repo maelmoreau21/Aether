@@ -31,6 +31,15 @@ fn parse_bind_addr() -> Result<Ipv4Addr, std::io::Error> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let args: Vec<String> = std::env::args().collect();
+    if args
+        .iter()
+        .any(|a| a == "--version" || a == "-V" || a == "-v")
+    {
+        println!("aether {}", media_contracts::version::current_version());
+        return Ok(());
+    }
+
     let library_root = std::env::var("MEDIA_LIBRARY_ROOT").ok();
     let root = PathBuf::from(library_root.clone().unwrap_or_else(|| {
         std::env::var("MEDIA_FIXTURE_DIR").unwrap_or_else(|_| "tests/fixtures/generated".into())

@@ -72,6 +72,15 @@
                 <span class="badge kind-badge">
                   {node.kind === 'local' ? 'Local (intégré)' : 'Distant (autonome)'}
                 </span>
+                {#if node.version}
+                  <span class="badge version-badge" title={`Version du Media Node : v${node.version}`}>
+                    v{node.version}
+                  </span>
+                {:else}
+                  <span class="badge version-badge version-unknown" title="Version non transmise (nœud antérieur)">
+                    v?
+                  </span>
+                {/if}
               </div>
 
               <p class="path"><strong>Identifiant :</strong> <code>{node.id}</code></p>
@@ -461,6 +470,21 @@
   .kind-badge {
     background: var(--color-raised);
     color: #d1cadf;
+  }
+
+  .version-badge {
+    background: #1e1b2e;
+    color: var(--color-accent);
+    border-color: #55447a;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .version-badge.version-unknown {
+    color: var(--color-muted);
+    border-color: var(--color-line);
+    background: var(--color-raised);
   }
 
   .muted {

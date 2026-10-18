@@ -54,6 +54,7 @@ pub struct MediaNodeRecord {
     pub base_url: Option<String>,
     pub public_url: Option<String>,
     pub status: String,
+    pub version: Option<String>,
     pub key_id: String,
     pub shared_secret: String,
     pub roots_json: String,
@@ -93,6 +94,7 @@ pub struct AdminNodeView {
     pub base_url: Option<String>,
     pub public_url: Option<String>,
     pub status: String,
+    pub version: Option<String>,
     pub key_id: String,
     pub roots: Vec<String>,
     pub paired_at: i64,
@@ -186,7 +188,7 @@ pub async fn load_node(
     node_id: &str,
 ) -> Result<Option<MediaNodeRecord>, sqlx::Error> {
     crate::database::query_as::<_, MediaNodeRecord>(
-        "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at FROM media_nodes WHERE id=?",
+        "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version FROM media_nodes WHERE id=?",
     )
     .bind(node_id)
     .fetch_optional(&store.pool)
@@ -195,7 +197,7 @@ pub async fn load_node(
 
 pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView>, sqlx::Error> {
     let records: Vec<MediaNodeRecord> = crate::database::query_as(
-        "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at FROM media_nodes ORDER BY CASE WHEN id='local' THEN 0 ELSE 1 END, name, id",
+        "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version FROM media_nodes ORDER BY CASE WHEN id='local' THEN 0 ELSE 1 END, name, id",
     )
     .fetch_all(&store.pool)
     .await?;
@@ -240,6 +242,12 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
             })
             .collect();
 
+        let node_version = if rec.id == "local" {
+            Some(media_contracts::version::current_version().to_string())
+        } else {
+            rec.version.clone()
+        };
+
         views.push(AdminNodeView {
             id: rec.id,
             name: rec.name,
@@ -247,6 +255,7 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
             base_url: rec.base_url,
             public_url: rec.public_url,
             status: rec.status,
+            version: node_version,
             key_id: rec.key_id,
             roots,
             paired_at: rec.paired_at,
@@ -394,8 +403,8 @@ async fn pair_node_admin(
     let now = unix_now();
 
     crate::database::query(
-        "INSERT INTO media_nodes(id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at)
-         VALUES(?, ?, 'remote', ?, ?, 'connected', ?, ?, ?, ?, ?, NULL)
+        "INSERT INTO media_nodes(id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version)
+         VALUES(?, ?, 'remote', ?, ?, 'connected', ?, ?, ?, ?, ?, NULL, ?)
          ON CONFLICT(id) DO UPDATE SET
             name=excluded.name,
             kind='remote',
@@ -406,6 +415,7 @@ async fn pair_node_admin(
             shared_secret=excluded.shared_secret,
             roots_json=excluded.roots_json,
             last_seen_at=excluded.last_seen_at,
+            version=excluded.version,
             revoked_at=NULL",
     )
     .bind(pair_res.node_id.as_str())
@@ -417,6 +427,7 @@ async fn pair_node_admin(
     .bind(&roots_json)
     .bind(now)
     .bind(now)
+    .bind(pair_res.version.as_deref())
     .execute(&state.auth.store.pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -476,10 +487,11 @@ async fn reconnect_node(
                     .or(rec.public_url)
                     .and_then(|u| validate_public_url(&u).ok());
                 crate::database::query(
-                    "UPDATE media_nodes SET status='connected', roots_json=?, public_url=?, last_seen_at=? WHERE id=?",
+                    "UPDATE media_nodes SET status='connected', roots_json=?, public_url=?, version=COALESCE(?, version), last_seen_at=? WHERE id=?",
                 )
                 .bind(roots_json)
                 .bind(pub_url)
+                .bind(hb.version.as_deref())
                 .bind(now)
                 .bind(&id)
                 .execute(&state.auth.store.pool)
@@ -808,9 +820,10 @@ async fn receive_node_heartbeat(
         let roots_json =
             serde_json::to_string(&hb.roots).unwrap_or_else(|_| rec.roots_json.clone());
         let _ = crate::database::query(
-            "UPDATE media_nodes SET status='connected', roots_json=?, last_seen_at=? WHERE id=? AND status != 'revoked'",
+            "UPDATE media_nodes SET status='connected', roots_json=?, version=COALESCE(?, version), last_seen_at=? WHERE id=? AND status != 'revoked'",
         )
         .bind(roots_json)
+        .bind(hb.version.as_deref())
         .bind(unix_now())
         .bind(&rec.id)
         .execute(&state.auth.store.pool)

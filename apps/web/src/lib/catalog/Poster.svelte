@@ -11,7 +11,7 @@
     {#if !imageUrl}<span class="poster-type" aria-hidden="true">{work.kind === 'series' ? 'S' : 'F'}{#if work.synthetic}<span>DÉMO</span>{:else if work.available === false}<span>HORS LIGNE</span>{/if}</span>{/if}
     {#if href}<span class="card-open" aria-hidden="true">↗</span>{/if}
   </div>
-  {#if showMetadata}<h3>{work.title}</h3><p>{work.year ?? 'Année non renseignée'}{work.kind === 'series' ? ` · ${work.episodeCount ?? 0} ${(work.episodeCount ?? 0) > 1 ? 'épisodes' : 'épisode'}` : ''}{#if work.available === false} · Media Node indisponible{/if}</p>{#if work.genres?.length}<p class="genres">{work.genres.join(' · ')}</p>{/if}{#if work.description}<p class="synopsis">{work.description}</p>{/if}{/if}
+  {#if showMetadata}<h3>{work.title}</h3><p>{work.year ?? 'Année non renseignée'}{work.kind === 'series' ? ` · ${work.episodeCount ?? 0} ${(work.episodeCount ?? 0) > 1 ? 'épisodes' : 'épisode'}` : ''}{#if work.rating} · ⭐ {work.rating.toFixed(1)}{/if}{#if work.available === false} · Media Node indisponible{/if}</p>{#if work.genres?.length}<p class="genres">{work.genres.join(' · ')}</p>{/if}{#if work.description}<p class="synopsis">{work.description}</p>{/if}{/if}
 {/snippet}
 {#if href}
   <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- href already resolved by the parent route. -->

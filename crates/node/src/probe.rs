@@ -356,4 +356,108 @@ mod tests {
             .expect("probe_opened must succeed on moov-at-end MP4");
         assert_eq!(opened_probe.streams.len(), 2);
     }
+
+    #[tokio::test]
+    async fn probe_codecs_matrix_hevc_h264_aac_ac3_eac3() {
+        let ffmpeg_check = std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output();
+        if ffmpeg_check.is_err() {
+            eprintln!("ffmpeg not found, skipping synthetic codec matrix test");
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+
+        // 1. H.264 + AAC MP4
+        let h264_path = temp.path().join("h264_aac.mp4");
+        let output = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=1:size=320x180:rate=24",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=duration=1:frequency=440",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-movflags",
+                "+faststart",
+                h264_path.to_str().unwrap(),
+            ])
+            .output()
+            .expect("ffmpeg failed to generate h264 clip");
+        assert!(output.status.success());
+
+        let probe_h264 = probe_file(std::fs::File::open(&h264_path).unwrap())
+            .await
+            .expect("probe_file must succeed on H.264 + AAC MP4");
+        assert_eq!(probe_h264.streams.len(), 2);
+        assert_eq!(probe_h264.streams[0].codec_name.as_deref(), Some("h264"));
+        assert_eq!(probe_h264.streams[0].codec_type.as_deref(), Some("video"));
+        assert_eq!(probe_h264.streams[1].codec_name.as_deref(), Some("aac"));
+        assert_eq!(probe_h264.streams[1].codec_type.as_deref(), Some("audio"));
+
+        // 2. HEVC + AC3 / EAC3 MKV with subtitles
+        let hevc_path = temp.path().join("hevc_ac3.mkv");
+        let sub_path = temp.path().join("sub.srt");
+        std::fs::write(&sub_path, "1\n00:00:00,000 --> 00:00:01,000\nSub\n").unwrap();
+
+        let output = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=1:size=320x180:rate=24",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=duration=1:frequency=440",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=duration=1:frequency=880",
+                "-i",
+                sub_path.to_str().unwrap(),
+                "-map",
+                "0:v",
+                "-map",
+                "1:a",
+                "-map",
+                "2:a",
+                "-map",
+                "3:s",
+                "-c:v",
+                "libx265",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a:0",
+                "eac3",
+                "-c:a:1",
+                "ac3",
+                "-c:s",
+                "subrip",
+                hevc_path.to_str().unwrap(),
+            ])
+            .output()
+            .expect("ffmpeg failed to generate hevc clip");
+        assert!(output.status.success());
+
+        let probe_hevc = probe_file(std::fs::File::open(&hevc_path).unwrap())
+            .await
+            .expect("probe_file must succeed on HEVC + EAC3/AC3 MKV");
+        assert_eq!(probe_hevc.streams.len(), 4);
+        assert_eq!(probe_hevc.streams[0].codec_name.as_deref(), Some("hevc"));
+        assert_eq!(probe_hevc.streams[1].codec_name.as_deref(), Some("eac3"));
+        assert_eq!(probe_hevc.streams[2].codec_name.as_deref(), Some("ac3"));
+        assert_eq!(probe_hevc.streams[3].codec_name.as_deref(), Some("subrip"));
+    }
 }

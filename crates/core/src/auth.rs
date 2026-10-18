@@ -300,7 +300,7 @@ impl SessionToucher {
 pub struct AuthState {
     pub(crate) store: IdentityStore,
     origin: Arc<str>,
-    secure: bool,
+    pub(crate) secure: bool,
     dummy_hash: Arc<str>,
     workers: Arc<Semaphore>,
     toucher: Arc<SessionToucher>,
@@ -417,10 +417,10 @@ impl AuthState {
         // Validate session, user, role, active state, absolute expiry and idle expiry
         // via a pure SQLite read (WAL snapshot) so authenticated reads never block on write locks.
         let row: Option<(String, String, Role, i64, i64)> = sqlx::query_as(
-            "SELECT u.id, c.login, u.role, s.last_seen_at, unixepoch() \
+            "SELECT u.id, COALESCE(c.login, 'sso-' || u.id), u.role, s.last_seen_at, unixepoch() \
              FROM sessions s \
              JOIN users u ON u.id = s.user_id \
-             JOIN local_credentials c ON c.user_id = u.id \
+             LEFT JOIN local_credentials c ON c.user_id = u.id \
              WHERE s.token_hash = ? \
                AND s.expires_at > unixepoch() \
                AND s.last_seen_at > unixepoch() - ? \
@@ -458,7 +458,7 @@ impl AuthState {
         }
         Ok(())
     }
-    fn check_origin(&self, headers: &HeaderMap) -> Result<(), StatusCode> {
+    pub(crate) fn check_origin(&self, headers: &HeaderMap) -> Result<(), StatusCode> {
         if headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) != Some(&self.origin)
             || headers
                 .get("sec-fetch-site")
@@ -468,7 +468,7 @@ impl AuthState {
         }
         Ok(())
     }
-    fn cookie(&self, token: &str, max_age: i64) -> String {
+    pub(crate) fn cookie(&self, token: &str, max_age: i64) -> String {
         format!(
             "{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{}",
             if self.secure { "; Secure" } else { "" }
@@ -604,14 +604,14 @@ async fn logout(State(state): State<AuthState>, headers: HeaderMap) -> Response 
 fn failure(status: StatusCode, code: &str) -> Response {
     (status, Json(serde_json::json!({"error":code}))).into_response()
 }
-fn random_token() -> String {
+pub(crate) fn random_token() -> String {
     format!(
         "{}{}",
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     )
 }
-fn hash(raw: &str) -> String {
+pub(crate) fn hash(raw: &str) -> String {
     format!("{:x}", Sha256::digest(raw.as_bytes()))
 }
 fn csrf(raw: &str) -> String {

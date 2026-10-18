@@ -1,5 +1,58 @@
 # MEMORY.md — État et décisions Aether
 
+## 18 octobre 2026 — Réduction drastique de l'image Docker Media Node (`aether-node`) de 500 Mo à 158 Mo (-68,4 %)
+
+- **Diagnostic des couches et dépendances de l'image `aether-node`** :
+  - L'image `aether-node:p2-qa` mesurait 499 846 382 octets (~500 Mo non compressée, 142 Mo compressée) et l'image initiale `aether-node:latest` mesurait 774 419 827 octets (~774 Mo, 207 Mo compressée).
+  - L'audit `ldd /usr/bin/ffprobe` sur le paquet `ffmpeg` Debian Bookworm a révélé 215 bibliothèques dynamiques copiées pesant 246 Mo dans `/probe/lib/`. Ces dépendances incluaient des composants totalement superflus pour un Media Node : bibliothèques graphiques X11/Wayland/Cairo, synthèse vocale (`libflite`), reconnaissance vocale (`libpocketsphinx`), audio PulseAudio, extraction CD (`libcdio_paranoia`), algèbre linéaire (`liblapack`, `libblas`), et encodeurs vidéo volumineux (`libx265` 16 Mo, `libcodec2` 17 Mo, `libplacebo` 7,6 Mo).
+  - `aether-node` n'encode jamais et ne lit pas sur des périphériques matériels ; il n'utilise que `ffprobe` en sous-processus borné pour extraire les métadonnées de flux (`-v error -protocol_whitelist fd,pipe,file -format_whitelist matroska,webm,mov,mp4 -show_streams -show_format -show_data -of json -`).
+
+- **Construction d'un binaire `ffprobe` minimal, durci et autonome (`Dockerfile`)** :
+  - Remplacement de la copie Debian de 215 bibliothèques par un étage de compilation `probe-runtime` basé sur `debian:bookworm-slim` et les sources officielles FFmpeg (6.1.2) :
+    - Configuration ciblée : `--prefix=/probe --disable-programs --enable-ffprobe --disable-doc --disable-avdevice --disable-swscale --disable-postproc --disable-network --disable-encoders --disable-muxers --disable-devices --disable-filters --disable-hwaccels --enable-protocol=file,pipe,fd --disable-debug --enable-small`.
+    - Démuxeurs natifs conservés : Matroska, MOV/MP4/M4A, WebM et formats usuels.
+    - Décodeurs et parseurs natifs conservés : AV1, HEVC, H.264, Opus, AAC, AC3, EAC3, FLAC, Vorbis, sous-titres (SubRip/SRT, ASS, mov_text, WebVTT, PGS, DVD-sub).
+    - Aucun composant d'encodage, de transcodage, de capture ou d'interface graphique.
+    - Dépendances dynamiques de `ffprobe` : strictement limitées à `libc.so.6`, `libm.so.6` et `ld-linux-x86-64.so.2` (incluses de base dans `debian:bookworm-slim`). Zéro bibliothèque externe tierce copiée.
+    - Binaire final strippé (`strip --strip-all`) : **10,5 Mo**.
+    - Respect des obligations de licence LGPL v2.1+ : conservation des textes de licence (`COPYING.LGPLv2.1`, `common-licenses`) et de l'inventaire dans `/usr/share/media-probe/`.
+
+- **Mesures comparatives avant / après** :
+  - **Taille non compressée de l'image `aether-node`** :
+    - Référence initiale Debian `ffmpeg` : 774 419 827 octets (774 Mo).
+    - Jalon P2 durci (fermeture `ldd`) : 499 846 382 octets (500 Mo).
+    - Nouvelle image minimale : **157 702 478 octets** (158 Mo / 150,4 Mio).
+    - **Gain : -68,45 % par rapport à 500 Mo, et -79,64 % par rapport à 774 Mo** (largement sous la cible indicative des 300 Mo).
+  - **Taille compressée (registre GHCR / export tar.gz)** :
+    - Avant : 142 Mo (`p2-qa`) / 207 Mo (`latest`).
+    - Nouveau : **41,1 Mo** (-71,05 %).
+  - **Empreinte mémoire et CPU durant le scan (`test_p2_docker.py`)** :
+    - Pic mémoire échantillonné Node Films : **6,88 Mio** (scan 24 fichiers en 0,56 s).
+    - Pic mémoire échantillonné Node Séries : **4,81 Mio** (scan 24 fichiers en 0,56 s).
+    - CPU durant le scan distribué : 0,24-0,25 s CPU (~21-22 % d'un seul cœur pendant le scan parallèle d'1,14 s).
+    - Vitesse de scan : 24 fichiers scannés et indexés en **562 ms** (Films) et **563 ms** (Séries).
+  - **Temps de démarrage** :
+    - Le conteneur `aether-node` passe le healthcheck en **< 300 ms** dès le lancement du daemon HTTP.
+
+- **Vérifications et matrice de tests complète** :
+  - Nouveau test d'intégration unitaire Rust (`crates/node/src/probe.rs` :: `probe_codecs_matrix_hevc_h264_aac_ac3_eac3`) validant l'analyse directe par descripteur de fichier pour H.264, HEVC, AAC, AC3, EAC3 et sous-titres SubRip.
+  - Script dédié `scripts/test_ffprobe_matrix.py` validant 8 combinaisons représentatives (AV1+Opus MKV/MP4, representative 10-bit AV1 + 5.1/stereo Opus + 3 sous-titres, H.264+AAC MP4/MKV, HEVC+AC3 MP4, HEVC+EAC3/AC3 multi-pistes MKV) directement via flux stdin dans le conteneur Docker : **100 % succès**.
+  - Banc complet 86 contrôles Docker P2 (`scripts/test_p2_docker.py`, run `p2qa-386fc97e8e`) :
+    - Appairage mTLS des deux nœuds, rejet des noms SAN invalides (502).
+    - Scans sans aucune erreur média, extraction métadonnées, consultation catalogue.
+    - Streaming direct et relais avec hachage SHA-256 exact des octets reçus.
+    - Requêtes HTTP HEAD, Range 206 partiels stricts, rejet 416 des plages hors-limites, annulation propre.
+    - Persistance SQLite après redémarrage, reconnexion après arrêt, rotation durable de secret.
+    - Révocation en direct et hors-ligne, panne Core fail-closed.
+    - Validation Chromium Playwright (Chrome 155.0.8059.40 headless) : navigation et décodage vidéo/audio réels en direct et en relais.
+    - Audit des logs des conteneurs : 0 mot de passe, 0 jeton dans l'historique ou les requêtes.
+  - Conformité globale du workspace :
+    - `cargo fmt --check` : 0 diff.
+    - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+    - `cargo test --locked --workspace --all-features` : **125 tests réussis, 0 échec** (7 ignorés nécessitant runner graphique/certificats éphémères).
+    - Frontend `apps/web` : `npm run check` (0 erreur, 0 avertissement), `npm test` (33/33 tests Vitest passés).
+  - Zéro commit, zéro push, zéro publication sans autorisation.
+
 ## 17 octobre 2026 — CI, GHCR et simplification Docker (branche `develop`)
 
 - **Correction CI `clippy::collapsible_if` (`crates/core/src/backup.rs:202`)** :

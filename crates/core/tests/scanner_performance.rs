@@ -59,10 +59,8 @@ fn current_rss_bytes() -> usize {
     {
         if let Ok(statm) = std::fs::read_to_string("/proc/self/statm") {
             let parts: Vec<&str> = statm.split_whitespace().collect();
-            if parts.len() >= 2 {
-                if let Ok(pages) = parts[1].parse::<usize>() {
-                    return pages * 4096;
-                }
+            if let Some(pages) = parts.get(1).and_then(|p| p.parse::<usize>().ok()) {
+                return pages * 4096;
             }
         }
         0

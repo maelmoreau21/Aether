@@ -111,8 +111,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ARG FFMPEG_VERSION=6.1.2
-RUN curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" | tar -xJ -C /tmp \
-    && cd "/tmp/ffmpeg-${FFMPEG_VERSION}" \
+RUN mkdir -p /tmp/ffmpeg-src \
+    && ( \
+        curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o /tmp/ffmpeg.tar.xz \
+        && tar -xJ -f /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg-src --strip-components=1 \
+        && rm -f /tmp/ffmpeg.tar.xz \
+    ) || ( \
+        echo "Primary ffmpeg.org download failed; falling back to GitHub mirror" \
+        && curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n${FFMPEG_VERSION}.tar.gz" -o /tmp/ffmpeg.tar.gz \
+        && tar -xz -f /tmp/ffmpeg.tar.gz -C /tmp/ffmpeg-src --strip-components=1 \
+        && rm -f /tmp/ffmpeg.tar.gz \
+    ) \
+    && cd /tmp/ffmpeg-src \
     && ./configure \
         --prefix=/probe \
         --disable-programs \
@@ -137,7 +147,7 @@ RUN curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" | t
     && /probe/bin/ffprobe -version > /probe/share/media-probe/version.txt \
     && cp COPYING.LGPLv2.1 /probe/share/media-probe/LICENSE \
     && cp -r /usr/share/common-licenses /probe/share/media-probe/common-licenses \
-    && rm -rf "/tmp/ffmpeg-${FFMPEG_VERSION}"
+    && rm -rf /tmp/ffmpeg-src
 
 # ==============================================================================
 # Stage 3: Distributed Core Runtime (`aether-core`)

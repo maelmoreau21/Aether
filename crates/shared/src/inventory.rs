@@ -14,6 +14,11 @@ pub struct CachedFile {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScannedFile {
+    #[serde(default)]
+    pub audios: Vec<ExternalAudio>,
+    /// Bounded text snapshots prepared by the Node; no public filesystem paths.
+    #[serde(default)]
+    pub subtitles: Vec<ExternalSubtitle>,
     pub poster: Option<LocalImage>,
     pub editorial: NfoOutcome,
     pub relative_path: String,
@@ -44,6 +49,27 @@ pub struct ScannedFile {
     pub season_number: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub episode_number: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExternalSubtitle {
+    pub language: String,
+    pub label: String,
+    pub forced: bool,
+    pub sdh: bool,
+    pub source_format: String,
+    pub webvtt: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExternalAudio {
+    pub relative_path: String,
+    pub size: u64,
+    pub modified_ns: String,
+    pub language: String,
+    pub probe: Probe,
+    /// Timeline of this sidecar begins at video time zero. No filename offset guess.
+    pub offset_seconds: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

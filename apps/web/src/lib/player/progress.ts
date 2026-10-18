@@ -1,0 +1,59 @@
+import { get } from 'svelte/store';
+import { session, getSessionGeneration } from '../auth/session';
+import type { PlaybackState } from './types';
+
+export interface Progress { workId: string; position: number; duration: number; watched: boolean; revision: number; title?: string; kind?: string; seriesId?: string }
+
+export async function readProgress(work: string): Promise<Progress> {
+  const response = await fetch(`/api/v1/progress/${encodeURIComponent(work)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
+  if (!response.ok) throw new Error('Reprise indisponible : progression non chargée.');
+  return response.json();
+}
+
+export async function writeProgress(progress: Progress, keepalive = false): Promise<Progress> {
+  const current = get(session);
+  if (!current) throw new Error('Session requise pour enregistrer la progression.');
+  const response = await fetch(`/api/v1/progress/${encodeURIComponent(progress.workId)}`, {
+    method: 'PUT', credentials: 'same-origin', keepalive, signal: AbortSignal.timeout(10000),
+    headers: { 'content-type': 'application/json', 'x-csrf-token': current.csrfToken },
+    body: JSON.stringify({ position: progress.position, duration: progress.duration, watched: progress.watched, expectedRevision: progress.revision })
+  });
+  if (response.status === 409) throw new Error('La progression a changé dans une autre session. Fermez puis rouvrez le lecteur pour la synchroniser.');
+  if (!response.ok) throw new Error('Progression non enregistrée. Vérifiez votre connexion et vos droits.');
+  const saved: Progress = await response.json();
+  window.dispatchEvent(new Event('media-progress-updated'));
+  return saved;
+}
+
+export class ProgressTracker {
+  private revision = 0;
+  private generation = getSessionGeneration();
+  private queue = Promise.resolve();
+  private lastSave = Date.now();
+  private failed = false;
+  private watched = false;
+  constructor(private work: string, private onError: (message: string) => void) {}
+  async load(): Promise<number> {
+    try {
+      const progress = await readProgress(this.work);
+      if (this.generation !== getSessionGeneration()) { this.failed = true; return 0; }
+      this.revision = progress.revision; this.watched = progress.watched;
+      return progress.watched ? 0 : progress.position;
+    } catch (error) { this.fail(error); return 0; }
+  }
+  private fail(error: unknown) { this.failed = true; this.onError(error instanceof Error ? error.message : 'Progression indisponible.'); }
+  save(state: PlaybackState, force = false, ended = false) {
+    if (this.failed || this.generation !== getSessionGeneration() || !Number.isFinite(state.duration) || state.duration <= 0 || (state.position <= 0 && !force)) return;
+    if (!force && Date.now() - this.lastSave < 5000) return;
+    this.lastSave = Date.now();
+    const position = Math.max(0, Math.min(state.position, state.duration));
+    const duration = state.duration;
+    this.queue = this.queue.then(async () => {
+      if (this.failed || this.generation !== getSessionGeneration()) return;
+      try {
+        const progress = await writeProgress({ workId: this.work, position, duration, watched: this.watched || ended || position / duration >= .95, revision: this.revision }, force);
+        this.revision = progress.revision; this.watched = progress.watched;
+      } catch (error) { this.fail(error); }
+    });
+  }
+}

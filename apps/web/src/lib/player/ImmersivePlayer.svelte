@@ -3,12 +3,17 @@
   import Icon from '../ui/Icon.svelte';
   import PlayerControls, { type Menu } from './PlayerControls.svelte';
   import type { Media, Player, PlayerFactory, PlaybackState } from './types';
-  let { catalogue, createPlayer }: { catalogue: Media[]; createPlayer: PlayerFactory } = $props();
+  import { preferredSubtitle, type SubtitlePreference } from './subtitle-preference';
+  import { ProgressTracker } from './progress';
+  import { session } from '../auth/session';
+  let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
+  let autoplayNext = $state(false);
   let dialog: HTMLDialogElement;
   let surface: HTMLDivElement;
   let video: HTMLVideoElement;
   let controls = $state<PlayerControls>();
   let engine: Player | undefined;
+  let progressTracker: ProgressTracker | undefined;
   let opened = $state(false);
   let active = $state<Media | undefined>();
   let busy = $state(false);
@@ -17,6 +22,7 @@
   let audio = $state('');
   let preferredLanguage = 'fr';
   let subtitle = $state<string | null>(null);
+  let subtitlePreference: SubtitlePreference | undefined;
   let menu = $state<Menu>(null);
   let fullscreen = $state(false);
   let visible = $state(true);
@@ -33,6 +39,7 @@
     const snapshot = engine.state();
     playback = { ...snapshot, duration: Number.isFinite(snapshot.duration) ? snapshot.duration : 0 };
     paused = snapshot.paused;
+    if (!busy) progressTracker?.save(playback);
   }
   function armIdle() {
     clearTimeout(idle);
@@ -64,8 +71,15 @@
       if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
       if (source.language !== preferredLanguage) notice = 'Votre langue précédente est indisponible. Première source disponible sélectionnée.';
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
-      const usableSubtitle = media.subtitles.some(track => track.id === subtitle) ? subtitle : null;
+      const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
       await engine.selectSubtitle(usableSubtitle); subtitle = usableSubtitle;
+      if (!restore && media.workId && !media.synthetic) {
+        const tracker = new ProgressTracker(media.workId, message => { if (current === generation) notice = message; });
+        progressTracker = tracker;
+        const position = await tracker.load();
+        if (current !== generation) return;
+        if (position > 0) engine.seek(position);
+      }
       if (restore) { engine.setVolume(restore.volume); engine.setSpeed(restore.speed); engine.seek(Math.min(restore.position, Math.max(0, engine.state().duration - .05))); }
       if (current !== generation) return;
       active = media;
@@ -75,6 +89,18 @@
   }
   export function open(media: Media) {
     if (opened) return;
+    preferredLanguage = 'fr'; subtitlePreference = undefined;
+    try {
+      const scope = $session?.user.id ?? 'fixture';
+      preferredLanguage = localStorage.getItem(`media_audio_${scope}`) ?? localStorage.getItem('media_pref_audio') ?? 'fr';
+      const saved = JSON.parse(localStorage.getItem(`media_subtitle_${scope}`) ?? 'null') as SubtitlePreference | null;
+      if (saved && typeof saved.enabled === 'boolean' && (saved.language === undefined || typeof saved.language === 'string')) subtitlePreference = saved;
+      else {
+        const initialSubtitles = localStorage.getItem('media_pref_subtitles');
+        if (initialSubtitles === 'off') subtitlePreference = { enabled: false };
+        if (initialSubtitles === 'always') subtitlePreference = { enabled: true, language: 'fr', forced: false };
+      }
+    } catch { /* Preferences are optional when browser storage is unavailable. */ }
     generation++; const current = generation;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     scrollPosition = window.scrollY;
@@ -89,6 +115,8 @@
   }
   export function close() {
     if (!opened) return;
+    if (engine) progressTracker?.save(engine.state(), true);
+    progressTracker = undefined;
     opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null;
     const returnTarget = opener;
     const restoreNavigation = () => {
@@ -105,6 +133,16 @@
     void leavingFullscreen.then(() => requestAnimationFrame(restoreNavigation));
     busy = false; error = ''; paused = true;
   }
+  export function changeMedia(media: Media) {
+    if (!opened) { open(media); return; }
+    if (!engine || busy) return;
+    progressTracker?.save(engine.state(), true);
+    progressTracker = undefined;
+    active = media;
+    // Keep the dialog, focus context and fullscreen through episode transitions.
+    void prepare(media);
+  }
+  export function reportError(message: string) { fail(message); }
   function requestFullscreen() {
     if (!surface.requestFullscreen) { notice = 'Plein écran indisponible. Le mode immersif reste actif.'; return; }
     void surface.requestFullscreen().then(() => {
@@ -121,9 +159,16 @@
   function mute() { volume(playback.volume === 0 ? previousVolume || 1 : 0); }
   function seek(value: number) { if (!busy) { engine?.seek(value); sync(); wake(); } }
   function selectAudio(id: string) {
-    void action(async player => { await player.selectAudio(id); audio = id; preferredLanguage = active?.sources.find(source => source.audioTrackId === id)?.language ?? preferredLanguage; });
+    void action(async player => { await player.selectAudio(id); audio = id; preferredLanguage = active?.sources.find(source => source.audioTrackId === id)?.language ?? preferredLanguage;
+      try { localStorage.setItem(`media_audio_${$session?.user.id ?? 'fixture'}`, preferredLanguage); } catch { /* Optional preference. */ }
+    });
   }
-  function selectSubtitle(id: string | null) { void action(async player => { await player.selectSubtitle(id); subtitle = id; }); }
+  function selectSubtitle(id: string | null) { void action(async player => {
+    await player.selectSubtitle(id); subtitle = id;
+    const track = active?.subtitles.find(track => track.id === id);
+    subtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
+    try { localStorage.setItem(`media_subtitle_${$session?.user.id ?? 'fixture'}`, JSON.stringify(subtitlePreference)); } catch { /* Optional preference. */ }
+  }); }
   function selectSource(id: string) {
     if (!engine || busy || id === active?.id) return;
     const media = catalogue.find(media => media.id === id);
@@ -158,6 +203,7 @@
     keyboard(event);
   }
   function cancel(event: Event) { event.preventDefault(); if (menu) controls?.closeMenu(); else close(); }
+  function ended() { sync(); if (engine) progressTracker?.save(engine.state(), true, true); if (autoplayNext && onNext) onNext(); }
   onMount(() => {
     const change = () => { fullscreen = document.fullscreenElement === surface; wake(); };
     document.addEventListener('fullscreenchange', change);
@@ -172,11 +218,12 @@
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = true; wake(); }} onkeydown={keyboard}
     onpointermove={event => { if (event.pointerType !== 'touch') wake(); }} onpointerdown={() => { keyboardPinned = false; surface?.focus(); }}>
-    <video bind:this={video} playsinline preload="metadata" ontimeupdate={sync} ondurationchange={sync} onplay={sync} onpause={sync} onended={sync}><track kind="captions" /></video>
+    <video bind:this={video} playsinline preload="metadata" ontimeupdate={sync} ondurationchange={sync} onplay={sync} onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }} onended={ended}><track kind="captions" /></video>
     <button class="video-interaction" tabindex="-1" aria-label="Afficher ou masquer les commandes" onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
       <button class="return" aria-label="Retour à l’accueil" onclick={close}><Icon name="back" size={24} /></button>
       <div class="title"><span>{active?.title ?? 'Votre séance'}</span><small>LECTURE LOCALE{active?.synthetic ? ' · MIRE SYNTHÉTIQUE' : ''}</small></div>
+      {#if nextTitle && onNext}<div class="next-episode"><button disabled={busy} onclick={onNext}>Épisode suivant : {nextTitle}</button><label><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
     </div>
     {#if busy}<div class="loading" role="status"><span class="loader"></span>Préparation de votre séance…</div>{/if}
     {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, playback); }}>Réessayer explicitement</button></div>{/if}
@@ -188,6 +235,9 @@
 </dialog>
 
 <style>
+  video::cue { color:#fff; background:rgba(0,0,0,.8); text-shadow:0 1px 2px #000; font-size:clamp(18px,2vw,30px); }
+  .next-episode { margin-left:auto; max-width:50%; display:grid; gap:8px; font-size:12px; } .next-episode button { padding:10px; border:1px solid #ffffff40; border-radius:6px; color:inherit; background:#17121ee0; overflow-wrap:anywhere; } .next-episode label { display:flex; align-items:center; gap:8px; }
+  .title { min-width:0; flex:1; } .title>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   :global(body.immersive-open) { overflow: hidden; }
   .immersive-dialog { position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #000; color: var(--color-text); overflow: hidden; }.immersive-dialog::backdrop { background: #000; }
   .player-shell { width: 100%; height: 100%; position: relative; background: #000; outline: 0; overflow: hidden; }.player-shell:fullscreen { width: 100vw; height: 100dvh; }.inactive { cursor: none; }.inactive :global(*) { cursor: none; }

@@ -143,7 +143,7 @@ async fn exercise(store: IdentityStore, root: &Path) -> (String, String, String)
         StatusCode::UNAUTHORIZED
     );
     let (cookie, csrf) = login(&app, "contract-admin").await;
-    let (user_cookie, _) = login(&app, "contract-user").await;
+    let (user_cookie, user_csrf) = login(&app, "contract-user").await;
     assert_eq!(
         request(
             &app,
@@ -205,6 +205,39 @@ async fn exercise(store: IdentityStore, root: &Path) -> (String, String, String)
         .await
         .unwrap();
     let uri = format!("/api/v1/assets/{asset}/content");
+    let (_, descriptor, _, _) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/media/{asset}"),
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    let work = descriptor["workId"].as_str().unwrap();
+    let progress_uri = format!("/api/v1/progress/{work}");
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &progress_uri,
+            &user_cookie,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let subtitle_uri = descriptor["subtitles"][0]["url"].as_str().unwrap();
+    assert_eq!(
+        request(&app, "GET", subtitle_uri, &cookie, None, Value::Null, None)
+            .await
+            .0,
+        StatusCode::OK
+    );
     assert_eq!(
         request(
             &app,
@@ -225,6 +258,95 @@ async fn exercise(store: IdentityStore, root: &Path) -> (String, String, String)
         .execute(store.pool())
         .await
         .unwrap();
+    let update = json!({"position":4.0,"duration":12.0,"watched":false,"expectedRevision":0});
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            &progress_uri,
+            &user_cookie,
+            None,
+            update.clone(),
+            None
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, progress, _, _) = request(
+        &app,
+        "PUT",
+        &progress_uri,
+        &user_cookie,
+        Some(&user_csrf),
+        update.clone(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(progress["revision"], 1);
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            &progress_uri,
+            &user_cookie,
+            Some(&user_csrf),
+            update,
+            None
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    let (_, saved, _, _) = request(
+        &app,
+        "GET",
+        &progress_uri,
+        &user_cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    assert_eq!(saved["position"], 4.0);
+    let (other_session, _) = login(&app, "contract-user").await;
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &progress_uri,
+            &other_session,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .1["position"],
+        4.0,
+        "progress is shared across sessions for the same account"
+    );
+    assert_eq!(
+        request(&app, "GET", &progress_uri, &cookie, None, Value::Null, None)
+            .await
+            .1["revision"],
+        0,
+        "per-user isolation"
+    );
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            &progress_uri,
+            &user_cookie,
+            Some(&user_csrf),
+            json!({"position":99,"duration":12,"watched":false,"expectedRevision":1}),
+            None
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
     for (method, range, expected) in [
         ("GET", None, StatusCode::OK),
         ("HEAD", None, StatusCode::OK),
@@ -255,6 +377,50 @@ async fn exercise(store: IdentityStore, root: &Path) -> (String, String, String)
         .execute(store.pool())
         .await
         .unwrap();
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &progress_uri,
+            &user_cookie,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert!(
+        request(
+            &app,
+            "GET",
+            "/api/v1/progress",
+            &user_cookie,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .1["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            subtitle_uri,
+            &user_cookie,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
     assert_eq!(
         request(&app, "GET", &uri, &user_cookie, None, Value::Null, None)
             .await
@@ -362,6 +528,12 @@ async fn fixtures(root: &Path) {
             .unwrap();
         tokio::fs::copy(&generated, target).await.unwrap();
     }
+    tokio::fs::write(
+        root.join("Films/Contract Film (2026)/film.fr.forced.srt"),
+        "1\n00:00:00,000 --> 00:00:10,000\nBonjour PostgreSQL et SQLite",
+    )
+    .await
+    .unwrap();
 }
 async fn persistence(store: IdentityStore, root: &Path, identity: (String, String, String)) {
     assert!(store.user(&identity.0).await.unwrap().is_some());

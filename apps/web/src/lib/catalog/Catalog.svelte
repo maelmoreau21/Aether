@@ -36,6 +36,8 @@
     type CatalogPage
   } from './api';
   import { session, getSessionGeneration } from '../auth/session';
+  import WatchStatus from './WatchStatus.svelte';
+  import ContinueWatching from './ContinueWatching.svelte';
 
   let { section = 'home' }: { section?: 'home' | 'films' | 'series' | 'search' | 'settings' } = $props();
   let name = $state(DEFAULT_NAME);
@@ -88,11 +90,12 @@
       playingEpisode = episode;
       await tick();
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
-      immersive?.open(item);
+      immersive?.changeMedia(item);
     } catch (err) {
       if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
         media = media.filter(m => m.id !== versionId && getCachedMedia(m.id) !== undefined);
         mediaError = err instanceof Error ? err.message : 'Chargement de l’épisode impossible.';
+        immersive?.reportError(mediaError);
       }
     } finally {
       if (episodeLaunchController === controller) {
@@ -128,6 +131,19 @@
   const playableMedia = $derived(media.filter(item => allowedIds.includes(item.id)));
   const episodeIds = $derived(playingEpisode ? playbackIds(playingEpisode) : []);
   const playerMedia = $derived(detail?.kind === 'series' ? media.filter(item => episodeIds.includes(item.id)) : playableMedia);
+  const nextEpisode = $derived.by(() => {
+    if (!playingEpisode || detail?.kind !== 'series') return undefined;
+    const episodes = (detail.seasons ?? []).flatMap(season => season.episodes);
+    const index = episodes.findIndex(episode => episode.id === playingEpisode?.id);
+    return index >= 0 ? episodes[index + 1] : undefined;
+  });
+  function playNext() {
+    if (!nextEpisode) return;
+    const next = nextEpisode;
+    const id = playbackIds(next)[0];
+    if (!id) { mediaError = 'Épisode suivant sans source disponible.'; return; }
+    void launchEpisode(next, id);
+  }
   const activeSeason = $derived(detail?.seasons?.find(item => item.number === season));
 
   // Current selected media for film technical inspector
@@ -552,6 +568,7 @@
         <!-- Film Actions: Versions & Playback -->
         {#if detail.kind === 'film'}
           <div class="film-actions">
+            {#if !detail.synthetic}<WatchStatus workId={detail.id} />{/if}
             {#if playableMedia.length > 1}
               <div class="versions-section">
                 <span class="versions-label">Versions disponibles :</span>
@@ -689,6 +706,7 @@
                   {/if}
                 </div>
                 <p class="episode-desc">{episode.description || 'Pas de synopsis pour cet épisode.'}</p>
+                {#if !episode.synthetic}<WatchStatus workId={episode.id} />{/if}
                 <EpisodePlayer
                   {episode}
                   {media}
@@ -729,16 +747,7 @@
 
       <!-- Slot: Reprendre la lecture -->
       <section class="shelf resume-shelf">
-        <div class="section-heading">
-          <h2>Reprendre la lecture</h2>
-        </div>
-        <div class="empty compact-slot">
-          <div class="slot-icon" aria-hidden="true">⏱️</div>
-          <div>
-            <strong>Historique et reprise de séance</strong>
-            <p>La reprise automatique et l'historique de lecture apparaîtront ici dès que vos séances seront enregistrées.</p>
-          </div>
-        </div>
+        <ContinueWatching />
       </section>
 
     {:else}
@@ -941,7 +950,7 @@
 </footer>
 
 {#if detail && ImmersivePlayerComponent && createPlayer}
-  <ImmersivePlayerComponent bind:this={immersive} catalogue={playerMedia} {createPlayer} />
+  <ImmersivePlayerComponent bind:this={immersive} catalogue={playerMedia} {createPlayer} nextTitle={nextEpisode?.title} onNext={nextEpisode ? playNext : undefined} />
 {/if}
 
 <style>

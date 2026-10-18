@@ -1,4 +1,59 @@
 # MEMORY.md — État et décisions Aether
+## 18 octobre 2026 — Premier parcours P3 pistes externes et P4 séances/séries
+
+- Départ vérifié : `develop`, arbre propre. Priorité fonctionnalités ; aucun travail NAS,
+  Traefik, HTTP/3, déploiement physique, commit ou publication.
+- P3 : association exacte et unique des stems dans un dossier, avertissements pour
+  ambiguïtés ; SRT UTF-8/WebVTT normalisés et bornés, forcés FR par défaut,
+  choix manuels conservés par compte sur l'appareil. ASS/SSA explicitement refusé,
+  sans moteur de rendu promis. Sous-titres publiés transactionnellement et renouvelés
+  au rescan même lorsque le probe vidéo est réutilisé.
+- Audio externe Ogg/Opus : analyse confinée, métadonnées et canaux conservés,
+  URLs sans chemins locaux, lecture Range autorisée et relais depuis Nodes distants.
+  Le Node reçoit les entrées audio comme assets opérationnels virtuels signés.
+  Vérification taille/mtime au service local et distant. Vidéo direct Node conservée.
+  Les URLs audio reposent sur une clé opaque du fichier inventorié et ne dépendent
+  pas de son rang dans la liste, pour éviter une substitution après rescan.
+- Moteur natif à deux éléments média : pauses/seeks/volume/vitesse couplés,
+  correction de dérive >150 ms toutes les 100 ms. Une course au redémarrage après
+  seek a été reproduite dans Chrome puis corrigée en attendant le démarrage vidéo
+  avant l'audio. Aucune synchronisation à l'échantillon ni film long revendiqué.
+- P4 : progression `(user_id, work_id)`, reprise, historique récent/continuer à
+  regarder, vu/non vu manuel, sauvegarde périodique/pause/fermeture et révision
+  optimiste (409 en cas de session obsolète). Les versions partagent le Work.
+  Navigation séries existante réutilisée ; épisode suivant et enchaînement opt-in
+  entre saisons, avec revalidation de l'accès à chaque lancement.
+- Migrations additives 0014/0015 dans SQLite et PostgreSQL, sans transfert de données,
+  réidentification des œuvres ni modification d'originaux. Historique préservé tant
+  que l'identité Work reste établie ; aucune fusion approximative de fichiers déplacés.
+- POC raw exécuté : 288 paquets AV1, dernier PTS 11,480 s après extraction OBU
+  contre 11,958 s dans le témoin ; Opus concaténé non reconnu (sortie ffprobe 1).
+  Index/timebases/limites de paquets/init/pre-skip et preuve navigateur manquants :
+  pas d'intégration raw, P4 non bloqué. `scripts/raw-poc.ps1` et rapport dédiés.
+- Preuves obtenues : 45 tests Vitest, check Svelte 0/0, lint/build ; Chrome 155
+  Windows headless MP4 avant/MKV après redémarrage (SRT/WebVTT, `.opus`/`.ogg`,
+  PCM externe ~0,048, seek/pause,
+  reprise, marquage) ; navigateur séries (suivant, opt-in, inter-saisons, permissions
+  et isolation du cache lors des changements de compte) ; contrat PostgreSQL 18,
+  cinq tests OIDC et test distribué avec octets Ogg exacts et refus d'accès.
+- Validation finale : `cargo test --workspace --locked` **125 réussis, 8 ignorés** ;
+  `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`
+  et `git diff --check` réussis. Les deux tests navigateur ignorés sont exécutés
+  séparément et passent, avec contrôle du maintien du plein écran entre épisodes
+  et captures desktop/mobile inspectées. Résumé machine :
+  `docs/evidence/2026-10-18/p3-p4-verification.json`.
+- Le test de concurrence SQLite utilisait un délai de 50 ms pour présumer le verrou
+  acquis. Remplacé par deux canaux oneshot (verrou prêt / libération après tentative),
+  sans élargir le timeout de production. La suite complète passe après correction.
+  Sous Windows, éviter des compilations Cargo concurrentes remplaçant les exécutables
+  d'une autre suite active : erreurs de verrouillage 5/32, distinctes d'un échec métier.
+- Limites restantes : choix arbitraire des pistes internes, packaging/remux généralisé,
+  ASS/SSA, offsets configurables, récence d'ajout persistante, miniatures d'épisodes,
+  profils et raw. Audio externe actuellement relayé par Core ; pas de preuve réseau
+  prolongée, Safari/Firefox, mobile physique ou sortie physique 5.1/10 bits.
+- Contrat et détails : `docs/P3_P4_FEATURES.md`, `docs/API.md`,
+  `docs/STREAMING_COMPATIBILITY.md` ; preuves `docs/evidence/2026-10-18/`.
+
 ## 18 octobre 2026 — Généralisation OpenID Connect (OIDC) multi-fournisseurs
 
 - **Objectif atteint** : Généralisation complète du module OIDC (`crates/core/src/oidc.rs`), historiquement orienté Authentik, en un client OpenID Connect générique, sécurisé et standardisé, compatible avec **Authentik, Keycloak, Dex, Pocket ID** et tout fournisseur conforme OIDC Core 1.0.

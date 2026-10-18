@@ -1,9 +1,11 @@
 import type { Media, Player, PlaybackState, Source } from './types';
+import { ExternalAudio } from './external-audio';
 
 // One finite source replacement. No retries, silent fallback or player-specific API in the UI.
 export class NativePlayer implements Player {
   private media?: Media;
   private source?: Source;
+  private externalAudio?: ExternalAudio;
   private subtitle: string | null = null;
   private busy = false;
   private destroyed = false;
@@ -27,6 +29,7 @@ export class NativePlayer implements Player {
   }
   private mediaError = () => {
     this.video.pause();
+    this.externalAudio?.destroy(); this.externalAudio = undefined;
     this.onError(`Lecture interrompue : ${this.video.error?.message || 'source indisponible ou codecs/conteneur incompatibles'} (MediaError ${this.video.error?.code ?? '?'})`);
   };
   state(): PlaybackState {
@@ -45,6 +48,7 @@ export class NativePlayer implements Player {
     this.source = undefined;
     const { volume, speed } = this.state();
     this.video.pause();
+    this.externalAudio?.destroy(); this.externalAudio = undefined;
     this.clearStall();
     // Hide obsolete captions before the new resource is ready.
     this.video.querySelectorAll('track').forEach(track => track.remove());
@@ -109,10 +113,15 @@ export class NativePlayer implements Player {
         }
       }
       this.source = source;
+      if (source.externalAudioUrl) {
+        this.externalAudio = new ExternalAudio(this.video, source.audioOffsetSeconds ?? 0, this.onError);
+        await this.externalAudio.load(source.externalAudioUrl);
+      }
       await this.selectSubtitle(this.subtitle);
       if (!paused) await this.play();
     } catch (error) {
       this.video.pause();
+      this.externalAudio?.destroy(); this.externalAudio = undefined;
       this.source = undefined;
       throw error;
     } finally { this.busy = false; }
@@ -132,6 +141,12 @@ export class NativePlayer implements Player {
     if (!subtitle) throw new Error('Sous-titres indisponibles.');
     const track = document.createElement('track');
     track.kind = 'subtitles'; track.label = subtitle.label; track.srclang = subtitle.language;
+    track.addEventListener('load', () => {
+      // Keep text above the custom controls instead of under their gradient.
+      for (const cue of Array.from(track.track.cues ?? [])) {
+        if (typeof VTTCue !== 'undefined' && cue instanceof VTTCue) { cue.snapToLines = false; cue.line = 70; }
+      }
+    }, { once: true });
     track.addEventListener('error', () => this.onError('Échec du chargement des sous-titres WebVTT.'), { once: true });
     track.src = subtitle.url;
     this.video.append(track);
@@ -140,7 +155,12 @@ export class NativePlayer implements Player {
   async play() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([this.video.play(), new Promise<never>((_, reject) => {
+      await Promise.race([(async () => {
+        // Wait until video leaves seeking/buffering before starting independent audio.
+        // Otherwise its waiting event can cancel the pending audio play promise.
+        await this.video.play();
+        if (this.externalAudio) await this.externalAudio.play();
+      })(), new Promise<never>((_, reject) => {
         timer = setTimeout(() => { this.video.pause(); reject(new Error('Démarrage de lecture expiré après 10 secondes.')); }, 10000);
       })]);
     } finally { clearTimeout(timer); }
@@ -153,6 +173,7 @@ export class NativePlayer implements Player {
     this.destroyed = true;
     this.cancel?.();
     this.clearStall();
+    this.externalAudio?.destroy(); this.externalAudio = undefined;
     this.video.removeEventListener('error', this.mediaError);
     this.video.removeEventListener('waiting', this.stalled);
     this.video.removeEventListener('stalled', this.stalled);

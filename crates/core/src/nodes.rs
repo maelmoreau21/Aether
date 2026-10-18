@@ -1023,8 +1023,9 @@ pub async fn build_library_inventory_sync(
         .unwrap_or_default();
 
     let asset_rows = crate::database::query(
-        "SELECT a.id, a.library_id, s.root_snapshot, a.relative_path, a.mime, a.size, a.modified_ns
+        "SELECT a.id, a.library_id, s.root_snapshot, a.relative_path, a.mime, a.size, a.modified_ns, au.audios_json
          FROM inventory_assets a
+         LEFT JOIN inventory_audio au ON au.asset_id=a.id
          JOIN inventory_sources s ON s.id = a.source_id
          WHERE a.library_id=? AND a.available=1",
     )
@@ -1034,6 +1035,26 @@ pub async fn build_library_inventory_sync(
 
     let mut assets = Vec::with_capacity(asset_rows.len());
     for r in asset_rows {
+        let audios: Vec<media_contracts::inventory::ExternalAudio> = serde_json::from_str(
+            r.get::<Option<String>, _>("audios_json")
+                .as_deref()
+                .unwrap_or("[]"),
+        )
+        .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+        for audio in audios {
+            assets.push(NodeInventoryAssetEntry {
+                asset_id: AssetId::new(crate::inventory::audio_operational_id(
+                    &r.get::<String, _>("id"),
+                    &audio,
+                )),
+                library_id: LibraryId::new(r.get::<String, _>("library_id")),
+                root_snapshot: r.get("root_snapshot"),
+                relative_path: audio.relative_path,
+                mime: "audio/ogg".into(),
+                size: audio.size,
+                modified_ns: audio.modified_ns,
+            });
+        }
         assets.push(NodeInventoryAssetEntry {
             asset_id: AssetId::new(r.get::<String, _>("id")),
             library_id: LibraryId::new(r.get::<String, _>("library_id")),

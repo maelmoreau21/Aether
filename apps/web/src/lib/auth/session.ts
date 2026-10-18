@@ -114,6 +114,38 @@ export async function readSession(): Promise<Session | null> {
   return current;
 }
 
+export async function bootstrapAdmin(login: string, password: string): Promise<void> {
+  return enqueueAuthMutation(async () => {
+    const overrideSeq = manualOverrideSeq;
+    const response = await fetch('/api/v1/auth/bootstrap', {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ login, password }),
+      signal: AbortSignal.timeout(15000)
+    });
+    if (response.status === 403) throw new Error("L'initialisation du serveur est déjà clôturée.");
+    if (response.status === 429) throw new Error('Trop de requêtes. Patientez avant de réessayer.');
+    if (response.status === 400) {
+      const err = await response.json().catch(() => null);
+      if (err?.error === 'invalid_password') {
+        throw new Error('Le mot de passe doit comporter au moins 15 caractères.');
+      }
+      if (err?.error === 'invalid_login') {
+        throw new Error("L'identifiant est invalide (minuscules, chiffres, points, tirets uniquement).");
+      }
+      throw new Error('Identifiant ou mot de passe invalide.');
+    }
+    if (!response.ok) throw new Error("L'initialisation a échoué. Réessayez.");
+    const authenticated = (await response.json()) as Session;
+    if (overrideSeq !== manualOverrideSeq) {
+      throw new Error('La session a changé pendant l’initialisation.');
+    }
+    applySession(authenticated, true);
+  });
+}
+
 export async function login(login: string, password: string): Promise<void> {
   return enqueueAuthMutation(async () => {
     const overrideSeq = manualOverrideSeq;

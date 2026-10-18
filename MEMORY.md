@@ -1,4 +1,36 @@
 # MEMORY.md — État et décisions Aether
+## 18 octobre 2026 — Généralisation OpenID Connect (OIDC) multi-fournisseurs
+
+- **Objectif atteint** : Généralisation complète du module OIDC (`crates/core/src/oidc.rs`), historiquement orienté Authentik, en un client OpenID Connect générique, sécurisé et standardisé, compatible avec **Authentik, Keycloak, Dex, Pocket ID** et tout fournisseur conforme OIDC Core 1.0.
+- **Améliorations techniques et conformité** :
+  1. **Découverte OIDC standardisée** : validation stricte des endpoints (HTTPS ou HTTP loopback, absence de credentials/query/fragment), normalisation d'issuer (tolérance aux trailing slashes symétriques `issuers_match`), protection SSRF stricte interdisant les endpoints hors domaine de l'issuer.
+  2. **Multi-algorithmes de signature sans faille** : support des algorithmes de signature asymétriques standardisés `RS256`, `RS384`, `RS512`, `ES256`, `ES384`, `EdDSA` via AWS-LC (`jsonwebtoken`). Rejet catégorique et immédiat de l'algorithme `none` et de tout algorithme non approuvé. Validation stricte du claim `kid` et rotation immédiate des clés via JWKS à chaque callback.
+  3. **Authentification client flexible au token endpoint** : négociation automatique selon `token_endpoint_auth_methods_supported` du document de découverte (`client_secret_post` si supporté et sans `client_secret_basic`, sinon défaut robuste `client_secret_basic` selon RFC 6749 §2.3.1).
+  4. **Gestion des groupes & claims configurables** :
+     - `MEDIA_OIDC_SCOPES` (défaut : `"openid profile email"`).
+     - `MEDIA_OIDC_GROUPS_CLAIM` (défaut : `"groups"`, personnalisable ex. `"roles"` pour Keycloak ou Dex).
+     - `MEDIA_OIDC_REQUIRE_GROUP` : booléen explicite pour activer/désactiver le filtrage par groupe. Si désactivé (ou si aucun groupe n'est spécifié, ex. Pocket ID), tout compte IdP valide est accepté avec le rôle `user`.
+     - Support des formats de claim de groupe en tableau JSON (`["a", "b"]`) ou chaîne délimitée par virgules (`"a, b"`).
+  5. **Déconnexion locale et terminaison de session IdP** :
+     - Découverte et exposition de `end_session_endpoint`.
+     - Nouvelle route `GET /api/v1/auth/oidc/logout` fournissant l'URL de déconnexion fournisseur avec paramètre standard `post_logout_redirect_uri` vers l'origine du Core.
+- **Sécurité et intégrité préservées** :
+  - Comptes locaux préservés ; administrateur de secours local strictement requis pour démarrer un flux OIDC.
+  - Aucune attribution automatique du rôle `administrator`.
+  - Unicité durable par `(issuer, subject)` exclusivement (pas de fusion par email).
+  - Aucun jeton OIDC exposé au frontend, aux Media Nodes ou stocké dans `localStorage`.
+  - Cookies HttpOnly, Strict, rotation CSRF et sessions sécurisées conservés.
+- **Mise à jour Frontend & Documentation** :
+  - Interface d'administration SvelteKit (`apps/web/src/routes/admin/libraries/+page.svelte`) et composants catalogue (`Catalog.svelte`, `OidcSettings.svelte`) généralisés : libellés neutres "SSO (OpenID Connect)", affichage dynamique des détails de configuration (`scopes`, `groupsClaim`, `requireGroup`, `endSessionEndpoint`), exemples multi-fournisseurs.
+  - Documentation `docs/OIDC.md` mise à jour avec les guides de configuration pour Authentik, Keycloak, Dex et Pocket ID.
+- **Validation & Tests** :
+  - `cargo test --locked -p media-poc --lib oidc::tests` : 5/5 tests unitaires passés avec succès (dont test multi-provider Keycloak `client_secret_post` + roles claim + logout endpoint, et Pocket ID sans claim groups).
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo fmt --check` : formatage conforme.
+  - Frontend : `npm run check` (0 erreur, 0 avertissement), `npm run lint` (0 erreur), `npm test` (35/35 tests Vitest passés), `npm run build` (build statique réussi).
+  - Compatibilité SQLite et PostgreSQL 18 préservée.
+- **Règle respectée** : Aucun commit, push ou déploiement sans autorisation explicite.
+
 ## 18 octobre 2026 — PostgreSQL 18 optionnel entièrement validé
 
 - Départ vérifié : develop, base de code préparée avec SQLx 0.9 Any + SQLite/PostgreSQL.

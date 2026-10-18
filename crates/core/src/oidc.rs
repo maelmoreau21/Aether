@@ -38,7 +38,10 @@ struct Config {
     client_id: String,
     secret: Arc<Zeroizing<String>>,
     redirect: String,
+    scopes: String,
     groups: Vec<String>,
+    groups_claim: String,
+    require_group: bool,
 }
 impl Config {
     fn from_env(auth: &AuthState) -> Result<Option<Self>, &'static str> {
@@ -60,24 +63,57 @@ impl Config {
         if url.query().is_some() {
             return Err("OIDC issuer cannot have a query");
         }
-        let groups: Vec<String> = required("MEDIA_OIDC_USER_GROUPS")?
+
+        let scopes = std::env::var("MEDIA_OIDC_SCOPES")
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "openid profile email".to_string());
+
+        let groups_claim = std::env::var("MEDIA_OIDC_GROUPS_CLAIM")
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "groups".to_string());
+
+        let require_group = std::env::var("MEDIA_OIDC_REQUIRE_GROUP")
+            .map(|v| v.trim().eq_ignore_ascii_case("true"))
+            .unwrap_or_else(|_| {
+                // If MEDIA_OIDC_USER_GROUPS is set and non-empty, default require_group is true.
+                // If it is not set or empty, default require_group is false.
+                std::env::var("MEDIA_OIDC_USER_GROUPS")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                    .is_some()
+            });
+
+        let groups: Vec<String> = std::env::var("MEDIA_OIDC_USER_GROUPS")
+            .unwrap_or_default()
             .split(',')
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
             .collect();
-        if groups.is_empty() {
-            return Err("MEDIA_OIDC_USER_GROUPS must explicitly allow at least one group");
+
+        if require_group && groups.is_empty() {
+            return Err(
+                "MEDIA_OIDC_USER_GROUPS must explicitly allow at least one group when require_group is true",
+            );
         }
+
         Ok(Some(Self {
             issuer,
             client_id: required("MEDIA_OIDC_CLIENT_ID")?,
             secret: Arc::new(Zeroizing::new(required("MEDIA_OIDC_CLIENT_SECRET")?)),
             redirect: format!("{}/api/v1/auth/oidc/callback", auth.origin()),
+            scopes,
             groups,
+            groups_claim,
+            require_group,
         }))
     }
 }
+
 fn endpoint(raw: &str) -> Result<Url, Error> {
     let u = Url::parse(raw).map_err(|_| invalid())?;
     if !u.username().is_empty()
@@ -91,6 +127,11 @@ fn endpoint(raw: &str) -> Result<Url, Error> {
     }
     Ok(u)
 }
+
+fn issuers_match(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/') == b.trim_end_matches('/')
+}
+
 #[derive(Clone)]
 struct Oidc {
     auth: AuthState,
@@ -98,18 +139,25 @@ struct Oidc {
     http: reqwest::Client,
     workers: Arc<tokio::sync::Semaphore>,
 }
+
 #[derive(Deserialize)]
 struct Discovery {
     issuer: String,
     authorization_endpoint: String,
     token_endpoint: String,
     jwks_uri: String,
+    #[serde(default)]
+    end_session_endpoint: Option<String>,
     id_token_signing_alg_values_supported: Vec<String>,
+    #[serde(default)]
+    token_endpoint_auth_methods_supported: Vec<String>,
 }
+
 #[derive(Deserialize)]
 struct Tokens {
     id_token: String,
 }
+
 #[derive(Clone, Deserialize)]
 struct Claims {
     sub: String,
@@ -119,9 +167,31 @@ struct Claims {
     aud: serde_json::Value,
     #[serde(default)]
     azp: Option<String>,
-    #[serde(default)]
-    groups: Vec<String>,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
+
+impl Claims {
+    fn extract_groups(&self, claim_name: &str) -> Vec<String> {
+        let Some(val) = self.extra.get(claim_name) else {
+            return Vec::new();
+        };
+        match val {
+            serde_json::Value::Array(arr) => arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
+                .filter(|s| !s.is_empty())
+                .collect(),
+            serde_json::Value::String(s) => s
+                .split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct Callback {
     state: String,
@@ -130,10 +200,12 @@ struct Callback {
     #[serde(default)]
     error: Option<String>,
 }
+
 #[derive(Deserialize)]
 struct Link {
     password: String,
 }
+
 #[derive(sqlx::FromRow)]
 struct Flow {
     browser_hash: String,
@@ -141,6 +213,7 @@ struct Flow {
     verifier: String,
     link_session_hash: Option<String>,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Status {
@@ -148,7 +221,11 @@ struct Status {
     issuer: Option<String>,
     client_id: Option<String>,
     redirect_uri: Option<String>,
+    scopes: Option<String>,
+    groups_claim: Option<String>,
+    require_group: bool,
     user_groups: Vec<String>,
+    end_session_endpoint: Option<String>,
     local_login_enabled: bool,
 }
 
@@ -167,6 +244,7 @@ pub fn router(auth: AuthState) -> Result<Router, Box<dyn std::error::Error + Sen
         workers: Arc::new(tokio::sync::Semaphore::new(8)),
     }))
 }
+
 fn routes(state: Oidc) -> Router {
     Router::new()
         .route("/api/v1/auth/oidc/status", get(public_status))
@@ -186,12 +264,15 @@ fn routes(state: Oidc) -> Router {
         .route("/api/v1/auth/oidc/start", post(start))
         .route("/api/v1/auth/oidc/link", post(link))
         .route("/api/v1/auth/oidc/callback", get(callback))
+        .route("/api/v1/auth/oidc/logout", get(logout))
         .layer(axum::extract::DefaultBodyLimit::max(4096))
         .with_state(state)
 }
+
 async fn public_status(State(s): State<Oidc>) -> Json<serde_json::Value> {
     Json(serde_json::json!({"enabled": s.config.is_some()}))
 }
+
 async fn admin_status(State(s): State<Oidc>, headers: HeaderMap) -> Result<Json<Status>, Error> {
     let identity = s
         .auth
@@ -201,25 +282,47 @@ async fn admin_status(State(s): State<Oidc>, headers: HeaderMap) -> Result<Json<
     if identity.user.role != Role::Administrator {
         return Err(deny(StatusCode::FORBIDDEN, "forbidden"));
     }
+
+    let end_session_endpoint = if s.config.is_some() {
+        s.discover().await.ok().and_then(|d| d.end_session_endpoint)
+    } else {
+        None
+    };
+
     Ok(Json(Status {
         enabled: s.config.is_some(),
         issuer: s.config.as_ref().map(|c| c.issuer.clone()),
         client_id: s.config.as_ref().map(|c| c.client_id.clone()),
         redirect_uri: s.config.as_ref().map(|c| c.redirect.clone()),
+        scopes: s.config.as_ref().map(|c| c.scopes.clone()),
+        groups_claim: s.config.as_ref().map(|c| c.groups_claim.clone()),
+        require_group: s.config.as_ref().is_some_and(|c| c.require_group),
         user_groups: s
             .config
             .as_ref()
             .map(|c| c.groups.clone())
             .unwrap_or_default(),
+        end_session_endpoint,
         local_login_enabled: true,
     }))
 }
+
+const SUPPORTED_ALGS: &[Algorithm] = &[
+    Algorithm::RS256,
+    Algorithm::RS384,
+    Algorithm::RS512,
+    Algorithm::ES256,
+    Algorithm::ES384,
+    Algorithm::EdDSA,
+];
+
 impl Oidc {
     fn config(&self) -> Result<&Config, Error> {
         self.config
             .as_ref()
             .ok_or_else(|| deny(StatusCode::NOT_FOUND, "oidc_disabled"))
     }
+
     async fn json<T: DeserializeOwned>(
         &self,
         request: reqwest::RequestBuilder,
@@ -239,6 +342,7 @@ impl Oidc {
         }
         serde_json::from_slice(&body).map_err(|_| unavailable())
     }
+
     async fn discover(&self) -> Result<Discovery, Error> {
         let c = self.config()?;
         let d: Discovery = self
@@ -247,23 +351,35 @@ impl Oidc {
                 c.issuer.trim_end_matches('/')
             )))
             .await?;
-        if d.issuer != c.issuer
-            || !d
-                .id_token_signing_alg_values_supported
-                .iter()
-                .any(|a| a == "RS256")
-        {
+
+        if !issuers_match(&d.issuer, &c.issuer) {
             return Err(invalid());
         }
-        let issuer = endpoint(&c.issuer)?;
-        for raw in [&d.authorization_endpoint, &d.token_endpoint, &d.jwks_uri] {
-            // Authentik endpoints share the issuer origin. No arbitrary discovery redirects/SSRF.
-            if endpoint(raw)?.origin() != issuer.origin() {
+
+        let has_supported_alg = d
+            .id_token_signing_alg_values_supported
+            .iter()
+            .any(|a| SUPPORTED_ALGS.iter().any(|sa| format!("{sa:?}") == *a));
+        if !has_supported_alg {
+            return Err(invalid());
+        }
+
+        let issuer_url = endpoint(&c.issuer)?;
+        let mut check_endpoints = vec![&d.authorization_endpoint, &d.token_endpoint, &d.jwks_uri];
+        if let Some(ref ese) = d.end_session_endpoint {
+            check_endpoints.push(ese);
+        }
+
+        for raw in check_endpoints {
+            let ep = endpoint(raw)?;
+            // Endpoints must share origin or be a valid secure endpoint
+            if ep.origin() != issuer_url.origin() {
                 return Err(invalid());
             }
         }
         Ok(d)
     }
+
     async fn begin(
         &self,
         headers: &HeaderMap,
@@ -300,7 +416,7 @@ impl Oidc {
         let mut url = endpoint(&d.authorization_endpoint)?;
         url.query_pairs_mut().extend_pairs([
             ("response_type", "code"),
-            ("scope", "openid profile email"),
+            ("scope", c.scopes.as_str()),
             ("client_id", &c.client_id),
             ("redirect_uri", &c.redirect),
             ("state", &state),
@@ -315,25 +431,30 @@ impl Oidc {
         );
         Ok(response)
     }
+
     fn flow_cookie(&self, raw: &str, age: u32) -> String {
         format!(
             "media_oidc_flow={raw}; Path=/api/v1/auth/oidc; HttpOnly; SameSite=Lax; Max-Age={age}{}",
             if self.auth.secure { "; Secure" } else { "" }
         )
     }
+
     async fn claims(&self, d: &Discovery, token: &str, nonce: &str) -> Result<Claims, Error> {
         let c = self.config()?;
         let h = jsonwebtoken::decode_header(token).map_err(|_| invalid())?;
-        if h.alg != Algorithm::RS256 {
+
+        // Strict rejection of alg "none" or unsupported algorithms
+        if !SUPPORTED_ALGS.contains(&h.alg) {
             return Err(invalid());
         }
+
         let kid = h.kid.ok_or_else(invalid)?;
         // Fresh JWKS on each callback: rotation is immediate, no stale-key acceptance.
         let keys: JwkSet = self.json(self.http.get(&d.jwks_uri)).await?;
         let jwk = keys.find(&kid).ok_or_else(invalid)?;
         let key = DecodingKey::try_from(jwk).map_err(|_| invalid())?;
-        let mut validation = Validation::new(Algorithm::RS256);
-        validation.set_issuer(&[&c.issuer]);
+        let mut validation = Validation::new(h.alg);
+        validation.set_issuer(&[&c.issuer, c.issuer.trim_end_matches('/')]);
         validation.set_audience(&[&c.client_id]);
         validation.set_required_spec_claims(&["exp", "iss", "aud", "sub", "iat"]);
         validation.leeway = 0;
@@ -355,6 +476,7 @@ impl Oidc {
         }
         Ok(claims)
     }
+
     async fn finish(&self, headers: &HeaderMap, q: Callback) -> Result<Response, Error> {
         let _permit = self
             .workers
@@ -376,23 +498,45 @@ impl Oidc {
             .filter(|s| !s.is_empty() && s.len() < 4096)
             .ok_or_else(invalid)?;
         let d = self.discover().await?;
-        let tokens: Tokens = self
-            .json(
-                self.http
-                    .post(&d.token_endpoint)
-                    .basic_auth(&c.client_id, Some(c.secret.as_str()))
-                    .form(&[
-                        ("grant_type", "authorization_code"),
-                        ("code", &code),
-                        ("redirect_uri", &c.redirect),
-                        ("code_verifier", &flow.verifier),
-                    ]),
-            )
-            .await?;
-        let claims = self.claims(&d, &tokens.id_token, &flow.nonce).await?;
-        if !claims.groups.iter().any(|g| c.groups.contains(g)) {
-            return Err(deny(StatusCode::FORBIDDEN, "oidc_group_denied"));
+
+        // Client authentication negotiation at token endpoint:
+        // If provider advertises token_endpoint_auth_methods_supported containing client_secret_post
+        // and NOT client_secret_basic, use POST body authentication.
+        // Otherwise, default to standard client_secret_basic (RFC 6749 2.3.1).
+        let prefers_post = d
+            .token_endpoint_auth_methods_supported
+            .iter()
+            .any(|m| m == "client_secret_post")
+            && !d
+                .token_endpoint_auth_methods_supported
+                .iter()
+                .any(|m| m == "client_secret_basic");
+
+        let mut req = self.http.post(&d.token_endpoint);
+        let mut form_params = vec![
+            ("grant_type", "authorization_code".to_string()),
+            ("code", code),
+            ("redirect_uri", c.redirect.clone()),
+            ("code_verifier", flow.verifier.clone()),
+        ];
+
+        if prefers_post {
+            form_params.push(("client_id", c.client_id.clone()));
+            form_params.push(("client_secret", c.secret.as_str().to_string()));
+        } else {
+            req = req.basic_auth(&c.client_id, Some(c.secret.as_str()));
         }
+
+        let tokens: Tokens = self.json(req.form(&form_params)).await?;
+        let claims = self.claims(&d, &tokens.id_token, &flow.nonce).await?;
+
+        if c.require_group {
+            let extracted = claims.extract_groups(&c.groups_claim);
+            if !extracted.iter().any(|g| c.groups.contains(g)) {
+                return Err(deny(StatusCode::FORBIDDEN, "oidc_group_denied"));
+            }
+        }
+
         let mut conn = self.auth.store.pool.acquire().await.map_err(db)?;
         let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
         let linked_user: Option<String> = if let Some(ref session_hash) = flow.link_session_hash {
@@ -462,6 +606,22 @@ impl Oidc {
         );
         Ok(response)
     }
+
+    async fn logout_url(&self) -> Result<Option<String>, Error> {
+        let d = self.discover().await?;
+        let Some(ese) = d.end_session_endpoint else {
+            return Ok(None);
+        };
+        let mut url = endpoint(&ese)?;
+        url.query_pairs_mut()
+            .append_pair("post_logout_redirect_uri", self.auth.origin());
+        Ok(Some(url.to_string()))
+    }
+}
+
+async fn logout(State(s): State<Oidc>) -> Result<Json<serde_json::Value>, Error> {
+    let url = s.logout_url().await?;
+    Ok(Json(serde_json::json!({ "endSessionUrl": url })))
 }
 fn flow_token(headers: &HeaderMap) -> Option<&str> {
     let mut found = None;
@@ -644,7 +804,10 @@ mod tests {
             client_id: "client".into(),
             secret: Arc::new(Zeroizing::new("synthetic-secret".into())),
             redirect: format!("{ORIGIN}/api/v1/auth/oidc/callback"),
+            scopes: "openid profile email".into(),
             groups: vec!["media-users".into()],
+            groups_claim: "groups".into(),
+            require_group: true,
         };
         let s = Oidc {
             auth,
@@ -1196,5 +1359,220 @@ mod tests {
             .status(),
             StatusCode::NOT_FOUND
         );
+    }
+
+    #[tokio::test]
+    async fn oidc_generic_providers_keycloak_and_pocket_id_styles() {
+        // Test 1: Keycloak / Dex style provider:
+        // - Uses client_secret_post auth method
+        // - Uses custom groups_claim ("roles")
+        // - Has end_session_endpoint advertised
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let issuer = format!("http://{}/realms/media", listener.local_addr().unwrap());
+        let claims = Arc::new(Mutex::new(serde_json::json!({})));
+        let claims_for_app = claims.clone();
+        let issuer_for_app = issuer.clone();
+
+        let app = Router::new()
+            .route(
+                "/realms/media/.well-known/openid-configuration",
+                get({
+                    let iss = issuer_for_app.clone();
+                    move || async move {
+                        let base = Url::parse(&iss).unwrap().origin().ascii_serialization();
+                        Json(serde_json::json!({
+                            "issuer": iss,
+                            "authorization_endpoint": format!("{base}/auth"),
+                            "token_endpoint": format!("{base}/token"),
+                            "jwks_uri": format!("{base}/jwks"),
+                            "end_session_endpoint": format!("{base}/logout"),
+                            "id_token_signing_alg_values_supported": ["RS256", "ES256"],
+                            "token_endpoint_auth_methods_supported": ["client_secret_post"]
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/jwks",
+                get(|| async {
+                    Json(
+                        serde_json::from_str::<serde_json::Value>(include_str!(
+                            "../tests/fixtures/oidc/jwks1.json"
+                        ))
+                        .unwrap(),
+                    )
+                }),
+            )
+            .route(
+                "/token",
+                post({
+                    let claims_post = claims_for_app.clone();
+                    move |Form(form): Form<HashMap<String, String>>| async move {
+                        assert_eq!(form["grant_type"], "authorization_code");
+                        assert_eq!(form["client_id"], "keycloak-client");
+                        assert_eq!(form["client_secret"], "keycloak-secret");
+                        assert_eq!(
+                            form["redirect_uri"],
+                            format!("{ORIGIN}/api/v1/auth/oidc/callback")
+                        );
+                        let key = jsonwebtoken::EncodingKey::from_rsa_pem(include_bytes!(
+                            "../tests/fixtures/oidc/key1.pem"
+                        ))
+                        .unwrap();
+                        let mut h = jsonwebtoken::Header::new(Algorithm::RS256);
+                        h.kid = Some("test-1".into());
+                        let token =
+                            jsonwebtoken::encode(&h, &*claims_post.lock().unwrap(), &key).unwrap();
+                        Json(serde_json::json!({"id_token": token}))
+                    }
+                }),
+            );
+
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let temp = tempfile::tempdir().unwrap();
+        let store = crate::identity::IdentityStore::open(&temp.path().join("core.sqlite"))
+            .await
+            .unwrap();
+        store
+            .bootstrap("rescue", Zeroizing::new(PASSWORD.into()))
+            .await
+            .unwrap();
+        let auth = AuthState::new(store, ORIGIN.into()).await.unwrap();
+
+        let config = Config {
+            issuer: issuer.clone(),
+            client_id: "keycloak-client".into(),
+            secret: Arc::new(Zeroizing::new("keycloak-secret".into())),
+            redirect: format!("{ORIGIN}/api/v1/auth/oidc/callback"),
+            scopes: "openid profile email".into(),
+            groups: vec!["media-access".into()],
+            groups_claim: "roles".into(),
+            require_group: true,
+        };
+
+        let s = Oidc {
+            auth,
+            config: Some(config),
+            http: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(Duration::from_secs(2))
+                .build()
+                .unwrap(),
+            workers: Arc::new(tokio::sync::Semaphore::new(8)),
+        };
+
+        let f = Fixture {
+            _temp: temp,
+            s,
+            provider: Provider {
+                issuer,
+                claims,
+                key: Arc::new(std::sync::atomic::AtomicUsize::new(1)),
+                exchanges: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            },
+            task,
+        };
+
+        // 1. Check logout URL discovery
+        let logout_resp = req(
+            &f.s,
+            "/api/v1/auth/oidc/logout",
+            "GET",
+            "",
+            "",
+            serde_json::Value::Null,
+        )
+        .await;
+        assert_eq!(logout_resp.status(), StatusCode::OK);
+        let logout_data = body(logout_resp).await;
+        let end_session = logout_data["endSessionUrl"].as_str().unwrap();
+        assert!(end_session.contains("/logout"));
+        assert!(end_session.contains("post_logout_redirect_uri="));
+
+        // 2. Login with custom roles claim
+        let (cookie, state) = begin(&f).await;
+        let now = jsonwebtoken::get_current_timestamp();
+        let nonce = f.provider.claims.lock().unwrap()["nonce"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        *f.provider.claims.lock().unwrap() = serde_json::json!({
+            "iss": f.provider.issuer,
+            "sub": "keycloak-user-42",
+            "aud": "keycloak-client",
+            "iat": now,
+            "exp": now + 300,
+            "nonce": nonce,
+            "roles": ["media-access"]
+        });
+
+        let r = finish(&f, &cookie, &state).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let session = session_cookie(&r);
+
+        let me = body(
+            req(
+                &f.s,
+                "/api/v1/auth/me",
+                "GET",
+                &session,
+                "",
+                serde_json::Value::Null,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(me["user"]["role"], "user");
+
+        // Test 2: Pocket ID style provider:
+        // - require_group = false
+        // - claims have no groups / roles claim at all
+        let mut cfg_pocket = f.s.config.as_ref().unwrap().clone();
+        cfg_pocket.require_group = false;
+        cfg_pocket.groups.clear();
+        let mut s_pocket = f.s.clone();
+        s_pocket.config = Some(cfg_pocket);
+        let f_pocket = Fixture {
+            _temp: tempfile::tempdir().unwrap(),
+            s: s_pocket,
+            provider: f.provider.clone(),
+            task: tokio::spawn(async {}),
+        };
+
+        let (cookie2, state2) = begin(&f_pocket).await;
+        let nonce2 = f_pocket.provider.claims.lock().unwrap()["nonce"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        *f_pocket.provider.claims.lock().unwrap() = serde_json::json!({
+            "iss": f_pocket.provider.issuer,
+            "sub": "pocket-id-user-99",
+            "aud": "keycloak-client",
+            "iat": now,
+            "exp": now + 300,
+            "nonce": nonce2
+            // No groups or roles claim
+        });
+
+        let r2 = finish(&f_pocket, &cookie2, &state2).await;
+        assert_eq!(r2.status(), StatusCode::OK);
+        let session2 = session_cookie(&r2);
+
+        let me2 = body(
+            req(
+                &f_pocket.s,
+                "/api/v1/auth/me",
+                "GET",
+                &session2,
+                "",
+                serde_json::Value::Null,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(me2["user"]["role"], "user");
     }
 }

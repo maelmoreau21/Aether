@@ -1,31 +1,42 @@
-# SSO OpenID Connect — Authentik
+# SSO OpenID Connect (OIDC) — Multi-Fournisseurs
 
 Implémentation Core commune aux images standalone (`aether`) et distribuée
 (`aether-core`). Le login local et son administrateur de secours restent actifs.
 Aucun secret, code ou jeton OIDC n'est envoyé aux Media Nodes ou stocké dans
 localStorage. Le Node continue à vérifier les sessions Core et permissions vivantes.
 
-## Configuration Authentik
+Aether est interopérable avec tout fournisseur OIDC conforme aux standards,
+notamment **Authentik**, **Keycloak**, **Dex**, **Pocket ID**, etc.
 
-1. Créer une application et un fournisseur **OAuth2/OpenID Provider** confidentiel.
-2. Choisir Authorization Code, une clé de signature **RSA / RS256**, et le mode
-   issuer **par fournisseur**. Copier exactement l'issuer annoncé par la découverte,
-   avec son slash final : `https://auth.example.test/application/o/media/`.
-3. Enregistrer une seule URI de redirection **stricte**, sans joker :
+## Configuration du Fournisseur OIDC
+
+1. Créer une application / client **OAuth2/OpenID Provider** confidentiel auprès de votre IdP.
+2. Choisir Authorization Code avec PKCE S256 et une clé de signature compatible (**RS256, RS384, RS512, ES256, ES384, EdDSA**).
+3. Configurer l'URI de redirection **stricte**, sans joker :
    `https://media.example.test/api/v1/auth/oidc/callback`.
-4. Associer les scopes `openid`, `profile`, `email` ; inclure un mapping `groups`
-   dans l'ID token, sous forme de tableau de noms de groupes. Autoriser l'application
-   avec les politiques/groupes voulus. Les comptes désactivés doivent être refusés
-   par Authentik lors de l'autorisation et de l'échange de code.
-5. Configurer sur **Core seulement** :
+4. Configurer sur **Core seulement** :
 
 ```dotenv
 MEDIA_PUBLIC_URL=https://media.example.test
 MEDIA_OIDC_ENABLED=true
 MEDIA_OIDC_ISSUER=https://auth.example.test/application/o/media/
-MEDIA_OIDC_CLIENT_ID=client-id-fourni-par-authentik
-MEDIA_OIDC_CLIENT_SECRET=secret-confidentiel-fourni-par-authentik
-MEDIA_OIDC_USER_GROUPS=media-users,media-operators
+MEDIA_OIDC_CLIENT_ID=client-id-fourni-par-lidp
+MEDIA_OIDC_CLIENT_SECRET=secret-confidentiel-fourni-par-lidp
+
+# Facultatifs :
+# Scopes demandés lors de l'autorisation (défaut : "openid profile email")
+# MEDIA_OIDC_SCOPES=openid profile email
+
+# Nom du claim contenant les groupes ou rôles (défaut : "groups")
+# Ex. "roles" pour Keycloak ou Dex
+# MEDIA_OIDC_GROUPS_CLAIM=groups
+
+# Groupes autorisés pour l'attribution du rôle user (séparés par virgules)
+# MEDIA_OIDC_USER_GROUPS=media-users,media-operators
+
+# Filtrage obligatoire par groupe (défaut : true si MEDIA_OIDC_USER_GROUPS est défini, sinon false)
+# Définir à false pour autoriser tout utilisateur authentifié (ex. Pocket ID)
+# MEDIA_OIDC_REQUIRE_GROUP=false
 ```
 
 Les deux Compose transmettent ces variables au Core. `.env` doit être protégé,
@@ -39,22 +50,32 @@ aucune URI de retour n'est acceptée du navigateur. Le reverse proxy HTTPS conse
 Host et termine TLS. HTTP n'est accepté que sur loopback pour les essais locaux.
 Les certificats du fournisseur doivent être approuvés par le système du Core.
 Les endpoints découverts doivent partager l'origine de l'issuer ; aucun suivi de
-redirection HTTP. Le mode issuer global Authentik n'est pas pris en charge : son
-URL de découverte ne se déduit pas de l'issuer comme en mode par fournisseur.
+redirection HTTP arbitraire.
 
-Documentation de référence :
-[provider Authentik](https://docs.goauthentik.io/add-secure-apps/providers/oauth2/),
-[création du provider](https://docs.goauthentik.io/add-secure-apps/providers/oauth2/create-oauth2-provider/).
+### Exemples par fournisseur :
+
+- **Authentik** :
+  - Issuer : `https://auth.example.test/application/o/media/`
+  - Groupes : claim par défaut `groups` avec scope `openid profile email`.
+- **Keycloak** :
+  - Issuer : `https://auth.example.test/realms/nom-du-realm`
+  - Groupes : mapper un client scope pour injecter `groups` ou configurer `MEDIA_OIDC_GROUPS_CLAIM=roles`.
+  - Auth token endpoint : negotiation automatique `client_secret_post` ou `client_secret_basic`.
+  - Logout : support automatique de `end_session_endpoint`.
+- **Dex** :
+  - Issuer : `https://auth.example.test/dex`
+  - Scopes : `openid profile email groups`
+- **Pocket ID** :
+  - `MEDIA_OIDC_REQUIRE_GROUP=false` (autorise tout utilisateur IdP validé).
 
 ## Politique des comptes et des groupes
 
-`MEDIA_OIDC_USER_GROUPS` est une liste explicite de noms exacts, séparés par
-virgules. L'appartenance à au moins un groupe donne accès au rôle **user** pour
-un nouveau compte. Elle n'accorde aucune bibliothèque ; un administrateur attribue
-ensuite les permissions dans l'administration existante (les comptes SSO y sont
-identifiés par `sso-<UUID>`). Aucun rôle ni groupe fournisseur ne crée/promouvrait
-un administrateur. Les rôles Core existants sont conservés et relus à chaque
-requête ; les claims de rôle sont ignorés.
+L'accès OIDC donne accès au rôle **user** pour un nouveau compte. Il n'accorde
+aucune bibliothèque implicite ; un administrateur attribue ensuite les permissions
+dans l'administration existante (les comptes SSO y sont identifiés par `sso-<UUID>`).
+Aucun rôle ni groupe fournisseur ne crée/promouvrait un administrateur. Les rôles
+Core existants sont conservés et relus à chaque requête ; les claims de rôle IdP
+sont strictement ignorés.
 
 L'identité durable est uniquement `(issuer, sub)` avec unicité SQL ; `email`,
 `preferred_username` et nom ne sont jamais utilisés pour fusionner ou retrouver
@@ -65,7 +86,7 @@ est une nouvelle identité et nécessite une liaison explicite.
 
 Pour conserver un compte local existant : se connecter localement, ouvrir
 **Paramètres → Connexion SSO → Lier mon compte local au SSO**, confirmer le mot
-de passe local puis s'authentifier chez Authentik. L'opération nécessite session,
+de passe local puis s'authentifier auprès de l'IdP. L'opération nécessite session,
 Origin, CSRF, mot de passe correct et OIDC valide. Le callback revalide la session
 locale d'origine dans la transaction SQL. Une identité déjà liée à un autre
 compte est refusée ; un compte ne peut avoir qu'un sujet par issuer. Aucune fusion
@@ -78,11 +99,12 @@ promotion. Un administrateur local actif est requis avant de commencer OIDC.
 
 | Route | Contrat |
 | --- | --- |
-| `GET /api/v1/auth/oidc/status` | Public : `{enabled}` uniquement ; ne contacte pas Authentik |
-| `GET /api/v1/admin/oidc` | Session administrator ; enabled, issuer, clientId, redirectUri, userGroups, localLoginEnabled ; jamais de secret |
+| `GET /api/v1/auth/oidc/status` | Public : `{enabled}` uniquement ; ne contacte pas l'IdP |
+| `GET /api/v1/admin/oidc` | Session administrator ; enabled, issuer, clientId, redirectUri, scopes, groupsClaim, requireGroup, userGroups, endSessionEndpoint, localLoginEnabled ; jamais de secret |
 | `POST /api/v1/auth/oidc/start` | Origin exact ; retourne `{url}`, pose le cookie temporaire ; 404 si désactivé |
 | `POST /api/v1/auth/oidc/link` | JSON `{password}` ; session locale + Origin + CSRF + revalidation Argon2 ; retourne `{url}` |
 | `GET /api/v1/auth/oidc/callback` | state + code ; consommation unique, validation fournisseur, session Core, document de fin puis navigation `/app/` |
+| `GET /api/v1/auth/oidc/logout` | Retourne `{ "endSessionUrl": string | null }` pour redirection facultative vers IdP |
 
 Échecs : 401 réponse/état/nonce/signature/claims invalides, 403 groupe refusé ou
 compte local désactivé, 409 identité déjà liée, 429 budget épuisé, 502 fournisseur

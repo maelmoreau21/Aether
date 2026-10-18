@@ -513,11 +513,103 @@ impl AuthState {
 }
 pub fn router(state: AuthState) -> Router {
     Router::new()
+        .route("/api/v1/auth/bootstrap/status", get(bootstrap_status))
+        .route("/api/v1/auth/bootstrap", post(bootstrap))
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/me", get(me))
         .route("/api/v1/auth/logout", post(logout))
         .layer(DefaultBodyLimit::max(4096))
         .with_state(state)
+}
+
+async fn bootstrap_status(State(state): State<AuthState>) -> Response {
+    let closed: i64 = crate::database::query_scalar(
+        "SELECT CAST((EXISTS(SELECT 1 FROM bootstrap_state) OR EXISTS(SELECT 1 FROM users)) AS INTEGER)",
+    )
+    .fetch_one(&state.store.pool)
+    .await
+    .unwrap_or(1);
+    Json(serde_json::json!({
+        "needsBootstrap": closed == 0
+    }))
+    .into_response()
+}
+
+async fn bootstrap(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(input): Json<Login>,
+) -> Response {
+    if let Err(status) = state.check_origin(&headers) {
+        return failure(status, "forbidden");
+    }
+    let Ok(_permit) = state.workers.clone().try_acquire_owned() else {
+        return failure(StatusCode::TOO_MANY_REQUESTS, "try_later");
+    };
+    let login_str = input.login.trim();
+    if login_str.is_empty()
+        || login_str.len() > 64
+        || !login_str
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b))
+    {
+        return failure(StatusCode::BAD_REQUEST, "invalid_login");
+    }
+    if input.password.chars().count() < 15
+        || input.password.len() > 512
+        || input.password.chars().any(char::is_control)
+    {
+        return failure(StatusCode::BAD_REQUEST, "invalid_password");
+    }
+    let id = match state
+        .store
+        .bootstrap(login_str, Zeroizing::new(input.password))
+        .await
+    {
+        Ok(id) => id,
+        Err(IdentityError::AlreadyInitialized) => {
+            return failure(StatusCode::FORBIDDEN, "bootstrap_closed");
+        }
+        Err(IdentityError::InvalidLogin) => {
+            return failure(StatusCode::BAD_REQUEST, "invalid_login");
+        }
+        Err(IdentityError::InvalidPassword) => {
+            return failure(StatusCode::BAD_REQUEST, "invalid_password");
+        }
+        Err(_) => {
+            return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
+        }
+    };
+    let raw = random_token();
+    if crate::database::query(
+        "INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+? FROM users WHERE id=? AND disabled_at IS NULL",
+    )
+    .bind(hash(&raw))
+    .bind(ABSOLUTE_SECONDS)
+    .bind(&id)
+    .execute(&state.store.pool)
+    .await
+    .is_err()
+    {
+        return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
+    }
+    let mut auth_headers = HeaderMap::new();
+    if let Ok(value) = HeaderValue::from_str(&format!("{COOKIE}={raw}")) {
+        auth_headers.insert(header::COOKIE, value);
+    }
+    let identity = match state.authenticate(&auth_headers).await {
+        Ok(i) => i,
+        Err(s) => return failure(s, "internal_error"),
+    };
+    let mut response = Json(IdentityResponse {
+        user: identity.user,
+        csrf_token: identity.csrf_token,
+    })
+    .into_response();
+    if let Ok(value) = HeaderValue::from_str(&state.cookie(&raw, ABSOLUTE_SECONDS)) {
+        response.headers_mut().insert(header::SET_COOKIE, value);
+    }
+    response
 }
 pub async fn authenticate(
     state: &AuthState,
@@ -1347,5 +1439,105 @@ mod tests {
                 StatusCode::NO_CONTENT
             );
         }
+    }
+
+    #[tokio::test]
+    async fn bootstrap_status_and_bootstrap_web_flow() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = temp.path().join("bootstrap_test.sqlite3");
+        let store = IdentityStore::open(&db).await.unwrap();
+        let state = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+
+        // 1. Initial state: needsBootstrap is true
+        let status_res = request(
+            &state,
+            "/api/v1/auth/bootstrap/status",
+            "GET",
+            None,
+            None,
+            None,
+            serde_json::json!(null),
+        )
+        .await;
+        assert_eq!(status_res.status(), StatusCode::OK);
+        let status_bytes = status_res.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&status_bytes).unwrap();
+        assert_eq!(body["needsBootstrap"], true);
+
+        // 2. Invalid password (< 15 chars) rejected
+        let invalid_res = request(
+            &state,
+            "/api/v1/auth/bootstrap",
+            "POST",
+            None,
+            Some("http://127.0.0.1:3000"),
+            None,
+            serde_json::json!({
+                "login": "admin",
+                "password": "short"
+            }),
+        )
+        .await;
+        assert_eq!(invalid_res.status(), StatusCode::BAD_REQUEST);
+
+        // 3. Valid bootstrap succeeds
+        let valid_res = request(
+            &state,
+            "/api/v1/auth/bootstrap",
+            "POST",
+            None,
+            Some("http://127.0.0.1:3000"),
+            None,
+            serde_json::json!({
+                "login": "admin",
+                "password": "my-secure-admin-password-1234"
+            }),
+        )
+        .await;
+        assert_eq!(valid_res.status(), StatusCode::OK);
+        let cookie_header = valid_res
+            .headers()
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(cookie_header.contains("media_session="));
+        let valid_bytes = valid_res.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&valid_bytes).unwrap();
+        assert_eq!(body["user"]["role"], "administrator");
+        assert_eq!(body["user"]["login"], "admin");
+
+        // 4. After bootstrap, needsBootstrap is false
+        let status_res2 = request(
+            &state,
+            "/api/v1/auth/bootstrap/status",
+            "GET",
+            None,
+            None,
+            None,
+            serde_json::json!(null),
+        )
+        .await;
+        let status_bytes2 = status_res2.into_body().collect().await.unwrap().to_bytes();
+        let body2: serde_json::Value = serde_json::from_slice(&status_bytes2).unwrap();
+        assert_eq!(body2["needsBootstrap"], false);
+
+        // 5. Repeated bootstrap attempt is rejected with 403 Forbidden
+        let repeated_res = request(
+            &state,
+            "/api/v1/auth/bootstrap",
+            "POST",
+            None,
+            Some("http://127.0.0.1:3000"),
+            None,
+            serde_json::json!({
+                "login": "hacker",
+                "password": "another-password-12345"
+            }),
+        )
+        .await;
+        assert_eq!(repeated_res.status(), StatusCode::FORBIDDEN);
     }
 }

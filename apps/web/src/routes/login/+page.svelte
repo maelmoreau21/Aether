@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { DEFAULT_NAME, fetchBrandName } from '../../lib/config/brand';
-  import { login } from '../../lib/auth/session';
+  import { login, bootstrapAdmin } from '../../lib/auth/session';
   import Icon from '../../lib/ui/Icon.svelte';
 
   let name = $state(DEFAULT_NAME);
@@ -11,8 +11,14 @@
   let password = $state('');
   let ssoEnabled = $state(false);
   let ssoProvider = $state('SSO');
+  let needsBootstrap = $state(false);
   let busy = $state(false);
   let error = $state('');
+
+  // Bootstrap form fields
+  let bootstrapLogin = $state('admin');
+  let bootstrapPassword = $state('');
+  let bootstrapConfirm = $state('');
 
   function mapError(code: string): string {
     switch (code) {
@@ -38,6 +44,8 @@
         return 'Votre session a expiré. Veuillez vous reconnecter.';
       case 'authentication_required':
         return 'Authentification requise pour accéder à votre médiathèque.';
+      case 'bootstrap_closed':
+        return "L'initialisation du serveur est déjà clôturée.";
       default:
         return code ? decodeURIComponent(code) : 'Une erreur est survenue lors de l’authentification.';
     }
@@ -85,6 +93,33 @@
     }
   }
 
+  async function submitBootstrap(event: SubmitEvent) {
+    event.preventDefault();
+    if (busy) return;
+    if (bootstrapPassword.length < 15) {
+      error = 'Le mot de passe doit comporter au moins 15 caractères.';
+      return;
+    }
+    if (bootstrapPassword !== bootstrapConfirm) {
+      error = 'La confirmation du mot de passe ne correspond pas.';
+      return;
+    }
+    busy = true;
+    error = '';
+    try {
+      await bootstrapAdmin(bootstrapLogin.trim().toLowerCase(), bootstrapPassword);
+      bootstrapPassword = '';
+      bootstrapConfirm = '';
+      await goto(resolve('/'), { replaceState: true });
+    } catch (failure) {
+      error = failure instanceof Error ? failure.message : "Échec de l'initialisation.";
+    } finally {
+      bootstrapPassword = '';
+      bootstrapConfirm = '';
+      busy = false;
+    }
+  }
+
   $effect(() => {
     const controller = new AbortController();
 
@@ -94,6 +129,15 @@
       error = mapError(errParam);
     }
 
+    // Check bootstrap status (is this the first run?)
+    fetch('/api/v1/auth/bootstrap/status', { signal: controller.signal })
+      .then(r => r.ok ? r.json() : { needsBootstrap: false })
+      .then(data => {
+        needsBootstrap = data.needsBootstrap === true;
+      })
+      .catch(() => {});
+
+    // Check OIDC status
     fetch('/api/v1/auth/oidc/status', { signal: controller.signal })
       .then(r => r.ok ? r.json() : { enabled: false })
       .then(data => {
@@ -113,7 +157,7 @@
 </script>
 
 <svelte:head>
-  <title>Connexion · {name}</title>
+  <title>{needsBootstrap ? 'Initialisation' : 'Connexion'} · {name}</title>
   <meta name="description" content="Connectez-vous à votre médiathèque Aether." />
 </svelte:head>
 
@@ -135,108 +179,208 @@
       <p class="brand-tagline">VOTRE CINÉMA, CHEZ VOUS</p>
     </header>
 
-    <section class="login-card" aria-labelledby="login-title">
-      <div class="card-intro">
-        <h1 id="login-title">Bienvenue chez vous.</h1>
-        <p class="card-desc">Connectez-vous pour retrouver vos films, séries et votre progression.</p>
-      </div>
-
-      {#if error}
-        <div class="error-banner" role="alert">
-          <Icon name="alert" size={18} />
-          <p class="error-text">{error}</p>
-        </div>
-      {/if}
-
-      {#if ssoEnabled}
-        <div class="sso-section">
-          <button
-            type="button"
-            class="btn-sso"
-            onclick={sso}
-            disabled={busy}
-            aria-label="Se connecter avec SSO"
-          >
-            <span class="btn-sso-left">
-              <span class="sso-icon"><Icon name="shield" size={20} /></span>
-              <span class="btn-sso-text">Se connecter avec SSO</span>
-            </span>
-            <span class="btn-sso-right">
-              {#if ssoProvider && ssoProvider !== 'SSO'}
-                <span class="provider-pill" aria-hidden="true">{ssoProvider}</span>
-              {/if}
-              <span class="arrow-glyph" aria-hidden="true">→</span>
-            </span>
-          </button>
-        </div>
-
-        <div class="divider" role="separator">
-          <span class="divider-line"></span>
-          <span class="divider-text">ou avec un identifiant local</span>
-          <span class="divider-line"></span>
-        </div>
-      {/if}
-
-      <form class="login-form" onsubmit={submit} aria-busy={busy}>
-        <div class="field-group">
-          <label for="login" class="field-label">
-            <span>Identifiant</span>
-          </label>
-          <div class="input-container">
-            <span class="input-icon" aria-hidden="true"><Icon name="profile" size={17} /></span>
-            <input
-              id="login"
-              name="username"
-              autocomplete="username"
-              autocapitalize="none"
-              spellcheck="false"
-              maxlength="64"
-              required
-              bind:value={identifier}
-              disabled={busy}
-              placeholder="Ex. nom d’utilisateur"
-            />
-          </div>
-        </div>
-
-        <div class="field-group">
-          <label for="password" class="field-label">
-            <span>Mot de passe</span>
-          </label>
-          <div class="input-container">
-            <span class="input-icon" aria-hidden="true"><Icon name="settings" size={17} /></span>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autocomplete="current-password"
-              maxlength="512"
-              required
-              bind:value={password}
-              disabled={busy}
-              placeholder="••••••••••••"
-            />
-          </div>
-        </div>
-
-        <button type="submit" class="btn-submit" disabled={busy}>
-          <span class="btn-submit-text">{busy ? 'Connexion en cours…' : 'Se connecter'}</span>
-          <span class="arrow-glyph" aria-hidden="true">→</span>
-        </button>
-      </form>
-
-      <footer class="card-footer">
-        {#if ssoEnabled}
-          <p class="help-text">
-            Authentification unique (SSO) activée. Le compte local d'administration reste toujours disponible en secours.
+    {#if needsBootstrap}
+      <!-- Premier démarrage : création de l'administrateur initial -->
+      <section class="login-card" aria-labelledby="setup-title">
+        <div class="card-intro">
+          <span class="badge-setup">Premier démarrage</span>
+          <h1 id="setup-title">Créer l'administrateur</h1>
+          <p class="card-desc">
+            Bienvenue ! Aucun compte n'a encore été configuré. Définissez votre compte administrateur local de secours pour initialiser Aether (requis avant d'activer le SSO).
           </p>
-        {:else}
-          <p class="help-text">
-            Utilisez le compte local créé lors de l’installation de votre serveur.
-          </p>
+        </div>
+
+        {#if error}
+          <div class="error-banner" role="alert">
+            <Icon name="alert" size={18} />
+            <p class="error-text">{error}</p>
+          </div>
         {/if}
-      </footer>
-    </section>
+
+        <form class="login-form" onsubmit={submitBootstrap} aria-busy={busy}>
+          <div class="field-group">
+            <label for="bootstrap-login" class="field-label">
+              <span>Identifiant administrateur</span>
+            </label>
+            <div class="input-container">
+              <span class="input-icon" aria-hidden="true"><Icon name="profile" size={17} /></span>
+              <input
+                id="bootstrap-login"
+                name="bootstrap-login"
+                autocomplete="username"
+                autocapitalize="none"
+                spellcheck="false"
+                maxlength="64"
+                required
+                bind:value={bootstrapLogin}
+                disabled={busy}
+                placeholder="Ex. admin"
+              />
+            </div>
+            <span class="field-hint">Lettres minuscules, chiffres, tirets et points.</span>
+          </div>
+
+          <div class="field-group">
+            <label for="bootstrap-password" class="field-label">
+              <span>Mot de passe (15 caractères min.)</span>
+            </label>
+            <div class="input-container">
+              <span class="input-icon" aria-hidden="true"><Icon name="settings" size={17} /></span>
+              <input
+                id="bootstrap-password"
+                name="bootstrap-password"
+                type="password"
+                autocomplete="new-password"
+                minlength="15"
+                maxlength="512"
+                required
+                bind:value={bootstrapPassword}
+                disabled={busy}
+                placeholder="••••••••••••••••"
+              />
+            </div>
+            <span class="field-hint">Exigence de sécurité du Core : au moins 15 caractères.</span>
+          </div>
+
+          <div class="field-group">
+            <label for="bootstrap-confirm" class="field-label">
+              <span>Confirmer le mot de passe</span>
+            </label>
+            <div class="input-container">
+              <span class="input-icon" aria-hidden="true"><Icon name="settings" size={17} /></span>
+              <input
+                id="bootstrap-confirm"
+                name="bootstrap-confirm"
+                type="password"
+                autocomplete="new-password"
+                minlength="15"
+                maxlength="512"
+                required
+                bind:value={bootstrapConfirm}
+                disabled={busy}
+                placeholder="••••••••••••••••"
+              />
+            </div>
+          </div>
+
+          <button type="submit" class="btn-submit" disabled={busy}>
+            <span class="btn-submit-text">{busy ? 'Initialisation en cours…' : 'Initialiser le serveur'}</span>
+            <span class="arrow-glyph" aria-hidden="true">→</span>
+          </button>
+        </form>
+
+        <footer class="card-footer">
+          <p class="help-text">
+            Ce compte est unique et définitif. Conservez précieusement ces identifiants pour les opérations de maintenance.
+          </p>
+        </footer>
+      </section>
+
+    {:else}
+      <!-- Connexion standard (SSO ou compte local) -->
+      <section class="login-card" aria-labelledby="login-title">
+        <div class="card-intro">
+          <h1 id="login-title">Bienvenue chez vous.</h1>
+          <p class="card-desc">Connectez-vous pour retrouver vos films, séries et votre progression.</p>
+        </div>
+
+        {#if error}
+          <div class="error-banner" role="alert">
+            <Icon name="alert" size={18} />
+            <p class="error-text">{error}</p>
+          </div>
+        {/if}
+
+        {#if ssoEnabled}
+          <div class="sso-section">
+            <button
+              type="button"
+              class="btn-sso"
+              onclick={sso}
+              disabled={busy}
+              aria-label="Se connecter avec SSO"
+            >
+              <span class="btn-sso-left">
+                <span class="sso-icon"><Icon name="shield" size={20} /></span>
+                <span class="btn-sso-text">Se connecter avec SSO</span>
+              </span>
+              <span class="btn-sso-right">
+                {#if ssoProvider && ssoProvider !== 'SSO'}
+                  <span class="provider-pill" aria-hidden="true">{ssoProvider}</span>
+                {/if}
+                <span class="arrow-glyph" aria-hidden="true">→</span>
+              </span>
+            </button>
+          </div>
+
+          <div class="divider" role="separator">
+            <span class="divider-line"></span>
+            <span class="divider-text">ou avec un identifiant local</span>
+            <span class="divider-line"></span>
+          </div>
+        {/if}
+
+        <form class="login-form" onsubmit={submit} aria-busy={busy}>
+          <div class="field-group">
+            <label for="login" class="field-label">
+              <span>Identifiant</span>
+            </label>
+            <div class="input-container">
+              <span class="input-icon" aria-hidden="true"><Icon name="profile" size={17} /></span>
+              <input
+                id="login"
+                name="username"
+                autocomplete="username"
+                autocapitalize="none"
+                spellcheck="false"
+                maxlength="64"
+                required
+                bind:value={identifier}
+                disabled={busy}
+                placeholder="Ex. nom d’utilisateur"
+              />
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label for="password" class="field-label">
+              <span>Mot de passe</span>
+            </label>
+            <div class="input-container">
+              <span class="input-icon" aria-hidden="true"><Icon name="settings" size={17} /></span>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                maxlength="512"
+                required
+                bind:value={password}
+                disabled={busy}
+                placeholder="••••••••••••"
+              />
+            </div>
+          </div>
+
+          <button type="submit" class="btn-submit" disabled={busy}>
+            <span class="btn-submit-text">{busy ? 'Connexion en cours…' : 'Se connecter'}</span>
+            <span class="arrow-glyph" aria-hidden="true">→</span>
+          </button>
+        </form>
+
+        <footer class="card-footer">
+          {#if ssoEnabled}
+            <p class="help-text">
+              Authentification unique (SSO) activée. Le compte local d'administration reste toujours disponible en secours.
+            </p>
+          {:else}
+            <p class="help-text">
+              Utilisez le compte local créé lors de l’installation de votre serveur.
+            </p>
+          {/if}
+        </footer>
+      </section>
+    {/if}
 
     <footer class="site-footer">
       <span>{name} · Votre cinéma, autrement.</span>
@@ -335,6 +479,20 @@
 
   .card-intro {
     text-align: left;
+  }
+
+  .badge-setup {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 4px 10px;
+    background: rgba(167, 139, 250, 0.2);
+    border: 1px solid rgba(167, 139, 250, 0.4);
+    border-radius: var(--radius-full, 9999px);
+    color: var(--color-accent, #a78bfa);
+    margin-bottom: 12px;
   }
 
   h1 {
@@ -466,13 +624,18 @@
   .field-group {
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    gap: 6px;
   }
 
   .field-label {
     font-size: 12px;
     font-weight: 500;
     color: var(--color-text, #f8fafc);
+  }
+
+  .field-hint {
+    font-size: 11px;
+    color: var(--color-subtle, #64748b);
   }
 
   .input-container {

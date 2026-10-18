@@ -1,5 +1,34 @@
 # MEMORY.md — État et décisions Aether
 
+## 18 octobre 2026 — Assistant d'initialisation premier lancement (Web Bootstrap) et association administrateur local/SSO
+
+- **Contexte & Demande utilisateur** :
+  - Sur une base de données fraîche, l'utilisateur a rencontré le message d'erreur : `« un compte administrateur local de secours doit être créé avant d'utiliser le SSO »`.
+  - Demandes :
+    1. Proposer directement la création du compte administrateur local depuis l'interface Web au premier lancement.
+    2. Pouvoir utiliser « uniquement le SSO » car un groupe administrateurs existe déjà côté fournisseur d'identité.
+- **Règles de sécurité et architecture (rappel non négociable `AGENTS.md`)** :
+  - L'application interdit strictement l'auto-promotion administrateur via une simple assertion/claim OIDC (règle produit non négociable pour prévenir l'escalade de privilèges et la perte totale d'accès en cas d'indisponibilité ou compromission du fournisseur SSO).
+  - Un compte administrateur local de secours sans mot de passe par défaut doit obligatoirement être créé au premier lancement.
+  - Le compte administrateur local peut ensuite être lié à l'identité SSO depuis **Paramètres → Connexion SSO → Lier mon compte local au SSO**. Une fois lié, l'administrateur peut se connecter directement et exclusivement via le bouton SSO avec le rôle `administrator`.
+- **Réalisations backend (`crates/core/src/auth.rs`)** :
+  - `GET /api/v1/auth/bootstrap/status` : route publique non authentifiée retournant `{"needsBootstrap": true|false}` selon la présence ou non d'un administrateur ou état initialisé en base.
+  - `POST /api/v1/auth/bootstrap` : route publique protégée par limitation de débit et vérification de l'origine (`Origin`) permettant d'initialiser l'administrateur local (`login` alphanumérique, mot de passe $\ge 15$ caractères), créant la session immédiatement sans passer par la CLI. Fermeture irréversible (`HTTP 403 Forbidden` permanent dès que le bootstrap est consommé).
+  - Test d'intégration unitaire dédié `bootstrap_status_and_bootstrap_web_flow` validant la détection initiale, le rejet des mots de passe trop courts, le succès avec session et le rejet définitif des tentatives ultérieures.
+- **Réalisations frontend (`apps/web`)** :
+  - `apps/web/src/lib/auth/session.ts` : ajout de `bootstrapAdmin({ login, password })`.
+  - `apps/web/src/routes/login/+page.svelte` :
+    - Détection automatique au montage de l'état `needsBootstrap` via `/api/v1/auth/bootstrap/status`.
+    - Si le serveur n'est pas encore initialisé, affichage d'un assistant d'accueil dédié (« Initialisation du serveur », badge `Premier lancement`, formulaire de création du compte administrateur local de secours, rappel explicatif de sécurité pour l'association SSO ultérieure).
+    - Une fois l'administrateur créé, la session est automatiquement activée et redirige vers le catalogue ou les paramètres.
+    - Pour les connexions ultérieures, le bouton SSO est mis en valeur comme moyen principal de connexion, avec un panneau discret pour la connexion locale de secours.
+- **Validation** :
+  - `cargo test --locked --workspace` : 100% réussi.
+  - `cargo clippy --all-targets -- -D warnings` : 0 warning.
+  - `cargo fmt --check` : 0 diff.
+  - `npm --prefix apps/web test` : 48/48 tests réussis.
+  - `npm --prefix apps/web run build` : build statique réussi.
+
 ## 18 octobre 2026 — Refonte de la page de connexion SSO et redirection de la racine (`apps/web`, `crates/core/src/lib.rs`, `crates/core/src/oidc.rs`)
 
 - **Diagnostic du problème `{"error":"authentication_required"}`** :

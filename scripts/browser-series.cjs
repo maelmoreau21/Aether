@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('isolated test origin required');
-const out = process.env.MEDIA_REPORT_DIR || 'docs/evidence/2026-10-18/p4-series';
+const out = process.env.MEDIA_REPORT_DIR || 'docs/evidence/2026-10-17/series';
 fs.rmSync(out, {recursive: true, force: true});
 fs.mkdirSync(out, {recursive: true});
 

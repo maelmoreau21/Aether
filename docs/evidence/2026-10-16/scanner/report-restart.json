@@ -4,12 +4,68 @@
   "headless": true,
   "restart": true,
   "results": {
+    "internalSwitches": [
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.57830810546875,
+        "url": "http://127.0.0.1:1659/api/v1/assets/cf7b4561-08f8-4b82-864c-040d211cf3f6/prepared/video",
+        "time": 0.616508,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.04021453857422,
+        "url": "http://127.0.0.1:1659/api/v1/assets/cf7b4561-08f8-4b82-864c-040d211cf3f6/prepared/video",
+        "time": 1.000736,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.5768814086914,
+        "url": "http://127.0.0.1:1659/api/v1/assets/cf7b4561-08f8-4b82-864c-040d211cf3f6/prepared/video",
+        "time": 1.393197,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.04946899414062,
+        "url": "http://127.0.0.1:1659/api/v1/assets/cf7b4561-08f8-4b82-864c-040d211cf3f6/prepared/video",
+        "time": 1.826653,
+        "fullscreen": true
+      }
+    ],
+    "assTextFallback": true,
+    "integratedSubtitleAndNegativeOffset": true,
+    "signedOffsets": true,
+    "externalTracks": {
+      "container": "MKV",
+      "srtRendered": true,
+      "webvttRendered": true,
+      "externalOpusPcm": 0.04840671271085739,
+      "audioVideoSync": true,
+      "pausedSeek": true,
+      "subtitlesOff": true
+    },
+    "progress": {
+      "saved": true,
+      "resumed": true,
+      "manualWatched": true,
+      "manualUnwatched": true
+    },
     "catalogue": true,
     "singleWorkTwoVersions": true,
     "playback": true,
     "seek": true,
     "pause": true,
     "cspErrors": []
+  },
+  "captionLayout": {
+    "line": 70,
+    "snapToLines": false
   },
   "passed": true
 }

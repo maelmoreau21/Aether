@@ -1,5 +1,20 @@
 # MEMORY.md — État et décisions Aether
 
+## 18 octobre 2026 — Correction CI navigateur : Synchronisation des sous-titres intégrés et répertoires de preuves (`browser-scanner.cjs`, `browser-series.cjs`, `browser_scanner.rs`, `browser_series.rs`)
+
+- **Problème diagnostiqué** :
+  - Échec du test `browser_scanner_persists_and_plays_after_core_restart` sur GitHub Actions (Linux headless Chrome) avec un timeout de 30s à la ligne 129 de `scripts/browser-scanner.cjs`.
+  - Cause racine #1 : la position de lecture lors de la vérification de la piste de sous-titre forcé intégrée (`internal-4`, cue 2 de 4.0s à 5.0s) était fixée à exactement `v.currentTime = 4`. Sur les runners Linux sans accélération matérielle, la recherche (seek) dépose l'horloge média sur la trame vidéo immédiatement antérieure (ex. ~3.958s), située juste avant le début du cue. La vidéo étant en pause, le cue n'était jamais actif dans `activeCues`. Alignement appliqué sur `v.currentTime = 4.25` (standard utilisé dans `browser-p1.cjs`, `mse-checks.cjs`, `player-comparison-checks.cjs` et `remux-checks.cjs`), et vérification tolérante de la présence du texte dans l'ensemble des `activeCues`.
+  - Cause racine #2 : `scripts/browser-scanner.cjs` et `scripts/browser-series.cjs` écrivaient par défaut dans des sous-dossiers `2026-10-18/` lorsqu'aucune variable `MEDIA_REPORT_DIR` n'était fournie, alors que `.github/workflows/ci.yml` vérifie et archive strictement `docs/evidence/2026-10-16/scanner/` et `docs/evidence/2026-10-17/series/`.
+- **Corrections apportées** :
+  - `scripts/browser-scanner.cjs` : calage temporel `currentTime = 4.25` pour les sous-titres forcés et rétablissement du répertoire par défaut à `docs/evidence/2026-10-16/scanner`.
+  - `scripts/browser-series.cjs` : rétablissement du répertoire par défaut à `docs/evidence/2026-10-17/series`.
+  - `crates/core/tests/browser_scanner.rs` et `crates/core/tests/browser_series.rs` : propagation explicite de `MEDIA_REPORT_DIR` au processus Node si la variable d'environnement est définie.
+- **Validation** :
+  - `cargo test --locked --test browser_scanner -- --ignored --nocapture` : 100% réussi (les deux passes avec et sans redémarrage passent avec succès).
+  - Preuves générées et vérifiées dans `docs/evidence/2026-10-16/scanner/` (`scan.png`, `playback.png`, `playback-restart.png`, `report.json`, `report-restart.json`).
+  - `cargo fmt --check` et `cargo clippy --all-targets -- -D warnings` : 0 erreur, 0 avertissement.
+
 ## 18 octobre 2026 — Refonte de l'appairage des Media Nodes (Initiation sortante, tokens éphémères, canal bidirectionnel NAT-proof et streaming relais)
 
 - **Périmètre & Objectif** :

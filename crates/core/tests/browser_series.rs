@@ -126,13 +126,14 @@ async fn browser_series_flow_and_playback() {
     drop(listener);
 
     let mut child = start(&root, &db, &library, port).await;
-    let result = tokio::process::Command::new("node")
-        .arg("scripts/browser-series.cjs")
+    let mut cmd = tokio::process::Command::new("node");
+    cmd.arg("scripts/browser-series.cjs")
         .env("MEDIA_TEST_ORIGIN", format!("http://127.0.0.1:{port}"))
-        .current_dir(&root)
-        .status()
-        .await
-        .unwrap();
+        .current_dir(&root);
+    if let Ok(dir) = std::env::var("MEDIA_REPORT_DIR") {
+        cmd.env("MEDIA_REPORT_DIR", dir);
+    }
+    let result = cmd.status().await.unwrap();
     child.kill().await.unwrap();
     assert!(result.success(), "series browser scenario failed");
 }

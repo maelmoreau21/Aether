@@ -460,6 +460,9 @@ async fn test_node_enrollment_outbound_channel_and_streaming_relay() {
             .starts_with("bytes 0-63/")
     );
 
+    // Allow channel worker to cycle gracefully after completing stream relay
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
     // 13. Test Secret Rotation over outbound channel
     let (st, _, _) = http_request(
         &core_origin,

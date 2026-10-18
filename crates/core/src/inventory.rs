@@ -1,3 +1,4 @@
+use crate::database::{query, query_as, query_scalar};
 pub use crate::{
     identity::IdentityStore,
     media::Probe,
@@ -6,7 +7,7 @@ pub use crate::{
 };
 use futures_util::TryStreamExt;
 use serde_json::{Value, json};
-use sqlx::{Connection, Row};
+use sqlx::{Execute, Row};
 use std::{collections::HashMap, path::Path};
 
 fn id() -> String {
@@ -20,7 +21,7 @@ pub async fn load_cache(
     store: &IdentityStore,
     library_id: &str,
 ) -> Result<HashMap<String, CachedFile>, sqlx::Error> {
-    let rows = sqlx::query(
+    let rows = query(
         "SELECT relative_path,size,modified_ns,probe_json FROM inventory_assets WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked')",
     )
     .bind(library_id)
@@ -51,7 +52,7 @@ pub async fn load_scan_cache(
     store: &IdentityStore,
     library_id: &str,
 ) -> Result<HashMap<String, CachedFile>, sqlx::Error> {
-    let mut rows = sqlx::query(
+    let mut rows = query(
         "SELECT relative_path,size,modified_ns FROM inventory_assets WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked')",
     )
     .bind(library_id)
@@ -75,7 +76,7 @@ pub async fn load_image_cache(
     store: &IdentityStore,
     library_id: &str,
 ) -> Result<HashMap<String, crate::node::images::LocalImage>, sqlx::Error> {
-    let mut rows = sqlx::query("SELECT i.* FROM inventory_images i JOIN libraries l ON l.id=i.library_id JOIN media_nodes n ON n.id=l.node_id WHERE i.library_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked'")
+    let mut rows = query("SELECT i.* FROM inventory_images i JOIN libraries l ON l.id=i.library_id JOIN media_nodes n ON n.id=l.node_id WHERE i.library_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked'")
         .bind(library_id).fetch(&store.pool);
     let mut cache = HashMap::new();
     while let Some(row) = rows.try_next().await? {
@@ -101,8 +102,8 @@ pub async fn ingest(
     report: &ScanReport,
 ) -> Result<(), sqlx::Error> {
     let mut conn = store.pool.acquire().await?;
-    let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
-    let configured: Option<String> = sqlx::query_scalar(
+    let mut tx = crate::database::begin_write(&mut conn).await?;
+    let configured: Option<String> = query_scalar(
         "SELECT l.root FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked'",
     )
     .bind(library_id)
@@ -124,22 +125,20 @@ pub async fn ingest(
     }
     // Missing files become unavailable only after complete discovery; failed traversal preserves inventory.
     if report.complete {
-        sqlx::query("UPDATE inventory_assets SET available=0 WHERE library_id=?")
+        query("UPDATE inventory_assets SET available=0 WHERE library_id=?")
             .bind(library_id)
             .execute(&mut *tx)
             .await?;
     }
     for issue in &report.errors {
-        sqlx::query(
-            "UPDATE inventory_assets SET available=0 WHERE library_id=? AND relative_path=?",
-        )
-        .bind(library_id)
-        .bind(&issue.relative_path)
-        .execute(&mut *tx)
-        .await?;
+        query("UPDATE inventory_assets SET available=0 WHERE library_id=? AND relative_path=?")
+            .bind(library_id)
+            .bind(&issue.relative_path)
+            .execute(&mut *tx)
+            .await?;
     }
     if report.complete {
-        sqlx::query("UPDATE inventory_images SET available=0 WHERE library_id=?")
+        query("UPDATE inventory_images SET available=0 WHERE library_id=?")
             .bind(library_id)
             .execute(&mut *tx)
             .await?;
@@ -147,7 +146,7 @@ pub async fn ingest(
     for file in &report.files {
         let identity_key = format!("{}\n{}", _root.to_string_lossy(), file.identity_key);
         let existing =
-            sqlx::query("SELECT a.id,w.identity_key,s.root_snapshot FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id WHERE a.library_id=? AND a.relative_path=?")
+            query("SELECT a.id,w.identity_key,s.root_snapshot FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id WHERE a.library_id=? AND a.relative_path=?")
                 .bind(library_id)
                 .bind(&file.relative_path)
                 .fetch_optional(&mut *tx)
@@ -160,7 +159,7 @@ pub async fn ingest(
             row.get::<String, _>("id")
         } else {
             let work =
-                sqlx::query("SELECT id FROM inventory_works WHERE library_id=? AND identity_key=?")
+                query("SELECT id FROM inventory_works WHERE library_id=? AND identity_key=?")
                     .bind(library_id)
                     .bind(&identity_key)
                     .fetch_optional(&mut *tx)
@@ -170,7 +169,7 @@ pub async fn ingest(
             } else {
                 let work_id = id();
                 let title_sort = file.title.to_lowercase();
-                sqlx::query("INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort) VALUES(?,?,?,?,?,?,?)")
+                query("INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort) VALUES(?,?,?,?,?,?,?)")
                     .bind(&work_id)
                     .bind(library_id)
                     .bind(&identity_key)
@@ -182,7 +181,7 @@ pub async fn ingest(
                     .await?;
                 work_id
             };
-            let edition_id = sqlx::query_scalar::<_, String>(
+            let edition_id = query_scalar::<_, String>(
                 "SELECT id FROM inventory_editions WHERE work_id=? LIMIT 1",
             )
             .bind(&work_id)
@@ -192,7 +191,7 @@ pub async fn ingest(
                 edition_id
             } else {
                 let edition_id = id();
-                sqlx::query("INSERT INTO inventory_editions VALUES(?,?)")
+                query("INSERT INTO inventory_editions VALUES(?,?)")
                     .bind(&edition_id)
                     .bind(&work_id)
                     .execute(&mut *tx)
@@ -204,23 +203,23 @@ pub async fn ingest(
             let asset_id = previous_asset_id.unwrap_or_else(id);
             // A reused physical-path UUID after a root/identity change must not
             // inherit the editorial snapshot of the previous physical source.
-            sqlx::query("DELETE FROM inventory_editorial WHERE asset_id=?")
+            query("DELETE FROM inventory_editorial WHERE asset_id=?")
                 .bind(&asset_id)
                 .execute(&mut *tx)
                 .await?;
-            sqlx::query("INSERT INTO inventory_versions VALUES(?,?)")
+            query("INSERT INTO inventory_versions VALUES(?,?)")
                 .bind(&version_id)
                 .bind(&edition_id)
                 .execute(&mut *tx)
                 .await?;
-            sqlx::query("INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,?,?)")
+            query("INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,?,?)")
                 .bind(&source_id)
                 .bind(&version_id)
                 .bind(library_id)
                 .bind(_root.to_string_lossy().as_ref())
                 .execute(&mut *tx)
                 .await?;
-            sqlx::query("INSERT INTO inventory_assets VALUES(?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET source_id=excluded.source_id")
+            query("INSERT INTO inventory_assets VALUES(?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET source_id=excluded.source_id")
                 .bind(&asset_id)
                 .bind(source_id)
                 .bind(library_id)
@@ -233,23 +232,23 @@ pub async fn ingest(
                 .await?;
             asset_id
         };
-        sqlx::query("UPDATE inventory_assets SET size=?,modified_ns=?,mime=?,probe_json=?,available=1 WHERE id=?").bind(file.size as i64).bind(&file.modified_ns).bind(&file.mime).bind(json!(file.probe).to_string()).bind(&asset_id).execute(&mut *tx).await?;
-        sqlx::query("UPDATE inventory_sources SET root_snapshot=? WHERE id=(SELECT source_id FROM inventory_assets WHERE id=?)").bind(_root.to_string_lossy().as_ref()).bind(&asset_id).execute(&mut *tx).await?;
+        query("UPDATE inventory_assets SET size=?,modified_ns=?,mime=?,probe_json=?,available=1 WHERE id=?").bind(file.size as i64).bind(&file.modified_ns).bind(&file.mime).bind(json!(file.probe).to_string()).bind(&asset_id).execute(&mut *tx).await?;
+        query("UPDATE inventory_sources SET root_snapshot=? WHERE id=(SELECT source_id FROM inventory_assets WHERE id=?)").bind(_root.to_string_lossy().as_ref()).bind(&asset_id).execute(&mut *tx).await?;
         if let Some(image) = &file.poster {
-            let work_id: String = sqlx::query_scalar("SELECT e.work_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id WHERE a.id=?")
+            let work_id: String = query_scalar("SELECT e.work_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id WHERE a.id=?")
                 .bind(&asset_id).fetch_one(&mut *tx).await?;
-            sqlx::query("INSERT INTO inventory_images(id,work_id,library_id,root_snapshot,relative_path,size,modified_ns,mime,priority,available) VALUES(?,?,?,?,?,?,?,?,?,1) ON CONFLICT(work_id,root_snapshot,relative_path) DO UPDATE SET size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,priority=excluded.priority,available=1")
+            query("INSERT INTO inventory_images(id,work_id,library_id,root_snapshot,relative_path,size,modified_ns,mime,priority,available) VALUES(?,?,?,?,?,?,?,?,?,1) ON CONFLICT(work_id,root_snapshot,relative_path) DO UPDATE SET size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,priority=excluded.priority,available=1")
                 .bind(id()).bind(work_id).bind(library_id).bind(_root.to_string_lossy().as_ref())
                 .bind(&image.path).bind(image.size_bytes as i64).bind(&image.modified_ns)
                 .bind(&image.mime).bind(i64::from(image.priority)).execute(&mut *tx).await?;
         }
         let fallback =
             json!({"title":file.title,"year":file.year,"external_ids":file.external_ids});
-        sqlx::query("INSERT INTO inventory_editorial(asset_id,fallback_json) VALUES(?,?) ON CONFLICT(asset_id) DO UPDATE SET fallback_json=excluded.fallback_json")
+        query("INSERT INTO inventory_editorial(asset_id,fallback_json) VALUES(?,?) ON CONFLICT(asset_id) DO UPDATE SET fallback_json=excluded.fallback_json")
             .bind(&asset_id).bind(fallback.to_string()).execute(&mut *tx).await?;
         match &file.editorial {
             NfoOutcome::Missing => {
-                sqlx::query("UPDATE inventory_editorial SET nfo_json=NULL,nfo_path=NULL,nfo_priority=NULL WHERE asset_id=?")
+                query("UPDATE inventory_editorial SET nfo_json=NULL,nfo_path=NULL,nfo_priority=NULL WHERE asset_id=?")
                     .bind(&asset_id).execute(&mut *tx).await?;
             }
             NfoOutcome::Valid {
@@ -257,7 +256,7 @@ pub async fn ingest(
                 path,
                 priority,
             } => {
-                sqlx::query("UPDATE inventory_editorial SET nfo_json=?,nfo_path=?,nfo_priority=? WHERE asset_id=?")
+                query("UPDATE inventory_editorial SET nfo_json=?,nfo_path=?,nfo_priority=? WHERE asset_id=?")
                     .bind(json!(metadata).to_string()).bind(path).bind(i64::from(*priority)).bind(&asset_id).execute(&mut *tx).await?;
             }
             // A broken replacement retains the last successfully indexed editorial snapshot.
@@ -270,20 +269,20 @@ pub async fn ingest(
             .iter()
             .map(|t| i64::from(t.index))
             .collect();
-        let previous = sqlx::query("SELECT id,stream_index FROM inventory_tracks WHERE asset_id=?")
+        let previous = query("SELECT id,stream_index FROM inventory_tracks WHERE asset_id=?")
             .bind(&asset_id)
             .fetch_all(&mut *tx)
             .await?;
         for row in previous {
             if !indexes.contains(&row.get("stream_index")) {
-                sqlx::query("DELETE FROM inventory_tracks WHERE id=?")
+                query("DELETE FROM inventory_tracks WHERE id=?")
                     .bind(row.get::<String, _>("id"))
                     .execute(&mut *tx)
                     .await?;
             }
         }
         for track in &file.probe.streams {
-            sqlx::query("INSERT INTO inventory_tracks VALUES(?,?,?,?) ON CONFLICT(asset_id,stream_index) DO UPDATE SET metadata_json=excluded.metadata_json").bind(id()).bind(&asset_id).bind(i64::from(track.index)).bind(json!(track).to_string()).execute(&mut *tx).await?;
+            query("INSERT INTO inventory_tracks VALUES(?,?,?,?) ON CONFLICT(asset_id,stream_index) DO UPDATE SET metadata_json=excluded.metadata_json").bind(id()).bind(&asset_id).bind(i64::from(track.index)).bind(json!(track).to_string()).execute(&mut *tx).await?;
         }
     }
     refresh_editorial(&mut tx, library_id).await?;
@@ -291,11 +290,11 @@ pub async fn ingest(
 }
 
 pub async fn clean_staging(store: &IdentityStore, scan_id: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM scan_staging_files WHERE scan_id=?")
+    query("DELETE FROM scan_staging_files WHERE scan_id=?")
         .bind(scan_id)
         .execute(&store.pool)
         .await?;
-    sqlx::query("DELETE FROM scan_staging_issues WHERE scan_id=?")
+    query("DELETE FROM scan_staging_issues WHERE scan_id=?")
         .bind(scan_id)
         .execute(&store.pool)
         .await?;
@@ -309,10 +308,10 @@ pub async fn stage_batch(
     batch: &InventoryBatch,
 ) -> Result<(), sqlx::Error> {
     let mut conn = store.pool.acquire().await?;
-    let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::database::begin_write(&mut conn).await?;
 
     for issue in &batch.errors {
-        sqlx::query(
+        query(
             "INSERT INTO scan_staging_issues(scan_id, kind, relative_path, message) VALUES(?, 'error', ?, ?)",
         )
         .bind(scan_id)
@@ -323,7 +322,7 @@ pub async fn stage_batch(
     }
 
     for issue in &batch.warnings {
-        sqlx::query(
+        query(
             "INSERT INTO scan_staging_issues(scan_id, kind, relative_path, message) VALUES(?, 'warning', ?, ?)",
         )
         .bind(scan_id)
@@ -396,7 +395,7 @@ pub async fn stage_batch(
 
         let external_ids_json = json!(file.external_ids).to_string();
 
-        sqlx::query(
+        query(
             "INSERT INTO scan_staging_files (
                 scan_id, library_id, relative_path, size, modified_ns, mime,
                 title, year, identity_key, external_ids_json, probe_json, reused,
@@ -477,9 +476,9 @@ pub async fn publish_staged_scan(
     complete: bool,
 ) -> Result<(), sqlx::Error> {
     let mut conn = store.pool.acquire().await?;
-    let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::database::begin_write(&mut conn).await?;
 
-    let configured: Option<(String, String)> = sqlx::query_as(
+    let configured: Option<(String, String)> = query_as(
         "SELECT l.root, l.kind FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked'",
     )
     .bind(library_id)
@@ -507,7 +506,7 @@ pub async fn publish_staged_scan(
 
     if complete {
         // Collect works whose available assets are about to be marked unavailable
-        let removed_works: Vec<String> = sqlx::query_scalar(
+        let removed_works: Vec<String> = query_scalar(
             "SELECT DISTINCT e.work_id 
              FROM inventory_assets a 
              JOIN inventory_sources s ON s.id=a.source_id 
@@ -526,7 +525,7 @@ pub async fn publish_staged_scan(
             affected_work_ids.insert(w);
         }
 
-        sqlx::query(
+        query(
             "UPDATE inventory_assets 
              SET available=0 
              WHERE library_id=? AND available=1 AND relative_path NOT IN (
@@ -538,7 +537,7 @@ pub async fn publish_staged_scan(
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query(
+        query(
             "UPDATE inventory_images 
              SET available=0 
              WHERE library_id=? AND available=1 AND relative_path NOT IN (
@@ -555,7 +554,7 @@ pub async fn publish_staged_scan(
     }
 
     // Collect works whose assets had errors in this scan
-    let error_works: Vec<String> = sqlx::query_scalar(
+    let error_works: Vec<String> = query_scalar(
         "SELECT DISTINCT e.work_id 
          FROM inventory_assets a 
          JOIN inventory_sources s ON s.id=a.source_id 
@@ -574,7 +573,7 @@ pub async fn publish_staged_scan(
         affected_work_ids.insert(w);
     }
 
-    sqlx::query(
+    query(
         "UPDATE inventory_assets 
          SET available=0 
          WHERE library_id=? AND relative_path IN (
@@ -586,7 +585,7 @@ pub async fn publish_staged_scan(
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query(
+    query(
         "UPDATE inventory_assets 
          SET available=1 
          WHERE library_id=? AND available=0 AND relative_path IN (
@@ -613,7 +612,7 @@ pub async fn publish_staged_scan(
         //    - series_poster_priority ASC (lower number = higher priority)
         //    - series_poster_path ASC
         //    - relative_path ASC
-        let staged_series = sqlx::query(
+        let staged_series = query(
             "WITH ranked_meta AS (
                 SELECT
                     series_identity_key,
@@ -770,7 +769,7 @@ pub async fn publish_staged_scan(
             };
             let s_title_sort = s_title.to_lowercase();
 
-            let existing_series = sqlx::query(
+            let existing_series = query(
                 "SELECT id, editorial_json FROM inventory_works WHERE library_id=? AND identity_key=?",
             )
             .bind(library_id)
@@ -783,12 +782,12 @@ pub async fn publish_staged_scan(
                 let prev_editorial: String = row.get("editorial_json");
                 // Preserve already-validated NFO metadata if the replacement NFO in this scan is invalid.
                 if is_valid_nfo == 0 && has_invalid_nfo == 1 && prev_editorial != "{}" {
-                    sqlx::query("UPDATE inventory_works SET kind='series' WHERE id=?")
+                    query("UPDATE inventory_works SET kind='series' WHERE id=?")
                         .bind(&swid)
                         .execute(&mut *tx)
                         .await?;
                 } else {
-                    sqlx::query(
+                    query(
                         "UPDATE inventory_works SET title=?, year=?, external_ids_json=?, title_sort=?, editorial_json=?, kind='series' WHERE id=?",
                     )
                     .bind(&s_title)
@@ -803,7 +802,7 @@ pub async fn publish_staged_scan(
                 swid
             } else {
                 let swid = id();
-                sqlx::query(
+                query(
                     "INSERT INTO inventory_works (id, library_id, identity_key, title, year, external_ids_json, title_sort, editorial_json, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'series')",
                 )
                 .bind(&swid)
@@ -829,7 +828,7 @@ pub async fn publish_staged_scan(
                 let poster_priority: i64 = s_row.get("series_poster_priority");
 
                 if complete {
-                    sqlx::query(
+                    query(
                         "UPDATE inventory_images SET available=0 WHERE work_id=? AND root_snapshot=? AND relative_path != ?",
                     )
                     .bind(&series_work_id)
@@ -839,7 +838,7 @@ pub async fn publish_staged_scan(
                     .await?;
                 }
 
-                sqlx::query(
+                query(
                     "INSERT INTO inventory_images(id, work_id, library_id, root_snapshot, relative_path, size, modified_ns, mime, priority, available)
                      VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                      ON CONFLICT(work_id, root_snapshot, relative_path) DO UPDATE SET
@@ -860,7 +859,7 @@ pub async fn publish_staged_scan(
         }
 
         // Seasons
-        let staged_seasons = sqlx::query(
+        let staged_seasons = query(
             "SELECT series_identity_key, season_number
              FROM scan_staging_files
              WHERE scan_id=? AND series_identity_key IS NOT NULL AND season_number IS NOT NULL
@@ -880,13 +879,12 @@ pub async fn publish_staged_scan(
                 continue;
             };
 
-            let existing_season = sqlx::query(
-                "SELECT id FROM inventory_seasons WHERE series_id=? AND season_number=?",
-            )
-            .bind(series_work_id)
-            .bind(season_num)
-            .fetch_optional(&mut *tx)
-            .await?;
+            let existing_season =
+                query("SELECT id FROM inventory_seasons WHERE series_id=? AND season_number=?")
+                    .bind(series_work_id)
+                    .bind(season_num)
+                    .fetch_optional(&mut *tx)
+                    .await?;
 
             let season_id = if let Some(row) = existing_season {
                 row.get::<String, _>("id")
@@ -897,7 +895,7 @@ pub async fn publish_staged_scan(
                 } else {
                     format!("Saison {}", season_num)
                 };
-                sqlx::query(
+                query(
                     "INSERT INTO inventory_seasons(id, series_id, season_number, title) VALUES(?, ?, ?, ?)",
                 )
                 .bind(&sid)
@@ -915,7 +913,7 @@ pub async fn publish_staged_scan(
         // Episodes: Keyset pagination for new / modified files (reused=0)
         let mut last_new_path = String::new();
         loop {
-            let chunk = sqlx::query(
+            let chunk = query(
                 "SELECT relative_path, identity_key, title, year, external_ids_json, probe_json, size, modified_ns, mime,
                         series_identity_key, season_number, episode_number
                  FROM scan_staging_files 
@@ -956,7 +954,7 @@ pub async fn publish_staged_scan(
                 let modified_ns: String = row.get("modified_ns");
                 let mime: String = row.get("mime");
 
-                let existing = sqlx::query(
+                let existing = query(
                     "SELECT a.id,w.id as work_id,w.identity_key,s.root_snapshot 
                      FROM inventory_assets a 
                      JOIN inventory_sources s ON s.id=a.source_id 
@@ -980,7 +978,7 @@ pub async fn publish_staged_scan(
                     let r = existing.unwrap();
                     let asset_id: String = r.get("id");
                     let ep_work_id: String = r.get("work_id");
-                    sqlx::query(
+                    query(
                         "UPDATE inventory_assets SET size=?,modified_ns=?,mime=?,probe_json=?,available=1 WHERE id=?",
                     )
                     .bind(size)
@@ -993,7 +991,7 @@ pub async fn publish_staged_scan(
 
                     (asset_id, ep_work_id)
                 } else {
-                    let work = sqlx::query(
+                    let work = query(
                         "SELECT id FROM inventory_works WHERE library_id=? AND identity_key=?",
                     )
                     .bind(library_id)
@@ -1006,7 +1004,7 @@ pub async fn publish_staged_scan(
                     } else {
                         let wid = id();
                         let title_sort = title.to_lowercase();
-                        sqlx::query(
+                        query(
                             "INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort,kind) VALUES(?,?,?,?,?,?,?,'episode')",
                         )
                         .bind(&wid)
@@ -1025,7 +1023,7 @@ pub async fn publish_staged_scan(
                         (&series_identity_key, season_number, episode_number)
                         && let Some(season_id) = season_map.get(&(s_key.clone(), s_num))
                     {
-                        sqlx::query(
+                        query(
                             "INSERT INTO inventory_episodes(id, season_id, episode_number, work_id)
                              VALUES(?, ?, ?, ?)
                              ON CONFLICT(season_id, episode_number) DO UPDATE SET work_id=excluded.work_id",
@@ -1038,7 +1036,7 @@ pub async fn publish_staged_scan(
                         .await?;
                     }
 
-                    let edition_id = sqlx::query_scalar::<_, String>(
+                    let edition_id = query_scalar::<_, String>(
                         "SELECT id FROM inventory_editions WHERE work_id=? LIMIT 1",
                     )
                     .bind(&ep_work_id)
@@ -1048,7 +1046,7 @@ pub async fn publish_staged_scan(
                         edition_id
                     } else {
                         let edition_id = id();
-                        sqlx::query("INSERT INTO inventory_editions VALUES(?,?)")
+                        query("INSERT INTO inventory_editions VALUES(?,?)")
                             .bind(&edition_id)
                             .bind(&ep_work_id)
                             .execute(&mut *tx)
@@ -1061,17 +1059,17 @@ pub async fn publish_staged_scan(
                     let is_new_asset = previous_asset_id.is_none();
                     let asset_id = previous_asset_id.unwrap_or_else(id);
                     if !is_new_asset {
-                        sqlx::query("DELETE FROM inventory_editorial WHERE asset_id=?")
+                        query("DELETE FROM inventory_editorial WHERE asset_id=?")
                             .bind(&asset_id)
                             .execute(&mut *tx)
                             .await?;
                     }
-                    sqlx::query("INSERT INTO inventory_versions VALUES(?,?)")
+                    query("INSERT INTO inventory_versions VALUES(?,?)")
                         .bind(&version_id)
                         .bind(&edition_id)
                         .execute(&mut *tx)
                         .await?;
-                    sqlx::query(
+                    query(
                         "INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,?,?)",
                     )
                     .bind(&source_id)
@@ -1080,7 +1078,7 @@ pub async fn publish_staged_scan(
                     .bind(&root_snapshot)
                     .execute(&mut *tx)
                     .await?;
-                    sqlx::query(
+                    query(
                         "INSERT INTO inventory_assets VALUES(?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET source_id=excluded.source_id,size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,probe_json=excluded.probe_json,available=1",
                     )
                     .bind(&asset_id)
@@ -1102,22 +1100,21 @@ pub async fn publish_staged_scan(
                 if let Ok(probe) = decode(&probe_json) {
                     let indexes: Vec<i64> =
                         probe.streams.iter().map(|t| i64::from(t.index)).collect();
-                    let previous = sqlx::query(
-                        "SELECT id,stream_index FROM inventory_tracks WHERE asset_id=?",
-                    )
-                    .bind(&asset_id)
-                    .fetch_all(&mut *tx)
-                    .await?;
+                    let previous =
+                        query("SELECT id,stream_index FROM inventory_tracks WHERE asset_id=?")
+                            .bind(&asset_id)
+                            .fetch_all(&mut *tx)
+                            .await?;
                     for r in previous {
                         if !indexes.contains(&r.get("stream_index")) {
-                            sqlx::query("DELETE FROM inventory_tracks WHERE id=?")
+                            query("DELETE FROM inventory_tracks WHERE id=?")
                                 .bind(r.get::<String, _>("id"))
                                 .execute(&mut *tx)
                                 .await?;
                         }
                     }
                     for track in &probe.streams {
-                        sqlx::query(
+                        query(
                             "INSERT INTO inventory_tracks VALUES(?,?,?,?) 
                              ON CONFLICT(asset_id,stream_index) DO UPDATE SET metadata_json=excluded.metadata_json",
                         )
@@ -1138,7 +1135,7 @@ pub async fn publish_staged_scan(
         // Avoids loading all probe_json blobs into RAM simultaneously, strictly bounding RSS.
         let mut last_new_path = String::new();
         loop {
-            let chunk = sqlx::query(
+            let chunk = query(
                 "SELECT relative_path, identity_key, title, year, external_ids_json, probe_json, size, modified_ns, mime 
                  FROM scan_staging_files 
                  WHERE scan_id=? AND reused=0 AND relative_path > ? 
@@ -1167,7 +1164,7 @@ pub async fn publish_staged_scan(
                 let modified_ns: String = row.get("modified_ns");
                 let mime: String = row.get("mime");
 
-                let existing = sqlx::query(
+                let existing = query(
                     "SELECT a.id,w.id as work_id,w.identity_key,s.root_snapshot 
                      FROM inventory_assets a 
                      JOIN inventory_sources s ON s.id=a.source_id 
@@ -1191,7 +1188,7 @@ pub async fn publish_staged_scan(
                     let r = existing.unwrap();
                     let asset_id: String = r.get("id");
                     let work_id: String = r.get("work_id");
-                    sqlx::query(
+                    query(
                         "UPDATE inventory_assets SET size=?,modified_ns=?,mime=?,probe_json=?,available=1 WHERE id=?",
                     )
                     .bind(size)
@@ -1204,7 +1201,7 @@ pub async fn publish_staged_scan(
 
                     (asset_id, work_id)
                 } else {
-                    let work = sqlx::query(
+                    let work = query(
                         "SELECT id FROM inventory_works WHERE library_id=? AND identity_key=?",
                     )
                     .bind(library_id)
@@ -1216,7 +1213,7 @@ pub async fn publish_staged_scan(
                     } else {
                         let work_id = id();
                         let title_sort = title.to_lowercase();
-                        sqlx::query(
+                        query(
                             "INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort,kind) VALUES(?,?,?,?,?,?,?,'film')",
                         )
                         .bind(&work_id)
@@ -1231,7 +1228,7 @@ pub async fn publish_staged_scan(
                         work_id
                     };
 
-                    let edition_id = sqlx::query_scalar::<_, String>(
+                    let edition_id = query_scalar::<_, String>(
                         "SELECT id FROM inventory_editions WHERE work_id=? LIMIT 1",
                     )
                     .bind(&work_id)
@@ -1241,7 +1238,7 @@ pub async fn publish_staged_scan(
                         edition_id
                     } else {
                         let edition_id = id();
-                        sqlx::query("INSERT INTO inventory_editions VALUES(?,?)")
+                        query("INSERT INTO inventory_editions VALUES(?,?)")
                             .bind(&edition_id)
                             .bind(&work_id)
                             .execute(&mut *tx)
@@ -1254,17 +1251,17 @@ pub async fn publish_staged_scan(
                     let is_new_asset = previous_asset_id.is_none();
                     let asset_id = previous_asset_id.unwrap_or_else(id);
                     if !is_new_asset {
-                        sqlx::query("DELETE FROM inventory_editorial WHERE asset_id=?")
+                        query("DELETE FROM inventory_editorial WHERE asset_id=?")
                             .bind(&asset_id)
                             .execute(&mut *tx)
                             .await?;
                     }
-                    sqlx::query("INSERT INTO inventory_versions VALUES(?,?)")
+                    query("INSERT INTO inventory_versions VALUES(?,?)")
                         .bind(&version_id)
                         .bind(&edition_id)
                         .execute(&mut *tx)
                         .await?;
-                    sqlx::query(
+                    query(
                         "INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,?,?)",
                     )
                     .bind(&source_id)
@@ -1273,7 +1270,7 @@ pub async fn publish_staged_scan(
                     .bind(&root_snapshot)
                     .execute(&mut *tx)
                     .await?;
-                    sqlx::query(
+                    query(
                         "INSERT INTO inventory_assets VALUES(?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET source_id=excluded.source_id,size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,probe_json=excluded.probe_json,available=1",
                     )
                     .bind(&asset_id)
@@ -1295,22 +1292,21 @@ pub async fn publish_staged_scan(
                 if let Ok(probe) = decode(&probe_json) {
                     let indexes: Vec<i64> =
                         probe.streams.iter().map(|t| i64::from(t.index)).collect();
-                    let previous = sqlx::query(
-                        "SELECT id,stream_index FROM inventory_tracks WHERE asset_id=?",
-                    )
-                    .bind(&asset_id)
-                    .fetch_all(&mut *tx)
-                    .await?;
+                    let previous =
+                        query("SELECT id,stream_index FROM inventory_tracks WHERE asset_id=?")
+                            .bind(&asset_id)
+                            .fetch_all(&mut *tx)
+                            .await?;
                     for r in previous {
                         if !indexes.contains(&r.get("stream_index")) {
-                            sqlx::query("DELETE FROM inventory_tracks WHERE id=?")
+                            query("DELETE FROM inventory_tracks WHERE id=?")
                                 .bind(r.get::<String, _>("id"))
                                 .execute(&mut *tx)
                                 .await?;
                         }
                     }
                     for track in &probe.streams {
-                        sqlx::query(
+                        query(
                             "INSERT INTO inventory_tracks VALUES(?,?,?,?) 
                              ON CONFLICT(asset_id,stream_index) DO UPDATE SET metadata_json=excluded.metadata_json",
                         )
@@ -1333,7 +1329,7 @@ pub async fn publish_staged_scan(
     // on unchanged media, reducing rescan publication time by over 90%.
     let mut last_staged_path = String::new();
     loop {
-        let chunk = sqlx::query(
+        let chunk = query(
             "SELECT s.relative_path, s.poster_path, s.poster_size, s.poster_modified_ns, s.poster_mime, s.poster_priority,
                     s.title, s.year, s.external_ids_json, s.editorial_outcome, s.editorial_json, s.editorial_path, s.editorial_priority,
                     a.id as asset_id, e.work_id,
@@ -1379,7 +1375,7 @@ pub async fn publish_staged_scan(
                     || curr_img_prio != Some(poster_priority);
 
                 if poster_needs_update {
-                    sqlx::query(
+                    query(
                         "INSERT INTO inventory_images(id,work_id,library_id,root_snapshot,relative_path,size,modified_ns,mime,priority,available) 
                          VALUES(?,?,?,?,?,?,?,?,?,1) 
                          ON CONFLICT(work_id,root_snapshot,relative_path) DO UPDATE SET 
@@ -1428,7 +1424,7 @@ pub async fn publish_staged_scan(
             if changed {
                 affected_work_ids.insert(work_id);
 
-                sqlx::query(
+                query(
                     "INSERT INTO inventory_editorial(asset_id,fallback_json) VALUES(?,?) 
                      ON CONFLICT(asset_id) DO UPDATE SET fallback_json=excluded.fallback_json",
                 )
@@ -1439,7 +1435,7 @@ pub async fn publish_staged_scan(
 
                 match outcome.as_str() {
                     "missing" => {
-                        sqlx::query(
+                        query(
                             "UPDATE inventory_editorial SET nfo_json=NULL,nfo_path=NULL,nfo_priority=NULL WHERE asset_id=?",
                         )
                         .bind(&asset_id)
@@ -1447,7 +1443,7 @@ pub async fn publish_staged_scan(
                         .await?;
                     }
                     "valid" => {
-                        sqlx::query(
+                        query(
                             "UPDATE inventory_editorial SET nfo_json=?,nfo_path=?,nfo_priority=? WHERE asset_id=?",
                         )
                         .bind(&nfo_json)
@@ -1467,12 +1463,12 @@ pub async fn publish_staged_scan(
 
     refresh_editorial_for_works(&mut tx, &affected_work_ids).await?;
 
-    sqlx::query("DELETE FROM scan_staging_files WHERE scan_id=?")
+    query("DELETE FROM scan_staging_files WHERE scan_id=?")
         .bind(scan_id)
         .execute(&mut *tx)
         .await?;
 
-    sqlx::query("DELETE FROM scan_staging_issues WHERE scan_id=?")
+    query("DELETE FROM scan_staging_issues WHERE scan_id=?")
         .bind(scan_id)
         .execute(&mut *tx)
         .await?;
@@ -1481,7 +1477,7 @@ pub async fn publish_staged_scan(
 }
 
 pub async fn refresh_editorial_for_works(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     work_ids: &std::collections::BTreeSet<String>,
 ) -> Result<(), sqlx::Error> {
     if work_ids.is_empty() {
@@ -1490,7 +1486,7 @@ pub async fn refresh_editorial_for_works(
 
     let work_ids_vec: Vec<&String> = work_ids.iter().collect();
     for chunk in work_ids_vec.chunks(250) {
-        let mut builder = sqlx::QueryBuilder::new(
+        let mut builder = sqlx::QueryBuilder::<sqlx::Any>::new(
             "SELECT e.work_id, m.fallback_json, m.nfo_json, a.relative_path, m.nfo_priority, m.nfo_path 
              FROM inventory_editorial m 
              JOIN inventory_assets a ON a.id=m.asset_id 
@@ -1507,11 +1503,19 @@ pub async fn refresh_editorial_for_works(
         }
         separated.push_unseparated(") ");
         builder.push(
-            "ORDER BY e.work_id, m.nfo_json IS NULL, m.nfo_priority, m.nfo_path, a.relative_path",
+            "ORDER BY e.work_id, m.nfo_json IS NULL, m.nfo_priority NULLS FIRST, m.nfo_path NULLS FIRST, a.relative_path",
         );
 
-        let rows = builder.build().fetch_all(&mut **tx).await?;
-        let mut grouped: std::collections::BTreeMap<String, Vec<sqlx::sqlite::SqliteRow>> =
+        let sql = crate::database::normalize_sql(builder.sql().as_str());
+        let arguments = builder
+            .build()
+            .take_arguments()
+            .map_err(sqlx::Error::Encode)?
+            .unwrap_or_default();
+        let rows = sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(sql), arguments)
+            .fetch_all(&mut **tx)
+            .await?;
+        let mut grouped: std::collections::BTreeMap<String, Vec<sqlx::any::AnyRow>> =
             std::collections::BTreeMap::new();
         for r in rows {
             let wid: String = r.get("work_id");
@@ -1581,7 +1585,7 @@ pub async fn refresh_editorial_for_works(
                     .collect::<Vec<_>>()
             );
             let title_sort = title.to_lowercase();
-            sqlx::query(
+            query(
                 "UPDATE inventory_works SET title=?,year=?,external_ids_json=?,editorial_json=?,title_sort=? WHERE id=?",
             )
             .bind(title)
@@ -1598,20 +1602,19 @@ pub async fn refresh_editorial_for_works(
 }
 
 async fn refresh_editorial(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     library_id: &str,
 ) -> Result<(), sqlx::Error> {
-    let works: Vec<String> =
-        sqlx::query_scalar("SELECT id FROM inventory_works WHERE library_id=?")
-            .bind(library_id)
-            .fetch_all(&mut **tx)
-            .await?;
+    let works: Vec<String> = query_scalar("SELECT id FROM inventory_works WHERE library_id=?")
+        .bind(library_id)
+        .fetch_all(&mut **tx)
+        .await?;
     let set: std::collections::BTreeSet<String> = works.into_iter().collect();
     refresh_editorial_for_works(tx, &set).await
 }
 
 pub async fn refresh_work_editorial(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     work_id: &str,
 ) -> Result<(), sqlx::Error> {
     let mut set = std::collections::BTreeSet::new();
@@ -1634,13 +1637,13 @@ pub async fn resource_library(
         }
         _ => return Ok(None),
     };
-    sqlx::query_scalar(query)
+    query_scalar(query)
         .bind(resource_id)
         .fetch_optional(&store.pool)
         .await
 }
 
-fn work(row: &sqlx::sqlite::SqliteRow) -> Value {
+fn work(row: &sqlx::any::AnyRow) -> Value {
     let metadata: Value =
         serde_json::from_str(row.get("editorial_json")).unwrap_or_else(|_| json!({}));
     let kind: String = row.try_get("kind").unwrap_or_else(|_| "film".to_string());
@@ -1685,7 +1688,7 @@ pub async fn editorial_warnings(
     store: &IdentityStore,
     library_id: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    let rows = sqlx::query("SELECT w.editorial_json FROM inventory_works w WHERE w.library_id=? AND EXISTS(SELECT 1 FROM inventory_editions e JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked') ORDER BY w.id")
+    let rows = query("SELECT w.editorial_json FROM inventory_works w WHERE w.library_id=? AND EXISTS(SELECT 1 FROM inventory_editions e JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked') ORDER BY w.id")
         .bind(library_id).fetch_all(&store.pool).await?;
     let mut warnings = Vec::new();
     for row in rows {
@@ -1742,7 +1745,7 @@ pub async fn catalogue(
     let search_clean = search.trim().to_lowercase();
     let has_search = !search_clean.is_empty();
 
-    let mut count_builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+    let mut count_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
         "SELECT COUNT(*) FROM inventory_works w WHERE w.library_id IN (",
     );
     let mut separated = count_builder.separated(", ");
@@ -1815,10 +1818,16 @@ pub async fn catalogue(
         }
     }
 
-    let total: i64 = count_builder
-        .build_query_scalar()
-        .fetch_one(&store.pool)
-        .await?;
+    let count_sql = crate::database::normalize_sql(count_builder.sql().as_str());
+    let arguments = count_builder
+        .build()
+        .take_arguments()
+        .map_err(sqlx::Error::Encode)?
+        .unwrap_or_default();
+    let total: i64 =
+        sqlx::query_scalar_with::<sqlx::Any, i64, _>(sqlx::AssertSqlSafe(count_sql), arguments)
+            .fetch_one(&store.pool)
+            .await?;
     let total = total as usize;
 
     if total == 0 || offset >= total || limit == 0 {
@@ -1832,7 +1841,7 @@ pub async fn catalogue(
         }));
     }
 
-    let mut data_builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+    let mut data_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
         "SELECT w.*, wl.node_id AS node_id, wn.status AS node_status, \
            CASE WHEN w.kind = 'series' THEN ( \
              SELECT COUNT(DISTINCT s.id) FROM inventory_seasons s \
@@ -1948,7 +1957,15 @@ pub async fn catalogue(
     data_builder.push(" OFFSET ");
     data_builder.push_bind(offset as i64);
 
-    let rows = data_builder.build().fetch_all(&store.pool).await?;
+    let data_sql = crate::database::normalize_sql(data_builder.sql().as_str());
+    let arguments = data_builder
+        .build()
+        .take_arguments()
+        .map_err(sqlx::Error::Encode)?
+        .unwrap_or_default();
+    let rows = sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(data_sql), arguments)
+        .fetch_all(&store.pool)
+        .await?;
     let items: Vec<Value> = rows.iter().map(work).collect();
 
     Ok(json!({
@@ -1962,10 +1979,10 @@ pub async fn catalogue(
 }
 
 async fn load_work_editions(
-    pool: &sqlx::SqlitePool,
+    pool: &sqlx::AnyPool,
     work_id: &str,
 ) -> Result<Vec<Value>, sqlx::Error> {
-    let rows = sqlx::query(
+    let rows = query(
         "SELECT e.id AS edition_id, v.id AS version_id, s.id AS source_id, a.id AS asset_id \
          FROM inventory_editions e \
          JOIN inventory_versions v ON v.edition_id=e.id \
@@ -2046,10 +2063,10 @@ async fn load_work_editions(
 }
 
 async fn load_series_editions(
-    pool: &sqlx::SqlitePool,
+    pool: &sqlx::AnyPool,
     series_id: &str,
 ) -> Result<HashMap<String, Vec<Value>>, sqlx::Error> {
-    let rows = sqlx::query(
+    let rows = query(
         "SELECT e.work_id, e.id AS edition_id, v.id AS version_id, s.id AS source_id, a.id AS asset_id \
          FROM inventory_seasons se \
          JOIN inventory_episodes ep ON ep.season_id=se.id \
@@ -2159,7 +2176,7 @@ async fn load_series_editions(
 }
 
 pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value>, sqlx::Error> {
-    let Some(row) = sqlx::query(
+    let Some(row) = query(
         "SELECT w.*, wl.node_id AS node_id, wn.status AS node_status, \
          (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
           FROM inventory_images i JOIN libraries il ON il.id=i.library_id JOIN media_nodes in_node ON in_node.id=il.node_id \
@@ -2181,14 +2198,14 @@ pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value
     let kind: String = row.try_get("kind").unwrap_or_else(|_| "film".to_string());
 
     if kind == "series" {
-        let seasons_rows = sqlx::query(
+        let seasons_rows = query(
             "SELECT id, season_number, title FROM inventory_seasons WHERE series_id=? ORDER BY season_number ASC",
         )
         .bind(work_id)
         .fetch_all(&store.pool)
         .await?;
 
-        let ep_rows = sqlx::query(
+        let ep_rows = query(
             "SELECT ep.season_id, ep.episode_number, w.*, wl.node_id AS node_id, wn.status AS node_status \
              FROM inventory_seasons s \
              JOIN inventory_episodes ep ON ep.season_id=s.id \
@@ -2263,7 +2280,7 @@ pub async fn descriptor(
     asset_id: &str,
     session_hash: &str,
 ) -> Result<Option<Value>, sqlx::Error> {
-    let row = sqlx::query(
+    let row = query(
         "SELECT a.mime, a.probe_json, a.library_id, w.title, l.node_id \
          FROM inventory_assets a \
          JOIN inventory_sources s ON s.id=a.source_id \
@@ -2350,7 +2367,7 @@ pub async fn content(
         ids::{AssetId, LibraryId, NodeId},
         inventory::{ReadGrant, ReadTarget},
     };
-    let row = sqlx::query(
+    let row = query(
         "SELECT a.library_id,a.relative_path,a.mime,l.root,l.node_id \
          FROM inventory_assets a \
          JOIN libraries l ON l.id=a.library_id \
@@ -2416,7 +2433,7 @@ pub async fn image(
         ids::{ImageId, LibraryId, NodeId},
         inventory::{ReadGrant, ReadTarget},
     };
-    let row = sqlx::query(
+    let row = query(
         "SELECT i.*,l.root,l.node_id \
          FROM inventory_images i \
          JOIN libraries l ON l.id=i.library_id \
@@ -2480,10 +2497,10 @@ pub async fn image(
 /// preserves all UUIDs, metadata, and relations, and records completion in
 /// `inventory_works_unicode_migration`.
 pub async fn backfill_title_sort_unicode(
-    conn: &mut sqlx::SqliteConnection,
+    conn: &mut sqlx::AnyConnection,
 ) -> Result<(), sqlx::Error> {
     let completed: Option<(String,)> =
-        sqlx::query_as("SELECT completed_at FROM inventory_works_unicode_migration LIMIT 1")
+        query_as("SELECT completed_at FROM inventory_works_unicode_migration LIMIT 1")
             .fetch_optional(&mut *conn)
             .await?;
 
@@ -2495,7 +2512,7 @@ pub async fn backfill_title_sort_unicode(
     let mut last_id = String::new();
 
     loop {
-        let rows: Vec<(String, String, String)> = sqlx::query_as(
+        let rows: Vec<(String, String, String)> = query_as(
             "SELECT id, title, title_sort FROM inventory_works WHERE id > ? ORDER BY id ASC LIMIT ?",
         )
         .bind(&last_id)
@@ -2512,7 +2529,7 @@ pub async fn backfill_title_sort_unicode(
         for (id, title, current_sort) in rows {
             let expected_sort = title.to_lowercase();
             if current_sort != expected_sort {
-                sqlx::query("UPDATE inventory_works SET title_sort = ? WHERE id = ?")
+                query("UPDATE inventory_works SET title_sort = ? WHERE id = ?")
                     .bind(expected_sort)
                     .bind(id)
                     .execute(&mut *conn)
@@ -2521,8 +2538,8 @@ pub async fn backfill_title_sort_unicode(
         }
     }
 
-    sqlx::query(
-        "INSERT INTO inventory_works_unicode_migration (completed_at) VALUES (datetime('now'))",
+    query(
+        "INSERT INTO inventory_works_unicode_migration (completed_at) VALUES (CAST(CURRENT_TIMESTAMP AS TEXT))",
     )
     .execute(&mut *conn)
     .await?;
@@ -2536,8 +2553,13 @@ mod tests {
     use crate::node::scanner::ScannedFile;
     #[tokio::test]
     async fn editorial_migration_preserves_existing_0004_works() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::query("CREATE TABLE libraries(id TEXT PRIMARY KEY)")
+        sqlx::any::install_default_drivers();
+        let pool = sqlx::any::AnyPoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        query("CREATE TABLE libraries(id TEXT PRIMARY KEY)")
             .execute(&pool)
             .await
             .unwrap();
@@ -2545,22 +2567,20 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO libraries VALUES('lib')")
+        query("INSERT INTO libraries VALUES('lib')")
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query(
-            "INSERT INTO inventory_works VALUES('stable','lib','folder:Film','Film',2026,'{}')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        query("INSERT INTO inventory_works VALUES('stable','lib','folder:Film','Film',2026,'{}')")
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::raw_sql(include_str!("../migrations/0005_film_editorial.sql"))
             .execute(&pool)
             .await
             .unwrap();
         let preserved: (String, String, i64, String) =
-            sqlx::query_as("SELECT id,title,year,editorial_json FROM inventory_works")
+            query_as("SELECT id,title,year,editorial_json FROM inventory_works")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
@@ -2573,7 +2593,7 @@ mod tests {
             .await
             .unwrap();
         let after: (String, String, i64, String) =
-            sqlx::query_as("SELECT id,title,year,editorial_json FROM inventory_works")
+            query_as("SELECT id,title,year,editorial_json FROM inventory_works")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
@@ -2583,7 +2603,7 @@ mod tests {
             .await
             .unwrap();
         let after_0007: (String, String, i64, String, String) =
-            sqlx::query_as("SELECT id,title,year,editorial_json,title_sort FROM inventory_works")
+            query_as("SELECT id,title,year,editorial_json,title_sort FROM inventory_works")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
@@ -2605,8 +2625,9 @@ mod tests {
         .unwrap();
         let mut conn = pool.acquire().await.unwrap();
         backfill_title_sort_unicode(&mut conn).await.unwrap();
+        drop(conn);
         let after_0008: (String, String, i64, String, String) =
-            sqlx::query_as("SELECT id,title,year,editorial_json,title_sort FROM inventory_works")
+            query_as("SELECT id,title,year,editorial_json,title_sort FROM inventory_works")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
@@ -2617,7 +2638,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let db = temp.path().join("editorial.sqlite");
         let store = IdentityStore::open(&db).await.unwrap();
-        sqlx::query("INSERT INTO libraries VALUES('lib','Films','films','local','/movies',1)")
+        query("INSERT INTO libraries VALUES('lib','Films','films','local','/movies',1)")
             .execute(&store.pool)
             .await
             .unwrap();
@@ -2632,11 +2653,11 @@ mod tests {
         ingest(&store, "lib", Path::new("/movies"), &report)
             .await
             .unwrap();
-        let work_id: String = sqlx::query_scalar("SELECT id FROM inventory_works")
+        let work_id: String = query_scalar("SELECT id FROM inventory_works")
             .fetch_one(&store.pool)
             .await
             .unwrap();
-        let graph: Vec<(String,String,String,String)> = sqlx::query_as("SELECT a.id,s.id,v.id,e.id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id").fetch_all(&store.pool).await.unwrap();
+        let graph: Vec<(String,String,String,String)> = query_as("SELECT a.id,s.id,v.id,e.id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id").fetch_all(&store.pool).await.unwrap();
         report.files[0].editorial = NfoOutcome::Valid {
             metadata: serde_json::from_value(json!({"title":"Titre NFO <script>","year":2001,"plot":"A & B","genres":["Drame"],"external_ids":{"tmdb":"123"}})).unwrap(),
             path: "Film (2026)/movie.nfo".into(), priority:1,
@@ -2660,7 +2681,7 @@ mod tests {
             detail,
             super::detail(&store, &work_id).await.unwrap().unwrap()
         );
-        let after: Vec<(String,String,String,String)> = sqlx::query_as("SELECT a.id,s.id,v.id,e.id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id").fetch_all(&store.pool).await.unwrap();
+        let after: Vec<(String,String,String,String)> = query_as("SELECT a.id,s.id,v.id,e.id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id").fetch_all(&store.pool).await.unwrap();
         assert_eq!(graph, after);
         assert_eq!(
             load_cache(&store, "lib").await.unwrap()["Film (2026)/film.mp4"]
@@ -2692,7 +2713,7 @@ mod tests {
         ingest(&store, "lib", Path::new("/movies"), &report)
             .await
             .unwrap();
-        sqlx::query("UPDATE libraries SET root='/replacement' WHERE id='lib'")
+        query("UPDATE libraries SET root='/replacement' WHERE id='lib'")
             .execute(&store.pool)
             .await
             .unwrap();
@@ -2718,7 +2739,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let db = temp.path().join("inventory.sqlite");
         let store = IdentityStore::open(&db).await.unwrap();
-        sqlx::query("INSERT INTO libraries VALUES('lib','Films','films','local','/movies',1)")
+        query("INSERT INTO libraries VALUES('lib','Films','films','local','/movies',1)")
             .execute(&store.pool)
             .await
             .unwrap();
@@ -2764,7 +2785,7 @@ mod tests {
         store.pool.close().await;
         let store = IdentityStore::open(&db).await.unwrap();
         assert_eq!(initial, detail(&store, work_id).await.unwrap().unwrap());
-        sqlx::query("UPDATE libraries SET root='/other' WHERE id='lib'")
+        query("UPDATE libraries SET root='/other' WHERE id='lib'")
             .execute(&store.pool)
             .await
             .unwrap();
@@ -2803,7 +2824,7 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        sqlx::query("UPDATE libraries SET root='/movies' WHERE id='lib'")
+        query("UPDATE libraries SET root='/movies' WHERE id='lib'")
             .execute(&store.pool)
             .await
             .unwrap();

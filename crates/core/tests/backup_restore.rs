@@ -221,8 +221,8 @@ async fn test_sqlite_wal_backup_and_restore_preserves_users_grants_uuids_and_met
     assert_eq!(restored_assets, original_assets);
 
     // Verify library permissions grant
-    let has_grant: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM library_permissions WHERE library_id=? AND user_id=?)",
+    let has_grant: i64 = sqlx::query_scalar(
+        "SELECT CAST(EXISTS(SELECT 1 FROM library_permissions WHERE library_id=? AND user_id=?) AS INTEGER)",
     )
     .bind(library_id)
     .bind(&user_id)
@@ -230,7 +230,7 @@ async fn test_sqlite_wal_backup_and_restore_preserves_users_grants_uuids_and_met
     .await
     .unwrap();
 
-    assert!(has_grant, "User must retain library grant after restore");
+    assert_eq!(has_grant, 1, "User must retain library grant after restore");
 
     // 9. Validation of reconnection / authentication after restore
     let auth = AuthState::new(restored_store.clone(), "http://127.0.0.1:3000".into())

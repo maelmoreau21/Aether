@@ -24,7 +24,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .or_else(|| std::env::var_os("MEDIA_FIXTURE_DIR"))
             .unwrap_or_else(|| "tests/fixtures/generated".into()),
     );
-    let path = media_poc::identity::configured_path(&root)?;
+
     // Do not silently create directories or modify their access rights.
     println!("Local administrator bootstrap. Protect the database directory with OS permissions.");
     print!("Login (lowercase): ");
@@ -37,7 +37,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("password confirmation does not match".into());
     }
     drop(confirmation);
-    let store = IdentityStore::open(&path).await?;
+    let store = IdentityStore::open_configured(&root).await?;
     let result = store.bootstrap(login.trim(), password).await;
     store.close().await;
     result?;

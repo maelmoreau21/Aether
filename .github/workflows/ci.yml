@@ -28,6 +28,18 @@ jobs:
   rust:
     name: Rust (Format, Clippy, Tests)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: media_test
+          POSTGRES_USER: media_test
+          POSTGRES_PASSWORD: ci-only-disposable-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U media_test -d media_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - name: Récupérer le code source
         uses: actions/checkout@v4
@@ -82,6 +94,14 @@ jobs:
         # Les fixtures 1k/10k partagent CPU et disque du runner ; chaque test de
         # concurrence conserve ses propres tâches concurrentes et ses assertions.
         run: cargo test --locked --workspace --all-features -- --test-threads=1
+
+      - name: Contrats PostgreSQL 18 (HTTP, OIDC, deux Nodes)
+        env:
+          MEDIA_TEST_POSTGRES_URL: postgres://media_test:ci-only-disposable-password@127.0.0.1:5432/media_test?sslmode=disable
+        run: |
+          cargo test --locked -p media-poc --test postgres -- --ignored --test-threads=1
+          cargo test --locked -p media-poc --lib oidc::tests -- --test-threads=1
+          cargo test --locked -p media-poc --test distributed_multi_node -- --test-threads=1
 
   # =========================================================================
   # 2. Audit de sécurité des dépendances Rust

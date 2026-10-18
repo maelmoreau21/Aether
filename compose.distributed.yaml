@@ -44,6 +44,8 @@ services:
       - MEDIA_PUBLIC_URL=${MEDIA_PUBLIC_URL:-http://127.0.0.1:3000}
       - MEDIA_CORE_INTERNAL_URL=${MEDIA_CORE_INTERNAL_URL:-http://aether-core:3000}
       - MEDIA_DB_PATH=/data/core.sqlite3
+      - MEDIA_DB_ENGINE=${MEDIA_DB_ENGINE:-sqlite}
+      - MEDIA_DB_URL=${MEDIA_DB_URL:-}
       - MEDIA_WEB_DIST=/app/apps/web/build
       - MEDIA_OIDC_ENABLED=${MEDIA_OIDC_ENABLED:-false}
       - MEDIA_OIDC_ISSUER=${MEDIA_OIDC_ISSUER:-}

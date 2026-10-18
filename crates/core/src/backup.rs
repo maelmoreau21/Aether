@@ -103,7 +103,7 @@ fn is_symlink_or_reparse(metadata: &std::fs::Metadata) -> bool {
 
 /// Verify that a path does not contain parent directory traversal ('..') and
 /// neither the path itself nor its existing parent is a symlink or reparse point.
-fn check_path_safety(path: &Path, label: &str) -> Result<(), BackupError> {
+pub(crate) fn check_path_safety(path: &Path, label: &str) -> Result<(), BackupError> {
     if path.as_os_str().is_empty() {
         return Err(BackupError::InvalidPath(format!(
             "{label} path cannot be empty"
@@ -141,7 +141,7 @@ fn check_path_safety(path: &Path, label: &str) -> Result<(), BackupError> {
 }
 
 /// Ensure a path is not placed inside the media directory (which must stay read-only).
-fn check_not_in_media_root(
+pub(crate) fn check_not_in_media_root(
     path: &Path,
     media_root: Option<&Path>,
     label: &str,

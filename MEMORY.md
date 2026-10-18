@@ -1,4 +1,29 @@
 # MEMORY.md — État et décisions Aether
+## 18 octobre 2026 — PostgreSQL 18 optionnel entièrement validé
+
+- Départ vérifié : develop, base de code préparée avec SQLx 0.9 Any + SQLite/PostgreSQL.
+- Configuration explicite : `MEDIA_DB_ENGINE=sqlite` (défaut) / `postgres` avec `MEDIA_DB_URL`.
+  Migrations PostgreSQL indépendantes 0001..0013 dans `crates/core/migrations-postgres/` ;
+  migrations SQLite historiques dans `crates/core/migrations/` préservées sans régression.
+- Core, bootstrap (`media-bootstrap`), CLI (`media-backup`, `media-restore`) et Docker Compose
+  pleinement adaptés aux deux moteurs. Sauvegarde SQLite par snapshot WAL `VACUUM INTO` ;
+  sauvegarde PostgreSQL par `pg_dump`/`pg_restore` sécurisés avec transmission d'identifiants
+  par variables d'environnement exclusivement (aucun secret dans argv ni dans les logs).
+- Corrections de stabilité appliquées et validées :
+  1. Résolution d'un interblocage de pool (`PoolTimedOut`) dans `inventory.rs` lors du test de migration éditoriale en libérant explicitement la connexion (`drop(conn)`) sur le pool mono-connexion de test.
+  2. Alignement du décodage `EXISTS(...)` dans `backup_restore.rs` (`SELECT CAST(EXISTS(...) AS INTEGER)` retournant `i64`) pour compatibilité SQLx Any.
+- Suite complète de tests exécutée avec succès :
+  - `cargo test --workspace` : 100 % passés (5 tests `media_contracts`, 30 tests `media_node`, 26 tests unitaires `media_poc`, 9 tests `backup_restore`, tests de concurrence, scans, auth, etc.).
+  - `.\scripts\test-postgres.ps1` (PostgreSQL 18.6 temporaire sous Docker) :
+    - `postgres18_http_contract_and_reopen` : SUCCÈS (30,33 s) — bootstrap premier admin, prévention second admin, rôles/FK, auth/cookies/CSRF, création bibliothèques Films/Séries, scan et staging, navigation catalogue, permissions par bibliothèque, streaming HTTP Range (`GET`, `HEAD`, `206`, `416` avec vérification exacte des octets du média), révocation instantanée des droits, expiration de sessions (`last_seen_at`, `expires_at`), déconnexion, désactivation de compte, fermeture et persistance avec réouverture du Core.
+    - `oidc::tests` (4 tests) : SUCCÈS (50,94 s) — liaison de compte, rejet d'état/nonce invalides, rotation, maintien compte admin de secours.
+    - `distributed_multi_node` : SUCCÈS (16,36 s) — appairage et requêtes sur 2 nœuds distants.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement, code propre.
+  - `cargo fmt --check` : code formaté conforme.
+  - Frontend (`apps/web`) : `svelte-check` (0 erreur, 0 avertissement), 35 tests Vitest passés, build statique réussi.
+- Aucun commit, push ou déploiement effectué sans accord explicite. Prochaine étape P2 : OIDC générique multi-fournisseurs.
+
+
 
 ## 18 octobre 2026 — Correction des échecs CI (Clippy Linux & téléchargement FFmpeg Docker)
 

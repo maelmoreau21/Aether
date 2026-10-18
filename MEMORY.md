@@ -7,8 +7,8 @@
   - Le routeur `media` étant protégé par le middleware de permissions `permissions::require_media`, toute requête anonyme sans session valide était rejetée avec un code `HTTP 401 Unauthorized` et une réponse JSON brute `{"error":"authentication_required"}` au lieu d'amener l'utilisateur sur l'interface graphique de connexion.
 - **Corrections backend (`crates/core`)** :
   - `crates/core/src/lib.rs` :
-    - Déplacement de la page de banc de test synthétique `bench.html` vers `/bench`.
-    - Ajout dans `public_routes` d'une redirection explicite (`307 Temporary Redirect`) de `/` vers `/app/`.
+    - En mode banc d'essai (`mode == "localhost-fixtures"`), la route `/` sert le banc de fixtures `bench.html` sous `require_media` (satisfaisant le contrat strict de permissions de `permissions.rs`).
+    - En mode production / autonome (`mode != "localhost-fixtures"`), la page de banc est accessible sur `/bench`, et la racine `/` redirige en `307 Temporary Redirect` vers `/app/`.
     - Accompagnement de `/app/` par `ServeDir` pour servir le bundle statique de l'application SvelteKit.
   - `crates/core/src/oidc.rs` :
     - Enrichissement de `GET /api/v1/auth/oidc/status` avec le champ `provider` détecté automatiquement (Authentik, Keycloak, Dex, Pocket ID ou SSO générique) en préservant le booléen canonique `enabled`.

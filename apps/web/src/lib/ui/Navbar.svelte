@@ -36,7 +36,7 @@
     <div class="header-brand-group">
       <a class="brand" href={resolve('/')} aria-label={`${name}, accueil`}>
         <div class="brand-logo-wrapper">
-          <img src={`${base}/images/brand-mark.svg`} width="26" height="30" alt="" />
+          <img src={`${base}/images/logo-animated.svg`} width="26" height="30" alt="" />
         </div>
         <span class="brand-text">{name}</span>
       </a>

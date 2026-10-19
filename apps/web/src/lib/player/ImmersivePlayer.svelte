@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { resolve } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
   import PlayerControls, { type Menu } from './PlayerControls.svelte';
   import type { Media, Player, PlayerFactory, PlaybackState } from './types';
@@ -7,6 +8,7 @@
   import { ProgressTracker } from './progress';
   import { getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences } from '../preferences';
+  const base = resolve('/').replace(/\/$/, '');
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
   let dialog: HTMLDialogElement;
@@ -103,13 +105,10 @@
       if (offsets && Number.isFinite(offsets.audio) && Math.abs(offsets.audio) <= 30) audioOffset = offsets.audio;
       if (offsets && Number.isFinite(offsets.subtitle) && Math.abs(offsets.subtitle) <= 30) subtitleOffset = offsets.subtitle;
       preferredLanguage = account.audioLanguage ?? 'fr';
-      const saved = account.subtitlePreference;
-      if (saved && typeof saved.enabled === 'boolean' && (saved.language === undefined || typeof saved.language === 'string')) subtitlePreference = saved;
-      else {
-        const initialSubtitles = account.subtitles;
-        if (initialSubtitles === 'off') subtitlePreference = { enabled: false };
-        if (initialSubtitles === 'always') subtitlePreference = { enabled: true, language: 'fr', forced: false };
-      }
+      const initialSubtitles = account.subtitles;
+      if (initialSubtitles === 'off') subtitlePreference = { enabled: false };
+      else if (initialSubtitles === 'always') subtitlePreference = { enabled: true, language: 'fr', forced: false };
+      else subtitlePreference = undefined;
     } catch { /* Preferences are optional when browser storage is unavailable. */ }
     generation++; const current = generation;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -176,12 +175,10 @@
       savePreferences({ audioTrack: preferredAudio, audioLanguage: preferredLanguage });
     });
   }
-  function selectSubtitle(id: string | null) { const accountGeneration = getSessionGeneration(); void action(async player => {
+  function selectSubtitle(id: string | null) { void action(async player => {
     await player.selectSubtitle(id); subtitle = id;
-    if (accountGeneration !== getSessionGeneration()) return;
     const track = active?.subtitles.find(track => track.id === id);
     subtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
-    savePreferences({ subtitlePreference });
   }); }
   function offset(kind: 'audio' | 'subtitle', value: number) {
     if (!Number.isFinite(value) || Math.abs(value) > 30) return;
@@ -246,7 +243,7 @@
       <div class="title"><span>{active?.title ?? 'Votre séance'}</span><small>LECTURE LOCALE{active?.synthetic ? ' · MIRE SYNTHÉTIQUE' : ''}</small></div>
       {#if nextTitle && onNext}<div class="next-episode"><button disabled={busy} onclick={onNext}>Épisode suivant : {nextTitle}</button><label><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
     </div>
-    {#if busy}<div class="loading" role="status"><span class="loader"></span>Préparation de votre séance…</div>{/if}
+    {#if busy}<div class="loading" role="status"><img src="{base}/images/logo-loading.svg" alt="" class="player-spinner" width="40" height="40" />Préparation de votre séance…</div>{/if}
     {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, playback); }}>Réessayer explicitement</button></div>{/if}
     <p class="fullscreen-notice" role="status">{notice}</p>
     {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
@@ -325,19 +322,11 @@
     font-weight: 500;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
   }
-  .loader {
-    border: 3px solid rgba(255, 255, 255, 0.15);
-    border-top-color: var(--color-accent);
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
-    animation: spin 0.9s linear infinite;
-    box-shadow: 0 0 20px var(--color-accent-glow);
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
+  .player-spinner {
+    width: 40px;
+    height: 40px;
+    display: block;
+    filter: drop-shadow(0 0 16px rgba(245, 158, 11, 0.35));
   }
   .player-error {
     position: absolute;

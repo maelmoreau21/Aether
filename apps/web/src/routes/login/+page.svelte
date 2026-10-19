@@ -177,7 +177,7 @@
     <header class="brand-header">
       <div class="brand-badge">
         <img
-          src={`${resolve('/').replace(/\/$/, '')}/images/brand-mark.svg`}
+          src={`${resolve('/').replace(/\/$/, '')}/images/logo-animated.svg`}
           alt=""
           width="40"
           height="48"

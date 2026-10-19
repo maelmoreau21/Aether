@@ -180,13 +180,13 @@ MEDIA_OIDC_USER_GROUPS=media-users
   }
 
   .env-code {
-    background: #101017;
+    background: var(--color-raised);
     border: 1px solid var(--color-line);
     border-radius: var(--radius-sm);
     padding: 16px;
     overflow-x: auto;
     font-size: 12px;
-    color: #e5e0f0;
+    color: var(--color-text);
     line-height: 1.6;
   }
 
@@ -224,15 +224,15 @@ MEDIA_OIDC_USER_GROUPS=media-users
   }
 
   .badge[data-status='connected'] {
-    color: #9be7b4;
-    border-color: #2e6b44;
-    background: #14281c;
+    color: var(--color-success);
+    border-color: var(--color-success);
+    background: var(--color-success-soft);
   }
 
   .badge[data-status='disconnected'] {
-    color: #f5c97b;
-    border-color: #75541e;
-    background: #2b200e;
+    color: var(--color-warning);
+    border-color: var(--color-warning);
+    background: var(--color-warning-soft);
   }
 
   .muted-note {

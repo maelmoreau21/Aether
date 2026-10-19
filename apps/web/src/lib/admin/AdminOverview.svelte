@@ -236,9 +236,9 @@
   }
 
   .kpi-badge.ok {
-    background: #14281c;
-    border: 1px solid #2e6b44;
-    color: #9be7b4;
+    background: var(--color-success-soft);
+    border: 1px solid var(--color-success);
+    color: var(--color-success);
   }
 
   .kpi-value-row {
@@ -266,11 +266,11 @@
   }
 
   .ok-text {
-    color: #4ade80;
+    color: var(--color-success);
   }
 
   .warn-text {
-    color: #f5c97b;
+    color: var(--color-warning);
   }
 
   .error-text {
@@ -343,8 +343,8 @@
   }
 
   .status-dot.connected {
-    background: #4ade80;
-    box-shadow: 0 0 8px #4ade80aa;
+    background: var(--color-success);
+    box-shadow: 0 0 8px var(--color-success-soft);
   }
 
   .badge {
@@ -356,8 +356,8 @@
   }
 
   .badge[data-status='connected'] {
-    color: #9be7b4;
-    border-color: #2e6b44;
-    background: #14281c;
+    color: var(--color-success);
+    border-color: var(--color-success);
+    background: var(--color-success-soft);
   }
 </style>

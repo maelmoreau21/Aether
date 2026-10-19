@@ -407,6 +407,7 @@
               href="#overview"
               class="sidebar-nav-item"
               class:active={currentHash === '#overview'}
+              aria-current={currentHash === '#overview' ? 'page' : undefined}
               onclick={() => currentHash = '#overview'}
             >
               <span class="nav-icon"><Icon name="sparkles" size={16} /></span>
@@ -423,6 +424,7 @@
               href="#libraries-section"
               class="sidebar-nav-item"
               class:active={currentHash === '#libraries-section'}
+              aria-current={currentHash === '#libraries-section' ? 'page' : undefined}
               onclick={() => currentHash = '#libraries-section'}
             >
               <span class="nav-icon"><Icon name="film" size={16} /></span>
@@ -433,6 +435,7 @@
               href="#nodes-section"
               class="sidebar-nav-item"
               class:active={currentHash === '#nodes-section'}
+              aria-current={currentHash === '#nodes-section' ? 'page' : undefined}
               onclick={() => currentHash = '#nodes-section'}
             >
               <span class="nav-icon"><Icon name="server" size={16} /></span>
@@ -447,16 +450,25 @@
               href="#users-section"
               class="sidebar-nav-item"
               class:active={currentHash === '#users-section'}
+              aria-current={currentHash === '#users-section' ? 'page' : undefined}
               onclick={() => currentHash = '#users-section'}
             >
               <span class="nav-icon"><Icon name="users" size={16} /></span>
               <span class="nav-text">{$t('admin_nav_users')}</span>
               <span class="count-badge">{users.length}</span>
             </a>
+            <a href="#groups-section" class="sidebar-nav-item" class:active={currentHash === '#groups-section'}
+              aria-current={currentHash === '#groups-section' ? 'page' : undefined}
+              onclick={() => currentHash = '#groups-section'}>
+              <span class="nav-icon"><Icon name="users" size={16} /></span>
+              <span class="nav-text">Groupes</span>
+              <span class="count-badge">{groups.length}</span>
+            </a>
             <a
               href="#sso-section"
               class="sidebar-nav-item"
               class:active={currentHash === '#sso-section'}
+              aria-current={currentHash === '#sso-section' ? 'page' : undefined}
               onclick={() => currentHash = '#sso-section'}
             >
               <span class="nav-icon"><Icon name="shield" size={16} /></span>
@@ -469,16 +481,15 @@
           <div class="sidebar-group">
             <span class="group-label">Maintenance &amp; intégrations</span>
             {#each [
-              ['#tasks-section', $t('admin_nav_tasks'), 'server'],
+              ['#tasks-section', $t('admin_nav_tasks'), 'clock'],
               ['#backups-section', 'Sauvegardes', 'server'],
-              ['#groups-section', 'Groupes', 'users'],
               ['#api-keys-section', 'Clés API', 'shield'],
               ['#extensions-section', 'Extensions', 'sparkles']
             ] as [hash, label, icon] (hash)}
               <a href={resolve(`admin/libraries/#${hash.slice(1)}`)} class="sidebar-nav-item" class:active={currentHash === hash}
                 aria-current={currentHash === hash ? 'page' : undefined}
                 onclick={() => currentHash = hash}>
-                <span class="nav-icon"><Icon name={icon as 'server' | 'users' | 'shield' | 'sparkles'} size={16} /></span>
+                <span class="nav-icon"><Icon name={icon as 'server' | 'users' | 'shield' | 'sparkles' | 'clock'} size={16} /></span>
                 <span class="nav-text">{label}</span>
               </a>
             {/each}
@@ -488,7 +499,7 @@
         <!-- Main Admin Content Area -->
         <div class="admin-content-area">
           <div class="admin-hero">
-            <p class="eyebrow">AETHER CORE · GESTION DE LA PLATEFORME</p>
+            <p class="eyebrow">Console serveur</p>
             <h1>{$t('admin_title')}</h1>
             <p class="hero-desc">
               {$t('admin_subtitle')}
@@ -588,10 +599,10 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 24px;
+    gap: 12px;
     padding: 16px var(--page-gutter);
     border-bottom: 1px solid var(--color-line);
-    background: var(--color-glass);
+    background: var(--color-surface);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     position: sticky;
@@ -643,8 +654,8 @@
 
   .admin-dashboard-container {
     display: grid;
-    grid-template-columns: 260px 1fr;
-    gap: 36px;
+    grid-template-columns: 248px minmax(0, 1fr);
+    gap: 32px;
     align-items: start;
   }
 
@@ -660,8 +671,7 @@
     padding: 20px 14px;
     background: var(--color-surface);
     border: 1px solid var(--color-line);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm);
+    border-radius: var(--radius-sm);
   }
 
   .sidebar-header {
@@ -686,7 +696,7 @@
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.08em;
-    color: var(--color-subtle);
+    color: var(--color-muted);
     padding: 4px 8px;
     text-transform: uppercase;
   }
@@ -727,9 +737,9 @@
 
   .nav-text {
     flex: 1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    line-height: 1.45;
   }
 
   .count-badge {
@@ -753,9 +763,9 @@
     font-weight: 700;
     padding: 2px 7px;
     border-radius: 99px;
-    background: #14281c;
-    color: #9be7b4;
-    border: 1px solid #2e6b44;
+    background: var(--color-success-soft);
+    color: var(--color-success);
+    border: 1px solid var(--color-success);
   }
 
   .status-indicator {
@@ -770,7 +780,7 @@
   .admin-content-area {
     display: flex;
     flex-direction: column;
-    gap: 40px;
+    gap: 24px;
     min-width: 0;
   }
 
@@ -823,15 +833,15 @@
   }
 
   .error-banner {
-    background: #361719;
+    background: var(--color-danger-soft);
     border: 1px solid var(--color-danger);
     color: var(--color-danger);
   }
 
   .notice-banner {
-    background: #14281c;
-    border: 1px solid #2e6b44;
-    color: #9be7b4;
+    background: var(--color-success-soft);
+    border: 1px solid var(--color-success);
+    color: var(--color-success);
   }
 
   .small-btn {
@@ -863,6 +873,18 @@
     height: 48px;
     display: block;
     margin: 0 auto;
+  }
+
+  .admin-content-area :global(:where(section, article, form, fieldset, header, label, details, .card)) { min-width: 0; }
+  .admin-content-area :global(:where(h2, h3, p, dd, code, label, button, summary)) { overflow-wrap: anywhere; }
+  .admin-content-area :global(:where(input, select, button)) { max-width: 100%; }
+  .header-left { min-width: 0; flex-wrap: wrap; }
+  .banner-content { min-width: 0; overflow-wrap: anywhere; }
+  @media (max-width: 480px) {
+    main { padding: 20px 16px 48px; }
+    .admin-header { padding: 12px 16px; }
+    .header-badge, .header-separator { display: none; }
+    .count-badge { padding: 2px 5px; }
   }
 
   @media (max-width: 960px) {

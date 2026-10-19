@@ -28,6 +28,10 @@ const translations = {
     language: 'Langue de l’interface',
     language_fr: 'Français',
     language_en: 'English',
+    theme: 'Apparence & Thème',
+    theme_light: 'Clair (Pierre Douce)',
+    theme_dark: 'Sombre (Cinéma OLED)',
+    theme_system: 'Automatique (Système)',
 
     // User & Roles
     administrator: 'Administrateur',
@@ -114,6 +118,10 @@ const translations = {
     language: 'Interface language',
     language_fr: 'Français',
     language_en: 'English',
+    theme: 'Appearance & Theme',
+    theme_light: 'Light (Pierre Douce)',
+    theme_dark: 'Dark (OLED Cinema)',
+    theme_system: 'Automatic (System)',
 
     // User & Roles
     administrator: 'Administrator',

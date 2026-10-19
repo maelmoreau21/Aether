@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { session, logout } from '../auth/session';
   import { t, locale, setLocale } from '../i18n';
+  import { themeMode, setTheme } from '../theme';
 
   let panel: HTMLDivElement;
   let expanded = $state(false);
@@ -90,6 +91,31 @@
           <Icon name="chevron" size={13} />
         </a>
       {/if}
+
+      <!-- Theme mode selector toggle -->
+      <div class="lang-switch-section">
+        <span class="lang-title"><Icon name="sun" size={15} /> {$t('theme')}</span>
+        <div class="lang-pills">
+          <button
+            type="button"
+            class="lang-pill"
+            class:active={$themeMode === 'light'}
+            onclick={() => setTheme('light')}
+            title={$t('theme_light')}
+          >
+            {$locale === 'fr' ? 'Clair' : 'Light'}
+          </button>
+          <button
+            type="button"
+            class="lang-pill"
+            class:active={$themeMode === 'dark'}
+            onclick={() => setTheme('dark')}
+            title={$t('theme_dark')}
+          >
+            {$locale === 'fr' ? 'Sombre' : 'Dark'}
+          </button>
+        </div>
+      </div>
 
       <!-- Language selector toggle -->
       <div class="lang-switch-section">

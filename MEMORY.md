@@ -1,5 +1,39 @@
 # MEMORY.md — État et décisions Aether
 
+## 19 octobre 2026 — Mises à jour des dépendances stables et Refonte Bi-thème (Clair "Pierre Douce" & Sombre "Cinéma OLED")
+
+- **Mises à jour des dépendances vers les dernières versions stables** :
+  - **Rust Workspace** :
+    - Alignement de `base64` sur la version `0.23.1` dans `crates/shared/Cargo.toml` (partagé avec `crates/core`).
+    - Mise à jour de `Cargo.lock` avec les dernières versions stables compatibles (`cc` 1.9.0, `crypto-common` 0.1.7, `find-msvc-tools` 0.1.15, `libc` 0.2.191, `unicode-normalization` 0.1.26).
+  - **Frontend Web (`apps/web`)** :
+    - Mise à jour d'`eslint` vers `^10.13.0` et `svelte-check` vers `^4.7.7`.
+    - Maintien rigoureux de `typescript` en `^6.0.3` (exigé par `@sveltejs/kit@3.1.0` et `typescript-eslint@8.71.2`, TS 7.0 n'étant pas encore supporté par les plugins du compilateur SvelteKit/ESLint).
+- **Implémentation du Système Bi-thème de Référence** :
+  - **Fichier de référence (`apps/web/src/app.css`)** :
+    - Contient exactement les variables spécifiées pour `:root`, `[data-theme="light"]` (Pierre Douce) et `[data-theme="dark"]` (Cinéma OLED) :
+      - Couleurs de marque : `--brand-amber: #F59E0B`, `--brand-red: #EF4444`, `--brand-gradient: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%)`.
+      - États : `--status-success: #10B981`, `--status-warning: #F59E0B`, `--status-error: #EF4444`.
+      - Thème Clair "Pierre Douce" : `--bg-main: #EFECE6`, `--bg-surface: #FAF9F6`, `--bg-elevated: #E5E0D8`, `--border-subtle: #DCD6CC`, `--text-primary: #1C1917`, `--text-secondary: #57534E`, `--text-muted: #A8A29E`, `--accent-primary: #EA580C`, `--accent-secondary: #D97706`.
+      - Thème Sombre "Cinéma OLED" : `--bg-main: #09090B`, `--bg-surface: #121215`, `--bg-elevated: #1E1E24`, `--border-subtle: #27272A`, `--text-primary: #FAFAFA`, `--text-secondary: #A1A1AA`, `--text-muted: #52525B`, `--accent-primary: #EF4444`, `--accent-secondary: #F59E0B`.
+  - **Intégration du Design System (`apps/web/src/lib/styles/tokens.css`)** :
+    - Mappage réactif complet des surfaces, canvas, lignes, verres, ombres et typographies vers les nouvelles variables pour les deux modes, avec prise en compte automatique de `@media (prefers-color-scheme: dark)`.
+  - **Gestionnaire de Thème (`apps/web/src/lib/theme/index.ts`)** :
+    - Module Svelte store avec persistance `localStorage` (`media_theme`), détection dynamique de l'OS (`prefers-color-scheme`), et application immédiate de `data-theme` sur `<html>`.
+  - **Composants d'Interface & Internationalisation** :
+    - Sélecteur de thème rapide ajouté au menu profil (`ProfileMenu.svelte`) avec bascule instantanée Clair / Sombre.
+    - Sélecteur complet ajouté aux paramètres de profil (`SettingsView.svelte`) supportant les 3 modes (Clair, Sombre, Système).
+    - Clés de traduction bilingues (FR / EN) ajoutées dans `apps/web/src/lib/i18n/index.ts`.
+    - Icônes `sun` et `moon` ajoutées dans `Icon.svelte`.
+- **Validation & Contrôle Qualité** :
+  - `cargo test --workspace` : 100% réussi.
+  - `cargo clippy --all-targets -- -D warnings` : 0 warning.
+  - `cargo fmt --check` : 0 diff.
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web run lint` : 0 erreur.
+  - `npm --prefix apps/web test` : 48/48 tests réussis.
+  - `npm --prefix apps/web run build` : build statique réussi sans violation CSP.
+
 ## 18 octobre 2026 — Refonte Tableau de bord Jellyfin, Support SSO Unicode & Pseudo, et Internationalisation (FR / EN)
 
 - **Tableau de bord Administrateur Jellyfin-style & Menu Profil** :

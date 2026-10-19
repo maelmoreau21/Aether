@@ -1,5 +1,42 @@
 # MEMORY.md — État et décisions Aether
 
+## 19 octobre 2026 — Tolérances sous-titres, groupes par défaut et exclusions d'indexation (NAS / corbeille)
+
+- **Tolérances et robustesse sous-titres (`crates/node/src/subtitles.rs`)** :
+  - Résolution des anomalies de scan `subtitles exceed 512 KiB per video` et `subtitle end precedes start` constatées sur des pistes volumineuses (ex. CJK/SDH) ou avec des timecodes corrompus.
+  - Plafond par piste porté de 256 Kio à 1 Mio, plafond total par vidéo porté de 512 Kio à 16 Mio, nombre max de pistes porté de 16 à 64.
+  - Dans les convertisseurs WebVTT (SRT et ASS), les répliques isolées où `end <= start` sont désormais ignorées sans invalider tout le reste de la piste.
+- **Groupes par défaut (`is_default`)** :
+  - Ajout d'une colonne `is_default INTEGER/BOOLEAN NOT NULL DEFAULT 0` sur `user_groups` via migration 0028 (SQLite et PostgreSQL).
+  - La vue `effective_library_permissions` associe automatiquement tous les utilisateurs existants et futurs aux groupes marqués comme par défaut, leur conférant l'accès aux bibliothèques associées sans affecter le modèle strict à deux rôles (`administrator` / `user`).
+  - Interface d'administration `AdminGroups.svelte` et `AdminUsers.svelte` enrichie d'une case à cocher « Groupe par défaut » et de badges d'indication clairs.
+- **Exclusion des dossiers NAS / corbeille et filtres personnalisés** :
+  - Le scanner (`crates/node/src/scanner.rs`) ignore d'office les dossiers et fichiers système ou corbeille des NAS : `#recycle`, `@eaDir`, `@synoEAStream`, `@appstore`, `#snapshot`, `lost+found`, `.@__thumb`, `thumbs.db`, `desktop.ini`, ainsi que tout nom commençant par `@`.
+  - Prise en charge des marqueurs d'exclusion dans les dossiers : `.nomedia`, `.ignore`, `.aetherignore`.
+  - Ajout du champ `excluded_patterns` par bibliothèque (`crates/core/src/libraries.rs`, formulaire `AdminLibraries.svelte`), transmis au Media Node lors du scan en streaming (`RemoteScanStartRequest`).
+- **Validations exécutées** :
+  - `cargo test -p media-node` : 36/36 tests unitaires passés + 3 tests d'intégration (dont test dédié sur dossiers NAS, `.nomedia` et patterns).
+  - `cargo test -p media-poc` : ensemble des suites unitaires et d'intégration validées (dont `scheduler`, `series_flow`, `catalog_performance`, `admin_access`).
+  - `cargo fmt --check` et `cargo clippy --all-targets -- -D warnings` : 0 avertissement.
+  - `npm run check` (0 erreur, 0 avertissement) et `npm test` (54/54 tests passés dans `apps/web`).
+
+## 19 octobre 2026 — Général, réseau effectif, avatars et modes d’actualisation
+
+- Nouvelle demande appuyée par cinq captures Jellyfin : console avec navigation latérale fixe sur bureau, marque/version, pages Général et Réseau ; médiathèques en grille et menus Gérer/Renommer/Actualiser/Planifier, formulaires en dialogues natifs, menu mobile repliable. Les cartes restent une représentation Films/Séries sans fausses affiches.
+- Général : nom du serveur et message d’accueil persistants (`server_settings`), édition administrateur + CSRF, relecture après sauvegarde, nom dans la navigation et message sur l’accueil authentifié. La marque produit de `/api/v1/config` reste indépendante du nom de cette installation.
+- Réseau : page et endpoint administrateur montrant l’origine réellement utilisée par AuthState, les cookies HTTPS et les chemins Web/API. Transport en lecture seule : pas de changement à chaud de ports/TLS/MEDIA_PUBLIC_URL, ni d’ouverture automatique d’accès distant.
+- Avatar : GET/HEAD/PUT/DELETE `/api/v1/account/avatar`, compte courant uniquement, CSRF sur mutations. PNG/JPEG/WebP ≤ 2 Mio, dimensions ≤ 4096, pixels décodés ≤ 32 Mio, deux décodeurs maximum ; recadrage/réencodage PNG 256×256, stockage dans la base (`user_avatars`), cache privé no-store/nosniff. Affiché dans Compte, l’en-tête et le menu profil ; suppression et repli icône. Aucun chemin ou URL externe accepté, aucune écriture dans les médias.
+- Modes manuels : `incremental` (défaut historique), `new_only` (éditorial connu conservé), `missing_metadata` (NFO validés connus conservés, absents complétés), `full` (caches techniques/images ignorés et données locales relues). Le Core fige le mode dans le job ; publication commune Films/Séries/Épisodes. Les pistes, fichiers modifiés, contrôles de confinement et autorisations restent vérifiés. Mode complet distant via caches vides du contrat existant ; les plans périodiques restent incrémentaux.
+- Migration additive 0027 SQLite + PostgreSQL : réglages, avatars et mode de job. Les données du compte et du serveur sont incluses dans les sauvegardes de la base.
+- Fournisseurs futurs : contrat/politiques préparés et documentés, pas de recherche TMDB/TVDB/IMDb implémentée ni de tâche d’extension fictive. « Manquant » signifie actuellement absence de NFO validé, pas fusion champ par champ. Détails : `docs/SETTINGS_AND_REFRESH.md`, revue mise à jour dans `docs/SETTINGS_REVIEW.md`.
+- Vérifications réussies : `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace` (tests externes/navigateurs ignorés gardent leurs prérequis), `npm run check` (0 erreur/avertissement), `npm run lint`, `npm test` (54 tests), `npm run build`, `git diff --check`.
+- Vérifications ciblées après dernières retouches : `cargo test -p media-poc --test nfo_flow --test settings_avatars` (3 tests), `cargo test -p media-poc --lib avatars::tests` (1 test : trois formats réencodés, dimensions bornées). Les tests de modes couvrent Films, Séries et Épisodes : conservation, complétion, réanalyse complète, identifiants stables et médias inchangés. Les tests avatars/réglages couvrent droits, CSRF, fichiers refusés/oversize, HEAD et persistance après réouverture.
+- Chrome headless/API simulée : `node scripts/test-admin-ui.mjs` réussi, deux thèmes/cinq largeurs, pages Général/Réseau, upload/suppression avatar, modes envoyés par le menu de médiathèque, tâches et préférences. Premier démarrage du serveur Vite froid a dépassé 10 s pendant la compilation Rust ; scénario relancé avec navigation 30 s, puis réussi.
+- Vrai Core/SQLite temporaire : `cargo test -p media-poc --test browser_admin -- --ignored --nocapture` réussi. Création/renommage de médiathèque par UI, nom/message relus et message vu sur l’accueil, réseau effectif, avatar décodé à 256 px puis rechargé/supprimé, actualisation complète par dialogue, comptes/groupes/clefs/backups/préférences conservés. Clé de sauvegarde éphémère fournie au seul processus de test ; aucun dossier personnel utilisé. Correction du script Playwright pour lire l’ID de création avant de quitter la page.
+- Captures inspectées : `docs/evidence/2026-10-19/settings-expanded/`, dont compte/actualisation issus du vrai Core. Les scripts navigateur Films/NFO/posters/Séries/distribué sont adaptés aux menus et dialogues ; seule l’administration réelle a été relancée explicitement dans ce jalon.
+- Limites : pas de nouvelle preuve PostgreSQL réel, NAS, appareil physique ou nouveau décodage média navigateur. Aucun déploiement/publication/push. Prochain petit lot proposé après retour sur l’interface : règles de reprise configurables et gestion personnelle des sessions. Token Saver : contexte réutilisé, lectures ciblées et contrôles regroupés ; aucune économie chiffrée revendiquée.
+
+
 ## 19 octobre 2026 — Correction du test E2E séries (`browser_series`)
 
 - **Correction de la navigation Playwright dans `scripts/browser-series.cjs`** :
@@ -128,8 +165,31 @@
   - `npm run check` (dans `apps/web`) : 0 erreur, 0 avertissement.
   - `npm test` (dans `apps/web`) : 53/53 tests unitaires réussis.
   - `npm run build` (dans `apps/web`) : compilation et génération statique réussies sans erreur.
-  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 warning.
-  - `cargo fmt --check` : 0 diff.
+## 19 octobre 2026 — Correction des anomalies de sous-titres, groupes par défaut et exclusion de dossiers/fichiers d'indexation (#recycle)
+
+- **Correction des anomalies de sous-titres (`subtitles exceed 512 KiB per video` et `subtitle end precedes start`)** :
+  - **Augmentation des limites de taille dans `crates/node/src/subtitles.rs`** :
+    - `MAX_BYTES` (taille max d'un fichier de sous-titre) relevé de 256 Ko à 1 Mo (`1024 * 1024`).
+    - `MAX_TOTAL_BYTES` (taille max cumulée des pistes WebVTT par vidéo) relevé de 512 Ko à 16 Mo (`16 * 1024 * 1024`). Permet d'indexer sans blocage les films longs comportant de nombreuses pistes externes (ex: Avatar 2, Babylon, Avengers, Harry Potter avec 10+ langues).
+    - `MAX_TRACKS` relevé de 16 à 64 pistes.
+  - **Tolérance aux erreurs mineures de minutage (`subtitle end precedes start`)** :
+    - Dans `to_webvtt` (SRT/VTT) et `ass_to_webvtt` (ASS), si une réplique a `end <= start` (durée nulle ou inversion de quelques ms dans un fichier de 2 000 répliques), la réplique corrompue est ignorée via `continue` au lieu de rejeter l'intégralité du fichier de sous-titres du film. Si aucune réplique valide n'est trouvée, l'erreur est maintenue.
+- **Groupes par défaut pour tous les utilisateurs (`is_default`)** :
+  - Migration SQL `0028_default_groups_and_library_exclusions.sql` (SQLite & PostgreSQL) ajoutant la colonne `is_default` (booléen) sur `user_groups` et mettant à jour la vue `effective_library_permissions` :
+    - Tout groupe marqué par défaut (`is_default = 1`) accorde automatiquement l'accès à ses bibliothèques à tous les utilisateurs existants et futurs (locaux et OIDC), sans nécessiter d'assignation manuelle dans `user_group_members`.
+  - API `crates/core/src/groups.rs` : prise en charge de `isDefault` dans `create`, `update` et `list`.
+  - Frontend :
+    - `apps/web/src/lib/admin/AdminGroups.svelte` : badge « Par défaut » sur les groupes concernés et case à cocher explicite dans le formulaire de création/modification.
+    - `apps/web/src/lib/admin/AdminUsers.svelte` : prise en compte de `isDefault` dans le calcul d'accès aux bibliothèques des utilisateurs.
+- **Exclusion de dossiers/fichiers lors de l'indexation (`#recycle`, `@eaDir`, `.nomedia`, motifs personnalisés)** :
+  - **Exclusions automatiques système dans `crates/node/src/scanner.rs`** :
+    - `ignored(name)` ignore désormais inconditionnellement les corbeilles et dossiers système NAS : `#recycle`, `@eaDir`, `@synoEAStream`, `@appstore`, `#snapshot`, `lost+found`, `.@__thumb`, `thumbs.db`, `desktop.ini`, ainsi que les noms débutant par `@`.
+    - `FolderVideos::load` ignore également ces entrées lors du parcours des fichiers annexes.
+    - Tout dossier contenant un fichier marqueur d'ignorance `.nomedia`, `.ignore` ou `.aetherignore` est automatiquement sauté lors du scan récursif.
+  - **Exclusions configurables par médiathèque** :
+    - Ajout de la colonne `excluded_patterns TEXT NOT NULL DEFAULT ''` sur la table `libraries`.
+    - Interface d'administration `AdminLibraries.svelte` : champ de saisie permettant à l'administrateur de renseigner des motifs ou dossiers à exclure séparés par des virgules (ex: `bonus, trailers, specials, #recycle`).
+    - Prise en charge dans `crates/core/src/libraries.rs`, `crates/core/src/scans.rs`, `crates/core/src/nodes.rs`, `crates/shared/src/protocol.rs` (`RemoteScanStartRequest`) et `crates/node/src/scanner.rs` (`scan_streaming` et `is_excluded`).
 
 ## 19 octobre 2026 — Console administrateur, premier jalon
 

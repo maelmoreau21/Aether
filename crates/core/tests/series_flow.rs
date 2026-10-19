@@ -1090,7 +1090,7 @@ async fn a3_contradictory_series_staging_deterministic_selection_and_200_episode
     .await;
 
     // Create matching library row in store_rev
-    sqlx::query("INSERT INTO libraries VALUES(?, 'Series Lib', 'series', 'local', ?, 1)")
+    sqlx::query("INSERT INTO libraries(id, name, kind, node_id, root, enabled) VALUES(?, 'Series Lib', 'series', 'local', ?, 1)")
         .bind(&series_lib_id)
         .bind(series_root.to_string_lossy().as_ref())
         .execute(store_rev.pool())
@@ -1216,7 +1216,7 @@ async fn a3_contradictory_series_staging_deterministic_selection_and_200_episode
     let store_tie_1 = IdentityStore::open(&db_tie_1).await.unwrap();
     let store_tie_2 = IdentityStore::open(&db_tie_2).await.unwrap();
     for s in [&store_tie_1, &store_tie_2] {
-        sqlx::query("INSERT INTO libraries VALUES(?, 'Series Lib', 'series', 'local', ?, 1)")
+        sqlx::query("INSERT INTO libraries(id, name, kind, node_id, root, enabled) VALUES(?, 'Series Lib', 'series', 'local', ?, 1)")
             .bind(&series_lib_id)
             .bind(series_root.to_string_lossy().as_ref())
             .execute(s.pool())

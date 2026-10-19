@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import { serverPresentation } from '../config/presentation';
   import { preferences, savePreferences } from '../preferences';
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
@@ -377,6 +378,7 @@
 <Navbar {section} {name} />
 
 <main id="main-content" tabindex="-1">
+  {#if section === 'home' && $serverPresentation.welcomeMessage}<p class="server-welcome">{$serverPresentation.welcomeMessage}</p>{/if}
   {#if section === 'settings'}
     <SettingsView
       bind:prefAudio
@@ -510,6 +512,7 @@
 {/if}
 
 <style>
+  .server-welcome { color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; padding-block: 16px; }
   .skip-link {
     position: fixed;
     top: -80px;

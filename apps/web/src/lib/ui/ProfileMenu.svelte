@@ -1,6 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import Icon from './Icon.svelte';
+  import ProfileAvatar from './ProfileAvatar.svelte';
   import { goto } from '$app/navigation';
   import { session, logout } from '../auth/session';
   import { t, locale, setLocale } from '../i18n';
@@ -51,7 +52,7 @@
     aria-expanded={expanded}
     aria-controls="profile-menu"
   >
-    <span class="avatar"><Icon name="profile" size={18} /></span>
+    <ProfileAvatar />
     <span class="profile-caption">{displayName}</span>
     <span class="profile-chevron" class:expanded><Icon name="chevron" size={12} /></span>
   </button>
@@ -65,7 +66,7 @@
     onfocusout={focusLeft}
   >
     <div class="profile-heading">
-      <span class="avatar"><Icon name="profile" size={18} /></span>
+      <ProfileAvatar />
       <div class="user-details">
         <strong>{displayName}</strong>
         {#if hasDistinctName}
@@ -175,18 +176,6 @@
   }
   .profile-trigger:active {
     background: var(--color-accent-soft);
-  }
-  .avatar {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    border: 1px solid var(--color-line);
-    border-radius: 50%;
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-    flex-shrink: 0;
   }
   .profile-caption {
     font-size: 12px;

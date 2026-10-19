@@ -12,4 +12,4 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
 
-export interface UserGroup { id: string; name: string; userIds: string[]; libraryIds: string[] }
+export interface UserGroup { id: string; name: string; isDefault?: boolean; userIds: string[]; libraryIds: string[] }

@@ -94,11 +94,12 @@ fs.mkdirSync(out, { recursive: true });
     await page.screenshot({ path: `${out}/01-nodes-paired.png`, fullPage: true });
 
     // 3. Create Films library on Node 1 and Series library on Node 2 via UI if not present
-    const libListSection = page.locator('section[aria-labelledby="library-list"]');
+    await page.locator('.admin-sidebar a[href$="#libraries-section"]').click();
+    const libListSection = page.locator('#libraries-section');
     const nodeSelect = page.locator('#library-node');
-    await nodeSelect.waitFor();
 
     if (await libListSection.getByText('Films NAS Node 1').count() === 0) {
+      await page.getByRole('button',{name:'Ajouter une médiathèque',exact:true}).click();
       const node1OptionValue = await nodeSelect.locator('option', { hasText: 'Node Films Docker' }).getAttribute('value');
       assert.ok(node1OptionValue, 'Node 1 option must exist in #library-node select');
       await page.locator('#library-name').fill('Films NAS Node 1');
@@ -110,6 +111,7 @@ fs.mkdirSync(out, { recursive: true });
     }
 
     if (await libListSection.getByText('Séries NAS Node 2').count() === 0) {
+      await page.getByRole('button',{name:'Ajouter une médiathèque',exact:true}).click();
       const node2OptionValue = await nodeSelect.locator('option', { hasText: 'Node Séries Docker' }).getAttribute('value');
       assert.ok(node2OptionValue, 'Node 2 option must exist in #library-node select');
       await page.locator('#library-name').fill('Séries NAS Node 2');
@@ -122,13 +124,17 @@ fs.mkdirSync(out, { recursive: true });
     report.results.librariesCreated = true;
 
     // 4. Trigger scans on both remote Nodes from UI and wait for completion
-    await page.getByLabel('Scanner Films NAS Node 1').click();
+    await page.getByLabel('Actions Films NAS Node 1',{exact:true}).click();
+    await page.getByRole('button',{name:'Actualiser la médiathèque',exact:true}).click();
+    await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
     const filmLibArticle = page.locator('article').filter({ has: page.getByRole('heading', { name: 'Films NAS Node 1', exact: true }) });
-    await filmLibArticle.getByText(/Scan : Terminé/).waitFor({ timeout: 60000 });
+    await filmLibArticle.getByText(/Terminé/).waitFor({ timeout: 60000 });
 
-    await page.getByLabel('Scanner Séries NAS Node 2').click();
+    await page.getByLabel('Actions Séries NAS Node 2',{exact:true}).click();
+    await page.getByRole('button',{name:'Actualiser la médiathèque',exact:true}).click();
+    await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
     const seriesLibArticle = page.locator('article').filter({ has: page.getByRole('heading', { name: 'Séries NAS Node 2', exact: true }) });
-    await seriesLibArticle.getByText(/Scan : Terminé/).waitFor({ timeout: 60000 });
+    await seriesLibArticle.getByText(/Terminé/).waitFor({ timeout: 60000 });
     report.results.remoteScansCompleted = true;
     await page.screenshot({ path: `${out}/02-remote-scans-complete.png`, fullPage: true });
 

@@ -40,3 +40,9 @@ Ce jalon concerne les scans seulement. Les horaires calendaires/cron, l’histor
 complet des exécutions, les sauvegardes automatiques et plusieurs Core restent
 hors de ce parcours. Les résultats réels des tests sont consignés par le jalon
 principal ; aucune validation NAS ou navigateur réel n’est déduite du test HTTP.
+
+## Extension Général / Réseau / profil / actualisation (19 octobre 2026)
+
+Voir [contrats et limites](SETTINGS_AND_REFRESH.md) pour les paramètres persistants du serveur,
+la configuration réseau effective, les avatars de compte et les quatre modes de scan.
+Les fournisseurs de métadonnées en ligne restent à développer.

@@ -987,6 +987,7 @@ async fn run_remote_scan_task(
             &image_cache,
             &cancel,
             batch_size,
+            &req.excluded_patterns,
             |mut batch: InventoryBatch| {
                 seq += 1;
                 batch.scan_id = req.scan_id.clone();

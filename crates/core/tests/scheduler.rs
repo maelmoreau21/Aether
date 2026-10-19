@@ -60,7 +60,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     media_poc::libraries::initialize_local(&store)
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO libraries VALUES('films','Films','films','local',?,1)")
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local',?,1)")
         .bind(root.to_str().unwrap())
         .execute(store.pool())
         .await

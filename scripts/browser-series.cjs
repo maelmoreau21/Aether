@@ -41,6 +41,7 @@ fs.mkdirSync(out, {recursive: true});
 
     // 2. Admin libraries: add Séries library, grant access to series-user-b in Users section, and scan
     await page.goto(origin + '/app/admin/libraries/');
+    await page.getByRole('button', {name:'Ajouter une médiathèque', exact:true}).click();
     await page.locator('#library-name').fill('Séries Navigateur');
     await page.locator('#library-kind').selectOption('series');
     await page.getByRole('button', {name:'Enregistrer', exact:true}).click();
@@ -55,9 +56,11 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByText('Compte enregistré').waitFor();
 
     await page.locator('a[href="#libraries-section"]').click();
-    await page.getByRole('button', {name:'Scanner Séries Navigateur', exact:true}).click();
+    await page.getByLabel('Actions Séries Navigateur', {exact:true}).click();
+    await page.getByRole('button', {name:'Actualiser la médiathèque', exact:true}).click();
+    await page.getByRole('dialog').getByRole('button', {name:'Actualiser', exact:true}).click();
     const article = page.locator('article').filter({has: page.getByRole('heading', {name:'Séries Navigateur', exact:true})});
-    await article.getByText(/Scan : Terminé/).waitFor({timeout:60000});
+    await article.getByText(/Terminé/).waitFor({timeout:60000});
     report.results.scan = true;
     await page.screenshot({path:`${out}/admin-scan.png`});
 

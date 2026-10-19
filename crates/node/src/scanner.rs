@@ -36,6 +36,10 @@ impl FolderVideos {
         let mut sidecar_paths = Vec::new();
         while let Some(entry) = read_dir.next_entry().await? {
             let p = entry.path();
+            let file_name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            if ignored(file_name) {
+                continue;
+            }
             if p.extension().and_then(|s| s.to_str()).is_some_and(|s| {
                 ["mkv", "mp4", "opus", "ogg", "srt", "vtt", "ass", "ssa"]
                     .iter()
@@ -75,14 +79,25 @@ impl FolderVideos {
     }
 }
 
-fn ignored(name: &str) -> bool {
+pub(crate) fn ignored(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     name.starts_with('.')
+        || name.starts_with('@')
+        || name.starts_with("#recycle")
+        || name.starts_with("#snapshot")
         || name.ends_with(".trickplay")
         || name.ends_with(".metathumb")
         || matches!(
             name.as_str(),
-            "extrafanart" | "$recycle.bin" | "system volume information"
+            "extrafanart"
+                | "$recycle.bin"
+                | "system volume information"
+                | "lost+found"
+                | "#recycle"
+                | "#snapshot"
+                | ".@__thumb"
+                | "thumbs.db"
+                | "desktop.ini"
         )
         || [
             ".part",
@@ -95,6 +110,24 @@ fn ignored(name: &str) -> bool {
         ]
         .iter()
         .any(|suffix| name.ends_with(suffix))
+}
+
+pub(crate) fn is_excluded(relative_path: &str, name: &str, excluded_patterns: &[String]) -> bool {
+    if ignored(name) {
+        return true;
+    }
+    let lower_name = name.to_ascii_lowercase();
+    let lower_rel = relative_path.to_ascii_lowercase();
+    for pat in excluded_patterns {
+        let pat = pat.trim().to_ascii_lowercase();
+        if pat.is_empty() {
+            continue;
+        }
+        if lower_name == pat || lower_rel.split('/').any(|seg| seg == pat) {
+            return true;
+        }
+    }
+    false
 }
 
 fn metadata_name(name: &str) -> (String, Option<u16>, BTreeMap<String, String>) {
@@ -523,10 +556,19 @@ pub async fn scan_with_images(
     cancel: &AtomicBool,
 ) -> io::Result<ScanReport> {
     let mut files = Vec::new();
-    let mut report = scan_streaming(root, "films", cache, image_cache, cancel, 100, |batch| {
-        files.extend(batch.files);
-        async { Ok(()) }
-    })
+    let mut report = scan_streaming(
+        root,
+        "films",
+        cache,
+        image_cache,
+        cancel,
+        100,
+        &[],
+        |batch| {
+            files.extend(batch.files);
+            async { Ok(()) }
+        },
+    )
     .await?;
     report.files = files;
     Ok(report)
@@ -556,6 +598,7 @@ fn record_warning(report: &mut ScanReport, batch: &mut Vec<ScanIssue>, issue: Sc
 
 /// Bounded batch-streaming discovery traversal yielding `InventoryBatch` chunks with backpressure.
 /// Does not retain discovered files in RAM across batches, ensuring strictly bounded memory footprint.
+#[allow(clippy::too_many_arguments)]
 pub async fn scan_streaming<F, Fut>(
     root: &Path,
     kind: &str,
@@ -563,6 +606,7 @@ pub async fn scan_streaming<F, Fut>(
     image_cache: &HashMap<String, super::images::LocalImage>,
     cancel: &AtomicBool,
     batch_size: usize,
+    excluded_patterns: &[String],
     mut on_batch: F,
 ) -> io::Result<ScanReport>
 where
@@ -635,7 +679,8 @@ where
             .map_err(|_| io::Error::other("unconfined traversal"))?;
         let relative_path = relative.to_string_lossy().replace('\\', "/");
         let name = entry.file_name();
-        if ignored(&name.to_string_lossy()) {
+        let name_str = name.to_string_lossy();
+        if is_excluded(&relative_path, &name_str, excluded_patterns) {
             continue;
         }
         let metadata = match tokio::fs::symlink_metadata(&path).await {
@@ -659,6 +704,12 @@ where
             continue;
         }
         if metadata.is_dir() {
+            if path.join(".nomedia").exists()
+                || path.join(".ignore").exists()
+                || path.join(".aetherignore").exists()
+            {
+                continue;
+            }
             match tokio::fs::read_dir(&path).await {
                 Ok(dir) => stack.push(dir),
                 Err(err) => {
@@ -1240,5 +1291,83 @@ mod tests {
         assert_eq!(second.reused, 20);
         assert_eq!(second.probed, 0);
         assert!(elapsed < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn scanner_ignores_nas_system_folders_nomedia_and_custom_exclusions() {
+        let temp = tempfile::tempdir().unwrap();
+        // 1. Valid video
+        let valid_dir = temp.path().join("Valid (2024)");
+        tokio::fs::create_dir(&valid_dir).await.unwrap();
+        let path = valid_dir.join("valid.mp4");
+        tokio::fs::write(&path, b"synthetic media").await.unwrap();
+        let m = tokio::fs::metadata(&path).await.unwrap();
+        let cache = HashMap::from([(
+            "Valid (2024)/valid.mp4".into(),
+            CachedFile {
+                size: m.len(),
+                modified_ns: m
+                    .modified()
+                    .unwrap()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+                    .to_string(),
+                probe: Probe::default(),
+            },
+        )]);
+
+        // 2. Synology #recycle folder
+        let recycle = temp.path().join("#recycle");
+        tokio::fs::create_dir(&recycle).await.unwrap();
+        tokio::fs::write(recycle.join("deleted.mp4"), b"deleted media")
+            .await
+            .unwrap();
+
+        // 3. Synology @eaDir folder
+        let eadir = valid_dir.join("@eaDir");
+        tokio::fs::create_dir(&eadir).await.unwrap();
+        tokio::fs::write(eadir.join("thumb.mp4"), b"thumb media")
+            .await
+            .unwrap();
+
+        // 4. Directory with .nomedia file
+        let nomedia_dir = temp.path().join("IgnoredFolder");
+        tokio::fs::create_dir(&nomedia_dir).await.unwrap();
+        tokio::fs::write(nomedia_dir.join(".nomedia"), b"")
+            .await
+            .unwrap();
+        tokio::fs::write(nomedia_dir.join("unwanted.mp4"), b"unwanted")
+            .await
+            .unwrap();
+
+        // 5. Custom excluded folder
+        let bonus_dir = temp.path().join("Bonus");
+        tokio::fs::create_dir(&bonus_dir).await.unwrap();
+        tokio::fs::write(bonus_dir.join("featurette.mp4"), b"bonus")
+            .await
+            .unwrap();
+
+        let excluded = vec!["bonus".to_string()];
+        let mut files = Vec::new();
+        let report = scan_streaming(
+            temp.path(),
+            "films",
+            &cache,
+            &HashMap::new(),
+            &AtomicBool::new(false),
+            100,
+            &excluded,
+            |batch| {
+                files.extend(batch.files);
+                async { Ok(()) }
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.discovered, 1);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].title, "Valid");
     }
 }

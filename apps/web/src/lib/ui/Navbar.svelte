@@ -12,6 +12,7 @@
   import Icon from './Icon.svelte';
   import ProfileMenu from './ProfileMenu.svelte';
   import { t } from '../i18n';
+  import { serverPresentation } from '../config/presentation';
 
   let {
     section = 'home',
@@ -34,11 +35,11 @@
 <header class="site-header" class:scrolled>
   <div class="header-inner">
     <div class="header-brand-group">
-      <a class="brand" href={resolve('/')} aria-label={`${name}, accueil`}>
+      <a class="brand" href={resolve('/')} aria-label={`${$serverPresentation.serverName || name}, accueil`}>
         <div class="brand-logo-wrapper">
           <img src={`${base}/images/brand-mark.svg`} width="32" height="32" alt="" />
         </div>
-        <span class="brand-text">{name}</span>
+        <span class="brand-text">{$serverPresentation.serverName || name}</span>
       </a>
 
       <nav class="main-nav" aria-label="Navigation principale">
@@ -142,6 +143,10 @@
   }
 
   .brand-text {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 24px;
     font-weight: 750;
     letter-spacing: -0.04em;
@@ -217,6 +222,10 @@
     }
 
     .brand-text {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
       font-size: 20px;
     }
 
@@ -231,7 +240,11 @@
     .header-inner { gap: 8px; padding-inline: 16px; }
     .header-brand-group { gap: 8px; }
     .brand { gap: 6px; }
-    .brand-text { display: none; }
+    .brand-text {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap; display: none; }
     .main-nav { gap: 2px; }
     .nav-link span {
       display: none;

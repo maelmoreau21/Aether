@@ -223,6 +223,8 @@ pub struct RemoteScanStartRequest {
     pub batch_size: usize,
     pub cached_files: Vec<CachedFileMeta>,
     pub cached_images: Vec<LocalImage>,
+    #[serde(default)]
+    pub excluded_patterns: Vec<String>,
 }
 
 /// Node -> Core batch submission (`POST /internal/v1/core/scans/{scan_id}/batches`).

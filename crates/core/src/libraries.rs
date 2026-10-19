@@ -29,6 +29,8 @@ pub(crate) struct Library {
     pub root: String,
     #[sqlx(try_from = "crate::database::DbBool")]
     pub enabled: bool,
+    #[sqlx(default)]
+    pub excluded_patterns: String,
     #[sqlx(skip)]
     pub user_ids: Vec<String>,
 }
@@ -44,6 +46,8 @@ struct LibraryInput {
     root: String,
     #[serde(default = "default_enabled")]
     enabled: bool,
+    #[serde(default)]
+    excluded_patterns: String,
     #[serde(default)]
     user_ids: Vec<String>,
 }
@@ -119,7 +123,7 @@ async fn load(store: &IdentityStore) -> Result<Vec<Library>, StatusCode> {
     // Same transaction gives a coherent configuration/grants snapshot.
     let mut tx = store.pool.begin().await.map_err(database)?;
     let mut libraries: Vec<Library> = crate::database::query_as(
-        "SELECT id,name,kind,node_id,root,enabled FROM libraries ORDER BY name,id",
+        "SELECT id,name,kind,node_id,root,enabled,excluded_patterns FROM libraries ORDER BY name,id",
     )
     .fetch_all(&mut *tx)
     .await
@@ -289,13 +293,14 @@ async fn save(
     }
     if existing {
         let result = crate::database::query(
-            "UPDATE libraries SET name=?,kind=?,node_id=?,root=?,enabled=? WHERE id=?",
+            "UPDATE libraries SET name=?,kind=?,node_id=?,root=?,enabled=?,excluded_patterns=? WHERE id=?",
         )
         .bind(&input.name)
         .bind(&input.kind)
         .bind(&input.node_id)
         .bind(&root)
         .bind(i64::from(input.enabled))
+        .bind(input.excluded_patterns.trim())
         .bind(&id)
         .execute(&mut *tx)
         .await
@@ -310,7 +315,7 @@ async fn save(
             .map_err(database)?;
     } else {
         crate::database::query(
-            "INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,?,?,?,?)",
+            "INSERT INTO libraries(id,name,kind,node_id,root,enabled,excluded_patterns) VALUES(?,?,?,?,?,?,?)",
         )
         .bind(&id)
         .bind(&input.name)
@@ -318,6 +323,7 @@ async fn save(
         .bind(&input.node_id)
         .bind(&root)
         .bind(i64::from(input.enabled))
+        .bind(input.excluded_patterns.trim())
         .execute(&mut *tx)
         .await
         .map_err(database)?;
@@ -338,6 +344,7 @@ async fn save(
         node_id: input.node_id,
         root,
         enabled: input.enabled,
+        excluded_patterns: input.excluded_patterns,
         user_ids: input.user_ids,
     })
 }
@@ -371,6 +378,7 @@ mod tests {
             node_id: "local".into(),
             root: state.root.to_string_lossy().into_owned(),
             enabled: true,
+            excluded_patterns: String::new(),
             user_ids: users,
         }
     }

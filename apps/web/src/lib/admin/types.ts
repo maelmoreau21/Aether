@@ -33,6 +33,7 @@ export interface Library {
   nodeId: string;
   root: string;
   enabled: boolean;
+  excludedPatterns?: string;
   userIds: string[];
 }
 
@@ -100,3 +101,5 @@ export interface CoreHealth {
   mode: string;
   version?: string;
 }
+
+export type RefreshMode = 'incremental' | 'new_only' | 'missing_metadata' | 'full';

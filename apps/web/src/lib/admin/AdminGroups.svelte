@@ -3,14 +3,14 @@
   import type { AuthUser } from '../auth/session';
   import type { Library } from './types';
   let { groups, users, libraries, onchanged }: { groups: UserGroup[]; users: AuthUser[]; libraries: Library[]; onchanged: () => Promise<void> } = $props();
-  let name = $state(''); let userIds = $state<string[]>([]); let libraryIds = $state<string[]>([]);
+  let name = $state(''); let isDefault = $state(false); let userIds = $state<string[]>([]); let libraryIds = $state<string[]>([]);
   let editing = $state<string | null>(null); let busy = $state(false); let error = $state(''); let notice = $state('');
-  function reset() { editing = null; name = ''; userIds = []; libraryIds = []; }
-  function edit(group: UserGroup) { editing = group.id; name = group.name; userIds = [...group.userIds]; libraryIds = [...group.libraryIds]; }
+  function reset() { editing = null; name = ''; isDefault = false; userIds = []; libraryIds = []; }
+  function edit(group: UserGroup) { editing = group.id; name = group.name; isDefault = !!group.isDefault; userIds = [...group.userIds]; libraryIds = [...group.libraryIds]; }
   async function save(event: SubmitEvent) {
     event.preventDefault(); if (busy) return; busy = true; error = ''; notice = '';
     try {
-      await adminRequest(editing ? `/api/v1/admin/groups/${encodeURIComponent(editing)}` : '/api/v1/admin/groups', { method: editing ? 'PUT' : 'POST', body: JSON.stringify({ name: name.trim(), userIds, libraryIds }) });
+      await adminRequest(editing ? `/api/v1/admin/groups/${encodeURIComponent(editing)}` : '/api/v1/admin/groups', { method: editing ? 'PUT' : 'POST', body: JSON.stringify({ name: name.trim(), isDefault, userIds, libraryIds }) });
       reset(); await onchanged(); notice = 'Groupe enregistré. Les droits sont appliqués aux prochaines requêtes.';
     } catch (e) { error = e instanceof Error ? e.message : 'Enregistrement impossible.'; } finally { busy = false; }
   }
@@ -29,7 +29,7 @@
   {#if notice}<p role="status">{notice}</p>{/if}
   <div class="groups">
     {#each groups as group (group.id)}
-      <article><div><h3>{group.name}</h3><p>{group.userIds.length} membre(s) · {group.libraryIds.length} bibliothèque(s)</p></div>
+      <article><div><h3>{group.name}{#if group.isDefault}<span class="default-badge">Par défaut</span>{/if}</h3><p>{group.isDefault ? 'Tous les utilisateurs (par défaut)' : `${group.userIds.length} membre(s)`} · {group.libraryIds.length} bibliothèque(s)</p></div>
         <div class="actions"><button disabled={busy} onclick={() => edit(group)}>Modifier</button><button disabled={busy} onclick={() => remove(group)}>Supprimer</button></div>
       </article>
     {:else}<p>Aucun groupe local. Créez votre premier groupe ci-dessous.</p>{/each}
@@ -37,8 +37,9 @@
   <form onsubmit={save}>
     <h3>{editing ? 'Modifier le groupe' : 'Créer un groupe'}</h3>
     <label>Nom <input required maxlength="80" bind:value={name} disabled={busy} /></label>
+    <label class="check-label"><input type="checkbox" bind:checked={isDefault} disabled={busy} /> <span><strong>Groupe par défaut</strong> — tous les utilisateurs (existants et futurs) font automatiquement partie de ce groupe et accèdent à ses bibliothèques.</span></label>
     <div class="choices">
-      <fieldset disabled={busy}><legend>Membres</legend>{#each users as user (user.id)}<label><input type="checkbox" value={user.id} bind:group={userIds} aria-label={"Membre : " + (user.displayName || user.login)} /> {user.displayName || user.login}</label>{/each}</fieldset>
+      <fieldset disabled={busy || isDefault}><legend>Membres {isDefault ? '(automatique : tous)' : ''}</legend>{#each users as user (user.id)}<label><input type="checkbox" value={user.id} bind:group={userIds} disabled={isDefault} aria-label={"Membre : " + (user.displayName || user.login)} /> {user.displayName || user.login}</label>{/each}</fieldset>
       <fieldset disabled={busy}><legend>Bibliothèques autorisées</legend>{#each libraries as library (library.id)}<label><input type="checkbox" value={library.id} bind:group={libraryIds} aria-label={"Bibliothèque autorisée : " + library.name} /> {library.name}{library.enabled ? '' : ' (désactivée)'}</label>{/each}</fieldset>
     </div>
     <div class="actions"><button disabled={busy} type="submit">{busy ? 'Enregistrement…' : 'Enregistrer'}</button>{#if editing}<button disabled={busy} type="button" onclick={reset}>Annuler</button>{/if}</div>
@@ -53,5 +54,8 @@
   label { display:block; margin:.6rem 0; } input:not([type='checkbox']) { display:block; width:100%; max-width:400px; padding:.7rem; background:var(--color-raised); border:1px solid var(--color-line); border-radius:6px; color:var(--color-text); }
   .choices { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin:1rem 0; } fieldset { min-width:0; border:1px solid var(--color-line); max-height:320px; overflow:auto; }
   button { padding:.65rem .9rem; border:1px solid var(--color-line); border-radius:6px; color:var(--color-text); background:var(--color-raised); cursor:pointer; } button:disabled { opacity:.6; cursor:wait; }
+  .default-badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; background:var(--color-primary, #6366f1); color:#fff; font-weight:600; vertical-align:middle; margin-left:8px; }
+  .check-label { display:flex; align-items:flex-start; gap:8px; margin:10px 0; font-size:14px; cursor:pointer; }
+  .check-label input { width:auto; margin-top:3px; }
   @media(max-width:640px) { .choices { grid-template-columns:1fr; } article { align-items:flex-start; flex-direction:column; } }
 </style>

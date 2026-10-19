@@ -76,3 +76,9 @@ planification/lancement/désactivation des backups depuis Tâches, préférences
 `offsets` relues par API puis après rechargement. Il demande une clé de sauvegarde
 éphémère de 64 caractères hexadécimaux dans MEDIA_BACKUP_KEY ; ne pas lui fournir
 un dossier MEDIA_BACKUP_DIR personnel. Ce résultat ne prouve pas un déploiement NAS.
+
+## Extension Général / Réseau / profil / actualisation (19 octobre 2026)
+
+Voir [contrats et limites](SETTINGS_AND_REFRESH.md) pour les paramètres persistants du serveur,
+la configuration réseau effective, les avatars de compte et les quatre modes de scan.
+Les fournisseurs de métadonnées en ligne restent à développer.

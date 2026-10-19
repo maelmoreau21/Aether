@@ -397,7 +397,7 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
 
     let count = 10000;
     let mut tx = store.pool().begin().await.unwrap();
-    sqlx::query("INSERT INTO libraries VALUES('lib-main','Films Populaires','films','local','/media/films',1)")
+    sqlx::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib-main','Films Populaires','films','local','/media/films',1)")
         .execute(&mut *tx).await.unwrap();
 
     let sample_titles = [
@@ -726,7 +726,7 @@ async fn test_scan_cancellation_and_restart_recovery() {
     // 2. Test Restart Recovery
     // Simulate process termination leaving orphan running job and staging data
     let scan_id = uuid::Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO libraries VALUES('orphan-lib', 'Orphan Library', 'films', 'local', '/media/orphan', 1)")
+    sqlx::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('orphan-lib', 'Orphan Library', 'films', 'local', '/media/orphan', 1)")
         .execute(store.pool())
         .await
         .unwrap();
@@ -1120,7 +1120,7 @@ async fn test_10000_new_synthetic_media_cold_ingestion_benchmark() {
         .unwrap();
 
     let root_path = Path::new("/media/cold_ingest");
-    sqlx::query("INSERT INTO libraries VALUES('lib-cold','Cold Ingest Library','films','local','/media/cold_ingest',1)")
+    sqlx::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib-cold','Cold Ingest Library','films','local','/media/cold_ingest',1)")
         .execute(store.pool())
         .await
         .unwrap();
@@ -1403,7 +1403,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
         .unwrap();
 
     let root_path = Path::new("/media/mixed");
-    sqlx::query("INSERT INTO libraries VALUES('lib-mixed','Mixed Library','films','local','/media/mixed',1)")
+    sqlx::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib-mixed','Mixed Library','films','local','/media/mixed',1)")
         .execute(store.pool())
         .await
         .unwrap();

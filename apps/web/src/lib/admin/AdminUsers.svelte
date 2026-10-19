@@ -8,7 +8,7 @@
     users: Account[];
     libraries: Library[];
     currentUserId?: string;
-    groups?: { id: string; name: string; userIds: string[]; libraryIds: string[] }[];
+    groups?: { id: string; name: string; isDefault?: boolean; userIds: string[]; libraryIds: string[] }[];
     onchanged?: () => void | Promise<void>;
   }
 
@@ -103,7 +103,7 @@
   const visibleUsers = $derived(allUsers.filter(user => {
     const query = search.trim().toLocaleLowerCase();
     const matchesSearch = !query || [user.login, user.displayName ?? '', user.id].some(value => value.toLocaleLowerCase().includes(query));
-    const hasAccess = user.disabledAt == null && libraries.some(library => library.enabled && (user.role === 'administrator' || (library.userIds.includes(user.id) || groups.some(group => group.userIds.includes(user.id) && group.libraryIds.includes(library.id)))));
+    const hasAccess = user.disabledAt == null && libraries.some(library => library.enabled && (user.role === 'administrator' || (library.userIds.includes(user.id) || groups.some(group => (group.isDefault || group.userIds.includes(user.id)) && group.libraryIds.includes(library.id)))));
     return matchesSearch
       && (roleFilter === 'all' || user.role === roleFilter)
       && (authFilter === 'all' || (authFilter === 'sso' ? user.sso === true : user.sso === false))
@@ -232,7 +232,7 @@
         <tbody>
           {#each visibleUsers as user (user.id)}
             {@const isSso = user.sso === true}
-            {@const userLibraries = libraries.filter(lib => lib.userIds.includes(user.id) || groups.some(group => group.userIds.includes(user.id) && group.libraryIds.includes(lib.id)))}
+            {@const userLibraries = libraries.filter(lib => lib.userIds.includes(user.id) || groups.some(group => (group.isDefault || group.userIds.includes(user.id)) && group.libraryIds.includes(lib.id)))}
             <tr>
               <td>
                 <div class="user-login-cell">

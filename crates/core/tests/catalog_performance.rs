@@ -86,11 +86,11 @@ async fn populate_synthetic_catalog(
     let mut tx = store.pool().begin().await.unwrap();
 
     // Insert libraries
-    sqlx::query("INSERT OR IGNORE INTO libraries VALUES('lib-main','Films Populaires','films','local','/media/films',1)")
+    sqlx::query("INSERT OR IGNORE INTO libraries(id, name, kind, node_id, root, enabled) VALUES('lib-main','Films Populaires','films','local','/media/films',1)")
         .execute(&mut *tx).await.unwrap();
-    sqlx::query("INSERT OR IGNORE INTO libraries VALUES('lib-priv','Films Prives','films','local','/media/private',1)")
+    sqlx::query("INSERT OR IGNORE INTO libraries(id, name, kind, node_id, root, enabled) VALUES('lib-priv','Films Prives','films','local','/media/private',1)")
         .execute(&mut *tx).await.unwrap();
-    sqlx::query("INSERT OR IGNORE INTO libraries VALUES('lib-disabled','Films Desactives','films','local','/media/disabled',0)")
+    sqlx::query("INSERT OR IGNORE INTO libraries(id, name, kind, node_id, root, enabled) VALUES('lib-disabled','Films Desactives','films','local','/media/disabled',0)")
         .execute(&mut *tx).await.unwrap();
 
     let sample_titles = [
@@ -686,7 +686,7 @@ async fn test_migrated_database_from_0006_to_0007_then_0008_unicode_fix() {
     }
 
     // Insert library
-    sqlx::query("INSERT INTO libraries VALUES('lib-test', 'Films Test', 'films', 'local', '/media/test', 1)")
+    sqlx::query("INSERT INTO libraries(id, name, kind, node_id, root, enabled) VALUES('lib-test', 'Films Test', 'films', 'local', '/media/test', 1)")
         .execute(&mut conn)
         .await
         .unwrap();

@@ -69,7 +69,7 @@
 <section id="tasks-section" class="dashboard-section" aria-labelledby="tasks-heading">
   <header>
     <div>
-      <h2 id="tasks-heading">Tâches</h2>
+      <h2 id="tasks-heading">Planificateur de tâches</h2>
       <p>Déclenchez l'indexation de vos bibliothèques et consultez leur dernier état connu.</p>
     </div>
     <span class="badge">{activeCount} en attente ou en cours</span>

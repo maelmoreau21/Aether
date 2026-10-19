@@ -112,12 +112,14 @@
   }
 
   async function refreshAccess() {
-    const [accounts, memberships] = await Promise.all([
+    const [accounts, memberships, libList] = await Promise.all([
       request<{ users: AuthUser[] }>('/api/v1/admin/users'),
-      request<{ groups: UserGroup[] }>('/api/v1/admin/groups')
+      request<{ groups: UserGroup[] }>('/api/v1/admin/groups'),
+      request<{ libraries: Library[] }>('/api/v1/admin/libraries')
     ]);
     users = accounts.users;
     groups = memberships.groups;
+    libraries = libList.libraries;
   }
 
   async function load() {
@@ -171,7 +173,7 @@
       libraries = data.libraries;
       nodes = nodeList.nodes;
       reset();
-      notice = 'Bibliothèque enregistrée. Les permissions sont appliquées aux prochaines requêtes.';
+      notice = 'Bibliothèque enregistrée. Les autorisations d’accès se gèrent dans Utilisateurs ou Groupes.';
     } catch (failure) {
       error = failure instanceof Error ? failure.message : 'Enregistrement impossible.';
     } finally {
@@ -467,7 +469,7 @@
           <div class="sidebar-group">
             <span class="group-label">Maintenance &amp; intégrations</span>
             {#each [
-              ['#tasks-section', 'Tâches', 'server'],
+              ['#tasks-section', $t('admin_nav_tasks'), 'server'],
               ['#backups-section', 'Sauvegardes', 'server'],
               ['#groups-section', 'Groupes', 'users'],
               ['#api-keys-section', 'Clés API', 'shield'],

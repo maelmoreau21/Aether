@@ -296,10 +296,19 @@ fn public_routes(mode: &'static str) -> Router {
             }),
         );
     if mode != "localhost-fixtures" {
-        router = router.route(
-            "/",
-            get(|| async { axum::response::Redirect::temporary("/app/") }),
-        );
+        router = router
+            .route(
+                "/",
+                get(|| async { axum::response::Redirect::temporary("/app/") }),
+            )
+            .route(
+                "/favicon.ico",
+                get(|| async { axum::response::Redirect::temporary("/app/favicon.svg") }),
+            )
+            .route(
+                "/favicon.svg",
+                get(|| async { axum::response::Redirect::temporary("/app/favicon.svg") }),
+            );
     }
     router
 }

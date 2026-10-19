@@ -51,11 +51,12 @@ const translations = {
     admin_nav_overview: 'Vue d’ensemble',
     admin_nav_libraries: 'Médiathèques & Scans',
     admin_nav_nodes: 'Nœuds de stockage',
-    admin_nav_users: 'Utilisateurs & Accès',
+    admin_nav_users: 'Utilisateurs',
+    admin_nav_tasks: 'Planificateur de tâches',
     admin_nav_sso: 'SSO (OpenID Connect)',
 
     // Users section
-    users_heading: 'Comptes utilisateurs & Autorisations',
+    users_heading: 'Utilisateurs',
     users_subtitle: 'Gestion des comptes et matrice des permissions de streaming par bibliothèque (RBAC)',
     registered_accounts: 'Comptes enregistrés',
     strict_roles_note: 'Rôles stricts : administrator et user uniquement.',
@@ -141,11 +142,12 @@ const translations = {
     admin_nav_overview: 'Overview',
     admin_nav_libraries: 'Libraries & Scans',
     admin_nav_nodes: 'Media Nodes',
-    admin_nav_users: 'Users & Permissions',
+    admin_nav_users: 'Users',
+    admin_nav_tasks: 'Task Scheduler',
     admin_nav_sso: 'SSO (OpenID Connect)',
 
     // Users section
-    users_heading: 'User Accounts & Access Matrix',
+    users_heading: 'Users',
     users_subtitle: 'Account directory and per-library RBAC streaming permissions',
     registered_accounts: 'Registered Accounts',
     strict_roles_note: 'Strict roles: administrator and user only.',

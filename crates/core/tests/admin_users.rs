@@ -298,3 +298,97 @@ async fn concurrent_administrators_cannot_disable_each_other() {
     .unwrap();
     assert_eq!(count, 1);
 }
+
+#[tokio::test]
+async fn user_library_permissions_create_and_update() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&dir.path().join("users_libs.sqlite"))
+        .await
+        .unwrap();
+    let _admin = store
+        .bootstrap("admin", Zeroizing::new(PASSWORD.into()))
+        .await
+        .unwrap();
+
+    // Insert dummy libraries in database
+    media_poc::database::query(
+        "INSERT INTO libraries(id, name, kind, node_id, root, enabled) VALUES('lib-films', 'Films', 'films', 'local', '/media/films', 1)"
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    media_poc::database::query(
+        "INSERT INTO libraries(id, name, kind, node_id, root, enabled) VALUES('lib-series', 'Séries', 'series', 'local', '/media/series', 1)"
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    let state = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
+    let app = auth::router(state.clone()).merge(admin_users::router(state));
+    let (cookie, csrf) = login(&app, "admin").await;
+
+    // 1. Create user with libraryIds
+    let create = json!({
+        "login": "tester",
+        "password": PASSWORD,
+        "role": "user",
+        "libraryIds": ["lib-films"]
+    });
+    let res = request(&app, "/api/v1/admin/users", "POST", &cookie, &csrf, create).await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let user_id = body(res).await["id"].as_str().unwrap().to_owned();
+
+    let has_films: i64 = media_poc::database::query_scalar(
+        "SELECT COUNT(*) FROM library_permissions WHERE user_id=? AND library_id='lib-films'",
+    )
+    .bind(&user_id)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(has_films, 1);
+
+    // 2. Update user to have both libraries
+    let update = json!({
+        "role": "user",
+        "disabled": false,
+        "displayName": "Tester User",
+        "libraryIds": ["lib-films", "lib-series"]
+    });
+    let res = request(
+        &app,
+        &format!("/api/v1/admin/users/{user_id}"),
+        "PUT",
+        &cookie,
+        &csrf,
+        update,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let count: i64 = media_poc::database::query_scalar(
+        "SELECT COUNT(*) FROM library_permissions WHERE user_id=?",
+    )
+    .bind(&user_id)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(count, 2);
+
+    // 3. Update with invalid library -> 400 Bad Request
+    let bad_update = json!({
+        "role": "user",
+        "disabled": false,
+        "libraryIds": ["nonexistent"]
+    });
+    let res = request(
+        &app,
+        &format!("/api/v1/admin/users/{user_id}"),
+        "PUT",
+        &cookie,
+        &csrf,
+        bad_update,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}

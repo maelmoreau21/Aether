@@ -30,6 +30,7 @@
   let disabled = $state(false);
   let password = $state('');
   let newPassword = $state('');
+  let libraryIds = $state<string[]>([]);
   async function refresh() {
     const response = await fetch('/api/v1/admin/users', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error('Chargement des comptes impossible.');
@@ -38,6 +39,7 @@
   function edit(user: Account | null) {
     editing = user; login = user?.login ?? ''; displayName = user?.displayName ?? '';
     role = user?.role ?? 'user'; disabled = user?.disabledAt != null; password = ''; newPassword = '';
+    libraryIds = user ? libraries.filter(l => l.userIds.includes(user.id)).map(l => l.id) : [];
   }
   async function mutate(path: string, method: string, body: object) {
     if (!$session) throw new Error('Session expirée. Reconnectez-vous.');
@@ -57,11 +59,23 @@
         message = 'Mot de passe remplacé. Toutes les sessions du compte ont été révoquées.';
         if (editing.id === currentUserId) { await readSession(); return; }
       } else if (editing) {
-        await mutate(`/api/v1/admin/users/${encodeURIComponent(editing.id)}`, 'PUT', { role, disabled, displayName: displayName.trim() || null });
-        message = 'Compte enregistré. Les changements de sécurité révoquent ses sessions.';
+        await mutate(`/api/v1/admin/users/${encodeURIComponent(editing.id)}`, 'PUT', {
+          role,
+          disabled,
+          displayName: displayName.trim() || null,
+          libraryIds: role === 'administrator' ? [] : libraryIds
+        });
+        message = 'Compte enregistré. Les permissions et changements de sécurité sont appliqués.';
       } else {
-        await mutate('/api/v1/admin/users', 'POST', { login, password, role, displayName: displayName.trim() || null });
-        password = ''; message = 'Compte créé. Attribuez ses bibliothèques dans la rubrique Bibliothèques.';
+        await mutate('/api/v1/admin/users', 'POST', {
+          login,
+          password,
+          role,
+          displayName: displayName.trim() || null,
+          libraryIds: role === 'administrator' ? [] : libraryIds
+        });
+        password = '';
+        message = 'Compte créé avec ses autorisations d’accès aux bibliothèques.';
       }
       await refresh(); await onchanged?.(); edit(null);
     } catch (error) { failed = true; message = error instanceof Error ? error.message : 'Opération impossible.'; }
@@ -75,15 +89,15 @@
     search: 'Search accounts', placeholder: 'Name, login or user ID…', role: 'Role', all: 'All',
     authentication: 'Authentication', access: 'Library access', withAccess: 'With access', withoutAccess: 'Without access',
     results: 'matching accounts', empty: 'No accounts match these filters.', reset: 'Clear filters',
-    manage: 'Manage library permissions', disabled: 'Disabled', unknown: 'Not specified',
-    limit: 'Disabling an account preserves its data. Security changes revoke its sessions. Library permissions are managed in Libraries.',
+    manage: 'Manage user groups', disabled: 'Disabled', unknown: 'Not specified',
+    limit: 'Disabling an account preserves its data. Security changes revoke its sessions. Library permissions are assigned directly here or via user groups.',
     identifier: 'User ID',
   } : {
     search: 'Rechercher un compte', placeholder: 'Nom, identifiant ou ID utilisateur…', role: 'Rôle', all: 'Tous',
     authentication: 'Authentification', access: 'Accès aux bibliothèques', withAccess: 'Avec accès', withoutAccess: 'Sans accès',
     results: 'comptes correspondants', empty: 'Aucun compte ne correspond à ces filtres.', reset: 'Effacer les filtres',
-    manage: 'Gérer les accès aux bibliothèques', disabled: 'Désactivée', unknown: 'Non précisée',
-    limit: 'Les comptes sont conservés lors de leur désactivation. Les changements de rôle, état et mot de passe révoquent leurs sessions. Les permissions se gèrent dans Bibliothèques.',
+    manage: 'Gérer les groupes d’utilisateurs', disabled: 'Désactivée', unknown: 'Non précisée',
+    limit: 'Les comptes sont conservés lors de leur désactivation. Les changements de rôle, état et mot de passe révoquent leurs sessions. Les accès aux bibliothèques se configurent directement ici ou via les groupes d’utilisateurs.',
     identifier: 'ID utilisateur',
   });
   const visibleUsers = $derived(allUsers.filter(user => {
@@ -137,6 +151,28 @@
       <label>Rôle<select bind:value={role} disabled={editing?.id === currentUserId}><option value="user">Utilisateur</option><option value="administrator">Administrateur</option></select></label>
       {#if editing}<label><input type="checkbox" bind:checked={disabled} disabled={editing.id === currentUserId} /> Compte désactivé</label>
       {:else}<label>Mot de passe (15 à 128 caractères)<input type="password" required minlength="15" maxlength="128" autocomplete="new-password" bind:value={password} /></label>{/if}
+      {#if role === 'user'}
+        <fieldset class="user-libraries-fieldset" disabled={busy}>
+          <legend>Bibliothèques autorisées</legend>
+          {#if libraries.length === 0}
+            <p class="muted-note">Aucune bibliothèque configurée.</p>
+          {:else}
+            <div class="user-libraries-grid">
+              {#each libraries as library (library.id)}
+                <label class="check">
+                  <input
+                    type="checkbox"
+                    value={library.id}
+                    bind:group={libraryIds}
+                    aria-label={"Bibliothèque autorisée : " + library.name}
+                  />
+                  <span>{library.name}{library.enabled ? '' : ' (désactivée)'}</span>
+                </label>
+              {/each}
+            </div>
+          {/if}
+        </fieldset>
+      {/if}
       <button type="submit" class="btn btn-primary" disabled={busy}>{busy ? 'Enregistrement…' : editing ? 'Enregistrer' : 'Créer le compte'}</button>
       {#if editing}<button type="button" class="btn btn-secondary" disabled={busy} onclick={() => edit(null)}>Annuler</button>{/if}
     </form>
@@ -248,7 +284,7 @@
       <Icon name="shield" size={16} />
       <span>
         {copy.limit}
-        <a href="#libraries-section">{copy.manage}</a>
+        <a href="#groups-section">{copy.manage}</a>
       </span>
     </div>
   </div>
@@ -474,5 +510,33 @@
   .muted {
     color: var(--color-subtle);
     font-size: 12px;
+  }
+  .user-libraries-fieldset {
+    flex-basis: 100%;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
+    padding: 12px 16px;
+    margin-top: 4px;
+    background: var(--color-surface);
+  }
+  .user-libraries-fieldset legend {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text);
+    padding: 0 4px;
+  }
+  .user-libraries-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 6px;
+  }
+  .user-libraries-grid .check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    cursor: pointer;
+    font-size: 13px;
   }
 </style>

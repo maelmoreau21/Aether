@@ -231,8 +231,16 @@ pub(crate) async fn enqueue(
             )
             .await
             {
-                let _ = inventory::clean_staging(&store_err, &scan_id_err).await;
-                let errors_json = serde_json::to_string(&vec![format!("Scan échoué: {err_msg}")])
+                let detailed = if err_msg.contains("os error 13")
+                    || err_msg.to_lowercase().contains("permission denied")
+                {
+                    format!(
+                        "{err_msg} (le conteneur UID 10001 n'a pas accès à ce dossier ou ses fichiers ; vérifiez que les dossiers possèdent les droits d'exécution +x et lecture hôte, ex: chmod -R o+rX)"
+                    )
+                } else {
+                    err_msg
+                };
+                let errors_json = serde_json::to_string(&vec![format!("Scan échoué: {detailed}")])
                     .unwrap_or_else(|_| "[\"Scan échoué\"]".into());
                 let _ = crate::database::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=?")
                     .bind(errors_json)
@@ -307,7 +315,16 @@ pub(crate) async fn enqueue(
             } else {
                 err_str
             };
-            let err_msg = format!("Scan échoué: {sanitized}");
+            let detailed_msg = if sanitized.contains("os error 13")
+                || sanitized.to_lowercase().contains("permission denied")
+            {
+                format!(
+                    "{sanitized} (le conteneur UID 10001 n'a pas accès à ce dossier ou ses fichiers ; vérifiez que les dossiers possèdent les droits d'exécution +x et lecture hôte, ex: chmod -R o+rX)"
+                )
+            } else {
+                sanitized
+            };
+            let err_msg = format!("Scan échoué: {detailed_msg}");
             let errors_json = serde_json::to_string(&vec![err_msg])
                 .unwrap_or_else(|_| "[\"Scan échoué ou interrompu\"]".into());
             let _ =

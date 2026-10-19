@@ -39,13 +39,18 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('button[type="submit"]').click();
     await page.waitForURL(origin + '/app/');
 
-    // 2. Admin libraries: add Séries library, grant access to series-user-b, and scan
+    // 2. Admin libraries: add Séries library, grant access to series-user-b in Users section, and scan
     await page.goto(origin + '/app/admin/libraries/');
     await page.locator('#library-name').fill('Séries Navigateur');
     await page.locator('#library-kind').selectOption('series');
-    await page.locator('#libraries-section').getByLabel('series-user-b', {exact: true}).check();
     await page.getByRole('button', {name:'Enregistrer', exact:true}).click();
     await page.getByRole('heading', {name:'Séries Navigateur', exact:true}).waitFor();
+
+    // Grant library access directly on series-user-b in Users section
+    const userRow = page.locator('tr').filter({hasText: 'series-user-b'});
+    await userRow.getByRole('button', {name: 'Modifier'}).click();
+    await page.locator('#users-section').getByLabel('Bibliothèque autorisée : Séries Navigateur').check();
+    await page.locator('#users-section').getByRole('button', {name: 'Enregistrer'}).click();
 
     await page.getByRole('button', {name:'Scanner Séries Navigateur', exact:true}).click();
     const article = page.locator('article').filter({has: page.getByRole('heading', {name:'Séries Navigateur', exact:true})});

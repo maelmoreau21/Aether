@@ -1,5 +1,23 @@
 # MEMORY.md — État et décisions Aether
 
+## 19 octobre 2026 — Correction du test d'intégration navigateur `browser_series` et archivage des preuves CI
+
+- **Diagnostic des échecs CI (`FileNotFoundError: docs/evidence/2026-10-17/series/report.json`)** :
+  1. **Répertoire de sortie par défaut** : Dans `scripts/browser-series.cjs`, `out` avait été modifié vers `docs/evidence/2026-10-19/catalogue` alors que `.github/workflows/ci.yml` attend strictly les preuves sous `docs/evidence/2026-10-17/series/`.
+  2. **Attente du scan film asynchrone** : `page.waitForFunction(async () => ...)` dans Playwright recevait une fonction `async` retournant une `Promise` (toujours truthy en JavaScript dans le contexte de page), ce qui résolvait immédiatement sans attendre la complétion réelle du scan (`status === 'completed'`). La navigation vers `/app/films/` s'exécutait alors que le scan tournait encore, produisant un catalogue vide (`0 film`).
+  3. **Timeout artificiel sur le clic film** : Un `timeout: 5000` arbitraire faisait échouer l'action avant le chargement complet des cartes.
+- **Correctifs appliqués** :
+  - `scripts/browser-series.cjs` :
+    - Rétablissement de la sortie par défaut vers `docs/evidence/2026-10-17/series` (avec copie miroir vers `docs/evidence/2026-10-19/catalogue` dans le bloc `finally`).
+    - Remplacement du `waitForFunction` asynchrone par une boucle de polling côté Node (`page.evaluate`) vérifiant le statut `completed` ou `error` du job de scan.
+    - Utilisation de `await filmCard.waitFor()` avec le timeout Playwright standard (30s) au lieu du timeout réduit à 5s.
+- **Vérifications réelles exécutées** :
+  - `cargo test --locked --test browser_series -- --ignored --nocapture` : **100 % passé avec succès** (1 passed, 0 failed en 47.32s).
+  - Validation du script Python de la CI (`.github/workflows/ci.yml` step 260) :
+    - Présence et `passed: true` vérifiés sur `docs/evidence/2026-10-16/scanner/report.json`, `docs/evidence/2026-10-16/scanner/report-restart.json` et `docs/evidence/2026-10-17/series/report.json`.
+    - Présence de toutes les images requises vérifiée (`admin-scan.png`, `series-detail.png`, `immersive-playback.png`, etc.).
+  - `cargo check --tests` : 0 erreur.
+
 ## 19 octobre 2026 — Correction du test d'intégration navigateur `browser_scanner` (dialogue natif d'ajout de médiathèque)
 
 - **Diagnostic de l'échec `browser_scanner_persists_and_plays_after_core_restart`** :

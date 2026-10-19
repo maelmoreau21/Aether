@@ -5,6 +5,11 @@
   "results": {
     "scan": true,
     "deferredMediaLoading": true,
+    "catalogueChanges": {
+      "privateFeedbackPersisted": true,
+      "seasonShortcuts": true,
+      "responsiveThemes": true
+    },
     "episode1Playback": true,
     "seekAndPause": true,
     "nextEpisode": {
@@ -16,6 +21,7 @@
     "season2Playback": true,
     "revokedPermission403": true,
     "restoredPermissionPlayback": true,
+    "filmPresentation": true,
     "accountSwitchCacheIsolation": true,
     "delayedLogoutDoesNotWipeNewLoginCookie": true,
     "concurrentLoginsSequencedCorrectly": true,

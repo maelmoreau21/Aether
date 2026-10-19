@@ -1,5 +1,21 @@
 # MEMORY.md — État et décisions Aether
 
+## 19 octobre 2026 — Correction du test d'intégration navigateur `browser_scanner` (dialogue natif d'ajout de médiathèque)
+
+- **Diagnostic de l'échec `browser_scanner_persists_and_plays_after_core_restart`** :
+  - Suite à la refonte de l'interface d'administration des médiathèques (`AdminLibraries.svelte`) utilisant des dialogues `<dialog>` natifs, le formulaire d'ajout d'une médiathèque est encapsulé dans une boîte de dialogue modale fermée par défaut (`editor?.showModal()`).
+  - Le script `scripts/browser-scanner.cjs` tentait d'écrire directement dans le champ `#library-name` sans ouvrir préalablement le dialogue via le bouton « + Ajouter une médiathèque », provoquant un timeout Playwright de 30 secondes (`element is not visible`).
+  - L'affichage du statut de scan (`scan-status`) utilisait la classe `scan-status` sans la classe historique `scan-counters` et n'incluait pas le libellé « découvert(s) ».
+- **Correctifs apportés** :
+  - `AdminLibraries.svelte` : Ajout de la classe `scan-counters` et du libellé « découvert(s) » sur `<p class="scan-status scan-counters" role="status">` pour compatibilité complète avec les assertions des scripts E2E et l'affichage Jellyfin-like.
+  - `scripts/browser-scanner.cjs` : Ouverture explicite du dialogue via `await page.getByRole('button', { name: 'Ajouter une médiathèque', exact: true }).click()`, soumission via le dialogue, et adaptation des regex de scan counters (`/2 (?:fichier\(s\) )?découvert/`, `/0 analysé.*2 réutilisé/`).
+  - `scripts/browser-nfo.cjs` et `scripts/browser-posters.cjs` : Harmonisation de l'ouverture du dialogue d'ajout de médiathèque lors de la phase initiale.
+  - `apps/web` : Rebuild statique `npm run build` synchronisé.
+- **Vérifications réelles exécutées** :
+  - `cargo test --locked --test browser_scanner -- --ignored --nocapture` : **100 % passé avec succès** (1 passed, 0 failed en 22.40s, tests avant/après redémarrage de Core, switch audio, sous-titres ASS/SRT/VTT, progression).
+  - `cargo test --lib --bins` : l'ensemble des 74 tests unitaires des crates passent avec succès.
+  - `cargo check --tests` : 0 erreur de compilation.
+
 ## 19 octobre 2026 — Optimisation de performance et fluidité de chargement des images (posters et backdrops)
 
 - **Diagnostic de la lenteur constatée** :

@@ -26,8 +26,9 @@ fs.mkdirSync(out, {recursive:true});
     if (phase !== 'restart') {
       await page.goto(origin+'/app/admin/libraries/');
       if (phase === 'initial') {
-        await page.getByLabel('Nom',{exact:true}).fill('Films scanner navigateur');
-        await page.getByRole('button',{name:'Enregistrer',exact:true}).click();
+        await page.getByRole('button',{name:'Ajouter une médiathèque',exact:true}).click();
+        await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
+        await page.getByRole('dialog').getByRole('button',{name:'Enregistrer',exact:true}).click();
         await page.getByRole('heading',{name:'Films scanner navigateur',exact:true}).waitFor();
       }
       const article=page.locator('article').filter({has:page.getByRole('heading',{name:'Films scanner navigateur',exact:true})});

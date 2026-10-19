@@ -3,6 +3,7 @@
   import { session } from '../auth/session';
   import OidcSettings from '../auth/OidcSettings.svelte';
   import Icon from '../ui/Icon.svelte';
+  import { t, locale, setLocale } from '../i18n';
 
   let {
     prefAudio = $bindable('fr'),
@@ -13,45 +14,53 @@
     prefSubtitles: string;
     onSavePreference: (key: string, value: string) => void;
   } = $props();
+
+  const displayName = $derived($session?.user.displayName || $session?.user.login || 'Utilisateur');
+  const hasDistinctName = $derived(
+    Boolean($session?.user.displayName && $session?.user.displayName !== $session?.user.login)
+  );
 </script>
 
 <div class="settings-view">
   <div class="page-heading">
-    <span class="eyebrow">VOTRE ESPACE PERSONNEL</span>
-    <h1>Profil & Paramètres</h1>
-    <p class="heading-sub">Gérez votre identité, vos accès SSO et vos préférences de lecture.</p>
+    <span class="eyebrow">{$t('settings_eyebrow')}</span>
+    <h1>{$t('settings_title')}</h1>
+    <p class="heading-sub">{$t('settings_subtitle')}</p>
   </div>
 
   <div class="settings-grid">
     <!-- User Account Info Card -->
     <section class="card profile-card" aria-labelledby="profile-heading">
-      <h2 id="profile-heading" class="card-title">Compte utilisateur</h2>
+      <h2 id="profile-heading" class="card-title">{$t('settings_user_account')}</h2>
       <div class="profile-header-row">
         <div class="profile-avatar-large" aria-hidden="true">
           <Icon name="profile" size={32} />
         </div>
         <div>
-          <h3>{$session?.user.login ?? 'Utilisateur'}</h3>
+          <h3>{displayName}</h3>
+          {#if hasDistinctName}
+            <p class="profile-handle">@{$session?.user.login}</p>
+          {/if}
           <span class="role-badge" class:admin-badge={$session?.user.role === 'administrator'}>
-            {$session?.user.role === 'administrator' ? 'Administrateur de l’instance' : 'Utilisateur standard'}
+            {$session?.user.role === 'administrator' ? $t('administrator') : $t('user')}
           </span>
         </div>
       </div>
 
       <div class="profile-info-list">
         <div class="info-row">
-          <span class="label">Identifiant unique (UUID)</span>
+          <span class="label">{$t('settings_unique_id')}</span>
           <span class="val"><code>{$session?.user.id ?? 'Inconnu'}</code></span>
         </div>
         <div class="info-row">
-          <span class="label">Type d’authentification</span>
+          <span class="label">{$t('settings_auth_type')}</span>
           <span class="val">
-            {$session?.user.login.startsWith('sso-') ? 'SSO (OpenID Connect)' : 'Compte local (hash Argon2id)'}
+            {$session?.user.sso ?? $session?.user.login.startsWith('sso-') ? $t('sso_account') : $t('auth_local_sub')}
           </span>
         </div>
         <div class="info-row">
-          <span class="label">Sécurité de session</span>
-          <span class="val">Cookie <code>HttpOnly</code> strict, rotation CSRF et expiration glissante.</span>
+          <span class="label">{$t('settings_session_security')}</span>
+          <span class="val">{$t('settings_session_note')}</span>
         </div>
       </div>
 
@@ -59,7 +68,7 @@
         <div class="admin-shortcut">
           <a class="admin-link" href={resolve('admin/libraries/')}>
             <Icon name="settings" size={16} />
-            <span>Ouvrir la console Administrateur</span>
+            <span>{$t('admin_dashboard')}</span>
           </a>
         </div>
       {/if}
@@ -73,39 +82,50 @@
 
     <!-- Playback Preferences Card -->
     <section class="card preferences-card" aria-labelledby="pref-heading">
-      <h2 id="pref-heading" class="card-title">Préférences de lecture</h2>
+      <h2 id="pref-heading" class="card-title">{$t('settings_playback_prefs')}</h2>
       <p class="muted">
-        Configurez vos préférences pour la sélection automatique des pistes audio et des sous-titres lors du lancement des médias.
+        {$t('settings_playback_note')}
       </p>
 
       <div class="pref-fields">
         <label>
-          <span>Langue audio par défaut</span>
+          <span><Icon name="globe" size={14} /> {$t('language')}</span>
+          <select
+            value={$locale}
+            onchange={(e) => setLocale(e.currentTarget.value as 'fr' | 'en')}
+          >
+            <option value="fr">{$t('language_fr')}</option>
+            <option value="en">{$t('language_en')}</option>
+          </select>
+        </label>
+
+        <label>
+          <span>{$t('settings_pref_audio')}</span>
           <select
             bind:value={prefAudio}
             onchange={() => onSavePreference('media_pref_audio', prefAudio)}
           >
             <option value="fr">Français (par défaut)</option>
             <option value="original">Version originale (si disponible)</option>
-            <option value="en">Anglais</option>
+            <option value="en">English</option>
           </select>
         </label>
 
         <label>
-          <span>Affichage des sous-titres</span>
+          <span>{$t('settings_pref_subtitles')}</span>
           <select
             bind:value={prefSubtitles}
             onchange={() => onSavePreference('media_pref_subtitles', prefSubtitles)}
           >
-            <option value="forced">Sous-titres forcés uniquement (recommandé)</option>
-            <option value="always">Toujours afficher les sous-titres</option>
-            <option value="off">Désactivés par défaut</option>
+            <option value="forced">{$t('settings_sub_forced')}</option>
+            <option value="always">{$t('settings_sub_all')}</option>
+            <option value="off">{$t('settings_sub_none')}</option>
           </select>
         </label>
       </div>
 
       <p class="pref-note">
-        ✓ Vos préférences sont enregistrées sur cet appareil et appliquées automatiquement au lecteur.
+        ✓ {$t('settings_saved_alert')}
       </p>
     </section>
   </div>

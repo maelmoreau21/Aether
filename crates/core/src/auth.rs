@@ -349,11 +349,16 @@ pub enum AuthConfigError {
     Identity(#[from] IdentityError),
 }
 #[derive(Clone, Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
 pub struct AuthUser {
     pub id: String,
     pub login: String,
     #[serde(serialize_with = "serialize_role")]
     pub role: Role,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sso: Option<bool>,
 }
 fn serialize_role<S: serde::Serializer>(role: &Role, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(role.as_str())
@@ -374,6 +379,17 @@ struct Login {
 struct IdentityResponse {
     user: AuthUser,
     csrf_token: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct SessionUserRow {
+    id: String,
+    login: String,
+    role: Role,
+    display_name: Option<String>,
+    sso: i64,
+    last_seen_at: i64,
+    now: i64,
 }
 
 impl AuthState {
@@ -448,12 +464,13 @@ impl AuthState {
             token_hash,
         })
     }
+
     /// Internal capability checks share live validation and coalesced activity with P1.
     pub(crate) async fn session_from_hash(&self, token_hash: &str) -> Result<AuthUser, StatusCode> {
         // Validate session, user, role, active state, absolute expiry and idle expiry
         // via a pure SQLite read (WAL snapshot) so authenticated reads never block on write locks.
-        let row: Option<(String, String, Role, i64, i64)> = crate::database::query_as(
-            "SELECT u.id, COALESCE(c.login, 'sso-' || u.id), u.role, s.last_seen_at, unixepoch() \
+        let row: Option<SessionUserRow> = crate::database::query_as(
+            "SELECT u.id, COALESCE(u.sso_username, c.login, u.display_name, 'sso-' || u.id) AS login, u.role, u.display_name, CAST((c.login IS NULL) AS INTEGER) AS sso, s.last_seen_at, unixepoch() AS now \
              FROM sessions s \
              JOIN users u ON u.id = s.user_id \
              LEFT JOIN local_credentials c ON c.user_id = u.id \
@@ -467,11 +484,17 @@ impl AuthState {
         .fetch_optional(&self.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let (id, login, role, last_seen_at, now) = row.ok_or(StatusCode::UNAUTHORIZED)?;
-        if now.saturating_sub(last_seen_at) >= self.toucher.shared.interval_seconds {
-            self.toucher.shared.record(token_hash, now);
+        let row = row.ok_or(StatusCode::UNAUTHORIZED)?;
+        if row.now.saturating_sub(row.last_seen_at) >= self.toucher.shared.interval_seconds {
+            self.toucher.shared.record(token_hash, row.now);
         }
-        Ok(AuthUser { id, login, role })
+        Ok(AuthUser {
+            id: row.id,
+            login: row.login,
+            role: row.role,
+            display_name: row.display_name,
+            sso: Some(row.sso != 0),
+        })
     }
     pub fn require_csrf(
         &self,
@@ -522,6 +545,19 @@ pub fn router(state: AuthState) -> Router {
         .with_state(state)
 }
 
+pub fn is_local_login_enabled() -> bool {
+    let disabled = std::env::var("MEDIA_AUTH_LOCAL_ENABLED")
+        .map(|v| v.trim().eq_ignore_ascii_case("false"))
+        .unwrap_or(false)
+        || std::env::var("MEDIA_AUTH_DISABLE_LOCAL_LOGIN")
+            .map(|v| v.trim().eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        || std::env::var("MEDIA_OIDC_ONLY")
+            .map(|v| v.trim().eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+    !disabled
+}
+
 async fn bootstrap_status(State(state): State<AuthState>) -> Response {
     let closed: i64 = crate::database::query_scalar(
         "SELECT CAST((EXISTS(SELECT 1 FROM bootstrap_state) OR EXISTS(SELECT 1 FROM users)) AS INTEGER)",
@@ -529,8 +565,17 @@ async fn bootstrap_status(State(state): State<AuthState>) -> Response {
     .fetch_one(&state.store.pool)
     .await
     .unwrap_or(1);
+    let oidc_admin_configured = std::env::var("MEDIA_OIDC_ADMIN_GROUPS")
+        .or_else(|_| std::env::var("MEDIA_OIDC_ADMIN_GROUP"))
+        .or_else(|_| std::env::var("OIDC_ADMIN_GROUP"))
+        .or_else(|_| std::env::var("OIDC_ADMIN_GROUPS"))
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
+    let local_enabled = is_local_login_enabled();
     Json(serde_json::json!({
-        "needsBootstrap": closed == 0
+        "needsBootstrap": closed == 0 && !oidc_admin_configured,
+        "localLoginEnabled": local_enabled,
+        "oidcAdminConfigured": oidc_admin_configured
     }))
     .into_response()
 }
@@ -540,6 +585,9 @@ async fn bootstrap(
     headers: HeaderMap,
     Json(input): Json<Login>,
 ) -> Response {
+    if !is_local_login_enabled() {
+        return failure(StatusCode::FORBIDDEN, "local_login_disabled");
+    }
     if let Err(status) = state.check_origin(&headers) {
         return failure(status, "forbidden");
     }
@@ -622,6 +670,9 @@ async fn login(
     headers: HeaderMap,
     Json(input): Json<Login>,
 ) -> Response {
+    if !is_local_login_enabled() {
+        return failure(StatusCode::FORBIDDEN, "local_login_disabled");
+    }
     if let Err(status) = state.check_origin(&headers) {
         return failure(status, "forbidden");
     }

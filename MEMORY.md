@@ -1,5 +1,34 @@
 # MEMORY.md — État et décisions Aether
 
+## 18 octobre 2026 — Refonte Tableau de bord Jellyfin, Support SSO Unicode & Pseudo, et Internationalisation (FR / EN)
+
+- **Tableau de bord Administrateur Jellyfin-style & Menu Profil** :
+  - Élimination des liens dupliqués dans le menu profil : « Mon profil & Préférences » pointe vers `/settings/` et « Tableau de bord (Admin) » vers `/admin/libraries/`.
+  - Refonte de la page d'administration (`apps/web/src/routes/admin/libraries/+page.svelte`) en dashboard Jellyfin avec barre latérale gauche catégorisée (`SERVEUR`, `MÉDIATHÈQUE`, `ACCÈS & SÉCURITÉ`), navigation réactive par ancre et badges d'état.
+  - Découverte automatique des sous-dossiers dans l'endpoint `roots` (`/api/v1/admin/libraries/roots`) permettant la sélection immédiate des répertoires montés (ex. `/media/films`, `/media/series`) dans l'interface sans devoir les taper manuellement.
+  - Diagnostic explicite pour l'erreur `directory unreadable` : détection d'erreur de permissions et recommandation de contrôle des droits hôte pour l'UID conteneur 10001 (`aether:aether`).
+- **Support SSO des Pseudonymes et Noms Réels Unicode (ex. « Maël Moreau »)** :
+  - Migrations 0019 et 0020 créées pour SQLite (`crates/core/migrations/`) et PostgreSQL (`crates/core/migrations-postgres/`) ajoutant `display_name TEXT` et `sso_username TEXT` à la table `users`.
+  - `Claims` dans `crates/core/src/oidc.rs` enrichi pour extraire de manière ordonnée le pseudo (`preferred_username`, `username`, `nickname`, ou préfixe d'email) et le nom complet réel (`name`, `given_name` + `family_name`), acceptant sans restriction les espaces, majuscules et accents.
+  - Mise à jour automatique de `users.display_name` et `users.sso_username` lors du callback OIDC, que le compte soit nouveau ou déjà existant.
+  - Table des utilisateurs (`AdminUsers.svelte`) affichant désormais deux colonnes distinctes : `Identifiant / Pseudo` et `Nom complet / Affiché`, ainsi que l'identification claire du type d'authentification (`SSO (OIDC)` ou `Compte local`).
+  - Menu Profil (`ProfileMenu.svelte`) et vue Paramètres (`SettingsView.svelte`) affichant le nom réel complet en titre et le pseudo `@login` en sous-titre.
+- **Variables d'environnement SSO étendues** :
+  - `MEDIA_OIDC_ADMIN_GROUPS` (et alias `OIDC_ADMIN_GROUP`) : attribue automatiquement le rôle `administrator` aux comptes appartenant aux groupes spécifiés de l'IdP, levant l'obligation de créer un compte local préalable.
+  - `MEDIA_AUTH_LOCAL_ENABLED=false` (et alias `MEDIA_OIDC_ONLY=true`, `MEDIA_AUTH_DISABLE_LOCAL_LOGIN=true`) : masque le formulaire local et désactive les routes de connexion locale pour un mode SSO exclusif.
+- **Internationalisation bilingue (Français & Anglais)** :
+  - Création du module réactif d'internationalisation `apps/web/src/lib/i18n/index.ts` avec dictionnaire complet `fr` et `en`, détection de la langue du navigateur et mémorisation dans `localStorage` (`media_locale`).
+  - Sélecteur rapide de langue (`FR` / `EN`) intégré dans le menu déroulant du profil et dans la page des paramètres.
+  - Traduction réactive appliquée à la navigation (`Navbar.svelte`), l'administration (`AdminUsers.svelte`, sidebar et hero), le profil et les paramètres (`SettingsView.svelte`).
+- **Validation & Contrôle Qualité** :
+  - `cargo test --workspace` : 100% réussi.
+  - `cargo clippy --all-targets -- -D warnings` : 0 warning.
+  - `cargo fmt --check` : 0 diff.
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web run lint` : 0 erreur.
+  - `npm --prefix apps/web test` : 48/48 tests réussis.
+  - `npm --prefix apps/web run build` : build statique réussi.
+
 ## 18 octobre 2026 — Optimisation majeure du workflow CI GitHub Actions (`.github/workflows/ci.yml`)
 
 - **Objectif** : Réduire drastiquement le temps d'exécution de la CI (~6 min 40 s initialement) sans compromettre les vérifications de sécurité, les contrats ni la rigueur des tests.

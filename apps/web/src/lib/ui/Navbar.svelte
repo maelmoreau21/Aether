@@ -11,6 +11,7 @@
   import { resolve } from '$app/paths';
   import Icon from './Icon.svelte';
   import ProfileMenu from './ProfileMenu.svelte';
+  import { t } from '../i18n';
 
   let {
     section = 'home',
@@ -57,7 +58,7 @@
             {:else if link.key === 'series'}
               <Icon name="tv" size={16} />
             {/if}
-            <span>{link.label}</span>
+            <span>{$t(link.key)}</span>
           </a>
         {/each}
       </nav>

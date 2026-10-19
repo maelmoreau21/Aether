@@ -14,6 +14,7 @@
   import AdminNodes from '../../../lib/admin/AdminNodes.svelte';
   import AdminUsers from '../../../lib/admin/AdminUsers.svelte';
   import AdminOidc from '../../../lib/admin/AdminOidc.svelte';
+  import { t } from '../../../lib/i18n';
 
   let scans = $state<Record<string, Scan>>({});
   let pending = $state<string[]>([]);
@@ -286,14 +287,26 @@
     }
   }
 
+  let currentHash = $state('#overview');
+
   onMount(() => {
     void load();
+    if (typeof window !== 'undefined' && window.location.hash) {
+      currentHash = window.location.hash;
+    }
+    const hashHandler = () => {
+      currentHash = window.location.hash || '#overview';
+    };
+    window.addEventListener('hashchange', hashHandler);
     const timer = setInterval(() => {
       if (Object.values(scans).some(scan => scan.status === 'queued' || scan.status === 'running')) {
         void refreshScans();
       }
     }, 1500);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('hashchange', hashHandler);
+    };
   });
 </script>
 
@@ -316,14 +329,6 @@
 </header>
 
 <main>
-  <div class="admin-hero">
-    <p class="eyebrow">AETHER CORE · GESTION DE LA PLATEFORME</p>
-    <h1>Tableau de bord administrateur</h1>
-    <p class="hero-desc">
-      Supervisez le serveur Core, surveillez l'état des Media Nodes distribués, organisez vos bibliothèques et configurez les droits d'accès.
-    </p>
-  </div>
-
   {#if !administrator}
     <div class="error-banner" role="alert">
       <div class="banner-content">
@@ -354,93 +359,155 @@
       </div>
     {/if}
 
-    <!-- Quick Navigation Anchor Bar -->
-    <nav class="admin-nav" aria-label="Sections d’administration">
-      <a href="#overview">
-        <Icon name="sparkles" size={14} />
-        <span>Vue d’ensemble</span>
-      </a>
-      <a href="#libraries-section">
-        <Icon name="film" size={14} />
-        <span>Bibliothèques & Scans</span>
-      </a>
-      <a href="#nodes-section">
-        <Icon name="server" size={14} />
-        <span>Media Nodes</span>
-      </a>
-      <a href="#users-section">
-        <Icon name="users" size={14} />
-        <span>Utilisateurs & Droits</span>
-      </a>
-      <a href="#sso-section">
-        <Icon name="shield" size={14} />
-        <span>SSO (OpenID Connect)</span>
-      </a>
-    </nav>
-
     {#if loading}
       <div class="loading-state" role="status">
         <div class="spinner" aria-hidden="true"></div>
         <p>Chargement des données administratives…</p>
       </div>
     {:else}
-      <!-- Section 1: Dashboard Overview -->
-      <AdminOverview
-        {coreHealth}
-        {nodes}
-        {libraries}
-        {scans}
-        adminLogin={$session?.user.login}
-      />
+      <div class="admin-dashboard-container">
+        <!-- Jellyfin-Style Navigation Sidebar -->
+        <aside class="admin-sidebar" aria-label="Menu d’administration">
+          <div class="sidebar-header">
+            <span class="sidebar-brand-title">CONSOLE SERVEUR</span>
+          </div>
 
-      <!-- Section 2: Libraries & Scans -->
-      <AdminLibraries
-        {libraries}
-        {nodes}
-        {users}
-        {scans}
-        {pending}
-        {availableRootsForNode}
-        {saving}
-        {editing}
-        bind:name
-        bind:kind
-        bind:nodeId
-        bind:root
-        bind:enabled
-        bind:userIds
-        onsave={save}
-        onscan={scan}
-        onedit={edit}
-        onreset={reset}
-        onnodechange={handleNodeChange}
-      />
+          <div class="sidebar-group">
+            <span class="group-label">{$t('admin_category_server')}</span>
+            <a
+              href="#overview"
+              class="sidebar-nav-item"
+              class:active={currentHash === '#overview' || currentHash === ''}
+              onclick={() => currentHash = '#overview'}
+            >
+              <span class="nav-icon"><Icon name="sparkles" size={16} /></span>
+              <span class="nav-text">{$t('admin_nav_overview')}</span>
+              {#if coreHealth?.status === 'ok'}
+                <span class="status-indicator online" title="Core opérationnel"></span>
+              {/if}
+            </a>
+          </div>
 
-      <!-- Section 3: Media Nodes -->
-      <AdminNodes
-        {nodes}
-        {pairing}
-        {nodeActionBusy}
-        bind:pairName
-        bind:pairBaseUrl
-        bind:pairPublicUrl
-        bind:pairToken
-        onpair={pairNode}
-        onnodeaction={nodeAction}
-        ongeneratetoken={generateEnrollmentToken}
-      />
+          <div class="sidebar-group">
+            <span class="group-label">{$t('admin_category_media')}</span>
+            <a
+              href="#libraries-section"
+              class="sidebar-nav-item"
+              class:active={currentHash === '#libraries-section'}
+              onclick={() => currentHash = '#libraries-section'}
+            >
+              <span class="nav-icon"><Icon name="film" size={16} /></span>
+              <span class="nav-text">{$t('admin_nav_libraries')}</span>
+              <span class="count-badge">{libraries.length}</span>
+            </a>
+            <a
+              href="#nodes-section"
+              class="sidebar-nav-item"
+              class:active={currentHash === '#nodes-section'}
+              onclick={() => currentHash = '#nodes-section'}
+            >
+              <span class="nav-icon"><Icon name="server" size={16} /></span>
+              <span class="nav-text">{$t('admin_nav_nodes')}</span>
+              <span class="count-badge">{nodes.length}</span>
+            </a>
+          </div>
 
-      <!-- Section 4: Users & RBAC Permissions -->
-      <AdminUsers
-        {users}
-        {libraries}
-        currentUserId={$session?.user.id}
-      />
+          <div class="sidebar-group">
+            <span class="group-label">{$t('admin_category_access')}</span>
+            <a
+              href="#users-section"
+              class="sidebar-nav-item"
+              class:active={currentHash === '#users-section'}
+              onclick={() => currentHash = '#users-section'}
+            >
+              <span class="nav-icon"><Icon name="users" size={16} /></span>
+              <span class="nav-text">{$t('admin_nav_users')}</span>
+              <span class="count-badge">{users.length}</span>
+            </a>
+            <a
+              href="#sso-section"
+              class="sidebar-nav-item"
+              class:active={currentHash === '#sso-section'}
+              onclick={() => currentHash = '#sso-section'}
+            >
+              <span class="nav-icon"><Icon name="shield" size={16} /></span>
+              <span class="nav-text">{$t('admin_nav_sso')}</span>
+              {#if oidcStatus?.enabled}
+                <span class="sso-badge">{$t('active')}</span>
+              {/if}
+            </a>
+          </div>
+        </aside>
 
-      <!-- Section 5: SSO OpenID Connect (OIDC) -->
-      <AdminOidc
-        {oidcStatus}
-      />
+        <!-- Main Admin Content Area -->
+        <div class="admin-content-area">
+          <div class="admin-hero">
+            <p class="eyebrow">AETHER CORE · GESTION DE LA PLATEFORME</p>
+            <h1>{$t('admin_title')}</h1>
+            <p class="hero-desc">
+              {$t('admin_subtitle')}
+            </p>
+          </div>
+
+          <!-- Section 1: Dashboard Overview -->
+          <AdminOverview
+            {coreHealth}
+            {nodes}
+            {libraries}
+            {scans}
+            adminLogin={$session?.user.login}
+          />
+
+          <!-- Section 2: Libraries & Scans -->
+          <AdminLibraries
+            {libraries}
+            {nodes}
+            {users}
+            {scans}
+            {pending}
+            {availableRootsForNode}
+            {saving}
+            {editing}
+            bind:name
+            bind:kind
+            bind:nodeId
+            bind:root
+            bind:enabled
+            bind:userIds
+            onsave={save}
+            onscan={scan}
+            onedit={edit}
+            onreset={reset}
+            onnodechange={handleNodeChange}
+          />
+
+          <!-- Section 3: Media Nodes -->
+          <AdminNodes
+            {nodes}
+            {pairing}
+            {nodeActionBusy}
+            bind:pairName
+            bind:pairBaseUrl
+            bind:pairPublicUrl
+            bind:pairToken
+            onpair={pairNode}
+            onnodeaction={nodeAction}
+            ongeneratetoken={generateEnrollmentToken}
+          />
+
+          <!-- Section 4: Users & RBAC Permissions -->
+          <AdminUsers
+            {users}
+            {libraries}
+            currentUserId={$session?.user.id}
+          />
+
+          <!-- Section 5: SSO OpenID Connect (OIDC) -->
+          <AdminOidc
+            {oidcStatus}
+          />
+        </div>
+      </div>
     {/if}
   {/if}
 </main>
@@ -498,13 +565,144 @@
   }
 
   main {
-    max-width: 1440px;
+    max-width: 1600px;
     margin: auto;
-    padding: 40px var(--page-gutter) 80px;
+    padding: 28px var(--page-gutter) 80px;
+  }
+
+  .admin-dashboard-container {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 36px;
+    align-items: start;
+  }
+
+  /* Jellyfin-style Navigation Sidebar */
+  .admin-sidebar {
+    position: sticky;
+    top: 86px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 20px 14px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .sidebar-header {
+    padding: 0 8px 10px;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .sidebar-brand-title {
+    font-size: 10.5px;
+    font-weight: 750;
+    letter-spacing: 0.12em;
+    color: var(--color-muted);
+  }
+
+  .sidebar-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .group-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--color-subtle);
+    padding: 4px 8px;
+    text-transform: uppercase;
+  }
+
+  .sidebar-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    color: var(--color-muted);
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.15s ease;
+    border-left: 3px solid transparent;
+  }
+
+  .sidebar-nav-item:hover {
+    color: var(--color-text-bright);
+    background: var(--color-raised);
+  }
+
+  .sidebar-nav-item.active {
+    color: var(--color-text-bright);
+    font-weight: 600;
+    background: var(--color-accent-soft);
+    border-left-color: var(--color-accent);
+    box-shadow: 0 0 16px rgba(167, 139, 250, 0.12);
+  }
+
+  .nav-icon {
+    display: grid;
+    place-items: center;
+    color: inherit;
+    flex-shrink: 0;
+  }
+
+  .nav-text {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .count-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 99px;
+    background: var(--color-raised);
+    color: var(--color-muted);
+    border: 1px solid var(--color-line);
+  }
+
+  .sidebar-nav-item.active .count-badge {
+    background: rgba(167, 139, 250, 0.2);
+    color: var(--color-accent);
+    border-color: rgba(167, 139, 250, 0.3);
+  }
+
+  .sso-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 99px;
+    background: #14281c;
+    color: #9be7b4;
+    border: 1px solid #2e6b44;
+  }
+
+  .status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 8px #10b981;
+    flex-shrink: 0;
+  }
+
+  .admin-content-area {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+    min-width: 0;
   }
 
   .admin-hero {
-    margin-bottom: 32px;
+    margin-bottom: 8px;
   }
 
   .eyebrow {
@@ -516,9 +714,9 @@
   }
 
   .admin-hero h1 {
-    font-size: clamp(26px, 4vw, 38px);
+    font-size: clamp(26px, 4vw, 36px);
     font-weight: 700;
-    margin: 0 0 12px;
+    margin: 0 0 10px;
     letter-spacing: -0.03em;
   }
 
@@ -528,37 +726,6 @@
     line-height: 1.6;
     max-width: 780px;
     margin: 0;
-  }
-
-  .admin-nav {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 40px;
-    padding: 10px 14px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-md);
-  }
-
-  .admin-nav a {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    padding: 8px 14px;
-    border-radius: var(--radius-sm);
-    color: var(--color-muted);
-    background: var(--color-raised);
-    border: 1px solid transparent;
-    transition: all 0.15s ease;
-  }
-
-  .admin-nav a:hover {
-    color: var(--color-text);
-    border-color: var(--color-border-glow);
-    background: var(--color-accent-soft);
   }
 
   .error-banner, .notice-banner {
@@ -629,5 +796,44 @@
 
   @keyframes spin {
     to { transform: rotate(360deg); }
+  }
+
+  @media (max-width: 960px) {
+    .admin-dashboard-container {
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+
+    .admin-sidebar {
+      position: sticky;
+      top: 72px;
+      z-index: 50;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px 12px;
+    }
+
+    .sidebar-header, .group-label {
+      display: none;
+    }
+
+    .sidebar-group {
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .sidebar-nav-item {
+      border-left: none;
+      border-bottom: 2px solid transparent;
+      padding: 8px 12px;
+      font-size: 12px;
+    }
+
+    .sidebar-nav-item.active {
+      border-left: none;
+      border-bottom-color: var(--color-accent);
+    }
   }
 </style>

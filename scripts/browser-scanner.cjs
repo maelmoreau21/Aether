@@ -28,21 +28,22 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForURL(origin+'/app/');
     if (!restart) {
       await page.goto(origin+'/app/admin/libraries/');
+      await page.getByRole('button',{name:'Ajouter une médiathèque',exact:true}).click();
       await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
-      await page.getByRole('button',{name:'Enregistrer',exact:true}).click();
+      await page.getByRole('dialog').getByRole('button',{name:'Enregistrer',exact:true}).click();
       await page.getByRole('heading',{name:'Films scanner navigateur',exact:true}).waitFor();
       await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
       await page.getByRole('button',{name:'Actualiser la médiathèque',exact:true}).click();
       await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
       const article = page.locator('article').filter({has:page.getByRole('heading',{name:'Films scanner navigateur',exact:true})});
       await article.getByText(/Terminé/).waitFor({timeout:60000});
-      assert.match(await article.locator('.scan-counters').textContent(), /2 découverts/);
+      assert.match(await article.locator('.scan-counters').textContent(), /2 (?:fichier\(s\) )?découvert/);
       report.results.scan = true;
       await page.screenshot({path:`${out}/scan.png`});
       await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
       await page.getByRole('button',{name:'Actualiser la médiathèque',exact:true}).click();
       await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
-      await article.locator('.scan-counters').filter({hasText:/0 analysés.*2 réutilisés/}).waitFor({timeout:60000});
+      await article.locator('.scan-counters').filter({hasText:/0 analysé.*2 réutilisé/}).waitFor({timeout:60000});
       await article.getByText(/Terminé/).waitFor({timeout:60000});
       report.results.incremental = true;
     }

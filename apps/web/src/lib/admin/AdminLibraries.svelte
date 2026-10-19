@@ -44,7 +44,7 @@
           <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(library.id)}`)}>Planifier l’actualisation</a>
         </div></details>
       </div>
-      {#if scans[library.id]}<p class="scan-status" role="status">Scan : {scanLabels[scans[library.id].status]} · {scans[library.id].discovered} fichier(s) · {scans[library.id].probed} analysé(s) · {scans[library.id].reused} réutilisé(s)</p>{/if}
+      {#if scans[library.id]}<p class="scan-status scan-counters" role="status">Scan : {scanLabels[scans[library.id].status]} · {scans[library.id].discovered} fichier(s) découvert(s) · {scans[library.id].probed} analysé(s) · {scans[library.id].reused} réutilisé(s)</p>{/if}
     </article>{:else}<p>Ajoutez votre première bibliothèque de films ou de séries.</p>{/each}
   </div>
 </section>

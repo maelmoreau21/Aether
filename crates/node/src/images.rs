@@ -2,8 +2,10 @@
 use image::{ImageDecoder, ImageFormat, ImageReader, Limits};
 pub use media_contracts::media::{LocalImage, ValidatedImage};
 use std::{
+    collections::HashMap,
     io::{self, Cursor, Read, Seek, SeekFrom},
-    path::Path,
+    path::{Path, PathBuf},
+    sync::{LazyLock, Mutex},
     time::UNIX_EPOCH,
 };
 use tokio::sync::Semaphore;
@@ -12,6 +14,29 @@ use crate::{files::OpenedFile, scanner::FolderVideos};
 
 pub const MAX_BYTES: u64 = 10 * 1024 * 1024;
 static VALIDATION: Semaphore = Semaphore::const_new(1);
+
+type ValidationKey = (PathBuf, u64, String);
+
+static VALIDATION_CACHE: LazyLock<Mutex<HashMap<ValidationKey, &'static str>>> =
+    LazyLock::new(|| Mutex::new(HashMap::with_capacity(512)));
+
+pub(crate) fn remember_validated_image(
+    path: PathBuf,
+    size: u64,
+    modified_ns: String,
+    mime: &'static str,
+) {
+    let mut cache = match VALIDATION_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if cache.len() >= 4096
+        && let Some(first) = cache.keys().next().cloned()
+    {
+        cache.remove(&first);
+    }
+    cache.insert((path, size, modified_ns), mime);
+}
 
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
@@ -53,19 +78,38 @@ fn decode_and_verify(bytes: Vec<u8>, extension: &str) -> io::Result<&'static str
 /// Validate an already-confined `OpenedFile` handle without reopening by path.
 /// Ensures no TOCTOU substitution can occur between confinement, validation, and streaming.
 pub async fn validate_opened(opened: &OpenedFile) -> io::Result<ValidatedImage> {
+    opened.verify_unchanged_sync()?;
+    let size = opened.size();
+    if size == 0 || size > MAX_BYTES {
+        return Err(invalid("image must be a regular file of at most 10 MiB"));
+    }
+    let modified_ns = opened.modified_ns().to_owned();
+    let key = (
+        opened.canonical_path().to_path_buf(),
+        size,
+        modified_ns.clone(),
+    );
+    {
+        let cache = match VALIDATION_CACHE.lock() {
+            Ok(c) => c,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(&mime) = cache.get(&key) {
+            return Ok(ValidatedImage {
+                mime,
+                size_bytes: size,
+                modified_ns,
+            });
+        }
+    }
     let permit = VALIDATION
         .acquire()
         .await
         .map_err(|_| io::Error::other("image validation stopped"))?;
     let mut cloned = opened.try_clone()?;
-    tokio::task::spawn_blocking(move || {
+    let validated = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         cloned.verify_unchanged_sync()?;
-        let size = cloned.size();
-        if size == 0 || size > MAX_BYTES {
-            return Err(invalid("image must be a regular file of at most 10 MiB"));
-        }
-        let modified_ns = cloned.modified_ns().to_owned();
         let extension = cloned
             .canonical_path()
             .extension()
@@ -91,7 +135,11 @@ pub async fn validate_opened(opened: &OpenedFile) -> io::Result<ValidatedImage> 
         })
     })
     .await
-    .map_err(|_| io::Error::other("image validation failed"))?
+    .map_err(|_| io::Error::other("image validation failed"))??;
+
+    remember_validated_image(key.0, key.1, key.2, validated.mime);
+
+    Ok(validated)
 }
 
 /// Caller must first apply confined_file or use `validate_opened`. One blocking decoder at a time;
@@ -228,6 +276,19 @@ pub async fn discover_cached_with_folder(
                 }) {
                     let mut reused = cached.clone();
                     reused.priority = (name_index * 4 + format_index) as u8;
+                    let static_mime = match reused.mime.as_str() {
+                        "image/jpeg" => Some("image/jpeg"),
+                        "image/png" => Some("image/png"),
+                        _ => Some("image/webp"),
+                    };
+                    if let Some(m) = static_mime {
+                        remember_validated_image(
+                            opened.canonical_path().to_path_buf(),
+                            size_bytes,
+                            modified,
+                            m,
+                        );
+                    }
                     return Ok(reused);
                 }
                 let validated = validate_opened(&opened).await?;
@@ -287,6 +348,19 @@ pub async fn discover_series_poster(
                 }) {
                     let mut reused = cached.clone();
                     reused.priority = (name_index * 4 + format_index) as u8;
+                    let static_mime = match reused.mime.as_str() {
+                        "image/jpeg" => Some("image/jpeg"),
+                        "image/png" => Some("image/png"),
+                        _ => Some("image/webp"),
+                    };
+                    if let Some(m) = static_mime {
+                        remember_validated_image(
+                            opened.canonical_path().to_path_buf(),
+                            size_bytes,
+                            modified,
+                            m,
+                        );
+                    }
                     return Ok(reused);
                 }
                 let validated = validate_opened(&opened).await?;

@@ -1,5 +1,24 @@
 # MEMORY.md — État et décisions Aether
 
+## 19 octobre 2026 — Optimisation de performance et fluidité de chargement des images (posters et backdrops)
+
+- **Diagnostic de la lenteur constatée** :
+  - Sur chaque requête d'image (`GET /api/v1/assets/{id}/image`), `media_node` exécutait `validate_opened`, qui acquérait un sémaphore global de taille 1 (`VALIDATION = Semaphore::const_new(1)`), relisait le fichier entier en mémoire et décompressait l'intégralité des pixels en CPU via `DynamicImage::from_decoder`. Pour une page de catalogue affichant 30 posters, les requêtes étaient sérialisées dans ce goulot CPU (3 à 6 secondes d'attente cumulative).
+  - Dans l'interface, les conteneurs d'arrière-plan (`HeroBanner.svelte`, `FilmDetail.svelte`, `SeriesDetail.svelte`) laissaient un vide noir avant l'arrivée de l'image de fond et les affiches (`Poster.svelte`) apparaissaient brusquement sans transition.
+- **Optimisation backend (`crates/node/src/images.rs` et `crates/node/src/stream.rs`)** :
+  - **Cache de validation en mémoire (`VALIDATION_CACHE`)** : Bounded in-memory cache associant `(canonical_path, size_bytes, modified_ns)` au format MIME validé. Dès qu'une image a été validée (au scan ou lors de la première lecture), toute requête ultérieure sur le même fichier inchangé est servie immédiatement sans passer par le sémaphore ni allouer 10 Mio ni exécuter de décodage CPU (temps de traitement réduit à ~0 ms).
+  - **Amorçage lors des scans incrémentaux** : Les fonctions `discover_cached_with_folder` et `discover_series_poster` pré-remplissent le cache de validation lors de la réutilisation des entrées inchangées.
+  - **En-têtes HTTP de streaming** : Ajout de l'en-tête `ETag` calculé à partir de `(modified_ns, file_size)` sur les réponses 200/206 dans `serve_opened_parts`.
+- **Améliorations frontend (`HeroBanner.svelte`, `Poster.svelte`, `FilmDetail.svelte`, `SeriesDetail.svelte`)** :
+  - `HeroBanner` : L'arrière-plan cinématique (`cinematic-horizon.png`) est conservé en permanence en sous-couche sous le dégradé sombre, supprimant tout vide noir au chargement. L'image de fond se charge en priorité haute (`fetchpriority="high"`, `loading="eager"`) et effectue un fondu progressif (`opacity: 0 -> 1` avec transition douce) dès qu'elle est prête (`onload`).
+  - `Poster` : Ajout d'une transition d'opacité fluide à l'arrivée de l'image pour supprimer le pop visuel saccadé.
+  - `FilmDetail` et `SeriesDetail` : Chargement eager et fondu progressif pour le backdrop flouté en arrière-plan.
+- **Validations exécutées** :
+  - `cargo test -p media-node` : 36/36 tests unitaires passés + 3 tests d'intégration.
+  - `cargo test -p media-poc --test posters_flow --test scanner_flow` : validés avec succès.
+  - `cargo fmt --check` et `cargo clippy --all-targets -- -D warnings` : 0 avertissement.
+  - `npm run check` (0 erreur, 0 avertissement), `npm test` (54/54 tests), `npm run lint` (0 erreur), `npm run build` réussi.
+
 ## 19 octobre 2026 — Tolérances sous-titres, groupes par défaut et exclusions d'indexation (NAS / corbeille)
 
 - **Tolérances et robustesse sous-titres (`crates/node/src/subtitles.rs`)** :

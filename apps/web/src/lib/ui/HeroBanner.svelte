@@ -3,6 +3,8 @@
   import type { Work } from '../catalog/api';
   import Icon from './Icon.svelte';
 
+  let heroLoaded = $state(false);
+
   let {
     featured = null,
     onPlay
@@ -19,24 +21,32 @@
         : resolve(`films/?work=${encodeURIComponent(featured.id)}`)
       : resolve('films/')
   );
+
+  $effect(() => {
+    if (featured?.posterUrl) {
+      heroLoaded = false;
+    }
+  });
 </script>
 
 <section class="hero-banner" class:has-featured={!!featured} aria-label="Média en vedette">
   <!-- Backdrop Background -->
   <div class="backdrop-wrapper" aria-hidden="true">
+    <div
+      class="backdrop-art"
+      style:background-image="url('{base}/images/cinematic-horizon.png')"
+    ></div>
     {#if featured?.posterUrl}
       <img
         class="backdrop-img"
+        class:loaded={heroLoaded}
         src={featured.posterUrl}
         alt=""
         loading="eager"
+        fetchpriority="high"
         decoding="async"
+        onload={() => { heroLoaded = true; }}
       />
-    {:else}
-      <div
-        class="backdrop-art"
-        style:background-image="url('{base}/images/cinematic-horizon.png')"
-      ></div>
     {/if}
     <div class="backdrop-gradient-vignette"></div>
     <div class="backdrop-gradient-bottom"></div>
@@ -151,21 +161,31 @@
     overflow: hidden;
   }
 
+  .backdrop-art {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center 48%;
+    filter: brightness(0.6) saturate(0.9);
+  }
+
   .backdrop-img {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
     object-position: center 25%;
     filter: brightness(0.65) saturate(1.1);
     transform: scale(1.02);
+    opacity: 0;
+    transition: opacity 0.5s ease-out;
   }
 
-  .backdrop-art {
-    width: 100%;
-    height: 100%;
-    background-size: cover;
-    background-position: center 48%;
-    filter: brightness(0.6) saturate(0.9);
+  .backdrop-img.loaded {
+    opacity: 1;
   }
 
   .backdrop-gradient-vignette {

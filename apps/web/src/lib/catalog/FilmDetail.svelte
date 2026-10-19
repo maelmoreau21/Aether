@@ -31,6 +31,7 @@
   const currentSelectedMedia = $derived(
     playableMedia.find(item => item.id === selected) ?? playableMedia[0]
   );
+  let backdropLoaded = $state(false);
   const currentVideoTrack = $derived(
     currentSelectedMedia?.sources[0]?.tracks?.find(t => t.codec_type === 'video')
   );
@@ -44,7 +45,15 @@
   <div class="detail-hero">
     {#if work.posterUrl}
       <div class="backdrop-art-container" aria-hidden="true">
-        <img class="backdrop-art-image" src={work.posterUrl} alt="" />
+        <img
+          class="backdrop-art-image"
+          class:loaded={backdropLoaded}
+          src={work.posterUrl}
+          alt=""
+          loading="eager"
+          decoding="async"
+          onload={() => { backdropLoaded = true; }}
+        />
         <div class="backdrop-vignette"></div>
       </div>
     {/if}
@@ -264,6 +273,12 @@
     object-position: center 25%;
     filter: blur(28px) brightness(0.28) saturate(1.3);
     transform: scale(1.15);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+  }
+
+  .backdrop-art-image.loaded {
+    opacity: 1;
   }
 
   .backdrop-vignette {

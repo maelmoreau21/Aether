@@ -63,6 +63,9 @@ services:
       - MEDIA_DB_PATH=/data/core.sqlite3
       - MEDIA_DB_ENGINE=${MEDIA_DB_ENGINE:-sqlite}
       - MEDIA_DB_URL=${MEDIA_DB_URL:-}
+      - MEDIA_BACKUP_DIR=/backups
+      # Store the encryption key separately from archives; no fallback key is generated.
+      - MEDIA_BACKUP_KEY=${MEDIA_BACKUP_KEY:-}
       - MEDIA_LIBRARY_ROOT=/media
       - MEDIA_WEB_DIST=/app/apps/web/build
       - MEDIA_OIDC_ENABLED=${MEDIA_OIDC_ENABLED:-false}
@@ -73,6 +76,7 @@ services:
     volumes:
       # Persistent application state & SQLite database (WAL mode)
       - aether_data:/data
+      - aether_backups:/backups
       # Media library root mounted strictly read-only (:ro).
       # On Synology DSM, set MEDIA_LIBRARY_DIR in .env or replace with /volume1/video
       - ${MEDIA_LIBRARY_DIR:-./tests/fixtures/generated}:/media:ro
@@ -86,3 +90,5 @@ services:
 volumes:
   aether_data:
     name: aether_data
+  aether_backups:
+    name: aether_backups

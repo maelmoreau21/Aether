@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 
-export interface AuthUser { id: string; login: string; role: 'administrator' | 'user'; displayName?: string | null; sso?: boolean | null; }
+export interface AuthUser { id: string; login: string; role: 'administrator' | 'user'; displayName?: string | null; sso?: boolean | null; disabledAt?: number | null; }
 export interface Session { user: AuthUser; csrfToken: string }
 
 type SessionGenerationListener = (generation: number, current: Session | null) => void;

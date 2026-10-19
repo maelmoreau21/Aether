@@ -56,15 +56,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let jobs = std::sync::Arc::new(ScanJobs::default());
     let shutdown_jobs = jobs.clone();
-    axum::serve(
-        listener,
-        secure_app_with_jobs(inventory, port, auth, jobs).await?,
-    )
-    .with_graceful_shutdown(async move {
-        let _ = tokio::signal::ctrl_c().await;
-        shutdown_jobs.shutdown().await;
-    })
-    .await?;
+    let scheduler_root = inventory.root().to_owned();
+    let app = secure_app_with_jobs(inventory, port, auth.clone(), jobs.clone()).await?;
+    let scheduler = media_poc::scheduler::Scheduler::start(auth, scheduler_root, jobs);
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            let _ = tokio::signal::ctrl_c().await;
+            drop(scheduler);
+            shutdown_jobs.shutdown().await;
+        })
+        .await?;
     database.close().await;
     Ok(())
 }

@@ -1,0 +1,163 @@
+//! Account-owned playback/UI preferences, included in ordinary database backups.
+use crate::auth::AuthState;
+use axum::{
+    Json, Router,
+    extract::{DefaultBodyLimit, State},
+    http::{HeaderMap, StatusCode},
+    routing::get,
+};
+use serde::{Deserialize, Serialize};
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Preferences {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    theme: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    locale: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio_language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subtitles: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio_track: Option<AudioTrack>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    offsets: Option<Offsets>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subtitle_preference: Option<SubtitlePreference>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AudioTrack {
+    media_id: String,
+    track_id: String,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Offsets {
+    audio: f64,
+    subtitle: f64,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SubtitlePreference {
+    enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    forced: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sdh: Option<bool>,
+}
+fn language(value: &str) -> bool {
+    (2..=35).contains(&value.len())
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+impl Preferences {
+    fn valid(&self) -> bool {
+        self.theme
+            .as_deref()
+            .is_none_or(|v| matches!(v, "light" | "dark" | "system"))
+            && self
+                .locale
+                .as_deref()
+                .is_none_or(|v| matches!(v, "fr" | "en"))
+            && self.audio_language.as_deref().is_none_or(language)
+            && self
+                .subtitles
+                .as_deref()
+                .is_none_or(|v| matches!(v, "forced" | "always" | "off"))
+            && self.audio_track.as_ref().is_none_or(|v| {
+                [&v.media_id, &v.track_id]
+                    .into_iter()
+                    .all(|s| !s.is_empty() && s.len() <= 256 && !s.chars().any(char::is_control))
+            })
+            && self.offsets.as_ref().is_none_or(|v| {
+                [v.audio, v.subtitle]
+                    .into_iter()
+                    .all(|v| v.is_finite() && v.abs() <= 30.)
+            })
+            && self
+                .subtitle_preference
+                .as_ref()
+                .is_none_or(|v| v.language.as_deref().is_none_or(language))
+    }
+}
+pub fn router(auth: AuthState) -> Router {
+    Router::new()
+        .route("/api/v1/preferences", get(read).put(write))
+        .layer(DefaultBodyLimit::max(8192))
+        .with_state(auth)
+}
+async fn read(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+) -> Result<Json<Preferences>, StatusCode> {
+    let identity = auth.authenticate(&headers).await?;
+    let saved: Option<String> = crate::database::query_scalar(
+        "SELECT preferences_json FROM user_preferences WHERE user_id=?",
+    )
+    .bind(identity.user.id)
+    .fetch_optional(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(match saved {
+        Some(value) => {
+            serde_json::from_str(&value).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        }
+        None => Preferences::default(),
+    }))
+}
+async fn write(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Json(input): Json<Preferences>,
+) -> Result<StatusCode, StatusCode> {
+    let identity = auth.authenticate(&headers).await?;
+    auth.require_csrf(&headers, &identity)?;
+    if !input.valid() {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    let mut conn = auth
+        .store
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let previous: Option<String> = crate::database::query_scalar(
+        "SELECT preferences_json FROM user_preferences WHERE user_id=?",
+    )
+    .bind(&identity.user.id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut saved: serde_json::Value = match previous {
+        Some(value) => {
+            serde_json::from_str(&value).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        }
+        None => serde_json::json!({}),
+    };
+    let patch = serde_json::to_value(input).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let target = saved
+        .as_object_mut()
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    if let Some(fields) = patch.as_object() {
+        for (key, value) in fields {
+            target.insert(key.clone(), value.clone());
+        }
+    }
+    let encoded = serde_json::to_string(&saved).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if encoded.len() > 4096 {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    crate::database::query("INSERT INTO user_preferences(user_id,preferences_json) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET preferences_json=excluded.preferences_json").bind(identity.user.id).bind(encoded).execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}

@@ -14,6 +14,12 @@
   import AdminNodes from '../../../lib/admin/AdminNodes.svelte';
   import AdminUsers from '../../../lib/admin/AdminUsers.svelte';
   import AdminOidc from '../../../lib/admin/AdminOidc.svelte';
+  import AdminTasks from '../../../lib/admin/AdminTasks.svelte';
+  import AdminMaintenance from '../../../lib/admin/AdminMaintenance.svelte';
+  import AdminCapabilities from '../../../lib/admin/AdminCapabilities.svelte';
+  import AdminGroups from '../../../lib/admin/AdminGroups.svelte';
+  import AdminApiKeys from '../../../lib/admin/AdminApiKeys.svelte';
+  import type { UserGroup } from '../../../lib/admin/request';
   import { t } from '../../../lib/i18n';
 
   let scans = $state<Record<string, Scan>>({});
@@ -21,6 +27,7 @@
   let polling = false;
   let libraries = $state<Library[]>([]);
   let users = $state<AuthUser[]>([]);
+  let groups = $state<UserGroup[]>([]);
   let roots = $state<string[]>([]);
   let nodes = $state<AdminNode[]>([]);
   let coreHealth = $state<CoreHealth | null>(null);
@@ -104,6 +111,15 @@
     notice = '';
   }
 
+  async function refreshAccess() {
+    const [accounts, memberships] = await Promise.all([
+      request<{ users: AuthUser[] }>('/api/v1/admin/users'),
+      request<{ groups: UserGroup[] }>('/api/v1/admin/groups')
+    ]);
+    users = accounts.users;
+    groups = memberships.groups;
+  }
+
   async function load() {
     if (!administrator) {
       loading = false;
@@ -127,6 +143,7 @@
       coreHealth = health;
       oidcStatus = oidc;
       reset();
+      await refreshAccess();
       await refreshScans();
     } catch (failure) {
       error = failure instanceof Error ? failure.message : 'Chargement impossible.';
@@ -288,14 +305,18 @@
   }
 
   let currentHash = $state('#overview');
+  const sections = new Set(['#overview', '#libraries-section', '#nodes-section', '#users-section', '#sso-section', '#tasks-section', '#backups-section', '#groups-section', '#api-keys-section', '#extensions-section']);
+  function selectedSection() {
+    return sections.has(window.location.hash) ? window.location.hash : '#overview';
+  }
 
   onMount(() => {
     void load();
     if (typeof window !== 'undefined' && window.location.hash) {
-      currentHash = window.location.hash;
+      currentHash = selectedSection();
     }
     const hashHandler = () => {
-      currentHash = window.location.hash || '#overview';
+      currentHash = selectedSection();
     };
     window.addEventListener('hashchange', hashHandler);
     const timer = setInterval(() => {
@@ -355,6 +376,19 @@
         <div class="banner-content">
           <Icon name="check" size={18} />
           <p>{notice}</p>
+          <div hidden={currentHash !== '#tasks-section'}>
+            <AdminTasks {libraries} {nodes} {scans} {pending} onscan={scan} />
+          </div>
+          <div hidden={currentHash !== '#backups-section'}>
+            <AdminMaintenance />
+          </div>
+          <div hidden={currentHash !== '#groups-section'}>
+            <AdminGroups {groups} {users} {libraries} onchanged={refreshAccess} />
+          </div>
+          <div hidden={currentHash !== '#api-keys-section'}>
+            <AdminApiKeys {users} {libraries} />
+          </div>
+          <AdminCapabilities section={currentHash.slice(1)} />
         </div>
       </div>
     {/if}
@@ -437,6 +471,23 @@
               {/if}
             </a>
           </div>
+          <div class="sidebar-group">
+            <span class="group-label">Maintenance &amp; intégrations</span>
+            {#each [
+              ['#tasks-section', 'Tâches', 'server'],
+              ['#backups-section', 'Sauvegardes', 'server'],
+              ['#groups-section', 'Groupes', 'users'],
+              ['#api-keys-section', 'Clés API', 'shield'],
+              ['#extensions-section', 'Extensions', 'sparkles']
+            ] as [hash, label, icon] (hash)}
+              <a href={resolve(`admin/libraries/#${hash.slice(1)}`)} class="sidebar-nav-item" class:active={currentHash === hash}
+                aria-current={currentHash === hash ? 'page' : undefined}
+                onclick={() => currentHash = hash}>
+                <span class="nav-icon"><Icon name={icon as 'server' | 'users' | 'shield' | 'sparkles'} size={16} /></span>
+                <span class="nav-text">{label}</span>
+              </a>
+            {/each}
+          </div>
         </aside>
 
         <!-- Main Admin Content Area -->
@@ -450,6 +501,7 @@
           </div>
 
           <!-- Section 1: Dashboard Overview -->
+          <div hidden={currentHash !== "#overview"}>
           <AdminOverview
             {coreHealth}
             {nodes}
@@ -457,8 +509,10 @@
             {scans}
             adminLogin={$session?.user.login}
           />
+          </div>
 
           <!-- Section 2: Libraries & Scans -->
+          <div hidden={currentHash !== "#libraries-section"}>
           <AdminLibraries
             {libraries}
             {nodes}
@@ -480,8 +534,10 @@
             onreset={reset}
             onnodechange={handleNodeChange}
           />
+          </div>
 
           <!-- Section 3: Media Nodes -->
+          <div hidden={currentHash !== "#nodes-section"}>
           <AdminNodes
             {nodes}
             {pairing}
@@ -494,18 +550,38 @@
             onnodeaction={nodeAction}
             ongeneratetoken={generateEnrollmentToken}
           />
+          </div>
 
           <!-- Section 4: Users & RBAC Permissions -->
+          <div hidden={currentHash !== "#users-section"}>
           <AdminUsers
             {users}
             {libraries}
+            {groups}
+            onchanged={refreshAccess}
             currentUserId={$session?.user.id}
           />
+          </div>
 
           <!-- Section 5: SSO OpenID Connect (OIDC) -->
+          <div hidden={currentHash !== "#sso-section"}>
           <AdminOidc
             {oidcStatus}
           />
+          </div>
+          <div hidden={currentHash !== '#tasks-section'}>
+            <AdminTasks {libraries} {nodes} {scans} {pending} onscan={scan} />
+          </div>
+          <div hidden={currentHash !== '#backups-section'}>
+            <AdminMaintenance />
+          </div>
+          <div hidden={currentHash !== '#groups-section'}>
+            <AdminGroups {groups} {users} {libraries} onchanged={refreshAccess} />
+          </div>
+          <div hidden={currentHash !== '#api-keys-section'}>
+            <AdminApiKeys {users} {libraries} />
+          </div>
+          <AdminCapabilities section={currentHash.slice(1)} />
         </div>
       </div>
     {/if}
@@ -559,7 +635,7 @@
     letter-spacing: 0.05em;
     padding: 4px 10px;
     background: var(--color-accent-soft);
-    border: 1px solid #b4a1f833;
+    border: 1px solid var(--color-line);
     border-radius: 99px;
     color: var(--color-accent);
   }
@@ -584,6 +660,8 @@
     display: flex;
     flex-direction: column;
     gap: 20px;
+    max-height: calc(100dvh - 112px);
+    overflow-y: auto;
     padding: 20px 14px;
     background: var(--color-surface);
     border: 1px solid var(--color-line);
@@ -642,7 +720,7 @@
     font-weight: 600;
     background: var(--color-accent-soft);
     border-left-color: var(--color-accent);
-    box-shadow: 0 0 16px rgba(167, 139, 250, 0.12);
+
   }
 
   .nav-icon {
@@ -670,9 +748,9 @@
   }
 
   .sidebar-nav-item.active .count-badge {
-    background: rgba(167, 139, 250, 0.2);
+    background: var(--color-accent-soft);
     color: var(--color-accent);
-    border-color: rgba(167, 139, 250, 0.3);
+    border-color: var(--color-line);
   }
 
   .sso-badge {
@@ -805,11 +883,12 @@
     }
 
     .admin-sidebar {
-      position: sticky;
+      max-height: none;
+      position: static;
       top: 72px;
       z-index: 50;
-      flex-direction: row;
-      flex-wrap: wrap;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
       padding: 10px 12px;
     }
@@ -819,9 +898,7 @@
     }
 
     .sidebar-group {
-      flex-direction: row;
-      flex-wrap: wrap;
-      gap: 6px;
+      display: contents;
     }
 
     .sidebar-nav-item {

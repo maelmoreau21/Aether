@@ -48,6 +48,7 @@ RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/s
     echo 'fn main() {}' > crates/core/src/bootstrap.rs && \
     echo 'fn main() {}' > crates/core/src/bin/backup.rs && \
     echo 'fn main() {}' > crates/core/src/bin/restore.rs && \
+    echo 'fn main() {}' > crates/core/src/bin/recover.rs && \
     touch crates/core/tests/p0.rs crates/core/tests/catalog.rs
 
 # Precompile workspace dependencies
@@ -59,7 +60,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         --bin aether-node \
         --bin media-bootstrap \
         --bin media-backup \
-        --bin media-restore
+        --bin media-restore \
+        --bin media-recover
 
 # Copy actual workspace crates (shared contracts, node, and core with migrations)
 COPY crates/ ./crates/
@@ -74,7 +76,8 @@ RUN touch crates/shared/src/lib.rs \
           crates/core/src/bin/aether-core.rs \
           crates/core/src/bootstrap.rs \
           crates/core/src/bin/backup.rs \
-          crates/core/src/bin/restore.rs && \
+          crates/core/src/bin/restore.rs \
+          crates/core/src/bin/recover.rs && \
     rm -f target/release/deps/*media_contracts* \
           target/release/deps/*media_node* \
           target/release/deps/*aether_node* \
@@ -83,26 +86,30 @@ RUN touch crates/shared/src/lib.rs \
           target/release/deps/*media_bootstrap* \
           target/release/deps/*media_backup* \
           target/release/deps/*media_restore* \
+          target/release/deps/*media_recover* \
           target/release/media-poc \
           target/release/aether-core \
           target/release/aether-node \
           target/release/media-bootstrap \
           target/release/media-backup \
-          target/release/media-restore && \
+          target/release/media-restore \
+          target/release/media-recover && \
     cargo build --release --locked \
         --bin media-poc \
         --bin aether-core \
         --bin aether-node \
         --bin media-bootstrap \
         --bin media-backup \
-        --bin media-restore && \
+        --bin media-restore \
+        --bin media-recover && \
     strip --strip-all \
         target/release/media-poc \
         target/release/aether-core \
         target/release/aether-node \
         target/release/media-bootstrap \
         target/release/media-backup \
-        target/release/media-restore
+        target/release/media-restore \
+        target/release/media-recover
 
 # Minimal ffprobe build for Media Node discovery.
 # Builds a stripped, hardened ffprobe binary with native demuxers, parsers, and decoders.
@@ -157,35 +164,50 @@ RUN mkdir -p /tmp/ffmpeg-src \
     && rm -rf /tmp/ffmpeg-src
 
 # ==============================================================================
-# Stage 3: Distributed Core Runtime (`aether-core`)
+# PostgreSQL client tools for offline and Web backups, shared by Core/standalone.
+# The PGDG repository is authenticated with its scoped signed-by key; no DB server.
 # ==============================================================================
-FROM debian:bookworm-slim AS runtime-core
+FROM debian:bookworm-slim AS backup-runtime
 
-# Core does not mount or probe media files directly; no ffmpeg needed in Core-only image
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         tini \
+    && curl -fsSL --retry 3 https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/keyrings/postgresql-pgdg.asc \
+    && printf '%s\n' 'deb [signed-by=/usr/share/keyrings/postgresql-pgdg.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main' > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-18 \
+    && pg_dump --version \
+    && pg_restore --version \
     && rm -rf /var/lib/apt/lists/*
 
+# ==============================================================================
+# Stage 3: Distributed Core Runtime (`aether-core`)
+# ==============================================================================
+FROM backup-runtime AS runtime-core
+
+# Core does not mount or probe media files directly; no ffmpeg needed in Core-only image
 RUN groupadd --gid 10001 aether \
     && useradd --uid 10001 --gid 10001 --create-home --home-dir /app --shell /usr/sbin/nologin aether
 
 RUN mkdir -p /data /backups /app/apps/web/build \
     && chown -R aether:aether /data /backups /app \
-    && chmod 0750 /data /backups \
+    && chmod 0750 /data \
+    && chmod 0700 /backups \
     && chmod 0755 /app
 
 COPY --from=rust-builder --chmod=0755 /build/target/release/aether-core /usr/local/bin/aether-core
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-bootstrap /usr/local/bin/media-bootstrap
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-backup /usr/local/bin/media-backup
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-restore /usr/local/bin/media-restore
+COPY --from=rust-builder --chmod=0755 /build/target/release/media-recover /usr/local/bin/media-recover
 COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
 
 ENV MEDIA_MODE=distributed \
     MEDIA_PORT=3000 \
     MEDIA_BIND_ADDR=0.0.0.0 \
     MEDIA_DB_PATH=/data/core.sqlite3 \
+    MEDIA_BACKUP_DIR=/backups \
     MEDIA_WEB_DIST=/app/apps/web/build \
     MEDIA_PUBLIC_URL=http://127.0.0.1:3000
 
@@ -249,13 +271,10 @@ CMD ["aether-node"]
 # ==============================================================================
 # Stage 5: Standalone All-in-One Runtime (`aether` — Default Target)
 # ==============================================================================
-FROM debian:bookworm-slim AS runtime
+FROM backup-runtime AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
         ffmpeg \
-        tini \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid 10001 aether \
@@ -263,7 +282,8 @@ RUN groupadd --gid 10001 aether \
 
 RUN mkdir -p /data /backups /media /app/apps/web/build \
     && chown -R aether:aether /data /backups /media /app \
-    && chmod 0750 /data /backups \
+    && chmod 0750 /data \
+    && chmod 0700 /backups \
     && chmod 0755 /media /app
 
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-poc /usr/local/bin/media-poc
@@ -272,6 +292,7 @@ COPY --from=rust-builder --chmod=0755 /build/target/release/aether-node /usr/loc
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-bootstrap /usr/local/bin/media-bootstrap
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-backup /usr/local/bin/media-backup
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-restore /usr/local/bin/media-restore
+COPY --from=rust-builder --chmod=0755 /build/target/release/media-recover /usr/local/bin/media-recover
 RUN ln -s /usr/local/bin/media-poc /usr/local/bin/aether
 
 COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
@@ -279,6 +300,7 @@ COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/
 ENV MEDIA_PORT=3000 \
     MEDIA_BIND_ADDR=0.0.0.0 \
     MEDIA_DB_PATH=/data/core.sqlite3 \
+    MEDIA_BACKUP_DIR=/backups \
     MEDIA_LIBRARY_ROOT=/media \
     MEDIA_WEB_DIST=/app/apps/web/build \
     MEDIA_PUBLIC_URL=http://127.0.0.1:3000

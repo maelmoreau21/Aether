@@ -1,4 +1,5 @@
 import { writable, derived } from 'svelte/store';
+import { savePreferences } from '../preferences';
 
 export type SupportedLocale = 'fr' | 'en';
 
@@ -189,7 +190,8 @@ export type TranslationKey = keyof (typeof translations)['fr'];
 
 function getInitialLocale(): SupportedLocale {
   if (typeof window === 'undefined') return 'fr';
-  const saved = localStorage.getItem('media_locale');
+  let saved: string | null = null;
+  try { saved = localStorage.getItem('media_locale'); } catch { /* Optional cache. */ }
   if (saved === 'fr' || saved === 'en') return saved;
   const navLang = navigator.language.toLowerCase();
   return navLang.startsWith('en') ? 'en' : 'fr';
@@ -197,10 +199,11 @@ function getInitialLocale(): SupportedLocale {
 
 export const locale = writable<SupportedLocale>(getInitialLocale());
 
-export function setLocale(newLocale: SupportedLocale) {
+export function setLocale(newLocale: SupportedLocale, persist = true) {
   locale.set(newLocale);
+  if (persist) savePreferences({ locale: newLocale });
   if (typeof window !== 'undefined') {
-    localStorage.setItem('media_locale', newLocale);
+    try { localStorage.setItem('media_locale', newLocale); } catch { /* Optional cache. */ }
     document.documentElement.lang = newLocale;
   }
 }

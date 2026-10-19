@@ -1,9 +1,15 @@
 //! Local Core: persistent authentication and isolated synthetic media inventory.
+pub mod admin_backups;
+pub mod admin_users;
+pub mod api_keys;
 pub mod auth;
 pub mod backup;
+pub mod backup_bundle;
 pub mod database;
+pub mod groups;
 pub mod oidc;
 pub mod postgres_backup;
+pub mod scheduler;
 use media_contracts::brand;
 mod catalog;
 mod demo;
@@ -14,6 +20,7 @@ pub mod media;
 pub mod node;
 pub mod nodes;
 pub mod permissions;
+pub mod preferences;
 pub mod progress;
 pub mod scans;
 
@@ -146,9 +153,15 @@ pub async fn secure_app_with_jobs(
         public_routes(mode)
             .merge(media)
             .merge(scans::router(auth.clone(), root.clone(), jobs).await?)
-            .merge(libraries::router(auth.clone(), root))
+            .merge(libraries::router(auth.clone(), root.clone()))
             .merge(nodes::router(auth.clone(), replay_window))
             .merge(progress::router(auth.clone()))
+            .merge(preferences::router(auth.clone()))
+            .merge(admin_users::router(auth.clone()))
+            .merge(admin_backups::router(auth.clone(), root.clone()).await?)
+            .merge(scheduler::router(auth.clone()).await?)
+            .merge(groups::router(auth.clone()))
+            .merge(api_keys::router(auth.clone()))
             .merge(auth::router(auth))
             .merge(oidc),
         origin,

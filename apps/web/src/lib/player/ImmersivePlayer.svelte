@@ -5,7 +5,8 @@
   import type { Media, Player, PlayerFactory, PlaybackState } from './types';
   import { preferredSubtitle, type SubtitlePreference } from './subtitle-preference';
   import { ProgressTracker } from './progress';
-  import { session } from '../auth/session';
+  import { getSessionGeneration } from '../auth/session';
+  import { preferences, savePreferences } from '../preferences';
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
   let dialog: HTMLDialogElement;
@@ -95,17 +96,17 @@
     if (opened) return;
     preferredLanguage = 'fr'; subtitlePreference = undefined; preferredAudio = undefined; audioOffset = 0; subtitleOffset = 0;
     try {
-      const scope = $session?.user.id ?? 'fixture';
-      const track = JSON.parse(localStorage.getItem(`media_audio_track_${scope}`) ?? 'null');
+      const account = preferences();
+      const track = account.audioTrack;
       if (track && typeof track.mediaId === 'string' && typeof track.trackId === 'string') preferredAudio = track;
-      const offsets = JSON.parse(localStorage.getItem(`media_offsets_${scope}`) ?? 'null');
-      if (Number.isFinite(offsets?.audio) && Math.abs(offsets.audio) <= 30) audioOffset = offsets.audio;
-      if (Number.isFinite(offsets?.subtitle) && Math.abs(offsets.subtitle) <= 30) subtitleOffset = offsets.subtitle;
-      preferredLanguage = localStorage.getItem(`media_audio_${scope}`) ?? localStorage.getItem('media_pref_audio') ?? 'fr';
-      const saved = JSON.parse(localStorage.getItem(`media_subtitle_${scope}`) ?? 'null') as SubtitlePreference | null;
+      const offsets = account.offsets;
+      if (offsets && Number.isFinite(offsets.audio) && Math.abs(offsets.audio) <= 30) audioOffset = offsets.audio;
+      if (offsets && Number.isFinite(offsets.subtitle) && Math.abs(offsets.subtitle) <= 30) subtitleOffset = offsets.subtitle;
+      preferredLanguage = account.audioLanguage ?? 'fr';
+      const saved = account.subtitlePreference;
       if (saved && typeof saved.enabled === 'boolean' && (saved.language === undefined || typeof saved.language === 'string')) subtitlePreference = saved;
       else {
-        const initialSubtitles = localStorage.getItem('media_pref_subtitles');
+        const initialSubtitles = account.subtitles;
         if (initialSubtitles === 'off') subtitlePreference = { enabled: false };
         if (initialSubtitles === 'always') subtitlePreference = { enabled: true, language: 'fr', forced: false };
       }
@@ -168,22 +169,25 @@
   function mute() { volume(playback.volume === 0 ? previousVolume || 1 : 0); }
   function seek(value: number) { if (!busy) { engine?.seek(value); sync(); wake(); } }
   function selectAudio(id: string) {
+    const accountGeneration = getSessionGeneration();
     void action(async player => { await player.selectAudio(id); audio = id; preferredLanguage = active?.sources.find(source => source.audioTrackId === id)?.language ?? preferredLanguage;
+      if (accountGeneration !== getSessionGeneration()) return;
       preferredAudio = { mediaId: active?.id ?? '', trackId: id };
-      try { localStorage.setItem(`media_audio_track_${$session?.user.id ?? 'fixture'}`, JSON.stringify(preferredAudio)); localStorage.setItem(`media_audio_${$session?.user.id ?? 'fixture'}`, preferredLanguage); } catch { /* Optional preference. */ }
+      savePreferences({ audioTrack: preferredAudio, audioLanguage: preferredLanguage });
     });
   }
-  function selectSubtitle(id: string | null) { void action(async player => {
+  function selectSubtitle(id: string | null) { const accountGeneration = getSessionGeneration(); void action(async player => {
     await player.selectSubtitle(id); subtitle = id;
+    if (accountGeneration !== getSessionGeneration()) return;
     const track = active?.subtitles.find(track => track.id === id);
     subtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
-    try { localStorage.setItem(`media_subtitle_${$session?.user.id ?? 'fixture'}`, JSON.stringify(subtitlePreference)); } catch { /* Optional preference. */ }
+    savePreferences({ subtitlePreference });
   }); }
   function offset(kind: 'audio' | 'subtitle', value: number) {
     if (!Number.isFinite(value) || Math.abs(value) > 30) return;
     if (kind === 'audio') { audioOffset = value; engine?.setAudioOffset?.(value); }
     else { subtitleOffset = value; engine?.setSubtitleOffset?.(value); }
-    try { localStorage.setItem(`media_offsets_${$session?.user.id ?? 'fixture'}`, JSON.stringify({ audio: audioOffset, subtitle: subtitleOffset })); } catch { /* Optional preference. */ }
+    savePreferences({ offsets: { audio: audioOffset, subtitle: subtitleOffset } });
     wake();
   }
   function selectSource(id: string) {

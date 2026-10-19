@@ -36,7 +36,7 @@ async fn authorized(
     if mutation {
         auth.require_csrf(headers, &identity)?;
     }
-    let found: Option<String> = query_scalar("SELECT w.id FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE w.id=? AND w.kind IN ('film','episode') AND l.enabled=1 AND n.status != 'revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM library_permissions p WHERE p.library_id=l.id AND p.user_id=?))")
+    let found: Option<String> = query_scalar("SELECT w.id FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE w.id=? AND w.kind IN ('film','episode') AND l.enabled=1 AND n.status != 'revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?))")
         .bind(work).bind(identity.user.role.as_str()).bind(&identity.user.id).fetch_optional(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if found.is_none() {
         return Err(StatusCode::FORBIDDEN);
@@ -127,7 +127,7 @@ async fn list(
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
     let identity = auth.authenticate(&headers).await?;
-    let rows = query("SELECT p.*,w.title,w.kind,s.series_id FROM playback_progress p JOIN inventory_works w ON w.id=p.work_id JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id LEFT JOIN inventory_episodes ep ON ep.work_id=w.id LEFT JOIN inventory_seasons s ON s.id=ep.season_id WHERE p.user_id=? AND l.enabled=1 AND n.status != 'revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM library_permissions lp WHERE lp.library_id=l.id AND lp.user_id=?)) ORDER BY p.updated_at DESC,p.work_id LIMIT 100")
+    let rows = query("SELECT p.*,w.title,w.kind,s.series_id FROM playback_progress p JOIN inventory_works w ON w.id=p.work_id JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id LEFT JOIN inventory_episodes ep ON ep.work_id=w.id LEFT JOIN inventory_seasons s ON s.id=ep.season_id WHERE p.user_id=? AND l.enabled=1 AND n.status != 'revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id=l.id AND lp.user_id=?)) ORDER BY p.updated_at DESC,p.work_id LIMIT 100")
         .bind(&identity.user.id).bind(if identity.user.role == Role::Administrator {"administrator"} else {"user"}).bind(&identity.user.id).fetch_all(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let items: Vec<_> = rows
         .iter()

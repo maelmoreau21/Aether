@@ -23,7 +23,7 @@ argon2 = { version = "0.6.0", features = ["zeroize"] }
 rpassword = "7.5.4"
 zeroize = "1"
 uuid = { version = "1", features = ["v4"] }
-sha2 = "0.10.9"
+sha2 = "0.11.1"
 bytes = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }

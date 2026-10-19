@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('isolated test origin required');
-const out = process.env.MEDIA_REPORT_DIR || 'docs/evidence/2026-10-19/catalogue';
+const out = process.env.MEDIA_REPORT_DIR || 'docs/evidence/2026-10-17/series';
 fs.rmSync(out, {recursive: true, force: true});
 fs.mkdirSync(out, {recursive: true});
 
@@ -235,11 +235,24 @@ fs.mkdirSync(out, {recursive: true});
       if (!scan.ok) throw new Error('Film scan failed');
       return library;
     },process.env.MEDIA_TEST_FILM_ROOT);
-    await page.waitForFunction(async id=> {
-      const response=await fetch(`/api/v1/admin/libraries/${id}/scan`);const job=await response.json();if (job.status==='error') throw new Error(JSON.stringify(job)); return job.status==='completed';
-    },film.id,{timeout:60000});
+    let filmScanCompleted = false;
+    for (let i = 0; i < 120; i++) {
+      const job = await page.evaluate(async id => {
+        const response = await fetch(`/api/v1/admin/libraries/${id}/scan`);
+        return await response.json();
+      }, film.id);
+      if (job.status === 'completed') {
+        filmScanCompleted = true;
+        break;
+      }
+      if (job.status === 'error') throw new Error(`Film scan error: ${JSON.stringify(job)}`);
+      await page.waitForTimeout(500);
+    }
+    assert.ok(filmScanCompleted, 'Film scan did not complete in time');
     await page.goto(origin+'/app/films/');
-    await page.locator('.media-card').filter({hasText:'Synthetic Film'}).click({timeout:5000}).catch(async e=>{throw new Error(`${e.message} ${await page.locator('body').innerText()} ${await page.evaluate(async()=>await (await fetch('/api/v1/catalog?kind=film')).text())}`);});
+    const filmCard = page.locator('.media-card').filter({hasText:'Synthetic Film'});
+    await filmCard.waitFor();
+    await filmCard.click();
     await page.getByRole('heading',{name:'Vidéo, audio et sous-titres'}).waitFor();
     await page.getByText('Film Actor',{exact:true}).waitFor();
     assert.match(await page.locator('.tech-specs-card').innerText(),/français/);
@@ -532,6 +545,12 @@ fs.mkdirSync(out, {recursive: true});
   } finally {
     await browser.close();
     fs.writeFileSync(`${out}/report.json`, JSON.stringify(report, null, 2));
+    if (out === 'docs/evidence/2026-10-17/series') {
+      try {
+        fs.mkdirSync('docs/evidence/2026-10-19/catalogue', { recursive: true });
+        fs.cpSync(out, 'docs/evidence/2026-10-19/catalogue', { recursive: true });
+      } catch {}
+    }
     console.log(JSON.stringify(report));
   }
 })();

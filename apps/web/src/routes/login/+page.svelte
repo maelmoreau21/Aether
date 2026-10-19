@@ -20,6 +20,8 @@
   let bootstrapLogin = $state('admin');
   let bootstrapPassword = $state('');
   let bootstrapConfirm = $state('');
+  let bootstrapToken = $state('');
+  let httpBootstrapEnabled = $state(true);
 
   function mapError(code: string): string {
     switch (code) {
@@ -49,6 +51,10 @@
         return 'Authentification requise pour accéder à votre médiathèque.';
       case 'bootstrap_closed':
         return "L'initialisation du serveur est déjà clôturée.";
+      case 'invalid_bootstrap_token':
+        return "Code d'initialisation invalide. Consultez la console du serveur ou le fichier .bootstrap_token.";
+      case 'http_bootstrap_disabled':
+        return "L'initialisation via le Web est désactivée. Utilisez la commande locale 'media-bootstrap'.";
       default:
         return code ? decodeURIComponent(code) : 'Une erreur est survenue lors de l’authentification.';
     }
@@ -99,6 +105,10 @@
   async function submitBootstrap(event: SubmitEvent) {
     event.preventDefault();
     if (busy) return;
+    if (!bootstrapToken.trim()) {
+      error = "Veuillez renseigner le code d'initialisation affiché dans la console du serveur.";
+      return;
+    }
     if (bootstrapPassword.length < 15) {
       error = 'Le mot de passe doit comporter au moins 15 caractères.';
       return;
@@ -110,9 +120,10 @@
     busy = true;
     error = '';
     try {
-      await bootstrapAdmin(bootstrapLogin.trim().toLowerCase(), bootstrapPassword);
+      await bootstrapAdmin(bootstrapLogin.trim().toLowerCase(), bootstrapPassword, bootstrapToken.trim());
       bootstrapPassword = '';
       bootstrapConfirm = '';
+      bootstrapToken = '';
       await goto(resolve('/'), { replaceState: true });
     } catch (failure) {
       error = failure instanceof Error ? failure.message : "Échec de l'initialisation.";
@@ -139,6 +150,9 @@
         needsBootstrap = data.needsBootstrap === true;
         if (typeof data.localLoginEnabled === 'boolean') {
           localLoginEnabled = data.localLoginEnabled;
+        }
+        if (typeof data.httpBootstrapEnabled === 'boolean') {
+          httpBootstrapEnabled = data.httpBootstrapEnabled;
         }
       })
       .catch(() => {});
@@ -206,7 +220,36 @@
           </div>
         {/if}
 
+        {#if !httpBootstrapEnabled}
+          <div class="error-banner" role="alert">
+            <Icon name="alert" size={18} />
+            <p class="error-text">
+              L'initialisation via le Web est désactivée. Veuillez exécuter la commande locale <code>media-bootstrap</code> dans un terminal pour créer l'administrateur.
+            </p>
+          </div>
+        {:else}
         <form class="login-form" onsubmit={submitBootstrap} aria-busy={busy}>
+          <div class="field-group">
+            <label for="bootstrap-token" class="field-label">
+              <span>Code d'initialisation (Jeton serveur)</span>
+            </label>
+            <div class="input-container">
+              <span class="input-icon" aria-hidden="true"><Icon name="settings" size={17} /></span>
+              <input
+                id="bootstrap-token"
+                name="bootstrap-token"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                required
+                bind:value={bootstrapToken}
+                disabled={busy}
+                placeholder="Code affiché dans la console du serveur"
+              />
+            </div>
+            <span class="field-hint">Consultez les journaux du serveur ou le fichier .bootstrap_token.</span>
+          </div>
+
           <div class="field-group">
             <label for="bootstrap-login" class="field-label">
               <span>Identifiant administrateur</span>
@@ -277,6 +320,7 @@
             <span class="arrow-glyph" aria-hidden="true">→</span>
           </button>
         </form>
+        {/if}
 
         <footer class="card-footer">
           <p class="help-text">

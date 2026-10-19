@@ -33,6 +33,15 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    deploy:
+      resources:
+        limits:
+          cpus: '2.00'
+          memory: 1G
+          pids: 200
     ports:
       - "${MEDIA_CORE_BIND_HOST:-127.0.0.1}:${MEDIA_CORE_PORT:-3000}:3000"
     environment:
@@ -80,6 +89,15 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    deploy:
+      resources:
+        limits:
+          cpus: '2.00'
+          memory: 1G
+          pids: 200
     ports:
       # Loopback bound for direct browser -> Node streaming (`/stream/v1/...`) on local/proxied setups.
       # Internal control endpoints (`/internal/v1/...`) require mutual HMAC-SHA256.

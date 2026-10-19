@@ -52,6 +52,15 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    deploy:
+      resources:
+        limits:
+          cpus: '2.00'
+          memory: 1G
+          pids: 200
     ports:
       # Bound strictly to host loopback. For LAN or remote access, expose via a trusted HTTPS
       # reverse proxy forwarding to 127.0.0.1:3000 and set MEDIA_PUBLIC_URL to your https:// origin.

@@ -1,6 +1,44 @@
 # MEMORY.md — État et décisions Aether
 
-## 19 octobre 2026 — Correction des échecs CI GitHub Actions (espace disque & timeout déconnexion Séries)
+## 19 octobre 2026 — Durcissement Sécurité & Résolution des Priorités d'Audit (OWASP ASVS 5.0.0 L2)
+
+- **Initialisation sécurisée du premier administrateur (Critique sous condition)** :
+  - **Jeton de bootstrap à usage unique** : `AuthState` génère au démarrage un jeton cryptographique aléatoire de 128 bits (hexadécimal de 32 caractères) ou utilise `MEDIA_BOOTSTRAP_TOKEN` si défini. Ce jeton est consigné dans les logs et persisté dans un fichier local protégé `.bootstrap_token` avec les permissions `0o600` (lecture/écriture propriétaire exclusive).
+  - **Validation constante et suppression immédiate** : `POST /api/v1/auth/bootstrap` compare le jeton fourni en temps constant (`constant_time_eq`). Dès la validation et la création du premier administrateur, le jeton mémoire est effacé et le fichier `.bootstrap_token` est supprimé du disque. Tout essai avec jeton absent ou invalide renvoie `401 Unauthorized` (`invalid_bootstrap_token`).
+  - **Désactivation HTTP explicite** : Support de `MEDIA_DISABLE_HTTP_BOOTSTRAP=true` ou `MEDIA_BOOTSTRAP_HTTP_ENABLED=false` interdisant l'initialisation via l'API Web HTTP (`403 Forbidden` / `http_bootstrap_disabled`) au profit de l'initialisation locale.
+  - **Interface utilisateur mise à jour** : La page `/login` détecte le besoin d'initialisation et présente un champ dédié pour le jeton de bootstrap, ou un bandeau d'instruction CLI/local si le bootstrap HTTP est désactivé.
+
+- **Resynchronisation et révocation OIDC à la baisse (Élevé)** :
+  - **Révocation du privilège administrateur** : Lors du rappel OIDC (`callback`), si un compte pur OIDC (`password_hash IS NULL`) possédait le rôle `administrator` mais ne fait plus partie d'aucun groupe IdP configuré dans `admin_groups`, son rôle est immédiatement rétrogradé à `user` en base.
+  - **Révocation immédiate des sessions existantes** :
+    - En cas de perte du rôle administrateur OIDC, toutes les sessions actives de l'utilisateur sont purgées (`DELETE FROM sessions WHERE user_id = ?`) afin de forcer la ré-authentification avec ses nouveaux droits minimaux.
+    - Si l'utilisateur perd tous ses groupes autorisés (`require_group = true`), ses sessions existantes sont également révoquées avant le rejet en `403 Forbidden`.
+  - **Tests unitaires exhaustifs** : Couverture ajoutée dans `crates/core/src/oidc.rs` validant l'attribution initiale du rôle administrateur, la rétrogradation à `user`, et la purge systématique des sessions.
+
+- **Limiteur de connexion scopé anti-DoS (Moyenne)** :
+  - **Problème résolu** : Le limiteur global à 10 connexions/minute permettait à un tiers malveillant d'épuiser le quota et d'interdire la connexion à tous les utilisateurs légitimes.
+  - **Migrations 0026** : Création de `0026_login_throttle_scoped.sql` (SQLite & PostgreSQL) introduisant une clé de découpage (`throttle_key TEXT PRIMARY KEY`) à la place du singleton.
+  - **Clé par adresse IP cliente** : L'adresse IP est extraite de `x-forwarded-for` (premier saut non fiable), `x-real-ip` ou `ip:127.0.0.1`. Le blocage de 10 tentatives/minute s'applique désormais par IP cliente indépendante, protégeant le service contre les dénis de service distribués sur les utilisateurs légitimes.
+
+- **Filtrage de groupe OIDC obligatoire par défaut (Moyenne)** :
+  - `require_group` est désormais activé par défaut (`true`) dans `crates/core/src/oidc.rs`. Si la configuration OIDC est activée sans groupes spécifiés, le démarrage est refusé par défaut afin d'éviter l'accès libre non désiré, sauf déclaration explicite de `MEDIA_OIDC_REQUIRE_GROUP=false`.
+
+- **Surveillance Dependabot npm (Moyenne)** :
+  - Activation de la surveillance continue des dépendances de l'application web dans `.github/dependabot.yml` (`package-ecosystem: npm`, `directory: /apps/web`, hebdomadaire le lundi à 04h00).
+
+- **Durcissement Docker Compose (Moyenne)** :
+  - Dans `docker-compose.yml` et `compose.distributed.yaml` :
+    - Ajout de `read_only: true` sur les conteneurs Core et Media Node.
+    - Montage `tmpfs` dédié pour `/tmp` (`rw,noexec,nosuid,size=64m`).
+    - Définition de limites strictes de ressources : `cpus: '2.00'`, `memory: 1G`, `pids: 200`.
+
+- **Nettoyage des journaux internes IA (Faible)** :
+  - Désindexation de `.agents/teamwork` via `git rm -r --cached` et exclusion persistante dans `.gitignore` pour préparer une base propre pour la publication open source.
+
+- **Alignement OWASP ASVS 5.0.0 Niveau 2** :
+  - Documentation détaillée intégrée dans `docs/SECURITY.md` (V2 Authentification, V3 Gestion de session, V4 Contrôle d'accès, V14 Configuration sécurisée) et dans `docs/OIDC.md`.
+
+
 
 - **Diagnostic et résolution des deux échecs de la CI** :
   1. **Échec `scanner_performance::test_1000_synthetic_files_scan_and_rescan` (`No space left on device`)** :

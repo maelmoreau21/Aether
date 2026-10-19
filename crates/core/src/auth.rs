@@ -340,6 +340,8 @@ pub struct AuthState {
     dummy_hash: Arc<str>,
     pub(crate) workers: Arc<Semaphore>,
     toucher: Arc<SessionToucher>,
+    pub(crate) bootstrap_token: Arc<Mutex<Option<String>>>,
+    pub(crate) bootstrap_file_path: Arc<Mutex<Option<std::path::PathBuf>>>,
 }
 #[derive(Debug, thiserror::Error)]
 pub enum AuthConfigError {
@@ -373,6 +375,13 @@ pub struct Authenticated {
 struct Login {
     login: String,
     password: String,
+}
+#[derive(Deserialize)]
+struct BootstrapInput {
+    login: String,
+    password: String,
+    #[serde(default)]
+    bootstrap_token: Option<String>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -445,6 +454,69 @@ impl AuthState {
             touch_interval_seconds,
             max_pending_touches,
         );
+        let closed: i64 = crate::database::query_scalar(
+            "SELECT CAST((EXISTS(SELECT 1 FROM bootstrap_state) OR EXISTS(SELECT 1 FROM users)) AS INTEGER)",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap_or(1);
+
+        let (bootstrap_token, bootstrap_file_path) = if closed != 0 || is_http_bootstrap_disabled()
+        {
+            (Arc::new(Mutex::new(None)), Arc::new(Mutex::new(None)))
+        } else {
+            let token = std::env::var("MEDIA_BOOTSTRAP_TOKEN")
+                .or_else(|_| std::env::var("MEDIA_SETUP_TOKEN"))
+                .ok()
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(random_token);
+
+            let token_path = std::env::var("MEDIA_DB_PATH")
+                .ok()
+                .map(std::path::PathBuf::from)
+                .and_then(|p| p.parent().map(|d| d.join(".bootstrap_token")))
+                .or_else(|| Some(std::path::PathBuf::from(".bootstrap_token")));
+
+            if let Some(mut f) = token_path
+                .as_ref()
+                .and_then(|p| std::fs::File::create(p).ok())
+            {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+                }
+                let _ = std::io::Write::write_all(&mut f, token.as_bytes());
+            }
+
+            if !std::env::var("MEDIA_SILENT_BOOTSTRAP_BANNER")
+                .map(|v| v == "true")
+                .unwrap_or(false)
+            {
+                println!(
+                    "================================================================================"
+                );
+                println!("[AETHER BOOTSTRAP] Initialisation sécurisée requise");
+                println!("Aucun administrateur n'est encore configuré.");
+                println!("Code d'initialisation unique : {}", token);
+                if let Some(ref p) = token_path {
+                    println!("Fichier de jeton temporaire : {}", p.display());
+                }
+                println!(
+                    "Saisissez ce code dans l'interface Web ou transmettez-le via l'API bootstrap."
+                );
+                println!(
+                    "================================================================================"
+                );
+            }
+
+            (
+                Arc::new(Mutex::new(Some(token))),
+                Arc::new(Mutex::new(token_path)),
+            )
+        };
+
         Ok(Self {
             store,
             origin: origin.into(),
@@ -452,7 +524,22 @@ impl AuthState {
             dummy_hash: dummy_hash.into(),
             workers: Arc::new(Semaphore::new(2)),
             toucher,
+            bootstrap_token,
+            bootstrap_file_path,
         })
+    }
+    pub fn get_bootstrap_token(&self) -> Option<String> {
+        self.bootstrap_token
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+    pub fn set_bootstrap_token(&self, token: Option<String>) {
+        let mut guard = self
+            .bootstrap_token
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        *guard = token;
     }
     pub async fn authenticate(&self, headers: &HeaderMap) -> Result<Authenticated, StatusCode> {
         let raw = session_token(headers).ok_or(StatusCode::UNAUTHORIZED)?;
@@ -558,6 +645,50 @@ pub fn is_local_login_enabled() -> bool {
     !disabled
 }
 
+pub fn is_http_bootstrap_disabled() -> bool {
+    std::env::var("MEDIA_DISABLE_HTTP_BOOTSTRAP")
+        .map(|v| v.trim().eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+        || std::env::var("MEDIA_BOOTSTRAP_HTTP_ENABLED")
+            .map(|v| v.trim().eq_ignore_ascii_case("false"))
+            .unwrap_or(false)
+}
+
+pub fn extract_client_key(headers: &HeaderMap) -> String {
+    if let Some(ip) = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|f| f.split(',').next())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let sanitized = ip
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-' | '_'))
+            .take(64)
+            .collect::<String>();
+        if !sanitized.is_empty() {
+            return format!("ip:{sanitized}");
+        }
+    }
+    if let Some(real_ip) = headers
+        .get("x-real-ip")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let sanitized = real_ip
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-' | '_'))
+            .take(64)
+            .collect::<String>();
+        if !sanitized.is_empty() {
+            return format!("ip:{sanitized}");
+        }
+    }
+    "ip:127.0.0.1".to_string()
+}
+
 async fn bootstrap_status(State(state): State<AuthState>) -> Response {
     let closed: i64 = crate::database::query_scalar(
         "SELECT CAST((EXISTS(SELECT 1 FROM bootstrap_state) OR EXISTS(SELECT 1 FROM users)) AS INTEGER)",
@@ -572,10 +703,12 @@ async fn bootstrap_status(State(state): State<AuthState>) -> Response {
         .map(|v| !v.trim().is_empty())
         .unwrap_or(false);
     let local_enabled = is_local_login_enabled();
+    let http_bootstrap_enabled = !is_http_bootstrap_disabled();
     Json(serde_json::json!({
         "needsBootstrap": closed == 0 && !oidc_admin_configured,
         "localLoginEnabled": local_enabled,
-        "oidcAdminConfigured": oidc_admin_configured
+        "oidcAdminConfigured": oidc_admin_configured,
+        "httpBootstrapEnabled": http_bootstrap_enabled
     }))
     .into_response()
 }
@@ -583,10 +716,13 @@ async fn bootstrap_status(State(state): State<AuthState>) -> Response {
 async fn bootstrap(
     State(state): State<AuthState>,
     headers: HeaderMap,
-    Json(input): Json<Login>,
+    Json(input): Json<BootstrapInput>,
 ) -> Response {
     if !is_local_login_enabled() {
         return failure(StatusCode::FORBIDDEN, "local_login_disabled");
+    }
+    if is_http_bootstrap_disabled() {
+        return failure(StatusCode::FORBIDDEN, "http_bootstrap_disabled");
     }
     if let Err(status) = state.check_origin(&headers) {
         return failure(status, "forbidden");
@@ -594,6 +730,20 @@ async fn bootstrap(
     let Ok(_permit) = state.workers.clone().try_acquire_owned() else {
         return failure(StatusCode::TOO_MANY_REQUESTS, "try_later");
     };
+
+    let expected = state.get_bootstrap_token();
+    let Some(expected_token) = expected else {
+        return failure(StatusCode::FORBIDDEN, "bootstrap_closed");
+    };
+
+    let provided = input.bootstrap_token.as_deref().unwrap_or("").trim();
+    if provided.is_empty()
+        || provided.len() != expected_token.len()
+        || !constant_equal(hash(provided).as_bytes(), hash(&expected_token).as_bytes())
+    {
+        return failure(StatusCode::UNAUTHORIZED, "invalid_bootstrap_token");
+    }
+
     let login_str = input.login.trim();
     if login_str.is_empty()
         || login_str.len() > 64
@@ -628,6 +778,17 @@ async fn bootstrap(
             return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
         }
     };
+
+    state.set_bootstrap_token(None);
+    if let Some(path) = state
+        .bootstrap_file_path
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .take()
+    {
+        let _ = std::fs::remove_file(path);
+    }
+
     let raw = random_token();
     if crate::database::query(
         "INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+? FROM users WHERE id=? AND disabled_at IS NULL",
@@ -679,13 +840,24 @@ async fn login(
     let Ok(_permit) = state.workers.clone().try_acquire_owned() else {
         return failure(StatusCode::TOO_MANY_REQUESTS, "try_later");
     };
-    // Single bounded row: shared budget across all account names, durable across restarts.
-    let allowed=crate::database::query_scalar::<_,i64>("INSERT INTO login_throttle(singleton,window_started,attempts) VALUES(1,unixepoch(),1) ON CONFLICT(singleton) DO UPDATE SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<10 RETURNING login_throttle.attempts").fetch_optional(&state.store.pool).await;
+    // Scoped throttle: budget per client IP, durable across restarts.
+    let client_key = extract_client_key(&headers);
+    let allowed = crate::database::query_scalar::<_, i64>(
+        "INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<10 RETURNING login_throttle.attempts",
+    )
+    .bind(&client_key)
+    .fetch_optional(&state.store.pool)
+    .await;
     match allowed {
         Ok(Some(_)) => {}
         Ok(None) => return failure(StatusCode::TOO_MANY_REQUESTS, "try_later"),
         Err(_) => return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
     }
+    let _ = crate::database::query(
+        "DELETE FROM login_throttle WHERE window_started <= unixepoch() - 300",
+    )
+    .execute(&state.store.pool)
+    .await;
     if input.login.len() > 64 || input.password.len() > 512 {
         return failure(StatusCode::UNAUTHORIZED, "invalid_credentials");
     }
@@ -861,6 +1033,38 @@ mod tests {
         }
         if let Some(v) = csrf {
             req = req.header("x-csrf-token", v)
+        }
+        router(state.clone())
+            .oneshot(req.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap()
+    }
+    #[allow(clippy::too_many_arguments)]
+    async fn request_with_ip(
+        state: &AuthState,
+        path: &str,
+        method: &str,
+        cookie: Option<&str>,
+        origin: Option<&str>,
+        csrf: Option<&str>,
+        ip: Option<&str>,
+        body: serde_json::Value,
+    ) -> Response {
+        let mut req = Request::builder()
+            .uri(path)
+            .method(method)
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(v) = cookie {
+            req = req.header(header::COOKIE, v);
+        }
+        if let Some(v) = origin {
+            req = req.header(header::ORIGIN, v);
+        }
+        if let Some(v) = csrf {
+            req = req.header("x-csrf-token", v);
+        }
+        if let Some(v) = ip {
+            req = req.header("x-forwarded-for", v);
         }
         router(state.clone())
             .oneshot(req.body(Body::from(body.to_string())).unwrap())
@@ -1092,6 +1296,21 @@ mod tests {
             .status(),
             StatusCode::TOO_MANY_REQUESTS
         );
+
+        // Different client IP is NOT affected by the throttle on 127.0.0.1 (Anti-DoS)
+        let other_ip_res = request_with_ip(
+            &restarted,
+            "/api/v1/auth/login",
+            "POST",
+            None,
+            Some(ORIGIN),
+            None,
+            Some("198.51.100.42"),
+            serde_json::json!({"login":"admin","password":PASSWORD}),
+        )
+        .await;
+        assert_eq!(other_ip_res.status(), StatusCode::OK);
+
         crate::database::query("UPDATE login_throttle SET window_started=0")
             .execute(&restarted.store.pool)
             .await
@@ -1501,7 +1720,7 @@ mod tests {
             .await
             .unwrap();
 
-        // 1. Initial state: needsBootstrap is true
+        // 1. Initial state: needsBootstrap is true, httpBootstrapEnabled is true
         let status_res = request(
             &state,
             "/api/v1/auth/bootstrap/status",
@@ -1516,8 +1735,30 @@ mod tests {
         let status_bytes = status_res.into_body().collect().await.unwrap().to_bytes();
         let body: serde_json::Value = serde_json::from_slice(&status_bytes).unwrap();
         assert_eq!(body["needsBootstrap"], true);
+        assert_eq!(body["httpBootstrapEnabled"], true);
 
-        // 2. Invalid password (< 15 chars) rejected
+        let token = state
+            .get_bootstrap_token()
+            .expect("bootstrap token must be generated");
+
+        // 2. Missing or wrong token rejected with 401 Unauthorized
+        let wrong_token_res = request(
+            &state,
+            "/api/v1/auth/bootstrap",
+            "POST",
+            None,
+            Some("http://127.0.0.1:3000"),
+            None,
+            serde_json::json!({
+                "login": "admin",
+                "password": "my-secure-admin-password-1234",
+                "bootstrap_token": "wrong-token-value"
+            }),
+        )
+        .await;
+        assert_eq!(wrong_token_res.status(), StatusCode::UNAUTHORIZED);
+
+        // 3. Invalid password (< 15 chars) with valid token rejected
         let invalid_res = request(
             &state,
             "/api/v1/auth/bootstrap",
@@ -1527,13 +1768,14 @@ mod tests {
             None,
             serde_json::json!({
                 "login": "admin",
-                "password": "short"
+                "password": "short",
+                "bootstrap_token": token
             }),
         )
         .await;
         assert_eq!(invalid_res.status(), StatusCode::BAD_REQUEST);
 
-        // 3. Valid bootstrap succeeds
+        // 4. Valid bootstrap with valid token succeeds
         let valid_res = request(
             &state,
             "/api/v1/auth/bootstrap",
@@ -1543,7 +1785,8 @@ mod tests {
             None,
             serde_json::json!({
                 "login": "admin",
-                "password": "my-secure-admin-password-1234"
+                "password": "my-secure-admin-password-1234",
+                "bootstrap_token": token
             }),
         )
         .await;
@@ -1559,8 +1802,9 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&valid_bytes).unwrap();
         assert_eq!(body["user"]["role"], "administrator");
         assert_eq!(body["user"]["login"], "admin");
+        assert!(state.get_bootstrap_token().is_none());
 
-        // 4. After bootstrap, needsBootstrap is false
+        // 5. After bootstrap, needsBootstrap is false
         let status_res2 = request(
             &state,
             "/api/v1/auth/bootstrap/status",
@@ -1575,7 +1819,7 @@ mod tests {
         let body2: serde_json::Value = serde_json::from_slice(&status_bytes2).unwrap();
         assert_eq!(body2["needsBootstrap"], false);
 
-        // 5. Repeated bootstrap attempt is rejected with 403 Forbidden
+        // 6. Repeated bootstrap attempt is rejected with 403 Forbidden
         let repeated_res = request(
             &state,
             "/api/v1/auth/bootstrap",
@@ -1585,7 +1829,8 @@ mod tests {
             None,
             serde_json::json!({
                 "login": "hacker",
-                "password": "another-password-12345"
+                "password": "another-password-12345",
+                "bootstrap_token": token
             }),
         )
         .await;

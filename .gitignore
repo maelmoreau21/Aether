@@ -19,3 +19,6 @@
 
 # Encrypted operator backups
 *.media-backup
+
+# Internal AI agent logs and teamwork artifacts
+/.agents/

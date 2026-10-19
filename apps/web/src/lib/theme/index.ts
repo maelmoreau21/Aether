@@ -1,4 +1,5 @@
 import { writable, derived } from 'svelte/store';
+import { savePreferences } from '../preferences';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -31,8 +32,9 @@ export const effectiveTheme = derived(themeMode, ($mode) => {
   return $mode;
 });
 
-export function setTheme(mode: ThemeMode) {
+export function setTheme(mode: ThemeMode, persist = true) {
   themeMode.set(mode);
+  if (persist) savePreferences({ theme: mode });
   if (typeof window === 'undefined') return;
 
   try {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import { preferences, savePreferences } from '../preferences';
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import { DEFAULT_NAME, fetchBrandName } from '../config/brand';
@@ -225,9 +226,9 @@
       });
 
     try {
-      const savedAudio = localStorage.getItem('media_pref_audio');
+      const savedAudio = preferences().audioLanguage;
       if (savedAudio) prefAudio = savedAudio;
-      const savedSub = localStorage.getItem('media_pref_subtitles');
+      const savedSub = preferences().subtitles;
       if (savedSub) prefSubtitles = savedSub;
     } catch {
       // localStorage may be disabled in private browsing
@@ -237,6 +238,8 @@
   });
 
   function savePreference(key: string, value: string) {
+    if (key === 'media_pref_audio') savePreferences({ audioLanguage: value });
+    if (key === 'media_pref_subtitles' && (value === 'forced' || value === 'always' || value === 'off')) savePreferences({ subtitles: value });
     try {
       localStorage.setItem(key, value);
     } catch {

@@ -1200,6 +1200,7 @@ dependencies = [
  "media-contracts",
  "media-node",
  "reqwest",
+ "ring",
  "rpassword",
  "serde",
  "serde_json",

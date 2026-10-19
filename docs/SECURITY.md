@@ -1,3 +1,9 @@
+> Administration du 19 octobre 2026 : comptes mutables avec protections transactionnelles,
+> groupes sans promotion de rôle, clés catalogue seulement et permissions vivantes,
+> sauvegardes chiffrées avec clé externe et extraction hors ligne sans écrasement.
+> Contrats : ADMIN_USERS.md, ADMIN_ACCESS.md, ADMIN_BACKUPS.md, BACKUP_BUNDLE.md.
+> Les préférences sont persistées par session utilisateur, sans ID de compte fourni par le client.
+
 > Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités
 > issuer/subject et sessions Core communes aux deux modes Docker.
 > Contrat, configuration et limites : [OIDC](OIDC.md). Les exclusions OIDC

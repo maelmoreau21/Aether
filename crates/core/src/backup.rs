@@ -103,7 +103,7 @@ fn is_symlink_or_reparse(metadata: &std::fs::Metadata) -> bool {
 
 /// Verify that a path does not contain parent directory traversal ('..') and
 /// neither the path itself nor its existing parent is a symlink or reparse point.
-pub(crate) fn check_path_safety(path: &Path, label: &str) -> Result<(), BackupError> {
+pub fn check_path_safety(path: &Path, label: &str) -> Result<(), BackupError> {
     if path.as_os_str().is_empty() {
         return Err(BackupError::InvalidPath(format!(
             "{label} path cannot be empty"
@@ -141,7 +141,7 @@ pub(crate) fn check_path_safety(path: &Path, label: &str) -> Result<(), BackupEr
 }
 
 /// Ensure a path is not placed inside the media directory (which must stay read-only).
-pub(crate) fn check_not_in_media_root(
+pub fn check_not_in_media_root(
     path: &Path,
     media_root: Option<&Path>,
     label: &str,
@@ -154,9 +154,13 @@ pub(crate) fn check_not_in_media_root(
                 "{label} must not be placed inside the media directory",
             )));
         }
-        if let Some(parent) = path.parent()
-            && let Ok(parent_canon) = parent.canonicalize()
-            && parent_canon.starts_with(&root_canon)
+        // Resolve the closest existing ancestor: the output directory itself may
+        // not exist yet, and Windows canonical paths carry a verbatim prefix.
+        if path
+            .ancestors()
+            .filter_map(|ancestor| ancestor.canonicalize().ok())
+            .next()
+            .is_some_and(|ancestor| ancestor.starts_with(&root_canon))
         {
             return Err(BackupError::InvalidPath(format!(
                 "{label} must not be placed inside the media directory",

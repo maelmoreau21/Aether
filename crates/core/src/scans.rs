@@ -17,6 +17,7 @@ use std::{
 use tokio::{sync::Semaphore, task::JoinHandle};
 
 pub struct ScanJobs {
+    pub(crate) scheduler_tick: tokio::sync::Mutex<()>,
     cancel: Arc<AtomicBool>,
     slots: Arc<Semaphore>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
@@ -24,6 +25,7 @@ pub struct ScanJobs {
 impl Default for ScanJobs {
     fn default() -> Self {
         Self {
+            scheduler_tick: tokio::sync::Mutex::new(()),
             cancel: Arc::new(AtomicBool::new(false)),
             slots: Arc::new(Semaphore::new(1)),
             tasks: Mutex::new(Vec::new()),
@@ -160,6 +162,27 @@ async fn start(
     headers: HeaderMap,
 ) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
     authorize(&state, &headers, true).await?;
+    enqueue(&state.auth, state.root, state.jobs, id).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(
+            serde_json::json!({"status":"queued","discovered":0,"probed":0,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}),
+        ),
+    ))
+}
+
+/// Shared dispatch path for authenticated manual scans and the internal scheduler.
+pub(crate) async fn enqueue(
+    auth: &AuthState,
+    root: PathBuf,
+    jobs: Arc<ScanJobs>,
+    id: String,
+) -> Result<(), StatusCode> {
+    let state = ScanState {
+        auth: auth.clone(),
+        root,
+        jobs,
+    };
     if state.jobs.cancel.load(Ordering::Acquire) {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
@@ -302,12 +325,7 @@ async fn start(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     tasks.retain(|task| !task.is_finished());
     tasks.push(task);
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(
-            serde_json::json!({"status":"queued","discovered":0,"probed":0,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}),
-        ),
-    ))
+    Ok(())
 }
 
 #[cfg(test)]

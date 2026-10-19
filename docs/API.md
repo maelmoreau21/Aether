@@ -1,3 +1,9 @@
+> Administration du 19 octobre 2026 : comptes [ADMIN_USERS.md](ADMIN_USERS.md),
+> groupes et clés API [ADMIN_ACCESS.md](ADMIN_ACCESS.md), planifications
+> [SCHEDULED_TASKS.md](SCHEDULED_TASKS.md), sauvegardes complètes
+> [ADMIN_BACKUPS.md](ADMIN_BACKUPS.md) et récupération [BACKUP_RECOVERY.md](BACKUP_RECOVERY.md).
+> Les contrats historiques ci-dessous ne décrivent pas ces nouvelles routes.
+
 > Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités
 > issuer/subject et sessions Core communes aux deux modes Docker.
 > Contrat, configuration et limites : [OIDC](OIDC.md). Les exclusions OIDC

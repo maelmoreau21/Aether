@@ -45,7 +45,7 @@
     </div>
     <div>
       <h2 id="overview-heading" class="section-title">Vue d'ensemble du système</h2>
-      <p class="section-subtitle">Surveillance en temps réel des services Core, Media Nodes et indexations</p>
+      <p class="section-subtitle">État chargé à l’ouverture ; suivi des indexations actives</p>
     </div>
   </div>
 
@@ -55,13 +55,13 @@
         <span class="kpi-label">Statut du Core</span>
         <div class="kpi-badge ok">
           <span class="status-dot connected" aria-hidden="true"></span>
-          <span>{coreHealth?.status === 'ok' ? 'Opérationnel' : 'En ligne'}</span>
+          <span>{coreHealth?.status === 'ok' ? 'Opérationnel' : 'État indisponible'}</span>
         </div>
       </div>
       <div class="kpi-value-row">
-        <span class="kpi-value">Actif</span>
+        <span class="kpi-value">{coreHealth?.status === 'ok' ? 'Actif' : 'Inconnu'}</span>
       </div>
-      <span class="kpi-meta">Mode d'exécution : <code>{coreHealth?.mode ?? 'local'}</code></span>
+      <span class="kpi-meta">Mode d'exécution : <code>{coreHealth?.mode ?? 'Non communiqué'}</code></span>
     </div>
 
     <div class="kpi-card">
@@ -119,16 +119,16 @@
         <Icon name="shield" size={16} />
         <h3>Informations d'exécution du Core</h3>
       </div>
-      <span class="badge" data-status="connected">Prêt pour streaming AV1/Opus</span>
+      <span class="badge" data-status="connected">Compatibilité selon le client</span>
     </div>
     <div class="details-grid">
       <div class="detail-item">
         <span class="detail-label">Version Aether</span>
-        <span class="detail-value"><code>{coreHealth?.version ? `v${coreHealth.version}` : 'v0.1.0-beta'}</code></span>
+        <span class="detail-value"><code>{coreHealth?.version ? `v${coreHealth.version}` : 'Non communiquée'}</code></span>
       </div>
       <div class="detail-item">
         <span class="detail-label">Base de données</span>
-        <span class="detail-value">SQLite WAL intégrée (transactions sécurisées)</span>
+        <span class="detail-value">Moteur défini par la configuration du serveur</span>
       </div>
       <div class="detail-item">
         <span class="detail-label">Session administrateur</span>
@@ -136,11 +136,11 @@
       </div>
       <div class="detail-item">
         <span class="detail-label">Stockage médias</span>
-        <span class="detail-value">Lecture seule stricte (<code>:ro</code>)</span>
+        <span class="detail-value">Bibliothèques à monter en lecture seule (<code>:ro</code>)</span>
       </div>
       <div class="detail-item">
         <span class="detail-label">Protection CSRF</span>
-        <span class="detail-value">Jeton HMAC lié à la session navigateur</span>
+        <span class="detail-value">Jeton lié à la session navigateur</span>
       </div>
     </div>
   </div>

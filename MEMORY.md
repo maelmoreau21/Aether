@@ -1,5 +1,10 @@
 # MEMORY.md — État et décisions Aether
 
+## 19 octobre 2026 — Console administrateur, premier jalon
+
+Navigation par rubrique, annuaire utilisateurs filtrable, scans manuels et suivi, documentation sauvegardes SQLite/PostgreSQL dans la console. Aucun CRUD utilisateurs, planificateur, groupes locaux, clés API ou moteur de plugins ajouté ; états indisponibles explicites. Backend inchangé. Voir docs/ADMIN_CONSOLE.md pour validations et limites du test navigateur à API synthétique.
+
+
 ## 19 octobre 2026 — Mises à jour des dépendances stables et Refonte Bi-thème (Clair "Pierre Douce" & Sombre "Cinéma OLED")
 
 - **Mises à jour des dépendances vers les dernières versions stables** :

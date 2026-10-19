@@ -1,3 +1,13 @@
+## Administration complète — 19 octobre 2026
+
+Vérifications ciblées : `cargo test --locked -p media-poc --test admin_users --test admin_access --test admin_backups --test backup_bundle --test scheduler --test preferences`. Comptes, rôle/session/CSRF, protection du dernier administrateur, groupes/droits vivants, clés expirables et révocables, scans planifiés, archivage chiffré et restauration réelle SQLite. Les tests du paquet couvrent altération, troncature, permutation, clé incorrecte, base vide, destinations existantes et certificats.
+
+PostgreSQL réel : `pwsh -NoProfile -File scripts/test-admin-postgres.ps1` — base18 jetable, vrais pg_dump/pg_restore, paquet chiffré, extraction, restauration dans une base vide, comparaison de toutes les tables et des paramètres. Les clients du conteneur sont invoqués via un pont de test, sans identifiants dans les arguments.
+
+Navigateur : build Web puis `cargo test --locked -p media-poc --test browser_admin -- --ignored --nocapture`, avec MEDIA_BACKUP_KEY de test unique dans l'environnement du processus. Vrai Core/SQLite jetable, création compte/groupe, planification/scan, création/révocation clé, sauvegarde/téléchargement et planification, largeur mobile et erreurs JS. Ce scénario ne cible aucun média personnel. `test-admin-ui.mjs` reste un contrôle séparé avec API simulée.
+
+Les images applicatives complètes, le NAS et la charge ne sont pas validés par ces essais. La cible Docker `backup-runtime` seule a été construite ; pg_dump/pg_restore18.6 exécutés avec succès.
+
 > Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités
 > issuer/subject et sessions Core communes aux deux modes Docker.
 > Contrat, configuration et limites : [OIDC](OIDC.md). Les exclusions OIDC

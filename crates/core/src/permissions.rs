@@ -30,7 +30,7 @@ pub async fn require_media(
         Err(status) => return error(status, "authentication_required"),
     };
     // Read permissions are live; fixture associations remain separate from indexed assets.
-    let rows = crate::database::query_as::<_, (String,String,String)>("SELECT id,root,kind FROM libraries WHERE enabled=1 AND EXISTS(SELECT 1 FROM media_nodes n WHERE n.id=libraries.node_id AND n.status != 'revoked') AND ( ?='administrator' OR EXISTS(SELECT 1 FROM library_permissions p WHERE p.library_id=libraries.id AND p.user_id=?))")
+    let rows = crate::database::query_as::<_, (String,String,String)>("SELECT id,root,kind FROM libraries WHERE enabled=1 AND EXISTS(SELECT 1 FROM media_nodes n WHERE n.id=libraries.node_id AND n.status != 'revoked') AND ( ?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=libraries.id AND p.user_id=?))")
         .bind(identity.user.role.as_str()).bind(&identity.user.id).fetch_all(&state.auth.store.pool).await;
     let rows = match rows {
         Ok(rows) => rows,

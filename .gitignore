@@ -16,3 +16,6 @@
 # Local deployment credentials
 .env
 .env.local
+
+# Encrypted operator backups
+*.media-backup

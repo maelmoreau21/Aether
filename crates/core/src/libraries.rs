@@ -1,6 +1,6 @@
 //! Persistent library configuration. Filesystem policy is delegated to the local Node.
 use crate::{
-    auth::{AuthState, AuthUser},
+    auth::AuthState,
     identity::{IdentityStore, Role},
     node::validate_library_root,
 };
@@ -52,7 +52,6 @@ pub fn router(auth: AuthState, local_root: PathBuf) -> Router {
     Router::new()
         .route("/api/v1/admin/libraries", get(list).post(create))
         .route("/api/v1/admin/libraries/{id}", axum::routing::put(update))
-        .route("/api/v1/admin/users", get(users))
         .route("/api/v1/admin/roots", get(roots))
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(LibraryState {
@@ -148,24 +147,6 @@ async fn list(
     Ok(Json(
         serde_json::json!({"libraries":load(&state.auth.store).await?}),
     ))
-}
-async fn users(
-    State(state): State<LibraryState>,
-    headers: HeaderMap,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    administrator(&state, &headers, false).await?;
-    let rows: Vec<(String, String, Role, Option<String>, i64)> = crate::database::query_as("SELECT u.id,COALESCE(u.sso_username,c.login,u.display_name,'sso-' || u.id) AS login,u.role,u.display_name,CAST((c.login IS NULL) AS INTEGER) AS sso FROM users u LEFT JOIN local_credentials c ON c.user_id=u.id WHERE u.disabled_at IS NULL ORDER BY COALESCE(u.sso_username,c.login,u.display_name,'sso-' || u.id)").fetch_all(&state.auth.store.pool).await.map_err(database)?;
-    let users: Vec<AuthUser> = rows
-        .into_iter()
-        .map(|(id, login, role, display_name, sso)| AuthUser {
-            id,
-            login,
-            role,
-            display_name,
-            sso: Some(sso != 0),
-        })
-        .collect();
-    Ok(Json(serde_json::json!({"users":users})))
 }
 async fn roots(
     State(state): State<LibraryState>,
@@ -538,12 +519,10 @@ mod http_tests {
             "{:x}",
             Sha256::digest(format!("csrf:{}", "a".repeat(64)).as_bytes())
         );
-        let app = router(
-            AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
-                .await
-                .unwrap(),
-            root.clone(),
-        );
+        let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+        let app = router(auth.clone(), root.clone()).merge(crate::admin_users::router(auth));
         let null = serde_json::Value::Null;
         for path in [
             "/api/v1/admin/libraries",

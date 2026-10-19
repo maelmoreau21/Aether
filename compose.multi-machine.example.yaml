@@ -33,6 +33,9 @@ services:
       - MEDIA_PUBLIC_URL=https://media.example.lan
       - MEDIA_CORE_INTERNAL_URL=https://media.example.lan
       - MEDIA_DB_PATH=/data/core.sqlite3
+      - MEDIA_BACKUP_DIR=/backups
+      # Protect this key separately from the archive volume.
+      - MEDIA_BACKUP_KEY=${MEDIA_BACKUP_KEY:-}
       - MEDIA_WEB_DIST=/app/apps/web/build
     volumes:
       - /volume1/docker/aether-core/data:/data

@@ -171,7 +171,7 @@
   .profile-trigger:hover,
   .profile-trigger[aria-expanded='true'] {
     background: var(--color-surface);
-    border-color: #b4a1f833;
+    border-color: var(--color-line);
   }
   .profile-trigger:active {
     background: var(--color-accent-soft);
@@ -182,7 +182,7 @@
     justify-content: center;
     width: 34px;
     height: 34px;
-    border: 1px solid #b4a1f84d;
+    border: 1px solid var(--color-line);
     border-radius: 50%;
     background: var(--color-accent-soft);
     color: var(--color-accent);
@@ -190,7 +190,7 @@
   }
   .profile-caption {
     font-size: 12px;
-    color: #e8e3f4;
+    color: var(--color-text);
     white-space: nowrap;
     max-width: 150px;
     overflow: hidden;
@@ -213,10 +213,10 @@
     width: 270px;
     max-width: calc(100vw - 32px);
     padding: 10px;
-    border: 1px solid #b4a1f830;
+    border: 1px solid var(--color-line);
     border-radius: 14px;
     color: var(--color-text);
-    background: #15141e;
+    background: var(--color-raised);
     box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
   }
   .profile-popover:popover-open {
@@ -291,14 +291,14 @@
     color: var(--color-accent-hover);
   }
   .signout-entry {
-    color: #e57373;
+    color: var(--color-danger);
     border-top: 1px solid var(--color-line);
     margin-top: 4px;
     padding-top: 12px;
   }
   .signout-entry:hover:not(:disabled) {
-    background: rgba(229, 115, 115, 0.12);
-    color: #ef5350;
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
   }
   .lang-switch-section {
     display: flex;
@@ -318,10 +318,10 @@
   .lang-pills {
     display: flex;
     gap: 4px;
-    background: #0d0c14;
+    background: var(--color-surface);
     padding: 2px;
     border-radius: 6px;
-    border: 1px solid #b4a1f822;
+    border: 1px solid var(--color-line);
   }
   .lang-pill {
     padding: 3px 8px;
@@ -336,7 +336,7 @@
   }
   .lang-pill.active {
     background: var(--color-accent);
-    color: #0b0a12;
+    color: var(--color-on-accent);
   }
   .menu-notice {
     padding: 4px 12px;

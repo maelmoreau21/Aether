@@ -556,11 +556,11 @@
 
   .danger-btn {
     color: var(--color-danger);
-    border-color: #f3aaa944;
+    border-color: var(--color-danger);
   }
 
   .danger-btn:hover:not(:disabled) {
-    background: #f3aaa922;
+    background: var(--color-danger-soft);
   }
 
   .info-callout {
@@ -568,7 +568,7 @@
     align-items: flex-start;
     gap: 12px;
     background: var(--color-accent-soft);
-    border: 1px solid #b4a1f844;
+    border: 1px solid var(--color-line);
     border-radius: var(--radius-sm);
     padding: 14px;
     margin-bottom: 20px;
@@ -579,7 +579,7 @@
 
   .primary {
     background: var(--color-accent);
-    color: #0f0d14;
+    color: var(--color-on-accent);
     font-weight: 650;
     border: none;
     border-radius: var(--radius-sm);
@@ -643,26 +643,26 @@
   }
 
   .badge[data-status='connected'] {
-    color: #9be7b4;
-    border-color: #2e6b44;
-    background: #14281c;
+    color: var(--color-success);
+    border-color: var(--color-success);
+    background: var(--color-success-soft);
   }
 
   .badge[data-status='disconnected'] {
-    color: #f5c97b;
-    border-color: #75541e;
-    background: #2b200e;
+    color: var(--color-warning);
+    border-color: var(--color-warning);
+    background: var(--color-warning-soft);
   }
 
   .badge[data-status='revoked'] {
     color: var(--color-danger);
     border-color: var(--color-danger);
-    background: #331518;
+    background: var(--color-danger-soft);
   }
 
   .kind-badge {
     background: var(--color-raised);
-    color: #d1cadf;
+    color: var(--color-muted);
   }
 
   .mode-badge {
@@ -671,27 +671,27 @@
   }
 
   .mode-badge[data-mode='outbound'] {
-    background: #1e1b38;
-    color: #a78bfa;
-    border-color: #4c1d95;
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+    border-color: var(--color-accent);
   }
 
   .mode-badge[data-mode='direct'] {
-    background: #0f2e24;
-    color: #34d399;
-    border-color: #065f46;
+    background: var(--color-success-soft);
+    color: var(--color-success);
+    border-color: var(--color-success);
   }
 
   .mode-badge[data-mode='inbound'] {
     background: var(--color-raised);
-    color: #94a3b8;
+    color: var(--color-muted);
     border-color: var(--color-line);
   }
 
   .version-badge {
-    background: #1e1b2e;
+    background: var(--color-raised);
     color: var(--color-accent);
-    border-color: #55447a;
+    border-color: var(--color-line);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 11px;
     font-weight: 600;
@@ -841,8 +841,8 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 12px;
     line-height: 1.5;
-    background: #0c0b11;
-    color: #e2e8f0;
+    background: var(--color-raised);
+    color: var(--color-text);
     border: 1px solid var(--color-line);
     border-radius: var(--radius-sm);
     padding: 12px;
@@ -878,7 +878,7 @@
   }
 
   .token-error {
-    background: #331518;
+    background: var(--color-danger-soft);
     color: var(--color-danger);
     border: 1px solid var(--color-danger);
     padding: 10px 14px;

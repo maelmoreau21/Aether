@@ -29,7 +29,7 @@
   --color-canvas: var(--bg-main);
   --color-canvas-rgb: 239, 236, 230;
   --color-surface: var(--bg-surface);
-  --color-surface-hover: #F2EFE9;
+  --color-surface-hover: var(--bg-elevated);
   --color-raised: var(--bg-elevated);
   --color-raised-hover: #DBD5CC;
   --color-overlay: #D8D2C6;
@@ -43,7 +43,7 @@
 
   /* Typography */
   --color-text: var(--text-primary);
-  --color-text-bright: #0C0A09;
+  --color-text-bright: var(--text-primary);
   --color-muted: var(--text-secondary);
   --color-subtle: var(--text-muted);
 
@@ -52,7 +52,7 @@
   --color-accent-hover: #C2410C;
   --color-accent-soft: rgba(234, 88, 12, 0.12);
   --color-accent-soft-hover: rgba(234, 88, 12, 0.2);
-  --color-accent-solid: #C2410C;
+  --color-accent-solid: var(--accent-primary);
   --color-accent-glow: rgba(234, 88, 12, 0.22);
 
   /* Status Colors */
@@ -102,7 +102,7 @@
   --color-canvas: var(--bg-main);
   --color-canvas-rgb: 9, 9, 11;
   --color-surface: var(--bg-surface);
-  --color-surface-hover: #18181D;
+  --color-surface-hover: var(--bg-elevated);
   --color-raised: var(--bg-elevated);
   --color-raised-hover: #282830;
   --color-overlay: #22222A;
@@ -116,7 +116,7 @@
 
   /* Typography */
   --color-text: var(--text-primary);
-  --color-text-bright: #FFFFFF;
+  --color-text-bright: var(--text-primary);
   --color-muted: var(--text-secondary);
   --color-subtle: var(--text-muted);
 
@@ -125,7 +125,7 @@
   --color-accent-hover: #F87171;
   --color-accent-soft: rgba(239, 68, 68, 0.14);
   --color-accent-soft-hover: rgba(239, 68, 68, 0.22);
-  --color-accent-solid: #DC2626;
+  --color-accent-solid: var(--accent-primary);
   --color-accent-glow: rgba(239, 68, 68, 0.35);
 
   /* Status Colors */
@@ -174,7 +174,7 @@
     --color-canvas: var(--bg-main);
     --color-canvas-rgb: 9, 9, 11;
     --color-surface: var(--bg-surface);
-    --color-surface-hover: #18181D;
+    --color-surface-hover: var(--bg-elevated);
     --color-raised: var(--bg-elevated);
     --color-raised-hover: #282830;
     --color-overlay: #22222A;
@@ -186,7 +186,7 @@
     --color-line-strong: #3F3F46;
 
     --color-text: var(--text-primary);
-    --color-text-bright: #FFFFFF;
+    --color-text-bright: var(--text-primary);
     --color-muted: var(--text-secondary);
     --color-subtle: var(--text-muted);
 
@@ -194,7 +194,7 @@
     --color-accent-hover: #F87171;
     --color-accent-soft: rgba(239, 68, 68, 0.14);
     --color-accent-soft-hover: rgba(239, 68, 68, 0.22);
-    --color-accent-solid: #DC2626;
+    --color-accent-solid: var(--accent-primary);
     --color-accent-glow: rgba(239, 68, 68, 0.35);
 
     --color-success: var(--status-success);
@@ -222,6 +222,10 @@
 }
 
 :root {
+  --color-on-accent: #FFFFFF;
+  --color-success-soft: color-mix(in srgb, var(--status-success) 12%, var(--bg-surface));
+  --color-warning-soft: color-mix(in srgb, var(--status-warning) 12%, var(--bg-surface));
+  --color-danger-soft: color-mix(in srgb, var(--status-error) 12%, var(--bg-surface));
   /* Fonts */
   --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
   --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif;

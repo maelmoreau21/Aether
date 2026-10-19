@@ -371,8 +371,8 @@
   }
 
   .offline-library {
-    border-color: #f5c97b55;
-    background: #1e1b15;
+    border-color: var(--color-warning);
+    background: var(--color-warning-soft);
   }
 
   .item-content {
@@ -411,7 +411,7 @@
     align-items: flex-start;
     gap: 12px;
     background: var(--color-accent-soft);
-    border: 1px solid #b4a1f844;
+    border: 1px solid var(--color-line);
     border-radius: var(--radius-sm);
     padding: 14px;
     margin-bottom: 20px;
@@ -423,7 +423,7 @@
   .scan-state {
     margin-top: 14px;
     padding: 12px 14px;
-    background: #101017;
+    background: var(--color-raised);
     border: 1px solid var(--color-line);
     border-radius: var(--radius-sm);
   }
@@ -443,12 +443,12 @@
   }
 
   .scan-indicator-badge[data-scan='completed'] {
-    color: #9be7b4;
+    color: var(--color-success);
   }
 
   .scan-indicator-badge[data-scan='running'],
   .scan-indicator-badge[data-scan='queued'] {
-    color: #b4a1f8;
+    color: var(--color-accent);
   }
 
   .scan-indicator-badge[data-scan='error'] {
@@ -527,17 +527,17 @@
   .scan-btn {
     background: var(--color-accent-soft);
     color: var(--color-accent);
-    border-color: #b4a1f844;
+    border-color: var(--color-line);
   }
 
   .scan-btn:hover:not(:disabled) {
     background: var(--color-accent);
-    color: #0f0d14;
+    color: var(--color-on-accent);
   }
 
   .primary {
     background: var(--color-accent);
-    color: #0f0d14;
+    color: var(--color-on-accent);
     font-weight: 650;
     border: none;
     border-radius: var(--radius-sm);
@@ -631,30 +631,30 @@
   }
 
   .badge[data-status='connected'] {
-    color: #9be7b4;
-    border-color: #2e6b44;
-    background: #14281c;
+    color: var(--color-success);
+    border-color: var(--color-success);
+    background: var(--color-success-soft);
   }
 
   .badge[data-status='disconnected'] {
-    color: #f5c97b;
-    border-color: #75541e;
-    background: #2b200e;
+    color: var(--color-warning);
+    border-color: var(--color-warning);
+    background: var(--color-warning-soft);
   }
 
   .kind-badge {
     background: var(--color-raised);
-    color: #d1cadf;
+    color: var(--color-muted);
   }
 
   .warn-badge {
-    background: #38240b;
-    color: #f5c97b;
-    border-color: #75541e;
+    background: var(--color-warning-soft);
+    color: var(--color-warning);
+    border-color: var(--color-warning);
   }
 
   .warning-msg {
-    color: #f5c97b;
+    color: var(--color-warning);
     font-size: 12px;
     margin-top: 6px;
   }
@@ -666,7 +666,7 @@
   }
 
   .node-warning {
-    color: #f5c97b;
+    color: var(--color-warning);
     font-size: 12px;
     margin: 6px 0 !important;
   }

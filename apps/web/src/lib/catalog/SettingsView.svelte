@@ -176,12 +176,14 @@
 
   .settings-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
     gap: 24px;
   }
 
   .card {
-    padding: 26px 28px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    padding: clamp(16px, 3vw, 28px);
     border-radius: var(--radius-lg);
     background: var(--color-surface);
     border: 1px solid var(--color-line);
@@ -208,6 +210,7 @@
   }
 
   .profile-avatar-large {
+    flex-shrink: 0;
     display: grid;
     place-items: center;
     width: 60px;
@@ -215,7 +218,7 @@
     border-radius: 50%;
     background: var(--color-accent-soft);
     color: var(--color-accent);
-    border: 1px solid rgba(167, 139, 250, 0.3);
+    border: 1px solid var(--color-line);
   }
 
   h3 {
@@ -238,7 +241,7 @@
   .admin-badge {
     background: var(--color-accent-soft);
     color: var(--color-accent);
-    border: 1px solid rgba(167, 139, 250, 0.3);
+    border: 1px solid var(--color-line);
   }
 
   .profile-info-list {
@@ -284,8 +287,8 @@
     gap: 10px;
     padding: 10px 18px;
     border-radius: var(--radius-sm);
-    background: var(--color-text-bright);
-    color: #0b0c13;
+    background: var(--brand-gradient);
+    color: var(--color-on-accent);
     font-size: 13px;
     font-weight: 700;
     text-decoration: none;
@@ -293,8 +296,8 @@
   }
 
   .admin-link:hover {
-    background: #ffffff;
-    box-shadow: 0 4px 16px rgba(255, 255, 255, 0.2);
+    background: var(--brand-gradient);
+    box-shadow: var(--shadow-sm);
     transform: translateY(-1px);
   }
 

@@ -4,6 +4,7 @@
   import Icon from '../ui/Icon.svelte';
 
   let failedUrl = $state('');
+  let imageLoaded = $state(false);
   let {
     work,
     href = '',
@@ -24,6 +25,12 @@
       ? Math.min(100, Math.max(0, (watchProgress.position / watchProgress.duration) * 100))
       : 0
   );
+
+  $effect(() => {
+    if (imageUrl) {
+      imageLoaded = false;
+    }
+  });
 </script>
 
 {#snippet posterBody()}
@@ -31,12 +38,14 @@
     {#if imageUrl}
       <img
         class="poster-image"
+        class:loaded={imageLoaded}
         src={imageUrl}
         alt={`Affiche de ${work.title}`}
         width="400"
         height="600"
         loading={eager ? 'eager' : 'lazy'}
         decoding="async"
+        onload={() => { imageLoaded = true; }}
         onerror={() => { failedUrl = imageUrl; }}
       />
       <div class="poster-gradient" aria-hidden="true"></div>
@@ -177,7 +186,12 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .poster-image.loaded {
+    opacity: 1;
   }
 
   .media-card:hover .poster-image {

@@ -124,6 +124,9 @@ pub fn serve_opened_parts(
     async move {
         opened.verify_unchanged()?;
         let file_size = opened.size();
+        let etag_str = format!("\"{}-{:x}\"", opened.modified_ns(), file_size);
+        let etag_value = HeaderValue::from_str(&etag_str)
+            .unwrap_or_else(|_| HeaderValue::from_static("\"0-0\""));
 
         if let Some(range_str) = range_header {
             match parse_single_range(&range_str, file_size) {
@@ -136,7 +139,8 @@ pub fn serve_opened_parts(
                         .header(header::CONTENT_TYPE, content_type)
                         .header(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"))
                         .header(header::CONTENT_LENGTH, length.to_string())
-                        .header(header::CONTENT_RANGE, content_range);
+                        .header(header::CONTENT_RANGE, content_range)
+                        .header(header::ETAG, etag_value);
 
                     let body = if is_head {
                         empty_body()
@@ -172,6 +176,7 @@ pub fn serve_opened_parts(
                 .header(header::CONTENT_TYPE, content_type)
                 .header(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"))
                 .header(header::CONTENT_LENGTH, file_size.to_string())
+                .header(header::ETAG, etag_value)
                 .body(body)
                 .expect("valid 200 response"))
         }

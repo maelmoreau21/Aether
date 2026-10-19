@@ -1,0 +1,35 @@
+:root, [data-theme="light"] {
+  --brand-amber: #F59E0B;
+  --brand-red: #EF4444;
+  --brand-gradient: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%);
+
+  --bg-main: #EFECE6;
+  --bg-surface: #FAF9F6;
+  --bg-elevated: #E5E0D8;
+  --border-subtle: #DCD6CC;
+
+  --text-primary: #1C1917;
+  --text-secondary: #57534E;
+  --text-muted: #A8A29E;
+
+  --accent-primary: #EA580C;
+  --accent-secondary: #D97706;
+
+  --status-success: #10B981;
+  --status-warning: #F59E0B;
+  --status-error: #EF4444;
+}
+
+[data-theme="dark"] {
+  --bg-main: #09090B;
+  --bg-surface: #121215;
+  --bg-elevated: #1E1E24;
+  --border-subtle: #27272A;
+
+  --text-primary: #FAFAFA;
+  --text-secondary: #A1A1AA;
+  --text-muted: #52525B;
+
+  --accent-primary: #EF4444;
+  --accent-secondary: #F59E0B;
+}

@@ -4,6 +4,7 @@
   import OidcSettings from '../auth/OidcSettings.svelte';
   import Icon from '../ui/Icon.svelte';
   import { t, locale, setLocale } from '../i18n';
+  import { themeMode, setTheme, type ThemeMode } from '../theme';
 
   let {
     prefAudio = $bindable('fr'),
@@ -88,6 +89,18 @@
       </p>
 
       <div class="pref-fields">
+        <label>
+          <span><Icon name="sun" size={14} /> {$t('theme')}</span>
+          <select
+            value={$themeMode}
+            onchange={(e) => setTheme(e.currentTarget.value as ThemeMode)}
+          >
+            <option value="dark">{$t('theme_dark')}</option>
+            <option value="light">{$t('theme_light')}</option>
+            <option value="system">{$t('theme_system')}</option>
+          </select>
+        </label>
+
         <label>
           <span><Icon name="globe" size={14} /> {$t('language')}</span>
           <select

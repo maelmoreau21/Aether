@@ -1,43 +1,227 @@
-/* Design system Aether : thème sombre premium inspiré des standards cinématographiques */
-:root {
-  color-scheme: dark;
+/* Design system Aether : Thème Clair ("Pierre Douce") & Thème Sombre ("Cinéma OLED") */
 
-  /* Surfaces & Canvas */
-  --color-canvas: #090a10;
-  --color-canvas-rgb: 9, 10, 16;
-  --color-surface: #11131c;
-  --color-surface-hover: #171a26;
-  --color-raised: #181a25;
-  --color-raised-hover: #222534;
-  --color-overlay: #232636;
-  --color-glass: rgba(17, 19, 28, 0.75);
-  --color-glass-raised: rgba(24, 26, 37, 0.85);
+:root, [data-theme="light"] {
+  color-scheme: light;
+
+  /* 2. Couleurs de marque & États (communs aux deux thèmes) */
+  --brand-amber: #F59E0B;
+  --brand-red: #EF4444;
+  --brand-gradient: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%);
+
+  /* 3. Thème Clair — "Pierre Douce" (Light Mode) */
+  --bg-main: #EFECE6;
+  --bg-surface: #FAF9F6;
+  --bg-elevated: #E5E0D8;
+  --border-subtle: #DCD6CC;
+
+  --text-primary: #1C1917;
+  --text-secondary: #57534E;
+  --text-muted: #A8A29E;
+
+  --accent-primary: #EA580C;
+  --accent-secondary: #D97706;
+
+  --status-success: #10B981;
+  --status-warning: #F59E0B;
+  --status-error: #EF4444;
+
+  /* Surfaces & Canvas Aether */
+  --color-canvas: var(--bg-main);
+  --color-canvas-rgb: 239, 236, 230;
+  --color-surface: var(--bg-surface);
+  --color-surface-hover: #F2EFE9;
+  --color-raised: var(--bg-elevated);
+  --color-raised-hover: #DBD5CC;
+  --color-overlay: #D8D2C6;
+  --color-glass: rgba(250, 249, 246, 0.85);
+  --color-glass-raised: rgba(229, 224, 216, 0.92);
 
   /* Borders & Lines */
-  --color-line: rgba(255, 255, 255, 0.08);
-  --color-line-subtle: rgba(255, 255, 255, 0.04);
-  --color-line-strong: rgba(255, 255, 255, 0.16);
+  --color-line: var(--border-subtle);
+  --color-line-subtle: rgba(28, 25, 23, 0.08);
+  --color-line-strong: #C5BEB3;
 
   /* Typography */
-  --color-text: #f8fafc;
-  --color-text-bright: #ffffff;
-  --color-muted: #94a3b8;
-  --color-subtle: #64748b;
+  --color-text: var(--text-primary);
+  --color-text-bright: #0C0A09;
+  --color-muted: var(--text-secondary);
+  --color-subtle: var(--text-muted);
 
-  /* Accent Aether (Améthyste / Violet cinématique) */
-  --color-accent: #a78bfa;
-  --color-accent-hover: #c4b5fd;
-  --color-accent-soft: rgba(167, 139, 250, 0.12);
-  --color-accent-soft-hover: rgba(167, 139, 250, 0.2);
-  --color-accent-solid: #8b5cf6;
-  --color-accent-glow: rgba(139, 92, 246, 0.35);
+  /* Accent */
+  --color-accent: var(--accent-primary);
+  --color-accent-hover: #C2410C;
+  --color-accent-soft: rgba(234, 88, 12, 0.12);
+  --color-accent-soft-hover: rgba(234, 88, 12, 0.2);
+  --color-accent-solid: #C2410C;
+  --color-accent-glow: rgba(234, 88, 12, 0.22);
 
   /* Status Colors */
-  --color-success: #34d399;
-  --color-warning: #fbbf24;
-  --color-danger: #f87171;
-  --color-info: #60a5fa;
+  --color-success: var(--status-success);
+  --color-warning: var(--status-warning);
+  --color-danger: var(--status-error);
+  --color-info: #0284C7;
 
+  /* Shadows */
+  --shadow-sm: 0 2px 8px rgba(28, 25, 23, 0.06);
+  --shadow-md: 0 8px 24px rgba(28, 25, 23, 0.09);
+  --shadow-lg: 0 16px 40px rgba(28, 25, 23, 0.13);
+  --shadow-screen: 0 20px 80px rgba(28, 25, 23, 0.18);
+  --shadow-card: 0 4px 14px rgba(28, 25, 23, 0.07);
+  --shadow-card-hover: 0 16px 36px rgba(28, 25, 23, 0.14), 0 0 0 1px var(--border-subtle);
+  --shadow-glow: 0 0 30px var(--color-accent-glow);
+
+  /* Gradients */
+  --gradient-hero: linear-gradient(180deg, rgba(239, 236, 230, 0.15) 0%, rgba(239, 236, 230, 0.85) 65%, #EFECE6 100%);
+  --gradient-hero-horizontal: linear-gradient(90deg, #EFECE6 0%, rgba(239, 236, 230, 0.9) 35%, rgba(239, 236, 230, 0.3) 70%, transparent 100%);
+  --gradient-card: linear-gradient(180deg, transparent 40%, rgba(239, 236, 230, 0.96) 100%);
+  --gradient-accent: var(--brand-gradient);
+
+  /* Scrollbar & Skeleton */
+  --scrollbar-thumb: rgba(28, 25, 23, 0.2);
+  --scrollbar-thumb-hover: rgba(28, 25, 23, 0.35);
+  --skeleton-bg: linear-gradient(90deg, rgba(28, 25, 23, 0.04) 25%, rgba(28, 25, 23, 0.09) 37%, rgba(28, 25, 23, 0.04) 63%);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* 4. Thème Sombre — "Cinéma OLED" (Dark Mode) */
+  --bg-main: #09090B;
+  --bg-surface: #121215;
+  --bg-elevated: #1E1E24;
+  --border-subtle: #27272A;
+
+  --text-primary: #FAFAFA;
+  --text-secondary: #A1A1AA;
+  --text-muted: #52525B;
+
+  --accent-primary: #EF4444;
+  --accent-secondary: #F59E0B;
+
+  /* Surfaces & Canvas Aether */
+  --color-canvas: var(--bg-main);
+  --color-canvas-rgb: 9, 9, 11;
+  --color-surface: var(--bg-surface);
+  --color-surface-hover: #18181D;
+  --color-raised: var(--bg-elevated);
+  --color-raised-hover: #282830;
+  --color-overlay: #22222A;
+  --color-glass: rgba(18, 18, 21, 0.78);
+  --color-glass-raised: rgba(30, 30, 36, 0.88);
+
+  /* Borders & Lines */
+  --color-line: var(--border-subtle);
+  --color-line-subtle: rgba(255, 255, 255, 0.05);
+  --color-line-strong: #3F3F46;
+
+  /* Typography */
+  --color-text: var(--text-primary);
+  --color-text-bright: #FFFFFF;
+  --color-muted: var(--text-secondary);
+  --color-subtle: var(--text-muted);
+
+  /* Accent */
+  --color-accent: var(--accent-primary);
+  --color-accent-hover: #F87171;
+  --color-accent-soft: rgba(239, 68, 68, 0.14);
+  --color-accent-soft-hover: rgba(239, 68, 68, 0.22);
+  --color-accent-solid: #DC2626;
+  --color-accent-glow: rgba(239, 68, 68, 0.35);
+
+  /* Status Colors */
+  --color-success: var(--status-success);
+  --color-warning: var(--status-warning);
+  --color-danger: var(--status-error);
+  --color-info: #38BDF8;
+
+  /* Shadows */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.65);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.8);
+  --shadow-screen: 0 20px 80px rgba(0, 0, 0, 0.9);
+  --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.5);
+  --shadow-card-hover: 0 16px 36px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(239, 68, 68, 0.3);
+  --shadow-glow: 0 0 30px var(--color-accent-glow);
+
+  /* Gradients */
+  --gradient-hero: linear-gradient(180deg, rgba(9, 9, 11, 0.1) 0%, rgba(9, 9, 11, 0.75) 65%, #09090B 100%);
+  --gradient-hero-horizontal: linear-gradient(90deg, #09090B 0%, rgba(9, 9, 11, 0.85) 35%, rgba(9, 9, 11, 0.2) 70%, transparent 100%);
+  --gradient-card: linear-gradient(180deg, transparent 40%, rgba(9, 9, 11, 0.95) 100%);
+  --gradient-accent: var(--brand-gradient);
+
+  /* Scrollbar & Skeleton */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
+  --skeleton-bg: linear-gradient(90deg, rgba(255, 255, 255, 0.04) 25%, rgba(255, 255, 255, 0.09) 37%, rgba(255, 255, 255, 0.04) 63%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg-main: #09090B;
+    --bg-surface: #121215;
+    --bg-elevated: #1E1E24;
+    --border-subtle: #27272A;
+
+    --text-primary: #FAFAFA;
+    --text-secondary: #A1A1AA;
+    --text-muted: #52525B;
+
+    --accent-primary: #EF4444;
+    --accent-secondary: #F59E0B;
+
+    --color-canvas: var(--bg-main);
+    --color-canvas-rgb: 9, 9, 11;
+    --color-surface: var(--bg-surface);
+    --color-surface-hover: #18181D;
+    --color-raised: var(--bg-elevated);
+    --color-raised-hover: #282830;
+    --color-overlay: #22222A;
+    --color-glass: rgba(18, 18, 21, 0.78);
+    --color-glass-raised: rgba(30, 30, 36, 0.88);
+
+    --color-line: var(--border-subtle);
+    --color-line-subtle: rgba(255, 255, 255, 0.05);
+    --color-line-strong: #3F3F46;
+
+    --color-text: var(--text-primary);
+    --color-text-bright: #FFFFFF;
+    --color-muted: var(--text-secondary);
+    --color-subtle: var(--text-muted);
+
+    --color-accent: var(--accent-primary);
+    --color-accent-hover: #F87171;
+    --color-accent-soft: rgba(239, 68, 68, 0.14);
+    --color-accent-soft-hover: rgba(239, 68, 68, 0.22);
+    --color-accent-solid: #DC2626;
+    --color-accent-glow: rgba(239, 68, 68, 0.35);
+
+    --color-success: var(--status-success);
+    --color-warning: var(--status-warning);
+    --color-danger: var(--status-error);
+    --color-info: #38BDF8;
+
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.65);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.8);
+    --shadow-screen: 0 20px 80px rgba(0, 0, 0, 0.9);
+    --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.5);
+    --shadow-card-hover: 0 16px 36px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(239, 68, 68, 0.3);
+    --shadow-glow: 0 0 30px var(--color-accent-glow);
+
+    --gradient-hero: linear-gradient(180deg, rgba(9, 9, 11, 0.1) 0%, rgba(9, 9, 11, 0.75) 65%, #09090B 100%);
+    --gradient-hero-horizontal: linear-gradient(90deg, #09090B 0%, rgba(9, 9, 11, 0.85) 35%, rgba(9, 9, 11, 0.2) 70%, transparent 100%);
+    --gradient-card: linear-gradient(180deg, transparent 40%, rgba(9, 9, 11, 0.95) 100%);
+    --gradient-accent: var(--brand-gradient);
+
+    --scrollbar-thumb: rgba(255, 255, 255, 0.18);
+    --scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
+    --skeleton-bg: linear-gradient(90deg, rgba(255, 255, 255, 0.04) 25%, rgba(255, 255, 255, 0.09) 37%, rgba(255, 255, 255, 0.04) 63%);
+  }
+}
+
+:root {
   /* Fonts */
   --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
   --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
@@ -49,21 +233,6 @@
   --radius-lg: 16px;
   --radius-xl: 22px;
   --radius-full: 9999px;
-
-  /* Shadows */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.55);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.7);
-  --shadow-screen: 0 20px 80px rgba(0, 0, 0, 0.85);
-  --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.4);
-  --shadow-card-hover: 0 16px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(167, 139, 250, 0.3);
-  --shadow-glow: 0 0 30px var(--color-accent-glow);
-
-  /* Gradients */
-  --gradient-hero: linear-gradient(180deg, rgba(9, 10, 16, 0.1) 0%, rgba(9, 10, 16, 0.75) 65%, #090a10 100%);
-  --gradient-hero-horizontal: linear-gradient(90deg, #090a10 0%, rgba(9, 10, 16, 0.85) 35%, rgba(9, 10, 16, 0.2) 70%, transparent 100%);
-  --gradient-card: linear-gradient(180deg, transparent 40%, rgba(9, 10, 16, 0.95) 100%);
-  --gradient-accent: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
 
   /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -100,6 +269,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  transition: background-color var(--transition-normal), color var(--transition-normal);
 }
 
 /* Custom modern scrollbars */
@@ -111,11 +281,11 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--scrollbar-thumb, rgba(128, 128, 128, 0.2));
   border-radius: var(--radius-full);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--scrollbar-thumb-hover, rgba(128, 128, 128, 0.35));
 }
 
 button, input, select {
@@ -174,7 +344,7 @@ select {
 
 select:hover:not(:disabled) {
   background-color: var(--color-raised-hover);
-  border-color: rgba(167, 139, 250, 0.3);
+  border-color: var(--color-accent);
 }
 
 option {
@@ -230,12 +400,7 @@ option {
 }
 
 .skeleton {
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.04) 25%,
-    rgba(255, 255, 255, 0.09) 37%,
-    rgba(255, 255, 255, 0.04) 63%
-  );
+  background: var(--skeleton-bg);
   background-size: 200% 100%;
   animation: shimmer 1.6s infinite ease-in-out;
   border-radius: var(--radius-sm);

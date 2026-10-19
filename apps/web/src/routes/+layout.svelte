@@ -1,9 +1,16 @@
 <script lang="ts">
+  import '../app.css';
   import '../lib/styles/tokens.css';
+  import { onMount } from 'svelte';
+  import { initTheme } from '../lib/theme';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { readSession } from '../lib/auth/session';
+
+  onMount(() => {
+    initTheme();
+  });
   let { children } = $props();
   let verified = $state(false);
   let error = $state('');

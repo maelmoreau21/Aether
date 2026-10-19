@@ -289,3 +289,5 @@ Catalogue : `sort=year-asc|year-desc|added-asc|added-desc` en plus des tris titr
 Voir [contrats et limites](SETTINGS_AND_REFRESH.md) pour les paramètres persistants du serveur,
 la configuration réseau effective, les avatars de compte et les quatre modes de scan.
 Les fournisseurs de métadonnées en ligne restent à développer.
+
+Voir [Fiches, saisons, visuels et préférences privées](CATALOGUE_PRESENTATION.md) pour les extensions du 19 octobre 2026.

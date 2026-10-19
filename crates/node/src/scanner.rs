@@ -16,6 +16,27 @@ use std::{
     time::Duration,
 };
 
+type ArtworkCache = HashMap<(PathBuf, String), (Option<super::images::LocalImage>, Option<String>)>;
+async fn artwork_cached(
+    root: &Path,
+    dir: &Path,
+    cache: &HashMap<String, super::images::LocalImage>,
+    memo: &mut ArtworkCache,
+    role: &str,
+    names: &[&str],
+) -> (Option<super::images::LocalImage>, Option<String>) {
+    let key = (dir.to_path_buf(), role.to_owned());
+    if let Some(found) = memo.get(&key) {
+        return found.clone();
+    }
+    let found = super::images::discover_named(root, dir, cache, names).await;
+    if memo.len() >= 1024 {
+        memo.clear();
+    }
+    memo.insert(key, found.clone());
+    found
+}
+
 /// Precomputed video stems and identity keys for a single directory,
 /// avoiding `O(N^2)` directory re-reads when resolving sidecar NFOs and posters.
 #[derive(Debug, Clone)]
@@ -634,6 +655,7 @@ where
         }
     })?;
     let mut stack = vec![read_root];
+    let mut artwork_memo = ArtworkCache::new();
     let mut folder_cache: HashMap<PathBuf, FolderVideos> = HashMap::new();
     let mut series_cache: HashMap<
         PathBuf,
@@ -831,6 +853,7 @@ where
             record_warning(&mut report, &mut current_batch_warnings, issue);
         }
 
+        let mut artwork_directory = relative.parent().unwrap_or(Path::new("")).to_path_buf();
         let scanned_file = if kind == "series" {
             let Some(parsed) = parse_series_episode(relative) else {
                 let issue = ScanIssue {
@@ -842,6 +865,7 @@ where
                 continue;
             };
 
+            artwork_directory = parsed.series_dir.clone();
             if !series_cache.contains_key(&parsed.series_dir) {
                 if series_cache.len() >= MAX_SERIES_CACHE
                     && let Some(first_key) = series_cache.keys().next().cloned()
@@ -937,6 +961,7 @@ where
                 series_year,
                 series_external_ids: Some(series_external_ids),
                 series_editorial: Some(entry.0.clone()),
+                artwork: Default::default(),
                 series_poster: entry.1.clone(),
                 season_number: Some(parsed.season_number),
                 episode_number: Some(parsed.episode_number),
@@ -990,11 +1015,104 @@ where
                 series_year: None,
                 series_external_ids: None,
                 series_editorial: None,
+                artwork: Default::default(),
                 series_poster: None,
                 season_number: None,
                 episode_number: None,
             }
         };
+        let mut scanned_file = scanned_file;
+        let parent = relative.parent().unwrap_or(Path::new(""));
+        let directory = artwork_directory.as_path();
+        let is_series = scanned_file.series_identity_key.is_some();
+        let shared_artwork = is_series
+            || folder_videos
+                .is_some_and(|folder| super::images::shared_allowed_from_folder(relative, folder));
+        let exact_artwork = is_series
+            || folder_videos.is_some_and(|folder| {
+                folder.stem_unambiguous(relative.file_stem(), &scanned_file.identity_key)
+            });
+        let artwork_stem = relative.file_stem().unwrap_or_default().to_string_lossy();
+        for (role, names) in [
+            ("backdrop", vec!["backdrop", "fanart"]),
+            ("logo", vec!["logo", "clearlogo"]),
+            ("landscape", vec!["landscape", "banner"]),
+            ("illustration", vec!["clearart"]),
+        ] {
+            if !shared_artwork && !exact_artwork {
+                continue;
+            }
+            let exact_names: Vec<String> = names
+                .iter()
+                .map(|name| format!("{artwork_stem}-{name}"))
+                .collect();
+            let candidates: Vec<&str> = if shared_artwork {
+                names
+            } else {
+                exact_names.iter().map(String::as_str).collect()
+            };
+            let memo_key = if shared_artwork {
+                role.to_owned()
+            } else {
+                format!("{}:{role}", scanned_file.identity_key)
+            };
+            let (image, warning) = artwork_cached(
+                &root,
+                directory,
+                image_cache,
+                &mut artwork_memo,
+                &memo_key,
+                &candidates,
+            )
+            .await;
+            if let Some(image) = image {
+                let key = if scanned_file.series_identity_key.is_some() {
+                    format!("series/{role}")
+                } else {
+                    role.into()
+                };
+                scanned_file.artwork.insert(key, image);
+            }
+            if let Some(message) = warning {
+                record_warning(
+                    &mut report,
+                    &mut current_batch_warnings,
+                    ScanIssue {
+                        relative_path: relative.to_string_lossy().into_owned(),
+                        message,
+                    },
+                );
+            }
+        }
+        let stem = relative.file_stem().unwrap_or_default().to_string_lossy();
+        let thumb = format!("{stem}-thumb");
+        if exact_artwork
+            && let (Some(image), _) =
+                super::images::discover_named(&root, parent, image_cache, &[&thumb]).await
+        {
+            scanned_file.artwork.insert("thumb".into(), image);
+        }
+        if let Some(number) = scanned_file.season_number {
+            let name = if number == 0 {
+                "season-specials-poster".into()
+            } else {
+                format!("season{number:02}-poster")
+            };
+            if let (Some(image), _) = artwork_cached(
+                &root,
+                directory,
+                image_cache,
+                &mut artwork_memo,
+                &name,
+                &[&name],
+            )
+            .await
+            {
+                scanned_file
+                    .artwork
+                    .insert(format!("series/season{number}"), image);
+            }
+        }
         current_batch_files.push(scanned_file);
 
         if current_batch_files.len() >= batch_size
@@ -1040,6 +1158,58 @@ mod tests {
     use super::*;
     use crate::probe::Probe;
     use std::time::UNIX_EPOCH;
+
+    #[tokio::test]
+    async fn artwork_is_never_shared_between_ambiguous_films() {
+        let root = tempfile::tempdir().unwrap();
+        let fixtures =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/generated/p1");
+        for name in ["a.mp4", "b.mp4"] {
+            tokio::fs::copy(fixtures.join("clip-mp4-fr.mp4"), root.path().join(name))
+                .await
+                .unwrap();
+        }
+        let bytes = {
+            let mut out = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::new_rgb8(2, 3)
+                .write_to(&mut out, image::ImageFormat::Png)
+                .unwrap();
+            out.into_inner()
+        };
+        for name in ["backdrop.png", "a-backdrop.png"] {
+            tokio::fs::write(root.path().join(name), &bytes)
+                .await
+                .unwrap();
+        }
+        let report = scan(root.path(), &HashMap::new(), &AtomicBool::new(false))
+            .await
+            .unwrap();
+        let a = report
+            .files
+            .iter()
+            .find(|f| f.relative_path == "a.mp4")
+            .unwrap();
+        let b = report
+            .files
+            .iter()
+            .find(|f| f.relative_path == "b.mp4")
+            .unwrap();
+        assert_eq!(a.artwork["backdrop"].path, "a-backdrop.png");
+        assert!(b.artwork.is_empty());
+        tokio::fs::copy(fixtures.join("clip-mkv-fr.mkv"), root.path().join("a.mkv"))
+            .await
+            .unwrap();
+        let report = scan(root.path(), &HashMap::new(), &AtomicBool::new(false))
+            .await
+            .unwrap();
+        assert!(
+            report
+                .files
+                .iter()
+                .filter(|f| f.relative_path.starts_with("a."))
+                .all(|f| f.artwork.is_empty())
+        );
+    }
 
     #[tokio::test]
     async fn traversal_refuses_directory_links_and_windows_junctions() {

@@ -84,6 +84,29 @@ async fn browser_series_flow_and_playback() {
     )
     .unwrap();
 
+    image::RgbImage::from_fn(1280, 720, |x, y| {
+        image::Rgb([30 + (x / 8) as u8, 25 + (y / 6) as u8, 35])
+    })
+    .save(series.join("backdrop.png"))
+    .unwrap();
+    std::fs::copy(
+        series.join("poster.png"),
+        series.join("season01-poster.png"),
+    )
+    .unwrap();
+    std::fs::write(series.join("tvshow.nfo"),r#"<tvshow><title>Browser Series</title><actor><name>Synthetic Actor</name><role>Explorer</role></actor><director>Test Director</director><ratings><rating name="imdb" max="10"><value>8.2</value></rating></ratings></tvshow>"#).unwrap();
+    let film_root = library.join("_FilmFixture");
+    std::fs::create_dir_all(&film_root).unwrap();
+    std::fs::copy(&sample_mp4, film_root.join("movie.mp4")).unwrap();
+    std::fs::write(film_root.join("movie.nfo"),r#"<movie><title>Synthetic Film</title><actor><name>Film Actor</name><role>Captain</role></actor><ratings><rating name="tmdb"><value>7.8</value></rating></ratings></movie>"#).unwrap();
+    for name in ["poster.png", "backdrop.png"] {
+        std::fs::copy(series.join(name), film_root.join(format!("movie-{name}"))).unwrap();
+    }
+    std::fs::write(
+        film_root.join("movie.en.srt"),
+        "1\n00:00:00,000 --> 00:00:02,000\nSynthetic subtitle\n",
+    )
+    .unwrap();
     let db = temp.path().join("series.sqlite3");
     let store = IdentityStore::open(&db).await.unwrap();
     store
@@ -128,6 +151,7 @@ async fn browser_series_flow_and_playback() {
     let mut child = start(&root, &db, &library, port).await;
     let mut cmd = tokio::process::Command::new("node");
     cmd.arg("scripts/browser-series.cjs")
+        .env("MEDIA_TEST_FILM_ROOT", &film_root)
         .env("MEDIA_TEST_ORIGIN", format!("http://127.0.0.1:{port}"))
         .current_dir(&root);
     if let Ok(dir) = std::env::var("MEDIA_REPORT_DIR") {

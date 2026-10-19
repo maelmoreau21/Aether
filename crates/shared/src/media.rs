@@ -24,6 +24,19 @@ pub struct Probe {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct Credit {
+    pub name: String,
+    pub role: String,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProviderRating {
+    pub provider: String,
+    pub value: f64,
+    pub max: f64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct FilmMetadata {
     pub title: Option<String>,
     pub original_title: Option<String>,
@@ -34,6 +47,10 @@ pub struct FilmMetadata {
     pub genres: Vec<String>,
     pub rating: Option<f64>,
     pub mpaa: Option<String>,
+    pub actors: Vec<Credit>,
+    pub directors: Vec<String>,
+    pub writers: Vec<String>,
+    pub ratings: Vec<ProviderRating>,
     pub external_ids: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub season: Option<u16>,

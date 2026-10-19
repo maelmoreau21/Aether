@@ -180,7 +180,7 @@ async fn populate_synthetic_catalog(
             let img_id = format!("img-{:06}", i);
             let img_rel = format!("film_{:06}/poster.jpg", i);
             sqlx::query(
-                "INSERT INTO inventory_images VALUES(?, ?, ?, ?, ?, 51200, '1700000000', 'image/jpeg', 1, 1)"
+                "INSERT INTO inventory_images(id,work_id,library_id,root_snapshot,relative_path,size,modified_ns,mime,priority,available) VALUES(?, ?, ?, ?, ?, 51200, '1700000000', 'image/jpeg', 1, 1)"
             )
             .bind(&img_id)
             .bind(&work_id)

@@ -464,6 +464,12 @@ pub async fn stage_batch(
         .execute(&mut *tx)
         .await?;
 
+        query("UPDATE scan_staging_files SET artwork_json=? WHERE scan_id=? AND relative_path=?")
+            .bind(json!(file.artwork).to_string())
+            .bind(scan_id)
+            .bind(&file.relative_path)
+            .execute(&mut *tx)
+            .await?;
         query("UPDATE scan_staging_files SET subtitles_json=?,audios_json=? WHERE scan_id=? AND relative_path=?")
             .bind(json!(file.subtitles).to_string())
             .bind(json!(file.audios).to_string())
@@ -1353,7 +1359,7 @@ pub async fn publish_staged_scan(
     let mut last_staged_path = String::new();
     loop {
         let chunk = query(
-            "SELECT s.relative_path, s.poster_path, s.poster_size, s.poster_modified_ns, s.poster_mime, s.poster_priority,
+            "SELECT s.artwork_json, s.relative_path, s.poster_path, s.poster_size, s.poster_modified_ns, s.poster_mime, s.poster_priority,
                     s.title, s.year, s.external_ids_json, s.editorial_outcome, s.editorial_json, s.editorial_path, s.editorial_priority,
                     a.id as asset_id, e.work_id,
                     ed.fallback_json as curr_fallback, ed.nfo_json as curr_nfo, ed.nfo_path as curr_nfo_path, ed.nfo_priority as curr_nfo_priority,
@@ -1380,6 +1386,21 @@ pub async fn publish_staged_scan(
 
         for row in &chunk {
             let work_id: String = row.get("work_id");
+            let artwork: std::collections::BTreeMap<String, media_contracts::media::LocalImage> =
+                serde_json::from_str(row.get("artwork_json")).unwrap_or_default();
+            for (role, image) in artwork {
+                let (owner, role) = if let Some(role) = role.strip_prefix("series/") {
+                    let owner: Option<String> = query_scalar("SELECT s.series_id FROM inventory_seasons s JOIN inventory_episodes ep ON ep.season_id=s.id WHERE ep.work_id=?").bind(&work_id).fetch_optional(&mut *tx).await?;
+                    let Some(owner) = owner else {
+                        continue;
+                    };
+                    (owner, role.to_owned())
+                } else {
+                    (work_id.clone(), role)
+                };
+                query("INSERT INTO inventory_images(id,work_id,library_id,root_snapshot,relative_path,size,modified_ns,mime,priority,available,role) VALUES(?,?,?,?,?,?,?,?,100,1,?) ON CONFLICT(work_id,root_snapshot,relative_path) DO UPDATE SET size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,available=1,role=excluded.role")
+                    .bind(id()).bind(owner).bind(library_id).bind(&root_snapshot).bind(&image.path).bind(image.size_bytes as i64).bind(&image.modified_ns).bind(&image.mime).bind(role).execute(&mut *tx).await?;
+            }
             let poster_path: Option<String> = row.get("poster_path");
             if let Some(poster_path) = poster_path {
                 let poster_size: i64 = row.get("poster_size");
@@ -1703,11 +1724,16 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
         "premiered": metadata["premiered"],
         "rating": metadata["rating"],
         "mpaa": metadata["mpaa"],
+        "actors": metadata["actors"].as_array().cloned().unwrap_or_default(),
+        "directors": metadata["directors"].as_array().cloned().unwrap_or_default(),
+        "writers": metadata["writers"].as_array().cloned().unwrap_or_default(),
+        "ratings": metadata["ratings"].as_array().cloned().unwrap_or_default(),
         "externalIds": metadata["external_ids"],
         "metadataProvenance": metadata["provenance"].as_str().unwrap_or("local"),
         "metadataWarnings": metadata["warnings"].as_array().cloned().unwrap_or_default(),
         "synthetic": false,
         "posterUrl": row.try_get::<Option<String>,_>("poster_url").ok().flatten(),
+        "artwork": { "backdrop": row.try_get::<Option<String>,_>("backdrop_url").ok().flatten(), "logo": row.try_get::<Option<String>,_>("logo_url").ok().flatten(), "thumb": row.try_get::<Option<String>,_>("thumb_url").ok().flatten() },
         "nodeId": node_id.unwrap_or_else(|| "local".to_string()),
         "nodeStatus": node_status.unwrap_or_else(|| "connected".to_string()),
         "available": node_available
@@ -1906,8 +1932,10 @@ pub async fn catalogue(
             FROM inventory_images i \
             JOIN libraries il ON il.id=i.library_id \
             JOIN media_nodes in_node ON in_node.id=il.node_id \
-            WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND in_node.status='connected' \
-            ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url \
+            WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND in_node.status='connected' \
+            ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url, \
+           (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i WHERE i.work_id=w.id AND i.role='backdrop' AND i.available=1 AND i.root_snapshot=wl.root AND wn.status='connected' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS backdrop_url, \
+           (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i WHERE i.work_id=w.id AND i.role='logo' AND i.available=1 AND i.root_snapshot=wl.root AND wn.status='connected' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS logo_url \
          FROM inventory_works w \
          JOIN libraries wl ON wl.id=w.library_id \
          JOIN media_nodes wn ON wn.id=wl.node_id \
@@ -2232,8 +2260,10 @@ pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value
         "SELECT w.*, wl.node_id AS node_id, wn.status AS node_status, \
          (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
           FROM inventory_images i JOIN libraries il ON il.id=i.library_id JOIN media_nodes in_node ON in_node.id=il.node_id \
-          WHERE i.work_id=w.id AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND in_node.status='connected' \
-          ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url \
+          WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND in_node.status='connected' \
+          ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url, \
+           (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i WHERE i.work_id=w.id AND i.role='backdrop' AND i.available=1 AND i.root_snapshot=wl.root AND wn.status='connected' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS backdrop_url, \
+           (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i WHERE i.work_id=w.id AND i.role='logo' AND i.available=1 AND i.root_snapshot=wl.root AND wn.status='connected' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS logo_url \
          FROM inventory_works w \
          JOIN libraries wl ON wl.id=w.library_id \
          JOIN media_nodes wn ON wn.id=wl.node_id \
@@ -2247,6 +2277,21 @@ pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value
     };
 
     let mut value = work(&row);
+    let images = query("SELECT i.id,i.role,i.modified_ns,i.size FROM inventory_images i JOIN libraries l ON l.id=i.library_id JOIN media_nodes n ON n.id=l.node_id WHERE i.work_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND n.status='connected' AND i.role!='poster' ORDER BY i.priority,i.relative_path,i.id").bind(work_id).fetch_all(&store.pool).await?;
+    let mut artwork = serde_json::Map::new();
+    for image in images {
+        let role: String = image.get("role");
+        artwork.entry(role).or_insert_with(|| {
+            json!(format!(
+                "/api/v1/assets/{}/image?v={}-{}",
+                image.get::<String, _>("id"),
+                image.get::<String, _>("modified_ns"),
+                image.get::<i64, _>("size")
+            ))
+        });
+    }
+    value["artwork"] = json!(artwork);
+
     let kind: String = row.try_get("kind").unwrap_or_else(|_| "film".to_string());
 
     if kind == "series" {
@@ -2258,7 +2303,8 @@ pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value
         .await?;
 
         let ep_rows = query(
-            "SELECT ep.season_id, ep.episode_number, w.*, wl.node_id AS node_id, wn.status AS node_status \
+            "SELECT ep.season_id, ep.episode_number, w.*, wl.node_id AS node_id, wn.status AS node_status, \
+             (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i WHERE i.work_id=w.id AND i.role='thumb' AND i.available=1 AND i.root_snapshot=wl.root AND wn.status='connected' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS thumb_url \
              FROM inventory_seasons s \
              JOIN inventory_episodes ep ON ep.season_id=s.id \
              JOIN inventory_works w ON w.id=ep.work_id \

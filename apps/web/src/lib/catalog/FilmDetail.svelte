@@ -1,16 +1,19 @@
 <script lang="ts">
   import type { Work } from './api';
+  import PersonalFeedback from './PersonalFeedback.svelte';
+  import EditorialCredits from './EditorialCredits.svelte';
   import type { Media } from '../player/types';
   import { sourceLabel } from './api';
   import {
     videoResolutionBadge,
     containerLabel,
     colorProfileLabel,
-    languageLabel
+    inspectedAudioTracks
   } from '../player/track-labels';
   import WatchStatus from './WatchStatus.svelte';
   import Poster from './Poster.svelte';
   import Icon from '../ui/Icon.svelte';
+  import LanguageLabel from '../ui/LanguageLabel.svelte';
 
   let {
     work,
@@ -35,20 +38,19 @@
   const currentVideoTrack = $derived(
     currentSelectedMedia?.sources[0]?.tracks?.find(t => t.codec_type === 'video')
   );
-  const currentAudioTracks = $derived(
-    currentSelectedMedia?.sources.flatMap(s => s.tracks?.filter(t => t.codec_type === 'audio') ?? []) ?? []
-  );
+  const currentAudioTracks = $derived(inspectedAudioTracks(currentSelectedMedia));
 </script>
 
 <div class="film-detail-view">
   <!-- Backdrop Banner -->
   <div class="detail-hero">
-    {#if work.posterUrl}
+    {#if work.artwork?.backdrop || work.posterUrl}
       <div class="backdrop-art-container" aria-hidden="true">
         <img
           class="backdrop-art-image"
+          class:artwork={!!work.artwork?.backdrop}
           class:loaded={backdropLoaded}
-          src={work.posterUrl}
+          src={work.artwork?.backdrop || work.posterUrl || ''}
           alt=""
           loading="eager"
           decoding="async"
@@ -91,7 +93,9 @@
           {/if}
         </div>
 
+        {#if work.artwork?.logo}<img class="title-logo" src={work.artwork.logo} alt="" />{/if}
         <h1>{work.title}</h1>
+        {#if !work.synthetic}<PersonalFeedback workId={work.id} />{/if}
 
         {#if work.originalTitle && work.originalTitle !== work.title}
           <p class="original-title">Titre original : <em>{work.originalTitle}</em></p>
@@ -172,12 +176,12 @@
         <!-- Technical Specifications Inspector -->
         {#if currentSelectedMedia}
           <div class="tech-specs-card">
-            <h4>Informations techniques réelles (flux analysés)</h4>
+            <h4>Vidéo, audio et sous-titres</h4>
             <div class="specs-grid">
               <div>
                 <span class="spec-label">🎬 Vidéo</span>
                 <span class="spec-val">
-                  {currentVideoTrack?.codec_name?.toUpperCase() ?? 'Codec natif'}
+                  {currentVideoTrack?.codec_name?.toUpperCase() ?? 'Codec inconnu'}
                   {#if currentVideoTrack?.width && currentVideoTrack?.height}
                     · {currentVideoTrack.width} × {currentVideoTrack.height}
                   {/if}
@@ -190,31 +194,30 @@
                 </span>
               </div>
               <div>
-                <span class="spec-label">🔊 Audio</span>
+                <span class="spec-label">🔊 Audio ({currentAudioTracks.length})</span>
                 <span class="spec-val">
                   {#if currentAudioTracks.length > 0}
                     {#each currentAudioTracks as at, idx (idx)}
                       <span class="audio-track-spec">
-                        {at.codec_name?.toUpperCase() ?? 'Audio'} ({at.channel_layout ?? `${at.channels}ch`})
+                        <LanguageLabel language={at.language} /> · {at.codec_name?.toUpperCase() ?? 'Codec inconnu'}{at.channel_layout || at.channels ? ` · ${at.channel_layout ?? `${at.channels} canaux`}` : ''}{at.tags?.title ? ` · ${at.tags.title}` : ''}
                       </span>
                     {/each}
                   {:else}
-                    Piste audio intégrée
+                    Aucune piste audio analysée
                   {/if}
                 </span>
               </div>
               <div>
-                <span class="spec-label">📦 Conteneur & Langues</span>
+                <span class="spec-label">📦 Conteneur</span>
                 <span class="spec-val">
-                  {containerLabel(currentSelectedMedia.sources[0]?.mime)} ·
-                  {currentSelectedMedia.sources.map(s => languageLabel(s.language)).join(', ')}
+                  {containerLabel(currentSelectedMedia.sources[0]?.mime)}
                 </span>
               </div>
               {#if currentSelectedMedia.subtitles.length > 0}
                 <div>
                   <span class="spec-label">💬 Sous-titres</span>
                   <span class="spec-val">
-                    {currentSelectedMedia.subtitles.map(s => s.label).join(' · ')}
+                    {#each currentSelectedMedia.subtitles as subtitle (subtitle.id)}<span class="audio-track-spec"><LanguageLabel language={subtitle.language} />{subtitle.sourceFormat ? ` · ${subtitle.sourceFormat.toUpperCase()}` : ''}{subtitle.forced ? ' · Forcés' : ''}{subtitle.sdh ? ' · Malentendants' : ''}</span>{/each}
                   </span>
                 </div>
               {/if}
@@ -222,6 +225,14 @@
           </div>
         {/if}
 
+        {#if work.artwork?.illustration || work.artwork?.landscape}
+          <div class="artwork-gallery" aria-label="Illustrations locales">
+            {#each ['illustration','landscape'] as role (role)}
+              {#if work.artwork?.[role]}<img src={work.artwork[role] ?? ''} alt={role === 'illustration' ? `Illustration de ${work.title}` : `Visuel de ${work.title}`} loading="lazy" />{/if}
+            {/each}
+          </div>
+        {/if}
+        <EditorialCredits {work} />
         <!-- Provenance Footer -->
         <div class="metadata-footer">
           <span class="prov-tag">
@@ -245,6 +256,11 @@
 </div>
 
 <style>
+  .artwork-gallery { display:flex;flex-wrap:wrap;gap:12px;margin-block:16px; }
+  .artwork-gallery img { max-width:100%;width:260px;max-height:160px;object-fit:contain;border-radius:6px; }
+
+  .title-logo { max-width:min(340px,100%); max-height:110px; object-fit:contain; object-position:left; }
+
   .film-detail-view {
     position: relative;
     padding-bottom: 40px;
@@ -257,7 +273,7 @@
 
   .backdrop-art-container {
     position: absolute;
-    top: -20px;
+    top: 0;
     left: calc(-1 * var(--page-gutter));
     right: calc(-1 * var(--page-gutter));
     height: 520px;
@@ -271,11 +287,13 @@
     height: 100%;
     object-fit: cover;
     object-position: center 25%;
-    filter: blur(28px) brightness(0.28) saturate(1.3);
+    filter: blur(28px) brightness(0.75) saturate(1.3);
     transform: scale(1.15);
     opacity: 0;
     transition: opacity 0.4s ease;
   }
+
+  .backdrop-art-image.artwork { filter: brightness(0.8); transform:none; }
 
   .backdrop-art-image.loaded {
     opacity: 1;
@@ -284,7 +302,11 @@
   .backdrop-vignette {
     position: absolute;
     inset: 0;
-    background: linear-gradient(180deg, rgba(9, 10, 16, 0.4) 0%, rgba(9, 10, 16, 0.85) 60%, var(--color-canvas) 100%);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--bg-main) 40%, transparent) 0%, color-mix(in srgb, var(--bg-main) 85%, transparent) 60%, var(--color-canvas) 100%);
+  }
+
+  :global([data-theme="light"]) .backdrop-vignette {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--bg-main) 80%, transparent), var(--bg-main));
   }
 
   .detail-main-layout {
@@ -302,6 +324,8 @@
   }
 
   .detail-info-column {
+    min-width: 0;
+    overflow-wrap: anywhere;
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -326,12 +350,12 @@
   .kind-tag {
     background: var(--color-accent-soft);
     color: var(--color-accent);
-    border: 1px solid rgba(167, 139, 250, 0.3);
+    border: 1px solid var(--border-subtle);
   }
 
   .demo-tag {
     background: rgba(251, 191, 36, 0.15);
-    color: #fbbf24;
+    color: var(--accent-secondary);
   }
 
   .rating-tag {
@@ -339,7 +363,7 @@
     align-items: center;
     gap: 4px;
     background: rgba(251, 191, 36, 0.15);
-    color: #fbbf24;
+    color: var(--accent-secondary);
     border: 1px solid rgba(251, 191, 36, 0.25);
   }
 
@@ -348,9 +372,9 @@
   }
 
   .tech-tag {
-    background: rgba(99, 102, 241, 0.15);
-    color: #a5b4fc;
-    border: 1px solid rgba(99, 102, 241, 0.25);
+    background: var(--color-accent-soft);
+    color: var(--accent-primary);
+    border: 1px solid var(--border-subtle);
   }
 
   .meta-tag {
@@ -402,7 +426,7 @@
   .synopsis {
     font-size: 15px;
     line-height: 1.65;
-    color: #cbd5e1;
+    color: var(--text-secondary);
     margin: 4px 0 12px;
   }
 
@@ -427,7 +451,7 @@
     margin: 0;
     font-size: 13px;
     line-height: 1.5;
-    color: #fca5a5;
+    color: var(--status-error);
   }
 
   .film-actions {
@@ -471,7 +495,7 @@
   }
 
   .version-choice:hover {
-    border-color: rgba(167, 139, 250, 0.35);
+    border-color: var(--accent-primary);
     background: var(--color-raised-hover);
   }
 
@@ -498,8 +522,8 @@
     padding: 0 32px;
     border: 0;
     border-radius: var(--radius-sm);
-    background: var(--color-text-bright);
-    color: #090a10;
+    background: var(--brand-gradient);
+    color: #1C1917;
     font-size: 15px;
     font-weight: 750;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
@@ -507,7 +531,7 @@
   }
 
   .hero-cta:hover:not(:disabled) {
-    background: #ffffff;
+    background: var(--brand-gradient);
     transform: translateY(-2px);
     box-shadow: 0 12px 30px rgba(255, 255, 255, 0.25);
   }
@@ -553,7 +577,7 @@
 
   .specs-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
     gap: 16px 20px;
   }
 
@@ -582,8 +606,9 @@
   }
 
   .audio-track-spec {
-    display: inline-block;
-    margin-right: 8px;
+    display: block;
+    margin-block: 4px;
+    overflow-wrap: anywhere;
   }
 
   /* Metadata Footer */

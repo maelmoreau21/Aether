@@ -166,6 +166,8 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
     let mut stack: Vec<(String, String, String)> = Vec::new();
     let mut metadata = FilmMetadata::default();
     let mut roots = 0;
+    let mut actor = media_contracts::media::Credit::default();
+    let mut rating_max = 10.0;
     loop {
         let event = reader.read_event().map_err(|_| "malformed NFO XML")?;
         let empty = matches!(event, Event::Empty(_));
@@ -185,6 +187,9 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
                 if stack.len() >= MAX_DEPTH {
                     return Err("NFO XML depth limit".into());
                 }
+                if name == "rating" {
+                    rating_max = 10.0;
+                }
                 let mut provider = String::new();
                 for attribute in e.attributes() {
                     let attribute = attribute.map_err(|_| "invalid XML attribute")?;
@@ -194,9 +199,19 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
                     if value.len() > MAX_FIELD {
                         return Err("XML attribute too large".into());
                     }
-                    if attribute.key.as_ref() == "type" {
+                    if name == "rating" && attribute.key.as_ref() == "max" {
+                        rating_max = value
+                            .parse::<f64>()
+                            .ok()
+                            .filter(|v| v.is_finite() && *v > 0.0 && *v <= 100.0)
+                            .unwrap_or(10.0);
+                    }
+                    if attribute.key.as_ref() == "type" || attribute.key.as_ref() == "name" {
                         provider = value.to_ascii_lowercase();
                     }
+                }
+                if name == "actor" {
+                    actor = Default::default();
                 }
                 if !empty {
                     stack.push((name, provider, String::new()));
@@ -209,12 +224,49 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
                 if stack.len() == 1 {
                     apply(&mut metadata, &name, &provider, &text)?;
                 }
+                let text = text.trim();
+                if stack.len() == 2 && stack[1].0 == "actor" {
+                    if name == "name" {
+                        actor.name = text.to_owned();
+                    }
+                    if name == "role" {
+                        actor.role = text.to_owned();
+                    }
+                }
+                if name == "actor"
+                    && stack.len() == 1
+                    && !actor.name.is_empty()
+                    && metadata.actors.len() < 100
+                {
+                    metadata.actors.push(std::mem::take(&mut actor));
+                }
+                if stack.len() == 1 && !text.is_empty() {
+                    if name == "director" && metadata.directors.len() < 40 {
+                        metadata.directors.push(text.into());
+                    }
+                    if name == "credits" && metadata.writers.len() < 40 {
+                        metadata.writers.push(text.into());
+                    }
+                }
                 if name == "value"
                     && stack.len() == 3
                     && stack[1].0 == "ratings"
                     && stack[2].0 == "rating"
+                    && let Ok(value) = text.parse::<f64>()
+                    && value.is_finite()
+                    && (0.0..=rating_max).contains(&value)
+                    && metadata.ratings.len() < 20
                 {
-                    apply(&mut metadata, "rating", "", &text)?;
+                    metadata
+                        .ratings
+                        .push(media_contracts::media::ProviderRating {
+                            provider: stack[2].1.clone(),
+                            value,
+                            max: rating_max,
+                        });
+                    if metadata.rating.is_none() {
+                        metadata.rating = Some(value * 10.0 / rating_max);
+                    }
                 }
             }
             Event::Text(e) => {
@@ -406,6 +458,16 @@ async fn read_and_parse_nfo(root: &Path, relative: &Path, priority: u8) -> NfoOu
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preserves_credits_and_provider_scales() {
+        let meta=parse(br#"<tvshow><actor><name>Actor</name><role>Role</role></actor><director>Director</director><credits>Writer</credits><ratings><rating name="tomatometer" max="100"><value>95</value></rating><rating name="imdb"><value>8.4</value></rating></ratings></tvshow>"#).unwrap();
+        assert_eq!(meta.actors[0].role, "Role");
+        assert_eq!(meta.writers, ["Writer"]);
+        assert_eq!(meta.ratings[0].max, 100.0);
+        assert_eq!(meta.ratings[1].max, 10.0);
+        assert_eq!(meta.ratings[1].provider, "imdb");
+    }
+
     #[test]
     fn extracts_bounded_editorial_only_and_entities() {
         let m = parse(br#"<movie><title>A &amp; B &#233;</title><originaltitle>Original</originaltitle><plot><![CDATA[<script>evil()</script>]]></plot><genre>Drama</genre><genre>Comedy</genre><year>2024</year><premiered>2024-02-29</premiered><rating>8.5</rating><uniqueid type="tmdb">123</uniqueid><imdbid>tt123</imdbid><codec>fake</codec></movie>"#).unwrap();

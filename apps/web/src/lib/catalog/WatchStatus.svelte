@@ -22,6 +22,6 @@
 </div>
 <style>
   .watch-status { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin:12px 0; font-size:12px; }
-  button { min-height:36px; padding:8px 12px; border:1px solid #ffffff30; border-radius:6px; background:transparent; color:inherit; }
-  small { flex-basis:100%; color:#efb4c4; }
+  button { min-height:36px; padding:8px 12px; border:1px solid var(--border-subtle); border-radius:6px; background:transparent; color:inherit; }
+  small { flex-basis:100%; color:var(--status-error); }
 </style>

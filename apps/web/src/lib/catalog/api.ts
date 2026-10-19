@@ -8,12 +8,15 @@ export interface Work {
   id: string; kind: 'film' | 'series' | 'episode'; title: string; year: number | null;
   description: string; libraryId: string; synthetic: boolean; number?: number;
   posterUrl?: string | null;
+  artwork?: Record<string, string | null>;
   addedAt?: number | null;
   nodeId?: string;
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';
   available?: boolean;
   originalTitle?: string | null; plot?: string | null; outline?: string | null;
   premiered?: string | null; genres?: string[]; rating?: number | null; mpaa?: string | null;
+  actors?: { name:string; role:string }[]; directors?:string[]; writers?:string[];
+  ratings?: { provider:string;value:number;max:number }[];
   externalIds?: Record<string, string>; metadataProvenance?: string | null;
   seasonCount?: number; episodeCount?: number; editions?: Edition[];
   seasons?: { id: string; number: number; title: string; episodes: Work[] }[];

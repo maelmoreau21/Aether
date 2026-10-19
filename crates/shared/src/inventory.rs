@@ -19,6 +19,8 @@ pub struct ScannedFile {
     /// Bounded text snapshots prepared by the Node; no public filesystem paths.
     #[serde(default)]
     pub subtitles: Vec<ExternalSubtitle>,
+    #[serde(default)]
+    pub artwork: BTreeMap<String, LocalImage>,
     pub poster: Option<LocalImage>,
     pub editorial: NfoOutcome,
     pub relative_path: String,

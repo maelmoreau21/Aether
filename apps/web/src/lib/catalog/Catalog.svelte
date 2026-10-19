@@ -29,7 +29,6 @@
   let name = $state(DEFAULT_NAME);
   let media = $state<Media[]>([]);
   let mediaError = $state('');
-  let catalogueNotice = $state('');
   let busy = $state(true);
   let error = $state('');
   let films = $state<Work[]>([]);
@@ -335,7 +334,6 @@
           series = [];
           totalFilms = 0;
           totalSeries = 0;
-          catalogueNotice = [...new Set(results.map(result => result.notice).filter(Boolean))].join(' ');
           results.forEach((result, index) => {
             if (kinds[index] === 'film') {
               films = result.items;
@@ -486,21 +484,6 @@
   {/if}
 </main>
 
-<footer>
-  <div class="footer-inner">
-    <div class="footer-brand">
-      <span class="footer-title">{name}</span>
-      <span class="footer-dot">·</span>
-      <span class="footer-tagline">Votre cinéma, en direct de vos serveurs.</span>
-    </div>
-    <p class="footer-notice">
-      {detail?.synthetic
-        ? 'Fiche de démonstration · médias de test synthétiques.'
-        : catalogueNotice || 'Bibliothèques locales indexées · Fichiers médias en lecture seule.'}
-    </p>
-  </div>
-</footer>
-
 {#if detail && ImmersivePlayerComponent && createPlayer}
   <ImmersivePlayerComponent
     bind:this={immersive}
@@ -538,6 +521,8 @@
   }
 
   .back-link {
+    position: relative;
+    z-index: 2;
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -637,43 +622,4 @@
     transform: translateY(-1px);
   }
 
-  /* Footer */
-  footer {
-    border-top: 1px solid var(--color-line);
-    background: var(--color-surface);
-    padding: 40px var(--page-gutter);
-    color: var(--color-muted);
-    font-size: 13px;
-  }
-
-  .footer-inner {
-    max-width: 1600px;
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .footer-brand {
-    flex-wrap: wrap;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-weight: 600;
-  }
-
-  .footer-title {
-    color: var(--color-text-bright);
-    font-weight: 700;
-  }
-
-  .footer-dot {
-    opacity: 0.4;
-  }
-
-  .footer-notice {
-    margin: 0;
-    font-size: 12px;
-    color: var(--color-muted);
-  }
 </style>

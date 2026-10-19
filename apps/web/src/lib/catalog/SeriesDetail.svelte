@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { Work } from './api';
+  import PersonalFeedback from './PersonalFeedback.svelte';
+  import EditorialCredits from './EditorialCredits.svelte';
   import type { Media } from '../player/types';
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
   import Poster from './Poster.svelte';
@@ -28,18 +30,23 @@
   } = $props();
 
   let backdropLoaded = $state(false);
-  const activeSeason = $derived(work.seasons?.find(item => item.number === season));
+  const activeSeason = $derived(work.seasons?.find(item => item.number === season) ?? work.seasons?.[0]);
+  function selectSeason(number: number) {
+    season = number;
+    document.getElementById('episodes-shelf-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 </script>
 
 <div class="series-detail-view">
   <!-- Series Backdrop Banner -->
   <div class="detail-hero">
-    {#if work.posterUrl}
+    {#if work.artwork?.backdrop || work.posterUrl}
       <div class="backdrop-art-container" aria-hidden="true">
         <img
           class="backdrop-art-image"
+          class:artwork={!!work.artwork?.backdrop}
           class:loaded={backdropLoaded}
-          src={work.posterUrl}
+          src={work.artwork?.backdrop || work.posterUrl || ''}
           alt=""
           loading="eager"
           decoding="async"
@@ -80,7 +87,19 @@
           </span>
         </div>
 
+        {#if work.artwork?.logo}<img class="title-logo" src={work.artwork.logo} alt="" />{/if}
         <h1>{work.title}</h1>
+        {#if !work.synthetic}<PersonalFeedback workId={work.id} />{/if}
+        {#if work.seasons?.length}
+          <nav class="season-shortcuts" aria-label="Saisons disponibles">
+            {#each work.seasons as item (item.id)}
+              <button class:chosen={activeSeason?.number === item.number} onclick={() => selectSeason(item.number)}>
+                {#if work.artwork?.[`season${item.number}`]}<img src={work.artwork[`season${item.number}`] ?? ''} alt="" />{:else}<span class="season-placeholder" aria-hidden="true">{item.number === 0 ? '★' : item.number}</span>{/if}
+                {item.number === 0 ? 'Hors-série' : `Saison ${item.number}`} · {item.episodes.length} {item.episodes.length > 1 ? 'épisodes' : 'épisode'}
+              </button>
+            {/each}
+          </nav>
+        {/if}
 
         {#if work.originalTitle && work.originalTitle !== work.title}
           <p class="original-title">Titre original : <em>{work.originalTitle}</em></p>
@@ -118,6 +137,13 @@
           </div>
         {/if}
 
+        {#if work.artwork?.illustration || work.artwork?.landscape}
+          <div class="artwork-gallery" aria-label="Illustrations locales">
+            {#each ['illustration','landscape'] as role (role)}
+              {#if work.artwork?.[role]}<img src={work.artwork[role] ?? ''} alt={role === 'illustration' ? `Illustration de ${work.title}` : `Visuel de ${work.title}`} loading="lazy" />{/if}
+            {/each}
+          </div>
+        {/if}
         <!-- Provenance Footer -->
         <div class="metadata-footer">
           <span class="prov-tag">
@@ -159,6 +185,7 @@
     <div class="episodes-list">
       {#each activeSeason?.episodes ?? [] as episode (episode.id)}
         <article class="episode">
+          {#if episode.artwork?.thumb}<img class="episode-thumb" src={episode.artwork.thumb} alt="" loading="lazy" />{/if}
           <span class="episode-number">{String(episode.number).padStart(2, '0')}</span>
           <div class="episode-content">
             <div class="episode-title-row">
@@ -189,9 +216,23 @@
       {/each}
     </div>
   </section>
+  <EditorialCredits {work} />
 </div>
 
 <style>
+  .artwork-gallery { display:flex;flex-wrap:wrap;gap:12px;margin-block:16px; }
+  .artwork-gallery img { max-width:100%;width:260px;max-height:160px;object-fit:contain;border-radius:6px; }
+
+  .title-logo { max-width:min(340px,100%); max-height:110px; object-fit:contain; object-position:left; }
+
+  .season-placeholder { display:grid;place-items:center;width:80px;aspect-ratio:2/3;background:var(--bg-elevated);border-radius:4px;font-size:32px;color:var(--text-secondary); }
+  .season-shortcuts img { display:block; width:80px; aspect-ratio:2/3; object-fit:cover; margin-bottom:8px; border-radius:4px; }
+  .episode-thumb { width:140px; max-width:25vw; aspect-ratio:16/9; object-fit:cover; border-radius:4px; }
+  .season-shortcuts { display:flex; gap:8px; overflow-x:auto; max-width:100%; padding:2px; }
+  .season-shortcuts button { flex:0 0 150px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;padding:10px 14px; border:1px solid var(--border-subtle); background:var(--bg-surface); color:var(--text-primary); border-radius:6px; }
+  .season-shortcuts .chosen { border-color:var(--accent-primary); color:var(--accent-primary); }
+  #episodes-shelf-title { scroll-margin-top:110px; }
+
   .series-detail-view {
     position: relative;
     padding-bottom: 40px;
@@ -204,7 +245,7 @@
 
   .backdrop-art-container {
     position: absolute;
-    top: -20px;
+    top: 0;
     left: calc(-1 * var(--page-gutter));
     right: calc(-1 * var(--page-gutter));
     height: 520px;
@@ -218,11 +259,13 @@
     height: 100%;
     object-fit: cover;
     object-position: center 25%;
-    filter: blur(28px) brightness(0.28) saturate(1.3);
+    filter: blur(28px) brightness(0.75) saturate(1.3);
     transform: scale(1.15);
     opacity: 0;
     transition: opacity 0.4s ease;
   }
+
+  .backdrop-art-image.artwork { filter: brightness(0.8); transform:none; }
 
   .backdrop-art-image.loaded {
     opacity: 1;
@@ -231,7 +274,11 @@
   .backdrop-vignette {
     position: absolute;
     inset: 0;
-    background: linear-gradient(180deg, rgba(9, 10, 16, 0.4) 0%, rgba(9, 10, 16, 0.85) 60%, var(--color-canvas) 100%);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--bg-main) 40%, transparent) 0%, color-mix(in srgb, var(--bg-main) 85%, transparent) 60%, var(--color-canvas) 100%);
+  }
+
+  :global([data-theme="light"]) .backdrop-vignette {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--bg-main) 80%, transparent), var(--bg-main));
   }
 
   .detail-main-layout {
@@ -249,6 +296,8 @@
   }
 
   .detail-info-column {
+    min-width: 0;
+    overflow-wrap: anywhere;
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -271,14 +320,14 @@
   }
 
   .kind-tag {
-    background: rgba(99, 102, 241, 0.15);
-    color: #a5b4fc;
+    background: var(--color-accent-soft);
+    color: var(--accent-primary);
     border: 1px solid rgba(99, 102, 241, 0.3);
   }
 
   .demo-tag {
     background: rgba(251, 191, 36, 0.15);
-    color: #fbbf24;
+    color: var(--accent-secondary);
   }
 
   .warn-badge {
@@ -292,7 +341,7 @@
     align-items: center;
     gap: 4px;
     background: rgba(251, 191, 36, 0.15);
-    color: #fbbf24;
+    color: var(--accent-secondary);
     border: 1px solid rgba(251, 191, 36, 0.25);
   }
 
@@ -354,7 +403,7 @@
   .synopsis {
     font-size: 15px;
     line-height: 1.65;
-    color: #cbd5e1;
+    color: var(--text-secondary);
     margin: 4px 0 12px;
   }
 
@@ -379,7 +428,7 @@
     margin: 0;
     font-size: 13px;
     line-height: 1.5;
-    color: #fca5a5;
+    color: var(--status-error);
   }
 
   /* Metadata Footer */
@@ -463,7 +512,7 @@
 
   .episode:hover {
     background: var(--color-raised);
-    border-color: rgba(167, 139, 250, 0.25);
+    border-color: var(--border-subtle);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   }
 
@@ -546,7 +595,9 @@
       margin: 0 auto;
     }
 
+    .episode-thumb { width:100%;max-width:100%; }
     .episode {
+      flex-wrap:wrap;
       padding: 16px;
       gap: 14px;
     }

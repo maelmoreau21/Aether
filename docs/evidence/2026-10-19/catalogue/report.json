@@ -1,0 +1,26 @@
+{
+  "browser": "155.0.8059.82",
+  "os": "10.0.26300",
+  "headless": true,
+  "results": {
+    "scan": true,
+    "deferredMediaLoading": true,
+    "catalogueChanges": {
+      "privateFeedbackPersisted": true,
+      "seasonShortcuts": true,
+      "responsiveThemes": true
+    },
+    "episode1Playback": true,
+    "seekAndPause": true,
+    "nextEpisode": {
+      "manual": true,
+      "automaticOptIn": true,
+      "crossSeason": true
+    },
+    "seasonNavigation": true,
+    "season2Playback": true,
+    "revokedPermission403": true,
+    "restoredPermissionPlayback": true
+  },
+  "failure": "Error: locator.click: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('.media-card').filter({ hasText: 'Synthetic Film' })\u001b[22m\n Aller au contenu\nAether\nAccueil\nFilms\nSéries\nseries-admin\nCATALOGUE AETHER\n0 film\nFilms\n\nTous vos films indexés, avec leurs différentes versions physiques et pistes audio.\n\nRechercher dans le catalogue\nTrier par\nTitre · A à Z\nTitre · Z à A\nAnnée · plus récente\nAnnée · plus ancienne\nAjout · plus récent\nAjout · plus ancien\nAppliquer\nTous les films\n0 film\n\nAucun film dans cette bibliothèque. {\"items\":[{\"actors\":[{\"name\":\"Film Actor\",\"role\":\"Captain\"}],\"addedAt\":1792444490,\"artwork\":{\"backdrop\":\"/api/v1/assets/96b37c20-6cde-4098-9d3e-b4bb7fb0ac6b/image?v=1792444477203549500-15509\",\"logo\":null,\"thumb\":null},\"available\":true,\"description\":\"Média local indexé\",\"directors\":[],\"externalIds\":{},\"genres\":[],\"id\":\"fdcc4e7b-a579-477c-bd41-75780bec9f8d\",\"kind\":\"film\",\"libraryId\":\"f2be6a27-bacb-4a24-9212-1e864da226a8\",\"metadataProvenance\":\"nfo\",\"metadataWarnings\":[],\"mpaa\":null,\"nodeId\":\"local\",\"nodeStatus\":\"connected\",\"originalTitle\":null,\"outline\":null,\"plot\":null,\"posterUrl\":\"/api/v1/assets/25ae0d31-0b0b-4eac-97c5-416669db1fae/image?v=1792444477073091200-73\",\"premiered\":null,\"rating\":7.8,\"ratings\":[{\"max\":10.0,\"provider\":\"tmdb\",\"value\":7.8}],\"synthetic\":false,\"title\":\"Synthetic Film\",\"writers\":[],\"year\":null}],\"limit\":24,\"mode\":\"local-library\",\"notice\":\"Bibliothèques locales indexées\",\"offset\":0,\"total\":1}\n    at C:\\Users\\Mael\\Documents\\GitHub\\Aether\\scripts\\browser-series.cjs:242:118\n    at async C:\\Users\\Mael\\Documents\\GitHub\\Aether\\scripts\\browser-series.cjs:242:5"
+}

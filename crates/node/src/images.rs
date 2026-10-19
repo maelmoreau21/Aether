@@ -188,7 +188,7 @@ pub async fn validate(path: &Path) -> io::Result<ValidatedImage> {
     .map_err(|_| io::Error::other("image validation failed"))?
 }
 
-fn shared_allowed_from_folder(video: &Path, videos: &FolderVideos) -> bool {
+pub(crate) fn shared_allowed_from_folder(video: &Path, videos: &FolderVideos) -> bool {
     let parent = video.parent().unwrap_or(Path::new(""));
     if parent.as_os_str().is_empty() {
         return false;
@@ -324,7 +324,16 @@ pub async fn discover_series_poster(
     series_dir: &Path,
     cache: &std::collections::HashMap<String, LocalImage>,
 ) -> (Option<LocalImage>, Option<String>) {
-    for (name_index, name) in ["poster", "folder"].iter().enumerate() {
+    discover_named(root, series_dir, cache, &["poster", "folder"]).await
+}
+
+pub async fn discover_named(
+    root: &Path,
+    series_dir: &Path,
+    cache: &std::collections::HashMap<String, LocalImage>,
+    names: &[&str],
+) -> (Option<LocalImage>, Option<String>) {
+    for (name_index, name) in names.iter().enumerate() {
         for (format_index, extension) in ["jpg", "jpeg", "png", "webp"].iter().enumerate() {
             let relative = series_dir.join(format!("{name}.{extension}"));
             if tokio::fs::symlink_metadata(root.join(&relative))

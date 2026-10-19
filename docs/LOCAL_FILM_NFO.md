@@ -85,3 +85,5 @@ Résultats réellement exécutés : MEMORY.md et TEST_PLAN.md.
 
 Séries/épisodes, affiches, sous-titres externes, métadonnées en ligne, multi-Node,
 PostgreSQL, Docker/Synology et refonte UI restent hors de ce jalon.
+
+Voir [Fiches, saisons, visuels et préférences privées](CATALOGUE_PRESENTATION.md) pour les extensions du 19 octobre 2026.

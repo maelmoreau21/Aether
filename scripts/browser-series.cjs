@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('isolated test origin required');
-const out = process.env.MEDIA_REPORT_DIR || 'docs/evidence/2026-10-17/series';
+const out = process.env.MEDIA_REPORT_DIR || 'docs/evidence/2026-10-19/catalogue';
 fs.rmSync(out, {recursive: true, force: true});
 fs.mkdirSync(out, {recursive: true});
 
@@ -16,12 +16,9 @@ fs.mkdirSync(out, {recursive: true});
     const errors = [];
     const requestedMediaUrls = [];
 
-    page.on('response', async response => {
+    page.on('response', response => {
       if (response.url().includes('/api/v1/media/')) {
         requestedMediaUrls.push(response.url());
-      }
-      if (response.url().endsWith('/scan')) {
-        console.log('scan HTTP', response.status(), await response.text());
       }
     });
     page.on('pageerror', error => errors.push(String(error)));
@@ -64,10 +61,19 @@ fs.mkdirSync(out, {recursive: true});
     report.results.scan = true;
     await page.screenshot({path:`${out}/admin-scan.png`});
 
+    await page.goto(origin+'/app/');
+    await page.locator('.hero-banner h1').waitFor();
+    await page.waitForFunction(()=>document.querySelector('.backdrop-img.loaded'));
+    await page.waitForTimeout(550);
+    for (const theme of ['light','dark']) {
+      await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+      await page.screenshot({path:`${out}/home-${theme}.png`});
+    }
     // 3. Open Series catalogue
     await page.goto(origin + '/app/series/');
     const card = page.locator('.media-card').filter({hasText:'Browser Series'});
     await card.waitFor();
+    await page.getByText('Page 1 sur 1',{exact:true}).waitFor();
     assert.equal(await page.locator('.media-card').count(), 1);
 
     // Record media URLs requested before clicking card
@@ -89,6 +95,36 @@ fs.mkdirSync(out, {recursive: true});
     // Verify seasons dropdown and episode list
     const seasonSelect = page.locator('select[aria-label="Saison"]');
     await seasonSelect.waitFor();
+    await page.getByRole('navigation',{name:'Saisons disponibles'}).waitFor();
+    assert.equal(await page.locator('.main-nav a[href*="search"]').count(),0);
+    assert.equal(await page.locator('main + footer').count(),0);
+    assert.equal(await page.getByRole('link',{name:'Recherche rapide'}).count(),1);
+    await page.getByRole('button',{name:'♡ Ajouter aux favoris',exact:true}).click();
+    await page.getByRole('button',{name:'♥ Favori',exact:true}).waitFor();
+    await page.getByRole('combobox',{name:'Ma note privée'}).selectOption('4');
+    await page.waitForFunction(() => !document.querySelector('select[aria-label="Ma note privée"]')?.disabled);
+    await page.reload();
+    await page.getByRole('button',{name:'♥ Favori',exact:true}).waitFor();
+    assert.equal(await page.getByRole('combobox',{name:'Ma note privée'}).inputValue(),'4');
+    await page.getByText('Synthetic Actor',{exact:true}).waitFor();
+    for (const theme of ['light','dark']) {
+      await page.evaluate(theme => document.documentElement.dataset.theme=theme, theme);
+      for (const width of [390,1440]) {
+        await page.setViewportSize({width,height:900});
+        await page.evaluate(()=>window.scrollTo(0,0));
+        await page.waitForTimeout(150);
+        assert.ok(await page.getByRole('link',{name:'Recherche rapide'}).isVisible(),`search visible at ${width}`);
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false,`${theme} ${width} overflow`);
+        const back=page.getByRole('link',{name:'Toutes les séries',exact:false});
+        assert.ok(await back.isVisible());
+        await page.screenshot({path:`${out}/detail-${theme}-${width}.png`,fullPage:true});
+      }
+    }
+    await page.getByRole('navigation',{name:'Saisons disponibles'}).getByRole('button',{name:'Saison 2',exact:false}).click();
+    await page.getByRole('button',{name:'Lire Season Two Episode',exact:true}).waitFor();
+    await seasonSelect.selectOption('1');
+    report.results.catalogueChanges={privateFeedbackPersisted:true,seasonShortcuts:true,responsiveThemes:true};
+
     await page.screenshot({path:`${out}/series-detail.png`});
 
     // 5. Select Version and Play Episode 1
@@ -186,6 +222,41 @@ fs.mkdirSync(out, {recursive: true});
 
     await closeBtn.click({force: true});
     await page.waitForFunction(() => !document.querySelector('dialog#player')?.hasAttribute('open'));
+
+    // Real Film detail exercises local NFO, track languages, subtitles and themes too.
+    const seriesDetailUrl=page.url();
+    const film = await page.evaluate(async root => {
+      const me=await (await fetch('/api/v1/auth/me')).json();
+      const headers={'content-type':'application/json','x-csrf-token':me.csrfToken};
+      const response=await fetch('/api/v1/admin/libraries',{method:'POST',headers,body:JSON.stringify({name:'Film Fixture',kind:'films',nodeId:'local',root,enabled:true,userIds:[]})});
+      if (!response.ok) throw new Error(`Film library HTTP ${response.status}`);
+      const library=await response.json();
+      const scan=await fetch(`/api/v1/admin/libraries/${library.id}/scan`,{method:'POST',headers,body:'{}'});
+      if (!scan.ok) throw new Error('Film scan failed');
+      return library;
+    },process.env.MEDIA_TEST_FILM_ROOT);
+    await page.waitForFunction(async id=> {
+      const response=await fetch(`/api/v1/admin/libraries/${id}/scan`);const job=await response.json();if (job.status==='error') throw new Error(JSON.stringify(job)); return job.status==='completed';
+    },film.id,{timeout:60000});
+    await page.goto(origin+'/app/films/');
+    await page.locator('.media-card').filter({hasText:'Synthetic Film'}).click({timeout:5000}).catch(async e=>{throw new Error(`${e.message} ${await page.locator('body').innerText()} ${await page.evaluate(async()=>await (await fetch('/api/v1/catalog?kind=film')).text())}`);});
+    await page.getByRole('heading',{name:'Vidéo, audio et sous-titres'}).waitFor();
+    await page.getByText('Film Actor',{exact:true}).waitFor();
+    assert.match(await page.locator('.tech-specs-card').innerText(),/français/);
+    assert.equal(await page.locator('.tech-specs-card .audio-track-spec').filter({hasText:'français'}).count(),1);
+    assert.ok(await page.locator('.tech-specs-card .language-label svg').count() >= 2);
+    assert.match(await page.locator('.tech-specs-card').innerText(),/anglais/);
+    for (const theme of ['light','dark']) {
+      await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+      for (const width of [390,1440]) {
+        await page.setViewportSize({width,height:900});
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false,`film ${theme} ${width} overflow`);
+        await page.screenshot({path:`${out}/film-${theme}-${width}.png`,fullPage:true});
+      }
+    }
+    report.results.filmPresentation=true;
+    await page.goto(seriesDetailUrl);
+    await seasonSelect.waitFor();
 
     // 9a. Real account switch in SPA (series-admin -> cache filled -> logout -> login series-user-b with real HttpOnly cookies)
     await seasonSelect.selectOption('1');

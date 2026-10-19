@@ -951,6 +951,10 @@ async fn test_1000_synthetic_files_scan_and_rescan() {
     let file_count = 1000;
     let generated = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/generated");
     let sample_mp4 = generated.join("p1/clip-mp4-en.mp4");
+    let sample_mp4_stub = {
+        let full = tokio::fs::read(&sample_mp4).await.unwrap();
+        full[..full.len().min(512)].to_vec()
+    };
     let png = sample_png();
 
     let t_create = Instant::now();
@@ -961,7 +965,7 @@ async fn test_1000_synthetic_files_scan_and_rescan() {
             20000 + i
         ));
         tokio::fs::create_dir_all(&folder).await.unwrap();
-        tokio::fs::copy(&sample_mp4, folder.join("movie.mp4"))
+        tokio::fs::write(folder.join("movie.mp4"), &sample_mp4_stub)
             .await
             .unwrap();
         tokio::fs::write(

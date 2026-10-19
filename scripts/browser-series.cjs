@@ -11,7 +11,7 @@ fs.mkdirSync(out, {recursive: true});
   const browser = await chromium.launch({channel:'chrome', headless:true});
   const report = {browser:browser.version(), os:require('node:os').release(), headless:true, results:{}};
   try {
-    const context = await browser.newContext({viewport:{width:1440,height:900}});
+    const context = await browser.newContext({viewport:{width:1440,height:900}, locale:'fr-FR'});
     const page = await context.newPage();
     const errors = [];
     const requestedMediaUrls = [];
@@ -208,7 +208,7 @@ fs.mkdirSync(out, {recursive: true});
 
     // Logout series-admin via ProfileMenu (pure SPA transition, real Core logout)
     await page.getByRole('button', {name: 'Menu profil', exact: true}).click();
-    await page.getByRole('button', {name: 'Se déconnecter', exact: true}).click();
+    await page.getByRole('button', {name: /^(Se déconnecter|Sign out)$/, exact: true}).click();
     await page.waitForURL('**/app/login/**');
 
     const cookieAfterLogout = (await context.cookies()).find(c => c.name === 'media_session');
@@ -228,7 +228,7 @@ fs.mkdirSync(out, {recursive: true});
     assert.match(await page.locator('.profile-trigger').textContent(), /series-user-b/);
 
     // Navigate via SPA links to Series -> Browser Series (no full page reload)
-    await page.getByRole('navigation', {name: 'Navigation principale'}).getByRole('link', {name: 'Séries', exact: true}).click();
+    await page.getByRole('navigation', {name: /^(Navigation principale|Main navigation)$/}).getByRole('link', {name: /^(Séries|TV Shows)$/, exact: true}).click();
     await card.waitFor();
     const mediaCallsBeforeDetailB = requestedMediaUrls.length;
     await card.click();

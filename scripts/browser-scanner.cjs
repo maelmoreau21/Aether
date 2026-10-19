@@ -12,7 +12,7 @@ fs.mkdirSync(out, {recursive: true});
   const browser = await chromium.launch({channel:'chrome', headless:true});
   const report = {browser:browser.version(), os:require('node:os').release(), headless:true, restart, results:{}};
   try {
-    const context = await browser.newContext({viewport:{width:1440,height:900}});
+    const context = await browser.newContext({viewport:{width:1440,height:900}, locale:'fr-FR'});
     const page = await context.newPage();
     page.setDefaultTimeout(30000);
     async function openMenu(name) { await page.keyboard.press('Shift'); await page.locator(`[data-menu="${name}"]`).click(); }

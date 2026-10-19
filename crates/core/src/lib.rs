@@ -15,6 +15,7 @@ pub mod server_settings;
 use media_contracts::brand;
 mod catalog;
 mod demo;
+pub mod feedback;
 pub mod identity;
 pub mod inventory;
 pub mod libraries;
@@ -158,6 +159,7 @@ pub async fn secure_app_with_jobs(
             .merge(libraries::router(auth.clone(), root.clone()))
             .merge(nodes::router(auth.clone(), replay_window))
             .merge(progress::router(auth.clone()))
+            .merge(feedback::router(auth.clone()))
             .merge(preferences::router(auth.clone()))
             .merge(avatars::router(auth.clone()))
             .merge(server_settings::router(auth.clone()))

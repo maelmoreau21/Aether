@@ -177,11 +177,19 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
             <year>2023</year>
             <plot>A deep journey through stars.</plot>
             <id>101</id>
+            <actor><name>Synthetic Actor</name><role>Explorer</role></actor>
+            <director>Synthetic Director</director>
+            <ratings><rating name="imdb" max="10"><value>8.2</value></rating><rating name="tomatometer" max="100"><value>92</value></rating></ratings>
         </tvshow>"#,
     )
     .await
     .unwrap();
 
+    for name in ["backdrop.png", "logo.png", "season01-poster.png"] {
+        tokio::fs::write(series1_dir.join(name), png())
+            .await
+            .unwrap();
+    }
     // S00E01
     tokio::fs::copy(&sample_mkv, s1_s00_dir.join("S00E01.mkv"))
         .await
@@ -395,10 +403,148 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(s1_detail["title"], "Cosmos Alpha");
+    assert_eq!(s1_detail["actors"][0]["name"], "Synthetic Actor");
+    assert_eq!(s1_detail["directors"][0], "Synthetic Director");
+    assert_eq!(s1_detail["ratings"][1]["value"], 92.0);
+    for role in ["backdrop", "logo", "season1"] {
+        let url = s1_detail["artwork"][role].as_str().unwrap();
+        assert_eq!(
+            request(&app, "GET", url, &admin_cookie, None, Value::Null, None)
+                .await
+                .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            request(&app, "GET", url, &user_cookie, None, Value::Null, None)
+                .await
+                .0,
+            StatusCode::FORBIDDEN
+        );
+    }
+    let feedback_uri = format!("/api/v1/feedback/{s1_id}");
+    assert_eq!(
+        request(&app, "GET", &feedback_uri, "", None, Value::Null, None)
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &feedback_uri,
+            &user_cookie,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            &feedback_uri,
+            &admin_cookie,
+            None,
+            json!({"favorite":true,"rating":5}),
+            None
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            &feedback_uri,
+            &admin_cookie,
+            Some(&admin_csrf),
+            json!({"favorite":true,"rating":6}),
+            None
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            &feedback_uri,
+            &admin_cookie,
+            Some(&admin_csrf),
+            json!({"favorite":true,"rating":5,"userId":"other"}),
+            None
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            &feedback_uri,
+            &admin_cookie,
+            Some(&admin_csrf),
+            json!({"favorite":true,"rating":5}),
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &feedback_uri,
+            &admin_cookie,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .1,
+        json!({"favorite":true,"rating":5})
+    );
+
     assert_eq!(s1_detail["description"], "A deep journey through stars.");
     assert_eq!(s1_detail["plot"], "A deep journey through stars.");
     let seasons = s1_detail["seasons"].as_array().unwrap();
     assert_eq!(seasons.len(), 3);
+
+    let shared_detail = request(
+        &app,
+        "GET",
+        &format!("/api/v1/catalog/{s1_id}"),
+        &admin_cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await
+    .1;
+    assert_eq!(shared_detail["rating"], 8.2);
+    assert!(shared_detail.get("favorite").is_none());
+    assert_eq!(
+        request(
+            &app,
+            "HEAD",
+            &feedback_uri,
+            &user_cookie,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
 
     // Season 0 (Specials)
     assert_eq!(seasons[0]["number"], 0);
@@ -627,6 +773,80 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+
+    // Access does not expose another account's private rating, and writes remain account-owned.
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &feedback_uri,
+            &user_cookie,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .1,
+        json!({"favorite":false,"rating":null})
+    );
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            &feedback_uri,
+            &user_cookie,
+            Some(&_user_csrf),
+            json!({"favorite":false,"rating":2}),
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &feedback_uri,
+            &admin_cookie,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .1,
+        json!({"favorite":true,"rating":5})
+    );
+    let reopened = IdentityStore::open(&db).await.unwrap();
+    let reopened_app = router(&root, &reopened, jobs.clone()).await;
+    assert_eq!(
+        request(
+            &reopened_app,
+            "GET",
+            &feedback_uri,
+            &user_cookie,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .1,
+        json!({"favorite":false,"rating":2})
+    );
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            &feedback_uri,
+            &user_cookie,
+            Some(&_user_csrf),
+            json!({"favorite":false,"rating":null}),
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
 
     // Now standard user can access series catalog and detail
     let (_, user_cat_granted, _, _) = request(
@@ -939,6 +1159,7 @@ async fn a3_contradictory_series_staging_deterministic_selection_and_200_episode
             path: "Show/tvshow.nfo".into(),
             priority: 1,
         }),
+        artwork: Default::default(),
         series_poster: Some(poster_a.clone()),
         season_number: Some(1),
         episode_number: Some(1),
@@ -973,6 +1194,7 @@ async fn a3_contradictory_series_staging_deterministic_selection_and_200_episode
             path: "Show/Season 01/tvshow.nfo".into(),
             message: "corrupt series xml".into(),
         }),
+        artwork: Default::default(),
         series_poster: Some(poster_b.clone()),
         season_number: Some(1),
         episode_number: Some(1),
@@ -1000,6 +1222,7 @@ async fn a3_contradictory_series_staging_deterministic_selection_and_200_episode
         series_year: Some(2023),
         series_external_ids: None,
         series_editorial: Some(NfoOutcome::Missing),
+        artwork: Default::default(),
         series_poster: None,
         season_number: Some(1),
         episode_number: Some(2),
@@ -1501,6 +1724,7 @@ async fn a3_contradictory_series_staging_deterministic_selection_and_200_episode
                 series_year: Some(if season == 1 && ep == 1 { 2022 } else { 2024 }),
                 series_external_ids: None,
                 series_editorial: Some(NfoOutcome::Missing),
+                artwork: Default::default(),
                 series_poster: Some(if season == 1 && ep == 1 {
                     poster_a.clone()
                 } else {

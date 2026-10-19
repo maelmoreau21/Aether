@@ -23,7 +23,7 @@
   );
 
   $effect(() => {
-    if (featured?.posterUrl) {
+    if (featured?.artwork?.backdrop || featured?.posterUrl) {
       heroLoaded = false;
     }
   });
@@ -36,11 +36,11 @@
       class="backdrop-art"
       style:background-image="url('{base}/images/cinematic-horizon.png')"
     ></div>
-    {#if featured?.posterUrl}
+    {#if featured?.artwork?.backdrop || featured?.posterUrl}
       <img
         class="backdrop-img"
         class:loaded={heroLoaded}
-        src={featured.posterUrl}
+        src={featured?.artwork?.backdrop || featured?.posterUrl || ''}
         alt=""
         loading="eager"
         fetchpriority="high"
@@ -191,15 +191,15 @@
   .backdrop-gradient-vignette {
     position: absolute;
     inset: 0;
-    background: radial-gradient(circle at 75% 30%, transparent 20%, rgba(9, 10, 16, 0.7) 70%, #090a10 100%),
-                linear-gradient(90deg, #090a10 0%, rgba(9, 10, 16, 0.85) 45%, transparent 100%);
+    background: radial-gradient(circle at 75% 30%, transparent 20%, color-mix(in srgb, var(--bg-main) 70%, transparent) 70%, var(--bg-main) 100%),
+                linear-gradient(90deg, var(--bg-main) 0%, color-mix(in srgb, var(--bg-main) 85%, transparent) 45%, transparent 100%);
   }
 
   .backdrop-gradient-bottom {
     position: absolute;
     inset: auto 0 0 0;
     height: 65%;
-    background: linear-gradient(180deg, transparent 0%, rgba(9, 10, 16, 0.85) 60%, #090a10 100%);
+    background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--bg-main) 85%, transparent) 60%, var(--bg-main) 100%);
   }
 
   .hero-content {
@@ -227,8 +227,8 @@
     font-weight: 750;
     letter-spacing: 0.16em;
     color: var(--color-accent);
-    background: rgba(167, 139, 250, 0.12);
-    border: 1px solid rgba(167, 139, 250, 0.25);
+    background: var(--color-accent-soft);
+    border: 1px solid var(--border-subtle);
     padding: 4px 10px;
     border-radius: var(--radius-pill);
     backdrop-filter: blur(8px);
@@ -248,7 +248,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    color: #fbbf24;
+    color: var(--accent-secondary);
     background: rgba(251, 191, 36, 0.15);
     border: 1px solid rgba(251, 191, 36, 0.25);
   }
@@ -265,13 +265,13 @@
     letter-spacing: -0.04em;
     color: var(--color-text-bright);
     margin: 0;
-    text-shadow: 0 4px 18px rgba(0, 0, 0, 0.8);
+    text-shadow: 0 2px 12px color-mix(in srgb, var(--bg-main) 70%, transparent);
   }
 
   .hero-title-accent {
     font-style: italic;
     font-weight: 500;
-    background: linear-gradient(135deg, #ffffff 40%, var(--color-accent) 100%);
+    background: linear-gradient(135deg, var(--text-primary) 40%, var(--color-accent) 100%);
     background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -288,14 +288,14 @@
   .hero-synopsis {
     font-size: clamp(13.5px, 1.2vw, 15px);
     line-height: 1.6;
-    color: #cbd5e1;
+    color: var(--text-secondary);
     margin: 0;
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
     line-clamp: 3;
     overflow: hidden;
-    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+    text-shadow: none;
   }
 
   .hero-actions {
@@ -315,8 +315,8 @@
     padding: 0 26px;
     border: 0;
     border-radius: var(--radius-sm);
-    background: var(--color-text-bright);
-    color: #0b0c13;
+    background: var(--brand-gradient);
+    color: #1C1917;
     font-size: 14px;
     font-weight: 700;
     text-decoration: none;
@@ -325,7 +325,7 @@
   }
 
   .btn-primary:hover:not(:disabled) {
-    background: #ffffff;
+    background: var(--brand-gradient);
     transform: translateY(-2px);
     box-shadow: 0 10px 28px rgba(255, 255, 255, 0.25);
   }

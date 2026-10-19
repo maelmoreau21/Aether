@@ -1,10 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { audioLabel, videoLabel, videoResolutionBadge, containerLabel, colorProfileLabel } from './track-labels';
+import { audioLabel, videoLabel, videoResolutionBadge, containerLabel, colorProfileLabel, inspectedAudioTracks, languageLabel } from './track-labels';
 import type { Source } from './types';
 
 const source: Source = { id: 'one', audioTrackId: 'fr', language: 'fr', url: '/known', mime: 'video/mp4' };
 
 describe('track labels use available metadata', () => {
+  it('deduplicates prepared internal audio and preserves separate external assets', () => {
+    const track = {index:1,codec_type:'audio',codec_name:'opus',tags:{language:'fra'}};
+    const base = {...source, audioTrackId:'internal-default',tracks:[track]};
+    const prepared = {...base,id:'prepared',audioTrackId:'internal-1',externalAudioUrl:'/prepared/audio-1'};
+    const external = {...base,id:'external',audioTrackId:'external-0',externalAudioUrl:'/audio/id'};
+    const result=inspectedAudioTracks({id:'work',title:'Film',sources:[base,prepared,external],subtitles:[]});
+    expect(result).toHaveLength(2);
+    expect(result[0].language).toBe('fra');
+  });
+
+  it('names languages and keeps unknown metadata explicit', () => {
+    expect(languageLabel('fra')).toBe('français');
+    expect(languageLabel('eng')).toBe('anglais');
+    expect(languageLabel('und')).toBe('Langue non renseignée');
+    expect(languageLabel('zh')).toBe('chinois');
+    expect(languageLabel('es')).toBe('espagnol');
+  });
   it('shows the known audio codec and layout', () => {
     expect(audioLabel({ ...source, tracks: [{ codec_type: 'audio', codec_name: 'opus', channels: 6, channel_layout: '5.1' }] })).toBe('français · OPUS · 5.1');
   });
@@ -30,7 +47,7 @@ describe('track labels use available metadata', () => {
   it('formats container labels and color profiles', () => {
     expect(containerLabel('video/mp4')).toBe('MPEG-4 (.mp4)');
     expect(containerLabel('video/x-matroska')).toBe('Matroska (.mkv)');
-    expect(colorProfileLabel('yuv420p10le')).toBe('10 bits (Plage étendue)');
+    expect(colorProfileLabel('yuv420p10le')).toBe('10 bits');
     expect(colorProfileLabel('yuv420p')).toBe('8 bits standard');
     expect(colorProfileLabel(undefined)).toBeNull();
   });

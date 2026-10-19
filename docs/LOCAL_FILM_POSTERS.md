@@ -68,3 +68,5 @@ Tests : `posters_flow.rs`, `browser_posters.rs`, `browser-posters.cjs`, extensio
 unitaires inventaire/scanner/Node ; preuves dans `evidence/2026-10-16/posters/`.
 Architecture/API/sécurité/scanner/NFO/spécification/plan de tests et mémoire
 signalent ce jalon ; les jalons historiques sont conservés.
+
+Voir [Fiches, saisons, visuels et préférences privées](CATALOGUE_PRESENTATION.md) pour les extensions du 19 octobre 2026.

@@ -466,7 +466,7 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
             let img_id = format!("img-{:06}", i);
             let img_rel = format!("film_{:06}/poster.png", i);
             sqlx::query(
-                "INSERT INTO inventory_images VALUES(?, ?, 'lib-main', '/media/films', ?, 51200, '1700000000', 'image/png', 1, 1)"
+                "INSERT INTO inventory_images(id,work_id,library_id,root_snapshot,relative_path,size,modified_ns,mime,priority,available) VALUES(?, ?, 'lib-main', '/media/films', ?, 51200, '1700000000', 'image/png', 1, 1)"
             )
             .bind(&img_id).bind(&work_id).bind(&img_rel)
             .execute(&mut *tx).await.unwrap();

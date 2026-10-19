@@ -2,8 +2,7 @@
   export const navLinks = [
     { key: 'home', path: '/', label: 'Accueil', symbol: '⌂' },
     { key: 'films', path: 'films/', label: 'Films', symbol: '▤' },
-    { key: 'series', path: 'series/', label: 'Séries', symbol: '▥' },
-    { key: 'search', path: 'search/', label: 'Recherche', symbol: '⌕' }
+    { key: 'series', path: 'series/', label: 'Séries', symbol: '▥' }
   ] as const;
 </script>
 
@@ -50,9 +49,7 @@
             class:active={section === link.key}
             aria-current={section === link.key ? 'page' : undefined}
           >
-            {#if link.key === 'search'}
-              <Icon name="search" size={16} />
-            {:else if link.key === 'home'}
+            {#if link.key === 'home'}
               <Icon name="sparkles" size={16} />
             {:else if link.key === 'films'}
               <Icon name="film" size={16} />
@@ -70,6 +67,7 @@
         href={resolve('search/')}
         class="quick-search-btn"
         class:active={section === 'search'}
+        aria-current={section === 'search' ? 'page' : undefined}
         aria-label="Recherche rapide"
         title="Rechercher dans le catalogue"
       >
@@ -256,7 +254,10 @@
     }
 
     .quick-search-btn {
-      display: none;
+      display: inline-flex;
+      width: 36px;
+      height: 36px;
+      flex-shrink: 0;
     }
   }
 </style>

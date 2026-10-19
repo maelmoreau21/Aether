@@ -149,8 +149,8 @@
 
   .poster {
     aspect-ratio: 2 / 3;
-    background: linear-gradient(135deg, #161722 0%, #0d0e15 100%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(135deg, var(--bg-elevated), var(--bg-surface));
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     position: relative;
     overflow: hidden;
@@ -161,18 +161,18 @@
     transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
                 border-color 0.28s ease,
                 box-shadow 0.28s ease;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+    box-shadow: var(--shadow-card);
   }
 
   .poster.series {
-    background: linear-gradient(135deg, #141824 0%, #0b0f19 100%);
-    border-color: rgba(99, 102, 241, 0.15);
+    background: linear-gradient(135deg, var(--bg-elevated), var(--bg-surface));
+    border-color: var(--border-subtle);
   }
 
   .media-card:hover .poster {
     transform: translateY(-6px) scale(1.02);
-    border-color: rgba(167, 139, 250, 0.5);
-    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.75), 0 0 20px rgba(139, 92, 246, 0.25);
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-card-hover);
   }
 
   .media-card:focus-visible .poster {
@@ -225,7 +225,7 @@
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border-radius: var(--radius-xs);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border-subtle);
   }
 
   .watched-badge {
@@ -233,8 +233,8 @@
     align-items: center;
     gap: 3px;
     padding: 3px 6px;
-    background: rgba(52, 211, 153, 0.9);
-    color: #064e3b;
+    background: var(--status-success);
+    color: #1C1917;
     font-size: 9px;
     font-weight: 800;
     letter-spacing: 0.08em;
@@ -253,10 +253,10 @@
     font-family: var(--font-display);
     font-size: clamp(52px, 7vw, 90px);
     font-weight: 700;
-    color: rgba(167, 139, 250, 0.35);
+    color: var(--accent-primary);
     line-height: 1;
     display: block;
-    text-shadow: 0 0 25px rgba(139, 92, 246, 0.2);
+    text-shadow: none;
   }
 
   .badge-sub {

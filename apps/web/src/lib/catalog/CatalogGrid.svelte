@@ -32,6 +32,7 @@
     detailUrl: (work: Work) => string;
   } = $props();
 
+  const paginationTotal = $derived(section === 'films' || selectedKindFilter === 'film' ? totalFilms : section === 'series' || selectedKindFilter === 'series' ? totalSeries : Math.max(totalFilms,totalSeries));
   const base = $derived(resolve('/').replace(/\/$/, ''));
 
   // Local genre quick filter
@@ -224,7 +225,7 @@
   {/if}
 
   <!-- Pagination -->
-  {#if offset > 0 || totalFilms > offset + 24 || totalSeries > offset + 24}
+  {#if offset > 0 || paginationTotal > 0}
     <nav class="pagination" aria-label="Pages du catalogue">
       {#if offset > 0}
         <a
@@ -240,8 +241,8 @@
           ← Page précédente
         </a>
       {/if}
-      <span class="page-indicator">Page {Math.floor(offset / 24) + 1}</span>
-      {#if totalFilms > offset + 24 || totalSeries > offset + 24}
+      <span class="page-indicator">Page {Math.floor(offset / 24) + 1} sur {Math.max(1, Math.ceil(paginationTotal / 24))}</span>
+      {#if paginationTotal > offset + 24}
         <a
           class="page-nav-btn"
           href={resolve(

@@ -115,7 +115,7 @@ export async function readSession(): Promise<Session | null> {
   return current;
 }
 
-export async function bootstrapAdmin(login: string, password: string): Promise<void> {
+export async function bootstrapAdmin(login: string, password: string, bootstrapToken?: string): Promise<void> {
   return enqueueAuthMutation(async () => {
     const overrideSeq = manualOverrideSeq;
     const response = await fetch('/api/v1/auth/bootstrap', {
@@ -123,10 +123,23 @@ export async function bootstrapAdmin(login: string, password: string): Promise<v
       credentials: 'same-origin',
       cache: 'no-store',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ login, password }),
+      body: JSON.stringify({ login, password, bootstrap_token: bootstrapToken }),
       signal: AbortSignal.timeout(15000)
     });
-    if (response.status === 403) throw new Error("L'initialisation du serveur est déjà clôturée.");
+    if (response.status === 403) {
+      const err = await response.json().catch(() => null);
+      if (err?.error === 'http_bootstrap_disabled') {
+        throw new Error("L'initialisation via le Web est désactivée. Utilisez la commande locale 'media-bootstrap'.");
+      }
+      throw new Error("L'initialisation du serveur est déjà clôturée.");
+    }
+    if (response.status === 401) {
+      const err = await response.json().catch(() => null);
+      if (err?.error === 'invalid_bootstrap_token') {
+        throw new Error("Code d'initialisation invalide. Consultez la console du serveur ou le fichier .bootstrap_token.");
+      }
+      throw new Error("Autorisation d'initialisation refusée.");
+    }
     if (response.status === 429) throw new Error('Trop de requêtes. Patientez avant de réessayer.');
     if (response.status === 400) {
       const err = await response.json().catch(() => null);

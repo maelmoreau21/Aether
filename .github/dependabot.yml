@@ -30,13 +30,17 @@ updates:
       - "dependencies"
       - "ci"
 
-  # Frontend SvelteKit (à activer dès que apps/web sera initialisé avec package.json)
-  # - package-ecosystem: "npm"
-  #   directory: "/apps/web"
-  #   schedule:
-  #     interval: "weekly"
-  #   commit-message:
-  #     prefix: "deps(npm)"
-  #   labels:
-  #     - "dependencies"
-  #     - "frontend"
+  # Frontend SvelteKit
+  - package-ecosystem: "npm"
+    directory: "/apps/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(npm)"
+    labels:
+      - "dependencies"
+      - "frontend"

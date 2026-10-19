@@ -152,12 +152,16 @@ La refonte visuelle P1 ajoute img-src self à la CSP pour l'illustration origina
 et les SVG locaux. Aucune image tierce/data, aucun script distant ni
 assouplissement d'origine ajouté. Tests de violations CSP après refonte réussis.
 
-## Bootstrap P1 local
+## Bootstrap initial et initialisation du premier administrateur
 
-Le bootstrap est une CLI interactive autorisée par l'accès OS, jamais une API
-publique. Argon2id, transaction SQLite et marqueur durable : [LOCAL_ADMIN.md](LOCAL_ADMIN.md).
-L'identité persistée ne rend pas le prototype multi-utilisateur : sessions,
-CSRF, limitation des connexions et RBAC restent requis avant les médias privés.
+L'initialisation d'une instance neuve peut s'effectuer de deux manières exclusives :
+1. **CLI interactive locale (`media-bootstrap`)** : accès direct au terminal et au système de fichiers, sans passer par HTTP.
+2. **API Web (`POST /api/v1/auth/bootstrap`) protégée par jeton secret** :
+   - Exige la fourniture d'un **secret d'installation à usage unique** (`bootstrap_token`).
+   - Ce jeton est configuré via `MEDIA_BOOTSTRAP_TOKEN` ou généré aléatoirement au démarrage (aléa cryptographique 128 bits), affiché dans les journaux console du conteneur et écrit dans `<data_dir>/.bootstrap_token` (droits `0o600`).
+   - L'endpoint vérifie l'Origine HTTP, applique une limitation de débit stricte et compare le jeton en **temps constant**.
+   - Dès la création du premier administrateur, le jeton est détruit en mémoire, le fichier `.bootstrap_token` est supprimé du disque et la route est **définitivement verrouillée** (`403 Forbidden`).
+   - **Option de verrouillage total HTTP** : la variable `MEDIA_DISABLE_HTTP_BOOTSTRAP=true` désactive intégralement la route HTTP de bootstrap, imposant l'usage exclusif de la CLI `media-bootstrap`.
 
 ## P2 — transport et révocation, 17 octobre 2026
 
@@ -179,3 +183,33 @@ Les URL sont porteuses : expurger leurs queries dans tout proxy/journal. Les
 anciens rapports synthétiques conservés ont été expurgés sans changer les
 observations de lecture ; aucune nouvelle preuve n'est déduite de ces anciens
 rapports. L'amorçage ne peut plus reconstituer une identité déjà appairée.
+
+## Durcissement opérationnel & Alignement OWASP ASVS 5.0.0 (Niveau 2)
+
+Aether applique les exigences du standard **OWASP ASVS 5.0.0 Niveau 2** pour les applications manipulant des médias et des données sensibles :
+
+1. **V2 — Authentification & Anti-automatisation (Anti-DoS / Brute Force)** :
+   - Hachage de mot de passe par **Argon2id** (64 Mio RAM, $t=3$, $p=1$, paramètres conformes OWASP).
+   - Limitation de débit scopée par **adresse IP cliente** (`login_throttle` indexée par clé IP, fenêtre glissante 60 s, budget de 10 tentatives/min par IP).
+   - Protection contre le déni de service (DoS) : les attaques par force brute ou bourrage d'identifiants provenant d'une IP malveillante ne bloquent aucun utilisateur légitime naviguant depuis une autre adresse.
+   - Nettoyage opportuniste et mémoire bornée des anciennes fenêtres d'étranglement.
+2. **V3 — Gestion des Sessions** :
+   - Jetons de session de 256 bits d'aléa système (`ring::rand::SystemRandom`).
+   - Secrets de session jamais persistés en clair en base (uniquement hash SHA-256).
+   - Cookies `HttpOnly`, `SameSite=Strict`, et `Secure` inconditionnel en HTTPS.
+   - Expiration absolue (12 h) et expiration d'inactivité (30 min) validées à chaque requête.
+   - **Révocation immédiate et complète** : toute rétrogradation de rôle (ex. retrait du groupe admin IdP) ou perte d'autorisation de groupe supprime instantanément toutes les sessions actives de l'utilisateur en base.
+3. **V4 — Contrôle d'Accès (RBAC strict)** :
+   - Rôles autorisés exactement : `administrator` et `user`. Aucun rôle implicite.
+   - Contrôle d'accès côté serveur à chaque route API ; aucune décision d'autorisation déléguée au client frontend.
+   - Isolation stricte des bibliothèques : un utilisateur standard ne peut lister ou lire que les bibliothèques et médias explicitement autorisés.
+4. **V5 — Validation des Entrées & Confinement Système** :
+   - Confinement strict des chemins fichiers (`O_NOFOLLOW`, interdiction des traversées de répertoires, symlinks et jonctions Windows).
+   - Montage des bibliothèques multimédia en **lecture seule (`:ro`)**.
+   - Pas de transcodage dynamique non maîtrisé ni d'exécution de processus arbitraires.
+5. **V14 — Configuration & Conteneurs Docker durcis** :
+   - Exécution sous utilisateur non-root non privilégié (`UID:GID 10001:10001`).
+   - `cap_drop: [ALL]` et `no-new-privileges: true`.
+   - Système de fichiers racine en lecture seule (`read_only: true`) avec `tmpfs` non exécutable (`/tmp:rw,noexec,nosuid,size=64m`).
+   - Limites de ressources explicites sur CPU (`cpus: 2.0`), mémoire (`memory: 1G`) et processus (`pids: 200`).
+

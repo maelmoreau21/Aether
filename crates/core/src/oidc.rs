@@ -79,14 +79,7 @@ impl Config {
 
         let require_group = std::env::var("MEDIA_OIDC_REQUIRE_GROUP")
             .map(|v| v.trim().eq_ignore_ascii_case("true"))
-            .unwrap_or_else(|_| {
-                // If MEDIA_OIDC_USER_GROUPS is set and non-empty, default require_group is true.
-                // If it is not set or empty, default require_group is false.
-                std::env::var("MEDIA_OIDC_USER_GROUPS")
-                    .ok()
-                    .filter(|s| !s.trim().is_empty())
-                    .is_some()
-            });
+            .unwrap_or(true);
 
         let groups: Vec<String> = std::env::var("MEDIA_OIDC_USER_GROUPS")
             .unwrap_or_default()
@@ -109,7 +102,7 @@ impl Config {
 
         if require_group && groups.is_empty() && admin_groups.is_empty() {
             return Err(
-                "MEDIA_OIDC_USER_GROUPS must explicitly allow at least one group when require_group is true",
+                "MEDIA_OIDC_USER_GROUPS or MEDIA_OIDC_ADMIN_GROUPS must explicitly allow at least one group when OIDC is enabled. If you intentionally want to allow all users from this IdP without group filtering, explicitly set MEDIA_OIDC_REQUIRE_GROUP=false",
             );
         }
 
@@ -632,6 +625,19 @@ impl Oidc {
                     .iter()
                     .any(|g| c.admin_groups.iter().any(|ag| ag.eq_ignore_ascii_case(g)));
             if !in_user_groups && !in_admin_groups {
+                if let Ok(Some(existing_id)) = crate::database::query_scalar::<_, String>(
+                    "SELECT user_id FROM oidc_identities WHERE issuer=? AND subject=?",
+                )
+                .bind(&c.issuer)
+                .bind(&claims.sub)
+                .fetch_optional(&self.auth.store.pool)
+                .await
+                {
+                    let _ = crate::database::query("DELETE FROM sessions WHERE user_id=?")
+                        .bind(&existing_id)
+                        .execute(&self.auth.store.pool)
+                        .await;
+                }
                 return Err(deny(StatusCode::FORBIDDEN, "oidc_group_denied"));
             }
         }
@@ -665,10 +671,46 @@ impl Oidc {
                 return Err(deny(StatusCode::CONFLICT, "oidc_identity_already_linked"));
             }
             (Some(id), _) => {
+                let has_local_cred: bool = crate::database::query_scalar::<_, i64>(
+                    "SELECT CAST(EXISTS(SELECT 1 FROM local_credentials WHERE user_id=?) AS INTEGER)",
+                )
+                .bind(&id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db)? != 0;
+
+                let current_role: String =
+                    crate::database::query_scalar("SELECT role FROM users WHERE id=?")
+                        .bind(&id)
+                        .fetch_one(&mut *tx)
+                        .await
+                        .map_err(db)?;
+
                 if is_admin {
                     crate::database::query("UPDATE users SET role='administrator', display_name=COALESCE(?, display_name), sso_username=COALESCE(?, sso_username) WHERE id=?")
                         .bind(&display_name)
                         .bind(&sso_username)
+                        .bind(&id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(db)?;
+                } else if !has_local_cred
+                    && !c.admin_groups.is_empty()
+                    && current_role == "administrator"
+                {
+                    // Downgrade: SSO-managed user lost their admin group membership in IdP.
+                    crate::database::query(
+                        "UPDATE users SET role='user', display_name=COALESCE(?, display_name), sso_username=COALESCE(?, sso_username) WHERE id=?",
+                    )
+                    .bind(&display_name)
+                    .bind(&sso_username)
+                    .bind(&id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db)?;
+
+                    // Immediately revoke all existing sessions to invalidate stale administrator privileges.
+                    crate::database::query("DELETE FROM sessions WHERE user_id=?")
                         .bind(&id)
                         .execute(&mut *tx)
                         .await
@@ -790,8 +832,15 @@ async fn link(
     if input.password.len() > 512 {
         return Err(invalid());
     }
-    // Reuse local login's persistent global rate limit before expensive Argon2 work.
-    let allowed=crate::database::query_scalar::<_,i64>("INSERT INTO login_throttle(singleton,window_started,attempts) VALUES(1,unixepoch(),1) ON CONFLICT(singleton) DO UPDATE SET attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END, window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END RETURNING login_throttle.attempts").fetch_one(&s.auth.store.pool).await.map_err(db)?;
+    // Reuse local login's persistent client rate limit before expensive Argon2 work.
+    let client_key = auth::extract_client_key(&headers);
+    let allowed = crate::database::query_scalar::<_, i64>(
+        "INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE SET attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END, window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END RETURNING login_throttle.attempts",
+    )
+    .bind(&client_key)
+    .fetch_one(&s.auth.store.pool)
+    .await
+    .map_err(db)?;
     if allowed > 10 {
         return Err(deny(StatusCode::TOO_MANY_REQUESTS, "try_later"));
     }
@@ -1761,5 +1810,86 @@ mod tests {
         assert_eq!(me["user"]["role"], "administrator");
         assert_eq!(me["user"]["login"], "mael");
         assert_eq!(me["user"]["displayName"], "Maël Moreau");
+
+        // 2. User loses admin group in IdP (only has "media-users" now)
+        let (cookie2, state2) = begin(&f_custom).await;
+        let nonce2 = f_custom.provider.claims.lock().unwrap()["nonce"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        *f_custom.provider.claims.lock().unwrap() = serde_json::json!({
+            "iss": f_custom.provider.issuer,
+            "sub": "sso-mael-id",
+            "aud": "client",
+            "iat": now + 10,
+            "exp": now + 310,
+            "nonce": nonce2,
+            "groups": ["media-users"],
+            "preferred_username": "mael",
+            "name": "Maël Moreau"
+        });
+
+        let r2 = finish(&f_custom, &cookie2, &state2).await;
+        assert_eq!(r2.status(), StatusCode::OK);
+        let session2 = session_cookie(&r2);
+
+        // 3. New session has downgraded role "user"
+        let me2 = body(
+            req(
+                &f_custom.s,
+                "/api/v1/auth/me",
+                "GET",
+                &session2,
+                "",
+                serde_json::Value::Null,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(me2["user"]["role"], "user");
+
+        // 4. Stale admin session was immediately revoked upon downgrade
+        let old_session_res = req(
+            &f_custom.s,
+            "/api/v1/auth/me",
+            "GET",
+            &session,
+            "",
+            serde_json::Value::Null,
+        )
+        .await;
+        assert_eq!(old_session_res.status(), StatusCode::UNAUTHORIZED);
+
+        // 5. User loses all groups in IdP: login is denied and active sessions are revoked
+        let (cookie3, state3) = begin(&f_custom).await;
+        let nonce3 = f_custom.provider.claims.lock().unwrap()["nonce"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        *f_custom.provider.claims.lock().unwrap() = serde_json::json!({
+            "iss": f_custom.provider.issuer,
+            "sub": "sso-mael-id",
+            "aud": "client",
+            "iat": now + 20,
+            "exp": now + 320,
+            "nonce": nonce3,
+            "groups": ["unrelated-group"],
+            "preferred_username": "mael"
+        });
+
+        let r3 = finish(&f_custom, &cookie3, &state3).await;
+        assert_eq!(r3.status(), StatusCode::FORBIDDEN);
+
+        // Session2 is now revoked
+        let session2_after_removal = req(
+            &f_custom.s,
+            "/api/v1/auth/me",
+            "GET",
+            &session2,
+            "",
+            serde_json::Value::Null,
+        )
+        .await;
+        assert_eq!(session2_after_removal.status(), StatusCode::UNAUTHORIZED);
     }
 }

@@ -37,8 +37,9 @@ MEDIA_OIDC_CLIENT_SECRET=secret-confidentiel-fourni-par-lidp
 # Groupes IdP conférant immédiatement le rôle administrator (évite d'avoir à créer un compte local)
 # MEDIA_OIDC_ADMIN_GROUPS=Admins,media-admins
 
-# Filtrage obligatoire par groupe (défaut : true si MEDIA_OIDC_USER_GROUPS est défini, sinon false)
-# Définir à false pour autoriser tout utilisateur authentifié (ex. Pocket ID)
+# Filtrage obligatoire par groupe (défaut : true par défaut pour la sécurité ; fail-closed)
+# Exige explicitement MEDIA_OIDC_USER_GROUPS ou MEDIA_OIDC_ADMIN_GROUPS.
+# Définir explicitement à false pour autoriser tout utilisateur authentifié (ex. Pocket ID)
 # MEDIA_OIDC_REQUIRE_GROUP=false
 
 # Désactiver la connexion locale par mot de passe pour forcer le SSO exclusif
@@ -82,12 +83,12 @@ redirection HTTP arbitraire.
 
 ## Politique des comptes et des groupes
 
-L'accès OIDC donne accès au rôle **user** pour un nouveau compte. Il n'accorde
-aucune bibliothèque implicite ; un administrateur attribue ensuite les permissions
-dans l'administration existante (les comptes SSO y sont identifiés par `sso-<UUID>`).
-Aucun rôle ni groupe fournisseur ne crée/promouvrait un administrateur. Les rôles
-Core existants sont conservés et relus à chaque requête ; les claims de rôle IdP
-sont strictement ignorés.
+L'accès OIDC attribue le rôle **user** par défaut, ou **administrator** si l'utilisateur appartient à un groupe spécifié dans `MEDIA_OIDC_ADMIN_GROUPS`. Il n'accorde aucune bibliothèque implicite ; un administrateur attribue ensuite les permissions dans l'administration (les comptes SSO y sont identifiés par leur nom ou `sso-<UUID>`).
+
+**Synchronisation stricte et rétrogradation des privilèges :**
+- Lorsqu'un utilisateur OIDC pur (sans identifiants locaux) perd son groupe administrateur dans l'IdP (ex. Authentik), sa prochaine connexion le rétrograde automatiquement au rôle `user`.
+- **Révocation immédiate des sessions existantes :** dès qu'une rétrogradation de privilège est détectée, ou lorsqu'un utilisateur perd l'appartenance à tout groupe autorisé (`oidc_group_denied`), toutes les sessions actives existantes de cet utilisateur (`sessions.user_id = ?`) sont immédiatement supprimées en base, neutralisant tout risque de privilège résiduel.
+- Les comptes d'administrateurs locaux liés au SSO conservent leur rôle administrateur local de secours et ne peuvent pas être rétrogradés par l'IdP.
 
 L'identité durable est uniquement `(issuer, sub)` avec unicité SQL ; `email`,
 `preferred_username` et nom ne sont jamais utilisés pour fusionner ou retrouver

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import {
+  bootstrapAdmin,
   getSessionGeneration,
   invalidateSession,
   login,
@@ -242,4 +243,43 @@ describe('cookie based authentication client', () => {
     expect(result).toBeNull();
     expect(get(session)).toBeNull();
   });
+
+  it('submits bootstrap token and handles success, invalid token and disabled HTTP bootstrap', async () => {
+    // 1. Success with token
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(current));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await bootstrapAdmin('admin', 'long-password-12345', 'secret-token-xyz');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/auth/bootstrap',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ login: 'admin', password: 'long-password-12345', bootstrap_token: 'secret-token-xyz' })
+      })
+    );
+    expect(get(session)).toEqual(current);
+
+    // 2. Invalid token error
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'invalid_bootstrap_token' }), { status: 401, headers: { 'content-type': 'application/json' } })
+      )
+    );
+    await expect(bootstrapAdmin('admin', 'long-password-12345', 'bad-token')).rejects.toThrow(
+      "Code d'initialisation invalide. Consultez la console du serveur ou le fichier .bootstrap_token."
+    );
+
+    // 3. Disabled HTTP bootstrap error
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'http_bootstrap_disabled' }), { status: 403, headers: { 'content-type': 'application/json' } })
+      )
+    );
+    await expect(bootstrapAdmin('admin', 'long-password-12345', 'token')).rejects.toThrow(
+      "L'initialisation via le Web est désactivée. Utilisez la commande locale 'media-bootstrap'."
+    );
+  });
 });
+

@@ -230,7 +230,7 @@ jobs:
 
       - name: Archiver les rapports et captures navigateur
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-evidence-films-series
           if-no-files-found: error

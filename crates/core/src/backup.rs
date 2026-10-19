@@ -294,14 +294,14 @@ pub async fn backup_database_with_options(
         )));
     }
 
-    // Ensure target parent directory exists with secure permissions (0750)
+    // Ensure target parent directory exists with secure permissions (0700)
     let parent = target_backup_path.parent().unwrap_or(Path::new("."));
     if !parent.as_os_str().is_empty() {
         std::fs::create_dir_all(parent)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o750));
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
         }
     }
 
@@ -527,14 +527,14 @@ pub async fn restore_database(
 
     verify_pool.close().await;
 
-    // Ensure target parent directory exists with 0750 permissions
+    // Ensure target parent directory exists with 0700 permissions
     let parent = target_db_path.parent().unwrap_or(Path::new("."));
     if !parent.as_os_str().is_empty() {
         std::fs::create_dir_all(parent)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o750));
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
         }
     }
 

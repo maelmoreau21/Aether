@@ -38,8 +38,8 @@
     <h3>{editing ? 'Modifier le groupe' : 'Créer un groupe'}</h3>
     <label>Nom <input required maxlength="80" bind:value={name} disabled={busy} /></label>
     <div class="choices">
-      <fieldset disabled={busy}><legend>Membres</legend>{#each users as user (user.id)}<label><input type="checkbox" value={user.id} bind:group={userIds} /> {user.displayName || user.login}</label>{/each}</fieldset>
-      <fieldset disabled={busy}><legend>Bibliothèques autorisées</legend>{#each libraries as library (library.id)}<label><input type="checkbox" value={library.id} bind:group={libraryIds} /> {library.name}{library.enabled ? '' : ' (désactivée)'}</label>{/each}</fieldset>
+      <fieldset disabled={busy}><legend>Membres</legend>{#each users as user (user.id)}<label><input type="checkbox" value={user.id} bind:group={userIds} aria-label={"Membre : " + (user.displayName || user.login)} /> {user.displayName || user.login}</label>{/each}</fieldset>
+      <fieldset disabled={busy}><legend>Bibliothèques autorisées</legend>{#each libraries as library (library.id)}<label><input type="checkbox" value={library.id} bind:group={libraryIds} aria-label={"Bibliothèque autorisée : " + library.name} /> {library.name}{library.enabled ? '' : ' (désactivée)'}</label>{/each}</fieldset>
     </div>
     <div class="actions"><button disabled={busy} type="submit">{busy ? 'Enregistrement…' : 'Enregistrer'}</button>{#if editing}<button disabled={busy} type="button" onclick={reset}>Annuler</button>{/if}</div>
   </form>

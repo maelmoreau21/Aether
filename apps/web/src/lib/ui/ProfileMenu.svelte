@@ -47,7 +47,7 @@
   <button
     class="profile-trigger"
     popovertarget="profile-menu"
-    aria-label={$t('profile_settings')}
+    aria-label="Menu profil"
     aria-expanded={expanded}
     aria-controls="profile-menu"
   >
@@ -77,7 +77,7 @@
       </div>
     </div>
 
-    <nav aria-label={$t('profile_settings')}>
+    <nav aria-label="Menu profil">
       <a class="profile-entry" href={resolve('settings/')} onclick={() => panel.hidePopover()}>
         <Icon name="profile" size={17} />
         <span>{$t('profile_settings')}</span>

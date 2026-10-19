@@ -43,7 +43,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.goto(origin + '/app/admin/libraries/');
     await page.locator('#library-name').fill('Séries Navigateur');
     await page.locator('#library-kind').selectOption('series');
-    await page.getByLabel('series-user-b', {exact: true}).check();
+    await page.locator('#libraries-section').getByLabel('series-user-b', {exact: true}).check();
     await page.getByRole('button', {name:'Enregistrer', exact:true}).click();
     await page.getByRole('heading', {name:'Séries Navigateur', exact:true}).waitFor();
 

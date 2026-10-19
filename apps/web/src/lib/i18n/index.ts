@@ -12,7 +12,7 @@ const translations = {
     search: 'Recherche',
     admin_dashboard: 'Tableau de bord (Admin)',
     profile_settings: 'Mon profil & Préférences',
-    logout: 'Déconnexion',
+    logout: 'Se déconnecter',
     login: 'Connexion',
     you: 'Vous',
     save: 'Enregistrer',

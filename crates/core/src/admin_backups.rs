@@ -296,13 +296,19 @@ async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
         };
         #[cfg(not(unix))]
         let builder = std::fs::DirBuilder::new();
-        match builder.create(&path) {
+        let result = match builder.create(&path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => {
                 Ok(())
             }
             Err(error) => Err(error),
+        };
+        #[cfg(unix)]
+        if result.is_ok() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700));
         }
+        result
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?

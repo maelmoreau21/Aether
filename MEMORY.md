@@ -1,23 +1,27 @@
 # MEMORY.md — État et décisions Aether
 
-## 19 octobre 2026 — Intégration des logos animés / chargement et correction de la CI (FFmpeg & navigation admin)
+## 19 octobre 2026 — Intégration des logos animés / chargement et correction complète de la CI
 
 - **Renommage et intégration des logos SVG** :
   - `logo animée.svg` renommé en `logo-animated.svg` (racine et `apps/web/static/images/logo-animated.svg`). Utilisé dans la page de connexion (`apps/web/src/routes/login/+page.svelte`) et la barre de navigation (`Navbar.svelte`) pour afficher l'animation d'apparition fluide du ruban.
   - `logo chargement .svg` renommé en `logo-loading.svg` (racine et `apps/web/static/images/logo-loading.svg`). Intégré en remplacement des spinners génériques dans la médiathèque (`Catalog.svelte`), la console d'administration (`admin/libraries/+page.svelte`) et le lecteur immersif (`ImmersivePlayer.svelte`).
   - `brand-mark.svg` synchronisé avec la charte graphique et la géométrie actuelle du logo Aether.
-- **Correction des échecs CI GitHub Actions** :
+- **Résolution des échecs CI GitHub Actions** :
   - **Job Rust (`cargo test --lib --bins`)** : l'installation de FFmpeg (`sudo apt-get install -y ffmpeg`) était conditionnée par `steps.cache-fixtures.outputs.cache-hit != 'true'`. En cas de cache hit des fixtures, `ffmpeg` et `ffprobe` manquaient sur le runner Ubuntu, causant des erreurs `NotFound` (`Os { code: 2 }`) dans les tests unitaires de `media-node` (`probe::tests`, `packaging::tests`). L'installation de FFmpeg est désormais inconditionnelle dans le job `rust`.
-  - **Job Frontend / Test navigateur (`browser_scanner`)** :
-    - Navigation d'administration : `/app/admin/libraries/` sans ancre ouvrait par défaut la section `#overview`, masquant la section `#libraries-section` (`hidden={true}`). Tous les parcours d'administration (`browser-scanner.cjs`, etc.) ciblant l'URL directe `/app/admin/libraries/` échouaient en timeout car le champ `Nom de la bibliothèque` était invisible. `selectedSection()` retourne désormais `#libraries-section` par défaut en l'absence de hash dans l'URL.
-    - Nettoyage du template : suppression des composants d'administration accidentellement dupliqués à l'intérieur du bandeau de notification `{#if notice}`.
-    - Préférence sous-titres : la sélection manuelle en cours de lecture est maintenue au niveau de la séance du lecteur, préservant la règle produit d'activation par défaut des sous-titres forcés français sur les nouveaux médias.
+  - **Test navigateur Séries (`browser_series`)** :
+    - Conflit d'accessibilité : `AdminGroups.svelte` générait des cases à cocher enveloppées dans `<label>` contenant le nom de l'utilisateur sans label distinct, causant une violation de mode strict Playwright (`getByLabel('series-user-b', { exact: true })` trouvait 2 éléments). Des attributs `aria-label` explicites ont été ajoutés dans `AdminGroups` (`"Membre : ..."` et `"Bibliothèque autorisée : ..."`), et le sélecteur dans `scripts/browser-series.cjs` a été scopé sur `#libraries-section`.
+    - Bouton de profil & déconnexion : Le libellé accessible du bouton de menu et du conteneur nav dans `ProfileMenu.svelte` a été restauré à `"Menu profil"` (au lieu de la clé de traduction générique), et la traduction française du bouton de déconnexion dans `apps/web/src/lib/i18n/index.ts` a été alignée sur `"Se déconnecter"`.
+  - **Test sauvegardes administratives (`admin_backups`)** :
+    - Erreur HTTP 409 lors du téléchargement : `backup_database` et `restore_database` dans `crates/core/src/backup.rs` imposaient une permission Unix `0o750` sur le dossier parent de destination (`std::fs::set_permissions(parent, Permissions::from_mode(0o750))`). Or, `safe_directory` dans `crates/core/src/admin_backups.rs` vérifie strictement `metadata.permissions().mode() & 0o077 == 0` (seul l'utilisateur propriétaire a des droits). L'application de `0o750` par `backup_database` introduisait le bit groupe `0o050`, provoquant le rejet en `409 Conflict` lors du `GET /api/v1/admin/backups/:id/download`.
+    - Permissions alignées sur `0o700` (`rwx------`) dans `backup.rs` et application explicite de `0o700` dans `admin_backups::perform_backup`.
 - **Validation & Contrôle Qualité** :
   - `cargo test --locked --workspace --all-features --lib --bins` : 83/83 tests unitaires réussis.
-  - `cargo test --locked -p media-poc --test browser_scanner -- --ignored --nocapture` : 100% réussi (les deux passes avec et sans redémarrage du Core).
+  - `cargo test --locked --workspace --all-features --test '*' -- --test-threads=1` : 100% des suites de tests d'intégration réussies (45 tests sans aucun échec).
+  - `cargo test --locked -p media-poc --test browser_scanner -- --ignored --nocapture` : 100% réussi.
+  - `cargo test --locked -p media-poc --test browser_series -- --ignored --nocapture` : 100% réussi (`passed: true`).
   - `npm run check` (dans `apps/web`) : 0 erreur, 0 avertissement.
-  - `npm test` (dans `apps/web`) : 53/53 tests réussis.
-  - `npm run build` (dans `apps/web`) : compilation et prerender réussis sans erreur.
+  - `npm test` (dans `apps/web`) : 53/53 tests unitaires réussis.
+  - `npm run build` (dans `apps/web`) : compilation et génération statique réussies sans erreur.
   - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 warning.
   - `cargo fmt --check` : 0 diff.
 

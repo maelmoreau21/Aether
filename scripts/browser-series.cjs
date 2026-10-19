@@ -47,11 +47,14 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByRole('heading', {name:'Séries Navigateur', exact:true}).waitFor();
 
     // Grant library access directly on series-user-b in Users section
+    await page.locator('a[href="#users-section"]').click();
     const userRow = page.locator('tr').filter({hasText: 'series-user-b'});
     await userRow.getByRole('button', {name: 'Modifier'}).click();
     await page.locator('#users-section').getByLabel('Bibliothèque autorisée : Séries Navigateur').check();
     await page.locator('#users-section').getByRole('button', {name: 'Enregistrer'}).click();
+    await page.getByText('Compte enregistré').waitFor();
 
+    await page.locator('a[href="#libraries-section"]').click();
     await page.getByRole('button', {name:'Scanner Séries Navigateur', exact:true}).click();
     const article = page.locator('article').filter({has: page.getByRole('heading', {name:'Séries Navigateur', exact:true})});
     await article.getByText(/Scan : Terminé/).waitFor({timeout:60000});

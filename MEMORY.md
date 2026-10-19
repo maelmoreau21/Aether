@@ -1,5 +1,12 @@
 # MEMORY.md — État et décisions Aether
 
+## 19 octobre 2026 — Correction du test E2E séries (`browser_series`)
+
+- **Correction de la navigation Playwright dans `scripts/browser-series.cjs`** :
+  - Suite à la refonte de la console d'administration découpant les rubriques en sections masquées (`hidden`), l'attribution des droits d'accès à la bibliothèque `Séries Navigateur` pour `series-user-b` échouait sur un timeout de 30 secondes car le bouton « Modifier » dans `#users-section` était masqué depuis `#libraries-section`.
+  - Ajout explicite de la navigation vers `a[href="#users-section"]`, attente de l'enregistrement du compte, puis bascule vers `a[href="#libraries-section"]` pour déclencher le scan de la bibliothèque.
+  - Validation exécutée avec succès : `cargo test --locked --test browser_series -- --ignored --nocapture` (1 test passé en 20.71s, scan, lecture AV1/Opus, transitions inter-saisons, isolation de cache et permissions 403 vérifiés sous Chrome headless).
+
 ## 19 octobre 2026 — Correction du parcours Jellyfin et revue des paramètres
 
 - Demande précisée par deux captures : liste de tâches compacte par catégorie, puis page dédiée et liste de déclencheurs ; la précédente présentation en cartes/détails dépliables ne répondait pas au besoin.

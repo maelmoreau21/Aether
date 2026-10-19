@@ -36,7 +36,7 @@
     <div class="header-brand-group">
       <a class="brand" href={resolve('/')} aria-label={`${name}, accueil`}>
         <div class="brand-logo-wrapper">
-          <img src={`${base}/images/logo-animated.svg`} width="26" height="30" alt="" />
+          <img src={`${base}/images/brand-mark.svg`} width="32" height="32" alt="" />
         </div>
         <span class="brand-text">{name}</span>
       </a>
@@ -85,7 +85,7 @@
     top: 0;
     z-index: 40;
     width: 100%;
-    background: linear-gradient(180deg, rgba(9, 10, 16, 0.95) 0%, rgba(9, 10, 16, 0.75) 100%);
+    background: var(--color-glass);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border-bottom: 1px solid var(--color-line);
@@ -93,8 +93,8 @@
   }
 
   .site-header.scrolled {
-    background: rgba(9, 10, 16, 0.92);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-sm);
     border-bottom-color: var(--color-line-strong);
   }
 
@@ -130,6 +130,7 @@
   }
 
   .brand-logo-wrapper {
+    flex-shrink: 0;
     display: grid;
     place-items: center;
     filter: drop-shadow(0 0 12px var(--color-accent-glow));
@@ -137,17 +138,14 @@
   }
 
   .brand:hover .brand-logo-wrapper {
-    filter: drop-shadow(0 0 18px rgba(167, 139, 250, 0.6));
+    filter: drop-shadow(0 0 18px var(--color-accent-glow));
   }
 
   .brand-text {
     font-size: 24px;
     font-weight: 750;
     letter-spacing: -0.04em;
-    background: linear-gradient(135deg, #ffffff 40%, #c4b5fd 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--color-text);
   }
 
   .main-nav {
@@ -170,7 +168,7 @@
 
   .nav-link:hover {
     color: var(--color-text-bright);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--color-raised);
   }
 
   .nav-link.active,
@@ -178,8 +176,8 @@
     color: var(--color-text-bright);
     font-weight: 600;
     background: var(--color-accent-soft);
-    border: 1px solid rgba(167, 139, 250, 0.25);
-    box-shadow: 0 0 15px rgba(139, 92, 246, 0.15);
+    border: 1px solid var(--color-line);
+    box-shadow: var(--shadow-sm);
   }
 
   .header-actions {
@@ -195,7 +193,7 @@
     height: 38px;
     border-radius: 50%;
     color: var(--color-muted);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--color-surface);
     border: 1px solid var(--color-line);
     transition: all var(--transition-fast);
   }
@@ -203,8 +201,8 @@
   .quick-search-btn:hover,
   .quick-search-btn.active {
     color: var(--color-text-bright);
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(167, 139, 250, 0.3);
+    background: var(--color-raised);
+    border-color: var(--color-line);
     box-shadow: 0 0 12px var(--color-accent-glow);
   }
 
@@ -230,6 +228,11 @@
   }
 
   @media (max-width: 640px) {
+    .header-inner { gap: 8px; padding-inline: 16px; }
+    .header-brand-group { gap: 8px; }
+    .brand { gap: 6px; }
+    .brand-text { display: none; }
+    .main-nav { gap: 2px; }
     .nav-link span {
       display: none;
     }

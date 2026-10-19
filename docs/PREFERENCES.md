@@ -53,3 +53,12 @@ inconnus, fusion partielle et réouverture de base ; côté Web, refus d'importe
 cache hérité, réponses tardives et abandon d'écritures après changement de compte.
 La validation PostgreSQL réelle et navigateur est consignée séparément par le
 jalon principal.
+
+## Interface des paramètres (19 octobre 2026)
+
+Navigation Compte / Apparence / Lecture / Connexion SSO. Les fragments
+`#account`, `#appearance`, `#playback`, `#sso` permettent les accès directs et le
+retour navigateur. Lecture permet d’enregistrer les deux décalages de −30 à
++30 secondes via `offsets`, sans changer le contrat Core ni créer de nouveaux
+champs. Les erreurs de synchronisation restent affichées par le layout ; aucune
+bannière permanente ne prétend qu’une mutation a réussi.

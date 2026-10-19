@@ -1,13 +1,11 @@
 <script lang="ts">
   import type { Library, AdminNode, Scan } from './types';
   import { scanLabels } from './types';
-  import type { AuthUser } from '../auth/session';
   import Icon from '../ui/Icon.svelte';
 
   interface Props {
     libraries: Library[];
     nodes: AdminNode[];
-    users: AuthUser[];
     scans: Record<string, Scan>;
     pending: string[];
     availableRootsForNode: string[];
@@ -29,7 +27,6 @@
   let {
     libraries,
     nodes,
-    users,
     scans,
     pending,
     availableRootsForNode,
@@ -301,7 +298,7 @@
 
   .columns {
     display: grid;
-    grid-template-columns: 1.15fr 0.85fr;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr);
     gap: 28px;
   }
 
@@ -389,6 +386,8 @@
   }
 
   .item-title-row h4 {
+    min-width: 0;
+    overflow-wrap: anywhere;
     margin: 0;
     font-size: 16px;
     font-weight: 650;
@@ -503,7 +502,10 @@
     flex-shrink: 0;
   }
 
+  .action-btn span { min-width: 0; overflow-wrap: anywhere; }
   .action-btn, .secondary-btn {
+    max-width: 100%;
+    text-align: left;
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -683,6 +685,10 @@
     margin-top: 16px;
   }
 
+  @media(max-width: 640px) {
+    .item-card { flex-direction: column; }
+    .card { padding: 16px; }
+  }
   @media(max-width: 950px) {
     .columns {
       grid-template-columns: 1fr;

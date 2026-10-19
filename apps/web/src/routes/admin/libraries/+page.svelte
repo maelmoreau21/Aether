@@ -306,19 +306,33 @@
     }
   }
 
+  let menuOpen = $state(false);
+  let selectedTaskId = $state<string | null>(null);
   let currentHash = $state('#libraries-section');
+  const sectionTitle = $derived(({
+    '#overview': $t('admin_nav_overview'), '#libraries-section': $t('admin_nav_libraries'),
+    '#nodes-section': $t('admin_nav_nodes'), '#users-section': $t('admin_nav_users'),
+    '#groups-section': 'Groupes', '#sso-section': $t('admin_nav_sso'),
+    '#tasks-section': $t('admin_nav_tasks'), '#backups-section': 'Sauvegardes',
+    '#api-keys-section': 'Clés API', '#extensions-section': 'Extensions'
+  } as Record<string, string>)[currentHash]);
+  function chooseSection(hash: string) { currentHash = hash; menuOpen = false; }
+
   const sections = new Set(['#overview', '#libraries-section', '#nodes-section', '#users-section', '#sso-section', '#tasks-section', '#backups-section', '#groups-section', '#api-keys-section', '#extensions-section']);
   function selectedSection() {
-    return sections.has(window.location.hash) ? window.location.hash : '#libraries-section';
+    const section = window.location.hash.split('?')[0];
+    return sections.has(section) ? section : '#libraries-section';
   }
 
   onMount(() => {
     void load();
     if (typeof window !== 'undefined' && window.location.hash) {
       currentHash = selectedSection();
+      selectedTaskId = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('task');
     }
     const hashHandler = () => {
       currentHash = selectedSection();
+      selectedTaskId = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('task');
     };
     window.addEventListener('hashchange', hashHandler);
     const timer = setInterval(() => {
@@ -397,6 +411,10 @@
       <div class="admin-dashboard-container">
         <!-- Jellyfin-Style Navigation Sidebar -->
         <aside class="admin-sidebar" aria-label="Menu d’administration">
+          <button class="mobile-menu-toggle" type="button" aria-expanded={menuOpen} aria-controls="admin-navigation" onclick={() => menuOpen = !menuOpen}>
+            <Icon name="settings" size={18} /><span>{sectionTitle}</span><Icon name={menuOpen ? 'chevron-left' : 'chevron'} size={16} />
+          </button>
+          <div id="admin-navigation" class="sidebar-sections" class:expanded={menuOpen}>
           <div class="sidebar-header">
             <span class="sidebar-brand-title">CONSOLE SERVEUR</span>
           </div>
@@ -408,7 +426,7 @@
               class="sidebar-nav-item"
               class:active={currentHash === '#overview'}
               aria-current={currentHash === '#overview' ? 'page' : undefined}
-              onclick={() => currentHash = '#overview'}
+              onclick={() => chooseSection('#overview')}
             >
               <span class="nav-icon"><Icon name="sparkles" size={16} /></span>
               <span class="nav-text">{$t('admin_nav_overview')}</span>
@@ -425,7 +443,7 @@
               class="sidebar-nav-item"
               class:active={currentHash === '#libraries-section'}
               aria-current={currentHash === '#libraries-section' ? 'page' : undefined}
-              onclick={() => currentHash = '#libraries-section'}
+              onclick={() => chooseSection('#libraries-section')}
             >
               <span class="nav-icon"><Icon name="film" size={16} /></span>
               <span class="nav-text">{$t('admin_nav_libraries')}</span>
@@ -436,7 +454,7 @@
               class="sidebar-nav-item"
               class:active={currentHash === '#nodes-section'}
               aria-current={currentHash === '#nodes-section' ? 'page' : undefined}
-              onclick={() => currentHash = '#nodes-section'}
+              onclick={() => chooseSection('#nodes-section')}
             >
               <span class="nav-icon"><Icon name="server" size={16} /></span>
               <span class="nav-text">{$t('admin_nav_nodes')}</span>
@@ -451,7 +469,7 @@
               class="sidebar-nav-item"
               class:active={currentHash === '#users-section'}
               aria-current={currentHash === '#users-section' ? 'page' : undefined}
-              onclick={() => currentHash = '#users-section'}
+              onclick={() => chooseSection('#users-section')}
             >
               <span class="nav-icon"><Icon name="users" size={16} /></span>
               <span class="nav-text">{$t('admin_nav_users')}</span>
@@ -459,7 +477,7 @@
             </a>
             <a href="#groups-section" class="sidebar-nav-item" class:active={currentHash === '#groups-section'}
               aria-current={currentHash === '#groups-section' ? 'page' : undefined}
-              onclick={() => currentHash = '#groups-section'}>
+              onclick={() => chooseSection('#groups-section')}>
               <span class="nav-icon"><Icon name="users" size={16} /></span>
               <span class="nav-text">Groupes</span>
               <span class="count-badge">{groups.length}</span>
@@ -469,7 +487,7 @@
               class="sidebar-nav-item"
               class:active={currentHash === '#sso-section'}
               aria-current={currentHash === '#sso-section' ? 'page' : undefined}
-              onclick={() => currentHash = '#sso-section'}
+              onclick={() => chooseSection('#sso-section')}
             >
               <span class="nav-icon"><Icon name="shield" size={16} /></span>
               <span class="nav-text">{$t('admin_nav_sso')}</span>
@@ -488,22 +506,19 @@
             ] as [hash, label, icon] (hash)}
               <a href={resolve(`admin/libraries/#${hash.slice(1)}`)} class="sidebar-nav-item" class:active={currentHash === hash}
                 aria-current={currentHash === hash ? 'page' : undefined}
-                onclick={() => currentHash = hash}>
+                onclick={() => chooseSection(hash)}>
                 <span class="nav-icon"><Icon name={icon as 'server' | 'users' | 'shield' | 'sparkles' | 'clock'} size={16} /></span>
                 <span class="nav-text">{label}</span>
               </a>
             {/each}
+          </div>
           </div>
         </aside>
 
         <!-- Main Admin Content Area -->
         <div class="admin-content-area">
           <div class="admin-hero">
-            <p class="eyebrow">Console serveur</p>
-            <h1>{$t('admin_title')}</h1>
-            <p class="hero-desc">
-              {$t('admin_subtitle')}
-            </p>
+            <h1>Administration</h1>
           </div>
 
           <!-- Section 1: Dashboard Overview -->
@@ -522,7 +537,6 @@
           <AdminLibraries
             {libraries}
             {nodes}
-            {users}
             {scans}
             {pending}
             {availableRootsForNode}
@@ -576,10 +590,10 @@
           />
           </div>
           <div hidden={currentHash !== '#tasks-section'}>
-            <AdminTasks {libraries} {nodes} {scans} {pending} onscan={scan} />
+            <AdminTasks {libraries} {nodes} {scans} {pending} onscan={scan} selectedId={selectedTaskId} active={currentHash === '#tasks-section'} />
           </div>
           <div hidden={currentHash !== '#backups-section'}>
-            <AdminMaintenance />
+            <AdminMaintenance visible={currentHash === '#backups-section'} />
           </div>
           <div hidden={currentHash !== '#groups-section'}>
             <AdminGroups {groups} {users} {libraries} onchanged={refreshAccess} />
@@ -785,30 +799,14 @@
   }
 
   .admin-hero {
-    margin-bottom: 8px;
-  }
-
-  .eyebrow {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    color: var(--color-accent);
-    margin: 0 0 8px;
+    margin-bottom: 0;
   }
 
   .admin-hero h1 {
-    font-size: clamp(26px, 4vw, 36px);
+    font-size: 22px;
     font-weight: 700;
     margin: 0 0 10px;
     letter-spacing: -0.03em;
-  }
-
-  .hero-desc {
-    color: var(--color-muted);
-    font-size: 14px;
-    line-height: 1.6;
-    max-width: 780px;
-    margin: 0;
   }
 
   .error-banner, .notice-banner {
@@ -887,6 +885,8 @@
     .count-badge { padding: 2px 5px; }
   }
 
+  .mobile-menu-toggle { display: none; }
+  .sidebar-sections { display: contents; }
   @media (max-width: 960px) {
     .admin-dashboard-container {
       grid-template-columns: 1fr;
@@ -904,6 +904,12 @@
       padding: 10px 12px;
     }
 
+    .mobile-menu-toggle { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 8px; border: 0; background: transparent; color: var(--color-text); text-align: left; }
+    .mobile-menu-toggle span { flex: 1; min-width: 0; }
+    .sidebar-sections { display: none; }
+    .sidebar-sections.expanded { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; border-top: 1px solid var(--color-line); padding-top: 8px; }
+    .admin-sidebar { display: flex; gap: 8px; }
+    .admin-hero { display: none; }
     .sidebar-header, .group-label {
       display: none;
     }

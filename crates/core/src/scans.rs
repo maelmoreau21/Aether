@@ -2,11 +2,11 @@
 use crate::{auth::AuthState, identity::Role, inventory, node};
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{DefaultBodyLimit, Path, State},
     http::{HeaderMap, StatusCode},
     routing::get,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
     sync::{
@@ -15,6 +15,32 @@ use std::{
     },
 };
 use tokio::{sync::Semaphore, task::JoinHandle};
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RefreshMode {
+    #[default]
+    Incremental,
+    NewOnly,
+    MissingMetadata,
+    Full,
+}
+impl RefreshMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Incremental => "incremental",
+            Self::NewOnly => "new_only",
+            Self::MissingMetadata => "missing_metadata",
+            Self::Full => "full",
+        }
+    }
+}
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RefreshOptions {
+    #[serde(default)]
+    mode: RefreshMode,
+}
 
 pub struct ScanJobs {
     pub(crate) scheduler_tick: tokio::sync::Mutex<()>,
@@ -103,6 +129,7 @@ pub async fn router(
         .await?;
     Ok(Router::new()
         .route("/api/v1/admin/libraries/{id}/scan", get(status).post(start))
+        .layer(DefaultBodyLimit::max(4096))
         .with_state(ScanState { auth, root, jobs }))
 }
 async fn authorize(
@@ -160,9 +187,15 @@ async fn start(
     State(state): State<ScanState>,
     Path(id): Path<String>,
     headers: HeaderMap,
+    body: axum::body::Bytes,
 ) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
     authorize(&state, &headers, true).await?;
-    enqueue(&state.auth, state.root, state.jobs, id).await?;
+    let options: RefreshOptions = if body.is_empty() {
+        RefreshOptions::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?
+    };
+    enqueue_with_mode(&state.auth, state.root, state.jobs, id, options.mode).await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(
@@ -178,6 +211,16 @@ pub(crate) async fn enqueue(
     jobs: Arc<ScanJobs>,
     id: String,
 ) -> Result<(), StatusCode> {
+    enqueue_with_mode(auth, root, jobs, id, RefreshMode::Incremental).await
+}
+
+pub(crate) async fn enqueue_with_mode(
+    auth: &AuthState,
+    root: PathBuf,
+    jobs: Arc<ScanJobs>,
+    id: String,
+    mode: RefreshMode,
+) -> Result<(), StatusCode> {
     let state = ScanState {
         auth: auth.clone(),
         root,
@@ -186,21 +229,26 @@ pub(crate) async fn enqueue(
     if state.jobs.cancel.load(Ordering::Acquire) {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
-    let library: Option<(String, String, String)> = crate::database::query_as(
-        "SELECT l.root, l.kind, l.node_id FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
+    let library: Option<(String, String, String, String)> = crate::database::query_as(
+        "SELECT l.root, l.kind, l.node_id, l.excluded_patterns FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
     )
     .bind(&id)
     .fetch_optional(&state.auth.store.pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let (root, kind, node_id) = library.ok_or(StatusCode::BAD_REQUEST)?;
+    let (root, kind, node_id, excluded_patterns_raw) = library.ok_or(StatusCode::BAD_REQUEST)?;
+    let excluded_patterns: Vec<String> = excluded_patterns_raw
+        .split(&[',', ';', '\n', '\r'][..])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
     if node_id == "local" {
         node::LocalNode
             .validate_root(std::path::Path::new(&root), &state.root)
             .await
             .map_err(|_| StatusCode::BAD_REQUEST)?;
     }
-    let result = crate::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES(?,'queued',0,0) ON CONFLICT(library_id) DO UPDATE SET status='queued',discovered=0,probed=0,reused=0,errors_json='[]',errors_count=0,warnings_count=0 WHERE scan_jobs.status NOT IN ('queued','running')").bind(&id).execute(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = crate::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count,refresh_mode) VALUES(?,'queued',0,0,?) ON CONFLICT(library_id) DO UPDATE SET refresh_mode=excluded.refresh_mode,status='queued',discovered=0,probed=0,reused=0,errors_json='[]',errors_count=0,warnings_count=0 WHERE scan_jobs.status NOT IN ('queued','running')").bind(&id).bind(mode.as_str()).execute(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if result.rows_affected() == 0 {
         return Err(StatusCode::CONFLICT);
     }
@@ -220,6 +268,7 @@ pub(crate) async fn enqueue(
                     .bind(&job_id)
                     .execute(&store.pool)
                     .await;
+            let excluded_for_remote = excluded_patterns.clone();
             if let Err(err_msg) = crate::nodes::dispatch_remote_scan(
                 &store,
                 &core_origin,
@@ -228,6 +277,8 @@ pub(crate) async fn enqueue(
                 &node_id,
                 &kind,
                 &root,
+                mode == RefreshMode::Full,
+                excluded_for_remote,
             )
             .await
             {
@@ -255,8 +306,8 @@ pub(crate) async fn enqueue(
             if cancel.load(Ordering::Acquire) { return Err("Scan arrêté".into()); }
             crate::database::query("UPDATE scan_jobs SET status='running' WHERE library_id=?").bind(&job_id).execute(&store.pool).await?;
             let root = node::LocalNode.validate_root(std::path::Path::new(&root), &allowed_root).await?;
-            let cache = inventory::load_scan_cache(&store, &job_id).await?;
-            let images = inventory::load_image_cache(&store, &job_id).await?;
+            let cache = if mode == RefreshMode::Full { Default::default() } else { inventory::load_scan_cache(&store, &job_id).await? };
+            let images = if mode == RefreshMode::Full { Default::default() } else { inventory::load_image_cache(&store, &job_id).await? };
 
             let store_stage = store.clone();
             let scan_id_stage = scan_id.clone();
@@ -268,6 +319,7 @@ pub(crate) async fn enqueue(
                 &images,
                 &cancel,
                 100,
+                &excluded_patterns,
                 move |batch| {
                     let store = store_stage.clone();
                     let scan_id = scan_id_stage.clone();
@@ -370,7 +422,7 @@ mod tests {
             )
             .await
             .unwrap();
-        crate::database::query("INSERT INTO libraries VALUES('films','Films','films','local',?,1)")
+        crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local',?,1)")
             .bind(root.to_str().unwrap())
             .execute(&store.pool)
             .await
@@ -419,16 +471,26 @@ mod tests {
             jobs: jobs.clone(),
         };
         assert_eq!(
-            start(State(state.clone()), Path("films".into()), headers.clone())
-                .await
-                .unwrap()
-                .0,
+            start(
+                State(state.clone()),
+                Path("films".into()),
+                headers.clone(),
+                axum::body::Bytes::new()
+            )
+            .await
+            .unwrap()
+            .0,
             StatusCode::ACCEPTED
         );
         assert_eq!(
-            start(State(state.clone()), Path("films".into()), headers.clone())
-                .await
-                .err(),
+            start(
+                State(state.clone()),
+                Path("films".into()),
+                headers.clone(),
+                axum::body::Bytes::new()
+            )
+            .await
+            .err(),
             Some(StatusCode::CONFLICT)
         );
         assert_eq!(
@@ -450,9 +512,14 @@ mod tests {
             "error"
         );
         assert_eq!(
-            start(State(state), Path("films".into()), headers)
-                .await
-                .err(),
+            start(
+                State(state),
+                Path("films".into()),
+                headers,
+                axum::body::Bytes::new()
+            )
+            .await
+            .err(),
             Some(StatusCode::SERVICE_UNAVAILABLE)
         );
         crate::database::query("UPDATE scan_jobs SET status='running'")

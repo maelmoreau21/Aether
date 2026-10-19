@@ -73,9 +73,12 @@ async fn create_library(app: &Router, root: &Path, cookie: &str, csrf: &str, nam
     body["id"].as_str().unwrap().into()
 }
 async fn scan(app: &Router, library: &str, cookie: &str, csrf: &str) -> Value {
+    scan_mode(app, library, cookie, csrf, Value::Null).await
+}
+async fn scan_mode(app: &Router, library: &str, cookie: &str, csrf: &str, mode: Value) -> Value {
     let uri = format!("/api/v1/admin/libraries/{library}/scan");
     assert_eq!(
-        request(app, "POST", &uri, cookie, Some(csrf), Value::Null, None)
+        request(app, "POST", &uri, cookie, Some(csrf), mode, None)
             .await
             .0,
         StatusCode::ACCEPTED
@@ -321,5 +324,200 @@ async fn nfo_refresh_preserves_media_graph_probe_and_permissions() {
     }
     drop(app);
     pool.close().await;
+    store.close().await;
+}
+
+#[tokio::test]
+async fn refresh_modes_preserve_known_fill_missing_and_force_all_without_writing_media() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("media");
+    let generated = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/generated/p1/clip-mp4-fr.mp4");
+    for folder in ["First (2026) [tmdb-111]", "Second (2026) [tmdb-222]"] {
+        tokio::fs::create_dir_all(root.join(folder)).await.unwrap();
+        tokio::fs::copy(&generated, root.join(folder).join("movie.mp4"))
+            .await
+            .unwrap();
+    }
+    let first = root.join("First (2026) [tmdb-111]/movie.nfo");
+    let second = root.join("Second (2026) [tmdb-222]/movie.nfo");
+    tokio::fs::write(&first, "<movie><title>First original</title></movie>")
+        .await
+        .unwrap();
+    let before = hash(&root.join("First (2026) [tmdb-111]/movie.mp4")).await;
+    let store = IdentityStore::open(&temp.path().join("modes.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "modes-admin",
+            Zeroizing::new("temporary modes test password".into()),
+        )
+        .await
+        .unwrap();
+    let app = router(&root, &store).await;
+    let (_, login, _, cookie) = request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        None,
+        json!({"login":"modes-admin","password":"temporary modes test password"}),
+        None,
+    )
+    .await;
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let library = create_library(&app, &root, &cookie, csrf, "Refresh modes").await;
+    scan(&app, &library, &cookie, csrf).await;
+    let initial: Vec<String> =
+        media_poc::database::query_scalar("SELECT id FROM inventory_assets ORDER BY id")
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+    tokio::fs::write(&first, "<movie><title>First replacement</title></movie>")
+        .await
+        .unwrap();
+    tokio::fs::write(&second, "<movie><title>Second completed</title></movie>")
+        .await
+        .unwrap();
+    let missing = scan_mode(
+        &app,
+        &library,
+        &cookie,
+        csrf,
+        json!({"mode":"missing_metadata"}),
+    )
+    .await;
+    assert_eq!(missing["probed"], 0);
+    let titles: Vec<String> =
+        media_poc::database::query_scalar("SELECT title FROM inventory_works ORDER BY title")
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+    assert!(titles.contains(&"First original".into()));
+    assert!(titles.contains(&"Second completed".into()));
+    let third = root.join("Third (2026) [tmdb-333]");
+    tokio::fs::create_dir_all(&third).await.unwrap();
+    tokio::fs::copy(&generated, third.join("movie.mp4"))
+        .await
+        .unwrap();
+    tokio::fs::write(
+        third.join("movie.nfo"),
+        "<movie><title>Third new</title></movie>",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(&second, "<movie><title>Second replacement</title></movie>")
+        .await
+        .unwrap();
+    scan_mode(&app, &library, &cookie, csrf, json!({"mode":"new_only"})).await;
+    let titles: Vec<String> =
+        media_poc::database::query_scalar("SELECT title FROM inventory_works ORDER BY title")
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+    assert!(titles.contains(&"First original".into()));
+    assert!(titles.contains(&"Second completed".into()));
+    assert!(titles.contains(&"Third new".into()));
+    let full = scan_mode(&app, &library, &cookie, csrf, json!({"mode":"full"})).await;
+    assert_eq!(full["probed"], 3);
+    assert_eq!(full["reused"], 0);
+    let titles: Vec<String> =
+        media_poc::database::query_scalar("SELECT title FROM inventory_works ORDER BY title")
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+    assert!(titles.contains(&"First replacement".into()));
+    assert!(titles.contains(&"Second replacement".into()));
+    let after: Vec<String> =
+        media_poc::database::query_scalar("SELECT id FROM inventory_assets ORDER BY id")
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+    assert!(initial.iter().all(|id| after.contains(id)));
+    assert_eq!(
+        hash(&root.join("First (2026) [tmdb-111]/movie.mp4")).await,
+        before
+    );
+    for options in [
+        json!({"mode":"arbitrary"}),
+        json!({"mode":"full","path":"/outside"}),
+    ] {
+        assert_eq!(
+            request(
+                &app,
+                "POST",
+                &format!("/api/v1/admin/libraries/{library}/scan"),
+                &cookie,
+                Some(csrf),
+                options,
+                None
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    let series_root = root.join("Series");
+    let show = series_root.join("Show (2026)");
+    let season = show.join("Season 01");
+    tokio::fs::create_dir_all(&season).await.unwrap();
+    tokio::fs::copy(&generated, season.join("Show.S01E01.mp4"))
+        .await
+        .unwrap();
+    let tv = show.join("tvshow.nfo");
+    let episode = season.join("Show.S01E01.nfo");
+    tokio::fs::write(&tv, "<tvshow><title>Show original</title></tvshow>")
+        .await
+        .unwrap();
+    tokio::fs::write(
+        &episode,
+        "<episodedetails><title>Episode original</title></episodedetails>",
+    )
+    .await
+    .unwrap();
+    let (status,body,_,_)=request(&app,"POST","/api/v1/admin/libraries",&cookie,Some(csrf),json!({"name":"Series modes","kind":"series","nodeId":"local","root":series_root.to_string_lossy(),"enabled":true,"userIds":[]}),None).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let series = body["id"].as_str().unwrap();
+    scan(&app, series, &cookie, csrf).await;
+    tokio::fs::write(&tv, "<tvshow><title>Show replaced</title></tvshow>")
+        .await
+        .unwrap();
+    tokio::fs::write(
+        &episode,
+        "<episodedetails><title>Episode replaced</title></episodedetails>",
+    )
+    .await
+    .unwrap();
+    for mode in ["new_only", "missing_metadata"] {
+        scan_mode(&app, series, &cookie, csrf, json!({"mode":mode})).await;
+        let titles: Vec<String> = media_poc::database::query_scalar(
+            "SELECT title FROM inventory_works WHERE library_id=? ORDER BY title",
+        )
+        .bind(series)
+        .fetch_all(store.pool())
+        .await
+        .unwrap();
+        assert!(
+            titles.contains(&"Show original".into()),
+            "{mode}: {titles:?}"
+        );
+        assert!(
+            titles.contains(&"Episode original".into()),
+            "{mode}: {titles:?}"
+        );
+    }
+    let full = scan_mode(&app, series, &cookie, csrf, json!({"mode":"full"})).await;
+    assert_eq!(full["probed"], 1);
+    let titles: Vec<String> = media_poc::database::query_scalar(
+        "SELECT title FROM inventory_works WHERE library_id=? ORDER BY title",
+    )
+    .bind(series)
+    .fetch_all(store.pool())
+    .await
+    .unwrap();
+    assert!(titles.contains(&"Show replaced".into()));
+    assert!(titles.contains(&"Episode replaced".into()));
     store.close().await;
 }

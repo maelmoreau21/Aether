@@ -61,6 +61,8 @@ fn database(error: sqlx::Error) -> StatusCode {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Input {
     name: String,
+    #[serde(default)]
+    is_default: bool,
     user_ids: Vec<String>,
     library_ids: Vec<String>,
 }
@@ -70,10 +72,11 @@ async fn list(
 ) -> Result<Json<Value>, StatusCode> {
     administrator(&auth, &headers, false).await?;
     let mut tx = auth.store.pool.begin().await.map_err(database)?;
-    let rows: Vec<(String, String)> = query_as("SELECT id,name FROM user_groups ORDER BY name,id")
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(database)?;
+    let rows: Vec<(String, String, bool)> =
+        query_as("SELECT id,name,is_default FROM user_groups ORDER BY name,id")
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(database)?;
     let members: Vec<(String, String)> =
         query_as("SELECT group_id,user_id FROM user_group_members ORDER BY user_id")
             .fetch_all(&mut *tx)
@@ -84,7 +87,7 @@ async fn list(
             .fetch_all(&mut *tx)
             .await
             .map_err(database)?;
-    let values: Vec<_>=rows.into_iter().map(|(id,name)|json!({"id":id,"name":name,"userIds":members.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"libraryIds":libraries.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>() })).collect();
+    let values: Vec<_>=rows.into_iter().map(|(id,name,is_default)|json!({"id":id,"name":name,"isDefault":is_default,"userIds":members.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"libraryIds":libraries.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>() })).collect();
     tx.commit().await.map_err(database)?;
     Ok(Json(json!({"groups":values})))
 }
@@ -157,15 +160,17 @@ async fn save(
         if count >= 500 {
             return Err(StatusCode::CONFLICT);
         }
-        query("INSERT INTO user_groups(id,name) VALUES(?,?)")
+        query("INSERT INTO user_groups(id,name,is_default) VALUES(?,?,?)")
             .bind(id)
             .bind(name)
+            .bind(input.is_default)
             .execute(&mut *tx)
             .await
             .map_err(database)?;
     } else {
-        if query("UPDATE user_groups SET name=? WHERE id=?")
+        if query("UPDATE user_groups SET name=?,is_default=? WHERE id=?")
             .bind(name)
+            .bind(input.is_default)
             .bind(id)
             .execute(&mut *tx)
             .await

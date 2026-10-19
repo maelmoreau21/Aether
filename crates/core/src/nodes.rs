@@ -1713,6 +1713,7 @@ pub async fn sync_all_libraries_for_node(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn dispatch_remote_scan(
     store: &IdentityStore,
     core_origin: &str,
@@ -1721,6 +1722,8 @@ pub async fn dispatch_remote_scan(
     node_id: &str,
     kind: &str,
     root: &str,
+    force_refresh: bool,
+    excluded_patterns: Vec<String>,
 ) -> Result<(), String> {
     let rec = load_node(store, node_id)
         .await
@@ -1735,14 +1738,19 @@ pub async fn dispatch_remote_scan(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| core_origin.to_owned());
 
-    let cached_images: Vec<media_contracts::media::LocalImage> =
+    let cached_images: Vec<media_contracts::media::LocalImage> = if force_refresh {
+        Vec::new()
+    } else {
         inventory::load_image_cache(store, library_id)
             .await
             .unwrap_or_default()
             .into_values()
-            .collect();
+            .collect()
+    };
 
-    let cached_files: Vec<media_contracts::protocol::CachedFileMeta> =
+    let cached_files: Vec<media_contracts::protocol::CachedFileMeta> = if force_refresh {
+        Vec::new()
+    } else {
         inventory::load_scan_cache(store, library_id)
             .await
             .unwrap_or_default()
@@ -1752,7 +1760,8 @@ pub async fn dispatch_remote_scan(
                 size: cache.size,
                 modified_ns: cache.modified_ns,
             })
-            .collect();
+            .collect()
+    };
 
     let start_req = RemoteScanStartRequest {
         scan_id: ScanId::new(scan_id),
@@ -1765,6 +1774,7 @@ pub async fn dispatch_remote_scan(
         batch_size: 32,
         cached_files,
         cached_images,
+        excluded_patterns,
     };
 
     let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(node_id);

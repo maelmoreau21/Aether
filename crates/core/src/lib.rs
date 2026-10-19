@@ -3,6 +3,7 @@ pub mod admin_backups;
 pub mod admin_users;
 pub mod api_keys;
 pub mod auth;
+pub mod avatars;
 pub mod backup;
 pub mod backup_bundle;
 pub mod database;
@@ -10,6 +11,7 @@ pub mod groups;
 pub mod oidc;
 pub mod postgres_backup;
 pub mod scheduler;
+pub mod server_settings;
 use media_contracts::brand;
 mod catalog;
 mod demo;
@@ -157,6 +159,8 @@ pub async fn secure_app_with_jobs(
             .merge(nodes::router(auth.clone(), replay_window))
             .merge(progress::router(auth.clone()))
             .merge(preferences::router(auth.clone()))
+            .merge(avatars::router(auth.clone()))
+            .merge(server_settings::router(auth.clone()))
             .merge(admin_users::router(auth.clone()))
             .merge(admin_backups::router(auth.clone(), root.clone()).await?)
             .merge(scheduler::router(auth.clone()).await?)

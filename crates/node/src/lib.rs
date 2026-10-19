@@ -73,13 +73,24 @@ impl LocalNode {
         image_cache: &HashMap<String, LocalImage>,
         cancel: &AtomicBool,
         batch_size: usize,
+        excluded_patterns: &[String],
         on_batch: F,
     ) -> io::Result<ScanReport>
     where
         F: FnMut(InventoryBatch) -> Fut,
         Fut: std::future::Future<Output = Result<(), io::Error>>,
     {
-        scanner::scan_streaming(root, kind, cache, image_cache, cancel, batch_size, on_batch).await
+        scanner::scan_streaming(
+            root,
+            kind,
+            cache,
+            image_cache,
+            cancel,
+            batch_size,
+            excluded_patterns,
+            on_batch,
+        )
+        .await
     }
 
     /// Open a confined media file handle relative to `root`.

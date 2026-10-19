@@ -2,6 +2,7 @@
   import '../app.css';
   import '../lib/styles/tokens.css';
   import { onMount } from 'svelte';
+  import { loadServerPresentation } from '../lib/config/presentation';
   import { initTheme, setTheme } from '../lib/theme';
   import { setLocale } from '../lib/i18n';
   import { hydratePreferences, preferenceSyncError } from '../lib/preferences';
@@ -30,6 +31,7 @@
         const generation = getSessionGeneration();
         const saved = await hydratePreferences();
         if (cancelled || generation !== getSessionGeneration() || !saved) return;
+        void loadServerPresentation();
         setTheme(saved.theme ?? 'system', false);
         setLocale(saved.locale ?? (navigator.language.toLowerCase().startsWith('en') ? 'en' : 'fr'), false);
       }

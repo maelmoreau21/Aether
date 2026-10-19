@@ -510,6 +510,13 @@ pub async fn publish_staged_scan(
     }
     let (root_snapshot, lib_kind) = configured.unwrap();
 
+    // The mode is fixed by the Core when the unique library job is queued; the Node cannot choose it.
+    let refresh_mode: String =
+        query_scalar("SELECT refresh_mode FROM scan_jobs WHERE library_id=?")
+            .bind(library_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .unwrap_or_else(|| "incremental".into());
     let mut affected_work_ids = std::collections::BTreeSet::new();
 
     if complete {
@@ -789,7 +796,15 @@ pub async fn publish_staged_scan(
                 let swid: String = row.get("id");
                 let prev_editorial: String = row.get("editorial_json");
                 // Preserve already-validated NFO metadata if the replacement NFO in this scan is invalid.
-                if is_valid_nfo == 0 && has_invalid_nfo == 1 && prev_editorial != "{}" {
+                if refresh_mode == "new_only"
+                    || (refresh_mode == "missing_metadata"
+                        && serde_json::from_str::<Value>(&prev_editorial)
+                            .ok()
+                            .is_some_and(|v| {
+                                v.get("provenance").and_then(Value::as_str) == Some("nfo")
+                            }))
+                    || (is_valid_nfo == 0 && has_invalid_nfo == 1 && prev_editorial != "{}")
+                {
                     query("UPDATE inventory_works SET kind='series' WHERE id=?")
                         .bind(&swid)
                         .execute(&mut *tx)
@@ -1424,6 +1439,13 @@ pub async fn publish_staged_scan(
             let curr_path: Option<String> = row.get("curr_nfo_path");
             let curr_priority: Option<i64> = row.get("curr_nfo_priority");
 
+            // Technical inventory and sidecar validation always refresh. Existing editorial data
+            // survives only while its asset/source identity still matches (replacement clears it above).
+            if (refresh_mode == "new_only" && curr_fallback.is_some())
+                || (refresh_mode == "missing_metadata" && curr_nfo.is_some())
+            {
+                continue;
+            }
             let changed = curr_fallback.as_deref() != Some(&fallback_str)
                 || curr_nfo != nfo_json
                 || curr_path != nfo_path
@@ -3030,7 +3052,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let db = temp.path().join("editorial.sqlite");
         let store = IdentityStore::open(&db).await.unwrap();
-        query("INSERT INTO libraries VALUES('lib','Films','films','local','/movies',1)")
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','Films','films','local','/movies',1)")
             .execute(&store.pool)
             .await
             .unwrap();
@@ -3131,7 +3153,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let db = temp.path().join("inventory.sqlite");
         let store = IdentityStore::open(&db).await.unwrap();
-        query("INSERT INTO libraries VALUES('lib','Films','films','local','/movies',1)")
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','Films','films','local','/movies',1)")
             .execute(&store.pool)
             .await
             .unwrap();

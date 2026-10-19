@@ -283,3 +283,9 @@ bornes et limites : [préparation](PLAYER_TRACK_PREPARATION.md).
 
 Catalogue : `sort=year-asc|year-desc|added-asc|added-desc` en plus des tris titre.
 `addedAt` est un timestamp Unix ou NULL si la date historique est inconnue.
+
+## Extension Général / Réseau / profil / actualisation (19 octobre 2026)
+
+Voir [contrats et limites](SETTINGS_AND_REFRESH.md) pour les paramètres persistants du serveur,
+la configuration réseau effective, les avatars de compte et les quatre modes de scan.
+Les fournisseurs de métadonnées en ligne restent à développer.

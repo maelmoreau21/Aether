@@ -270,6 +270,35 @@ async fn group_membership_grants_live_permissions_without_roles_or_loss_of_direc
         .status(),
         StatusCode::FORBIDDEN
     );
+    // Setting isDefault=true grants access to all users without explicit user_ids membership
+    assert_eq!(
+        req(
+            &app,
+            &path,
+            "PUT",
+            &cookie,
+            &csrf,
+            "",
+            json!({"name":"Famille","isDefault":true,"userIds":[],"libraryIds":["first"]})
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        req(
+            &app,
+            "/api/v1/catalog/work-first",
+            "GET",
+            &viewer,
+            "",
+            "",
+            json!(null)
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
     assert_eq!(
         req(
             &app,

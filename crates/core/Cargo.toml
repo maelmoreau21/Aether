@@ -7,6 +7,7 @@ publish = false
 default-run = "media-poc"
 
 [dependencies]
+image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 media-contracts = { path = "../shared" }
 media-node = { path = "../node" }
 axum = "0.8.9"
@@ -35,7 +36,6 @@ base64 = "0.23.1"
 ring = "0.17.14"
 
 [dev-dependencies]
-image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 tempfile = "3"
 
 [[bin]]

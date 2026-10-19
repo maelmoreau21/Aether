@@ -4,20 +4,32 @@ import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 // Synthetic API contract/layout checks; the real API scenario is test-admin-live.mjs.
-const evidence = fileURLToPath(new URL('../../../docs/evidence/2026-10-19/settings-jellyfin/', import.meta.url));
+const evidence = fileURLToPath(new URL('../../../docs/evidence/2026-10-19/settings-expanded/', import.meta.url));
 await mkdir(evidence, { recursive: true });
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {
-  const page = await browser.newPage(); page.setDefaultTimeout(10000);
+  const page = await browser.newPage(); page.setDefaultTimeout(15000); page.setDefaultNavigationTimeout(30000);
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   let role = 'administrator', theme = 'dark', launches = 0, backupLaunches = 0, failSave = false, failRead = false, available = true;
   let preferences = { theme, locale: 'fr' }, plans = [];
+  let server = { serverName: 'Aether', welcomeMessage: '' };
+  let avatar = null;
+  const refreshModes = [];
   const library = { id: 'films', name: 'Films de test', kind: 'films', nodeId: 'local', root: '/media/films', enabled: true, userIds: [] };
   const archive = { available: true, running: false, archives: [], reason: null, schedule: { enabled: false, intervalMinutes: 1440, nextDueAt: 1792447200, lastStartedAt: null, lastCompletedAt: null, lastOutcome: 'never' } };
   await page.route('**/api/v1/**', async route => {
     const req = route.request(), path = new URL(req.url()).pathname, method = req.method(); let body;
     if (['PUT', 'POST', 'DELETE'].includes(method)) assert.equal(req.headers()['x-csrf-token'], 'synthetic-csrf');
     if (path.endsWith('/auth/me')) body = { user: { id: 'admin', login: 'admin', role, sso: false }, csrfToken: 'synthetic-csrf' };
+    else if (path.endsWith('/admin/settings')) { if (method === 'PUT') { server = req.postDataJSON(); await route.fulfill({ status: 204 }); return; } body = server; }
+    else if (path.endsWith('/server')) body = server;
+    else if (path.endsWith('/admin/network')) body = { publicUrl: 'http://127.0.0.1:5187', secureCookies: false, webPath: '/app/', apiPath: '/api/v1/' };
+    else if (path.endsWith('/account/avatar')) {
+      if (method === 'PUT') avatar = req.postDataBuffer();
+      if (method === 'DELETE') avatar = null;
+      if (method !== 'GET') { await route.fulfill({ status: 204 }); return; }
+      await route.fulfill(avatar ? { contentType: 'image/png', body: avatar } : { status: 404 }); return;
+    }
     else if (path.endsWith('/preferences')) {
       if (method === 'PUT') { preferences = { ...preferences, ...req.postDataJSON() }; await route.fulfill({ status: 204 }); return; }
       body = { ...preferences, theme };
@@ -31,7 +43,7 @@ try {
     else if (path.endsWith('/admin/tasks/schedules')) { if (failRead) { await route.fulfill({ status: 503 }); return; } body = plans; }
     else if (path.endsWith('/admin/backups/schedule')) { Object.assign(archive.schedule, req.postDataJSON()); await route.fulfill({ status: 204 }); return; }
     else if (path.endsWith('/admin/backups')) { if (method === 'POST') backupLaunches++; body = { ...archive, available }; }
-    else if (path.endsWith('/admin/libraries/films/scan')) { if (method === 'POST') launches++; body = { status: 'completed', discovered: 2, probed: 1, reused: 1, errors: [], errorsCount: 0 }; }
+    else if (path.endsWith('/admin/libraries/films/scan')) { if (method === 'POST') { launches++; refreshModes.push(req.postDataJSON()?.mode); } body = { status: 'completed', discovered: 2, probed: 1, reused: 1, errors: [], errorsCount: 0 }; }
     else if (path.endsWith('/admin/libraries')) body = { libraries: [library] };
     else if (path.endsWith('/admin/users')) body = { users: [{ id: 'admin', login: 'admin', role: 'administrator', sso: false }] };
     else if (path.endsWith('/admin/groups')) body = { groups: [] };
@@ -86,7 +98,11 @@ try {
       await page.getByRole('link', { name: 'Configurer Indexer Films de test' }).click(); await page.getByText('Chaque jour', { exact: true }).waitFor(); await noOverflow(`${theme}/${width}/detail`);
       if ([390, 1440].includes(width)) await page.screenshot({ path: `${evidence}/trigger-${theme}-${width}.png`, fullPage: true, animations: 'disabled' });
     }
-    for (const id of ['users', 'groups', 'libraries', 'nodes', 'sso', 'backups', 'api-keys', 'extensions']) { await nav(id); await noOverflow(`${theme}/${id}`); }
+    for (const id of ['general', 'network', 'users', 'groups', 'libraries', 'nodes', 'sso', 'backups', 'api-keys', 'extensions']) { await nav(id); await noOverflow(`${theme}/${id}`); }
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      for (const id of ['libraries', 'general', 'network']) { await nav(id); await page.screenshot({ path: `${evidence}/${id}-${theme}-${width}.png`, fullPage: true, animations: 'disabled' }); }
+    }
     for (const width of [360, 1440]) {
       await page.setViewportSize({ width, height: 1000 }); await page.goto('http://127.0.0.1:5187/app/settings/#account');
       for (const id of ['account', 'appearance', 'playback', 'sso']) {
@@ -97,6 +113,26 @@ try {
       await page.screenshot({ path: `${evidence}/settings-${theme}-${width}.png`, fullPage: true, animations: 'disabled' });
     }
   }
+  await page.goto(`${url}#general-section`);
+  await page.getByLabel('Nom du serveur', { exact: true }).fill('Cinéma familial');
+  await page.getByLabel('Message d’accueil', { exact: true }).fill('Bienvenue <script>texte</script>');
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await page.getByText('Paramètres enregistrés.', { exact: true }).waitFor(); assert.equal(server.serverName, 'Cinéma familial');
+  await nav('libraries');
+  for (const mode of ['new_only','missing_metadata','full']) {
+    await page.getByLabel('Actions Films de test', { exact: true }).click();
+    await page.getByRole('button', { name: 'Actualiser la médiathèque', exact: true }).click();
+    await page.getByLabel('Mode d’actualisation', { exact: true }).selectOption(mode);
+    await page.getByRole('dialog').getByRole('button', { name: 'Actualiser', exact: true }).click();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' }); assert.equal(refreshModes.at(-1), mode);
+  }
+  await page.goto('http://127.0.0.1:5187/app/settings/#account');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=', 'base64');
+  await page.getByLabel('Image de profil', { exact: true }).setInputFiles({ name: 'profile.png', mimeType: 'image/png', buffer: png });
+  await page.getByText('Image de profil enregistrée.', { exact: true }).waitFor(); assert.ok(avatar);
+  await page.getByRole('button', { name: 'Retirer l’image', exact: true }).click();
+  await page.getByText('Image de profil supprimée.', { exact: true }).waitFor(); assert.equal(avatar, null);
+  await page.locator('.settings-nav a[href$="#playback"]').click();
   await page.getByLabel('Décalage audio (secondes)', { exact: true }).fill('1.5');
   await page.getByLabel('Décalage des sous-titres (secondes)', { exact: true }).fill('-2');
   const offsetSaved = page.waitForResponse(r => r.url().endsWith('/preferences') && r.request().method() === 'PUT');
@@ -110,5 +146,5 @@ try {
   await goTask('missing'); await page.getByRole('heading', { name: 'Tâche introuvable' }).waitFor();
   role = 'user'; await page.reload(); await page.getByText('Accès refusé', { exact: true }).waitFor();
   assert.deepEqual(errors, []);
-  console.log('PASS: task list/detail/history/direct URLs; scan/backup trigger add/delete, errors, limits, CSRF; 2 themes × 5 widths; settings tabs/offset persistence; long names and role denial (mock API).');
+  console.log('PASS: general/network pages, avatar upload/delete, library refresh modes, task list/detail/history/direct URLs; scan/backup trigger add/delete, errors, limits, CSRF; 2 themes × 5 widths; settings tabs/offset persistence; long names and role denial (mock API).');
 } finally { await browser.close(); }

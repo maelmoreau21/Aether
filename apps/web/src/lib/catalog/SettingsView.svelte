@@ -3,6 +3,8 @@
   import { preferences, savePreferences } from '../preferences';
   import { resolve } from '$app/paths';
   import { session } from '../auth/session';
+  import ProfileAvatar from '../ui/ProfileAvatar.svelte';
+  import AvatarEditor from './AvatarEditor.svelte';
   import OidcSettings from '../auth/OidcSettings.svelte';
   import Icon from '../ui/Icon.svelte';
   import { t, locale, setLocale } from '../i18n';
@@ -59,9 +61,7 @@
     <section class="card profile-card" aria-labelledby="profile-heading">
       <h2 id="profile-heading" class="card-title">{$t('settings_user_account')}</h2>
       <div class="profile-header-row">
-        <div class="profile-avatar-large" aria-hidden="true">
-          <Icon name="profile" size={32} />
-        </div>
+        <ProfileAvatar size={64} />
         <div>
           <h3>{displayName}</h3>
           {#if hasDistinctName}
@@ -73,6 +73,7 @@
         </div>
       </div>
 
+      <AvatarEditor />
       <div class="profile-info-list">
         <div class="info-row">
           <span class="label">{$t('settings_unique_id')}</span>
@@ -176,7 +177,6 @@
   h2 { font-size: 24px; font-weight: 400; margin: 0 0 24px; }
   h3 { margin: 0; font-size: 18px; font-weight: 500; }
   .profile-header-row { display: flex; align-items: center; gap: 20px; margin-bottom: 28px; }
-  .profile-avatar-large { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0; background: var(--color-accent-soft); color: var(--accent-primary); }
   .profile-handle { margin: 6px 0; color: var(--text-secondary); }
   .role-badge { display: inline-block; margin-top: 8px; padding: 4px 8px; font-size: 12px; background: var(--bg-elevated); }
   .admin-badge { background: var(--color-accent-soft); color: var(--accent-primary); }

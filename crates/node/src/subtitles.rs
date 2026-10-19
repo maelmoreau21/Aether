@@ -4,9 +4,9 @@ use media_contracts::inventory::{ExternalSubtitle, ScanIssue};
 use std::path::Path;
 use tokio::io::AsyncReadExt;
 
-const MAX_BYTES: u64 = 256 * 1024;
-const MAX_TOTAL_BYTES: usize = 512 * 1024;
-const MAX_TRACKS: usize = 16;
+const MAX_BYTES: u64 = 1024 * 1024;
+const MAX_TOTAL_BYTES: usize = 16 * 1024 * 1024;
+const MAX_TRACKS: usize = 64;
 
 fn language(token: &str) -> Option<&str> {
     match token {
@@ -134,7 +134,8 @@ pub fn to_webvtt(text: &str, format: &str) -> Result<String, &'static str> {
         let start = timestamp(start)?;
         let end = timestamp(end)?;
         if end <= start {
-            return Err("subtitle end precedes start");
+            // Skip zero or negative duration cues to preserve playback of the remaining valid cues
+            continue;
         }
         let payload = lines
             .get(index + 1..)
@@ -217,6 +218,9 @@ fn ass_to_webvtt(text: &str) -> Result<String, &'static str> {
         };
         let a = time(fields[start])?;
         let b = time(fields[end])?;
+        if b <= a {
+            continue;
+        }
         let mut payload = String::new();
         let mut override_tag = false;
         for c in fields.last().ok_or("ASS Text missing")?.chars() {
@@ -338,7 +342,7 @@ pub async fn discover_with_folder(
                 .await
                 .map_err(|_| "subtitle unavailable or linked".to_owned())?;
             if opened.size() > MAX_BYTES {
-                return Err("subtitle exceeds 256 KiB".to_owned());
+                return Err(format!("subtitle exceeds {} KiB", MAX_BYTES / 1024));
             }
             let mut bytes = Vec::new();
             tokio::fs::File::from_std(opened.try_clone_std().map_err(|_| "subtitle read failed")?)
@@ -350,12 +354,15 @@ pub async fn discover_with_folder(
                 .verify_unchanged_sync()
                 .map_err(|_| "subtitle changed during analysis")?;
             if bytes.len() as u64 > MAX_BYTES {
-                return Err("subtitle exceeds 256 KiB".into());
+                return Err(format!("subtitle exceeds {} KiB", MAX_BYTES / 1024));
             }
             let text = std::str::from_utf8(&bytes).map_err(|_| "subtitle must be UTF-8")?;
             let webvtt = to_webvtt(text, &extension).map_err(str::to_owned)?;
             if total + webvtt.len() > MAX_TOTAL_BYTES {
-                return Err("subtitles exceed 512 KiB per video".into());
+                return Err(format!(
+                    "subtitles exceed {} KiB per video",
+                    MAX_TOTAL_BYTES / 1024
+                ));
             }
             let (language, forced, sdh) = matches[0].1.clone();
             Ok(ExternalSubtitle {
@@ -425,6 +432,13 @@ mod tests {
             "WEBVTT\n\n00:00:01.250 --> 00:00:03.000\n&lt;script&gt;A &amp; B&lt;/script&gt;\n\n"
         );
         assert!(to_webvtt("1\n00:00:03,000 --> 00:00:01,000\nOops", "srt").is_err());
+        let partial = to_webvtt(
+            "1\n00:00:03,000 --> 00:00:01,000\nOops\n\n2\n00:00:04,000 --> 00:00:05,000\nValid",
+            "srt",
+        )
+        .unwrap();
+        assert!(partial.contains("00:00:04.000 --> 00:00:05.000"));
+        assert!(!partial.contains("Oops"));
         assert!(to_webvtt("WEBVTT\n\n00:61.000 --> 00:62.000\nOops", "vtt").is_err());
         assert!(to_webvtt("[Events]", "ass").is_err());
     }

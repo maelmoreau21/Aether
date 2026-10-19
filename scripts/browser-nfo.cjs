@@ -31,11 +31,15 @@ fs.mkdirSync(out, {recursive:true});
         await page.getByRole('heading',{name:'Films scanner navigateur',exact:true}).waitFor();
       }
       const article=page.locator('article').filter({has:page.getByRole('heading',{name:'Films scanner navigateur',exact:true})});
-      await page.getByRole('button',{name:'Scanner Films scanner navigateur',exact:true}).click();
-      await article.getByText(/Scan : Terminé/).waitFor({timeout:60000});
+      await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
+      await page.getByRole('button',{name:'Actualiser la médiathèque',exact:true}).click();
+      await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
+      await article.getByText(/Terminé/).waitFor({timeout:60000});
       assert.match(await article.textContent(),/2 fichier\(s\) découvert\(s\)/);
       if (phase === 'initial') {
-        await page.getByRole('button',{name:'Scanner Films scanner navigateur',exact:true}).click();
+        await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
+      await page.getByRole('button',{name:'Actualiser la médiathèque',exact:true}).click();
+      await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
       }
       await article.getByText(/Scan : Terminé.*0 analysé\(s\).*2 réutilisé\(s\)/).waitFor({timeout:60000});
       report.results.incrementalWithoutVideoProbe=true;

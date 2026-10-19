@@ -62,3 +62,9 @@ retour navigateur. Lecture permet d’enregistrer les deux décalages de −30 �
 +30 secondes via `offsets`, sans changer le contrat Core ni créer de nouveaux
 champs. Les erreurs de synchronisation restent affichées par le layout ; aucune
 bannière permanente ne prétend qu’une mutation a réussi.
+
+## Extension Général / Réseau / profil / actualisation (19 octobre 2026)
+
+Voir [contrats et limites](SETTINGS_AND_REFRESH.md) pour les paramètres persistants du serveur,
+la configuration réseau effective, les avatars de compte et les quatre modes de scan.
+Les fournisseurs de métadonnées en ligne restent à développer.

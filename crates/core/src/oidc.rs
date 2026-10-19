@@ -40,6 +40,7 @@ struct Config {
     redirect: String,
     scopes: String,
     groups: Vec<String>,
+    admin_groups: Vec<String>,
     groups_claim: String,
     require_group: bool,
 }
@@ -95,7 +96,18 @@ impl Config {
             .map(str::to_owned)
             .collect();
 
-        if require_group && groups.is_empty() {
+        let admin_groups: Vec<String> = std::env::var("MEDIA_OIDC_ADMIN_GROUPS")
+            .or_else(|_| std::env::var("MEDIA_OIDC_ADMIN_GROUP"))
+            .or_else(|_| std::env::var("OIDC_ADMIN_GROUP"))
+            .or_else(|_| std::env::var("OIDC_ADMIN_GROUPS"))
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+
+        if require_group && groups.is_empty() && admin_groups.is_empty() {
             return Err(
                 "MEDIA_OIDC_USER_GROUPS must explicitly allow at least one group when require_group is true",
             );
@@ -108,6 +120,7 @@ impl Config {
             redirect: format!("{}/api/v1/auth/oidc/callback", auth.origin()),
             scopes,
             groups,
+            admin_groups,
             groups_claim,
             require_group,
         }))
@@ -190,6 +203,53 @@ impl Claims {
             _ => Vec::new(),
         }
     }
+
+    fn username(&self) -> Option<String> {
+        for key in [
+            "preferred_username",
+            "username",
+            "nickname",
+            "upn",
+            "unique_name",
+        ] {
+            if let Some(val) = self.extra.get(key).and_then(|v| v.as_str()) {
+                let trimmed = val.trim();
+                if !trimmed.is_empty() && trimmed.chars().count() <= 128 {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+        if let Some(email) = self.extra.get("email").and_then(|v| v.as_str())
+            && let Some((local, _)) = email.split_once('@')
+        {
+            let trimmed = local.trim();
+            if !trimmed.is_empty() && trimmed.chars().count() <= 128 {
+                return Some(trimmed.to_string());
+            }
+        }
+        None
+    }
+
+    fn display_name(&self) -> Option<String> {
+        for key in ["name", "display_name"] {
+            if let Some(val) = self.extra.get(key).and_then(|v| v.as_str()) {
+                let trimmed = val.trim();
+                if !trimmed.is_empty() && trimmed.chars().count() <= 128 {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+        if let (Some(g), Some(f)) = (
+            self.extra.get("given_name").and_then(|v| v.as_str()),
+            self.extra.get("family_name").and_then(|v| v.as_str()),
+        ) {
+            let full = format!("{} {}", g.trim(), f.trim()).trim().to_string();
+            if !full.is_empty() && full.chars().count() <= 128 {
+                return Some(full);
+            }
+        }
+        self.username()
+    }
 }
 
 #[derive(Deserialize)]
@@ -225,6 +285,7 @@ struct Status {
     groups_claim: Option<String>,
     require_group: bool,
     user_groups: Vec<String>,
+    admin_groups: Vec<String>,
     end_session_endpoint: Option<String>,
     local_login_enabled: bool,
 }
@@ -270,6 +331,7 @@ fn routes(state: Oidc) -> Router {
 }
 
 async fn public_status(State(s): State<Oidc>) -> Json<serde_json::Value> {
+    let local_login_enabled = crate::auth::is_local_login_enabled();
     if let Some(c) = &s.config {
         let issuer_lower = c.issuer.to_lowercase();
         let provider = if issuer_lower.contains("authentik") {
@@ -285,10 +347,14 @@ async fn public_status(State(s): State<Oidc>) -> Json<serde_json::Value> {
         };
         Json(serde_json::json!({
             "enabled": true,
-            "provider": provider
+            "provider": provider,
+            "localLoginEnabled": local_login_enabled
         }))
     } else {
-        Json(serde_json::json!({"enabled": false}))
+        Json(serde_json::json!({
+            "enabled": false,
+            "localLoginEnabled": local_login_enabled
+        }))
     }
 }
 
@@ -321,8 +387,13 @@ async fn admin_status(State(s): State<Oidc>, headers: HeaderMap) -> Result<Json<
             .as_ref()
             .map(|c| c.groups.clone())
             .unwrap_or_default(),
+        admin_groups: s
+            .config
+            .as_ref()
+            .map(|c| c.admin_groups.clone())
+            .unwrap_or_default(),
         end_session_endpoint,
-        local_login_enabled: true,
+        local_login_enabled: crate::auth::is_local_login_enabled(),
     }))
 }
 
@@ -414,7 +485,9 @@ impl Oidc {
         let c = self.config()?;
         let rescue: i64 = crate::database::query_scalar("SELECT CAST(EXISTS(SELECT 1 FROM users u JOIN local_credentials c ON c.user_id=u.id WHERE u.role='administrator' AND u.disabled_at IS NULL) AS INTEGER)")
             .fetch_one(&self.auth.store.pool).await.map_err(db)?;
-        if rescue == 0 {
+        let has_any_admin: i64 = crate::database::query_scalar("SELECT CAST(EXISTS(SELECT 1 FROM users WHERE role='administrator' AND disabled_at IS NULL) AS INTEGER)")
+            .fetch_one(&self.auth.store.pool).await.map_err(db)?;
+        if rescue == 0 && has_any_admin == 0 && c.admin_groups.is_empty() {
             return Err(deny(StatusCode::FORBIDDEN, "local_administrator_required"));
         }
         let d = self.discover().await?;
@@ -549,12 +622,26 @@ impl Oidc {
         let tokens: Tokens = self.json(req.form(&form_params)).await?;
         let claims = self.claims(&d, &tokens.id_token, &flow.nonce).await?;
 
+        let extracted_groups = claims.extract_groups(&c.groups_claim);
         if c.require_group {
-            let extracted = claims.extract_groups(&c.groups_claim);
-            if !extracted.iter().any(|g| c.groups.contains(g)) {
+            let in_user_groups = extracted_groups
+                .iter()
+                .any(|g| c.groups.iter().any(|ug| ug.eq_ignore_ascii_case(g)));
+            let in_admin_groups = !c.admin_groups.is_empty()
+                && extracted_groups
+                    .iter()
+                    .any(|g| c.admin_groups.iter().any(|ag| ag.eq_ignore_ascii_case(g)));
+            if !in_user_groups && !in_admin_groups {
                 return Err(deny(StatusCode::FORBIDDEN, "oidc_group_denied"));
             }
         }
+        let is_admin = !c.admin_groups.is_empty()
+            && extracted_groups
+                .iter()
+                .any(|g| c.admin_groups.iter().any(|ag| ag.eq_ignore_ascii_case(g)));
+        let role = if is_admin { "administrator" } else { "user" };
+        let display_name = claims.display_name();
+        let sso_username = claims.username();
 
         let mut conn = self.auth.store.pool.acquire().await.map_err(db)?;
         let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
@@ -577,13 +664,37 @@ impl Oidc {
             (Some(id), Some(link)) if id != link => {
                 return Err(deny(StatusCode::CONFLICT, "oidc_identity_already_linked"));
             }
-            (Some(id), _) => id,
+            (Some(id), _) => {
+                if is_admin {
+                    crate::database::query("UPDATE users SET role='administrator', display_name=COALESCE(?, display_name), sso_username=COALESCE(?, sso_username) WHERE id=?")
+                        .bind(&display_name)
+                        .bind(&sso_username)
+                        .bind(&id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(db)?;
+                } else {
+                    crate::database::query(
+                        "UPDATE users SET display_name=COALESCE(?, display_name), sso_username=COALESCE(?, sso_username) WHERE id=?",
+                    )
+                    .bind(&display_name)
+                    .bind(&sso_username)
+                    .bind(&id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db)?;
+                }
+                id
+            }
             (None, target) => {
                 let id = target.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 crate::database::query(
-                    "INSERT INTO users(id,role) VALUES (?,'user') ON CONFLICT(id) DO NOTHING",
+                    "INSERT INTO users(id,role,display_name,sso_username) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET role=CASE WHEN excluded.role='administrator' THEN 'administrator' ELSE users.role END, display_name=COALESCE(excluded.display_name, users.display_name), sso_username=COALESCE(excluded.sso_username, users.sso_username)",
                 )
                 .bind(&id)
+                .bind(role)
+                .bind(&display_name)
+                .bind(&sso_username)
                 .execute(&mut *tx)
                 .await
                 .map_err(db)?;
@@ -825,6 +936,7 @@ mod tests {
             redirect: format!("{ORIGIN}/api/v1/auth/oidc/callback"),
             scopes: "openid profile email".into(),
             groups: vec!["media-users".into()],
+            admin_groups: vec![],
             groups_claim: "groups".into(),
             require_group: true,
         };
@@ -1468,6 +1580,7 @@ mod tests {
             redirect: format!("{ORIGIN}/api/v1/auth/oidc/callback"),
             scopes: "openid profile email".into(),
             groups: vec!["media-access".into()],
+            admin_groups: vec![],
             groups_claim: "roles".into(),
             require_group: true,
         };
@@ -1593,5 +1706,60 @@ mod tests {
         )
         .await;
         assert_eq!(me2["user"]["role"], "user");
+    }
+
+    #[tokio::test]
+    async fn oidc_admin_group_and_unicode_display_name() {
+        let f = fixture().await;
+        let mut cfg = f.s.config.as_ref().unwrap().clone();
+        cfg.admin_groups = vec!["admingroup".into(), "Admins".into()];
+        cfg.groups = vec!["media-users".into()];
+        let mut s_custom = f.s.clone();
+        s_custom.config = Some(cfg);
+        let f_custom = Fixture {
+            _temp: tempfile::tempdir().unwrap(),
+            s: s_custom,
+            provider: f.provider.clone(),
+            task: tokio::spawn(async {}),
+        };
+
+        let (cookie, state) = begin(&f_custom).await;
+        let nonce = f_custom.provider.claims.lock().unwrap()["nonce"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let now = jsonwebtoken::get_current_timestamp();
+        *f_custom.provider.claims.lock().unwrap() = serde_json::json!({
+            "iss": f_custom.provider.issuer,
+            "sub": "sso-mael-id",
+            "aud": "client",
+            "iat": now,
+            "exp": now + 300,
+            "nonce": nonce,
+            "groups": ["Admins"],
+            "preferred_username": "mael",
+            "name": "Maël Moreau"
+        });
+
+        let r = finish(&f_custom, &cookie, &state).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let session = session_cookie(&r);
+
+        let me = body(
+            req(
+                &f_custom.s,
+                "/api/v1/auth/me",
+                "GET",
+                &session,
+                "",
+                serde_json::Value::Null,
+            )
+            .await,
+        )
+        .await;
+
+        assert_eq!(me["user"]["role"], "administrator");
+        assert_eq!(me["user"]["login"], "mael");
+        assert_eq!(me["user"]["displayName"], "Maël Moreau");
     }
 }

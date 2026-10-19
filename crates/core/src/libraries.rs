@@ -154,7 +154,17 @@ async fn users(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     administrator(&state, &headers, false).await?;
-    let users: Vec<AuthUser> = crate::database::query_as("SELECT u.id,COALESCE(c.login,'sso-' || u.id) AS login,u.role FROM users u LEFT JOIN local_credentials c ON c.user_id=u.id WHERE u.disabled_at IS NULL ORDER BY c.login").fetch_all(&state.auth.store.pool).await.map_err(database)?;
+    let rows: Vec<(String, String, Role, Option<String>, i64)> = crate::database::query_as("SELECT u.id,COALESCE(u.sso_username,c.login,u.display_name,'sso-' || u.id) AS login,u.role,u.display_name,CAST((c.login IS NULL) AS INTEGER) AS sso FROM users u LEFT JOIN local_credentials c ON c.user_id=u.id WHERE u.disabled_at IS NULL ORDER BY COALESCE(u.sso_username,c.login,u.display_name,'sso-' || u.id)").fetch_all(&state.auth.store.pool).await.map_err(database)?;
+    let users: Vec<AuthUser> = rows
+        .into_iter()
+        .map(|(id, login, role, display_name, sso)| AuthUser {
+            id,
+            login,
+            role,
+            display_name,
+            sso: Some(sso != 0),
+        })
+        .collect();
     Ok(Json(serde_json::json!({"users":users})))
 }
 async fn roots(
@@ -165,6 +175,21 @@ async fn roots(
     let mut all_roots = Vec::new();
     if let Ok(local_root) = validate_library_root(&state.root, &state.root).await {
         all_roots.push(local_root.to_string_lossy().into_owned());
+        if let Ok(mut entries) = tokio::fs::read_dir(&local_root).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                if let Ok(meta) = entry.metadata().await
+                    && meta.is_dir()
+                {
+                    let path = entry.path();
+                    if let Ok(sub) = validate_library_root(&path, &local_root).await {
+                        let sub_str = sub.to_string_lossy().into_owned();
+                        if !all_roots.contains(&sub_str) {
+                            all_roots.push(sub_str);
+                        }
+                    }
+                }
+            }
+        }
     }
     if let Ok(rows) = crate::database::query(
         "SELECT roots_json FROM media_nodes WHERE kind='remote' AND status != 'revoked' ORDER BY name, id",

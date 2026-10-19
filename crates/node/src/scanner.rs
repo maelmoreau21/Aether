@@ -651,11 +651,16 @@ where
         if metadata.is_dir() {
             match tokio::fs::read_dir(&path).await {
                 Ok(dir) => stack.push(dir),
-                Err(_) => {
+                Err(err) => {
                     report.complete = false;
+                    let message = if err.kind() == io::ErrorKind::PermissionDenied {
+                        "directory unreadable: permission denied (check Docker UID 10001 / file permissions)".into()
+                    } else {
+                        format!("directory unreadable: {err}")
+                    };
                     let issue = ScanIssue {
                         relative_path,
-                        message: "directory unreadable".into(),
+                        message,
                     };
                     record_error(&mut report, &mut current_batch_errors, issue);
                 }

@@ -2,6 +2,7 @@
   import type { Library } from './types';
   import type { AuthUser } from '../auth/session';
   import Icon from '../ui/Icon.svelte';
+  import { t } from '../i18n';
 
   interface Props {
     users: AuthUser[];
@@ -22,23 +23,23 @@
       <Icon name="users" size={18} />
     </div>
     <div>
-      <h2 id="users-heading" class="section-title">Comptes utilisateurs & Autorisations</h2>
-      <p class="section-subtitle">Gestion des comptes et matrice des permissions de streaming par bibliothèque (RBAC)</p>
+      <h2 id="users-heading" class="section-title">{$t('users_heading')}</h2>
+      <p class="section-subtitle">{$t('users_subtitle')}</p>
     </div>
   </div>
 
   <div class="card">
     <div class="card-header">
       <div class="card-title-group">
-        <h3>Comptes enregistrés ({users.length})</h3>
-        <span class="muted-note">Rôles stricts : <code>administrator</code> et <code>user</code> uniquement.</span>
+        <h3>{$t('registered_accounts')} ({users.length})</h3>
+        <span class="muted-note">{$t('strict_roles_note')}</span>
       </div>
       <div class="badge-role-stats">
         <span class="role-pill admin-pill">
-          {users.filter(u => u.role === 'administrator').length} Admin
+          {users.filter(u => u.role === 'administrator').length} {$t('administrator')}
         </span>
         <span class="role-pill user-pill">
-          {users.filter(u => u.role === 'user').length} Utilisateur(s)
+          {users.filter(u => u.role === 'user').length} {$t('user')}(s)
         </span>
       </div>
     </div>
@@ -47,38 +48,44 @@
       <table class="admin-table">
         <thead>
           <tr>
-            <th>Identifiant / Login</th>
-            <th>Type d'authentification</th>
-            <th>Rôle</th>
-            <th>Bibliothèques autorisées</th>
+            <th>{$t('col_user_login')}</th>
+            <th>{$t('col_user_name')}</th>
+            <th>{$t('col_auth_type')}</th>
+            <th>{$t('col_role')}</th>
+            <th>{$t('col_allowed_libs')}</th>
           </tr>
         </thead>
         <tbody>
           {#each users as user (user.id)}
-            {@const isSso = user.login.startsWith('sso-')}
+            {@const isSso = user.sso ?? user.login.startsWith('sso-')}
             {@const userLibraries = libraries.filter(lib => lib.userIds.includes(user.id))}
             <tr>
               <td>
                 <div class="user-login-cell">
                   <strong>{user.login}</strong>
                   {#if user.id === currentUserId}
-                    <span class="current-user-badge">Vous</span>
+                    <span class="current-user-badge">{$t('you')}</span>
                   {/if}
                 </div>
               </td>
               <td>
+                <span class="user-display-name">
+                  {user.displayName || user.login}
+                </span>
+              </td>
+              <td>
                 <span class="badge" data-status={isSso ? 'disconnected' : 'connected'}>
-                  {isSso ? 'SSO (OIDC)' : 'Compte local'}
+                  {isSso ? $t('sso_badge') : $t('local_account')}
                 </span>
               </td>
               <td>
                 <span class="role-badge" class:admin-role={user.role === 'administrator'}>
-                  {user.role === 'administrator' ? 'Administrateur' : 'Utilisateur'}
+                  {user.role === 'administrator' ? $t('administrator') : $t('user')}
                 </span>
               </td>
               <td>
                 {#if user.role === 'administrator'}
-                  <span class="all-access-badge">✓ Toutes les bibliothèques (administrateur)</span>
+                  <span class="all-access-badge">{$t('all_libs_granted')}</span>
                 {:else if userLibraries.length > 0}
                   <div class="lib-badges-list">
                     {#each userLibraries as lib (lib.id)}
@@ -86,7 +93,7 @@
                     {/each}
                   </div>
                 {:else}
-                  <span class="muted">Aucune bibliothèque autorisée</span>
+                  <span class="muted">{$t('no_libs_granted')}</span>
                 {/if}
               </td>
             </tr>
@@ -98,7 +105,7 @@
     <div class="security-footer-note">
       <Icon name="shield" size={16} />
       <span>
-        Pour modifier les bibliothèques accessibles par un compte utilisateur ordinaire, éditez directement les bibliothèques concernées dans la section <em>Bibliothèques & Scans</em> ci-dessus.
+        {$t('users_footer_hint')}
       </span>
     </div>
   </div>

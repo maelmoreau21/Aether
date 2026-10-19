@@ -34,10 +34,22 @@ MEDIA_OIDC_CLIENT_SECRET=secret-confidentiel-fourni-par-lidp
 # Groupes autorisés pour l'attribution du rôle user (séparés par virgules)
 # MEDIA_OIDC_USER_GROUPS=media-users,media-operators
 
+# Groupes IdP conférant immédiatement le rôle administrator (évite d'avoir à créer un compte local)
+# MEDIA_OIDC_ADMIN_GROUPS=Admins,media-admins
+
 # Filtrage obligatoire par groupe (défaut : true si MEDIA_OIDC_USER_GROUPS est défini, sinon false)
 # Définir à false pour autoriser tout utilisateur authentifié (ex. Pocket ID)
 # MEDIA_OIDC_REQUIRE_GROUP=false
+
+# Désactiver la connexion locale par mot de passe pour forcer le SSO exclusif
+# MEDIA_AUTH_LOCAL_ENABLED=false
 ```
+
+### Identité, pseudonymes et noms réels Unicode
+Lors de la connexion OIDC, Aether extrait automatiquement :
+1. Le **pseudonyme / login** (depuis `preferred_username`, `username`, `nickname` ou préfixe d'email).
+2. Le **nom réel complet** (depuis `name` ou `given_name` + `family_name`), acceptant sans restriction les espaces, majuscules et caractères accentués (ex. « **Maël Moreau** »).
+Ces informations sont persistées dans la base de données et affichées dans l'en-tête, le profil et la console administrateur.
 
 Les deux Compose transmettent ces variables au Core. `.env` doit être protégé,
 non versionné ; ne jamais publier `docker compose config` contenant un vrai secret.

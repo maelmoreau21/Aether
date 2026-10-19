@@ -11,6 +11,7 @@
   let password = $state('');
   let ssoEnabled = $state(false);
   let ssoProvider = $state('SSO');
+  let localLoginEnabled = $state(true);
   let needsBootstrap = $state(false);
   let busy = $state(false);
   let error = $state('');
@@ -22,6 +23,8 @@
 
   function mapError(code: string): string {
     switch (code) {
+      case 'local_login_disabled':
+        return 'La connexion locale est désactivée. Veuillez vous connecter avec le SSO.';
       case 'local_administrator_required':
         return "Un compte administrateur local de secours doit être créé avant d'utiliser le SSO.";
       case 'oidc_invalid_response':
@@ -134,6 +137,9 @@
       .then(r => r.ok ? r.json() : { needsBootstrap: false })
       .then(data => {
         needsBootstrap = data.needsBootstrap === true;
+        if (typeof data.localLoginEnabled === 'boolean') {
+          localLoginEnabled = data.localLoginEnabled;
+        }
       })
       .catch(() => {});
 
@@ -144,6 +150,9 @@
         ssoEnabled = data.enabled === true;
         if (data.provider && typeof data.provider === 'string') {
           ssoProvider = data.provider;
+        }
+        if (typeof data.localLoginEnabled === 'boolean') {
+          localLoginEnabled = data.localLoginEnabled;
         }
       })
       .catch(() => {});
@@ -313,63 +322,71 @@
             </button>
           </div>
 
-          <div class="divider" role="separator">
-            <span class="divider-line"></span>
-            <span class="divider-text">ou avec un identifiant local</span>
-            <span class="divider-line"></span>
-          </div>
+          {#if localLoginEnabled}
+            <div class="divider" role="separator">
+              <span class="divider-line"></span>
+              <span class="divider-text">ou avec un identifiant local</span>
+              <span class="divider-line"></span>
+            </div>
+          {/if}
         {/if}
 
-        <form class="login-form" onsubmit={submit} aria-busy={busy}>
-          <div class="field-group">
-            <label for="login" class="field-label">
-              <span>Identifiant</span>
-            </label>
-            <div class="input-container">
-              <span class="input-icon" aria-hidden="true"><Icon name="profile" size={17} /></span>
-              <input
-                id="login"
-                name="username"
-                autocomplete="username"
-                autocapitalize="none"
-                spellcheck="false"
-                maxlength="64"
-                required
-                bind:value={identifier}
-                disabled={busy}
-                placeholder="Ex. nom d’utilisateur"
-              />
+        {#if localLoginEnabled}
+          <form class="login-form" onsubmit={submit} aria-busy={busy}>
+            <div class="field-group">
+              <label for="login" class="field-label">
+                <span>Identifiant</span>
+              </label>
+              <div class="input-container">
+                <span class="input-icon" aria-hidden="true"><Icon name="profile" size={17} /></span>
+                <input
+                  id="login"
+                  name="username"
+                  autocomplete="username"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  maxlength="64"
+                  required
+                  bind:value={identifier}
+                  disabled={busy}
+                  placeholder="Ex. nom d’utilisateur"
+                />
+              </div>
             </div>
-          </div>
 
-          <div class="field-group">
-            <label for="password" class="field-label">
-              <span>Mot de passe</span>
-            </label>
-            <div class="input-container">
-              <span class="input-icon" aria-hidden="true"><Icon name="settings" size={17} /></span>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autocomplete="current-password"
-                maxlength="512"
-                required
-                bind:value={password}
-                disabled={busy}
-                placeholder="••••••••••••"
-              />
+            <div class="field-group">
+              <label for="password" class="field-label">
+                <span>Mot de passe</span>
+              </label>
+              <div class="input-container">
+                <span class="input-icon" aria-hidden="true"><Icon name="settings" size={17} /></span>
+                <input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autocomplete="current-password"
+                  maxlength="512"
+                  required
+                  bind:value={password}
+                  disabled={busy}
+                  placeholder="••••••••••••"
+                />
+              </div>
             </div>
-          </div>
 
-          <button type="submit" class="btn-submit" disabled={busy}>
-            <span class="btn-submit-text">{busy ? 'Connexion en cours…' : 'Se connecter'}</span>
-            <span class="arrow-glyph" aria-hidden="true">→</span>
-          </button>
-        </form>
+            <button type="submit" class="btn-submit" disabled={busy}>
+              <span class="btn-submit-text">{busy ? 'Connexion en cours…' : 'Se connecter'}</span>
+              <span class="arrow-glyph" aria-hidden="true">→</span>
+            </button>
+          </form>
+        {/if}
 
         <footer class="card-footer">
-          {#if ssoEnabled}
+          {#if !localLoginEnabled}
+            <p class="help-text">
+              La connexion locale est désactivée sur ce serveur. L'authentification s'effectue exclusivement via votre fournisseur SSO ({ssoProvider}).
+            </p>
+          {:else if ssoEnabled}
             <p class="help-text">
               Authentification unique (SSO) activée. Le compte local d'administration reste toujours disponible en secours.
             </p>

@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 
-export interface AuthUser { id: string; login: string; role: 'administrator' | 'user' }
+export interface AuthUser { id: string; login: string; role: 'administrator' | 'user'; displayName?: string | null; sso?: boolean | null; }
 export interface Session { user: AuthUser; csrfToken: string }
 
 type SessionGenerationListener = (generation: number, current: Session | null) => void;
@@ -36,6 +36,7 @@ function isSameSession(a: Session | null, b: Session | null): boolean {
     a.user.id === b.user.id &&
     a.user.login === b.user.login &&
     a.user.role === b.user.role &&
+    a.user.displayName === b.user.displayName &&
     a.csrfToken === b.csrfToken
   );
 }

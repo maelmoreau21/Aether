@@ -1,5 +1,28 @@
 # MEMORY.md — État et décisions Aether
 
+## 19 octobre 2026 — Correction du parcours Jellyfin et revue des paramètres
+
+- Demande précisée par deux captures : liste de tâches compacte par catégorie, puis page dédiée et liste de déclencheurs ; la précédente présentation en cartes/détails dépliables ne répondait pas au besoin.
+- `AdminTasks.svelte` remplace cette présentation : Bibliothèques + Maintenance, lien de configuration et lancement indépendant à droite, détail par `#tasks-section?task=scan-ID` ou `task=backup`, retour navigateur, ajout/modification en minutes/heures/jours et suppression. Endpoints de scan/backup existants réutilisés. Un seul intervalle par tâche ; pas de cron/calendrier ou durées de scan inventés.
+- Sauvegarde chiffrée réellement intégrée au planificateur : création, planification et désactivation du déclencheur ; accès aux archives/configuration conservé dans Sauvegardes. Cette vue se recharge à son ouverture pour refléter les mutations du planificateur.
+- Paramètres personnels organisés en Compte / Apparence / Lecture / Connexion SSO, liens directs par fragment et navigation mobile. Délais audio/sous-titres exposés via `offsets` existant (−30 à +30 s ; audio externe). Suppression de la bannière de succès permanente et de l’inférence SSO par préfixe du login.
+- Revue ciblée des fonctions existantes/manquantes : `docs/SETTINGS_REVIEW.md`. Mot de passe personnel, sessions/appareils, configuration/diagnostic général et historique/calendrier des tâches restent des lots serveur distincts à valider ; aucune fausse tâche d’extension ajoutée.
+- Contrôles réussis : `npm run check` (0 erreur/avertissement), `npm run lint`, `npm test` (54 tests), `npm run build`, `git diff --check`.
+- `node scripts/test-admin-ui.mjs` : Chrome headless/API simulée, scans et backups, création/suppression des déclencheurs, erreurs/limites/CSRF, liens directs et historique navigateur, 2 thèmes × 5 largeurs, paramètres par rubrique, offsets sauvegardés/rechargés, noms longs et refus du rôle user. Captures inspectées dans `docs/evidence/2026-10-19/settings-jellyfin/`.
+- `cargo test -p media-poc --test browser_admin -- --ignored --nocapture` : 1 test réussi sur vrai Core/SQLite temporaire et Chrome, après adaptation des anciens sélecteurs ; création compte/groupe, scan, suppression du déclencheur relue par API, clés API, archive chiffrée et tâches backup (intervalle relu, seconde archive créée, désactivation relue), offsets relus par API puis après rechargement. Clé de sauvegarde éphémère fournie uniquement au processus de test ; MEDIA_BACKUP_DIR laissé au dossier temporaire. Premier essai bloqué par ancien sélecteur de groupe, corrigé avant réussite.
+- Limites : aucune nouvelle preuve NAS, PostgreSQL, mobile physique ou lecture/décodage média. Prochain petit jalon proposé : mot de passe personnel et sessions, après validation de cette interface. Skill codex-token-saver appliqué par lectures ciblées, contexte réutilisé et vérifications regroupées ; aucune économie chiffrée revendiquée.
+
+
+## 19 octobre 2026 — Charte clair/sombre et présentation des paramètres
+
+- Groupes placé après Utilisateurs, dans Accès et sécurité. Navigation mobile repliable (≤ 960 px), rubriques directes et sélection active conservées.
+- Planificateur présenté en liste : icône horloge, scan manuel à droite, échéances connues, déclencheurs et résultats dépliables. Intervalles API existants conservés ; aucune nouvelle tâche serveur.
+- Charte Pierre Douce / Cinéma OLED centralisée dans `tokens.css` ; remplacement des couleurs violettes et fonds fixes de l’administration/menu profil. En-tête et pied du catalogue adaptés au thème, logo SVG officiel transparent dans Navbar, panneau SSO personnel simplifié.
+- Débordements corrigés sur paramètres personnels et noms longs des bibliothèques, y compris boutons de scan ; aucune nouvelle dépendance.
+- Vérifications locales exécutées : `npm run check` (0 erreur, 0 avertissement), `npm run lint`, `npm test` (54 tests), `npm run build`, `git diff --check` réussis. `node scripts/test-admin-ui.mjs` réussi sous Chrome headless/API simulée : deux palettes, neuf rubriques à 360/390/768/1024/1440 px, menu mobile, détails au clavier, requêtes CSRF scan/planification, paramètres personnels et noms longs à 360/1024 px. Captures inspectées : `docs/evidence/2026-10-19/admin-theme/`.
+- Limites : vérification de présentation et du contrat Web simulé ; pas de nouvelle preuve de persistance/RBAC Core, de déploiement NAS ou d’appareil mobile réel. Aucun test Rust relancé pour ces modifications Web. Prochain petit jalon : retour visuel utilisateur avant toute extension du planificateur.
+
+
 ## 19 octobre 2026 — Diagnostic Scan (Permissions RO), Intégration Favicon Logo et Gestion Droits Utilisateurs/Groupes
 
 - **Résolution et diagnostic explicite de l'erreur `Permission denied (os error 13)`** :

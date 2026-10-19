@@ -1,3 +1,8 @@
+> Charte courante (19 octobre 2026) : Pierre Douce clair (#EFECE6 / #FAF9F6),
+> Cinéma OLED sombre (#09090B / #121215), accents ambre #F59E0B et corail #EF4444.
+> La direction améthyste ci-dessous est historique. Référence CSS :
+> `apps/web/src/lib/styles/tokens.css` ; présentation administration : ADMIN_CONSOLE.md.
+
 # Première direction visuelle — 15 octobre 2026
 
 ## Intention

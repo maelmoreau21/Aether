@@ -637,7 +637,7 @@
   /* Footer */
   footer {
     border-top: 1px solid var(--color-line);
-    background: rgba(9, 10, 16, 0.9);
+    background: var(--color-surface);
     padding: 40px var(--page-gutter);
     color: var(--color-muted);
     font-size: 13px;
@@ -652,6 +652,7 @@
   }
 
   .footer-brand {
+    flex-wrap: wrap;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -670,6 +671,6 @@
   .footer-notice {
     margin: 0;
     font-size: 12px;
-    color: var(--color-subtle);
+    color: var(--color-muted);
   }
 </style>

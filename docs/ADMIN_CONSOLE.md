@@ -20,3 +20,59 @@ Le système d'extensions à dépôts/catalogue et permissions accordées par adm
 ## Vérification
 
 Commandes et résultats effectivement exécutés consignés dans MEMORY.md et docs/TEST_PLAN.md. `apps/web/scripts/test-admin-ui.mjs` est un test d'interface avec API simulée ; `cargo test -p media-poc --test browser_admin -- --ignored` exerce le vrai Core avec SQLite sur un dossier temporaire et sans média personnel. `scripts/test-admin-postgres.ps1` vise uniquement un PostgreSQL18 jetable pour sauvegarde complète et restauration réelle.
+
+## Présentation et thèmes — 19 octobre 2026
+
+La navigation regroupe Utilisateurs, Groupes puis SSO sous Accès et sécurité.
+Les libellés longs reviennent à la ligne. Sur écran de 960 px ou moins, le menu
+se replie derrière le nom de la rubrique courante ; son bouton fonctionne au clavier.
+Le planificateur affiche une liste de bibliothèques, une commande de scan à droite,
+les dernières/prochaines échéances connues et les déclencheurs/résultats dépliables.
+Cette présentation s’inspire de l’organisation des [tâches Jellyfin](https://jellyfin.org/docs/general/server/tasks/).
+Les intervalles restent ceux de l’API existante (5 à 10 080 minutes).
+
+La palette de référence est Pierre Douce / Cinéma OLED dans `tokens.css`,
+avec le dégradé ambre-corail pour les actions majeures. Le logo officiel transparent
+est affiché dans la navigation. Les en-têtes, menus profil, cartes, champs et pied
+de page suivent le thème actif ; l’écran SSO personnel évite les panneaux imbriqués.
+
+Le script `node scripts/test-admin-ui.mjs` depuis `apps/web` utilise Chrome headless
+et une API simulée : couleurs des deux thèmes, navigation sur neuf rubriques à
+360/390/768/1024/1440 px, menu mobile, ouverture clavier des détails, requêtes CSRF
+de scan et d’enregistrement, paramètres personnels et noms longs de bibliothèques.
+Captures dans `docs/evidence/2026-10-19/admin-theme/`. Ces vérifications d’interface
+ne prouvent pas la persistance Core, le RBAC backend ou un déploiement NAS.
+
+## Parcours corrigé d’après les captures Jellyfin — 19 octobre 2026
+
+La présentation dépliable décrite au jalon précédent est remplacée par une liste
+rectangulaire compacte groupée par Bibliothèques et Maintenance. Cliquer le nom
+ouvre une page dédiée avec retour à la liste, description, déclencheur et dernier
+résultat connu. Le bouton de lancement reste indépendant à droite.
+
+Les scans et la sauvegarde chiffrée utilisent leurs endpoints existants.
+Le déclencheur est réglable en minutes/heures/jours dans une boîte de dialogue ;
+le serveur conserve un intervalle unique, de 5 minutes à 7 jours pour les scans et
+de 1 heure à 7 jours pour les sauvegardes. Supprimer un déclencheur de scan utilise
+DELETE ; pour une sauvegarde, cela désactive son plan via PUT. Les dates de scans
+manuels ne sont pas assimilées aux dernières exécutions planifiées.
+
+Lien direct d’exemple : `/app/admin/libraries/#tasks-section?task=scan-ID`.
+La touche Retour du navigateur retrouve le détail ou la liste. Un identifiant
+inconnu affiche un écran explicite. Une sauvegarde non configurée ne peut pas
+être lancée et renvoie à la configuration des sauvegardes.
+
+Paramètres personnels : Compte, Apparence, Lecture et Connexion SSO, avec pages
+directes par fragment. Lecture expose les décalages audio/sous-titres existants.
+Voir [revue des paramètres](SETTINGS_REVIEW.md) pour les fonctions raccordées et
+les chantiers nécessitant un développement serveur distinct.
+Captures actuelles : `docs/evidence/2026-10-19/settings-jellyfin/`.
+
+Vérification de ce parcours : check/lint, 54 tests unitaires et build Web réussis.
+Le test navigateur simulé couvre les deux thèmes et cinq largeurs. Le test
+`cargo test -p media-poc --test browser_admin -- --ignored --nocapture` passe aussi
+sur vrai Core/SQLite temporaire : scans et suppression relue, archivage chiffré,
+planification/lancement/désactivation des backups depuis Tâches, préférences
+`offsets` relues par API puis après rechargement. Il demande une clé de sauvegarde
+éphémère de 64 caractères hexadécimaux dans MEDIA_BACKUP_KEY ; ne pas lui fournir
+un dossier MEDIA_BACKUP_DIR personnel. Ce résultat ne prouve pas un déploiement NAS.

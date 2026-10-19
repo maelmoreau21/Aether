@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { session } from '../auth/session';
+  let { visible = true }: { visible?: boolean } = $props();
   interface Archive { id: string; size: number; createdAt: number }
   interface Schedule { enabled: boolean; intervalMinutes: number; nextDueAt: number; lastStartedAt: number | null; lastCompletedAt: number | null; lastOutcome: string }
   interface Listing { available: boolean; reason: string | null; running: boolean; archives: Archive[]; schedule: Schedule }
@@ -53,7 +54,8 @@
       if (active) error = cause instanceof Error ? cause.message : 'Planification impossible.';
     } finally { if (active) saving = false; }
   }
-  onMount(() => { active = true; void refresh(); return () => { active = false; }; });
+  onMount(() => { active = true; return () => { active = false; }; });
+  $effect(() => { if (visible) void refresh(); });
 </script>
 
 <section id="backups-section" class="maintenance" aria-labelledby="maintenance-heading">

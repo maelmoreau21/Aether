@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { session } from './session';
+  let { embedded = false }: { embedded?: boolean } = $props();
   let enabled = $state(false);
   let config = $state<{ issuer: string; clientId: string; redirectUri: string; userGroups: string[] } | null>(null);
   let message = $state('');
@@ -25,8 +26,8 @@
     finally { password = ''; }
   }
 </script>
-<section aria-labelledby="oidc-title">
-  <h2 id="oidc-title">Connexion SSO</h2>
+<section class:embedded aria-label={embedded ? 'Liaison SSO' : undefined} aria-labelledby={embedded ? undefined : 'oidc-title'}>
+  {#if !embedded}<h2 id="oidc-title">Connexion SSO</h2>{/if}
   <p>{enabled ? 'SSO activé. La connexion locale reste disponible.' : 'SSO désactivé.'}</p>
   {#if config && enabled}
     <dl><dt>Issuer</dt><dd>{config.issuer}</dd><dt>Client ID</dt><dd>{config.clientId}</dd><dt>URI de redirection exacte</dt><dd>{config.redirectUri}</dd><dt>Groupes autorisés (rôle user)</dt><dd>{config.userGroups.join(', ')}</dd></dl>
@@ -43,5 +44,6 @@
 </section>
 <style>
   section { margin-bottom:24px; max-width:700px; padding:30px; background:var(--color-surface); border:1px solid var(--color-line); border-radius:12px; }
+  section.embedded { background: transparent; padding: 0; border: 0; border-radius: 0; margin: 0; }
   h2 { margin-top:0; }p,dl,label { font-size:14px; line-height:1.7; }dd { margin:0 0 10px; overflow-wrap:anywhere; }form { display:grid; gap:16px; }label { display:grid; gap:8px; }input,button { padding:12px; border-radius:6px; border:1px solid var(--color-line); background:var(--color-raised); color:var(--color-text); }
 </style>

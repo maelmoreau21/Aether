@@ -64,7 +64,7 @@
     </div>
     <div>
       <h2 id="libraries-heading" class="section-title">Gestion des bibliothèques & Scans</h2>
-      <p class="section-subtitle">Configurez vos répertoires de films et séries, surveillez l'indexation et attribuez les accès</p>
+      <p class="section-subtitle">Configurez vos répertoires de films et séries et surveillez l'indexation</p>
     </div>
   </div>
 
@@ -106,7 +106,6 @@
 
               <p class="path"><strong>Racine :</strong> <code>{library.root}</code></p>
               <p class="node-info"><strong>Media Node :</strong> {nodeLabel(library.nodeId)}</p>
-              <p class="grants-info"><strong>Accès :</strong> {library.userIds.length} utilisateur(s) autorisé(s)</p>
 
               {#if isNodeOffline}
                 <p class="node-warning" role="alert">
@@ -238,29 +237,9 @@
             <span>Bibliothèque active (visible et diffusable)</span>
           </label>
 
-          <fieldset class="grants">
-            <legend>Autorisations utilisateurs</legend>
-            <p class="muted-note">
-              Les administrateurs ont accès à toutes les bibliothèques. Les comptes utilisateurs n'accèdent qu'aux bibliothèques expressément cochées.
-            </p>
-            <div class="users-checkbox-grid">
-              {#each users.filter(user => user.role === 'user') as user (user.id)}
-                <label class="check" for={`user-chk-${user.id}`}>
-                  <input
-                    id={`user-chk-${user.id}`}
-                    type="checkbox"
-                    bind:group={userIds}
-                    value={user.id}
-                    aria-label={user.login}
-                  />
-                  <span>{user.login}</span>
-                </label>
-              {/each}
-            </div>
-            {#if !users.some(user => user.role === 'user')}
-              <p class="muted-note">Aucun compte utilisateur ordinaire n’est enregistré.</p>
-            {/if}
-          </fieldset>
+          <p class="muted-note">
+            💡 Les autorisations d'accès des comptes utilisateurs sont attribuées directement dans la rubrique <strong>Utilisateurs</strong> ou via les <strong>Groupes d’utilisateurs</strong>.
+          </p>
 
           <div class="actions">
             <button class="primary" type="submit" disabled={!availableRootsForNode.includes(root)}>
@@ -630,27 +609,6 @@
     width: 18px;
     height: 18px;
     cursor: pointer;
-  }
-
-  .grants {
-    margin: 24px 0 16px;
-    padding: 16px;
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    background: #101017;
-  }
-
-  .grants legend {
-    font-size: 13px;
-    font-weight: 600;
-    padding: 0 6px;
-  }
-
-  .users-checkbox-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 10px;
-    margin-top: 12px;
   }
 
   .actions {

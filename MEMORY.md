@@ -1,6 +1,30 @@
 # MEMORY.md — État et décisions Aether
 
-## 19 octobre 2026 — Durcissement Sécurité & Résolution des Priorités d'Audit (OWASP ASVS 5.0.0 L2)
+## 19 octobre 2026 — Diagnostic Scan (Permissions RO), Intégration Favicon Logo et Gestion Droits Utilisateurs/Groupes
+
+- **Résolution et diagnostic explicite de l'erreur `Permission denied (os error 13)`** :
+  - **Explication système & conteneur** : Aether lit les médias en lecture stricte (`OFlags::RDONLY` / `:ro`). L'erreur `Permission denied (os error 13)` sous Linux / Docker survient lorsque les fichiers/dossiers sur l'hôte ont été passés en lecture seule sans le bit d'exécution sur les répertoires (ex. `chmod 444` au lieu de `chmod 755` / `chmod a+rX`), ou lorsque les permissions Unix restreignent l'accès au propriétaire sans accorder les droits de lecture à l'UID 10001 du conteneur unprivileged `aether`.
+  - **Diagnostic enrichi** : Amélioration des messages d'erreur dans `crates/core/src/scans.rs` et `crates/node/src/scanner.rs` indiquant précisément à l'administrateur la cause système et la commande de correction hôte (`chmod -R o+rX` et droit `+x` sur les répertoires).
+- **Intégration de la Favicon Navigateur avec le logo de la marque** :
+  - Création de `apps/web/static/favicon.svg` à partir de la charte officielle `apps/web/static/images/brand-mark.svg`.
+  - Déclaration de `<link rel="icon" type="image/svg+xml" href="%sveltekit.assets%/favicon.svg" />` dans `apps/web/src/app.html`.
+  - Ajout des routes `/favicon.svg` et `/favicon.ico` dans `crates/core/src/lib.rs` redirigeant vers `/app/favicon.svg` pour les navigateurs interrogeant la racine.
+- **Séparation des responsabilités : Droits bibliothèques gérés sur les Utilisateurs et les Groupes** :
+  - **Retrait dans Bibliothèques (`AdminLibraries.svelte`)** : Suppression du `<fieldset class="grants">` et du compteur d'utilisateurs autorisés dans les cartes de bibliothèques. Les bibliothèques se concentrent uniquement sur la définition du répertoire, du type et du Media Node.
+  - **Attribution directe sur les Utilisateurs (`AdminUsers.svelte`)** : Ajout de la sélection des bibliothèques autorisées lors de la création et de la modification d'un compte utilisateur.
+  - **Support backend (`crates/core/src/admin_users.rs`)** : Extension de `Create` et `Update` avec `library_ids`, synchronisant automatiquement les lignes dans `library_permissions(library_id, user_id)`.
+  - **Tests et validation** :
+    - Test unitaire dédié `user_library_permissions_create_and_update` dans `crates/core/tests/admin_users.rs`.
+    - Script Playwright `scripts/browser-series.cjs` mis à jour pour accorder l'accès via la rubrique Utilisateurs.
+- **Optimisation drastique de l'empreinte de stockage de l'image Aether** :
+  - **Suppression du paquet apt Debian `ffmpeg` (~350 à 400 Mo économisés)** : `probe-runtime` dans `Dockerfile` compile désormais à la fois `ffmpeg` et `ffprobe` minimalistes depuis les sources (sans encodeurs superflus, sans X11, sans OpenGL, sans PulseAudio/ALSA, strictement pour le copy-muxing et l'analyse de conteneurs). Les binaires de ~15 Mo sont copiés directement dans l'image de runtime sans aucune dépendance lourde externe.
+  - **Profil de compilation Rust optimisé (`Cargo.toml`)** : Ajout de `[profile.release]` avec `opt-level = 3`, `lto = "thin"`, `codegen-units = 1`, `panic = "abort"`, et `strip = true`, réduisant le volume des exécutables compilés de 30 % à 50 %.
+  - **Nettoyage des couches runtime** : Purge systématique des caches apt, fichiers temporaires et documentations (`/usr/share/man`, `/usr/share/doc`).
+- **Harmonisation de la navigation administrateur** :
+  - L'onglet « Utilisateurs & Accès » est renommé en « **Utilisateurs** » (dans `i18n` FR/EN, la barre latérale et les en-têtes de section).
+  - L'onglet « Tâches » est renommé en « **Planificateur de tâches** » (dans `i18n` FR/EN, la barre latérale et l'en-tête de section).
+
+
 
 - **Initialisation sécurisée du premier administrateur (Critique sous condition)** :
   - **Jeton de bootstrap à usage unique** : `AuthState` génère au démarrage un jeton cryptographique aléatoire de 128 bits (hexadécimal de 32 caractères) ou utilise `MEDIA_BOOTSTRAP_TOKEN` si défini. Ce jeton est consigné dans les logs et persisté dans un fichier local protégé `.bootstrap_token` avec les permissions `0o600` (lecture/écriture propriétaire exclusive).

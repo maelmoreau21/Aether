@@ -39,6 +39,8 @@ struct Create {
     password: String,
     role: String,
     display_name: Option<String>,
+    #[serde(default)]
+    library_ids: Option<Vec<String>>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -46,6 +48,8 @@ struct Update {
     role: String,
     disabled: bool,
     display_name: Option<String>,
+    #[serde(default)]
+    library_ids: Option<Vec<String>>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -165,6 +169,28 @@ async fn create(
         .execute(&mut *tx)
         .await
         .map_err(db)?;
+    if let Some(mut libs) = input.library_ids {
+        libs.sort();
+        libs.dedup();
+        for lib in &libs {
+            let valid: i64 = query_scalar("SELECT COUNT(*) FROM libraries WHERE id=?")
+                .bind(lib)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db)?;
+            if valid == 0 {
+                return Err(error(StatusCode::BAD_REQUEST, "invalid_library"));
+            }
+        }
+        for lib in &libs {
+            query("INSERT INTO library_permissions(library_id, user_id) VALUES(?,?)")
+                .bind(lib)
+                .bind(&id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db)?;
+        }
+    }
     tx.commit().await.map_err(db)?;
     Ok((StatusCode::CREATED, Json(serde_json::json!({"id":id}))))
 }
@@ -220,6 +246,33 @@ async fn update(
             .execute(&mut *tx)
             .await
             .map_err(db)?;
+    }
+    if let Some(mut libs) = input.library_ids {
+        libs.sort();
+        libs.dedup();
+        for lib in &libs {
+            let valid: i64 = query_scalar("SELECT COUNT(*) FROM libraries WHERE id=?")
+                .bind(lib)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db)?;
+            if valid == 0 {
+                return Err(error(StatusCode::BAD_REQUEST, "invalid_library"));
+            }
+        }
+        query("DELETE FROM library_permissions WHERE user_id=?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db)?;
+        for lib in &libs {
+            query("INSERT INTO library_permissions(library_id, user_id) VALUES(?,?)")
+                .bind(lib)
+                .bind(&id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db)?;
+        }
     }
     tx.commit().await.map_err(db)?;
     Ok(StatusCode::NO_CONTENT)

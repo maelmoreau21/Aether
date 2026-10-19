@@ -6,3 +6,10 @@ resolver = "3"
 edition = "2024"
 rust-version = "1.99"
 
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+

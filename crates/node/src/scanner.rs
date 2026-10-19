@@ -579,7 +579,17 @@ where
         ));
     }
     let root = tokio::fs::canonicalize(root).await?;
-    let mut stack = vec![tokio::fs::read_dir(&root).await?];
+    let read_root = tokio::fs::read_dir(&root).await.map_err(|err| {
+        if err.kind() == io::ErrorKind::PermissionDenied {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{err} : racine de bibliothèque inaccessible (vérifiez les droits de lecture et d'exécution +x hôte pour l'utilisateur UID 10001)"),
+            )
+        } else {
+            err
+        }
+    })?;
+    let mut stack = vec![read_root];
     let mut folder_cache: HashMap<PathBuf, FolderVideos> = HashMap::new();
     let mut series_cache: HashMap<
         PathBuf,

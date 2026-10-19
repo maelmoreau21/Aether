@@ -140,6 +140,7 @@ RUN mkdir -p /tmp/ffmpeg-src \
     && ./configure \
         --prefix=/probe \
         --disable-programs \
+        --enable-ffmpeg \
         --enable-ffprobe \
         --disable-doc \
         --disable-avdevice \
@@ -147,7 +148,6 @@ RUN mkdir -p /tmp/ffmpeg-src \
         --disable-postproc \
         --disable-network \
         --disable-encoders \
-        --disable-muxers \
         --disable-devices \
         --disable-filters \
         --disable-hwaccels \
@@ -156,7 +156,7 @@ RUN mkdir -p /tmp/ffmpeg-src \
         --enable-small \
     && make -j$(nproc) \
     && make install \
-    && strip --strip-all /probe/bin/ffprobe \
+    && strip --strip-all /probe/bin/ffmpeg /probe/bin/ffprobe \
     && mkdir -p /probe/share/media-probe \
     && /probe/bin/ffprobe -version > /probe/share/media-probe/version.txt \
     && cp COPYING.LGPLv2.1 /probe/share/media-probe/LICENSE \
@@ -179,7 +179,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y --no-install-recommends postgresql-client-18 \
     && pg_dump --version \
     && pg_restore --version \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc
 
 # ==============================================================================
 # Stage 3: Distributed Core Runtime (`aether-core`)
@@ -235,8 +236,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tini \
     && rm -rf /var/lib/apt/lists/*
 
+COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffprobe /usr/local/bin/ffprobe
-RUN ln -s /usr/local/bin/ffprobe /usr/bin/ffprobe
+RUN ln -s /usr/local/bin/ffmpeg /usr/bin/ffmpeg \
+    && ln -s /usr/local/bin/ffprobe /usr/bin/ffprobe
 COPY --from=probe-runtime /probe/share/media-probe /usr/share/media-probe
 
 RUN groupadd --gid 10001 aether \
@@ -273,9 +276,11 @@ CMD ["aether-node"]
 # ==============================================================================
 FROM backup-runtime AS runtime
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg
+COPY --from=probe-runtime --chmod=0755 /probe/bin/ffprobe /usr/local/bin/ffprobe
+RUN ln -s /usr/local/bin/ffmpeg /usr/bin/ffmpeg \
+    && ln -s /usr/local/bin/ffprobe /usr/bin/ffprobe
+COPY --from=probe-runtime /probe/share/media-probe /usr/share/media-probe
 
 RUN groupadd --gid 10001 aether \
     && useradd --uid 10001 --gid 10001 --create-home --home-dir /app --shell /usr/sbin/nologin aether

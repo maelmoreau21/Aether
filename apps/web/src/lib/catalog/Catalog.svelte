@@ -390,7 +390,13 @@
       <h1>Votre médiathèque</h1>
     </div>
     <div class="empty loading-empty" role="status">
-      <div class="spinner" aria-hidden="true"></div>
+      <img
+        src={`${resolve('/').replace(/\/$/, '')}/images/logo-loading.svg`}
+        alt=""
+        class="logo-spinner"
+        width="48"
+        height="48"
+      />
       <span>Chargement du catalogue…</span>
     </div>
 
@@ -581,19 +587,11 @@
     font-size: 14.5px;
   }
 
-  .spinner {
-    width: 36px;
-    height: 36px;
-    border: 3px solid rgba(255, 255, 255, 0.1);
-    border-top-color: var(--color-accent);
-    border-radius: 50%;
-    animation: spin 0.9s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
+  .logo-spinner {
+    width: 48px;
+    height: 48px;
+    display: block;
+    margin: 0 auto 12px;
   }
 
   .error {

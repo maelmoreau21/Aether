@@ -1,5 +1,5 @@
 {
-  "browser": "155.0.8059.40",
+  "browser": "155.0.8059.82",
   "os": "10.0.26300",
   "headless": true,
   "restart": false,
@@ -10,33 +10,33 @@
       {
         "id": "internal-1",
         "frequency": 662.109375,
-        "db": -64.57096862792969,
-        "url": "http://127.0.0.1:26669/api/v1/assets/dac4e8e3-97e6-4024-8c12-ba6dbeafefdf/prepared/video",
-        "time": 0.595306,
+        "db": -64.58094787597656,
+        "url": "http://127.0.0.1:60171/api/v1/assets/e363e3b5-c4c8-475c-b6fa-9312c81ecef3/prepared/video",
+        "time": 0.646455,
         "fullscreen": true
       },
       {
         "id": "internal-2",
         "frequency": 990.234375,
-        "db": -70.03404235839844,
-        "url": "http://127.0.0.1:26669/api/v1/assets/dac4e8e3-97e6-4024-8c12-ba6dbeafefdf/prepared/video",
-        "time": 0.950256,
+        "db": -70.04803466796875,
+        "url": "http://127.0.0.1:60171/api/v1/assets/e363e3b5-c4c8-475c-b6fa-9312c81ecef3/prepared/video",
+        "time": 1.040535,
         "fullscreen": true
       },
       {
         "id": "internal-1",
         "frequency": 662.109375,
-        "db": -64.57150268554688,
-        "url": "http://127.0.0.1:26669/api/v1/assets/dac4e8e3-97e6-4024-8c12-ba6dbeafefdf/prepared/video",
-        "time": 1.298423,
+        "db": -64.58584594726562,
+        "url": "http://127.0.0.1:60171/api/v1/assets/e363e3b5-c4c8-475c-b6fa-9312c81ecef3/prepared/video",
+        "time": 1.417124,
         "fullscreen": true
       },
       {
         "id": "internal-2",
         "frequency": 990.234375,
-        "db": -70.04944610595703,
-        "url": "http://127.0.0.1:26669/api/v1/assets/dac4e8e3-97e6-4024-8c12-ba6dbeafefdf/prepared/video",
-        "time": 1.647227,
+        "db": -70.03303527832031,
+        "url": "http://127.0.0.1:60171/api/v1/assets/e363e3b5-c4c8-475c-b6fa-9312c81ecef3/prepared/video",
+        "time": 1.784032,
         "fullscreen": true
       }
     ],

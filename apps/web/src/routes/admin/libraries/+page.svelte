@@ -304,10 +304,10 @@
     }
   }
 
-  let currentHash = $state('#overview');
+  let currentHash = $state('#libraries-section');
   const sections = new Set(['#overview', '#libraries-section', '#nodes-section', '#users-section', '#sso-section', '#tasks-section', '#backups-section', '#groups-section', '#api-keys-section', '#extensions-section']);
   function selectedSection() {
-    return sections.has(window.location.hash) ? window.location.hash : '#overview';
+    return sections.has(window.location.hash) ? window.location.hash : '#libraries-section';
   }
 
   onMount(() => {
@@ -376,26 +376,19 @@
         <div class="banner-content">
           <Icon name="check" size={18} />
           <p>{notice}</p>
-          <div hidden={currentHash !== '#tasks-section'}>
-            <AdminTasks {libraries} {nodes} {scans} {pending} onscan={scan} />
-          </div>
-          <div hidden={currentHash !== '#backups-section'}>
-            <AdminMaintenance />
-          </div>
-          <div hidden={currentHash !== '#groups-section'}>
-            <AdminGroups {groups} {users} {libraries} onchanged={refreshAccess} />
-          </div>
-          <div hidden={currentHash !== '#api-keys-section'}>
-            <AdminApiKeys {users} {libraries} />
-          </div>
-          <AdminCapabilities section={currentHash.slice(1)} />
         </div>
       </div>
     {/if}
 
     {#if loading}
       <div class="loading-state" role="status">
-        <div class="spinner" aria-hidden="true"></div>
+        <img
+          src={`${resolve('/').replace(/\/$/, '')}/images/logo-loading.svg`}
+          alt=""
+          class="logo-spinner"
+          width="48"
+          height="48"
+        />
         <p>Chargement des données administratives…</p>
       </div>
     {:else}
@@ -411,7 +404,7 @@
             <a
               href="#overview"
               class="sidebar-nav-item"
-              class:active={currentHash === '#overview' || currentHash === ''}
+              class:active={currentHash === '#overview'}
               onclick={() => currentHash = '#overview'}
             >
               <span class="nav-icon"><Icon name="sparkles" size={16} /></span>
@@ -863,17 +856,11 @@
     color: var(--color-muted);
   }
 
-  .spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid var(--color-line);
-    border-top-color: var(--color-accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
+  .logo-spinner {
+    width: 48px;
+    height: 48px;
+    display: block;
+    margin: 0 auto;
   }
 
   @media (max-width: 960px) {

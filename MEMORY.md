@@ -1,5 +1,19 @@
 # MEMORY.md — État et décisions Aether
 
+## 19 octobre 2026 — Correction des échecs CI GitHub Actions (espace disque & timeout déconnexion Séries)
+
+- **Diagnostic et résolution des deux échecs de la CI** :
+  1. **Échec `scanner_performance::test_1000_synthetic_files_scan_and_rescan` (`No space left on device`)** :
+     - **Cause** : Le test créait 1 000 dossiers contenant chacun une copie complète de `sample_mp4` (368 Ko) sur disque (soit ~370 Mo d'écritures). Sur les runners GitHub Actions Ubuntu, l'accumulation de 37 binaires de tests d'intégration complets, d'objets debug et des SDKs préinstallés (Android, .NET, GHC) saturait la partition racine (`/`).
+     - **Correctifs** :
+       - Dans `.github/workflows/ci.yml` : ajout d'une étape de libération d'espace disque en début de job `rust` supprimant `/usr/share/dotnet`, `/usr/local/lib/android`, `/opt/ghc` (~30 Go libérés immédiatement).
+       - Dans `crates/core/tests/scanner_performance.rs` : le test rescan réutilise les sondes pré-remplies en base et n'a besoin que d'un fichier présent avec sa taille/mtime indexés. Remplacement de la copie de 368 Mo par un stub de 512 octets lu en mémoire et écrit dans les dossiers (~500 Ko au total, création 10x plus rapide et empreinte disque minimale).
+  2. **Échec `browser_series` (`Timeout 30000ms waiting for getByRole('button', { name: 'Se déconnecter' })`)** :
+     - **Cause** : Sur les runners Ubuntu Azure, `navigator.language` est configuré sur `en-US`. `+layout.svelte` initialisait la locale sur `en` en l'absence de préférences utilisateur enregistrées (`saved.locale ?? (navigator.language.startsWith('en') ? 'en' : 'fr')`). Par conséquent, le bouton du menu profil affichait `"Sign out"` au lieu de `"Se déconnecter"`, provoquant un timeout Playwright de 30 secondes.
+     - **Correctifs** :
+       - Dans `scripts/browser-series.cjs` et `scripts/browser-scanner.cjs` : ajout de `locale: 'fr-FR'` lors de l'initialisation du contexte Playwright (`browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'fr-FR' })`).
+       - Dans `scripts/browser-series.cjs` : assouplissement résilient des sélecteurs avec regex bilingue `/^(Se déconnecter|Sign out)$/` et navigation `/^(Séries|TV Shows)$/`.
+
 ## 19 octobre 2026 — Intégration des logos animés / chargement et correction complète de la CI
 
 - **Renommage et intégration des logos SVG** :

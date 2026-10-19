@@ -44,6 +44,13 @@ jobs:
       - name: Récupérer le code source
         uses: actions/checkout@v4
 
+      - name: Libérer de l'espace disque sur le runner
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/.ghcup
+
       - name: Installer la toolchain Rust
         uses: dtolnay/rust-toolchain@stable
         with:

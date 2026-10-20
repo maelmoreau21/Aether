@@ -143,13 +143,11 @@ async fn list(
                 &work,
             )
             .await?
-        {
-            if let Some(detail) = crate::inventory::detail(&auth.store, &work)
+            && let Some(detail) = crate::inventory::detail(&auth.store, &work)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            {
-                items.push(detail);
-            }
+        {
+            items.push(detail);
         }
     }
     Ok(Json(json!({"items":items})))
@@ -194,13 +192,33 @@ async fn remove_item(
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct Editorial {
     title: String,
     year: Option<i64>,
+    #[serde(default)]
+    original_title: Option<String>,
+    #[serde(default)]
+    tagline: Option<String>,
+    #[serde(default)]
     plot: String,
+    #[serde(default)]
     genres: Vec<String>,
+    #[serde(default)]
+    directors: Vec<String>,
+    #[serde(default)]
+    writers: Vec<String>,
+    #[serde(default)]
+    actors: Vec<Value>,
+    #[serde(default)]
+    ratings: Vec<Value>,
+    #[serde(default)]
     external_ids: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    poster_url: Option<String>,
+    #[serde(default)]
+    backdrop_url: Option<String>,
+    #[serde(default)]
     minimum_age: Option<i64>,
 }
 async fn metadata(
@@ -225,7 +243,22 @@ async fn metadata(
     {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let value = json!({"title":input.title,"year":input.year,"plot":input.plot,"genres":input.genres,"external_ids":input.external_ids,"provenance":"manual"});
+    let value = json!({
+        "title": input.title,
+        "original_title": input.original_title,
+        "tagline": input.tagline,
+        "year": input.year,
+        "plot": input.plot,
+        "genres": input.genres,
+        "directors": input.directors,
+        "writers": input.writers,
+        "actors": input.actors,
+        "ratings": input.ratings,
+        "external_ids": input.external_ids,
+        "poster_url": input.poster_url,
+        "backdrop_url": input.backdrop_url,
+        "provenance": "extension"
+    });
     let result = query("UPDATE inventory_works SET manual_json=?,minimum_age=? WHERE id=?")
         .bind(value.to_string())
         .bind(input.minimum_age)
@@ -514,10 +547,10 @@ pub async fn expand_detail(
             if let Some(episodes) = season["episodes"].as_array_mut() {
                 let mut filtered = Vec::new();
                 for episode in episodes.drain(..) {
-                    if let Some(id) = episode["id"].as_str() {
-                        if parental_allowed(store, user, id).await? {
-                            filtered.push(episode);
-                        }
+                    if let Some(id) = episode["id"].as_str()
+                        && parental_allowed(store, user, id).await?
+                    {
+                        filtered.push(episode);
                     }
                 }
                 *episodes = filtered;
@@ -530,19 +563,18 @@ pub async fn expand_detail(
     let original = value["id"].as_str().unwrap_or_default().to_owned();
     let siblings:Vec<(String,String)>=query_as("SELECT w.id,w.library_id FROM media_group_members member JOIN inventory_works w ON w.id=member.work_id WHERE member.group_id=? AND w.id!=? ORDER BY w.id").bind(group).bind(original).fetch_all(&store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     for (id, library) in siblings {
-        if visible.contains(&library) && parental_allowed(store, user, &id).await? {
-            if let Some(detail) = crate::inventory::detail(store, &id)
+        if visible.contains(&library)
+            && parental_allowed(store, user, &id).await?
+            && let Some(detail) = crate::inventory::detail(store, &id)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            {
-                if let Some(editions) = detail["editions"].as_array() {
-                    if detail["available"] == true {
-                        value["available"] = json!(true);
-                    }
-                    if let Some(target) = value["editions"].as_array_mut() {
-                        target.extend(editions.iter().cloned());
-                    }
-                }
+            && let Some(editions) = detail["editions"].as_array()
+        {
+            if detail["available"] == true {
+                value["available"] = json!(true);
+            }
+            if let Some(target) = value["editions"].as_array_mut() {
+                target.extend(editions.iter().cloned());
             }
         }
     }

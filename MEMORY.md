@@ -18,8 +18,10 @@
     - `crates/extension-sdk/tests/contracts_test.rs` valide le roundtrip de l'ensemble des structures riches et du contrat de host call HTTP.
 - **Validations réelles exécutées** :
   - `media-extension-sdk` : 3/3 tests passés (`cargo test -p media-extension-sdk`).
-  - `Aether Core` : 8/8 tests passés (`cargo test -p media-poc --test extensions` dont `http_broker_security_enforces_allowed_imports_and_allowlist` et `http_broker_rejects_ssrf_and_enforces_domain_allowlist`).
+  - `Aether Core` : 11/11 tests passés (`cargo test -p media-poc --test extensions` dont exécution réelle des binaires `.wasm` de TMDb et Avatar dans le runtime Wasmi, et application complète de métadonnées enrichies dans l'inventaire avec casting, notes et affiches).
   - `Aether-Plugins` : 19/19 tests passés (`cargo test` dans `Aether-Plugins`), `cargo fmt --check` validé et Clippy validé avec 0 erreur.
+  - Compilation WebAssembly `wasm32-unknown-unknown` : `aether_plugin_avatar.wasm` (150 Ko) et `aether_plugin_tmdb.wasm` (245 Ko) générés avec succès.
+  - CI GitHub Actions : création de `.github/workflows/ci.yml` dans `Aether-Plugins` avec linting, tests natifs, build Wasm et archivage des artefacts `.wasm`.
 
 - **Correction CI GitHub Actions (`npm run lint` & `npm run check`)** :
   - `AdminExtensions.svelte` : Élimination des types `any` stricts (`@typescript-eslint/no-explicit-any`) via `SettingValue` (`string | number | boolean`) et `ExtensionSettings`.

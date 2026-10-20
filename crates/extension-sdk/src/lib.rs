@@ -413,6 +413,7 @@ pub struct HostHttpError {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[link(wasm_import_module = "aether")]
 unsafe extern "C" {
     fn aether_host_http(req_ptr: u32, req_len: u32) -> u64;
 }

@@ -2049,35 +2049,35 @@ pub async fn relay_from_remote_node(
                             out.headers_mut().insert(header_name, val.clone());
                         }
                     }
-                    if head && out.status().is_success() {
-                        if let Some(range) = out
+                    if head
+                        && out.status().is_success()
+                        && let Some(range) = out
                             .headers()
                             .get(header::CONTENT_RANGE)
                             .and_then(|v| v.to_str().ok())
                             .map(str::to_owned)
+                    {
+                        let length = if let Some(total) = range.strip_prefix("bytes */") {
+                            total.parse::<u64>().ok()
+                        } else {
+                            range
+                                .strip_prefix("bytes ")
+                                .and_then(|v| v.split('/').next())
+                                .and_then(|v| v.split_once('-'))
+                                .and_then(|(start, end)| {
+                                    end.parse::<u64>()
+                                        .ok()?
+                                        .checked_sub(start.parse::<u64>().ok()?)?
+                                        .checked_add(1)
+                                })
+                        };
+                        if let Some(length) =
+                            length.and_then(|v| HeaderValue::from_str(&v.to_string()).ok())
                         {
-                            let length = if let Some(total) = range.strip_prefix("bytes */") {
-                                total.parse::<u64>().ok()
-                            } else {
-                                range
-                                    .strip_prefix("bytes ")
-                                    .and_then(|v| v.split('/').next())
-                                    .and_then(|v| v.split_once('-'))
-                                    .and_then(|(start, end)| {
-                                        end.parse::<u64>()
-                                            .ok()?
-                                            .checked_sub(start.parse::<u64>().ok()?)?
-                                            .checked_add(1)
-                                    })
-                            };
-                            if let Some(length) =
-                                length.and_then(|v| HeaderValue::from_str(&v.to_string()).ok())
-                            {
-                                out.headers_mut().insert(header::CONTENT_LENGTH, length);
-                            }
-                            if out.status() == StatusCode::OK {
-                                out.headers_mut().remove(header::CONTENT_RANGE);
-                            }
+                            out.headers_mut().insert(header::CONTENT_LENGTH, length);
+                        }
+                        if out.status() == StatusCode::OK {
+                            out.headers_mut().remove(header::CONTENT_RANGE);
                         }
                     }
                     return out;

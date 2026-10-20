@@ -1,5 +1,12 @@
 # Extensions : décision et prochain parcours vertical
 
+> Mise à jour du 20 octobre 2026 : un premier parcours de paquets locaux signés
+> et de propositions de métadonnées Wasm est validé localement sur SQLite et Chrome.
+> Contrat et limites actuels : [EXTENSIONS_API.md](EXTENSIONS_API.md).
+> Les sections ci-dessous conservent le projet initial; elles ne décrivent pas
+> l'état courant de ce sous-ensemble. Catalogue distant et extensions avancées
+> restent futurs.
+
 Décision du 19 octobre 2026, à la demande explicite de l'utilisateur : préparer
 un écosystème d'extensions avec dépôts, catalogue, installation et permissions
 accordées par l'administrateur, notamment pour les métadonnées et statistiques.

@@ -94,7 +94,7 @@
           <nav class="season-shortcuts" aria-label="Saisons disponibles">
             {#each work.seasons as item (item.id)}
               <button class:chosen={activeSeason?.number === item.number} onclick={() => selectSeason(item.number)}>
-                {#if work.artwork?.[`season${item.number}`]}<img src={work.artwork[`season${item.number}`] ?? ''} alt="" />{:else}<span class="season-placeholder" aria-hidden="true">{item.number === 0 ? '★' : item.number}</span>{/if}
+                {#if work.artwork?.[`season${item.number}`]}<img src={work.artwork[`season${item.number}`] ?? ''} alt="" loading="lazy" decoding="async" width="80" height="120" />{:else}<span class="season-placeholder" aria-hidden="true">{item.number === 0 ? '★' : item.number}</span>{/if}
                 {item.number === 0 ? 'Hors-série' : `Saison ${item.number}`} · {item.episodes.length} {item.episodes.length > 1 ? 'épisodes' : 'épisode'}
               </button>
             {/each}
@@ -185,7 +185,7 @@
     <div class="episodes-list">
       {#each activeSeason?.episodes ?? [] as episode (episode.id)}
         <article class="episode">
-          {#if episode.artwork?.thumb}<img class="episode-thumb" src={episode.artwork.thumb} alt="" loading="lazy" />{/if}
+          {#if episode.artwork?.thumb}<img class="episode-thumb" src={episode.artwork.thumb} alt="" loading="lazy" decoding="async" width="240" height="135" />{/if}
           <span class="episode-number">{String(episode.number).padStart(2, '0')}</span>
           <div class="episode-content">
             <div class="episode-title-row">
@@ -227,7 +227,7 @@
 
   .season-placeholder { display:grid;place-items:center;width:80px;aspect-ratio:2/3;background:var(--bg-elevated);border-radius:4px;font-size:32px;color:var(--text-secondary); }
   .season-shortcuts img { display:block; width:80px; aspect-ratio:2/3; object-fit:cover; margin-bottom:8px; border-radius:4px; }
-  .episode-thumb { width:140px; max-width:25vw; aspect-ratio:16/9; object-fit:cover; border-radius:4px; }
+  .episode-thumb { height:auto; width:240px; max-width:25vw; aspect-ratio:16/9; object-fit:cover; border-radius:4px; }
   .season-shortcuts { display:flex; gap:8px; overflow-x:auto; max-width:100%; padding:2px; }
   .season-shortcuts button { flex:0 0 150px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;padding:10px 14px; border:1px solid var(--border-subtle); background:var(--bg-surface); color:var(--text-primary); border-radius:6px; }
   .season-shortcuts .chosen { border-color:var(--accent-primary); color:var(--accent-primary); }

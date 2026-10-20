@@ -94,6 +94,11 @@ async fn browser_series_flow_and_playback() {
         series.join("season01-poster.png"),
     )
     .unwrap();
+    std::fs::copy(
+        series.join("backdrop.png"),
+        s01.join("Browser Series - S01E01-thumb.png"),
+    )
+    .unwrap();
     std::fs::write(series.join("tvshow.nfo"),r#"<tvshow><title>Browser Series</title><actor><name>Synthetic Actor</name><role>Explorer</role></actor><director>Test Director</director><ratings><rating name="imdb" max="10"><value>8.2</value></rating></ratings></tvshow>"#).unwrap();
     let film_root = library.join("_FilmFixture");
     std::fs::create_dir_all(&film_root).unwrap();

@@ -517,3 +517,19 @@ Aucun NAS ni ingestion/scanner ; pas de nouvelle preuve audio/codec.
   du test sur copies jetables explicites ; comparaisons sources avant/après.
   Pas de nouvelle preuve mobile/autres navigateurs/PCM/NAS/charge.
   Contrat réalisé et limites : [LOCAL_FILM_NFO.md](LOCAL_FILM_NFO.md).
+
+## Fiches, demi-étoiles et réactivité — 20 octobre 2026
+
+- `series_flow` : lecture/écriture de notes 4,5, refus des quarts d'étoile et valeurs hors limites, isolation des comptes, réouverture SQLite ; affiches de saison et vignette exacte d'épisode ; image conditionnelle 304 vide pour un compte autorisé, 403 pour un compte sans droit.
+- `media-node --lib` : image conditionnelle sans corps, validation des changements du fichier conservée ; Range/HEAD et confinement existants.
+- `native.test.ts` : langue préférée chargée directement, une seule ouverture vidéo, sans chargement FR intermédiaire.
+- `browser_series` explicite : cœur et note 4,5 persistés après rechargement, absence du bandeau de retour, images saison/épisode décodées, thèmes clair/sombre aux largeurs 390/1440, lecture/pause/seek et transitions existantes. `episodeLaunchMs` mesure le délai clic → progression vidéo sur fixture locale, sans comparaison NAS ni mesure audio physique.
+- Migration 0030 SQLite : vérification en mémoire de conservation note/favori, demi-étoile, refus d'un quart et cascade de suppression. La migration PostgreSQL est fournie ; son exécution réelle exige un serveur disponible.
+
+## Extensions locales — parcours synthétique vérifié
+
+Après build Web et compilation de la fixture SDK pour wasm32-unknown-unknown :
+`cargo test --locked -p media-poc --test extensions -j 1 -- --include-ignored --test-threads=1 --nocapture`.
+Inclut Chrome réel, SDK compilé, signatures, limites runtime, consentements,
+révocation pendant exécution et cycle d'installation/désinstallation.
+Résultats et frontières : [evidence/2026-10-20/extensions/README.md](evidence/2026-10-20/extensions/README.md).

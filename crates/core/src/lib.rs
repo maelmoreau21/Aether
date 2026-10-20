@@ -7,6 +7,8 @@ pub mod avatars;
 pub mod backup;
 pub mod backup_bundle;
 pub mod database;
+pub mod extension_runtime;
+pub mod extensions;
 pub mod groups;
 pub mod oidc;
 pub mod postgres_backup;
@@ -119,6 +121,7 @@ pub async fn secure_app_with_jobs(
         libraries::initialize_local(&auth.store).await?;
     }
     let oidc = oidc::router(auth.clone())?;
+    extensions::initialize(&auth).await?;
     let root = inventory.root().to_owned();
     let origin = auth.origin().to_owned();
     let store_for_csp = auth.store.clone();
@@ -168,6 +171,7 @@ pub async fn secure_app_with_jobs(
             .merge(scheduler::router(auth.clone()).await?)
             .merge(groups::router(auth.clone()))
             .merge(api_keys::router(auth.clone()))
+            .merge(extensions::router(auth.clone()))
             .merge(auth::router(auth))
             .merge(oidc),
         origin,
@@ -392,7 +396,7 @@ fn local_security_with_store(
                     }
                 }
                 let csp = format!(
-                    "default-src 'none'; script-src 'self'; img-src 'self'{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; frame-ancestors 'none'"
+                    "default-src 'none'; script-src 'self'; worker-src 'self'; manifest-src 'self'; img-src 'self'{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; frame-ancestors 'none'"
                 );
                 if let Ok(val) = HeaderValue::from_str(&csp) {
                     res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, val);
@@ -401,7 +405,7 @@ fn local_security_with_store(
             }
         }))
         .layer(SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
-        .layer(SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
+        .layer(SetResponseHeaderLayer::if_not_present(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
         .route("/bench.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("bench.js")) }))
 }
 

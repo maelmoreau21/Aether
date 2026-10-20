@@ -291,3 +291,18 @@ la configuration réseau effective, les avatars de compte et les quatre modes de
 Les fournisseurs de métadonnées en ligne restent à développer.
 
 Voir [Fiches, saisons, visuels et préférences privées](CATALOGUE_PRESENTATION.md) pour les extensions du 19 octobre 2026.
+
+### Notes privées par demi-étoile et images conditionnelles (20 octobre 2026)
+
+`PUT /api/v1/feedback/{workId}` accepte `rating: null` ou une valeur de 0,5 à 5 par pas de 0,5 ; une autre valeur renvoie 422. Le favori reste booléen, lié au compte authentifié, avec CSRF obligatoire. Les notes entières existantes sont conservées par la migration 0030 SQLite/PostgreSQL.
+
+Les images locales `GET`/`HEAD /api/v1/assets/{id}/image` portent `private, no-cache`. `If-None-Match` correspondant à l'ETag renvoie 304 sans corps après les vérifications de session, droits et fichier. Les requêtes Range conservent leur traitement existant. Le relais distant n'assure pas encore la transmission complète des conditions de cache.
+
+## Extensions locales — 20 octobre 2026
+
+Le premier contrat HTTP opérationnel est décrit dans [EXTENSIONS_API.md](EXTENSIONS_API.md)
+et [extensions-v1.openapi.json](extensions-v1.openapi.json) : administration des éditeurs,
+installation de paquets signés, consentements par bibliothèque, exécution Wasm bornée,
+propositions de métadonnées et historique. Aucun endpoint de catalogue distant,
+Trickplay ou Intro Skipper n'est annoncé. Preuves et limites :
+[evidence/2026-10-20/extensions/README.md](evidence/2026-10-20/extensions/README.md).

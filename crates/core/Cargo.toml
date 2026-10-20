@@ -9,6 +9,7 @@ default-run = "media-poc"
 [dependencies]
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 media-contracts = { path = "../shared" }
+media-extension-sdk = { path = "../extension-sdk" }
 media-node = { path = "../node" }
 axum = "0.8.9"
 serde = { version = "1", features = ["derive"] }
@@ -34,9 +35,19 @@ jsonwebtoken = { version = "11.1.0", features = ["aws_lc_rs"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "form"] }
 base64 = "0.23.1"
 ring = "0.17.14"
+wasmi = "=2.0.0"
 
 [dev-dependencies]
 tempfile = "3"
+wat = "1"
+
+[[bin]]
+name = "media-extension-worker"
+path = "src/bin/extension-worker.rs"
+
+[[bin]]
+name = "media-extension-pack"
+path = "src/bin/extension-pack.rs"
 
 [[bin]]
 name = "aether-core"

@@ -99,14 +99,19 @@ fs.mkdirSync(out, {recursive: true});
     assert.equal(await page.locator('.main-nav a[href*="search"]').count(),0);
     assert.equal(await page.locator('main + footer').count(),0);
     assert.equal(await page.getByRole('link',{name:'Recherche rapide'}).count(),1);
-    await page.getByRole('button',{name:'♡ Ajouter aux favoris',exact:true}).click();
-    await page.getByRole('button',{name:'♥ Favori',exact:true}).waitFor();
-    await page.getByRole('combobox',{name:'Ma note privée'}).selectOption('4');
-    await page.waitForFunction(() => !document.querySelector('select[aria-label="Ma note privée"]')?.disabled);
+    await page.getByRole('button',{name:'Ajouter aux favoris',exact:true}).click();
+    await page.getByRole('button',{name:'Retirer des favoris',exact:true}).waitFor();
+    await page.getByRole('button',{name:'4,5 sur 5',exact:true}).click();
+    await page.waitForFunction(() => document.querySelector('.half[aria-pressed="true"]')?.getAttribute('aria-label') === '4,5 sur 5');
     await page.reload();
-    await page.getByRole('button',{name:'♥ Favori',exact:true}).waitFor();
-    assert.equal(await page.getByRole('combobox',{name:'Ma note privée'}).inputValue(),'4');
+    await page.getByRole('button',{name:'Retirer des favoris',exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'4,5 sur 5',exact:true}).getAttribute('aria-pressed'),'true');
     await page.getByText('Synthetic Actor',{exact:true}).waitFor();
+    await page.locator('.season-shortcuts img').first().scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => [...document.querySelectorAll('.season-shortcuts img')].some(img => img.complete && img.naturalWidth > 0));
+    await page.locator('.episode-thumb').first().scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => [...document.querySelectorAll('.episode-thumb')].some(img => img.complete && img.naturalWidth > 0));
+    report.results.localArtwork = true;
     for (const theme of ['light','dark']) {
       await page.evaluate(theme => document.documentElement.dataset.theme=theme, theme);
       for (const width of [390,1440]) {
@@ -116,7 +121,7 @@ fs.mkdirSync(out, {recursive: true});
         assert.ok(await page.getByRole('link',{name:'Recherche rapide'}).isVisible(),`search visible at ${width}`);
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false,`${theme} ${width} overflow`);
         const back=page.getByRole('link',{name:'Toutes les séries',exact:false});
-        assert.ok(await back.isVisible());
+        assert.equal(await back.count(),0);
         await page.screenshot({path:`${out}/detail-${theme}-${width}.png`,fullPage:true});
       }
     }
@@ -130,12 +135,14 @@ fs.mkdirSync(out, {recursive: true});
     // 5. Select Version and Play Episode 1
     const ep1PlayButton = page.getByRole('button', {name:'Lire Episode One', exact:true});
     await ep1PlayButton.waitFor();
+    const launchStarted = Date.now();
     await ep1PlayButton.click();
 
     // Verify /api/v1/media/ was requested ONLY upon launch
     await page.waitForFunction(() => document.querySelector('video') !== null);
     await page.waitForFunction(() => document.querySelector('video')?.currentTime > 0.1);
     report.results.episode1Playback = true;
+    report.results.episodeLaunchMs = Date.now() - launchStarted;
 
     // Pause and seek test
     await page.evaluate(() => {

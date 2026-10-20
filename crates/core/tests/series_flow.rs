@@ -190,6 +190,9 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
             .await
             .unwrap();
     }
+    tokio::fs::write(s1_s01_dir.join("Cosmos Alpha - S01E01-thumb.png"), png())
+        .await
+        .unwrap();
     // S00E01
     tokio::fs::copy(&sample_mkv, s1_s00_dir.join("S00E01.mkv"))
         .await
@@ -421,6 +424,63 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
             StatusCode::FORBIDDEN
         );
     }
+    // Conditional requests still traverse live session/library authorization.
+    let image_url = s1_detail["artwork"]["season1"].as_str().unwrap();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(image_url)
+                .header("host", "127.0.0.1:3000")
+                .header(header::COOKIE, &admin_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.headers()[header::CACHE_CONTROL],
+        "private, no-cache"
+    );
+    let etag = response.headers()[header::ETAG].clone();
+    for (cookie, expected) in [
+        (&admin_cookie, StatusCode::NOT_MODIFIED),
+        (&user_cookie, StatusCode::FORBIDDEN),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(image_url)
+                    .header("host", "127.0.0.1:3000")
+                    .header(header::COOKIE, cookie)
+                    .header(header::IF_NONE_MATCH, etag.clone())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+        if expected == StatusCode::NOT_MODIFIED {
+            assert!(
+                response
+                    .into_body()
+                    .collect()
+                    .await
+                    .unwrap()
+                    .to_bytes()
+                    .is_empty()
+            );
+        }
+    }
+    let episode = &s1_detail["seasons"][1]["episodes"][0];
+    let thumb = episode["artwork"]["thumb"].as_str().unwrap();
+    assert_eq!(
+        request(&app, "GET", thumb, &admin_cookie, None, Value::Null, None)
+            .await
+            .0,
+        StatusCode::OK
+    );
     let feedback_uri = format!("/api/v1/feedback/{s1_id}");
     assert_eq!(
         request(&app, "GET", &feedback_uri, "", None, Value::Null, None)
@@ -449,7 +509,7 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
             &feedback_uri,
             &admin_cookie,
             None,
-            json!({"favorite":true,"rating":5}),
+            json!({"favorite":true,"rating":4.5}),
             None
         )
         .await
@@ -491,7 +551,7 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
             &feedback_uri,
             &admin_cookie,
             Some(&admin_csrf),
-            json!({"favorite":true,"rating":5}),
+            json!({"favorite":true,"rating":4.5}),
             None
         )
         .await
@@ -510,9 +570,25 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
         )
         .await
         .1,
-        json!({"favorite":true,"rating":5})
+        json!({"favorite":true,"rating":4.5})
     );
 
+    for rating in [0.0, 0.25, 4.25, 5.5] {
+        assert_eq!(
+            request(
+                &app,
+                "PUT",
+                &feedback_uri,
+                &admin_cookie,
+                Some(&admin_csrf),
+                json!({"favorite":true,"rating":rating}),
+                None
+            )
+            .await
+            .0,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+    }
     assert_eq!(s1_detail["description"], "A deep journey through stars.");
     assert_eq!(s1_detail["plot"], "A deep journey through stars.");
     let seasons = s1_detail["seasons"].as_array().unwrap();
@@ -796,7 +872,7 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
             &feedback_uri,
             &user_cookie,
             Some(&_user_csrf),
-            json!({"favorite":false,"rating":2}),
+            json!({"favorite":false,"rating":2.0}),
             None
         )
         .await
@@ -815,7 +891,7 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
         )
         .await
         .1,
-        json!({"favorite":true,"rating":5})
+        json!({"favorite":true,"rating":4.5})
     );
     let reopened = IdentityStore::open(&db).await.unwrap();
     let reopened_app = router(&root, &reopened, jobs.clone()).await;
@@ -831,7 +907,7 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
         )
         .await
         .1,
-        json!({"favorite":false,"rating":2})
+        json!({"favorite":false,"rating":2.0})
     );
     assert_eq!(
         request(

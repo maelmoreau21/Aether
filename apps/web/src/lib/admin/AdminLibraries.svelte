@@ -69,10 +69,10 @@
   <form onsubmit={refresh}>
     <h2 id="refresh-heading">Actualiser {target?.name ?? 'toutes les médiathèques'}</h2>
     <label for="refresh-mode">Mode d’actualisation</label><select id="refresh-mode" bind:value={mode} disabled={refreshing}>
-      <option value="incremental">Détecter les nouveaux fichiers et les modifications</option>
-      <option value="new_only">Ajouter les nouveaux médias, conserver les métadonnées connues</option>
-      <option value="missing_metadata">Rechercher les métadonnées locales manquantes</option>
-      <option value="full">Réactualiser tous les médias et leurs métadonnées locales</option>
+      <option value="incremental">Actualisation rapide (recommandée)</option>
+      <option value="new_only">Actualiser en gardant les descriptions existantes</option>
+      <option value="missing_metadata">Compléter les descriptions manquantes</option>
+      <option value="full">Tout réanalyser (plus lent)</option>
     </select>
     <p>{mode === 'new_only' ? 'Les métadonnées des médias déjà connus sont conservées. Les fichiers modifiés et les pistes restent vérifiés.' : mode === 'missing_metadata' ? 'Les métadonnées locales déjà validées sont conservées. Les médias sans métadonnées sont complétés depuis les fichiers NFO disponibles.' : mode === 'full' ? 'Tous les fichiers sont réanalysés. Les métadonnées locales sont relues, y compris celles des médias connus.' : 'Les analyses techniques inchangées sont réutilisées. Les fichiers et leurs pistes externes sont vérifiés.'}</p>
     <p>La recherche de métadonnées auprès de fournisseurs en ligne n’est pas encore disponible.</p>

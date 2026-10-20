@@ -20,6 +20,13 @@ const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr',
 function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
+  it('loads the preferred track directly without loading French first', async () => {
+    const { video, player } = setup();
+    await player.load(media, 'en');
+    await player.selectAudio('en');
+    expect(video.src).toBe('/en'); expect(video.loads).toBe(1);
+    player.destroy();
+  });
   it('switches prepared Opus while keeping the loaded video, position and paused state', async () => {
     const fetcher = vi.fn().mockResolvedValue({ok:true}); vi.stubGlobal('fetch', fetcher);
     const {video,player}=setup();

@@ -173,10 +173,29 @@ impl LocalNode {
                     let mut res = serve_opened_parts(opened, &method, &headers, checked.mime)
                         .await
                         .map_err(|_| NodeErrorCode::ImageStreamError)?;
-                    // Never let a browser cache bypass a later permission/revocation check.
+                    // Reuse bytes only after Core/Node authorization and file validation.
+                    let unchanged = headers
+                        .get(header::IF_NONE_MATCH)
+                        .and_then(|v| v.to_str().ok())
+                        .zip(
+                            res.headers()
+                                .get(header::ETAG)
+                                .and_then(|v| v.to_str().ok()),
+                        )
+                        .is_some_and(|(condition, etag)| {
+                            condition.split(',').any(|v| {
+                                let v = v.trim();
+                                v == "*" || v.strip_prefix("W/").unwrap_or(v) == etag
+                            })
+                        });
+                    if unchanged && !headers.contains_key(header::RANGE) {
+                        *res.status_mut() = axum::http::StatusCode::NOT_MODIFIED;
+                        res.headers_mut().remove(header::CONTENT_LENGTH);
+                        *res.body_mut() = stream::empty_body();
+                    }
                     res.headers_mut().insert(
                         header::CACHE_CONTROL,
-                        HeaderValue::from_static("private, no-store"),
+                        HeaderValue::from_static("private, no-cache"),
                     );
                     Ok(res)
                 }
@@ -251,7 +270,26 @@ mod tests {
         assert_eq!(img_res.status(), StatusCode::OK);
         assert_eq!(
             img_res.headers()[header::CACHE_CONTROL],
-            "private, no-store"
+            "private, no-cache"
+        );
+
+        let etag = img_res.headers()[header::ETAG].clone();
+        let conditional = Request::builder()
+            .method(Method::GET)
+            .header(header::IF_NONE_MATCH, etag)
+            .body(())
+            .unwrap();
+        let cached = node.serve_grant(&image_grant, &conditional).await.unwrap();
+        assert_eq!(cached.status(), StatusCode::NOT_MODIFIED);
+        assert!(!cached.headers().contains_key(header::CONTENT_LENGTH));
+        assert!(
+            cached
+                .into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .is_empty()
         );
 
         // Mutate poster size -> must return ImageChangedRescanRequired

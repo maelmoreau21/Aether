@@ -32,6 +32,8 @@
   let media = $state<Media[]>([]);
   let mediaError = $state('');
   let busy = $state(true);
+  let pendingCatalogKinds = $state(0);
+  let partialCatalogError = $state('');
   let error = $state('');
   let films = $state<Work[]>([]);
   let series = $state<Work[]>([]);
@@ -264,6 +266,8 @@
     search = q;
     sort = sorting;
     busy = true;
+    pendingCatalogKinds = 0;
+    partialCatalogError = '';
     error = '';
     mediaError = '';
     detail = null;
@@ -323,35 +327,44 @@
               : currentSection === 'series'
                 ? ['series']
                 : ['film', 'series'];
-          const results = await Promise.all(
-            kinds.map(kind =>
-              request<CatalogPage>(
-                `/api/v1/catalog?${new URLSearchParams({
-                  ...filters,
-                  kind,
-                  q,
-                  sort: sorting,
-                  offset: String(start),
-                  limit: '24'
-                })}`,
-                controller.signal
-              )
-            )
+          pendingCatalogKinds = kinds.length;
+          let completedKinds = 0;
+          const results = await Promise.allSettled(
+            kinds.map(async kind => {
+              try {
+                const result = await request<CatalogPage>(
+                  `/api/v1/catalog?${new URLSearchParams({
+                    ...filters,
+                    kind,
+                    q,
+                    sort: sorting,
+                    offset: String(start),
+                    limit: '24'
+                  })}`,
+                  controller.signal
+                );
+                if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
+                if (kind === 'film') {
+                  films = result.items;
+                  totalFilms = result.total;
+                } else {
+                  series = result.items;
+                  totalSeries = result.total;
+                }
+                completedKinds += 1;
+                // Render the ready shelf and start its images immediately.
+                busy = false;
+              } finally {
+                if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) pendingCatalogKinds -= 1;
+              }
+            })
           );
           if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
-          films = [];
-          series = [];
-          totalFilms = 0;
-          totalSeries = 0;
-          results.forEach((result, index) => {
-            if (kinds[index] === 'film') {
-              films = result.items;
-              totalFilms = result.total;
-            } else {
-              series = result.items;
-              totalSeries = result.total;
-            }
-          });
+          const failure = results.find(result => result.status === 'rejected');
+          if (failure?.status === 'rejected') {
+            if (completedKinds === 0) throw failure.reason;
+            partialCatalogError = 'Une partie du catalogue est indisponible. Rechargez la page pour réessayer.';
+          }
         }
       } catch (e) {
         if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) {
@@ -386,6 +399,8 @@
 {#if !workId && section!=='settings'}<CatalogFilters />{/if}
 
 <main id="main-content" tabindex="-1">
+  {#if !busy && pendingCatalogKinds > 0}<p role="status">Chargement du reste du catalogue…</p>{/if}
+  {#if partialCatalogError}<p role="alert">{partialCatalogError}</p>{/if}
   {#if section === 'home' && $serverPresentation.welcomeMessage}<p class="server-welcome">{$serverPresentation.welcomeMessage}</p>{/if}
   {#if section === 'settings'}
     <SettingsView

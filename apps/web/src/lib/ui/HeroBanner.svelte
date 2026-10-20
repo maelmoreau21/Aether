@@ -3,7 +3,7 @@
   import type { Work } from '../catalog/api';
   import Icon from './Icon.svelte';
 
-  let heroLoaded = $state(false);
+  let loadedUrl = $state('');
 
   let {
     featured = null,
@@ -22,11 +22,7 @@
       : resolve('films/')
   );
 
-  $effect(() => {
-    if (featured?.artwork?.backdrop || featured?.posterUrl) {
-      heroLoaded = false;
-    }
-  });
+  const imageUrl = $derived(featured?.artwork?.backdrop || featured?.posterUrl || '');
 </script>
 
 <section class="hero-banner" class:has-featured={!!featured} aria-label="Média en vedette">
@@ -39,13 +35,13 @@
     {#if featured?.artwork?.backdrop || featured?.posterUrl}
       <img
         class="backdrop-img"
-        class:loaded={heroLoaded}
-        src={featured?.artwork?.backdrop || featured?.posterUrl || ''}
+        class:loaded={loadedUrl === imageUrl}
+        src={imageUrl}
         alt=""
         loading="eager"
         fetchpriority="high"
         decoding="async"
-        onload={() => { heroLoaded = true; }}
+        onload={() => { loadedUrl = imageUrl; }}
       />
     {/if}
     <div class="backdrop-gradient-vignette"></div>

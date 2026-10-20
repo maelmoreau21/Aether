@@ -110,7 +110,7 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
     }
     let (cookie, csrf) = login(&app, "admin").await;
     let input =
-        json!({"serverName":"Mon serveur","welcomeMessage":"Bienvenue <script>texte</script>"})
+        json!({"serverName":"Mon serveur","welcomeMessage":"Bienvenue <script>texte</script>","ssoButtonLabel":"Connexion avec mon compte"})
             .to_string()
             .into_bytes();
     assert_eq!(
@@ -155,6 +155,38 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
     )
     .await;
     assert_eq!(presentation["serverName"], "Mon serveur");
+    assert_eq!(presentation["ssoButtonLabel"], "Connexion avec mon compte");
+    // Older clients updating the server name must preserve the custom SSO label.
+    assert_eq!(
+        request(
+            &app,
+            "/api/v1/admin/settings",
+            "PUT",
+            &cookie,
+            &csrf,
+            "application/json",
+            json!({"serverName":"Mon serveur","welcomeMessage":"Bienvenue"})
+                .to_string()
+                .into_bytes()
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let saved = json_body(
+        request(
+            &app,
+            "/api/v1/admin/settings",
+            "GET",
+            &cookie,
+            "",
+            "application/json",
+            vec![],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(saved["ssoButtonLabel"], "Connexion avec mon compte");
     let network = json_body(
         request(
             &app,
@@ -186,6 +218,9 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
     assert_eq!(network["secureCookies"], false);
     for input in [
         json!({"serverName":"","welcomeMessage":""}),
+        json!({"serverName":"ok","welcomeMessage":"","ssoButtonLabel":" "}),
+        json!({"serverName":"ok","welcomeMessage":"","ssoButtonLabel":"bad\nlabel"}),
+        json!({"serverName":"ok","welcomeMessage":"","ssoButtonLabel":"x".repeat(81)}),
         json!({"serverName":"ok","welcomeMessage":"","publicUrl":"https://evil.example"}),
     ] {
         assert!(

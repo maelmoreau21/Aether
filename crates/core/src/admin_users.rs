@@ -8,7 +8,8 @@ use argon2::{Algorithm, Argon2, Params, Version, password_hash::PasswordHasher};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Response},
     routing::{get, put},
 };
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,9 @@ struct Account {
     role: String,
     display_name: Option<String>,
     disabled_at: Option<i64>,
+    last_seen_at: Option<i64>,
+    #[sqlx(try_from = "crate::database::DbBool")]
+    has_avatar: bool,
     #[sqlx(try_from = "crate::database::DbBool")]
     sso: bool,
 }
@@ -61,6 +65,7 @@ pub fn router(auth: AuthState) -> Router {
         .route("/api/v1/admin/users", get(list).post(create))
         .route("/api/v1/admin/users/{id}", put(update).patch(update))
         .route("/api/v1/admin/users/{id}/password", put(password))
+        .route("/api/v1/admin/users/{id}/avatar", get(avatar))
         .layer(DefaultBodyLimit::max(4096))
         .with_state(auth)
 }
@@ -124,8 +129,30 @@ async fn list(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     administrator(&auth, &headers, false).await?;
-    let users:Vec<Account>=query_as("SELECT u.id,COALESCE(u.sso_username,c.login,u.display_name,'sso-' || u.id) AS login,u.role,u.display_name,u.disabled_at,CAST((c.login IS NULL) AS INTEGER) AS sso FROM users u LEFT JOIN local_credentials c ON c.user_id=u.id ORDER BY login,u.id").fetch_all(&auth.store.pool).await.map_err(db)?;
+    let users:Vec<Account>=query_as("SELECT u.id,COALESCE(u.sso_username,c.login,u.display_name,'sso-' || u.id) AS login,u.role,u.display_name,u.disabled_at,(SELECT MAX(s.last_seen_at) FROM sessions s WHERE s.user_id=u.id) AS last_seen_at,CAST(EXISTS(SELECT 1 FROM user_avatars a WHERE a.user_id=u.id) AS INTEGER) AS has_avatar,CAST((c.login IS NULL) AS INTEGER) AS sso FROM users u LEFT JOIN local_credentials c ON c.user_id=u.id ORDER BY login,u.id").fetch_all(&auth.store.pool).await.map_err(db)?;
     Ok(Json(serde_json::json!({"users":users})))
+}
+async fn avatar(
+    State(auth): State<AuthState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    administrator(&auth, &headers, false).await?;
+    let bytes: Option<Vec<u8>> =
+        query_scalar("SELECT image_data FROM user_avatars WHERE user_id=?")
+            .bind(id)
+            .fetch_optional(&auth.store.pool)
+            .await
+            .map_err(db)?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "private, no-store"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        ],
+        bytes.ok_or_else(|| error(StatusCode::NOT_FOUND, "avatar_not_found"))?,
+    )
+        .into_response())
 }
 async fn create(
     State(auth): State<AuthState>,

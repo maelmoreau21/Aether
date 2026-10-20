@@ -17,12 +17,27 @@ use serde::{Deserialize, Serialize};
 pub struct Settings {
     pub server_name: String,
     pub welcome_message: String,
+    #[serde(default = "default_sso_button_label")]
+    pub sso_button_label: String,
 }
+fn default_sso_button_label() -> String {
+    "Se connecter avec SSO".into()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SettingsInput {
+    server_name: String,
+    welcome_message: String,
+    sso_button_label: Option<String>,
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
             server_name: media_contracts::brand::DEFAULT_NAME.into(),
             welcome_message: String::new(),
+            sso_button_label: default_sso_button_label(),
         }
     }
 }
@@ -72,12 +87,23 @@ async fn read(
 async fn write(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Json(mut input): Json<Settings>,
+    Json(input): Json<SettingsInput>,
 ) -> Result<StatusCode, StatusCode> {
     administrator(&auth, &headers, true).await?;
-    input.server_name = input.server_name.trim().to_owned();
-    input.welcome_message = input.welcome_message.trim().to_owned();
-    if input.server_name.is_empty()
+    let previous = load(&auth.store).await?;
+    let input = Settings {
+        server_name: input.server_name.trim().to_owned(),
+        welcome_message: input.welcome_message.trim().to_owned(),
+        sso_button_label: input
+            .sso_button_label
+            .unwrap_or(previous.sso_button_label)
+            .trim()
+            .to_owned(),
+    };
+    if input.sso_button_label.is_empty()
+        || input.sso_button_label.chars().count() > 80
+        || input.sso_button_label.chars().any(char::is_control)
+        || input.server_name.is_empty()
         || input.server_name.chars().count() > 80
         || input.server_name.chars().any(char::is_control)
         || input.welcome_message.chars().count() > 500

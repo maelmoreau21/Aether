@@ -2,13 +2,13 @@
   import { adminRequest } from './request';
   import { serverPresentation } from '../config/presentation';
   let { section }: { section: string } = $props();
-  let name = $state(''), welcome = $state(''), error = $state(''), notice = $state('');
+  let name = $state(''), welcome = $state(''), ssoLabel = $state('Se connecter avec SSO'), error = $state(''), notice = $state('');
   let loading = $state(true), saving = $state(false);
   let network = $state<{ publicUrl: string; secureCookies: boolean; webPath: string; apiPath: string } | null>(null);
   async function load(target: string) {
     loading = true; error = ''; notice = '';
     try {
-      if (target === '#general-section') { const data = await adminRequest<{ serverName: string; welcomeMessage: string }>('/api/v1/admin/settings'); name = data.serverName; welcome = data.welcomeMessage; }
+      if (target === '#general-section') { const data = await adminRequest<{ serverName: string; welcomeMessage: string; ssoButtonLabel: string }>('/api/v1/admin/settings'); name = data.serverName; welcome = data.welcomeMessage; ssoLabel = data.ssoButtonLabel ?? 'Se connecter avec SSO'; }
       else network = await adminRequest('/api/v1/admin/network');
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Chargement impossible.'; }
     finally { loading = false; }
@@ -17,9 +17,9 @@
   async function save(event: SubmitEvent) {
     event.preventDefault(); if (saving) return; saving = true; error = ''; notice = '';
     try {
-      await adminRequest('/api/v1/admin/settings', { method: 'PUT', body: JSON.stringify({ serverName: name, welcomeMessage: welcome }) });
-      const saved = await adminRequest<{ serverName: string; welcomeMessage: string }>('/api/v1/admin/settings');
-      name = saved.serverName; welcome = saved.welcomeMessage; serverPresentation.set(saved); notice = 'Paramètres enregistrés.';
+      await adminRequest('/api/v1/admin/settings', { method: 'PUT', body: JSON.stringify({ serverName: name, welcomeMessage: welcome, ssoButtonLabel: ssoLabel }) });
+      const saved = await adminRequest<{ serverName: string; welcomeMessage: string; ssoButtonLabel: string }>('/api/v1/admin/settings');
+      name = saved.serverName; welcome = saved.welcomeMessage; ssoLabel = saved.ssoButtonLabel; serverPresentation.set(saved); notice = 'Paramètres enregistrés.';
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Enregistrement impossible.'; }
     finally { saving = false; }
   }
@@ -29,6 +29,7 @@
   <form onsubmit={save}><fieldset disabled={loading || saving}>
     <label>Nom du serveur<input bind:value={name} required maxlength="80" autocomplete="off" /></label><p>Affiché dans la navigation de cette installation.</p>
     <label>Message d’accueil<textarea bind:value={welcome} maxlength="500" rows="3"></textarea></label><p>Texte affiché sur l’accueil des utilisateurs connectés.</p>
+    <label>Texte du bouton de connexion SSO<input bind:value={ssoLabel} required maxlength="80" placeholder="Se connecter avec Authentik" /></label><p>Libellé affiché sur la page de connexion. Enregistré immédiatement, sans redémarrage du Core.</p>
     <button type="submit">{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
   </fieldset></form>
 </section>

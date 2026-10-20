@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "browser": "155.0.8059.82",
+  "platform": "win32",
+  "backend": "real Core / temporary SQLite",
+  "checks": [
+    "user creation and library permissions",
+    "admin avatar decoded",
+    "non-expiring API key and revocation",
+    "persisted SSO label",
+    "groups",
+    "schedules",
+    "scans",
+    "encrypted backups",
+    "preferences",
+    "responsive layout"
+  ],
+  "jsErrors": []
+}

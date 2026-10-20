@@ -108,11 +108,17 @@ Core est créée ; le mot de passe et le rôle local sont conservés. La liaison
 administrateur confirme une identité de ce compte déjà administrateur, sans
 promotion. Un administrateur local actif est requis avant de commencer OIDC.
 
+## Texte du bouton de connexion
+
+Dans **Administration → Général → Texte du bouton de connexion SSO**, saisir par exemple « Se connecter avec Authentik », puis enregistrer. Le libellé (1 à 80 caractères, sans caractères de contrôle) est conservé en base avec la présentation du serveur et appliqué à la prochaine ouverture de la page de connexion, sans redémarrage. Le texte est rendu comme texte, jamais comme HTML. Le réglage nécessite une session administrateur et le CSRF ; le statut OIDC public ne renvoie que ce libellé, sans le nom ou le message privé du serveur.
+
+`GET/PUT /api/v1/admin/settings` inclut `ssoButtonLabel`. Les anciens appels PUT qui omettent ce champ conservent sa valeur existante. Les anciennes configurations sans ce champ utilisent « Se connecter avec SSO ».
+
 ## API et cookies
 
 | Route | Contrat |
 | --- | --- |
-| `GET /api/v1/auth/oidc/status` | Public : `{enabled}` uniquement ; ne contacte pas l'IdP |
+| `GET /api/v1/auth/oidc/status` | Public : `{enabled,provider?,localLoginEnabled,buttonLabel}` ; ne contacte pas l'IdP |
 | `GET /api/v1/admin/oidc` | Session administrator ; enabled, issuer, clientId, redirectUri, scopes, groupsClaim, requireGroup, userGroups, endSessionEndpoint, localLoginEnabled ; jamais de secret |
 | `POST /api/v1/auth/oidc/start` | Origin exact ; retourne `{url}`, pose le cookie temporaire ; 404 si désactivé |
 | `POST /api/v1/auth/oidc/link` | JSON `{password}` ; session locale + Origin + CSRF + revalidation Argon2 ; retourne `{url}` |

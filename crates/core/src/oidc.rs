@@ -323,7 +323,11 @@ fn routes(state: Oidc) -> Router {
         .with_state(state)
 }
 
-async fn public_status(State(s): State<Oidc>) -> Json<serde_json::Value> {
+async fn public_status(State(s): State<Oidc>) -> Result<Json<serde_json::Value>, Error> {
+    let button_label = crate::server_settings::load(&s.auth.store)
+        .await
+        .map_err(|status| deny(status, "internal_error"))?
+        .sso_button_label;
     let local_login_enabled = crate::auth::is_local_login_enabled();
     if let Some(c) = &s.config {
         let issuer_lower = c.issuer.to_lowercase();
@@ -338,16 +342,18 @@ async fn public_status(State(s): State<Oidc>) -> Json<serde_json::Value> {
         } else {
             "SSO"
         };
-        Json(serde_json::json!({
+        Ok(Json(serde_json::json!({
             "enabled": true,
             "provider": provider,
-            "localLoginEnabled": local_login_enabled
-        }))
+            "localLoginEnabled": local_login_enabled,
+            "buttonLabel": button_label
+        })))
     } else {
-        Json(serde_json::json!({
+        Ok(Json(serde_json::json!({
             "enabled": false,
-            "localLoginEnabled": local_login_enabled
-        }))
+            "localLoginEnabled": local_login_enabled,
+            "buttonLabel": button_label
+        })))
     }
 }
 
@@ -1012,6 +1018,29 @@ mod tests {
             task,
         }
     }
+    #[tokio::test]
+    async fn public_status_reads_persisted_button_label_without_exposing_settings() {
+        let f = fixture().await;
+        crate::database::query("INSERT INTO server_settings(singleton,settings_json) VALUES(1,?)")
+            .bind(serde_json::json!({"serverName":"Private server name","welcomeMessage":"Private welcome","ssoButtonLabel":"Connexion avec mon compte"}).to_string())
+            .execute(&f.s.auth.store.pool).await.unwrap();
+        let value = body(
+            req(
+                &f.s,
+                "/api/v1/auth/oidc/status",
+                "GET",
+                "",
+                "",
+                serde_json::Value::Null,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(value["buttonLabel"], "Connexion avec mon compte");
+        assert!(value.get("serverName").is_none());
+        assert!(value.get("welcomeMessage").is_none());
+    }
+
     async fn body(r: Response) -> serde_json::Value {
         serde_json::from_slice(&r.into_body().collect().await.unwrap().to_bytes()).unwrap()
     }

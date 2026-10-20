@@ -264,7 +264,10 @@ pub fn execute(invocation: Invocation) -> Result<ExtensionResponse, &'static str
     let mut config = Config::default();
     config.consume_fuel(true).allow_start_fn(false);
     config.enforced_limits(EnforcedLimits::strict());
-    config.set_max_stack_height(1024);
+    // Wasmi measures the value stack in bytes, independently of recursion depth.
+    // 1 KiB rejected ordinary Rust/serde modules before their handler could run.
+    config.set_max_stack_height(64 * 1024);
+    config.set_max_recursion_depth(128);
     let engine = Engine::new(&config);
     let module = Module::new(&engine, &bytes).map_err(|_| "invalid_module")?;
 

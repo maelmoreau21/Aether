@@ -58,6 +58,9 @@ Le projet privilégie la **lecture directe** et évite d'imposer un transcodage 
 
 ## 🚀 Installation rapide
 
+**Sur ce PC Windows, sans Docker :** suivre le [guide local pas à pas](docs/INSTALLATION_LOCALE.md).
+Il couvre le premier administrateur, le démarrage et l’installation des extensions.
+
 ### Prérequis
 
 - Docker et Docker Compose v2 sur une machine Linux `x86_64` (ou un environnement compatible Docker).
@@ -106,7 +109,7 @@ docker compose up -d --build
 ### 4. Créer le premier administrateur
 
 ```bash
-docker compose exec -it aether media-bootstrap --login admin
+docker compose exec -it aether media-bootstrap
 ```
 
 Définissez un mot de passe lors de l'amorçage interactif. **Aether ne possède aucun compte ni mot de passe par défaut.**

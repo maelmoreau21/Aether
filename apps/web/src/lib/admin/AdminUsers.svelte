@@ -18,13 +18,20 @@
     libraries,
     currentUserId, groups = [], onchanged
   }: Props = $props();
-  type Account = AuthUser & { disabledAt?: number | null };
+  type Account = AuthUser & { disabledAt?: number | null; lastSeenAt?: number | null; hasAvatar?: boolean };
+  let failedAvatars = $state<string[]>([]);
+  function activityLabel(timestamp: number | null | undefined) {
+    if (timestamp == null) return 'Aucune session enregistrée';
+    return 'Dernière activité : ' + new Date(timestamp * 1000).toLocaleString($locale === 'en' ? 'en-GB' : 'fr-FR');
+  }
   let accounts = $state<Account[] | null>(null);
   const allUsers = $derived(accounts ?? users);
   let busy = $state(false);
   let message = $state('');
   let failed = $state(false);
   let editing = $state<Account | null>(null);
+  let editorOpen = $state(false);
+  let activeTab = $state<'profile' | 'access' | 'parental' | 'password'>('profile');
   let login = $state('');
   let displayName = $state('');
   let role = $state<'administrator' | 'user'>('user');
@@ -36,8 +43,10 @@
     const response = await fetch('/api/v1/admin/users', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error('Chargement des comptes impossible.');
     accounts = (await response.json()).users;
+    failedAvatars = [];
   }
   function edit(user: Account | null) {
+    editorOpen = true; activeTab = 'profile';
     editing = user; login = user?.login ?? ''; displayName = user?.displayName ?? '';
     role = user?.role ?? 'user'; disabled = user?.disabledAt != null; password = ''; newPassword = '';
     libraryIds = user ? libraries.filter(l => l.userIds.includes(user.id)).map(l => l.id) : [];
@@ -78,7 +87,7 @@
         password = '';
         message = 'Compte créé avec ses autorisations d’accès aux bibliothèques.';
       }
-      await refresh(); await onchanged?.(); edit(null);
+      await refresh(); await onchanged?.(); editorOpen = false; editing = null; password = ''; newPassword = '';
     } catch (error) { failed = true; message = error instanceof Error ? error.message : 'Opération impossible.'; }
     finally { busy = false; }
   }
@@ -120,425 +129,164 @@
 
 <section id="users-section" class="dashboard-section" aria-labelledby="users-heading">
   <div class="section-header">
-    <div class="header-icon-wrap">
-      <Icon name="users" size={18} />
-    </div>
-    <div>
-      <h2 id="users-heading" class="section-title">{$t('users_heading')}</h2>
-      <p class="section-subtitle">{$t('users_subtitle')}</p>
-    </div>
+    <div><h2 id="users-heading">{$t('users_heading')}</h2><p>{$t('users_subtitle')}</p></div>
+    <button type="button" class="btn btn-primary" disabled={busy} onclick={() => edit(null)}>+ Créer un compte local</button>
   </div>
 
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title-group">
-        <h3>{$t('registered_accounts')} ({allUsers.length})</h3>
-        <span class="muted-note">{$t('strict_roles_note')}</span>
+  {#if message}<p class="notice" role={failed ? 'alert' : 'status'}>{message}</p>{/if}
+  {#if editorOpen}
+    <div class="account-detail">
+      <div class="detail-heading">
+        <h3>{editing ? editing.displayName || editing.login : 'Créer un compte local'}</h3>
+        <button type="button" class="btn btn-secondary" disabled={busy} onclick={() => { editorOpen = false; password = ''; newPassword = ''; }}>Retour aux utilisateurs</button>
       </div>
-      <div class="badge-role-stats">
-        <span class="role-pill admin-pill">
-          {allUsers.filter(u => u.role === 'administrator').length} {$t('administrator')}
-        </span>
-        <span class="role-pill user-pill">
-          {allUsers.filter(u => u.role === 'user').length} {$t('user')}(s)
-        </span>
-      </div>
-    </div>
-
-    <form class="account-editor" onsubmit={(event) => { event.preventDefault(); void save(); }}>
-      <h3>{editing ? `Modifier ${editing.login}` : 'Créer un compte local'}</h3>
-      {#if !editing}<label>Identifiant<input required minlength="3" maxlength="64" pattern="[a-z0-9._-]+" autocomplete="off" bind:value={login} /></label>{/if}
-      <label>Nom affiché<input maxlength="128" bind:value={displayName} /></label>
-      <label>Rôle<select bind:value={role} disabled={editing?.id === currentUserId}><option value="user">Utilisateur</option><option value="administrator">Administrateur</option></select></label>
-      {#if editing}<label><input type="checkbox" bind:checked={disabled} disabled={editing.id === currentUserId} /> Compte désactivé</label>
-      {:else}<label>Mot de passe (15 à 128 caractères)<input type="password" required minlength="15" maxlength="128" autocomplete="new-password" bind:value={password} /></label>{/if}
-      {#if role === 'user'}
-        <fieldset class="user-libraries-fieldset" disabled={busy}>
-          <legend>Bibliothèques autorisées</legend>
-          {#if libraries.length === 0}
-            <p class="muted-note">Aucune bibliothèque configurée.</p>
-          {:else}
-            <div class="user-libraries-grid">
-              {#each libraries as library (library.id)}
-                <label class="check">
-                  <input
-                    type="checkbox"
-                    value={library.id}
-                    bind:group={libraryIds}
-                    aria-label={"Bibliothèque autorisée : " + library.name}
-                  />
-                  <span>{library.name}{library.enabled ? '' : ' (désactivée)'}</span>
-                </label>
-              {/each}
-            </div>
-          {/if}
-        </fieldset>
+      {#if editing}
+        <nav class="account-tabs" aria-label="Paramètres du compte">
+          <button type="button" aria-current={activeTab === 'profile' ? 'page' : undefined} onclick={() => activeTab = 'profile'}>Profil</button>
+          <button type="button" aria-current={activeTab === 'access' ? 'page' : undefined} onclick={() => activeTab = 'access'}>Accès</button>
+          <button type="button" aria-current={activeTab === 'parental' ? 'page' : undefined} onclick={() => activeTab = 'parental'}>Contrôle parental</button>
+          <button type="button" aria-current={activeTab === 'password' ? 'page' : undefined} onclick={() => activeTab = 'password'}>Mot de passe</button>
+        </nav>
       {/if}
-      <button type="submit" class="btn btn-primary" disabled={busy}>{busy ? 'Enregistrement…' : editing ? 'Enregistrer' : 'Créer le compte'}</button>
-      {#if editing}<button type="button" class="btn btn-secondary" disabled={busy} onclick={() => edit(null)}>Annuler</button>{/if}
-    </form>
-    {#if editing}<ParentalPolicy userId={editing.id} />{/if}
-    {#if editing && !editing.sso}
-      <form class="account-editor" onsubmit={(event) => { event.preventDefault(); void save(true); }}>
-        <h3>Remplacer le mot de passe local</h3>
-        <p>Toutes les sessions de ce compte seront déconnectées.</p>
-        <label>Nouveau mot de passe<input type="password" required minlength="15" maxlength="128" autocomplete="new-password" bind:value={newPassword} /></label>
-        <button type="submit" class="btn btn-secondary" disabled={busy}>Remplacer et révoquer les sessions</button>
-      </form>
-    {/if}
-    {#if message}<p role={failed ? 'alert' : 'status'}>{message}</p>{/if}
-    <button type="button" class="btn btn-secondary" disabled={busy} onclick={() => refresh().catch(() => { failed = true; message = 'Chargement impossible.'; })}>Actualiser les comptes et leurs états</button>
-    <div class="account-filters">
-      <label class="search-filter">{copy.search}
-        <input type="search" bind:value={search} placeholder={copy.placeholder} />
-      </label>
-      <label>{copy.role}
-        <select bind:value={roleFilter}>
-          <option value="all">{copy.all}</option>
-          <option value="administrator">{$t('administrator')}</option>
-          <option value="user">{$t('user')}</option>
-        </select>
-      </label>
-      <label>{copy.authentication}
-        <select bind:value={authFilter}>
-          <option value="all">{copy.all}</option>
-          <option value="local">{$t('local_account')}</option>
-          <option value="sso">{$t('sso_badge')}</option>
-        </select>
-      </label>
-      <label>{copy.access}
-        <select bind:value={accessFilter}>
-          <option value="all">{copy.all}</option>
-          <option value="with">{copy.withAccess}</option>
-          <option value="without">{copy.withoutAccess}</option>
-        </select>
-      </label>
-    </div>
-    <div class="directory-summary">
-      <span role="status">{visibleUsers.length} / {allUsers.length} {copy.results}</span>
-      {#if search || roleFilter !== 'all' || authFilter !== 'all' || accessFilter !== 'all'}
-        <button type="button" onclick={resetFilters}>{copy.reset}</button>
-      {/if}
-    </div>
-    <div class="users-table-wrapper">
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>{$t('col_user_login')}</th>
-            <th>{$t('col_user_name')}</th>
-            <th>{$t('col_auth_type')}</th>
-            <th>{$t('col_role')}</th>
-            <th>{$t('col_allowed_libs')}</th><th>Gestion</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each visibleUsers as user (user.id)}
-            {@const isSso = user.sso === true}
-            {@const userLibraries = libraries.filter(lib => lib.userIds.includes(user.id) || groups.some(group => (group.isDefault || group.userIds.includes(user.id)) && group.libraryIds.includes(lib.id)))}
-            <tr>
-              <td>
-                <div class="user-login-cell">
-                  <strong>{user.login}</strong>
-                  {#if user.id === currentUserId}
-                    <span class="current-user-badge">{$t('you')}</span>
-                  {/if}
-                </div>
-                <details class="account-id"><summary>{copy.identifier}</summary><code>{user.id}</code></details>
-              </td>
-              <td>
-                <span class="user-display-name">
-                  {user.displayName || user.login}
-                </span>
-              </td>
-              <td>
-                <span class="badge" data-status={isSso ? 'disconnected' : 'connected'}>
-                  {user.sso == null ? copy.unknown : isSso ? $t('sso_badge') : $t('local_account')}
-                </span>
-              </td>
-              <td>
-                <span class="role-badge" class:admin-role={user.role === 'administrator'}>
-                  {user.role === 'administrator' ? $t('administrator') : $t('user')}
-                </span>
-              </td>
-              <td>
-                {#if user.role === 'administrator'}
-                  <span class="all-access-badge">{$t('all_libs_granted')}</span>
-                {:else if userLibraries.length > 0}
-                  <div class="lib-badges-list">
-                    {#each userLibraries as lib (lib.id)}
-                      <span class="badge kind-badge" class:disabled-library={!lib.enabled}>{lib.name}{!lib.userIds.includes(user.id) ? ' � groupe' : ''}{!lib.enabled ? ` · ${copy.disabled}` : ''}</span>
+      {#if activeTab === 'profile' || activeTab === 'access'}
+        <form class="account-editor" onsubmit={(event) => { event.preventDefault(); void save(); }}>
+          <fieldset class="editor-fields" disabled={busy} hidden={activeTab !== 'profile'}>
+            <legend>Profil du compte</legend>
+            {#if !editing}<label>Identifiant<input required minlength="3" maxlength="64" pattern="[a-z0-9._-]+" autocomplete="off" bind:value={login} /></label>
+            {:else}<p>Identifiant : <strong>{editing.login}</strong> · {editing.sso ? 'Connexion SSO' : 'Compte local'}</p>{/if}
+            <label>Nom affiché<input maxlength="128" bind:value={displayName} /></label>
+            <label>Rôle<select bind:value={role} disabled={editing?.id === currentUserId}><option value="user">Utilisateur</option><option value="administrator">Administrateur</option></select></label>
+            {#if editing}
+              <label class="check"><input type="checkbox" bind:checked={disabled} disabled={editing.id === currentUserId} /> Compte désactivé</label>
+              <p class="muted-note">La désactivation conserve les données et déconnecte le compte. Votre propre compte administrateur est protégé.</p>
+              {#if editing.sso}<p class="muted-note">Le rôle SSO peut être réappliqué par le fournisseur à la prochaine connexion.</p>{/if}
+            {:else}<label>Mot de passe (15 à 128 caractères)<input type="password" required minlength="15" maxlength="128" autocomplete="new-password" bind:value={password} /></label>{/if}
+          </fieldset>
+          {#if activeTab === 'access' || !editing}
+            <fieldset class="user-libraries-fieldset" disabled={busy}>
+              <legend>Accès aux bibliothèques</legend>
+              {#if role === 'administrator'}
+                <p>Les administrateurs ont accès à toutes les bibliothèques actives.</p>
+              {:else}
+                <p>Choisissez les bibliothèques accessibles à ce compte. Les accès accordés par un groupe s’ajoutent à cette sélection.</p>
+                {#if libraries.length === 0}<p class="muted-note">Aucune bibliothèque configurée.</p>
+                {:else}
+                  <label class="check select-all"><input type="checkbox" checked={libraries.every(library => libraryIds.includes(library.id))} onchange={(event) => libraryIds = event.currentTarget.checked ? libraries.map(library => library.id) : []} />Sélectionner toutes les bibliothèques actuelles</label>
+                  <div class="user-libraries-grid">
+                    {#each libraries as library (library.id)}
+                      {@const inherited = editing ? groups.filter(group => (group.isDefault || group.userIds.includes(editing?.id ?? '')) && group.libraryIds.includes(library.id)) : []}
+                      <div class="library-choice">
+                        <label class="check"><input type="checkbox" value={library.id} bind:group={libraryIds} aria-label={'Bibliothèque autorisée : ' + library.name} /><span>{library.name}{library.enabled ? '' : ' (désactivée)'}</span></label>
+                        {#if inherited.length}<span class="inherited">Également autorisée par : {inherited.map(group => group.name).join(', ')}</span>{/if}
+                      </div>
                     {/each}
                   </div>
-                {:else}
-                  <span class="muted">{$t('no_libs_granted')}</span>
+                  <p class="muted-note">Les futures bibliothèques ne seront pas ajoutées automatiquement. Décocher une bibliothèque ne retire pas un accès accordé par un groupe.</p>
                 {/if}
-              </td>
-              <td><button type="button" class="btn btn-secondary" disabled={busy} onclick={() => edit(user)}>Modifier</button>{#if user.disabledAt != null}<span class="badge">Désactivé</span>{/if}</td>
-            </tr>
-          {:else}
-            <tr><td colspan="6" class="empty-directory">{copy.empty}</td></tr>
-          {/each}
-        </tbody>
-      </table>
+              {/if}
+            </fieldset>
+          {/if}
+          <div class="editor-actions"><button type="submit" class="btn btn-primary" disabled={busy}>{busy ? 'Enregistrement…' : editing ? 'Enregistrer' : 'Créer le compte'}</button><button type="button" class="btn btn-secondary" disabled={busy} onclick={() => { editorOpen = false; password = ''; newPassword = ''; }}>Annuler</button></div>
+        </form>
+      {:else if editing && activeTab === 'parental'}
+        <ParentalPolicy userId={editing.id} />
+      {:else if editing && activeTab === 'password'}
+        {#if editing.sso}<p>Le mot de passe de ce compte est géré par votre fournisseur SSO.</p>
+        {:else}<form class="account-editor" onsubmit={(event) => { event.preventDefault(); void save(true); }}>
+          <h4>Remplacer le mot de passe local</h4><p>Toutes les sessions de ce compte seront déconnectées.</p>
+          <label>Nouveau mot de passe<input type="password" required minlength="15" maxlength="128" autocomplete="new-password" bind:value={newPassword} /></label>
+          <button type="submit" class="btn btn-primary" disabled={busy}>Remplacer et révoquer les sessions</button>
+        </form>{/if}
+      {/if}
     </div>
-
-    <div class="security-footer-note">
-      <Icon name="shield" size={16} />
-      <span>
-        {copy.limit}
-        <a href="#groups-section">{copy.manage}</a>
-      </span>
+  {:else}
+    <div class="directory-toolbar"><span>{allUsers.length} comptes · {allUsers.filter(user => user.role === 'administrator').length} administrateur(s)</span><button type="button" class="btn btn-secondary" disabled={busy} onclick={() => refresh().catch(() => { failed = true; message = 'Chargement impossible.'; })}>Actualiser les comptes et leurs états</button></div>
+    <div class="account-filters">
+      <label class="search-filter">{copy.search}<input type="search" bind:value={search} placeholder={copy.placeholder} /></label>
+      <label>{copy.role}<select bind:value={roleFilter}><option value="all">{copy.all}</option><option value="administrator">{$t('administrator')}</option><option value="user">{$t('user')}</option></select></label>
+      <label>{copy.authentication}<select bind:value={authFilter}><option value="all">{copy.all}</option><option value="local">{$t('local_account')}</option><option value="sso">{$t('sso_badge')}</option></select></label>
+      <label>{copy.access}<select bind:value={accessFilter}><option value="all">{copy.all}</option><option value="with">{copy.withAccess}</option><option value="without">{copy.withoutAccess}</option></select></label>
     </div>
-  </div>
+    <div class="directory-summary"><span role="status">{visibleUsers.length} / {allUsers.length} {copy.results}</span>{#if search || roleFilter !== 'all' || authFilter !== 'all' || accessFilter !== 'all'}<button type="button" onclick={resetFilters}>{copy.reset}</button>{/if}</div>
+    <div class="users-grid">
+      {#each visibleUsers as user (user.id)}
+        {@const userLibraries = libraries.filter(library => library.enabled && (user.role === 'administrator' || library.userIds.includes(user.id) || groups.some(group => (group.isDefault || group.userIds.includes(user.id)) && group.libraryIds.includes(library.id))))}
+        <article class="user-card" class:disabled-account={user.disabledAt != null}>
+          <button type="button" class="user-card-open" disabled={busy} onclick={() => edit(user)} aria-label={'Modifier ' + (user.displayName || user.login)}>
+            <span class="user-avatar" aria-hidden="true">{#if user.hasAvatar && !failedAvatars.includes(user.id)}<img src={`/api/v1/admin/users/${encodeURIComponent(user.id)}/avatar`} alt="" width="96" height="96" loading="lazy" decoding="async" onerror={() => failedAvatars = [...failedAvatars, user.id]} />{:else}{(user.displayName || user.login).slice(0, 2).toLocaleUpperCase()}{/if}</span>
+            <span class="user-name">{user.displayName || user.login}</span>
+            <span class="user-login">{user.login}{user.id === currentUserId ? ' · ' + $t('you') : ''}</span>
+            <span class="card-badges"><span class="badge" class:admin-role={user.role === 'administrator'}>{user.role === 'administrator' ? $t('administrator') : $t('user')}</span><span class="badge">{user.sso == null ? copy.unknown : user.sso ? $t('sso_badge') : $t('local_account')}</span></span>
+            <span class="access-summary">{user.disabledAt != null ? 'Compte désactivé' : user.role === 'administrator' ? $t('all_libs_granted') : `${userLibraries.length} bibliothèque(s) accessible(s)`}</span>
+            <span class="access-summary">{activityLabel(user.lastSeenAt)}</span>
+            <span class="edit-label">Modifier le compte →</span>
+          </button>
+          <details class="account-id"><summary>{copy.identifier}</summary><code>{user.id}</code></details>
+        </article>
+      {:else}<p class="empty-directory">{copy.empty}</p>{/each}
+    </div>
+  {/if}
+  <div class="security-footer-note"><Icon name="shield" size={16} /><span>{copy.limit}<a href="#groups-section">{copy.manage}</a></span></div>
 </section>
 
 <style>
-  .account-editor { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; padding: 18px; margin-bottom: 20px; background: var(--color-raised); border-radius: var(--radius-sm); }
-  .account-editor h3, .account-editor p { flex-basis: 100%; margin: 0; }
-  .account-editor label { display: grid; gap: 7px; flex: 1 1 180px; font-size: 13px; }
-  .account-editor input:not([type="checkbox"]), .account-editor select { min-height: 40px; padding: 8px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font: inherit; }
-  .account-filters { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 14px; }
-  .account-filters label { display: grid; gap: 7px; flex: 1 1 150px; font-size: 12px; color: var(--color-muted); }
-  .account-filters .search-filter { flex-grow: 2; }
-  .account-filters input, .account-filters select { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: var(--color-raised); color: var(--color-text); font: inherit; }
-  .directory-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-bottom: 14px; font-size: 12px; color: var(--color-muted); }
-  .directory-summary button { border: 0; background: transparent; color: var(--color-accent); cursor: pointer; font: inherit; }
-  .account-id { margin-top: 7px; color: var(--color-muted); font-size: 11px; }
-  .account-id summary { cursor: pointer; }
-  .account-id code { display: block; margin-top: 5px; overflow-wrap: anywhere; }
-  .admin-table .empty-directory { padding: 32px 14px; text-align: center; color: var(--color-muted); }
-  .disabled-library { opacity: .65; }
-  .security-footer-note a { display: block; margin-top: 8px; color: var(--color-accent); }
-  :is(input, select, button, a, summary):focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
-
-  .dashboard-section {
-    margin-bottom: 48px;
-    scroll-margin-top: 24px;
-  }
-
-  .section-header {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-bottom: 24px;
-    padding-bottom: 14px;
-    border-bottom: 1px solid var(--color-line);
-  }
-
-  .header-icon-wrap {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-sm);
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-
-  .section-title {
-    font-size: 20px;
-    font-weight: 650;
-    letter-spacing: -0.02em;
-    margin: 0;
-    color: var(--color-text);
-  }
-
-  .section-subtitle {
-    margin: 4px 0 0;
-    font-size: 13px;
-    color: var(--color-muted);
-  }
-
-  .card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-md);
-    padding: 24px;
-  }
-
-  .card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 20px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--color-line);
-    flex-wrap: wrap;
-  }
-
-  .card-title-group h3 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-  }
-
-  .badge-role-stats {
-    display: flex;
-    gap: 8px;
-  }
-
-  .role-pill {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 3px 10px;
-    border-radius: 99px;
-  }
-
-  .admin-pill {
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-  }
-
-  .user-pill {
-    background: var(--color-raised);
-    color: var(--color-muted);
-  }
-
-  .users-table-wrapper {
-    overflow-x: auto;
-  }
-
-  .admin-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-    text-align: left;
-  }
-
-  .admin-table th {
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--color-line);
-    color: var(--color-muted);
-    font-weight: 500;
-    font-size: 12px;
-  }
-
-  .admin-table td {
-    padding: 14px;
-    border-bottom: 1px solid var(--color-line);
-    vertical-align: middle;
-  }
-
-  .user-login-cell {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .current-user-badge {
-    font-size: 10px;
-    font-weight: 600;
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-    padding: 2px 6px;
-    border-radius: 4px;
-  }
-
-  .role-badge {
-    font-size: 11px;
-    padding: 3px 8px;
-    border-radius: 4px;
-    background: var(--color-raised);
-    color: var(--color-muted);
-  }
-
-  .admin-role {
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-    font-weight: 600;
-  }
-
-  .all-access-badge {
-    color: var(--status-success);
-    font-size: 12px;
-    font-weight: 500;
-  }
-
-  .lib-badges-list {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    font-weight: 500;
-    padding: 2px 8px;
-    border-radius: 99px;
-    border: 1px solid var(--color-line);
-    vertical-align: middle;
-  }
-
-  .badge[data-status='connected'] {
-    color: var(--status-success);
-    border-color: var(--color-line);
-    background: var(--color-raised);
-  }
-
-  .badge[data-status='disconnected'] {
-    color: var(--text-secondary);
-    border-color: var(--color-line);
-    background: var(--color-raised);
-  }
-
-  .kind-badge {
-    background: var(--color-raised);
-    color: var(--color-text);
-  }
-
-  .security-footer-note {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 20px;
-    padding: 12px 16px;
-    background: var(--color-raised);
-    border-radius: var(--radius-sm);
-    font-size: 12px;
-    color: var(--color-muted);
-  }
-
-  .muted-note {
-    font-size: 12px;
-    color: var(--color-muted);
-  }
-
-  .muted {
-    color: var(--color-subtle);
-    font-size: 12px;
-  }
-  .user-libraries-fieldset {
-    flex-basis: 100%;
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    padding: 12px 16px;
-    margin-top: 4px;
-    background: var(--color-surface);
-  }
-  .user-libraries-fieldset legend {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--color-text);
-    padding: 0 4px;
-  }
-  .user-libraries-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-top: 6px;
-  }
-  .user-libraries-grid .check {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0;
-    cursor: pointer;
-    font-size: 13px;
-  }
+  .dashboard-section { margin-bottom:48px;scroll-margin-top:24px; }
+  .section-header,.detail-heading,.directory-toolbar,.directory-summary,.editor-actions { display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap; }
+  .section-header { margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--color-line); }
+  h2,h3,h4,p { margin:0; }
+  h2 { font-size:22px; } h3 { font-size:20px; } h4 { font-size:16px; }
+  .section-header p,.muted-note,.directory-toolbar,.directory-summary { color:var(--color-muted);font-size:13px; }
+  .section-header p { margin-top:6px; }
+  .account-detail { padding:24px;background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-md); }
+  .account-tabs { display:flex;gap:8px;overflow-x:auto;border-bottom:1px solid var(--color-line);margin:20px 0; }
+  .account-tabs button { border:0;border-bottom:3px solid transparent;background:transparent;color:var(--color-muted);padding:12px;white-space:nowrap;font:inherit;cursor:pointer; }
+  .account-tabs button[aria-current="page"] { border-bottom-color:var(--color-accent);color:var(--color-accent); }
+  .btn { display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:10px 16px;border:1px solid var(--color-line);border-radius:var(--radius-sm);font:inherit;cursor:pointer; }
+  .btn-primary { background:var(--color-accent);color:var(--color-on-accent);border-color:var(--color-accent); }
+  .btn-secondary { background:var(--color-surface);color:var(--color-text); }
+  .btn:disabled { opacity:.6;cursor:wait; }
+  .account-editor { display:grid;gap:20px;max-width:780px;margin-top:20px; }
+  .editor-fields { display:grid;gap:18px;border:0;padding:0;margin:0; }
+  .editor-fields[hidden] { display:none; }
+  .editor-fields legend { margin-bottom:16px;font-weight:600; }
+  .account-editor label,.account-filters label { display:grid;gap:7px;font-size:13px; }
+  input:not([type="checkbox"]),select { width:100%;min-height:42px;padding:8px 10px;border:1px solid var(--color-line);border-radius:var(--radius-sm);background:var(--color-raised);color:var(--color-text);font:inherit;box-sizing:border-box; }
+  input[type="checkbox"] { width:20px;height:20px;accent-color:var(--color-accent);flex-shrink:0; }
+  .account-editor .check { display:flex;align-items:center;gap:10px;cursor:pointer; }
+  .user-libraries-fieldset { border:1px solid var(--color-line);border-radius:var(--radius-sm);padding:18px;margin:0; }
+  .user-libraries-fieldset legend { padding:0 6px;font-weight:600; }
+  .user-libraries-fieldset p { margin:8px 0 16px;font-size:13px;line-height:1.6; }
+  .user-libraries-grid { display:grid;gap:1px;background:var(--color-line);border:1px solid var(--color-line);border-radius:var(--radius-sm);overflow:hidden; }
+  .library-choice { padding:14px;background:var(--color-raised); }
+  .inherited { display:block;color:var(--color-muted);font-size:12px;margin:6px 0 0 30px; }
+  .select-all { margin-bottom:16px; }
+  .directory-toolbar { margin-bottom:20px; }
+  .account-filters { display:flex;flex-wrap:wrap;gap:14px;margin-bottom:14px; }
+  .account-filters label { flex:1 1 140px;color:var(--color-muted); }
+  .account-filters .search-filter { flex-grow:2; }
+  .directory-summary { margin-bottom:20px; }
+  .directory-summary button { border:0;background:transparent;color:var(--color-accent);cursor:pointer;font:inherit; }
+  .users-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:18px; }
+  .user-card { min-width:0;overflow:hidden;border:1px solid var(--color-line);border-radius:var(--radius-md);background:var(--color-surface); }
+  .user-card-open { display:flex;flex-direction:column;align-items:flex-start;gap:10px;width:100%;padding:20px;border:0;background:transparent;color:var(--color-text);text-align:left;cursor:pointer;font:inherit; }
+  .user-card:hover { border-color:var(--color-accent); }
+  .user-avatar { display:grid;place-items:center;align-self:center;width:96px;height:96px;border-radius:50%;margin:4px 0 12px;background:var(--color-accent-soft);color:var(--color-accent);font-size:32px;font-weight:650; }
+  .user-avatar { overflow:hidden; }
+  .user-avatar img { width:100%;height:100%;object-fit:cover; }
+  .user-name { font-size:17px;font-weight:600;overflow-wrap:anywhere; }
+  .user-login,.access-summary { color:var(--color-muted);font-size:12px;overflow-wrap:anywhere; }
+  .card-badges { display:flex;flex-wrap:wrap;gap:6px; }
+  .badge { font-size:11px;padding:4px 8px;border-radius:99px;background:var(--color-raised);color:var(--color-muted); }
+  .admin-role { color:var(--color-accent);background:var(--color-accent-soft); }
+  .disabled-account .user-avatar { color:var(--color-muted);background:var(--color-raised); }
+  .edit-label { color:var(--color-accent);font-size:12px;margin-top:4px; }
+  .account-id { margin:0 20px 16px;color:var(--color-muted);font-size:11px; }
+  .account-id summary { cursor:pointer; }
+  .account-id code { display:block;margin-top:8px;overflow-wrap:anywhere; }
+  .empty-directory { padding:32px;color:var(--color-muted); }
+  .security-footer-note { display:flex;align-items:flex-start;gap:12px;margin-top:24px;padding:16px;background:var(--color-raised);border-radius:var(--radius-sm);font-size:12px;color:var(--color-muted);line-height:1.6; }
+  .security-footer-note a { display:block;margin-top:8px;color:var(--color-accent); }
+  .notice { margin-bottom:20px;padding:14px;background:var(--color-raised);border-radius:var(--radius-sm); }
+  :is(input,select,button,a,summary):focus-visible { outline:2px solid var(--color-accent);outline-offset:3px; }
+  @media(max-width:600px) { .account-detail { padding:16px; }.users-grid { grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:12px; }.user-card-open { padding:14px; }.user-avatar { width:76px;height:76px;font-size:26px; }.account-tabs { gap:0; }.account-tabs button { padding:10px 8px;font-size:13px; } }
 </style>

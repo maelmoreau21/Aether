@@ -48,6 +48,12 @@
   let busy = $state(false);
   let error = $state('');
   let notice = $state('');
+  let filter = $state('all');
+  let search = $state('');
+  const visibleExtensions = $derived(installed.filter(extension =>
+    (filter === 'all' || extension.enabled === (filter === 'enabled')) &&
+    `${extension.manifest.name} ${extension.manifest.description}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())
+  ));
 
   function toBannerSrc(banner?: string): string | null {
     if (!banner) return null;
@@ -136,7 +142,17 @@
 <section id="extensions-section" aria-labelledby="extensions-heading">
   <div class="heading"><h2 id="extensions-heading">Extensions</h2><button disabled={busy} onclick={() => perform(refresh, '')}>Actualiser</button></div>
   <p>Installez un paquet signé, configurez ses paramètres, choisissez ses bibliothèques puis activez-le. Les originaux restent en lecture seule.</p>
-  <p class="availability">API versionnée Core &rarr; Extensions. Bannières graphiques, schémas de configuration et métadonnées structurées type Jellyfin intégrés.</p>
+  <details class="availability">
+    <summary>Comment installer une extension en local ?</summary>
+    <ol>
+      <li>Préparez le fichier <code>*.package.json</code> signé avec le script <code>Aether-Plugins/scripts/Build-LocalPackage.ps1</code>.</li>
+      <li>Dans « Éditeurs approuvés », ajoutez l’identifiant et la clé publique affichée lors de la création de votre clé de signature.</li>
+      <li>Importez le paquet ci-dessous. Le serveur vérifie sa signature.</li>
+      <li>Ouvrez « Gérer cette extension », renseignez les paramètres du fournisseur, choisissez ses bibliothèques et activez-la.</li>
+    </ol>
+    <p>Une clé API Aether sert à lire le catalogue depuis une autre application. Une clé TMDb ou fanart.tv se renseigne dans les paramètres de l’extension. La clé privée de signature reste sur votre ordinateur.</p>
+    <p>Les dépôts Jellyfin et leurs fichiers DLL ne sont pas compatibles. L’installation actuelle utilise un paquet local ; l’ajout d’un catalogue distant n’est pas disponible.</p>
+  </details>
   {#if error}<p role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   <details>
@@ -175,11 +191,21 @@
         <p>Droits demandés : {candidate.manifest.permissions.join(', ')}</p>
         <code>SHA-256 : {candidate.sha256}</code>
         <p>L’installation vérifie la signature et conserve l’extension désactivée.</p>
-        <button disabled={busy} onclick={() => perform(async () => { await adminRequest('/api/v1/admin/extensions', { method: 'POST', body: JSON.stringify(candidate) }); candidate = null; }, 'Paquet installé, encore désactivé.')}>Vérifier et installer</button>
+        {#if !publishers.some(publisher => publisher.id === candidate?.publisherId && publisher.active)}
+          <p>Approuvez d’abord l’éditeur « {candidate.publisherId} » avec sa clé publique dans « Éditeurs approuvés ».</p>
+        {/if}
+        <button disabled={busy || !publishers.some(publisher => publisher.id === candidate?.publisherId && publisher.active)} onclick={() => perform(async () => { await adminRequest('/api/v1/admin/extensions', { method: 'POST', body: JSON.stringify(candidate) }); candidate = null; }, 'Paquet installé, encore désactivé.')}>Vérifier et installer</button>
       </div>
     {/if}
   </div>
-  {#each installed as extension (extension.manifest.id)}
+  <div class="heading"><h3>Installées ({installed.length})</h3>
+    <div class="row">
+      <label>Rechercher une extension<input type="search" bind:value={search} /></label>
+      <label>État<select bind:value={filter}><option value="all">Toutes</option><option value="enabled">Activées</option><option value="disabled">Désactivées</option></select></label>
+    </div>
+  </div>
+  <div class="plugins-grid">
+  {#each visibleExtensions as extension (extension.manifest.id)}
     <article class="card plugin-card">
       {#if extension.manifest.banner}
         {@const bannerSrc = toBannerSrc(extension.manifest.banner)}
@@ -206,6 +232,7 @@
         {/if}
       </div>
 
+      <details class="manage-extension"><summary>Gérer cette extension</summary>
       {#if extension.manifest.configSchema && extension.manifest.configSchema.length > 0}
         <div class="settings-toggle">
           <button
@@ -296,8 +323,10 @@
         <label class="check"><input type="checkbox" bind:checked={purge[extension.manifest.id]} />Supprimer aussi les résultats conservés</label>
         <button disabled={busy} onclick={() => perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`, { method: 'DELETE', body: JSON.stringify({ deleteData: purge[extension.manifest.id] ?? false }) }), 'Extension désinstallée.')}>Désinstaller cette extension</button>
       </details>
+      </details>
     </article>
-  {:else}<p>Aucune extension installée.</p>{/each}
+  {:else}<p>{installed.length ? 'Aucune extension ne correspond à la recherche.' : 'Aucune extension installée.'}</p>{/each}
+  </div>
   <h3>Dernières exécutions</h3>
   {#each runs as run (run.id)}
     <div class="card"><p>{run.extensionId} · {run.status} · {run.durationMs} ms</p>
@@ -332,22 +361,22 @@
   
   /* Jellyfin-style plugin presentation */
   .plugin-card { overflow: hidden; padding: 0; }
-  .plugin-banner { width: 100%; max-height: 140px; overflow: hidden; background: #0b0f19; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; }
+  .plugins-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 1rem; align-items: start; }
+  .plugins-grid .plugin-card { margin-block: 1rem 0; min-width: 0; }
+  .manage-extension { margin: 1rem; }
+  .plugin-banner { width: 100%; max-height: 140px; overflow: hidden; background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; }
   .plugin-banner img { width: 100%; height: auto; max-height: 140px; object-fit: contain; display: block; }
   .plugin-header { padding: 1rem 1rem 0 1rem; }
   .plugin-title-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
   .plugin-badges { display: flex; gap: .4rem; flex-wrap: wrap; }
   .badge { font-size: .75rem; padding: .2rem .5rem; border-radius: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
-  .badge.version { background: #1e3a8a; color: #93c5fd; }
-  .badge.category { background: #064e3b; color: #6ee7b7; }
-  .badge.abi { background: #3730a3; color: #c7d2fe; }
-  .badge.server { background: #701a75; color: #f472b6; }
+  .badge { background: var(--bg-elevated); color: var(--text-secondary); }
   .plugin-desc { margin: .5rem 0 .2rem 0; }
   .plugin-meta { font-size: .85rem; margin: 0 0 .5rem 0; opacity: .8; }
   .checksum-info { font-size: .8rem; margin: .2rem 0; }
-  .plugin-card > fieldset, .plugin-card > .actions, .plugin-card > form, .plugin-card > details, .settings-toggle { padding-inline: 1rem; }
+  .manage-extension > fieldset, .manage-extension > .actions, .manage-extension > form, .settings-toggle { padding-inline: 1rem; }
   .settings-toggle { margin-top: .5rem; }
-  .btn-settings { background: #1e293b; color: #38bdf8; border-color: #38bdf8; font-weight: 500; }
+  .btn-settings { background: var(--bg-elevated); color: var(--accent-primary); border-color: var(--accent-primary); font-weight: 500; }
   .settings-panel { margin: 1rem; padding: 1rem; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; }
   .setting-row { margin-bottom: .8rem; }
   .setting-row small { color: var(--text-secondary); opacity: .8; display: block; margin-top: .2rem; }

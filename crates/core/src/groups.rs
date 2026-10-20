@@ -72,7 +72,7 @@ async fn list(
 ) -> Result<Json<Value>, StatusCode> {
     administrator(&auth, &headers, false).await?;
     let mut tx = auth.store.pool.begin().await.map_err(database)?;
-    let rows: Vec<(String, String, bool)> =
+    let rows: Vec<(String, String, crate::database::DbBool)> =
         query_as("SELECT id,name,is_default FROM user_groups ORDER BY name,id")
             .fetch_all(&mut *tx)
             .await
@@ -87,7 +87,7 @@ async fn list(
             .fetch_all(&mut *tx)
             .await
             .map_err(database)?;
-    let values: Vec<_>=rows.into_iter().map(|(id,name,is_default)|json!({"id":id,"name":name,"isDefault":is_default,"userIds":members.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"libraryIds":libraries.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>() })).collect();
+    let values: Vec<_>=rows.into_iter().map(|(id,name,is_default)|json!({"id":id,"name":name,"isDefault":bool::from(is_default),"userIds":members.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"libraryIds":libraries.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>() })).collect();
     tx.commit().await.map_err(database)?;
     Ok(Json(json!({"groups":values})))
 }

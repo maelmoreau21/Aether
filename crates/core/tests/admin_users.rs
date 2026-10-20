@@ -116,6 +116,50 @@ async fn admin_account_lifecycle_authorization_and_revocation() {
             .status(),
         StatusCode::CONFLICT
     );
+    let listing =
+        body(request(&app, "/api/v1/admin/users", "GET", &cookie, "", json!(null)).await).await;
+    let viewer = listing["users"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|user| user["id"] == user_id)
+        .unwrap();
+    assert!(viewer["lastSeenAt"].is_null());
+    assert_eq!(viewer["hasAvatar"], false);
+    let avatar_path = format!("/api/v1/admin/users/{user_id}/avatar");
+    assert_eq!(
+        request(&app, &avatar_path, "GET", "", "", json!(null))
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        request(&app, &avatar_path, "GET", &cookie, "", json!(null))
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let avatar_data = vec![137u8, 80, 78, 71];
+    media_poc::database::query("INSERT INTO user_avatars(user_id,image_data) VALUES(?,?)")
+        .bind(&user_id)
+        .bind(avatar_data.clone())
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let avatar = request(&app, &avatar_path, "GET", &cookie, "", json!(null)).await;
+    assert_eq!(avatar.status(), StatusCode::OK);
+    assert_eq!(avatar.headers()["content-type"], "image/png");
+    assert_eq!(avatar.headers()["cache-control"], "private, no-store");
+    assert_eq!(
+        avatar
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .as_ref(),
+        avatar_data.as_slice()
+    );
     let (user_cookie, _) = login(&app, "viewer").await;
     assert_eq!(
         request(
@@ -130,6 +174,22 @@ async fn admin_account_lifecycle_authorization_and_revocation() {
         .status(),
         StatusCode::FORBIDDEN
     );
+    assert_eq!(
+        request(&app, &avatar_path, "GET", &user_cookie, "", json!(null))
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let listing =
+        body(request(&app, "/api/v1/admin/users", "GET", &cookie, "", json!(null)).await).await;
+    let viewer = listing["users"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|user| user["id"] == user_id)
+        .unwrap();
+    assert_eq!(viewer["hasAvatar"], true);
+    assert!(viewer["lastSeenAt"].as_i64().unwrap() > 0);
     let self_update = json!({"role":"user","disabled":false,"displayName":null});
     assert_eq!(
         request(

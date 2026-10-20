@@ -27,6 +27,7 @@ try {
   await panel.getByRole('button', { name: 'Vérifier et installer', exact: true }).click();
   await panel.getByText('Paquet installé, encore désactivé.', { exact: true }).waitFor();
   const extension = panel.getByRole('article');
+  await extension.getByText('Gérer cette extension', { exact: true }).click();
   await extension.getByLabel('Films synthétiques', { exact: true }).check();
   await extension.getByRole('button', { name: 'Enregistrer et activer', exact: true }).click();
   await panel.getByText('Permissions enregistrées et extension activée.', { exact: true }).waitFor();
@@ -38,7 +39,8 @@ try {
   await panel.getByText(/Proposition synthétique pour work-films/).waitFor();
   await page.reload();
   await panel.locator('strong').filter({ hasText: /^Titre original$/ }).waitFor();
-  const output = '../../docs/evidence/2026-10-20/extensions';
+  await extension.getByText('Gérer cette extension', { exact: true }).click();
+  const output = process.env.MEDIA_REPORT_DIR || '../../docs/evidence/2026-10-20/extensions';
   await mkdir(output, { recursive: true });
   await page.screenshot({ path: `${output}/desktop.png`, fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });

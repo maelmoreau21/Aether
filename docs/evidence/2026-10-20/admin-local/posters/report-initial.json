@@ -1,0 +1,34 @@
+{
+  "browser": "155.0.8059.82",
+  "os": "10.0.26300",
+  "headless": true,
+  "phase": "initial",
+  "results": {
+    "incrementalWithoutVideoProbe": true,
+    "progressiveImages": [
+      {
+        "width": 1440,
+        "firstPosterMs": 568,
+        "slowerShelfStillPending": true
+      },
+      {
+        "width": 390,
+        "firstPosterMs": 173,
+        "slowerShelfStillPending": true
+      }
+    ],
+    "partialCatalogueFailureKeepsFilms": true,
+    "catalogue": true,
+    "singleWorkTwoVersions": true,
+    "metadata": true,
+    "localPoster": true,
+    "fallback": true,
+    "imageSessionPermissions": true,
+    "escapedHostileText": true,
+    "playback": true,
+    "seek": true,
+    "pause": true,
+    "cspErrors": []
+  },
+  "passed": true
+}

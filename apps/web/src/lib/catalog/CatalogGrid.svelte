@@ -181,8 +181,8 @@
       </div>
 
       <div class="media-grid">
-        {#each filteredFilms as work (work.id)}
-          <Poster {work} href={detailUrl(work)} />
+        {#each filteredFilms as work, index (work.id)}
+          <Poster {work} href={detailUrl(work)} eager={index < 6} />
         {:else}
           <div class="empty-media-box">
             <Icon name="film" size={32} />
@@ -210,8 +210,8 @@
       </div>
 
       <div class="media-grid">
-        {#each filteredSeries as work (work.id)}
-          <Poster {work} href={detailUrl(work)} />
+        {#each filteredSeries as work, index (work.id)}
+          <Poster {work} href={detailUrl(work)} eager={filteredFilms.length === 0 && index < 6} />
         {:else}
           <div class="empty-media-box">
             <Icon name="tv" size={32} />

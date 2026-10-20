@@ -24,9 +24,11 @@ Une clé appartient à un compte et à une liste explicite de bibliothèques. Le
 | Route | Résultat |
 |---|---|
 | `GET /api/v1/admin/api-keys` | `{keys:[{id,name,userId,createdAt,expiresAt,revokedAt,scope,libraryIds}]}` ; aucun jeton |
-| `POST /api/v1/admin/api-keys` | `{name,userId,libraryIds,expiresInDays}` ; 201 `{id,token,expiresAt,scope}` |
+| `POST /api/v1/admin/api-keys` | `{name,userId,libraryIds,expiresInDays,neverExpires?}` ; 201 `{id,token,expiresAt,scope}` |
 | `DELETE /api/v1/admin/api-keys/{id}` | Révocation définitive, 204 |
 
-Gestion réservée aux administrateurs avec CSRF pour création/révocation. Expiration obligatoire entre 1 et 365 jours ; au plus 100 bibliothèques et 1 000 clés conservées. Le jeton aléatoire n'est affiché qu'une fois, stocké uniquement sous forme SHA-256 et jamais dans `localStorage`. Réponses `private, no-store`. Une clé n'authentifie pas les routes d'administration, les sessions utilisateur ni le streaming. Les intégrations doivent employer HTTPS hors réseau local de confiance.
+Gestion réservée aux administrateurs avec CSRF pour création/révocation. Par défaut, expiration entre 1 et 365 jours. Le choix explicite `neverExpires:true` avec `expiresInDays:null` crée une clé sans expiration, toujours révocable : les réponses exposent alors `expiresAt:null` (stockage interne : `expires_at=0`, sans migration). Une durée omise sans ce choix, 0 jour, ou une durée jointe à `neverExpires:true` est refusée. Au plus 100 bibliothèques et 1 000 clés conservées. Le jeton aléatoire n'est affiché qu'une fois, stocké uniquement sous forme SHA-256 et jamais dans `localStorage`. Réponses `private, no-store`. Une clé n'authentifie pas les routes d'administration, les sessions utilisateur ni le streaming. Les intégrations doivent employer HTTPS hors réseau local de confiance.
+
+Dans **Administration → Clés API**, donner un nom à l'application, choisir son propriétaire et ses bibliothèques, puis cocher **Sans expiration** si nécessaire et créer la clé. Copier le jeton immédiatement. Une clé Aether n'est pas une clé de fournisseur externe : elle ne supprime pas les quotas ou tarifs éventuels de TMDB, Fanart ou d'un autre service. Il n'y a pas de quota d'appels facturé par Aether ; les limites de pagination, de portée et les capacités du serveur restent applicables.
 
 Les tests HTTP `admin_access` exercent les autorisations réelles, les accès hérités, leur retrait sans perte des droits directs, le hachage, les limites de portée et les changements de droits en direct. Ils n'évaluent pas une charge d'intégrations concurrentes.

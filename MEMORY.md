@@ -1,5 +1,28 @@
 # MEMORY.md — État et décisions Aether
 
+## 20 octobre 2026 — Correction du blocage 403 Forbidden sur mobile / portail Authentik
+
+- **Analyse du blocage 403** :
+  - **Symptôme** : L'accès direct à Aether (via favori ou URL directe) fonctionne en 200 OK car aucun header `Origin` n'est émis. En revanche, l'accès depuis le portail Authentik (`https://authentik.dfmag.fr`), un lien tiers, ou un navigateur mobile (Chrome Android, Safari iOS) envoyant `Origin: https://authentik.dfmag.fr` ou `Sec-Fetch-Site: cross-site` était immédiatement rejeté avec `403 Forbidden` (`Content-Length: 0`).
+  - **Cause racine** :
+    1. Dans `crates/core/src/lib.rs` (`local_security_with_store`), le middleware de sécurité globale rejetait aveuglément toute requête portant `Sec-Fetch-Site: cross-site` ou dont l'en-tête `Origin` différait de `primary_origin`, en ne prévoyant une exception que pour le callback OIDC exact (`/api/v1/auth/oidc/callback`). Cela interdisait à tout utilisateur d'accéder au site web (`/`, `/app/`) via un lien externe ou un portail applicatif.
+    2. Ni le middleware global ni `auth.check_origin` ne prenaient en compte les origines externes de confiance (comme l'issuer Authentik ou une liste blanche d'origines).
+- **Résolution** :
+  - **1. Autorisation des navigations web de premier niveau (Top-level Document Navigation)** :
+    - Les requêtes HTTP `GET` ou `HEAD` vers les pages publiques du frontend (`/`, `/app`, `/app/*`, `/favicon*`) avec `Sec-Fetch-Mode: navigate` sont désormais autorisées même si elles proviennent d'un site tiers (`cross-site`), conformément aux recommandations W3C Fetch Metadata et OWASP. Les requêtes safe vers des documents statiques ne constituent pas une menace CSRF.
+  - **2. Support des origines externes de confiance (`allowed_origins`)** :
+    - `crates/core/src/auth.rs` : introduction de `resolve_allowed_origins` qui lit `MEDIA_ALLOWED_ORIGINS` (ou `MEDIA_TRUSTED_ORIGINS`) et dérive automatiquement l'origine de l'issuer OIDC à partir de `MEDIA_OIDC_ISSUER` (ex: `https://authentik.dfmag.fr`).
+    - `AuthState` expose `allowed_origins(&self)` et `is_origin_allowed(&self, candidate: &str)`.
+    - `check_origin` et `local_security_with_store` autorisent explicitement les origines externes de confiance.
+    - Les requêtes malveillantes (comme `evil.attacker.com`) ou sans mode navigation restent strictement rejetées avec `403 Forbidden`.
+    - Le Content Security Policy (CSP) intègre automatiquement ces origines de confiance dans `img-src` et `connect-src`.
+- **Validations réelles exécutées** :
+  - `cargo fmt --check` : validé.
+  - `cargo clippy --all-targets -- -D warnings` : 0 erreur, 0 avertissement.
+  - `cargo test -p media-poc --test challenger_security_challenge` : 4/4 passed (100% des tests de sécurité et CSRF validés).
+  - `cargo test -p media-poc --test static_web` : 2/2 passed (nouveaux tests validant la navigation Authentik mobile et l'origine de confiance `MEDIA_ALLOWED_ORIGINS`).
+  - `cargo test --lib -p media-poc` : 36/36 passed.
+
 ## 20 octobre 2026 — Correction du verrou d'allocation cache sous Linux CI (`cache_dirs`)
 
 - **Analyse de la régression / échec CI GitHub Actions** :

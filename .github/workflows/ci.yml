@@ -61,7 +61,7 @@ jobs:
 
       - name: Cache des fixtures synthétiques
         id: cache-fixtures
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tests/fixtures/generated
           key: fixtures-p0-p1-${{ hashFiles('scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
@@ -228,7 +228,7 @@ jobs:
 
       - name: Cache des fixtures synthétiques
         id: cache-fixtures
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tests/fixtures/generated
           key: fixtures-p0-p1-${{ hashFiles('scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}

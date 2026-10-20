@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ParentalPolicy from './ParentalPolicy.svelte';
   import type { Library } from './types';
   import { session, readSession, type AuthUser } from '../auth/session';
   import Icon from '../ui/Icon.svelte';
@@ -176,6 +177,7 @@
       <button type="submit" class="btn btn-primary" disabled={busy}>{busy ? 'Enregistrement…' : editing ? 'Enregistrer' : 'Créer le compte'}</button>
       {#if editing}<button type="button" class="btn btn-secondary" disabled={busy} onclick={() => edit(null)}>Annuler</button>{/if}
     </form>
+    {#if editing}<ParentalPolicy userId={editing.id} />{/if}
     {#if editing && !editing.sso}
       <form class="account-editor" onsubmit={(event) => { event.preventDefault(); void save(true); }}>
         <h3>Remplacer le mot de passe local</h3>

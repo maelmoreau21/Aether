@@ -15,7 +15,7 @@ la charte Pierre Douce / Cinéma OLED et les accents ambre-corail.
 | Général | Nom du serveur et message d’accueil persistants, endpoints administrateur et lecture authentifiée | Formulaire Général, navigation et message sur l’accueil |
 | Réseau | Origine effective, cookies HTTPS et chemins Web/API du Core | Page Réseau en lecture seule ; transport et ports restent des réglages de déploiement |
 | Image de profil | Upload/lecture/suppression du compte courant, image normalisée en PNG 256×256 | Compte, en-tête et menu profil ; formats et ressources bornés |
-| Mot de passe personnel et sessions/appareils | Pas de routes personnelles dédiées dans `auth.rs` | À développer avec vérification du mot de passe actuel et révocation ciblée |
+| Mot de passe personnel et sessions/appareils | `account.rs`, vérification du secret actuel, révocation ciblée/globale | Raccordé dans Compte le 20 octobre ; [contrat et limites](PRODUCT_FEATURES.md) |
 | Journal des tâches | État de scan et dernier lancement planifié ; dates de sauvegarde | Affichage des données réellement connues ; aucune durée de scan inventée |
 | Déclencheurs calendrier / plusieurs déclencheurs | Un intervalle persistant par bibliothèque ; un plan de sauvegarde | Non simulés ; nécessitent une évolution du scheduler et de ses tests de reprise |
 | Journaux, cache et stockage | Pas de contrat de maintenance Web dédié | Prochain lot distinct : diagnostic borné avant commandes de maintenance |

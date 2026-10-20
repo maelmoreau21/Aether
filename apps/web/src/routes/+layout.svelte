@@ -14,15 +14,20 @@
 
   onMount(() => {
     initTheme();
+    const refresh=()=>{if(document.visibilityState==='visible'&&!isDownloads)void hydratePreferences().then(saved=>{if(saved){setTheme(saved.theme??'system',false);setLocale(saved.locale??'fr',false);}}).catch(()=>{});};
+    window.addEventListener('focus',refresh);
+    return()=>window.removeEventListener('focus',refresh);
   });
   let { children } = $props();
   let verified = $state(false);
   let error = $state('');
   const isLogin = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/login'));
+  const isDownloads = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/downloads'));
   $effect(() => {
     const loginPage = isLogin;
     let cancelled = false;
     verified = false; error = '';
+    if (isDownloads) { verified=true; return; }
     readSession().then(async current => {
       if (cancelled) return;
       if (!current && !loginPage) { void goto(resolve('login/'), { replaceState: true }); return; }

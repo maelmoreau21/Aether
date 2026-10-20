@@ -20,6 +20,8 @@ pub struct Track {
 pub struct Probe {
     pub streams: Vec<Track>,
     pub format: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub chapters: Vec<Value>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

@@ -49,7 +49,7 @@ fs.mkdirSync(out, {recursive: true});
     const userRow = page.locator('tr').filter({hasText: 'series-user-b'});
     await userRow.getByRole('button', {name: 'Modifier'}).click();
     await page.locator('#users-section').getByLabel('Bibliothèque autorisée : Séries Navigateur').check();
-    await page.locator('#users-section').getByRole('button', {name: 'Enregistrer'}).click();
+    await page.locator('#users-section').getByRole('button', {name: 'Enregistrer', exact: true}).click();
     await page.getByText('Compte enregistré').waitFor();
 
     await page.locator('a[href="#libraries-section"]').click();
@@ -133,6 +133,9 @@ fs.mkdirSync(out, {recursive: true});
     await page.screenshot({path:`${out}/series-detail.png`});
 
     // 5. Select Version and Play Episode 1
+    const chapterVersion=page.getByRole('combobox',{name:'Version de Episode One'});
+    await chapterVersion.focus();
+    await chapterVersion.selectOption({label:'MP4'});
     const ep1PlayButton = page.getByRole('button', {name:'Lire Episode One', exact:true});
     await ep1PlayButton.waitFor();
     const launchStarted = Date.now();
@@ -141,8 +144,15 @@ fs.mkdirSync(out, {recursive: true});
     // Verify /api/v1/media/ was requested ONLY upon launch
     await page.waitForFunction(() => document.querySelector('video') !== null);
     await page.waitForFunction(() => document.querySelector('video')?.currentTime > 0.1);
+    await page.waitForFunction(()=>{const video=document.querySelector('video');return video?.videoWidth>0&&(video.getVideoPlaybackQuality?.().totalVideoFrames??0)>0;});
+    report.results.decodedVideoFrames=await page.evaluate(()=>document.querySelector('video').getVideoPlaybackQuality().totalVideoFrames);
     report.results.episode1Playback = true;
     report.results.episodeLaunchMs = Date.now() - launchStarted;
+    const chapters=page.getByRole('combobox',{name:'Chapitres vidéo'});
+    await chapters.waitFor();
+    await chapters.selectOption('1');
+    await page.waitForFunction(()=>document.querySelector('video')?.currentTime>=1);
+    report.results.realChapters=true;
 
     // Pause and seek test
     await page.evaluate(() => {
@@ -288,7 +298,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForFunction(
       () => {
         const sel = document.querySelector('select[aria-label="Version de Episode One"]');
-        return sel && Array.from(sel.options).every(opt => opt.textContent === 'MP4' || opt.textContent === 'MKV');
+        return sel && Array.from(sel.options).filter(opt=>opt.value!=='auto').every(opt => opt.textContent === 'MP4' || opt.textContent === 'MKV');
       },
       null,
       {timeout: 5000}
@@ -346,7 +356,7 @@ fs.mkdirSync(out, {recursive: true});
     // Verify Episode 1 options reverted to uncached generic labels ('Version 1', 'Version 2') because Session A cache was purged!
     const ep1SelectB = page.locator('select[aria-label="Version de Episode One"]');
     await ep1SelectB.waitFor();
-    const initialLabelsB = await ep1SelectB.locator('option').allTextContents();
+    const initialLabelsB = await ep1SelectB.locator('option:not([value="auto"])').allTextContents();
     assert.deepEqual(
       initialLabelsB,
       ['Version 1', 'Version 2'],
@@ -359,7 +369,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForFunction(
       () => {
         const sel = document.querySelector('select[aria-label="Version de Episode One"]');
-        return sel && Array.from(sel.options).every(opt => opt.textContent === 'MP4' || opt.textContent === 'MKV');
+        return sel && Array.from(sel.options).filter(opt=>opt.value!=='auto').every(opt => opt.textContent === 'MP4' || opt.textContent === 'MKV');
       },
       null,
       {timeout: 5000}
@@ -542,6 +552,27 @@ fs.mkdirSync(out, {recursive: true});
     assert.equal(concurrentLoginResult.logoutStatus, 204);
     report.results.concurrentLoginsSequencedCorrectly = true;
 
+    // Personal security UI: change the current password, revoke another live device and revoke all.
+    await page.goto(origin+'/app/settings/#account');
+    await page.waitForURL('**/app/login/**');
+    await page.locator('input[autocomplete="username"]').fill('series-user-b');
+    await page.locator('input[autocomplete="current-password"]').fill('disposable series user-b password');
+    await page.locator('button[type="submit"]').click();await page.waitForURL(origin+'/app/');
+    const otherDevice=await browser.newContext();
+    const loginOther=await otherDevice.request.post(origin+'/api/v1/auth/login',{headers:{origin},data:{login:'series-user-b',password:'disposable series user-b password'}});assert.equal(loginOther.status(),200);
+    await page.goto(origin+'/app/settings/#account');await page.getByRole('heading',{name:'Appareils connectés'}).waitFor();
+    for(const width of [390,1440]){await page.setViewportSize({width,height:900});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:`${out}/account-security-${width}.png`,fullPage:true});}
+    await page.getByLabel('Mot de passe actuel',{exact:true}).fill('disposable series user-b password');
+    await page.getByLabel('Nouveau mot de passe',{exact:true}).fill('changed disposable user-b password');
+    await page.getByLabel('Confirmer le nouveau mot de passe',{exact:true}).fill('changed disposable user-b password');
+    await page.getByRole('button',{name:'Changer le mot de passe',exact:true}).click();await page.waitForURL('**/app/login/**');
+    assert.equal((await otherDevice.request.get(origin+'/api/v1/auth/me')).status(),401);
+    await otherDevice.close();
+    await page.locator('input[autocomplete="username"]').fill('series-user-b');
+    await page.locator('input[autocomplete="current-password"]').fill('changed disposable user-b password');await page.locator('button[type="submit"]').click();await page.waitForURL(origin+'/app/');
+    await page.goto(origin+'/app/settings/#account');
+    await page.getByRole('button',{name:'Déconnecter tous les appareils',exact:true}).click();await page.waitForURL('**/app/login/**');
+    report.results.personalPasswordAndDeviceRevocation=true;
     assert.deepEqual(errors, []);
     report.results.cspErrors = errors;
     report.passed = true;

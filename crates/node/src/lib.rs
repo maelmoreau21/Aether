@@ -4,10 +4,12 @@
 //!
 //! This crate has zero dependency on `media-poc` (Core), `sqlx`, or Core users/sessions/permissions.
 
+mod cache_dirs;
 pub mod external_audio;
 pub mod files;
 pub mod images;
 pub mod inventory;
+pub mod music;
 pub mod nfo;
 pub mod packaging;
 pub mod probe;

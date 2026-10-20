@@ -6,6 +6,7 @@
   import ProfileAvatar from '../ui/ProfileAvatar.svelte';
   import AvatarEditor from './AvatarEditor.svelte';
   import OidcSettings from '../auth/OidcSettings.svelte';
+  import AccountSecurity from '../auth/AccountSecurity.svelte';
   import Icon from '../ui/Icon.svelte';
   import { t, locale, setLocale } from '../i18n';
   import { themeMode, setTheme, type ThemeMode } from '../theme';
@@ -87,7 +88,7 @@
         </div>
       </div>
 
-      <p class="muted">Pour modifier votre mot de passe local, contactez un administrateur.</p>
+      <AccountSecurity />
     </section>
       </div>
       <div hidden={current !== 'appearance'}><section class="card" aria-labelledby="appearance-heading"><h2 id="appearance-heading">Apparence</h2><p class="muted">Personnalisez le thème et la langue de l’interface.</p>

@@ -45,7 +45,7 @@
 
   let editing = $state<string | null>(null);
   let name = $state('');
-  let kind = $state<'films' | 'series'>('films');
+  let kind = $state<'films' | 'series' | 'music'>('films');
   let nodeId = $state('local');
   let root = $state('');
   let enabled = $state(true);
@@ -271,7 +271,7 @@
     polling = true;
     try {
       const scannable = libraries.filter(
-        library => (library.kind === 'films' || library.kind === 'series') && library.enabled && !library.id.startsWith('fixture-')
+        library => (library.kind === 'films' || library.kind === 'series' || library.kind === 'music') && library.enabled && !library.id.startsWith('fixture-')
       );
       const results = await Promise.all(
         scannable.map(async library => [

@@ -155,6 +155,7 @@ pub struct NodeServerState {
     pub replay_window: Arc<ReplayWindow>,
     pub active_scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub local_node: LocalNode,
+    preparations: Arc<crate::packaging::Preparations>,
 }
 
 impl NodeServerState {
@@ -227,6 +228,7 @@ impl NodeServerState {
             replay_window: Arc::new(ReplayWindow::new()),
             active_scans: Arc::new(Mutex::new(HashMap::new())),
             local_node: LocalNode,
+            preparations: Arc::new(crate::packaging::Preparations::default()),
         })
     }
 
@@ -291,6 +293,10 @@ pub fn app_with_state(state: NodeServerState) -> Router {
         .route("/internal/v1/node/revoke", post(revoke_node))
         .route("/internal/v1/node/inventory-sync", post(inventory_sync))
         .route("/internal/v1/node/scans", post(start_remote_scan))
+        .route(
+            "/internal/v1/node/assets/{id}/prepared/{component}",
+            get(internal_prepared).head(internal_prepared),
+        )
         .route(
             "/internal/v1/node/assets/{id}/content",
             get(internal_stream_asset).head(internal_stream_asset),
@@ -978,35 +984,63 @@ async fn run_remote_scan_task(
         image_cache.insert(img.path.clone(), img);
     }
 
-    let result = state
-        .local_node
-        .scan_library_streaming(
+    let result = if req.kind == "music" {
+        crate::music::scan_with_exclusions(
             &canonical_root,
-            &req.kind,
-            &scan_cache,
-            &image_cache,
             &cancel,
-            batch_size,
             &req.excluded_patterns,
-            |mut batch: InventoryBatch| {
+            |track| {
                 seq += 1;
-                batch.scan_id = req.scan_id.clone();
-                batch.sequence = seq;
-                let state_ref = state.clone();
-                let scan_id = req.scan_id.clone();
-                let library_id = req.library_id.clone();
+                let submission = crate::music::Submission {
+                    library_id: req.library_id.as_str().into(),
+                    scan_id: req.scan_id.as_str().into(),
+                    root_snapshot: root_snapshot.clone(),
+                    track,
+                };
+                let state = state.clone();
                 async move {
-                    let submission = RemoteBatchSubmission {
-                        node_id: state_ref.node_id(),
-                        library_id,
-                        batch,
-                    };
-                    let path = format!("/internal/v1/core/scans/{}/batches", scan_id.as_str());
-                    post_signed_to_core(&state_ref, &path, &submission).await
+                    post_signed_to_core(&state, "/internal/v1/core/music/tracks", &submission).await
                 }
             },
         )
-        .await;
+        .await
+        .map(|count| crate::scanner::ScanReport {
+            discovered: count as u64,
+            probed: count as u64,
+            complete: true,
+            ..Default::default()
+        })
+    } else {
+        state
+            .local_node
+            .scan_library_streaming(
+                &canonical_root,
+                &req.kind,
+                &scan_cache,
+                &image_cache,
+                &cancel,
+                batch_size,
+                &req.excluded_patterns,
+                |mut batch: InventoryBatch| {
+                    seq += 1;
+                    batch.scan_id = req.scan_id.clone();
+                    batch.sequence = seq;
+                    let state_ref = state.clone();
+                    let scan_id = req.scan_id.clone();
+                    let library_id = req.library_id.clone();
+                    async move {
+                        let submission = RemoteBatchSubmission {
+                            node_id: state_ref.node_id(),
+                            library_id,
+                            batch,
+                        };
+                        let path = format!("/internal/v1/core/scans/{}/batches", scan_id.as_str());
+                        post_signed_to_core(&state_ref, &path, &submission).await
+                    }
+                },
+            )
+            .await
+    };
 
     {
         let mut scans = state.active_scans.lock().unwrap_or_else(|e| e.into_inner());
@@ -1244,6 +1278,89 @@ pub async fn send_signed_http_request(
     Ok((status, headers, collected))
 }
 
+async fn prepare_asset(
+    state: &NodeServerState,
+    id: &str,
+    component: &str,
+    req: Request,
+) -> Response {
+    use crate::packaging::Component;
+    let entry = state
+        .inventory
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .assets
+        .get(id)
+        .cloned();
+    let Some(entry) = entry else {
+        return cors_error_response(StatusCode::NOT_FOUND, "asset_unknown");
+    };
+    if !state
+        .config
+        .allowed_roots
+        .iter()
+        .any(|root| Path::new(&entry.root_snapshot).starts_with(root))
+    {
+        return cors_error_response(StatusCode::FORBIDDEN, "root_denied");
+    }
+    let selected = if component == "video" {
+        Some(Component::Video)
+    } else if let Some(index) = component
+        .strip_prefix("audio-")
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        Some(Component::Audio(index))
+    } else {
+        component
+            .strip_prefix("subtitle-")
+            .and_then(|s| s.parse::<u32>().ok())
+            .map(Component::Subtitle)
+    };
+    let Some(selected) = selected else {
+        return cors_error_response(StatusCode::UNPROCESSABLE_ENTITY, "unsupported_component");
+    };
+    match state
+        .preparations
+        .prepare(
+            Path::new(&entry.root_snapshot),
+            Path::new(&entry.relative_path),
+            entry.size,
+            &entry.modified_ns,
+            selected,
+        )
+        .await
+    {
+        Ok(opened) => match crate::serve_opened(opened, &req, selected.mime()).await {
+            Ok(response) => convert_stream_response(response, false),
+            Err(_) => {
+                cors_error_response(StatusCode::INTERNAL_SERVER_ERROR, "prepared_stream_failed")
+            }
+        },
+        Err(_) => cors_error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "preparation_failed_ffmpeg_required_or_cache_busy",
+        ),
+    }
+}
+async fn internal_prepared(
+    State(state): State<NodeServerState>,
+    AxumPath((id, component)): AxumPath<(String, String)>,
+    req: Request,
+) -> Response {
+    let pq = req
+        .uri()
+        .path_and_query()
+        .map(|v| v.as_str())
+        .unwrap_or("")
+        .to_owned();
+    let (identity, nonce) =
+        match verify_signed_core_call(&state, req.headers(), req.method(), &pq, b"") {
+            Ok(ok) => ok,
+            Err(response) => return response,
+        };
+    let response = prepare_asset(&state, &id, &component, req).await;
+    sign_stream_response(response, &identity, &nonce)
+}
 async fn internal_stream_asset(
     State(state): State<NodeServerState>,
     AxumPath(id): AxumPath<String>,
@@ -1900,12 +2017,22 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
         return;
     };
 
-    let mut builder = hyper::Request::builder().method(Method::GET);
+    let mut builder =
+        hyper::Request::builder().method(if req.head { Method::HEAD } else { Method::GET });
     if let Some(ref r) = req.range {
         builder = builder.header(header::RANGE, r);
     }
     let synthetic_req = builder.body(Body::empty()).unwrap_or_default();
 
+    if let Some(component) = req.target_kind.strip_prefix("prepared:") {
+        let mut response = prepare_asset(&state, &req.target_id, component, synthetic_req).await;
+        if req.head {
+            encode_head_uplink(&mut response);
+        }
+        let _ =
+            send_stream_uplink_body(&state, core_url, &identity, &req.stream_id, response).await;
+        return;
+    }
     match state
         .local_node
         .serve_grant_for_node(identity.node_id.clone(), &grant, &synthetic_req)
@@ -1913,7 +2040,10 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
     {
         Ok(serve_res) => {
             let (parts, body) = serve_res.into_parts();
-            let axum_res = Response::from_parts(parts, Body::new(body));
+            let mut axum_res = Response::from_parts(parts, Body::new(body));
+            if req.head {
+                encode_head_uplink(&mut axum_res);
+            }
             let _ = send_stream_uplink_body(&state, core_url, &identity, &req.stream_id, axum_res)
                 .await;
         }
@@ -1928,6 +2058,25 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
     }
 }
 
+// Carry HEAD's resource length in existing signed range metadata while uploading zero bytes.
+fn encode_head_uplink(response: &mut Response) {
+    if response.status().is_success() && !response.headers().contains_key(header::CONTENT_RANGE) {
+        if let Some(length) = response
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+        {
+            if let Ok(value) = HeaderValue::from_str(&format!("bytes */{length}")) {
+                response.headers_mut().insert(header::CONTENT_RANGE, value);
+            }
+        }
+    }
+    response
+        .headers_mut()
+        .insert(header::CONTENT_LENGTH, HeaderValue::from_static("0"));
+    *response.body_mut() = Body::empty();
+}
 async fn send_stream_uplink_body(
     _state: &NodeServerState,
     core_url: &str,

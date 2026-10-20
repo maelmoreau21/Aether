@@ -1,8 +1,31 @@
 <script lang="ts">
   import { adminRequest } from './request';
-  type Manifest = { id: string; name: string; version: string; description: string; author: string; permissions: string[] };
+  type ConfigOption = { label: string; value: string };
+  type ConfigField = {
+    key: string;
+    label: string;
+    description?: string;
+    fieldType: string; // 'text' | 'password' | 'boolean' | 'select'
+    defaultValue?: string;
+    options?: ConfigOption[];
+  };
+  type Manifest = {
+    id: string;
+    name: string;
+    version: string;
+    description: string;
+    author: string;
+    permissions: string[];
+    category?: string;
+    targetAbi?: string;
+    minServerVersion?: string;
+    maxServerVersion?: string;
+    checksum?: string;
+    banner?: string;
+    configSchema?: ConfigField[];
+  };
   type Package = { manifest: Manifest; publisherId: string; sha256: string; signature: string; wasm: string };
-  type Installed = { manifest: Manifest; publisherId: string; sha256: string; enabled: boolean; libraryIds: string[] };
+  type Installed = { manifest: Manifest; publisherId: string; sha256: string; enabled: boolean; libraryIds: string[]; settings?: Record<string, any> };
   type Library = { id: string; name: string; enabled: boolean | number };
   type Run = { id: string; extensionId: string; status: string; durationMs: number; result: { title?: string; summary?: string; error?: string } };
   let installed = $state<Installed[]>([]);
@@ -18,6 +41,8 @@
   let queries = $state<Record<string, string>>({});
   let workOptions = $state<Record<string, { id: string; title: string }[]>>({});
   let purge = $state<Record<string, boolean>>({});
+  let editingSettings = $state<Record<string, Record<string, any>>>({});
+  let activeSettingsId = $state<string | null>(null);
   let busy = $state(false);
   let error = $state('');
   let notice = $state('');
@@ -32,6 +57,22 @@
     installed = extensions.extensions; libraries = libs.libraries; runs = history.runs; publishers = keys.publishers;
     audit = journal.audit;
     selected = Object.fromEntries(installed.map(e => [e.manifest.id, [...e.libraryIds]]));
+
+    for (const ext of installed) {
+      if (!editingSettings[ext.manifest.id]) {
+        const defaults: Record<string, unknown> = {};
+        if (ext.manifest.configSchema) {
+          for (const field of ext.manifest.configSchema) {
+            if (field.fieldType === 'boolean') {
+              defaults[field.key] = field.defaultValue === 'true';
+            } else {
+              defaults[field.key] = field.defaultValue ?? '';
+            }
+          }
+        }
+        editingSettings[ext.manifest.id] = { ...defaults, ...(ext.settings ?? {}) };
+      }
+    }
   }
   async function perform(action: () => Promise<unknown>, message: string) {
     busy = true; error = ''; notice = '';
@@ -58,6 +99,15 @@
       method: 'PUT', body: JSON.stringify({ enabled, libraryIds: selected[extension.manifest.id] ?? [] })
     }), enabled ? 'Permissions enregistrées et extension activée.' : 'Extension désactivée.');
   }
+  async function saveSettings(id: string) {
+    await perform(async () => {
+      await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(id)}/settings`, {
+        method: 'PUT',
+        body: JSON.stringify(editingSettings[id] ?? {})
+      });
+      activeSettingsId = null;
+    }, 'Paramètres enregistrés.');
+  }
   async function searchWorks(id: string) {
     busy = true; error = '';
     try {
@@ -71,8 +121,8 @@
 
 <section id="extensions-section" aria-labelledby="extensions-heading">
   <div class="heading"><h2 id="extensions-heading">Extensions</h2><button disabled={busy} onclick={() => perform(refresh, '')}>Actualiser</button></div>
-  <p>Installez un paquet signé, choisissez ses bibliothèques puis activez-le. Les originaux restent en lecture seule.</p>
-  <p class="availability">Première API : propositions de métadonnées, sans accès réseau. Le catalogue distant, Trickplay et Intro Skipper ne sont pas encore disponibles.</p>
+  <p>Installez un paquet signé, configurez ses paramètres, choisissez ses bibliothèques puis activez-le. Les originaux restent en lecture seule.</p>
+  <p class="availability">API versionnée Core &rarr; Extensions. Bannières graphiques, schémas de configuration et métadonnées structurées type Jellyfin intégrés.</p>
   {#if error}<p role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   <details>
@@ -92,26 +142,124 @@
     <h3>Installer un paquet local</h3>
     <label>Paquet JSON signé<input type="file" accept="application/json,.json" onchange={readPackage} disabled={busy} /></label>
     {#if candidate}
-      <p><strong>{candidate.manifest.name}</strong> · {candidate.manifest.version} · {candidate.publisherId}</p>
-      <p>{candidate.manifest.description}</p>
-      <p>Droits demandés : {candidate.manifest.permissions.join(', ')}</p>
-      <code>SHA-256 : {candidate.sha256}</code>
-      <p>L’installation vérifie la signature et conserve l’extension désactivée.</p>
-      <button disabled={busy} onclick={() => perform(async () => { await adminRequest('/api/v1/admin/extensions', { method: 'POST', body: JSON.stringify(candidate) }); candidate = null; }, 'Paquet installé, encore désactivé.')}>Vérifier et installer</button>
+      <div class="candidate-preview">
+        {#if candidate.manifest.banner}
+          <div class="plugin-banner">{@html candidate.manifest.banner}</div>
+        {/if}
+        <p><strong>{candidate.manifest.name}</strong> · v{candidate.manifest.version} · {candidate.publisherId}</p>
+        <p>{candidate.manifest.description}</p>
+        <div class="plugin-badges">
+          {#if candidate.manifest.category}<span class="badge category">{candidate.manifest.category}</span>{/if}
+          {#if candidate.manifest.targetAbi}<span class="badge abi">ABI {candidate.manifest.targetAbi}</span>{/if}
+          {#if candidate.manifest.minServerVersion}<span class="badge server">Aether &ge; {candidate.manifest.minServerVersion}</span>{/if}
+        </div>
+        <p>Droits demandés : {candidate.manifest.permissions.join(', ')}</p>
+        <code>SHA-256 : {candidate.sha256}</code>
+        <p>L’installation vérifie la signature et conserve l’extension désactivée.</p>
+        <button disabled={busy} onclick={() => perform(async () => { await adminRequest('/api/v1/admin/extensions', { method: 'POST', body: JSON.stringify(candidate) }); candidate = null; }, 'Paquet installé, encore désactivé.')}>Vérifier et installer</button>
+      </div>
     {/if}
   </div>
   {#each installed as extension (extension.manifest.id)}
-    <article class="card">
-      <h3>{extension.manifest.name} · {extension.manifest.version}</h3>
-      <p>{extension.manifest.description}</p>
-      <p>{extension.enabled ? 'Activée' : 'Désactivée'} · {extension.publisherId} · {extension.manifest.permissions.join(', ')}</p>
+    <article class="card plugin-card">
+      {#if extension.manifest.banner}
+        <div class="plugin-banner">
+          {@html extension.manifest.banner}
+        </div>
+      {/if}
+      <div class="plugin-header">
+        <div class="plugin-title-row">
+          <h3>{extension.manifest.name}</h3>
+          <div class="plugin-badges">
+            <span class="badge version">v{extension.manifest.version}</span>
+            {#if extension.manifest.category}<span class="badge category">{extension.manifest.category}</span>{/if}
+            {#if extension.manifest.targetAbi}<span class="badge abi">ABI {extension.manifest.targetAbi}</span>{/if}
+            {#if extension.manifest.minServerVersion}<span class="badge server">Aether &ge; {extension.manifest.minServerVersion}</span>{/if}
+          </div>
+        </div>
+        <p class="plugin-desc">{extension.manifest.description}</p>
+        <p class="plugin-meta">{extension.enabled ? 'Activée' : 'Désactivée'} · Éditeur: {extension.publisherId} · Droits: {extension.manifest.permissions.join(', ')}</p>
+        {#if extension.manifest.checksum}
+          <p class="checksum-info"><code>Checksum: {extension.manifest.checksum}</code></p>
+        {/if}
+      </div>
+
+      {#if extension.manifest.configSchema && extension.manifest.configSchema.length > 0}
+        <div class="settings-toggle">
+          <button
+            type="button"
+            class="btn-settings"
+            onclick={() => activeSettingsId = activeSettingsId === extension.manifest.id ? null : extension.manifest.id}
+          >
+            ⚙ {activeSettingsId === extension.manifest.id ? 'Masquer la configuration' : 'Paramètres du plugin'}
+          </button>
+        </div>
+
+        {#if activeSettingsId === extension.manifest.id}
+          <div class="settings-panel">
+            <h4>Paramètres de l'extension</h4>
+            <form onsubmit={(e) => { e.preventDefault(); void saveSettings(extension.manifest.id); }}>
+              {#each extension.manifest.configSchema as field (field.key)}
+                <div class="setting-row">
+                  {#if field.fieldType === 'boolean'}
+                    <label class="check">
+                      <input
+                        type="checkbox"
+                        bind:checked={editingSettings[extension.manifest.id][field.key]}
+                      />
+                      <span><strong>{field.label}</strong>{#if field.description} — {field.description}{/if}</span>
+                    </label>
+                  {:else if field.fieldType === 'password'}
+                    <label>
+                      <span><strong>{field.label}</strong></span>
+                      <input
+                        type="password"
+                        placeholder={field.defaultValue ?? ''}
+                        bind:value={editingSettings[extension.manifest.id][field.key]}
+                      />
+                      {#if field.description}<small>{field.description}</small>{/if}
+                    </label>
+                  {:else if field.fieldType === 'select'}
+                    <label>
+                      <span><strong>{field.label}</strong></span>
+                      <select bind:value={editingSettings[extension.manifest.id][field.key]}>
+                        {#each field.options ?? [] as opt (opt.value)}
+                          <option value={opt.value}>{opt.label}</option>
+                        {/each}
+                      </select>
+                      {#if field.description}<small>{field.description}</small>{/if}
+                    </label>
+                  {:else}
+                    <label>
+                      <span><strong>{field.label}</strong></span>
+                      <input
+                        type="text"
+                        placeholder={field.defaultValue ?? ''}
+                        bind:value={editingSettings[extension.manifest.id][field.key]}
+                      />
+                      {#if field.description}<small>{field.description}</small>{/if}
+                    </label>
+                  {/if}
+                </div>
+              {/each}
+              <div class="settings-actions">
+                <button type="submit" disabled={busy}>Enregistrer les paramètres</button>
+                <button type="button" onclick={() => activeSettingsId = null}>Fermer</button>
+              </div>
+            </form>
+          </div>
+        {/if}
+      {/if}
+
       <fieldset disabled={busy}><legend>Bibliothèques autorisées</legend>
         {#each libraries.filter(l => l.enabled) as library (library.id)}
           <label class="check"><input type="checkbox" value={library.id} bind:group={selected[extension.manifest.id]} />{library.name}</label>
         {/each}
       </fieldset>
-      <div class="actions"><button disabled={busy} onclick={() => configure(extension, true)}>Enregistrer et activer</button>
-        <button disabled={busy || !extension.enabled} onclick={() => configure(extension, false)}>Désactiver</button></div>
+      <div class="actions">
+        <button disabled={busy} onclick={() => configure(extension, true)}>Enregistrer et activer</button>
+        <button disabled={busy || !extension.enabled} onclick={() => configure(extension, false)}>Désactiver</button>
+      </div>
       <form onsubmit={event => { event.preventDefault(); void perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}/run`, { method: 'POST', body: JSON.stringify({ workId: workIds[extension.manifest.id] }) }), 'Proposition générée. Consultez les résultats ci-dessous.'); }}>
         <label>Rechercher une œuvre<input maxlength="120" bind:value={queries[extension.manifest.id]} /></label>
         <button type="button" disabled={busy || !extension.enabled} onclick={() => searchWorks(extension.manifest.id)}>Rechercher dans les bibliothèques autorisées</button>
@@ -144,10 +292,10 @@
 
 <style>
   section { padding: 1.5rem; border: 1px solid var(--border-subtle); background: var(--bg-surface); border-radius: 16px; }
-  h2,h3,strong,legend,summary { color: var(--text-primary); }
-  h2 { margin: 0; font-size: 1.3rem; } h3 { font-size: 1rem; }
+  h2,h3,h4,strong,legend,summary { color: var(--text-primary); }
+  h2 { margin: 0; font-size: 1.3rem; } h3 { font-size: 1.1rem; margin: 0; } h4 { margin: 0 0 .6rem 0; font-size: 1rem; }
   p,label { color: var(--text-secondary); line-height: 1.6; }
-  .heading,.row,.actions { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
+  .heading,.row,.actions,.settings-actions { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
   .heading { justify-content: space-between; }
   .card,.availability,details { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border-subtle); border-radius: 10px; }
   .availability { background: var(--bg-elevated); }
@@ -158,5 +306,27 @@
   button:disabled { opacity: .5; cursor: default; } code { color: var(--text-secondary); overflow-wrap: anywhere; }
   fieldset { border: 1px solid var(--border-subtle); display: grid; gap: .4rem; }
   summary { cursor: pointer; } [role=alert] { border-inline-start: 3px solid var(--text-primary); padding-inline-start: .8rem; }
+  
+  /* Jellyfin-style plugin presentation */
+  .plugin-card { overflow: hidden; padding: 0; }
+  .plugin-banner { width: 100%; max-height: 140px; overflow: hidden; background: #0b0f19; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; }
+  .plugin-banner :global(svg) { width: 100%; height: auto; display: block; }
+  .plugin-header { padding: 1rem 1rem 0 1rem; }
+  .plugin-title-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
+  .plugin-badges { display: flex; gap: .4rem; flex-wrap: wrap; }
+  .badge { font-size: .75rem; padding: .2rem .5rem; border-radius: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+  .badge.version { background: #1e3a8a; color: #93c5fd; }
+  .badge.category { background: #064e3b; color: #6ee7b7; }
+  .badge.abi { background: #3730a3; color: #c7d2fe; }
+  .badge.server { background: #701a75; color: #f472b6; }
+  .plugin-desc { margin: .5rem 0 .2rem 0; }
+  .plugin-meta { font-size: .85rem; margin: 0 0 .5rem 0; opacity: .8; }
+  .checksum-info { font-size: .8rem; margin: .2rem 0; }
+  .plugin-card > fieldset, .plugin-card > .actions, .plugin-card > form, .plugin-card > details, .settings-toggle { padding-inline: 1rem; }
+  .settings-toggle { margin-top: .5rem; }
+  .btn-settings { background: #1e293b; color: #38bdf8; border-color: #38bdf8; font-weight: 500; }
+  .settings-panel { margin: 1rem; padding: 1rem; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; }
+  .setting-row { margin-bottom: .8rem; }
+  .setting-row small { color: var(--text-secondary); opacity: .8; display: block; margin-top: .2rem; }
   @media(max-width:600px) { section { padding: 1rem; } }
 </style>

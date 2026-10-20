@@ -36,6 +36,7 @@ fn package(key: &Ed25519KeyPair, wasm: Vec<u8>) -> Package {
             license: "MIT".into(),
             repository: "https://example.invalid/test".into(),
             permissions: vec!["metadata.read".into()],
+            ..Default::default()
         },
         publisher_id: "test".into(),
         sha256: format!("{:x}", Sha256::digest(&wasm)),
@@ -365,6 +366,41 @@ async fn signed_package_real_worker_live_permissions_persistence_and_lifecycle()
     .await;
     assert_eq!(works["items"].as_array().unwrap().len(), 1);
     assert_eq!(works["items"][0]["libraryId"], "films");
+
+    // Verify extension settings GET and PUT
+    let settings_endpoint = format!("{endpoint}/settings");
+    let (status, initial_settings, _) =
+        call(&app, "GET", &settings_endpoint, &cookie, "", Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(initial_settings["settings"], json!({}));
+
+    let (status, _, _) = call(
+        &app,
+        "PUT",
+        &settings_endpoint,
+        &cookie,
+        csrf,
+        json!({"api_key": "secret123", "language": "fr-FR", "disallow_custom_avatars": true}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, updated_settings, _) =
+        call(&app, "GET", &settings_endpoint, &cookie, "", Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated_settings["settings"]["api_key"], "secret123");
+    assert_eq!(
+        updated_settings["settings"]["disallow_custom_avatars"],
+        true
+    );
+
+    let (status, list_val, _) = call(&app, "GET", base, &cookie, "", Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        list_val["extensions"][0]["settings"]["api_key"],
+        "secret123"
+    );
+
     assert_eq!(call(&app,"POST","/api/v1/admin/users",&cookie,csrf,json!({"login":"extension-user","password":"synthetic regular user password","role":"user","displayName":null,"libraryIds":["films"]})).await.0,StatusCode::CREATED);
     let (status, _, regular) = call(
         &app,

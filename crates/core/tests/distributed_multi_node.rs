@@ -132,6 +132,14 @@ async fn populate_test_libraries(films_root: &Path, series_root: &Path) {
         .save(film_dir.join("poster.png"))
         .expect("write film poster");
 
+    let music = films_root.join("Music");
+    tokio::fs::create_dir_all(&music).await.unwrap();
+    tokio::fs::copy(
+        film_dir.join("Horizon Stellaire (2025).en.opus"),
+        music.join("sample.opus"),
+    )
+    .await
+    .unwrap();
     // Node 2: Series library
     let show_dir = series_root.join("Chroniques Orbitales (2024) [tvdb-777]");
     let season_dir = show_dir.join("Season 01");
@@ -596,6 +604,94 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         );
     }
 
+    // Music is scanned on the owning remote Node and streamed under the same live library rights.
+    let music_root = node1_root
+        .join("Music")
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let (status,_,body)=http_request(&core_origin,Method::POST,"/api/v1/admin/libraries",&[("origin",&core_origin),("cookie",&admin_cookie),("x-csrf-token",&admin_csrf),("content-type","application/json")],serde_json::to_vec(&json!({"name":"Musique distante","kind":"music","nodeId":node1_id,"root":music_root,"enabled":true,"userIds":[&alice_id]})).unwrap()).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "music library: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let music_library = serde_json::from_slice::<Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        http_request(
+            &core_origin,
+            Method::POST,
+            &format!("/api/v1/admin/libraries/{music_library}/scan"),
+            &[
+                ("origin", &core_origin),
+                ("cookie", &admin_cookie),
+                ("x-csrf-token", &admin_csrf)
+            ],
+            vec![]
+        )
+        .await
+        .0,
+        StatusCode::ACCEPTED
+    );
+    let mut done = false;
+    for _ in 0..100 {
+        let (_, _, body) = http_request(
+            &core_origin,
+            Method::GET,
+            &format!("/api/v1/admin/libraries/{music_library}/scan"),
+            &[("cookie", &admin_cookie)],
+            vec![],
+        )
+        .await;
+        let job: Value = serde_json::from_slice(&body).unwrap();
+        assert_ne!(job["status"], "error", "music scan: {job}");
+        if job["status"] == "completed" {
+            done = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(done);
+    let (status, _, body) = http_request(
+        &core_origin,
+        Method::GET,
+        "/api/v1/music",
+        &[("cookie", &alice_cookie)],
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let music: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(music["total"], 1);
+    let track = music["items"][0]["id"].as_str().unwrap();
+    let path = format!("/api/v1/music/tracks/{track}/content");
+    let (status, _, bytes) = http_request(
+        &core_origin,
+        Method::GET,
+        &path,
+        &[("cookie", &alice_cookie), ("range", "bytes=0-3")],
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(&bytes[..], b"OggS");
+    assert_eq!(
+        http_request(
+            &core_origin,
+            Method::GET,
+            &path,
+            &[("cookie", &bob_cookie)],
+            vec![]
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
     // 7. Verify global catalogue publication and permissions
     let (cat_st, _, cat_body) = http_request(
         &core_origin,
@@ -711,6 +807,63 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .await;
         assert_eq!(md_st, StatusCode::OK);
         let md: Value = serde_json::from_slice(&md_body).unwrap();
+        let prepared = md["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|source| source["prepare"] == true)
+            .expect("remote prepared source");
+        let audio = prepared["externalAudioUrl"].as_str().unwrap();
+        let (status, _, bytes) = http_request(
+            &core_origin,
+            Method::GET,
+            audio,
+            &[("cookie", &alice_cookie), ("range", "bytes=0-3")],
+            vec![],
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::PARTIAL_CONTENT,
+            "remote audio preparation: {}",
+            String::from_utf8_lossy(&bytes)
+        );
+        assert_eq!(&bytes[..], b"OggS");
+        let video = prepared["url"].as_str().unwrap();
+        let (status, _, bytes) = http_request(
+            &core_origin,
+            Method::GET,
+            video,
+            &[("cookie", &alice_cookie), ("range", "bytes=0-31")],
+            vec![],
+        )
+        .await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(&bytes[4..8], b"ftyp");
+        assert_eq!(
+            http_request(
+                &core_origin,
+                Method::HEAD,
+                video,
+                &[("cookie", &alice_cookie)],
+                vec![]
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            http_request(
+                &core_origin,
+                Method::GET,
+                video,
+                &[("cookie", &bob_cookie)],
+                vec![]
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN
+        );
         if asset_id == &film_asset_id {
             let subtitle = md["subtitles"][0]["url"].as_str().unwrap();
             let (status, _, bytes) = http_request(

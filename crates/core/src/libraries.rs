@@ -227,7 +227,7 @@ async fn save(
     if input.name.is_empty()
         || input.name.chars().count() > 100
         || input.name.chars().any(char::is_control)
-        || !matches!(input.kind.as_str(), "films" | "series")
+        || !matches!(input.kind.as_str(), "films" | "series" | "music")
         || input.node_id.is_empty()
         || input.user_ids.len() > 1000
     {

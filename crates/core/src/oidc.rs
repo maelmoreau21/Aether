@@ -756,6 +756,12 @@ impl Oidc {
         };
         let raw = auth::random_token();
         let created=crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+43200 FROM users WHERE id=? AND disabled_at IS NULL").bind(auth::hash(&raw)).bind(&user).execute(&mut *tx).await.map_err(db)?;
+        crate::database::query("UPDATE sessions SET device_label=? WHERE token_hash=?")
+            .bind(auth::device_label(headers))
+            .bind(auth::hash(&raw))
+            .execute(&mut *tx)
+            .await
+            .map_err(db)?;
         if created.rows_affected() != 1 {
             return Err(deny(StatusCode::FORBIDDEN, "oidc_account_disabled"));
         }

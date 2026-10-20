@@ -21,7 +21,7 @@ pub fn router(auth: AuthState) -> Router {
         ))
         .with_state(auth)
 }
-async fn authorized(
+pub(crate) async fn authorized(
     auth: &AuthState,
     headers: &HeaderMap,
     work: &str,
@@ -34,6 +34,9 @@ async fn authorized(
     let found: Option<String> = query_scalar("SELECT w.id FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE w.id=? AND w.kind IN ('film','series','episode') AND l.enabled=1 AND n.status != 'revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?))")
         .bind(work).bind(identity.user.role.as_str()).bind(&identity.user.id).fetch_optional(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if found.is_none() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if !crate::product::parental_allowed(&auth.store, &identity.user.id, work).await? {
         return Err(StatusCode::FORBIDDEN);
     }
     Ok(identity.user.id)
@@ -51,6 +54,7 @@ async fn read(
     headers: HeaderMap,
 ) -> Result<Json<Feedback>, StatusCode> {
     let user = authorized(&auth, &headers, &work, false).await?;
+    let work = crate::product::canonical_work(&auth.store, &work).await?;
     let row = query("SELECT favorite,rating FROM work_feedback WHERE user_id=? AND work_id=?")
         .bind(user)
         .bind(work)
@@ -75,6 +79,7 @@ async fn write(
     Json(input): Json<Feedback>,
 ) -> Result<Json<Feedback>, StatusCode> {
     let user = authorized(&auth, &headers, &work, true).await?;
+    let work = crate::product::canonical_work(&auth.store, &work).await?;
     if input
         .rating
         .is_some_and(|r| !r.is_finite() || !(0.5..=5.0).contains(&r) || (r * 2.0).fract() != 0.0)

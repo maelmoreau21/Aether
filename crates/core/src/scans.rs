@@ -230,7 +230,7 @@ pub(crate) async fn enqueue_with_mode(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
     let library: Option<(String, String, String, String)> = crate::database::query_as(
-        "SELECT l.root, l.kind, l.node_id, l.excluded_patterns FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
+        "SELECT l.root, l.kind, l.node_id, l.excluded_patterns FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series', 'music') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
     )
     .bind(&id)
     .fetch_optional(&state.auth.store.pool)
@@ -306,6 +306,11 @@ pub(crate) async fn enqueue_with_mode(
             if cancel.load(Ordering::Acquire) { return Err("Scan arrêté".into()); }
             crate::database::query("UPDATE scan_jobs SET status='running' WHERE library_id=?").bind(&job_id).execute(&store.pool).await?;
             let root = node::LocalNode.validate_root(std::path::Path::new(&root), &allowed_root).await?;
+            if kind == "music" {
+                let count = crate::music::scan(&store, &job_id, &root, &cancel).await?;
+                crate::database::query("UPDATE scan_jobs SET status='completed',discovered=?,probed=?,reused=0 WHERE library_id=?").bind(count as i64).bind(count as i64).bind(&job_id).execute(&store.pool).await?;
+                return Ok(());
+            }
             let cache = if mode == RefreshMode::Full { Default::default() } else { inventory::load_scan_cache(&store, &job_id).await? };
             let images = if mode == RefreshMode::Full { Default::default() } else { inventory::load_image_cache(&store, &job_id).await? };
 

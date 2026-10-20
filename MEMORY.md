@@ -1,5 +1,48 @@
 # MEMORY.md — État et décisions Aether
 
+## 20 octobre 2026 — Extensions Rust, bannières Jellyfin, paramétrage dynamique et Avatar Plugin
+
+- **Extensions dans `C:\Users\Mael\Documents\GitHub\Aether-Plugins`** :
+  - **`aether-plugin-tmdb`** : métadonnées complètes, casting ordonné avec photos, équipe technique, affiches/backdrops (original et W500), notes moyennes et identifiants externes.
+  - **`aether-plugin-imdb`** : recherche instantanée via suggestions IMDb (sans clé requise), extraction Schema.org JSON-LD (note IMDb, votes, classification, durée ISO 8601 en minutes).
+  - **`aether-plugin-fanart`** : logos transparents ClearLogos (HD/4K), fonds sans texte Backdrops, ClearArt, bannières et jaquettes disc art.
+  - **`aether-plugin-avatar`** : inspiré de `cedev-1/jellyfin-avatars`. Fournit 4 packs d'avatars vectoriels SVG haute résolution intégrés (`personas`, `geometric`, `retro`, `botts`), générateur procédural déterministe avec graine (seed), attribution aléatoire et options de verrouillage de politique administrateur (`disallow_custom_avatars`).
+- **Inspiration Jellyfin & Métadonnées enrichies dans `crates/aether-plugin-api` et `crates/extension-sdk`** :
+  - Métadonnées dans `Cargo.toml` (`[package.metadata.aether]`) avec version de l'extension, ABI ciblée (`target_abi = "1"`), compatibilité serveur minimale/maximale (`min_server_version = "1.0.0"`), catégorie et checksum SHA-256.
+  - Bannière graphique Jellyfin intégrée (`banner.svg` vectoriel haute définition) pour chaque extension.
+  - Schéma de configuration dynamique (`config_schema: Vec<ConfigField>`) typé (`password`, `text`, `boolean`, `select` avec options) pour les clés d'API et options du serveur.
+- **Raccordement Core & Persistance dans Aether** :
+  - Migration `0035_extension_settings.sql` (SQLite et PostgreSQL) créant `extension_settings (extension_id PRIMARY KEY, settings_json)`.
+  - Endpoints sécurisés `GET /api/v1/admin/extensions/{id}/settings` et `PUT /api/v1/admin/extensions/{id}/settings` avec audit administratif et permissions.
+  - Endpoint `list` (`GET /api/v1/admin/extensions`) incluant automatiquement `settings` pour chaque extension.
+  - Protection des avatars dans `crates/core/src/avatars.rs` : interdiction du téléversement d'avatars personnalisés pour les utilisateurs non-administrateurs lorsque la politique `disallow_custom_avatars` est activée sur une extension d'avatars.
+- **Interface d'administration Web (`AdminExtensions.svelte`)** :
+  - Affichage des bannières visuelles vectorielles de chaque plugin.
+  - Badges de version, catégorie, compatibilité ABI et compatibilité Aether, avec checksum SHA-256.
+  - Menu interactif "Paramètres du plugin" générant les champs selon `configSchema` (clés secrètes masquées, cases à cocher, listes de sélection) avec sauvegarde asynchrone sécurisée.
+- **Validations réelles exécutées** :
+  - `Aether-Plugins` : 18/18 tests unitaires et d'intégration réussis (`cargo test --workspace`), `cargo fmt --check` et `cargo clippy --all-targets -- -D warnings` (0 erreur, 0 avertissement). Binaires release générés dans `target/release/`.
+  - `Aether` : `cargo check` réussi, tests d'extensions réussis (`cargo test -p media-poc --test extensions` avec validation des paramètres, du cycle de vie et des droits), `npm run check --prefix apps/web` réussi (0 erreur TypeScript / Svelte).
+
+
+## 20 octobre 2026 — Premier jalon PWA et demandes produit
+
+- Manifeste statique généré à partir de `DEFAULT_NAME`, icônes PNG 192/512,
+  lancement standalone et service worker SvelteKit réseau uniquement. CSP Core
+  étendue à `worker-src 'self'` et `manifest-src 'self'`.
+- Message hors connexion pour navigations `/app/`, aucun cache de données privées
+  ou médias, aucune interception des API/Range/Nodes distants et aucune activation
+  forcée pendant la lecture. Pas de téléchargement hors ligne livré.
+- Suivi complet des demandes dans `docs/PRODUCT_BACKLOG.md`, dont bibliothèques
+  musicales, comptes/sessions, multi-Node et correction du cache après crash.
+  Ces fonctionnalités restent ouvertes ; aucun changement du lecteur dans ce lot.
+- Web check/lint, 57 tests et build validés ; Chrome headless : manifeste,
+  icônes décodées, worker actif, navigation hors ligne et reconnexion, cache vide.
+  Test Rust `static_web` réussi ; `cargo fmt --check` et `git diff --check` réussis.
+  Voir `docs/PWA.md`. Installation physique et NAS HTTPS non testés.
+- Modifications préexistantes préservées ; pas de push ni de déploiement.
+  Token Saver appliqué par lectures ciblées et validations regroupées.
+
 ## 20 octobre 2026 — Socle d’extensions tierces et validation du runtime
 
 - Clarification utilisateur : fournir la plateforme et le SDK, sans développer ou livrer d’extension produit. Démonstration retirée des livrables et des artefacts, modules synthétiques uniquement dans les fixtures de test. ABI générique `{apiVersion,operation,input}` → `{apiVersion,result}`; adaptateurs métier soumis aux permissions Core.

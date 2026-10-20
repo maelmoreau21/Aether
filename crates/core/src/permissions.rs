@@ -108,6 +108,31 @@ pub async fn require_media(
     if !allowed {
         return error(StatusCode::FORBIDDEN, "permission_denied");
     }
+    if path != "/api/v1/catalog" {
+        let (kind, target) = if let Some(id) = path.strip_prefix("/api/v1/catalog/") {
+            ("work", id)
+        } else if let Some(id) = path.strip_prefix("/api/v1/media/") {
+            ("asset", id)
+        } else if let Some(id) = path.strip_prefix("/api/v1/assets/") {
+            (
+                if path.ends_with("/image") {
+                    "image"
+                } else {
+                    "asset"
+                },
+                id.split('/').next().unwrap_or(""),
+            )
+        } else {
+            ("asset", "")
+        };
+        match crate::product::target_allowed(&state.auth.store, &identity.user.id, kind, target)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => return error(StatusCode::FORBIDDEN, "parental_restriction"),
+            Err(status) => return error(status, "parental_policy_unavailable"),
+        }
+    }
     request.extensions_mut().insert(VisibleLibraries(visible));
     request.extensions_mut().insert(identity);
     next.run(request).await

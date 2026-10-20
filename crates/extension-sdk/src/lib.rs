@@ -21,7 +21,28 @@ pub struct ExtensionResponse {
     pub result: serde_json::Value,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigOption {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigField {
+    pub key: String,
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
+    pub field_type: String,
+    #[serde(default)]
+    pub default_value: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<ConfigOption>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Manifest {
     pub api_version: u32,
@@ -33,6 +54,20 @@ pub struct Manifest {
     pub license: String,
     pub repository: String,
     pub permissions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_abi: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_server_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_server_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub banner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_schema: Option<Vec<ConfigField>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

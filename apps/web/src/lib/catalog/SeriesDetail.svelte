@@ -1,4 +1,5 @@
 <script lang="ts">
+  import WorkTools from './WorkTools.svelte';
   import type { Work } from './api';
   import PersonalFeedback from './PersonalFeedback.svelte';
   import EditorialCredits from './EditorialCredits.svelte';
@@ -90,6 +91,7 @@
         {#if work.artwork?.logo}<img class="title-logo" src={work.artwork.logo} alt="" />{/if}
         <h1>{work.title}</h1>
         {#if !work.synthetic}<PersonalFeedback workId={work.id} />{/if}
+        {#if !work.synthetic}<WorkTools {work} />{/if}
         {#if work.seasons?.length}
           <nav class="season-shortcuts" aria-label="Saisons disponibles">
             {#each work.seasons as item (item.id)}

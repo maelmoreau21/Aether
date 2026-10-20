@@ -41,6 +41,9 @@ async fn authorized(
     if found.is_none() {
         return Err(StatusCode::FORBIDDEN);
     }
+    if !crate::product::parental_allowed(&auth.store, &identity.user.id, work).await? {
+        return Err(StatusCode::FORBIDDEN);
+    }
     Ok(identity.user.id)
 }
 
@@ -54,6 +57,8 @@ async fn read(
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
     let user = authorized(&auth, &headers, &work, false).await?;
+    let requested_work = work.clone();
+    let work = crate::product::canonical_work(&auth.store, &work).await?;
     let row = query("SELECT * FROM playback_progress WHERE user_id=? AND work_id=?")
         .bind(&user)
         .bind(&work)
@@ -61,7 +66,9 @@ async fn read(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if let Some(row) = row.as_ref() {
-        return Ok(Json(value(row)));
+        let mut saved = value(row);
+        saved["workId"] = json!(requested_work);
+        return Ok(Json(saved));
     }
     let probe: Option<String> = query_scalar("SELECT a.probe_json FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id WHERE e.work_id=? AND a.available=1 ORDER BY a.id LIMIT 1")
         .bind(&work).fetch_optional(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -76,7 +83,7 @@ async fn read(
         .filter(|d| d.is_finite() && *d > 0.0)
         .unwrap_or(0.0);
     Ok(Json(
-        json!({"workId":work,"position":0,"duration":duration,"watched":false,"revision":0}),
+        json!({"workId":requested_work,"position":0,"duration":duration,"watched":false,"revision":0}),
     ))
 }
 
@@ -96,6 +103,8 @@ async fn write(
     Json(input): Json<Input>,
 ) -> Result<Json<Value>, StatusCode> {
     let user = authorized(&auth, &headers, &work, true).await?;
+    let requested_work = work.clone();
+    let work = crate::product::canonical_work(&auth.store, &work).await?;
     if !input.position.is_finite()
         || !input.duration.is_finite()
         || input.duration <= 0.0
@@ -118,7 +127,11 @@ async fn write(
             .fetch_optional(&auth.store.pool).await
     }.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     row.as_ref()
-        .map(|row| Json(value(row)))
+        .map(|row| {
+            let mut saved = value(row);
+            saved["workId"] = json!(requested_work);
+            Json(saved)
+        })
         .ok_or(StatusCode::CONFLICT)
 }
 
@@ -127,9 +140,9 @@ async fn list(
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
     let identity = auth.authenticate(&headers).await?;
-    let rows = query("SELECT p.*,w.title,w.kind,s.series_id FROM playback_progress p JOIN inventory_works w ON w.id=p.work_id JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id LEFT JOIN inventory_episodes ep ON ep.work_id=w.id LEFT JOIN inventory_seasons s ON s.id=ep.season_id WHERE p.user_id=? AND l.enabled=1 AND n.status != 'revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id=l.id AND lp.user_id=?)) ORDER BY p.updated_at DESC,p.work_id LIMIT 100")
+    let rows = query("SELECT p.*,COALESCE(json_extract(w.manual_json,'$.title'),w.title) AS title,w.kind,s.series_id FROM playback_progress p JOIN inventory_works w ON w.id=p.work_id JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id LEFT JOIN inventory_episodes ep ON ep.work_id=w.id LEFT JOIN inventory_seasons s ON s.id=ep.season_id WHERE p.user_id=? AND l.enabled=1 AND n.status != 'revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id=l.id AND lp.user_id=?)) ORDER BY p.updated_at DESC,p.work_id LIMIT 100")
         .bind(&identity.user.id).bind(if identity.user.role == Role::Administrator {"administrator"} else {"user"}).bind(&identity.user.id).fetch_all(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let items: Vec<_> = rows
+    let mut items: Vec<_> = rows
         .iter()
         .map(|row| {
             let mut v = value(row);
@@ -139,5 +152,17 @@ async fn list(
             v
         })
         .collect();
-    Ok(Json(json!({"items":items})))
+    let mut allowed = Vec::new();
+    for item in items.drain(..) {
+        if crate::product::parental_allowed(
+            &auth.store,
+            &identity.user.id,
+            item["workId"].as_str().unwrap_or_default(),
+        )
+        .await?
+        {
+            allowed.push(item);
+        }
+    }
+    Ok(Json(json!({"items":allowed})))
 }

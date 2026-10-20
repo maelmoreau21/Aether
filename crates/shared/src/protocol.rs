@@ -154,6 +154,8 @@ pub struct NodeCommandEnvelope {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamRelayRequest {
+    #[serde(default)]
+    pub head: bool,
     pub stream_id: String,
     pub target_kind: String,
     pub target_id: String,

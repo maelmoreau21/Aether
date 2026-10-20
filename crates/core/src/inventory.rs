@@ -1701,8 +1701,19 @@ pub async fn resource_library(
 }
 
 fn work(row: &sqlx::any::AnyRow) -> Value {
-    let metadata: Value =
+    let mut metadata: Value =
         serde_json::from_str(row.get("editorial_json")).unwrap_or_else(|_| json!({}));
+    if let Some(manual) = row
+        .try_get::<Option<String>, _>("manual_json")
+        .ok()
+        .flatten()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|v| v.as_object().cloned())
+    {
+        if let Some(object) = metadata.as_object_mut() {
+            object.extend(manual);
+        }
+    }
     let kind: String = row.try_get("kind").unwrap_or_else(|_| "film".to_string());
     let season_count: Option<i64> = row.try_get("season_count").ok().flatten();
     let episode_count: Option<i64> = row.try_get("episode_count").ok().flatten();
@@ -1713,8 +1724,9 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
         "id": row.get::<String,_>("id"),
         "libraryId": row.get::<String,_>("library_id"),
         "kind": kind,
-        "title": row.get::<String,_>("title"),
-        "year": row.get::<Option<i64>,_>("year"),
+        "title": metadata["title"].as_str().map(str::to_owned).unwrap_or_else(||row.get::<String,_>("title")),
+        "year": metadata["year"].as_i64().or_else(||row.get::<Option<i64>,_>("year")),
+        "minimumAge":row.try_get::<Option<i64>,_>("minimum_age").ok().flatten(),
         "addedAt": row.try_get::<Option<i64>,_>("added_at").ok().flatten(),
         "description": metadata["plot"].as_str().or_else(||metadata["outline"].as_str()).unwrap_or("Média local indexé"),
         "plot": metadata["plot"],
@@ -1769,6 +1781,57 @@ pub async fn editorial_warnings(
     Ok(warnings)
 }
 
+#[derive(Default)]
+pub struct CatalogueFilter {
+    pub user_id: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<i64>,
+    pub quality: Option<i64>,
+    pub codec: Option<String>,
+    pub language: Option<String>,
+}
+fn push_catalogue_filters(builder: &mut sqlx::QueryBuilder<sqlx::Any>, filter: &CatalogueFilter) {
+    if let Some(genre) = &filter.genre {
+        builder.push(" AND instr(lower(json_extract(COALESCE(w.manual_json,w.editorial_json),'$.genres')), ").push_bind(format!("\"{}\"",genre.to_lowercase())).push(")>0 ");
+    }
+    if let Some(year) = filter.year {
+        builder
+            .push(" AND COALESCE(CAST(json_extract(w.manual_json,'$.year') AS BIGINT),w.year)=")
+            .push_bind(year)
+            .push(" ");
+    }
+    if filter.quality.is_some() || filter.codec.is_some() || filter.language.is_some() {
+        builder.push(" AND EXISTS(SELECT 1 FROM inventory_editions fe JOIN inventory_versions fv ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id JOIN inventory_assets fa ON fa.source_id=fs.id JOIN libraries fl ON fl.id=fs.library_id JOIN media_nodes fn ON fn.id=fl.node_id WHERE (fe.work_id=w.id OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep JOIN inventory_seasons fseason ON fseason.id=fep.season_id WHERE fseason.series_id=w.id)) AND fa.available=1 AND fl.enabled=1 AND fn.status!='revoked' AND fs.root_snapshot=fl.root ");
+        if let Some(height) = filter.quality {
+            builder.push(" AND EXISTS(SELECT 1 FROM inventory_tracks ft WHERE ft.asset_id=fa.id AND CAST(json_extract(ft.metadata_json,'$.height') AS BIGINT)>=").push_bind(height).push(") ");
+        }
+        if let Some(codec) = &filter.codec {
+            builder.push(" AND EXISTS(SELECT 1 FROM inventory_tracks ft WHERE ft.asset_id=fa.id AND lower(json_extract(ft.metadata_json,'$.codec_name'))=").push_bind(codec.to_lowercase()).push(") ");
+        }
+        if let Some(language) = &filter.language {
+            builder.push(" AND EXISTS(SELECT 1 FROM inventory_tracks ft WHERE ft.asset_id=fa.id AND lower(json_extract(json_extract(ft.metadata_json,'$.tags'),'$.language'))=").push_bind(language.to_lowercase()).push(") ");
+        }
+        builder.push(") ");
+    }
+    if let Some(user) = &filter.user_id {
+        builder
+            .push(" AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=")
+            .push_bind(user)
+            .push(" AND ((")
+            .push(crate::product::AGE_SQL)
+            .push(")>policy.maximum_age OR ((")
+            .push(crate::product::AGE_SQL)
+            .push(") IS NULL AND policy.allow_unrated=0))) ");
+    }
+}
+fn push_group_filter(builder: &mut sqlx::QueryBuilder<sqlx::Any>, filter: &CatalogueFilter) {
+    let Some(user) = &filter.user_id else {
+        return;
+    };
+    builder.push(" AND w.id IN (SELECT COALESCE(MIN(CASE WHEN gn.status='connected' THEN w.id END),MIN(w.id)) FROM inventory_works w LEFT JOIN media_group_members gm ON gm.work_id=w.id JOIN libraries gl ON gl.id=w.library_id JOIN media_nodes gn ON gn.id=gl.node_id WHERE gl.enabled=1 AND gn.status!='revoked' AND (EXISTS(SELECT 1 FROM users gu WHERE gu.id=").push_bind(user).push(" AND gu.role='administrator') OR EXISTS(SELECT 1 FROM effective_library_permissions gp WHERE gp.library_id=gl.id AND gp.user_id=").push_bind(user).push(")) AND (w.kind!='film' OR EXISTS(SELECT 1 FROM inventory_editions ge JOIN inventory_versions gv ON gv.edition_id=ge.id JOIN inventory_sources gs ON gs.version_id=gv.id JOIN inventory_assets ga ON ga.source_id=gs.id WHERE ge.work_id=w.id AND ga.available=1 AND gs.root_snapshot=gl.root)) ");
+    push_catalogue_filters(builder, filter);
+    builder.push(" GROUP BY COALESCE(gm.group_id,w.id)) ");
+}
 pub async fn catalogue(
     store: &IdentityStore,
     visible: &[String],
@@ -1777,6 +1840,29 @@ pub async fn catalogue(
     sort: &str,
     offset: usize,
     limit: usize,
+) -> Result<Value, sqlx::Error> {
+    catalogue_filtered(
+        store,
+        visible,
+        kind,
+        search,
+        sort,
+        offset,
+        limit,
+        &CatalogueFilter::default(),
+    )
+    .await
+}
+#[allow(clippy::too_many_arguments)]
+pub async fn catalogue_filtered(
+    store: &IdentityStore,
+    visible: &[String],
+    kind: Option<&str>,
+    search: &str,
+    sort: &str,
+    offset: usize,
+    limit: usize,
+    filter: &CatalogueFilter,
 ) -> Result<Value, sqlx::Error> {
     let target_kind = match kind {
         Some("film") | Some("films") => Some("film"),
@@ -1818,7 +1904,9 @@ pub async fn catalogue(
     separated.push_unseparated(") ");
 
     if has_search {
-        count_builder.push("AND instr(w.title_sort, ");
+        count_builder.push(
+            "AND instr(lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)), ",
+        );
         count_builder.push_bind(&search_clean);
         count_builder.push(") > 0 ");
     }
@@ -1881,6 +1969,8 @@ pub async fn catalogue(
         }
     }
 
+    push_catalogue_filters(&mut count_builder, filter);
+    push_group_filter(&mut count_builder, filter);
     let count_sql = crate::database::normalize_sql(count_builder.sql().as_str());
     let arguments = count_builder
         .build()
@@ -1948,7 +2038,9 @@ pub async fn catalogue(
     separated.push_unseparated(") ");
 
     if has_search {
-        data_builder.push("AND instr(w.title_sort, ");
+        data_builder.push(
+            "AND instr(lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)), ",
+        );
         data_builder.push_bind(&search_clean);
         data_builder.push(") > 0 ");
     }
@@ -2011,9 +2103,11 @@ pub async fn catalogue(
         }
     }
 
+    push_catalogue_filters(&mut data_builder, filter);
+    push_group_filter(&mut data_builder, filter);
     match sort {
         "title-desc" => {
-            data_builder.push("ORDER BY w.title_sort DESC, w.id DESC ");
+            data_builder.push("ORDER BY lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)) DESC, w.id DESC ");
         }
         "year-asc" => {
             data_builder.push("ORDER BY w.year IS NULL, w.year ASC, w.title_sort, w.id ");
@@ -2028,7 +2122,7 @@ pub async fn catalogue(
             data_builder.push("ORDER BY w.added_at IS NULL, w.added_at ASC, w.title_sort, w.id ");
         }
         _ => {
-            data_builder.push("ORDER BY w.title_sort ASC, w.id ASC ");
+            data_builder.push("ORDER BY lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)) ASC, w.id ASC ");
         }
     }
 
@@ -2046,7 +2140,10 @@ pub async fn catalogue(
     let rows = sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(data_sql), arguments)
         .fetch_all(&store.pool)
         .await?;
-    let items: Vec<Value> = rows.iter().map(work).collect();
+    let mut items: Vec<Value> = rows.iter().map(work).collect();
+    for item in &mut items {
+        crate::product::decorate(store, item).await?;
+    }
 
     Ok(json!({
         "items": items,
@@ -2277,6 +2374,7 @@ pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value
     };
 
     let mut value = work(&row);
+    crate::product::decorate(store, &mut value).await?;
     let images = query("SELECT i.id,i.role,i.modified_ns,i.size FROM inventory_images i JOIN libraries l ON l.id=i.library_id JOIN media_nodes n ON n.id=l.node_id WHERE i.work_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND n.status='connected' AND i.role!='poster' ORDER BY i.priority,i.relative_path,i.id").bind(work_id).fetch_all(&store.pool).await?;
     let mut artwork = serde_json::Map::new();
     for image in images {
@@ -2379,7 +2477,7 @@ pub async fn descriptor(
     session_hash: &str,
 ) -> Result<Option<Value>, sqlx::Error> {
     let row = query(
-        "SELECT a.mime, a.probe_json, a.library_id, w.title, w.id AS work_id, l.node_id, t.subtitles_json, au.audios_json \
+        "SELECT a.mime, a.probe_json, a.library_id, COALESCE(json_extract(w.manual_json,'$.title'),w.title) AS title, w.id AS work_id, l.node_id, t.subtitles_json, au.audios_json \
          FROM inventory_assets a \
          LEFT JOIN inventory_subtitles t ON t.asset_id=a.id \
          LEFT JOIN inventory_audio au ON au.asset_id=a.id \
@@ -2454,10 +2552,10 @@ pub async fn descriptor(
     .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
     let mut sources = vec![source_obj.clone()];
     // Optional preparation is restricted to known codecs; original source stays available.
-    if node_id == "local"
-        && probe.streams.iter().any(|t| {
-            t.codec_type.as_deref() == Some("video") && t.codec_name.as_deref() == Some("av1")
-        })
+    if probe
+        .streams
+        .iter()
+        .any(|t| t.codec_type.as_deref() == Some("video") && t.codec_name.as_deref() == Some("av1"))
     {
         for track in probe.streams.iter().filter(|t| {
             t.codec_type.as_deref() == Some("audio") && t.codec_name.as_deref() == Some("opus")
@@ -2532,7 +2630,12 @@ pub async fn descriptor(
         "nodeStatus": node_status,
         "available": node_status == "connected",
         "sources": sources,
-        "subtitles": subtitles
+        "subtitles": subtitles,
+        "chapters": probe.chapters.iter().filter_map(|chapter| {
+            let start = chapter["start_time"].as_str()?.parse::<f64>().ok()?;
+            if !start.is_finite() || start < 0. { return None; }
+            Some(json!({"start":start,"title":chapter["tags"]["title"].as_str().unwrap_or("Chapitre")}))
+        }).take(1000).collect::<Vec<_>>()
     })))
 }
 
@@ -2553,11 +2656,20 @@ pub async fn prepared(
         Ok(None) => return crate::error(StatusCode::NOT_FOUND, "asset_unavailable"),
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
     };
-    if row.get::<String, _>("node_id") != "local" {
-        return crate::error(
-            StatusCode::NOT_IMPLEMENTED,
-            "remote_preparation_unavailable",
-        );
+    let remote_id = row.get::<String, _>("node_id");
+    if remote_id != "local" {
+        return match crate::nodes::load_node(store, &remote_id).await {
+            Ok(Some(node)) => {
+                crate::nodes::relay_from_remote_node(
+                    store,
+                    &node,
+                    &format!("/internal/v1/node/assets/{asset_id}/prepared/{component}"),
+                    request,
+                )
+                .await
+            }
+            _ => crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable"),
+        };
     }
     let probe = match decode(row.get("probe_json")) {
         Ok(probe) => probe,

@@ -8,6 +8,8 @@
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
   import type { Media, PlayerFactory } from '../player/types';
   import Navbar from '../ui/Navbar.svelte';
+  import CatalogFilters from './CatalogFilters.svelte';
+  import { bestVersion } from '../player/version-choice';
   import CatalogHome from './CatalogHome.svelte';
   import CatalogGrid from './CatalogGrid.svelte';
   import FilmDetail from './FilmDetail.svelte';
@@ -252,6 +254,7 @@
     const q = query;
     const sorting = order;
     const start = offset;
+    const filters=Object.fromEntries(['genre','year','quality','codec','language'].flatMap(key=>{const value=page.url.searchParams.get(key);return value?[[key,value]]:[];}));
     const currentSection = section;
     const activeSessionKey = $session ? `${$session.user.id}:${$session.csrfToken}` : 'anonymous';
     void activeSessionKey;
@@ -298,7 +301,11 @@
             selected = ids[0] ?? '';
             try {
               const items = await fetchMediaDescriptors(ids, controller.signal);
-              if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) media = items;
+              if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) {
+                media = items;
+                const probe=document.createElement('video');
+                selected=bestVersion(items,mime=>probe.canPlayType(mime))?.id??selected;
+              }
             } catch (failure) {
               if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) {
                 mediaError = failure instanceof Error ? failure.message : 'Chargement des sources impossible.';
@@ -320,6 +327,7 @@
             kinds.map(kind =>
               request<CatalogPage>(
                 `/api/v1/catalog?${new URLSearchParams({
+                  ...filters,
                   kind,
                   q,
                   sort: sorting,
@@ -375,6 +383,7 @@
 <a class="skip-link" href="#main-content">Aller au contenu</a>
 
 <Navbar {section} {name} />
+{#if !workId && section!=='settings'}<CatalogFilters />{/if}
 
 <main id="main-content" tabindex="-1">
   {#if section === 'home' && $serverPresentation.welcomeMessage}<p class="server-welcome">{$serverPresentation.welcomeMessage}</p>{/if}

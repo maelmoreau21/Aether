@@ -1293,6 +1293,7 @@ mod tests {
             .unwrap();
         let m = tokio::fs::metadata(path).await.unwrap();
         let probe = Probe {
+            chapters: Vec::new(),
             streams: vec![],
             format: BTreeMap::new(),
         };
@@ -1432,6 +1433,7 @@ mod tests {
                     size: meta.len(),
                     modified_ns,
                     probe: Probe {
+                        chapters: Vec::new(),
                         streams: vec![],
                         format: BTreeMap::new(),
                     },

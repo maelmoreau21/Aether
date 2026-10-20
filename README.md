@@ -1,171 +1,240 @@
-# Aether — Plateforme multimédia auto-hébergeable
+<div align="center">
+  <img src="Aether.svg" alt="Logo Aether" width="100" height="100">
 
-Plateforme multimédia **100 % auto-hébergeable et open source**, inspirée de l'ergonomie Netflix,
-conçue pour coexister sans danger avec Jellyfin et fonctionner en lecture directe AV1 vidéo + Opus audio.
+  # Aether
 
-> **16 octobre 2026 — Distribution Docker Standalone P1 livrée & vérifiée :**
-> Image multi-stage « tout-en-un » non-root (`10001:10001`) intégrant le frontend SvelteKit compilé,
-> le Core Axum/Tokio, le Media Node local, SQLite persistant en mode WAL et `ffprobe`,
-> sans processus Node.js permanent.
-> Documentation complète : [docs/DEPLOYMENT_DOCKER.md](docs/DEPLOYMENT_DOCKER.md).
+  **Votre médiathèque, sur votre infrastructure.**
+
+  Une plateforme multimédia libre et auto-hébergeable, construite avec **Rust** et **SvelteKit** : catalogue Films & Séries, lecture Web, administration centralisée et stockage réparti sur plusieurs machines.
+
+  [![License: AGPL-3.0](https://img.shields.io/badge/Licence-AGPL--3.0-blue.svg)](LICENSE)
+  ![Rust](https://img.shields.io/badge/Backend-Rust-orange)
+  ![SvelteKit](https://img.shields.io/badge/Frontend-SvelteKit-ff3e00)
+  ![Docker](https://img.shields.io/badge/D%C3%A9ploiement-Docker-2496ed)
+  ![Statut](https://img.shields.io/badge/Statut-D%C3%A9veloppement%20actif-yellow)
+
+  [Installation](#-installation-rapide) · [Fonctionnalités](#-fonctionnalités) · [Architecture](#-architecture) · [Documentation](#-documentation) · [Contribuer](#-contribuer)
+</div>
 
 ---
 
-## 1. Déploiement Docker Standalone (Recommandé)
+> [!IMPORTANT]
+> **Aether est en développement actif.** Les fonctionnalités décrites ci-dessous correspondent aux parcours implémentés dans le dépôt, mais ne constituent pas une garantie de compatibilité avec tous les médias, navigateurs, appareils ou environnements de production. Vérifiez les limites documentées avant de l'exposer sur Internet.
 
-### Lancement rapide avec Docker Compose
-Depuis la racine du dépôt :
+> [!CAUTION]
+> **Respect des droits d’auteur :** Aether est un logiciel de gestion et de lecture de médias personnels. Il ne fournit, ne télécharge et ne distribue aucun film ni aucune série. Vous devez utiliser uniquement des contenus provenant de **sources licites** et disposer des droits ou autorisations nécessaires pour les copier, les héberger et les consulter.
+>
+> Le fait de posséder un DVD ou un Blu-ray ne donne pas automatiquement le droit de contourner une protection technique, de redistribuer une copie ou de mettre le film à disposition d’autres personnes. En France, l’exception de copie privée est limitée à une copie réalisée depuis une source licite et réservée à l’usage privé du copiste ; elle ne couvre pas la diffusion collective ou publique. Chaque utilisateur est responsable de l’utilisation qu’il fait d’Aether et du respect du droit applicable. Voir [l’article L122-5 du Code de la propriété intellectuelle](https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000043975029).
+
+## Pourquoi Aether ?
+
+Aether vise à offrir une expérience de médiathèque moderne sans dépendre d'un service de streaming propriétaire. Les fichiers restent **sur vos disques**, et l'application ne modifie pas vos bibliothèques : les volumes médias sont montés en **lecture seule**.
+
+Le projet privilégie la **lecture directe** et évite d'imposer un transcodage vidéo côté serveur. Il peut cohabiter avec une installation Jellyfin existante, sans être un fork ni nécessiter Jellyfin pour fonctionner.
+
+## Fonctionnalités
+
+| Domaine | Fonctionnalités |
+| --- | --- |
+| **Catalogue** | Films et séries, recherche, saisons et épisodes, affiches locales, métadonnées NFO et bibliothèques multiples |
+| **Lecture** | Lecteur Web, prise en charge ciblée d'AV1 et Opus en MKV/MP4, pause, avance, changement de piste selon les capacités du client |
+| **Pistes externes** | Audio Opus/Ogg associé au média et sous-titres texte SRT/WebVTT ; préférences de langues et sous-titres forcés |
+| **Suivi** | Reprise de lecture, progression par utilisateur, éléments vus/non vus et « Continuer à regarder » |
+| **Administration** | Comptes, groupes, droits par bibliothèque, clés API limitées au catalogue, tâches et scans planifiés |
+| **Authentification** | Comptes locaux et connexion OpenID Connect (OIDC), notamment avec Authentik |
+| **Stockage** | SQLite par défaut, PostgreSQL 18 externe en option pour un Core unique |
+| **Sauvegardes** | Sauvegardes administratives chiffrées et planifiables, restauration hors ligne |
+| **Distribution** | Mode autonome ou Core central avec un ou plusieurs Media Nodes |
+
+**Limites actuelles :** la lecture AV1/Opus dépend de la prise en charge du navigateur et du conteneur ; toutes les combinaisons de pistes ne sont pas garanties. Le support complet des styles ASS/SSA, des flux élémentaires « raw », des extensions exécutables et du cluster multi-Core n'est **pas** livré comme fonctionnalité de production. Aucun transcodage vidéo universel n'est proposé comme solution de repli.
+
+## Technologies
+
+- **Backend :** Rust (édition 2024), Axum, Tokio, SQLx.
+- **Frontend :** Svelte 5, SvelteKit, TypeScript, Vite ; application compilée et servie par le Core.
+- **Base de données :** SQLite (mode WAL) ou PostgreSQL 18 externe.
+- **Médias :** `ffprobe` pour l'inspection des fichiers ; stratégie de lecture directe et de flux autorisés.
+- **Déploiement :** Docker / Docker Compose, avec images Linux `amd64`.
+
+## 🚀 Installation rapide
+
+### Prérequis
+
+- Docker et Docker Compose v2 sur une machine Linux `x86_64` (ou un environnement compatible Docker).
+- Un dossier de films ou de séries accessible en lecture par le conteneur.
+- Pour l'accès depuis un autre appareil : un **reverse proxy HTTPS** (Traefik, Caddy, Nginx ou Synology DSM).
+
+### 1. Récupérer le dépôt
 
 ```bash
-docker compose up -d
+git clone https://github.com/maelmoreau21/Aether.git
+cd Aether
+cp .env.example .env
 ```
 
-Par défaut, Docker Compose télécharge l'image officielle pré-compilée depuis GitHub Container Registry (`ghcr.io/maelmoreau21/aether:latest`). Aucune compilation Rust ou Node.js n'est requise.
+Sur Windows PowerShell, remplacez `cp` par `Copy-Item .env.example .env` si nécessaire.
 
-Pour choisir une version spécifique :
+### 2. Configurer les médias
+
+Dans `.env`, renseignez au minimum le chemin réel de votre médiathèque :
+
+```dotenv
+MEDIA_LIBRARY_DIR=/chemin/vers/mes/medias
+MEDIA_PUBLIC_URL=http://127.0.0.1:3000
+MEDIA_DB_ENGINE=sqlite
+```
+
+`MEDIA_LIBRARY_DIR` est monté sur `/media` en **lecture seule**. L'URL HTTP locale convient uniquement à une utilisation depuis la machine hôte elle-même.
+
+### 3. Démarrer Aether
+
+Si les images `ghcr.io/maelmoreau21/aether` sont accessibles dans le registre :
+
 ```bash
-# Version de développement (branche develop)
-AETHER_TAG=develop docker compose up -d
-
-# Version stable (branche main, défaut)
-AETHER_TAG=latest docker compose up -d
+docker compose pull
+docker compose up -d --no-build
 ```
 
-Pour les contributeurs souhaitant recompiler les sources localement :
+Alternative pour construire les images depuis le code source :
+
 ```bash
 docker compose up -d --build
 ```
 
-Vérifiez l'état du conteneur :
-```bash
-docker compose ps
-```
-Le conteneur passe en état `(healthy)` en ~6 secondes via la sonde interne `/api/v1/health`.
+> La disponibilité et la visibilité publique des images GHCR dépendent de la publication réussie du workflow GitHub Actions ; rendre le dépôt GitHub public ne rend pas automatiquement ses packages publics.
 
-### Amorçage du premier administrateur local (Bootstrap)
-Aether n'inclut **aucun mot de passe par défaut**. L'initialisation du premier compte administrateur
-exige un terminal pseudo-TTY interactif :
+### 4. Créer le premier administrateur
 
 ```bash
-docker compose exec -it aether media-bootstrap
+docker compose exec -it aether media-bootstrap --login admin
 ```
-Saisissez l'identifiant et confirmez le mot de passe masqué.
-L'amorçage est alors définitivement clos en base SQLite ; toute tentative ultérieure est rejetée.
-Connectez-vous ensuite sur [http://127.0.0.1:3000/app/login/](http://127.0.0.1:3000/app/login/).
 
-### Sauvegarde et restauration SQLite (WAL)
-Aether fournit deux outils natifs pour sauvegarder et restaurer la base de données sans arrêter le service :
+Définissez un mot de passe lors de l'amorçage interactif. **Aether ne possède aucun compte ni mot de passe par défaut.**
+
+Ouvrez ensuite **[http://127.0.0.1:3000/app/login/](http://127.0.0.1:3000/app/login/)** depuis la machine qui héberge Docker. Ajoutez vos bibliothèques depuis l'administration, puis lancez un scan.
+
+Pour les procédures détaillées, consultez le [guide Docker](docs/DEPLOYMENT_DOCKER.md) ou le [guide Synology](docs/DEPLOYMENT_SYNOLOGY.md).
+
+## Architecture
+
+Aether sépare trois responsabilités, même dans le conteneur autonome :
+
+```text
+             Navigateur Web
+              SvelteKit
+                  │
+                  ▼
+          ┌───────────────┐
+          │  Aether Core  │
+          │ API · Auth    │
+          │ Catalogue     │
+          └──────┬────────┘
+                 │
+       ┌─────────┴─────────┐
+       ▼                   ▼
+ ┌────────────┐     ┌────────────┐
+ │ Media Node │     │ Media Node │
+ │ local      │     │ distant    │
+ └──────┬─────┘     └──────┬─────┘
+        ▼                  ▼
+  Films / Séries      Films / Séries
+   (lecture seule)     (lecture seule)
+```
+
+### Mode autonome
+
+Un seul conteneur `aether` regroupe l'interface Web, le Core, le Media Node local et `ffprobe`. **Aucun processus Node.js permanent** et **aucune base externe obligatoire**.
 
 ```bash
-# Sauvegarde cohérente à chaud vers un dossier externe à aether_data (ex. monté sur l'hôte)
-docker compose exec aether media-backup /backups/core_backup_$(date +%Y%m%d_%H%M%S).sqlite3
-
-# Ou remplacement explicite et sécurisé d'une sauvegarde existante
-docker compose exec aether media-backup --replace /backups/core_backup_latest.sqlite3
-
-# Restauration dans un volume vierge (n'écrase jamais un volume existant)
-docker run --rm -v aether_data_restored:/data -v /volume1/backups:/backup:ro aether media-restore /backup/core_backup_latest.sqlite3 /data/core.sqlite3
+docker compose -f docker-compose.yml up -d
 ```
-*Note : Les sauvegardes contiennent uniquement l'état applicatif SQLite (comptes, hachages Argon2id, catalogue, permissions) et jamais les médias d'origine situés dans `/media`.*
 
-Consultez la [documentation complète de sauvegarde et restauration](docs/DEPLOYMENT_DOCKER.md#7-sauvegarde-et-restauration-sqlite-wal-fiables) pour les procédures détaillées sur Docker Compose et Synology DSM.
+### Mode distribué
 
----
+Un `aether-core` centralise les comptes et le catalogue ; les conteneurs `aether-node` accèdent uniquement à leurs propres bibliothèques. Le déploiement distribué nécessite un **secret d'appairage unique**, une configuration réseau adaptée et, entre machines, un transport HTTPS de confiance.
 
-## 2. Spécificités Synology DS1522+
+Le fichier [`compose.distributed.yaml`](compose.distributed.yaml) fournit un exemple mono-hôte. Les exemples [`compose.multi-machine.example.yaml`](compose.multi-machine.example.yaml) et [`compose.postgres-multimachine.example.yaml`](compose.postgres-multimachine.example.yaml) couvrent les déploiements sur plusieurs hôtes. Consultez impérativement le [guide Synology / multi-Node](docs/DEPLOYMENT_SYNOLOGY.md) avant installation.
 
-Le Synology DS1522+ embarque un processeur **AMD Ryzen Embedded R1600** (x86_64, 2C/4T) **sans iGPU** :
-- **Ne pas ajouter de montage `/dev/dri`** : aucun processeur graphique Intel/AMD VCN n'est présent. Une déclaration `/dev/dri` provoque l'échec immédiat du conteneur sur DSM.
-- **Direct Play AV1 + Opus** : Aether privilégie la lecture directe dans `.mkv` et `.mp4`. Aucun transcodage vidéo gourmand n'est requis.
-- **Bibliothèques en lecture seule (`:ro`)** : Configurez votre dossier de partage existant dans `.env` (`MEDIA_LIBRARY_DIR=/volume1/video`). Le conteneur monte ce volume en `:ro` strict et n'écrit jamais dans vos médias.
-- **Persistance applicative** : La base SQLite, les sessions et les index résident dans le volume dédié `aether_data` (`/data`).
+### Images conteneur
 
----
+| Image | Usage |
+| --- | --- |
+| `ghcr.io/maelmoreau21/aether` | Mode autonome |
+| `ghcr.io/maelmoreau21/aether-core` | Core du mode distribué |
+| `ghcr.io/maelmoreau21/aether-node` | Nœud média du mode distribué |
 
-## 3. Configuration & Variables d'environnement
+Les tags `latest` et `develop` correspondent respectivement aux branches `main` et `develop` **lorsqu'un pipeline de publication réussit**. Pour figer une installation, privilégiez un digest d'image.
 
-| Variable | Défaut conteneur | Description |
-|---|---|---|
-| `MEDIA_PORT` | `3000` | Port d'écoute interne du serveur HTTP |
-| `MEDIA_BIND_ADDR` | `0.0.0.0` | Adresse d'écoute interne (`127.0.0.1` par défaut hors conteneur) |
-| `MEDIA_PUBLIC_URL` | `http://127.0.0.1:3000` | Origine publique canonique (`https://...` pour LAN/Internet, ou `http://` uniquement sur loopback `127.0.0.1`/`localhost`/`[::1]`) |
-| `MEDIA_DB_PATH` | `/data/core.sqlite3` | Chemin du fichier SQLite (volume persistant) |
-| `MEDIA_SQLITE_BUSY_TIMEOUT_SECS` | `15` | Délai d'attente max SQLite en cas de concurrence d'écriture (15s par défaut, 45s+ recommandé pour les très grandes bibliothèques 10k+) |
-| `MEDIA_LIBRARY_ROOT` | `/media` | Racine de montage en lecture seule des bibliothèques |
-| `MEDIA_WEB_DIST` | `/app/apps/web/build` | Répertoire des assets Web statiques SvelteKit |
+## Configuration et sécurité
 
----
+| Paramètre | Rôle |
+| --- | --- |
+| `MEDIA_PUBLIC_URL` | URL canonique de l'instance ; HTTPS obligatoire hors accès local loopback |
+| `MEDIA_LIBRARY_DIR` | Dossier de médias monté en lecture seule en mode autonome |
+| `MEDIA_DB_ENGINE` | `sqlite` (défaut) ou `postgres` |
+| `MEDIA_DB_URL` | URL PostgreSQL, uniquement si ce moteur est activé |
+| `MEDIA_BACKUP_KEY` | Clé externe requise pour les archives chiffrées de l'administration |
+| `MEDIA_OIDC_ENABLED` | Activation optionnelle de l'authentification OIDC |
+| `MEDIA_NODE_PAIRING_TOKEN` | Secret d'appairage pour le mode distribué |
 
-## 4. Exposition réseau & Proxy Inverse HTTPS
+Retrouvez les autres variables dans [`.env.example`](.env.example) et la [documentation PostgreSQL](docs/POSTGRESQL.md).
 
-- **HTTP limité strictement au loopback (développement/test local)** : `docker-compose.yml` lie le port hôte sur `"127.0.0.1:3000:3000"` avec `MEDIA_PUBLIC_URL=http://127.0.0.1:3000`. `AuthState::new()` refuse toute origine `http://` hors loopback (ex. `http://192.168.1.100:3000` est rejeté au démarrage avec `AuthConfigError::Origin`).
-- **Accès LAN distant ou Internet via Proxy Inverse HTTPS (Synology DSM, Nginx, Caddy)** :
-  1. Conservez la liaison locale `"127.0.0.1:3000:3000"` sur le conteneur.
-  2. Définissez `MEDIA_PUBLIC_URL` sur l'origine HTTPS canonique exacte (ex. `https://aether.mondomaine.fr` ou `https://aether.nas.lan:8443`).
-  3. **Obligatoire** : Configurez le proxy inverse de confiance pour conserver l'en-tête `Host` exact du client (`proxy_set_header Host $http_host;` sous Nginx, automatique via le Proxy inverse de Synology DSM).
-  4. En mode `https://`, le cookie de session `media_session` active automatiquement l'attribut `Secure` (`HttpOnly; SameSite=Strict; Secure`) et le Core vérifie strictement `Host`, `Origin`, `Sec-Fetch-Site` et `x-csrf-token`.
-  5. La sonde interne `/api/v1/health` est découplée de `MEDIA_PUBLIC_URL` et continue de répondre `200 OK` aux vérifications Docker en boucle locale.
+Principes de sécurité :
 
----
+- **Médias en lecture seule** (`:ro`) ; aucune réorganisation ou modification des fichiers d'origine.
+- **Pas d'identifiants prédéfinis** : le premier administrateur est créé localement.
+- **HTTPS obligatoire** pour l'accès réseau ; vérification de l'origine des requêtes et protections des sessions/CSRF.
+- **Conteneurs non-root** avec capacités Linux réduites.
+- **Secrets hors Git** : ne jamais commiter de `.env` de production, token d'appairage, clé de sauvegarde ou mot de passe.
 
-## 5. Métriques réelles de performance (Mesurées en conteneur)
+**Attention :** sélectionner PostgreSQL ne migre **pas** automatiquement une base SQLite existante. Les sauvegardes administratives couvrent la configuration et l'état applicatif, **pas** les fichiers multimédias.
 
-Mesures réelles enregistrées sur le banc de vérification de bout en bout (AC-11) :
+Consultez la [politique de sécurité](SECURITY.md) et les [notes techniques de sécurité](docs/SECURITY.md). Pour signaler une vulnérabilité, utilisez de préférence le signalement privé depuis l'onglet **Security** du dépôt.
 
-| Métrique | Valeur mesurée |
-|---|---|
-| **Taille contenu image (`aether:latest`)** | **213 Mo** (753,84 Mo couches décompressées) |
-| **Délai de démarrage vers `healthy`** | **6,34 secondes** |
-| **Mémoire RSS au repos (idle)** | **2,88 Mo** |
-| **Mémoire RSS pic pendant scan ffprobe** | **12,56 Mo** |
+## Développement
 
----
+Prérequis de développement : Rust `1.99+` (édition 2024), Node.js compatible avec le frontend, npm, `ffprobe` et les outils nécessaires aux fixtures multimédias des tests.
 
-## 6. Développement local & Banc P0 historique (Hors conteneur)
-
-Pour développer directement sur l'hôte sans Docker :
-
-Prérequis testés : Windows x64, Rust/Cargo 1.99.1, FFmpeg/ffprobe avec libaom-av1/libopus, Node.js 22, PowerShell 7, Chrome.
-
-Depuis la racine du dépôt, PowerShell :
-
-```powershell
-./scripts/generate-fixtures.ps1
-./scripts/prepare-language-remux.ps1
-python scripts/generate-representative-fixtures.py
+```bash
+# Qualité du code Rust
 cargo fmt --check
-cargo clippy --locked --all-features --all-targets -- -D warnings
-cargo test --locked --all-features
-New-Item -ItemType Directory -Path data -ErrorAction SilentlyContinue
-cargo run --locked -p media-poc --bin media-bootstrap
-cargo run --locked -p media-poc
+cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
+
+# Tests Rust (certaines suites nécessitent des fixtures ou services de test)
+cargo test --locked --workspace --all-features
+
+# Frontend
+cd apps/web
+npm ci
+npm run check
+npm run lint
+npm test
+npm run build
 ```
 
-Ouvrir [le banc local](http://127.0.0.1:3000/app/), choisir une source, charger, puis lancer la lecture. Arrêt : Ctrl+C.
-Les tests Rust utilisent le dossier standard `tests/fixtures/generated`.
+Les tests multimédias et navigateur nécessitent parfois la génération préalable de fixtures synthétiques et/ou des outils complémentaires. Consultez [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md) et [`docs/CI_GHCR.md`](docs/CI_GHCR.md) pour les parcours complets.
 
-### Tests automatisés navigateur (Playwright)
+## 📚 Documentation
 
-Dans un second terminal PowerShell :
+| Sujet | Document |
+| --- | --- |
+| Installation Docker | [Guide Docker](docs/DEPLOYMENT_DOCKER.md) |
+| NAS Synology et distribution | [Guide Synology](docs/DEPLOYMENT_SYNOLOGY.md) |
+| Multi-Node et architecture | [Architecture](ARCHITECTURE.md) |
+| PostgreSQL 18 | [Configuration PostgreSQL](docs/POSTGRESQL.md) |
+| Authentification SSO | [OIDC](docs/OIDC.md) |
+| Formats et limites des médias | [Formats médias](docs/MEDIA_FORMATS.md) · [Compatibilité de lecture](docs/STREAMING_COMPATIBILITY.md) |
+| Administration et sauvegardes | [Console](docs/ADMIN_CONSOLE.md) · [Sauvegardes](docs/ADMIN_BACKUPS.md) |
+| Qualité et CI | [Plan de tests](docs/TEST_PLAN.md) · [CI / GHCR](docs/CI_GHCR.md) |
 
-```powershell
-npm install --no-save --package-lock=false playwright@1.62.1
-node scripts/browser-smoke.cjs
-```
+## 🤝 Contribuer
 
-Variables de contrôle de tests navigateur :
-- `MEDIA_TEST_SCENARIO` : `native` ou `remux`
-- `MEDIA_BROWSER_CHANNEL` : `chrome`, `msedge`, `firefox`
-- `MEDIA_REPORT_DIR` : destination des rapports (ex. `artifacts/browser-chrome`)
+Les contributions sont les bienvenues : corrections, tests, documentation et améliorations ciblées. Avant d'ouvrir une Pull Request, consultez [`CONTRIBUTING.md`](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md) pour les conventions techniques et le [code de conduite](CODE_OF_CONDUCT.md).
 
----
+Les rapports de bugs et propositions de fonctionnalités peuvent être ouverts dans les [Issues GitHub](https://github.com/maelmoreau21/Aether/issues). Pour les problèmes de sécurité, utilisez plutôt le **signalement privé**.
 
-## 7. Documentation de référence
+## Licence
 
-- Architecture et frontières : [ARCHITECTURE.md](ARCHITECTURE.md)
-- Guide de déploiement Docker : [docs/DEPLOYMENT_DOCKER.md](docs/DEPLOYMENT_DOCKER.md)
-- Modèle de menaces et sécurité : [docs/SECURITY.md](docs/SECURITY.md)
-- Format média et pistes : [docs/MEDIA_FORMATS.md](docs/MEDIA_FORMATS.md)
-- Preuves de compatibilité et streaming : [docs/STREAMING_COMPATIBILITY.md](docs/STREAMING_COMPATIBILITY.md)
-- Plan de tests : [docs/TEST_PLAN.md](docs/TEST_PLAN.md)
-- État et décisions : [MEMORY.md](MEMORY.md)
+Aether est distribué sous **[GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE)**. Consultez le fichier `LICENSE` pour les conditions applicables à l'utilisation, à la modification et à la redistribution.
+
+Aether ne fournit aucun film ni aucune série. Chaque utilisateur reste responsable du respect des droits d’auteur et des règles applicables à la copie, à l’hébergement et à la mise à disposition de ses contenus.

@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-18",
+  "branch": "develop",
+  "base_commit": "1deb03f2d38774f8d7dcad0a9ece18fb5a6adf13",
+  "remote_ci_verified": false,
+  "images_published": false,
+  "rust_tests": {
+    "passed": 129,
+    "failed": 0,
+    "ignored": 7,
+    "command": "cargo test --locked --workspace --all-features -j 1 -- --test-threads=1"
+  },
+  "clippy": "passed: --locked --workspace --all-features --all-targets -- -D warnings",
+  "format": "passed",
+  "rustsec": "passed: 297 dependencies, updated advisory database",
+  "web_tests": 35,
+  "web_check": "0 errors, 0 warnings",
+  "web_lint": "passed",
+  "web_build": "passed",
+  "npm_audit": "0 vulnerabilities",
+  "actionlint": "1.7.12: Windows binary and Linux Docker image passed",
+  "compose": "standalone/distributed config --quiet passed",
+  "tls_tests": 4,
+  "probe_matrix": 8,
+  "docker_checks": 86,
+  "browser": "Chrome 155.0.8059.40 Windows 10.0.26300 headless",
+  "limitations": [
+    "No GitHub publication authorized",
+    "No PostgreSQL backend added",
+    "No extended generic OIDC provider configuration added",
+    "No Traefik or HTTP/3 validation",
+    "No physical multi-host test"
+  ]
+}

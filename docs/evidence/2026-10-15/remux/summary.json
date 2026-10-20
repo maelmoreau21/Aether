@@ -1,0 +1,207 @@
+[
+  {
+    "browser": "chrome",
+    "version": "155.0.8059.40",
+    "source": "fixture-mkv",
+    "switches": 6,
+    "paused": true,
+    "audioMs": [
+      138.8,
+      151.4
+    ],
+    "videoMs": [
+      41.3,
+      81.9
+    ],
+    "frameGapMs": [
+      75,
+      116.7
+    ],
+    "silenceMs": [
+      25.5,
+      51
+    ],
+    "maxPollGapMs": 28.1,
+    "positionErrorSeconds": 0,
+    "observedHz": [
+      878.90625,
+      439.453125
+    ],
+    "framesBeforeRestoredPosition": 0,
+    "baselineFrameGapsMs": [
+      49.9,
+      83.3
+    ]
+  },
+  {
+    "browser": "chrome",
+    "version": "155.0.8059.40",
+    "source": "fixture-mp4",
+    "switches": 6,
+    "paused": true,
+    "audioMs": [
+      142.2,
+      156.8
+    ],
+    "videoMs": [
+      48.6,
+      81.6
+    ],
+    "frameGapMs": [
+      50,
+      100
+    ],
+    "silenceMs": [
+      22.8,
+      52.5
+    ],
+    "maxPollGapMs": 21.1,
+    "positionErrorSeconds": 0,
+    "observedHz": [
+      878.90625,
+      439.453125
+    ],
+    "framesBeforeRestoredPosition": 1,
+    "baselineFrameGapsMs": [
+      50.3,
+      66.8
+    ]
+  },
+  {
+    "browser": "msedge",
+    "version": "155.0.4283.45",
+    "source": "fixture-mkv",
+    "switches": 6,
+    "paused": true,
+    "audioMs": [
+      149.4,
+      167.9
+    ],
+    "videoMs": [
+      53,
+      113.8
+    ],
+    "frameGapMs": [
+      82.8,
+      133.5
+    ],
+    "silenceMs": [
+      37.5,
+      88.8
+    ],
+    "maxPollGapMs": 17.9,
+    "positionErrorSeconds": 0,
+    "observedHz": [
+      878.90625,
+      439.453125
+    ],
+    "framesBeforeRestoredPosition": 0,
+    "baselineFrameGapsMs": [
+      50.1,
+      66.8
+    ]
+  },
+  {
+    "browser": "msedge",
+    "version": "155.0.4283.45",
+    "source": "fixture-mp4",
+    "switches": 6,
+    "paused": true,
+    "audioMs": [
+      143.2,
+      169.2
+    ],
+    "videoMs": [
+      48.8,
+      97.6
+    ],
+    "frameGapMs": [
+      66.5,
+      133.3
+    ],
+    "silenceMs": [
+      28.3,
+      65.8
+    ],
+    "maxPollGapMs": 19.1,
+    "positionErrorSeconds": 0,
+    "observedHz": [
+      878.90625,
+      439.453125
+    ],
+    "framesBeforeRestoredPosition": 0,
+    "baselineFrameGapsMs": [
+      50.2,
+      66.9
+    ]
+  },
+  {
+    "browser": "firefox",
+    "version": "155.0.1",
+    "source": "fixture-mkv",
+    "switches": 6,
+    "paused": true,
+    "audioMs": [
+      165,
+      288
+    ],
+    "videoMs": [
+      76.6,
+      210.6
+    ],
+    "frameGapMs": [
+      100.4,
+      253.3
+    ],
+    "silenceMs": [
+      62,
+      233
+    ],
+    "maxPollGapMs": 37,
+    "positionErrorSeconds": 0,
+    "observedHz": [
+      878.90625,
+      439.453125
+    ],
+    "framesBeforeRestoredPosition": 5,
+    "baselineFrameGapsMs": [
+      40.6,
+      50
+    ]
+  },
+  {
+    "browser": "firefox",
+    "version": "155.0.1",
+    "source": "fixture-mp4",
+    "switches": 6,
+    "paused": true,
+    "audioMs": [
+      164,
+      227
+    ],
+    "videoMs": [
+      76.9,
+      145.4
+    ],
+    "frameGapMs": [
+      89,
+      186.3
+    ],
+    "silenceMs": [
+      49,
+      147
+    ],
+    "maxPollGapMs": 44,
+    "positionErrorSeconds": 0,
+    "observedHz": [
+      884.765625,
+      439.453125,
+      878.90625
+    ],
+    "framesBeforeRestoredPosition": 6,
+    "baselineFrameGapsMs": [
+      42.8,
+      83.3
+    ]
+  }
+]

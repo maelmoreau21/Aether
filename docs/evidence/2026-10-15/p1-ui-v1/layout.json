@@ -1,0 +1,55 @@
+{
+  "browser": "155.0.8059.40",
+  "tests": [
+    {
+      "width": 360,
+      "overflow": false,
+      "cspErrors": [],
+      "keyboardFocus": true
+    },
+    {
+      "width": 390,
+      "overflow": false,
+      "cspErrors": [],
+      "keyboardFocus": true
+    },
+    {
+      "width": 768,
+      "overflow": false,
+      "cspErrors": [],
+      "keyboardFocus": true
+    },
+    {
+      "width": 1280,
+      "overflow": false,
+      "cspErrors": [],
+      "keyboardFocus": true
+    },
+    {
+      "width": 1440,
+      "overflow": false,
+      "cspErrors": [],
+      "keyboardFocus": true
+    },
+    {
+      "width": 1920,
+      "overflow": false,
+      "cspErrors": [],
+      "keyboardFocus": true
+    },
+    {
+      "mediaCards": "MP4 selection and real source loaded"
+    },
+    {
+      "missingAudio": "visible terminal error",
+      "attempts": 1
+    },
+    {
+      "missingSubtitle": "visible error"
+    },
+    {
+      "coreUnavailable": "visible error"
+    }
+  ],
+  "passed": true
+}

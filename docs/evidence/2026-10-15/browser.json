@@ -1,0 +1,302 @@
+{
+  "date": "2026-10-15T11:58:51.993Z",
+  "browser": "155.0.8059.40",
+  "channel": "chrome",
+  "headless": true,
+  "os": {
+    "platform": "win32",
+    "release": "10.0.26300",
+    "arch": "x64"
+  },
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+  "results": [
+    {
+      "id": "fixture-mkv",
+      "mime": "video/x-matroska",
+      "canPlayType": "maybe",
+      "events": [
+        {
+          "event": "loadedmetadata",
+          "time": 0
+        },
+        {
+          "event": "playing",
+          "time": 0
+        },
+        {
+          "event": "pause",
+          "time": 0.752
+        },
+        {
+          "event": "seeking",
+          "time": 4
+        },
+        {
+          "event": "seeked",
+          "time": 4
+        },
+        {
+          "event": "playing",
+          "time": 4
+        },
+        {
+          "event": "pause",
+          "time": 8.008
+        },
+        {
+          "event": "ended",
+          "time": 8.008
+        }
+      ],
+      "duration": 8.008,
+      "dimensions": [
+        320,
+        180
+      ],
+      "audioRms": 0.08848236740734026,
+      "distinctPixelValues": 256,
+      "pauseStable": true,
+      "seekTime": 4,
+      "decodedFrames": 87,
+      "ended": true,
+      "passed": true
+    },
+    {
+      "id": "fixture-mp4",
+      "mime": "video/mp4",
+      "canPlayType": "maybe",
+      "events": [
+        {
+          "event": "loadedmetadata",
+          "time": 0
+        },
+        {
+          "event": "playing",
+          "time": 0
+        },
+        {
+          "event": "pause",
+          "time": 0.738667
+        },
+        {
+          "event": "seeking",
+          "time": 4
+        },
+        {
+          "event": "seeked",
+          "time": 4
+        },
+        {
+          "event": "playing",
+          "time": 4
+        },
+        {
+          "event": "pause",
+          "time": 8.001
+        },
+        {
+          "event": "ended",
+          "time": 8.001
+        }
+      ],
+      "duration": 8.001,
+      "dimensions": [
+        320,
+        180
+      ],
+      "audioRms": 0.08814864201267554,
+      "distinctPixelValues": 256,
+      "pauseStable": true,
+      "seekTime": 4,
+      "decodedFrames": 86,
+      "ended": true,
+      "passed": true
+    },
+    {
+      "id": "fixture-webm",
+      "mime": "video/webm",
+      "canPlayType": "maybe",
+      "events": [
+        {
+          "event": "loadedmetadata",
+          "time": 0
+        },
+        {
+          "event": "playing",
+          "time": 0
+        },
+        {
+          "event": "pause",
+          "time": 0.738667
+        },
+        {
+          "event": "seeking",
+          "time": 4
+        },
+        {
+          "event": "seeked",
+          "time": 4
+        },
+        {
+          "event": "playing",
+          "time": 4
+        },
+        {
+          "event": "pause",
+          "time": 8.008
+        },
+        {
+          "event": "ended",
+          "time": 8.008
+        }
+      ],
+      "duration": 8.008,
+      "dimensions": [
+        320,
+        180
+      ],
+      "audioRms": 0.08848236740734026,
+      "distinctPixelValues": 256,
+      "pauseStable": true,
+      "seekTime": 4,
+      "decodedFrames": 86,
+      "ended": true,
+      "passed": true
+    },
+    {
+      "id": "fixture-fmp4",
+      "mime": "video/mp4",
+      "canPlayType": "maybe",
+      "events": [
+        {
+          "event": "loadedmetadata",
+          "time": 0
+        },
+        {
+          "event": "playing",
+          "time": 0
+        },
+        {
+          "event": "pause",
+          "time": 0.72
+        },
+        {
+          "event": "seeking",
+          "time": 4
+        },
+        {
+          "event": "seeked",
+          "time": 4
+        },
+        {
+          "event": "playing",
+          "time": 4
+        },
+        {
+          "event": "pause",
+          "time": 8.008
+        },
+        {
+          "event": "ended",
+          "time": 8.008
+        }
+      ],
+      "duration": 8.008,
+      "dimensions": [
+        320,
+        180
+      ],
+      "audioRms": 0.08854248101745797,
+      "distinctPixelValues": 256,
+      "pauseStable": true,
+      "seekTime": 4,
+      "decodedFrames": 85,
+      "ended": true,
+      "passed": true
+    }
+  ],
+  "missing": {
+    "code": 4,
+    "message": "MEDIA_ELEMENT_ERROR: Format error",
+    "displayed": "Échec navigateur : 4 MEDIA_ELEMENT_ERROR: Format error"
+  },
+  "responses": [
+    {
+      "url": "/api/v1/assets/fixture-mkv/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0bf6b.1f93ebfc-3c390\"",
+        "content-range": "bytes 0-246671/246672",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "246672",
+        "date": "Thu, 15 Oct 2026 11:58:30 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 11:56:27 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mp4/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0bf6b.25f1fa20-3cd3e\"",
+        "content-range": "bytes 0-249149/249150",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "249150",
+        "date": "Thu, 15 Oct 2026 11:58:36 GMT",
+        "content-type": "video/mp4",
+        "last-modified": "Thu, 15 Oct 2026 11:56:27 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-webm/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0bf6b.28714d50-3c15c\"",
+        "content-range": "bytes 0-246107/246108",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "246108",
+        "date": "Thu, 15 Oct 2026 11:58:41 GMT",
+        "content-type": "video/webm",
+        "last-modified": "Thu, 15 Oct 2026 11:56:27 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-fmp4/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0bf6b.2ae88c88-3c722\"",
+        "content-range": "bytes 0-247585/247586",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "247586",
+        "date": "Thu, 15 Oct 2026 11:58:46 GMT",
+        "content-type": "video/mp4",
+        "last-modified": "Thu, 15 Oct 2026 11:56:27 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/missing/content",
+      "status": 404,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "content-length": "25",
+        "date": "Thu, 15 Oct 2026 11:58:51 GMT",
+        "content-type": "application/json",
+        "x-content-type-options": "nosniff"
+      }
+    }
+  ],
+  "limits": "Headless decoded video pixels and PCM observed. No human listening, physical display, manual track selection, MSE or DRM test."
+}

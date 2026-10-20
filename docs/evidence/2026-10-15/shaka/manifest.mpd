@@ -1,0 +1,100 @@
+<?xml version='1.0' encoding='utf-8'?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" profiles="urn:mpeg:dash:profile:full:2011" minBufferTime="PT1S" mediaPresentationDuration="PT12.008000S">
+  <Period id="p0" start="PT0S" duration="PT12.008000S">
+    <AdaptationSet id="1" contentType="video" mimeType="video/mp4">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="main" />
+      <Representation id="video" codecs="av01.0.00M.10" bandwidth="96427" width="320" height="180" frameRate="288000/11999">
+        <SegmentList timescale="16000">
+          <Initialization sourceURL="video.mp4" range="0-765" />
+          <SegmentTimeline>
+            <S t="0" d="32000" />
+            <S t="32000" d="32000" />
+            <S t="64000" d="32000" />
+            <S t="96000" d="8672" />
+            <S t="104672" d="32000" />
+            <S t="136672" d="32000" />
+            <S t="168672" d="23312" />
+          </SegmentTimeline>
+          <SegmentURL media="video.mp4" mediaRange="766-24927" />
+          <SegmentURL media="video.mp4" mediaRange="24928-54354" />
+          <SegmentURL media="video.mp4" mediaRange="54355-78776" />
+          <SegmentURL media="video.mp4" mediaRange="78777-79290" />
+          <SegmentURL media="video.mp4" mediaRange="79291-106711" />
+          <SegmentURL media="video.mp4" mediaRange="106712-125459" />
+          <SegmentURL media="video.mp4" mediaRange="125460-144459" />
+        </SegmentList>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet id="2" contentType="audio" mimeType="audio/mp4" lang="fr">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="main" />
+      <Representation id="audio-fr" codecs="opus" bandwidth="262957" audioSamplingRate="48000">
+        <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="6" />
+        <SegmentList timescale="48000">
+          <Initialization sourceURL="audio-fr.mp4" range="0-711" />
+          <SegmentTimeline>
+            <S t="0" d="96048" />
+            <S t="96048" d="96000" />
+            <S t="192048" d="96000" />
+            <S t="288048" d="96000" />
+            <S t="384048" d="96000" />
+            <S t="480048" d="96000" />
+            <S t="576048" d="336" />
+          </SegmentTimeline>
+          <SegmentURL media="audio-fr.mp4" mediaRange="712-59343" />
+          <SegmentURL media="audio-fr.mp4" mediaRange="59344-122064" />
+          <SegmentURL media="audio-fr.mp4" mediaRange="122065-183495" />
+          <SegmentURL media="audio-fr.mp4" mediaRange="183496-253519" />
+          <SegmentURL media="audio-fr.mp4" mediaRange="253520-326050" />
+          <SegmentURL media="audio-fr.mp4" mediaRange="326051-393204" />
+          <SegmentURL media="audio-fr.mp4" mediaRange="393205-394254" />
+        </SegmentList>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet id="3" contentType="audio" mimeType="audio/mp4" lang="en">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="alternate" />
+      <Representation id="audio-en" codecs="opus" bandwidth="148567" audioSamplingRate="48000">
+        <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2" />
+        <SegmentList timescale="48000">
+          <Initialization sourceURL="audio-en.mp4" range="0-706" />
+          <SegmentTimeline>
+            <S t="0" d="96048" />
+            <S t="96048" d="96000" />
+            <S t="192048" d="96000" />
+            <S t="288048" d="96000" />
+            <S t="384048" d="96000" />
+            <S t="480048" d="96000" />
+            <S t="576048" d="336" />
+          </SegmentTimeline>
+          <SegmentURL media="audio-en.mp4" mediaRange="707-37566" />
+          <SegmentURL media="audio-en.mp4" mediaRange="37567-74802" />
+          <SegmentURL media="audio-en.mp4" mediaRange="74803-111210" />
+          <SegmentURL media="audio-en.mp4" mediaRange="111211-148446" />
+          <SegmentURL media="audio-en.mp4" mediaRange="148447-185682" />
+          <SegmentURL media="audio-en.mp4" mediaRange="185683-222090" />
+          <SegmentURL media="audio-en.mp4" mediaRange="222091-222668" />
+        </SegmentList>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet id="10" contentType="text" mimeType="text/vtt" lang="fr">
+      <Label>FR COMPLET</Label>
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="subtitle" />
+      <Representation id="fr-full" bandwidth="117">
+        <BaseURL>fr-full.vtt</BaseURL>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet id="11" contentType="text" mimeType="text/vtt" lang="fr">
+      <Label>FR FORCE</Label>
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="forced-subtitle" />
+      <Representation id="fr-forced" bandwidth="111">
+        <BaseURL>fr-forced.vtt</BaseURL>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet id="12" contentType="text" mimeType="text/vtt" lang="en">
+      <Label>EN FULL</Label>
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="subtitle" />
+      <Representation id="en-full" bandwidth="109">
+        <BaseURL>en-full.vtt</BaseURL>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Signalement de sécurité confidentiel
+    url: https://github.com/maelmoreau21/Aether/security/advisories/new
+    about: Veuillez signaler toute vulnérabilité de sécurité de manière confidentielle via cette interface.
+  - name: 📖 Spécifications et documentation d'architecture
+    url: https://github.com/maelmoreau21/Aether/tree/main/docs
+    about: Consultez la documentation technique et les contrats d'architecture avant d'ouvrir un ticket.

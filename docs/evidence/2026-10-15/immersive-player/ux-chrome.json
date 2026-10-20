@@ -1,0 +1,64 @@
+{
+  "browser": "155.0.8059.40",
+  "channel": "chrome",
+  "results": [
+    {
+      "opening": {
+        "fullscreen": true,
+        "dialog": true,
+        "ratio": [
+          1440,
+          900,
+          1440,
+          900
+        ],
+        "nativeControls": false,
+        "playing": true
+      }
+    },
+    {
+      "autoHideAndWake": true
+    },
+    {
+      "sourceSwitch": "MKV to MP4, position, pause, English and manual forced subtitle preserved"
+    },
+    {
+      "keyboard": "Space, seek, volume, mute, no range interception"
+    },
+    {
+      "menuKeyboard": true
+    },
+    {
+      "fullscreenToggle": true
+    },
+    {
+      "returnAndCleanup": {
+        "src": null,
+        "paused": true,
+        "ready": 0,
+        "tracks": 0
+      }
+    },
+    {
+      "manualLanguageAcrossReopen": true
+    },
+    {
+      "touch": {
+        "width": 390,
+        "height": 844
+      },
+      "fallback": true,
+      "menusInViewport": true
+    },
+    {
+      "touch": {
+        "width": 844,
+        "height": 390
+      },
+      "fallback": true,
+      "menusInViewport": true
+    }
+  ],
+  "headless": true,
+  "passed": true
+}

@@ -1,0 +1,12 @@
+{
+  "version": "5.2.13",
+  "url": "https://registry.npmjs.org/shaka-player/-/shaka-player-5.2.13.tgz",
+  "archive_integrity": "sha512-0XMkFT1ANs4M5YeHpZyUcUIE0NKS9IKL4B12DdG6lXf7zdLpWMP9KaVoPa+FGE/XLRjCYpg02Tr8ZoMSNtQH6g==",
+  "files_sha256": {
+    "LICENSE": "20ce2eba547fd0a8c4023511c003eabe510982a335cccd4e270f1f55ffbd2250",
+    "player.js": "c46bdd81a95f94480445f8ee8a9652e8fd343523e7046fd9325b31433eae9c3f",
+    "player_configuration.js": "0adb5370060d9fa6ad631c4b90748213ff6384bf2856251c199a7621dc575229",
+    "shaka-player.compiled.js": "62c615e1156f107ca49f72281710390d44babbc780785cc7dda8bf7b0e393fb3"
+  },
+  "license": "Apache-2.0; LICENSE retained; project license unchanged"
+}

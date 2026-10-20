@@ -1,0 +1,1877 @@
+{
+  "date": "2026-10-15T12:35:12.160Z",
+  "channel": "chrome",
+  "headless": true,
+  "os": {
+    "platform": "win32",
+    "release": "10.0.26300",
+    "arch": "x64"
+  },
+  "scenario": "remux",
+  "settings": "default browser features; no experimental audioTracks flags/preferences",
+  "hashesBefore": {
+    "av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66"
+  },
+  "results": [
+    {
+      "id": "fixture-mkv",
+      "method": "prepared-remux-source-reload",
+      "switches": [
+        {
+          "language": "en",
+          "expectedHz": 880,
+          "ui": {
+            "method": "prepared-remux-source-reload",
+            "fromAsset": "fixture-mkv",
+            "toAsset": "fixture-mkv-en",
+            "language": "en",
+            "requestedPosition": 0.981333,
+            "wasPlaying": true,
+            "ok": true,
+            "metadataMs": 15.900000000372529,
+            "restoredPosition": 0.981333,
+            "positionErrorSeconds": 0,
+            "seekReadyMs": 37.40000000037253,
+            "completedMs": 41.700000000186265
+          },
+          "observedAudio": {
+            "rms": 0.08848309397823763,
+            "hz": 878.90625
+          },
+          "requestToStableAudioMs": 147.60000000009313,
+          "requestToRestoredVideoFrameMs": 38.93200000009324,
+          "firstRestoredFrameMediaTime": 0.958,
+          "restoredFrameThresholdMs": 37.40000000037253,
+          "crossSourceFrameGapMs": 66.7320000000002,
+          "baselineMaxFrameGapMs": 50.299999999999955,
+          "sampledSilenceTotalMs": 33.8000000002794,
+          "silentIntervals": [
+            {
+              "fromMs": 27.899999999906868,
+              "toMs": 61.700000000186265,
+              "durationMs": 33.8000000002794
+            }
+          ],
+          "maxSampleGapMs": 17.899999999906868,
+          "framesBeforeRestoredPosition": 0,
+          "restoredVideoFrames": 7,
+          "trace": [
+            {
+              "ms": 0,
+              "rms": 0.08803882263699728,
+              "hz": 439.453125,
+              "position": 0.981333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 11,
+              "rms": 0.06306586367591348,
+              "hz": 439.453125,
+              "position": 0,
+              "readyState": 0,
+              "paused": true
+            },
+            {
+              "ms": 27.899999999906868,
+              "rms": 0,
+              "hz": 439.453125,
+              "position": 0.981333,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 32.10000000009313,
+              "rms": 0,
+              "hz": 439.453125,
+              "position": 0.981333,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 43.8000000002794,
+              "rms": 0,
+              "hz": 439.453125,
+              "position": 0.981333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 61.700000000186265,
+              "rms": 0.08273411004460891,
+              "hz": 439.453125,
+              "position": 1,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 73.20000000018626,
+              "rms": 0.08848309476985083,
+              "hz": 439.453125,
+              "position": 1.010666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 82.10000000009313,
+              "rms": 0.08902310812359897,
+              "hz": 439.453125,
+              "position": 1.021333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 92.10000000009313,
+              "rms": 0.08892659527777348,
+              "hz": 439.453125,
+              "position": 1.032,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 107.20000000018626,
+              "rms": 0.08861042882046315,
+              "hz": 878.90625,
+              "position": 1.048645,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 114.20000000018626,
+              "rms": 0.08861042882046315,
+              "hz": 878.90625,
+              "position": 1.050666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 123.3000000002794,
+              "rms": 0.08836255059757091,
+              "hz": 878.90625,
+              "position": 1.061333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 135,
+              "rms": 0.08833026050986834,
+              "hz": 878.90625,
+              "position": 1.072,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 147.10000000009313,
+              "rms": 0.08896797923316503,
+              "hz": 878.90625,
+              "position": 1.088474,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 155.8000000002794,
+              "rms": 0.08896797923316503,
+              "hz": 878.90625,
+              "position": 1.090666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 164.20000000018626,
+              "rms": 0.08864544151668131,
+              "hz": 878.90625,
+              "position": 1.101333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 172.60000000009313,
+              "rms": 0.08808981460460057,
+              "hz": 878.90625,
+              "position": 1.112,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 189.10000000009313,
+              "rms": 0.0884937627237182,
+              "hz": 878.90625,
+              "position": 1.130604,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 195.89999999990687,
+              "rms": 0.0884937627237182,
+              "hz": 878.90625,
+              "position": 1.130666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 205.89999999990687,
+              "rms": 0.08888533566341775,
+              "hz": 878.90625,
+              "position": 1.141333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 211.3000000002794,
+              "rms": 0.08925931404090477,
+              "hz": 878.90625,
+              "position": 1.152,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 222.5,
+              "rms": 0.08903759793130227,
+              "hz": 878.90625,
+              "position": 1.16,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 239.20000000018626,
+              "rms": 0.08798927527463736,
+              "hz": 878.90625,
+              "position": 1.181333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 247.20000000018626,
+              "rms": 0.08833122600403608,
+              "hz": 878.90625,
+              "position": 1.189851,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 255.70000000018626,
+              "rms": 0.08833122600403608,
+              "hz": 878.90625,
+              "position": 1.192,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 264,
+              "rms": 0.08812705687023727,
+              "hz": 878.90625,
+              "position": 1.2,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 273.20000000018626,
+              "rms": 0.08848309397823763,
+              "hz": 878.90625,
+              "position": 1.210666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 273.60000000009313,
+              "rms": 0.08848309397823763,
+              "hz": 878.90625,
+              "position": 1.210666,
+              "readyState": 4,
+              "paused": false
+            }
+          ],
+          "passed": true
+        },
+        {
+          "language": "fr",
+          "expectedHz": 440,
+          "ui": {
+            "method": "prepared-remux-source-reload",
+            "fromAsset": "fixture-mkv-en",
+            "toAsset": "fixture-mkv-fr",
+            "language": "fr",
+            "requestedPosition": 1.381333,
+            "wasPlaying": true,
+            "ok": true,
+            "metadataMs": 8.100000000093132,
+            "restoredPosition": 1.381333,
+            "positionErrorSeconds": 0,
+            "seekReadyMs": 23.399999999906868,
+            "completedMs": 23.800000000279397
+          },
+          "observedAudio": {
+            "rms": 0.08876442872676661,
+            "hz": 439.453125
+          },
+          "requestToStableAudioMs": 130.5,
+          "requestToRestoredVideoFrameMs": 32.5659999999998,
+          "firstRestoredFrameMediaTime": 1.417,
+          "restoredFrameThresholdMs": 23.399999999906868,
+          "crossSourceFrameGapMs": 33.365999999999985,
+          "baselineMaxFrameGapMs": 50,
+          "sampledSilenceTotalMs": 0,
+          "silentIntervals": [],
+          "maxSampleGapMs": 16.399999999906868,
+          "framesBeforeRestoredPosition": 0,
+          "restoredVideoFrames": 6,
+          "trace": [
+            {
+              "ms": 0,
+              "rms": 0.08798927527463736,
+              "hz": 878.90625,
+              "position": 1.381333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 15.799999999813735,
+              "rms": 0.062303169549977,
+              "hz": 878.90625,
+              "position": 1.381333,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 21.200000000186265,
+              "rms": 0.030355316621678643,
+              "hz": 878.90625,
+              "position": 1.381333,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 32.60000000009313,
+              "rms": 0.06167056472777674,
+              "hz": 878.90625,
+              "position": 1.392,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 43.200000000186265,
+              "rms": 0.08788860683174002,
+              "hz": 878.90625,
+              "position": 1.402666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 57.700000000186265,
+              "rms": 0.08883818231067271,
+              "hz": 878.90625,
+              "position": 1.419242,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 66.79999999981374,
+              "rms": 0.08883818231067271,
+              "hz": 878.90625,
+              "position": 1.421333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 73.39999999990687,
+              "rms": 0.08815873797782682,
+              "hz": 878.90625,
+              "position": 1.432,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 81.89999999990687,
+              "rms": 0.08848838006251815,
+              "hz": 878.90625,
+              "position": 1.442666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 98.29999999981374,
+              "rms": 0.0884953545987366,
+              "hz": 439.453125,
+              "position": 1.45996,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 100.29999999981374,
+              "rms": 0.0884953545987366,
+              "hz": 439.453125,
+              "position": 1.461333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 114.5,
+              "rms": 0.08793010214053024,
+              "hz": 439.453125,
+              "position": 1.472,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 122.10000000009313,
+              "rms": 0.08872443582285783,
+              "hz": 439.453125,
+              "position": 1.482666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 130.60000000009313,
+              "rms": 0.08793322339077114,
+              "hz": 439.453125,
+              "position": 1.493333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 146.5,
+              "rms": 0.0879219587325433,
+              "hz": 439.453125,
+              "position": 1.501333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 150.29999999981374,
+              "rms": 0.0884094039446992,
+              "hz": 439.453125,
+              "position": 1.512,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 162.39999999990687,
+              "rms": 0.08859865467148585,
+              "hz": 439.453125,
+              "position": 1.522666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 170.79999999981374,
+              "rms": 0.08808578205132411,
+              "hz": 439.453125,
+              "position": 1.533333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 183.5,
+              "rms": 0.08805229103962854,
+              "hz": 439.453125,
+              "position": 1.541333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 194.5,
+              "rms": 0.08877985186374623,
+              "hz": 439.453125,
+              "position": 1.552,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 202.89999999990687,
+              "rms": 0.08801019887226127,
+              "hz": 439.453125,
+              "position": 1.562666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 211.20000000018626,
+              "rms": 0.0883664350707805,
+              "hz": 439.453125,
+              "position": 1.573333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 221.5,
+              "rms": 0.08840876286455511,
+              "hz": 439.453125,
+              "position": 1.581333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 233.5,
+              "rms": 0.08841522348791298,
+              "hz": 439.453125,
+              "position": 1.592,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 245,
+              "rms": 0.08788860683174002,
+              "hz": 439.453125,
+              "position": 1.602666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 250.60000000009313,
+              "rms": 0.08876442872676661,
+              "hz": 439.453125,
+              "position": 1.613333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 250.89999999990687,
+              "rms": 0.08876442872676661,
+              "hz": 439.453125,
+              "position": 1.613333,
+              "readyState": 4,
+              "paused": false
+            }
+          ],
+          "passed": true
+        },
+        {
+          "language": "en",
+          "expectedHz": 880,
+          "ui": {
+            "method": "prepared-remux-source-reload",
+            "fromAsset": "fixture-mkv-fr",
+            "toAsset": "fixture-mkv-en",
+            "language": "en",
+            "requestedPosition": 1.773333,
+            "wasPlaying": true,
+            "ok": true,
+            "metadataMs": 13,
+            "restoredPosition": 1.773333,
+            "positionErrorSeconds": 0,
+            "seekReadyMs": 37.5,
+            "completedMs": 38.299999999813735
+          },
+          "observedAudio": {
+            "rms": 0.08877103366260435,
+            "hz": 878.90625
+          },
+          "requestToStableAudioMs": 151.70000000018626,
+          "requestToRestoredVideoFrameMs": 49.600000000186355,
+          "firstRestoredFrameMediaTime": 1.792,
+          "restoredFrameThresholdMs": 37.5,
+          "crossSourceFrameGapMs": 66.59999999999991,
+          "baselineMaxFrameGapMs": 66.59999999999991,
+          "sampledSilenceTotalMs": 26.100000000093132,
+          "silentIntervals": [
+            {
+              "fromMs": 21.5,
+              "toMs": 47.60000000009313,
+              "durationMs": 26.100000000093132
+            }
+          ],
+          "maxSampleGapMs": 16.90000000037253,
+          "framesBeforeRestoredPosition": 0,
+          "restoredVideoFrames": 6,
+          "trace": [
+            {
+              "ms": 0,
+              "rms": 0.0883664350707805,
+              "hz": 439.453125,
+              "position": 1.773333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 11.400000000372529,
+              "rms": 0.032979818593243324,
+              "hz": 439.453125,
+              "position": 0,
+              "readyState": 0,
+              "paused": true
+            },
+            {
+              "ms": 21.5,
+              "rms": 0,
+              "hz": 439.453125,
+              "position": 1.773333,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 35.3000000002794,
+              "rms": 0,
+              "hz": 439.453125,
+              "position": 1.773333,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 47.60000000009313,
+              "rms": 0.05429829261917109,
+              "hz": 439.453125,
+              "position": 1.781333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 53.200000000186265,
+              "rms": 0.08287958212225763,
+              "hz": 439.453125,
+              "position": 1.791768,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 64.10000000009313,
+              "rms": 0.08880885244250732,
+              "hz": 439.453125,
+              "position": 1.802666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 72.10000000009313,
+              "rms": 0.08877103366260435,
+              "hz": 439.453125,
+              "position": 1.811948,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 83.20000000018626,
+              "rms": 0.08902310760205757,
+              "hz": 439.453125,
+              "position": 1.821254,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 97.3000000002794,
+              "rms": 0.08892659555898735,
+              "hz": 439.453125,
+              "position": 1.832,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 100.70000000018626,
+              "rms": 0.08892659555898735,
+              "hz": 439.453125,
+              "position": 1.832,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 117.3000000002794,
+              "rms": 0.08872801397419482,
+              "hz": 878.90625,
+              "position": 1.853333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 124.10000000009313,
+              "rms": 0.08836255050115056,
+              "hz": 878.90625,
+              "position": 1.861333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 134.10000000009313,
+              "rms": 0.08833026050986834,
+              "hz": 878.90625,
+              "position": 1.872,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 142.40000000037253,
+              "rms": 0.0886804322987427,
+              "hz": 878.90625,
+              "position": 1.881551,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 151.90000000037253,
+              "rms": 0.08847000674525318,
+              "hz": 878.90625,
+              "position": 1.891629,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 165.5,
+              "rms": 0.08864544151668131,
+              "hz": 878.90625,
+              "position": 1.901333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 182.40000000037253,
+              "rms": 0.08843737436284334,
+              "hz": 878.90625,
+              "position": 1.921678,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 198.5,
+              "rms": 0.08919588097761177,
+              "hz": 878.90625,
+              "position": 1.933333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 214.20000000018626,
+              "rms": 0.08925931404090477,
+              "hz": 878.90625,
+              "position": 1.952,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 222.40000000037253,
+              "rms": 0.08860820937406531,
+              "hz": 878.90625,
+              "position": 1.961551,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 233.8000000002794,
+              "rms": 0.0877501460980954,
+              "hz": 878.90625,
+              "position": 1.973333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 248.60000000009313,
+              "rms": 0.08798927527463736,
+              "hz": 878.90625,
+              "position": 1.981333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 262.20000000018626,
+              "rms": 0.08880885244250732,
+              "hz": 878.90625,
+              "position": 2.001532,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 278.8000000002794,
+              "rms": 0.08877103366260435,
+              "hz": 878.90625,
+              "position": 2.013333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 279.3000000002794,
+              "rms": 0.08877103366260435,
+              "hz": 878.90625,
+              "position": 2.013333,
+              "readyState": 4,
+              "paused": false
+            }
+          ],
+          "passed": true
+        },
+        {
+          "language": "fr",
+          "expectedHz": 440,
+          "ui": {
+            "method": "prepared-remux-source-reload",
+            "fromAsset": "fixture-mkv-en",
+            "toAsset": "fixture-mkv-fr",
+            "language": "fr",
+            "requestedPosition": 2.181333,
+            "wasPlaying": true,
+            "ok": true,
+            "metadataMs": 16.199999999720603,
+            "restoredPosition": 2.181333,
+            "positionErrorSeconds": 0,
+            "seekReadyMs": 44.5,
+            "completedMs": 46.39999999990687
+          },
+          "observedAudio": {
+            "rms": 0.08792074015309925,
+            "hz": 439.453125
+          },
+          "requestToStableAudioMs": 149.89999999990687,
+          "requestToRestoredVideoFrameMs": 52.99999999990678,
+          "firstRestoredFrameMediaTime": 2.167,
+          "restoredFrameThresholdMs": 44.5,
+          "crossSourceFrameGapMs": 66.5,
+          "baselineMaxFrameGapMs": 50.19999999999982,
+          "sampledSilenceTotalMs": 31,
+          "silentIntervals": [
+            {
+              "fromMs": 26.799999999813735,
+              "toMs": 57.799999999813735,
+              "durationMs": 31
+            }
+          ],
+          "maxSampleGapMs": 20.40000000037253,
+          "framesBeforeRestoredPosition": 1,
+          "restoredVideoFrames": 6,
+          "trace": [
+            {
+              "ms": 0,
+              "rms": 0.08796737483495061,
+              "hz": 878.90625,
+              "position": 2.181333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 13.100000000093132,
+              "rms": 0.06230139925058209,
+              "hz": 878.90625,
+              "position": 0,
+              "readyState": 0,
+              "paused": true
+            },
+            {
+              "ms": 26.799999999813735,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.181333,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 39.1999999997206,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.181333,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 41.10000000009313,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.181333,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 57.799999999813735,
+              "rms": 0.06152233039637897,
+              "hz": 878.90625,
+              "position": 2.192,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 69.39999999990687,
+              "rms": 0.08770527593466286,
+              "hz": 878.90625,
+              "position": 2.202666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 72.39999999990687,
+              "rms": 0.08770527593466286,
+              "hz": 878.90625,
+              "position": 2.202666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 85.39999999990687,
+              "rms": 0.0887411817652878,
+              "hz": 878.90625,
+              "position": 2.219873,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 101.79999999981374,
+              "rms": 0.08809238736794178,
+              "hz": 878.90625,
+              "position": 2.232,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 117.89999999990687,
+              "rms": 0.08844699257166229,
+              "hz": 439.453125,
+              "position": 2.250666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 120.6999999997206,
+              "rms": 0.08844699257166229,
+              "hz": 439.453125,
+              "position": 2.250666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 134.1999999997206,
+              "rms": 0.08847139089160004,
+              "hz": 439.453125,
+              "position": 2.269344,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 149.29999999981374,
+              "rms": 0.08871333479619095,
+              "hz": 439.453125,
+              "position": 2.282666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 154.39999999990687,
+              "rms": 0.08869047857555756,
+              "hz": 439.453125,
+              "position": 2.288546,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 165.39999999990687,
+              "rms": 0.0879187323392046,
+              "hz": 439.453125,
+              "position": 2.299816,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 172.10000000009313,
+              "rms": 0.0879187323392046,
+              "hz": 439.453125,
+              "position": 2.301333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 183.1999999997206,
+              "rms": 0.08841268457459656,
+              "hz": 439.453125,
+              "position": 2.312,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 203.60000000009313,
+              "rms": 0.0887210747830738,
+              "hz": 439.453125,
+              "position": 2.33869,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 219.89999999990687,
+              "rms": 0.08894516248601947,
+              "hz": 439.453125,
+              "position": 2.352,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 236.89999999990687,
+              "rms": 0.08804737483267072,
+              "hz": 439.453125,
+              "position": 2.370666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 246.1999999997206,
+              "rms": 0.0884739814211726,
+              "hz": 439.453125,
+              "position": 2.380829,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 252.5,
+              "rms": 0.0884739814211726,
+              "hz": 439.453125,
+              "position": 2.381333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 263.89999999990687,
+              "rms": 0.08845587324688992,
+              "hz": 439.453125,
+              "position": 2.392,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 270.6999999997206,
+              "rms": 0.08792074015309925,
+              "hz": 439.453125,
+              "position": 2.402666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 271.60000000009313,
+              "rms": 0.08792074015309925,
+              "hz": 439.453125,
+              "position": 2.402666,
+              "readyState": 4,
+              "paused": false
+            }
+          ],
+          "passed": true
+        },
+        {
+          "language": "en",
+          "expectedHz": 880,
+          "ui": {
+            "method": "prepared-remux-source-reload",
+            "fromAsset": "fixture-mkv-fr",
+            "toAsset": "fixture-mkv-en",
+            "language": "en",
+            "requestedPosition": 2.570666,
+            "wasPlaying": true,
+            "ok": true,
+            "metadataMs": 13.5,
+            "restoredPosition": 2.570666,
+            "positionErrorSeconds": 0,
+            "seekReadyMs": 39.39999999990687,
+            "completedMs": 39.89999999990687
+          },
+          "observedAudio": {
+            "rms": 0.08869099330632277,
+            "hz": 878.90625
+          },
+          "requestToStableAudioMs": 150.79999999981374,
+          "requestToRestoredVideoFrameMs": 49.59999999981392,
+          "firstRestoredFrameMediaTime": 2.583,
+          "restoredFrameThresholdMs": 39.39999999990687,
+          "crossSourceFrameGapMs": 66.5,
+          "baselineMaxFrameGapMs": 66.10000000000036,
+          "sampledSilenceTotalMs": 33.10000000009313,
+          "silentIntervals": [
+            {
+              "fromMs": 21.899999999906868,
+              "toMs": 55,
+              "durationMs": 33.10000000009313
+            }
+          ],
+          "maxSampleGapMs": 17.300000000279397,
+          "framesBeforeRestoredPosition": 0,
+          "restoredVideoFrames": 6,
+          "trace": [
+            {
+              "ms": 0,
+              "rms": 0.08794856414842485,
+              "hz": 439.453125,
+              "position": 2.570666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 12,
+              "rms": 0.06166505503001523,
+              "hz": 439.453125,
+              "position": 0,
+              "readyState": 0,
+              "paused": true
+            },
+            {
+              "ms": 21.899999999906868,
+              "rms": 0,
+              "hz": 439.453125,
+              "position": 2.570666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 36.1999999997206,
+              "rms": 0,
+              "hz": 439.453125,
+              "position": 2.570666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 41.799999999813735,
+              "rms": 0,
+              "hz": 439.453125,
+              "position": 2.570666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 55,
+              "rms": 0.06236475266800905,
+              "hz": 439.453125,
+              "position": 2.581333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 61.799999999813735,
+              "rms": 0.08835845103618777,
+              "hz": 439.453125,
+              "position": 2.591999,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 77.6999999997206,
+              "rms": 0.08830059079487056,
+              "hz": 439.453125,
+              "position": 2.608453,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 83.6999999997206,
+              "rms": 0.08830059079487056,
+              "hz": 439.453125,
+              "position": 2.610666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 94.1999999997206,
+              "rms": 0.08873308486805606,
+              "hz": 439.453125,
+              "position": 2.621333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 110,
+              "rms": 0.0881528591333016,
+              "hz": 878.90625,
+              "position": 2.642666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 116.6999999997206,
+              "rms": 0.0881528591333016,
+              "hz": 878.90625,
+              "position": 2.642666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 134,
+              "rms": 0.08816149389901444,
+              "hz": 878.90625,
+              "position": 2.661333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 149.6999999997206,
+              "rms": 0.08875353353900241,
+              "hz": 878.90625,
+              "position": 2.682571,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 152.59999999962747,
+              "rms": 0.08875353353900241,
+              "hz": 878.90625,
+              "position": 2.682666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 165.39999999990687,
+              "rms": 0.0889546577499995,
+              "hz": 878.90625,
+              "position": 2.690666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 181.39999999990687,
+              "rms": 0.08807204415657785,
+              "hz": 878.90625,
+              "position": 2.711999,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 197.1999999997206,
+              "rms": 0.08816523789430016,
+              "hz": 878.90625,
+              "position": 2.722666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 213.89999999990687,
+              "rms": 0.08854532246624028,
+              "hz": 878.90625,
+              "position": 2.741333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 227.09999999962747,
+              "rms": 0.08889787467116117,
+              "hz": 878.90625,
+              "position": 2.751999,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 238.89999999990687,
+              "rms": 0.08847818827338347,
+              "hz": 878.90625,
+              "position": 2.769313,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 250.29999999981374,
+              "rms": 0.08815985490268714,
+              "hz": 878.90625,
+              "position": 2.781333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 255,
+              "rms": 0.08815985490268714,
+              "hz": 878.90625,
+              "position": 2.781333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 267.89999999990687,
+              "rms": 0.08901572189834066,
+              "hz": 878.90625,
+              "position": 2.800588,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 282.09999999962747,
+              "rms": 0.08869099330632277,
+              "hz": 878.90625,
+              "position": 2.810666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 282.39999999990687,
+              "rms": 0.08869099330632277,
+              "hz": 878.90625,
+              "position": 2.810666,
+              "readyState": 4,
+              "paused": false
+            }
+          ],
+          "passed": true
+        },
+        {
+          "language": "fr",
+          "expectedHz": 440,
+          "ui": {
+            "method": "prepared-remux-source-reload",
+            "fromAsset": "fixture-mkv-en",
+            "toAsset": "fixture-mkv-fr",
+            "language": "fr",
+            "requestedPosition": 2.970666,
+            "wasPlaying": true,
+            "ok": true,
+            "metadataMs": 20.5,
+            "restoredPosition": 2.970666,
+            "positionErrorSeconds": 0,
+            "seekReadyMs": 159.29999999981374,
+            "completedMs": 159.89999999990687
+          },
+          "observedAudio": {
+            "rms": 0.0880525341444513,
+            "hz": 439.453125
+          },
+          "requestToStableAudioMs": 203.89999999990687,
+          "requestToRestoredVideoFrameMs": 171.19999999981337,
+          "firstRestoredFrameMediaTime": 3,
+          "restoredFrameThresholdMs": 159.29999999981374,
+          "crossSourceFrameGapMs": 183.09999999999945,
+          "baselineMaxFrameGapMs": 50.19999999999982,
+          "sampledSilenceTotalMs": 157.6999999997206,
+          "silentIntervals": [
+            {
+              "fromMs": 14,
+              "toMs": 171.6999999997206,
+              "durationMs": 157.6999999997206
+            }
+          ],
+          "maxSampleGapMs": 22.300000000279397,
+          "framesBeforeRestoredPosition": 0,
+          "restoredVideoFrames": 4,
+          "trace": [
+            {
+              "ms": 0,
+              "rms": 0.08845322485246565,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 14,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 0,
+              "readyState": 0,
+              "paused": true
+            },
+            {
+              "ms": 21.09999999962747,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 34.1999999997206,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 48.09999999962747,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 54.799999999813735,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 69.59999999962747,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 85.6999999997206,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 91.89999999990687,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 100.79999999981374,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 114.39999999990687,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 123.09999999962747,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 132.89999999990687,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 143.5,
+              "rms": 0,
+              "hz": 878.90625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 153,
+              "rms": 0,
+              "hz": 884.765625,
+              "position": 2.970666,
+              "readyState": 1,
+              "paused": true
+            },
+            {
+              "ms": 160.5,
+              "rms": 0,
+              "hz": 884.765625,
+              "position": 2.970666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 171.6999999997206,
+              "rms": 0.06335627706644842,
+              "hz": 439.453125,
+              "position": 2.981333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 181.09999999962747,
+              "rms": 0.08841533879554635,
+              "hz": 439.453125,
+              "position": 2.991999,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 203.39999999990687,
+              "rms": 0.08886123101266252,
+              "hz": 439.453125,
+              "position": 3.019857,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 219.5,
+              "rms": 0.08816288765936009,
+              "hz": 439.453125,
+              "position": 3.031999,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 223,
+              "rms": 0.0884654202371069,
+              "hz": 439.453125,
+              "position": 3.040752,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 237.39999999990687,
+              "rms": 0.0884667362633841,
+              "hz": 439.453125,
+              "position": 3.050666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 247.29999999981374,
+              "rms": 0.08849027781623618,
+              "hz": 439.453125,
+              "position": 3.061333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 255.09999999962747,
+              "rms": 0.08792850403515673,
+              "hz": 439.453125,
+              "position": 3.071999,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 262.79999999981374,
+              "rms": 0.08872645360631787,
+              "hz": 439.453125,
+              "position": 3.080376,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 271.79999999981374,
+              "rms": 0.08872645360631787,
+              "hz": 439.453125,
+              "position": 3.082666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 286.09999999962747,
+              "rms": 0.0879232680596057,
+              "hz": 439.453125,
+              "position": 3.101333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 299.89999999990687,
+              "rms": 0.08841561975595123,
+              "hz": 439.453125,
+              "position": 3.111999,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 320.6999999997206,
+              "rms": 0.08862346575443132,
+              "hz": 439.453125,
+              "position": 3.130666,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 331.39999999990687,
+              "rms": 0.0880525341444513,
+              "hz": 439.453125,
+              "position": 3.141333,
+              "readyState": 4,
+              "paused": false
+            },
+            {
+              "ms": 331.79999999981374,
+              "rms": 0.0880525341444513,
+              "hz": 439.453125,
+              "position": 3.141333,
+              "readyState": 4,
+              "paused": false
+            }
+          ],
+          "passed": true
+        }
+      ],
+      "pausedSwitches": [
+        {
+          "language": "en",
+          "ui": {
+            "method": "prepared-remux-source-reload",
+            "fromAsset": "fixture-mkv-fr",
+            "toAsset": "fixture-mkv-en",
+            "language": "en",
+            "requestedPosition": 4.25,
+            "wasPlaying": false,
+            "ok": true,
+            "metadataMs": 19.600000000093132,
+            "restoredPosition": 4.25,
+            "positionErrorSeconds": 0,
+            "seekReadyMs": 38.5,
+            "completedMs": 38.5
+          },
+          "paused": true,
+          "position": 4.25,
+          "passed": true
+        },
+        {
+          "language": "fr",
+          "ui": {
+            "method": "prepared-remux-source-reload",
+            "fromAsset": "fixture-mkv-en",
+            "toAsset": "fixture-mkv-fr",
+            "language": "fr",
+            "requestedPosition": 4.25,
+            "wasPlaying": false,
+            "ok": true,
+            "metadataMs": 13.600000000093132,
+            "restoredPosition": 4.25,
+            "positionErrorSeconds": 0,
+            "seekReadyMs": 35.10000000009313,
+            "completedMs": 35.10000000009313
+          },
+          "paused": true,
+          "position": 4.25,
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "measurement": {
+        "pollTargetMs": 10,
+        "pcmWindowSamples": 1024,
+        "fftSamples": 8192,
+        "silenceRmsThreshold": 0.001,
+        "limits": "Main-thread sampling and compositor callbacks, not physical speaker/display timing. FFT includes a rolling analysis window; no seamless playback claim."
+      },
+      "initialAudio": {
+        "rms": 0.08872627100232185,
+        "hz": 439.453125
+      },
+      "sampleRate": 48000,
+      "nativeAudioTracksExposed": false,
+      "finalDistinctColors": 5909,
+      "ended": true
+    },
+    {
+      "id": "fixture-mp4",
+      "method": "prepared-remux-source-reload",
+      "switches": [],
+      "pausedSwitches": [],
+      "passed": false,
+      "measurement": {
+        "pollTargetMs": 10,
+        "pcmWindowSamples": 1024,
+        "fftSamples": 8192,
+        "silenceRmsThreshold": 0.001,
+        "limits": "Main-thread sampling and compositor callbacks, not physical speaker/display timing. FFT includes a rolling analysis window; no seamless playback claim."
+      },
+      "failure": "Prepare both language remuxes before this scenario",
+      "mediaError": null
+    }
+  ],
+  "limits": "Decoded pixels and PCM only; human listening and physical display NT. Remux files are played by native URL; no MSE append.",
+  "browser": "155.0.8059.40",
+  "driver": "Playwright 1.62.1",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+  "missing": {
+    "httpStatus": 404,
+    "code": 4,
+    "message": "MEDIA_ELEMENT_ERROR: Format error",
+    "displayed": "Échec navigateur : 4 MEDIA_ELEMENT_ERROR: Format error"
+  },
+  "responses": [
+    {
+      "url": "/api/v1/assets/fixture-mkv/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0bf6b.1f93ebfc-3c390\"",
+        "content-range": "bytes 0-246671/246672",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "246672",
+        "date": "Thu, 15 Oct 2026 12:35:13 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 11:56:27 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mkv-en/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0c779.15abbf70-2b648\"",
+        "content-range": "bytes 0-177735/177736",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "177736",
+        "date": "Thu, 15 Oct 2026 12:35:15 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 12:30:49 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mkv-fr/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0c778.2d7362fc-2aefe\"",
+        "content-range": "bytes 0-175869/175870",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "175870",
+        "date": "Thu, 15 Oct 2026 12:35:15 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 12:30:48 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mkv-en/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0c779.15abbf70-2b648\"",
+        "content-range": "bytes 0-177735/177736",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "177736",
+        "date": "Thu, 15 Oct 2026 12:35:16 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 12:30:49 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mkv-fr/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0c778.2d7362fc-2aefe\"",
+        "content-range": "bytes 0-175869/175870",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "175870",
+        "date": "Thu, 15 Oct 2026 12:35:16 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 12:30:48 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mkv-en/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0c779.15abbf70-2b648\"",
+        "content-range": "bytes 0-177735/177736",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "177736",
+        "date": "Thu, 15 Oct 2026 12:35:16 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 12:30:49 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mkv-fr/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0c778.2d7362fc-2aefe\"",
+        "content-range": "bytes 0-175869/175870",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "175870",
+        "date": "Thu, 15 Oct 2026 12:35:17 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 12:30:48 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mkv-en/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0c779.15abbf70-2b648\"",
+        "content-range": "bytes 0-177735/177736",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "177736",
+        "date": "Thu, 15 Oct 2026 12:35:17 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 12:30:49 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mkv-fr/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0c778.2d7362fc-2aefe\"",
+        "content-range": "bytes 0-175869/175870",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "175870",
+        "date": "Thu, 15 Oct 2026 12:35:17 GMT",
+        "content-type": "video/x-matroska",
+        "last-modified": "Thu, 15 Oct 2026 12:30:48 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mp4/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0bf6b.25f1fa20-3cd3e\"",
+        "content-range": "bytes 0-249149/249150",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "249150",
+        "date": "Thu, 15 Oct 2026 12:35:22 GMT",
+        "content-type": "video/mp4",
+        "last-modified": "Thu, 15 Oct 2026 11:56:27 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/fixture-mp4/content",
+      "status": 206,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "etag": "\"6ad0bf6b.25f1fa20-3cd3e\"",
+        "content-range": "bytes 65536-249149/249150",
+        "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "content-length": "183614",
+        "date": "Thu, 15 Oct 2026 12:35:22 GMT",
+        "content-type": "video/mp4",
+        "last-modified": "Thu, 15 Oct 2026 11:56:27 GMT"
+      }
+    },
+    {
+      "url": "/api/v1/assets/missing/content",
+      "status": 404,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "content-length": "25",
+        "date": "Thu, 15 Oct 2026 12:35:22 GMT",
+        "content-type": "application/json",
+        "x-content-type-options": "nosniff"
+      }
+    },
+    {
+      "url": "/api/v1/assets/missing/content",
+      "status": 404,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; media-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'",
+        "cache-control": "no-store",
+        "content-length": "25",
+        "date": "Thu, 15 Oct 2026 12:35:22 GMT",
+        "content-type": "application/json",
+        "x-content-type-options": "nosniff"
+      }
+    }
+  ],
+  "hashesAfter": {
+    "av1-opus.mkv": "426ba0eb44ebb73e1b770865a44fd97dc227be95f0461c691b8e50733662ddd8",
+    "av1-opus.mp4": "37b38550b7d7a9d69f0ddd1855f38d4470c66ff1955a88f661a219421602b72f",
+    "av1-opus.webm": "7141eef9c3d2db0f78e41fe0de66745532ea68996b180bdd49710377e75f4ca7",
+    "av1-opus-fragmented.mp4": "c3dc8a71e08771bfca2bbc4028459334c11971ff0150cc4080c9b7e674ca4d66"
+  },
+  "originalsUnchanged": true
+}

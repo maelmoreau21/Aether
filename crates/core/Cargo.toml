@@ -1,0 +1,70 @@
+[package]
+name = "media-poc"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+default-run = "media-poc"
+
+[dependencies]
+image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+media-contracts = { path = "../shared" }
+media-node = { path = "../node" }
+axum = "0.8.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "process", "io-util", "time", "fs"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7.1", features = ["fs", "set-header"] }
+
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "sqlite-bundled", "postgres", "any", "migrate", "macros"] }
+futures-util = "0.3"
+argon2 = { version = "0.6.0", features = ["zeroize"] }
+rpassword = "7.5.4"
+zeroize = "1"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10.9"
+bytes = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+url = "2"
+jsonwebtoken = { version = "11.1.0", features = ["aws_lc_rs"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "form"] }
+base64 = "0.23.1"
+ring = "0.17.14"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "aether-core"
+path = "src/bin/aether-core.rs"
+
+[[bin]]
+name = "media-bootstrap"
+path = "src/bootstrap.rs"
+
+[[bin]]
+name = "media-backup"
+path = "src/bin/backup.rs"
+
+[[bin]]
+name = "media-restore"
+path = "src/bin/restore.rs"
+
+[features]
+fixture-bench = []
+
+[[test]]
+name = "p0"
+required-features = ["fixture-bench"]
+
+[[test]]
+name = "catalog"
+required-features = ["fixture-bench"]
+
+[[bin]]
+name = "media-recover"
+path = "src/bin/recover.rs"

@@ -1,0 +1,111 @@
+# ==============================================================================
+# EXEMPLE DE DÉPLOIEMENT MULTI-MACHINE AVEC POSTGRESQL 18
+# ==============================================================================
+# Architecture :
+# - MACHINE A (Serveur Web / Core) : Core + Reverse Proxy HTTPS + PostgreSQL 18
+# - MACHINE B (Serveur de stockage / NAS) : Media Node avec vos disques de médias
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# FICHIER 1 : Sur la MACHINE A (Core + PostgreSQL 18)
+# Sauvegardez ce bloc dans un fichier `docker-compose.yml` sur votre Machine A.
+# ------------------------------------------------------------------------------
+# services:
+#   postgres:
+#     image: postgres:18-alpine
+#     container_name: aether-postgres
+#     restart: unless-stopped
+#     environment:
+#       POSTGRES_DB: aether_db
+#       POSTGRES_USER: aether_user
+#       POSTGRES_PASSWORD: VotreMotDePasseTresSecurise
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+#     # Si PostgreSQL est sur la même machine que le Core, ils communiquent via le réseau Docker.
+#     # Si PostgreSQL est sur un serveur séparé, exposez le port "5432:5432" et sécurisez l'accès.
+#     networks:
+#       - aether-net
+#
+#   aether-core:
+#     image: ghcr.io/maelmoreau21/aether-core:develop
+#     container_name: aether-core
+#     restart: unless-stopped
+#     depends_on:
+#       - postgres
+#     environment:
+#       - MEDIA_PORT=3000
+#       - MEDIA_BIND_ADDR=0.0.0.0
+#       # ⚠️ Doit être en HTTPS pour tout accès hors localhost
+#       - MEDIA_PUBLIC_URL=https://aether.mondomaine.lan
+#       - MEDIA_CORE_INTERNAL_URL=https://aether.mondomaine.lan
+#       # Configuration PostgreSQL 18 :
+#       - MEDIA_DB_ENGINE=postgres
+#       - MEDIA_BACKUP_DIR=/backups
+#       # Store MEDIA_BACKUP_KEY separately from backup archives.
+#       - MEDIA_BACKUP_KEY=${MEDIA_BACKUP_KEY:-}
+#       - MEDIA_DB_URL=postgresql://aether_user:VotreMotDePasseTresSecurise@postgres:5432/aether_db?sslmode=disable
+#     ports:
+#       # Bind local strict : un reverse proxy (Caddy / Nginx / DSM) écoute en 443 et renvoie vers 127.0.0.1:3000
+#       - "127.0.0.1:3000:3000"
+#     volumes:
+#       - aether_core_data:/data
+#       - aether_core_backups:/backups
+#     networks:
+#       - aether-net
+#
+#   # Exemple de Reverse Proxy Caddy intégré pour gérer le HTTPS simplement :
+#   # caddy:
+#   #   image: caddy:alpine
+#   #   container_name: aether-caddy
+#   #   restart: unless-stopped
+#   #   ports:
+#   #     - "80:80"
+#   #     - "443:443"
+#   #   volumes:
+#   #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
+#   #     - caddy_data:/data
+#   #   networks:
+#   #     - aether-net
+#
+# volumes:
+#   postgres_data:
+#   aether_core_data:
+#   aether_core_backups:
+#
+# networks:
+#   aether-net:
+#     driver: bridge
+
+
+# ------------------------------------------------------------------------------
+# FICHIER 2 : Sur la MACHINE B (Serveur de Stockage / NAS / Media Node)
+# Sauvegardez ce bloc dans un fichier `docker-compose.yml` sur votre Machine B.
+# ------------------------------------------------------------------------------
+# services:
+#   aether-node:
+#     image: ghcr.io/maelmoreau21/aether-node:develop
+#     container_name: aether-node
+#     restart: unless-stopped
+#     security_opt:
+#       - no-new-privileges:true
+#     cap_drop:
+#       - ALL
+#     environment:
+#       - MEDIA_NODE_NAME=NAS Stockage Films & Séries
+#       - MEDIA_NODE_ROOTS=/media/films;/media/series
+#       - MEDIA_NODE_DATA_DIR=/data
+#       # Adresse du Core sur la Machine A :
+#       - MEDIA_CORE_URL=https://aether.mondomaine.lan
+#       # Jeton temporaire obtenu dans l'interface Admin > "Ajouter un Node" :
+#       - MEDIA_NODE_ENROLLMENT_TOKEN=mnet_VOTRE_JETON_COPIE_DEPUIS_L_INTERFACE
+#       # Pas besoin de MEDIA_NODE_PUBLIC_URL si le Node est derrière une box sans redirection de port
+#     volumes:
+#       # Données d'identité du Node (conserve l'appairage chiffré)
+#       - aether_node_data:/data
+#       # Vos dossiers multimédias réels montés STRICTEMENT en lecture seule (:ro)
+#       - /volume1/video/Films:/media/films:ro
+#       - /volume1/video/Series:/media/series:ro
+#     # Note : Aucun port entrant n'a besoin d'être publié ! Le Node initie lui-même la liaison sortante vers le Core.
+#
+# volumes:
+#   aether_node_data:

@@ -1,0 +1,215 @@
+> Administration du 19 octobre 2026 : comptes mutables avec protections transactionnelles,
+> groupes sans promotion de rôle, clés catalogue seulement et permissions vivantes,
+> sauvegardes chiffrées avec clé externe et extraction hors ligne sans écrasement.
+> Contrats : ADMIN_USERS.md, ADMIN_ACCESS.md, ADMIN_BACKUPS.md, BACKUP_BUNDLE.md.
+> Les préférences sont persistées par session utilisateur, sans ID de compte fourni par le client.
+
+> Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités
+> issuer/subject et sessions Core communes aux deux modes Docker.
+> Contrat, configuration et limites : [OIDC](OIDC.md). Les exclusions OIDC
+> dans les jalons historiques ci-dessous ne décrivent plus ce parcours.
+
+> Jalon J1 (`ARCHITECTURE_ROADMAP.md`, 16 octobre 2026) : confinement et streaming
+> sur descripteur de fichier ouvert (`OpenedFile` dans `crates/node`). Sous Linux/Docker,
+> traversée relative confinée via `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV)`
+> avec repli `openat(O_NOFOLLOW)` composant par composant ; sous Windows, ouverture avec
+> `FILE_FLAG_OPEN_REPARSE_POINT`, rejet immédiat de l'attribut `FILE_ATTRIBUTE_REPARSE_POINT` (`0x400`)
+> et vérification d'identité de handle (`verify_unchanged`). Le streaming HTTP (`GET`, `HEAD`, `Range`
+> par blocs de 64 Kio), la lecture NFO et le décodage d'affiches lisent directement depuis le
+> descripteur ouvert sans réouverture par chemin (`ServeFile` retiré des routes médias/images).
+> L'analyse `ffprobe` (`probe_opened` / `probe_file`) consomme également directement le descripteur
+> déjà ouvert et confiné transmis sur son entrée standard (`-`, `protocol_whitelist` restreint à `fd,pipe`),
+> interdisant tout accès au protocole `file:` et éliminant le risque de substitution transitoire du chemin (TOCTOU).
+>
+> Extension P1 affiches locales Films : inventaire séparé, route image avec
+> session/droits et repli Web. État actuel : [LOCAL_FILM_POSTERS.md](LOCAL_FILM_POSTERS.md).
+> Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
+
+> Mise à jour scanner Films P1 : inventaire SQLite et bibliothèques locales
+> autorisées par MEDIA_LIBRARY_ROOT. Jobs session/rôle/CSRF, contrôle des droits
+> avant GET/HEAD/Range, refus liens et points de réanalyse Windows. Voir
+> [LOCAL_FILM_SCANNER.md](LOCAL_FILM_SCANNER.md).
+>
+> Mise à jour P1 bibliothèques : droits explicites SQLite et administration
+> session/rôle/CSRF livrés sur fixtures. Les restrictions administrator seule
+> ci-dessous sont historiques. Voir [LIBRARIES_AND_SCANNER.md](LIBRARIES_AND_SCANNER.md).
+
+# Sécurité du Core local et historique du banc P0
+
+NFO Films : XML local non fiable, quick-xml sans résolveur, DTD/entités externes
+rejetées, UTF-8 strict, limites1Mio/profondeur16/champs16Kio/64genres, confinement
+symlink/reparse existant et rendu texte échappé. Aucun champ ne devient chemin
+ou URL consulté ; aucune modification des médias/NFO. Le risque TOCTOU reste
+explicite. Détails et tests : [LOCAL_FILM_NFO.md](LOCAL_FILM_NFO.md).
+
+## État actuel — 16 octobre 2026
+
+Le binaire exige désormais une session SQLite et une permission backend pour
+les routes catalogue et média, y compris HEAD, Range, sous-titres et expériences
+MSE/DASH. Connexion Argon2id, sessions hachées/révocables, expirations, CSRF et
+limitation persistante des tentatives : [LOCAL_SESSIONS.md](LOCAL_SESSIONS.md).
+Seul l'administrateur accède à l'inventaire synthétique ; `user` est refusé
+jusqu'au prochain jalon de permissions explicites par bibliothèque.
+Le texte ci-dessous décrit les jalons historiques et leurs limites persistantes
+(notamment fixtures uniquement et confinement non atomique). Ses mentions
+« aucune authentification » ne décrivent plus le binaire actuel.
+Le constructeur sans auth est réservé à la feature de test `fixture-bench` ;
+le binaire ne l'utilise jamais. Pas de médias personnels ni de publication validée.
+
+## Historique du banc local P0
+
+Le binaire écoute exclusivement sur `127.0.0.1`, sans option pour ouvrir le LAN.
+Il vérifie Host, Origin et Sec-Fetch-Site, n'autorise pas CORS et applique une CSP
+sur la page. Aucune authentification : seules des fixtures synthétiques doivent
+être placées dans sa racine. Ne pas le publier via proxy, tunnel ou port NAS.
+Il ne constitue pas le mode standalone P1 sécurisé.
+
+Les quatre fichiers initiaux, quatre remux par langue optionnels et quatre
+fixtures représentatives optionnelles sont
+résolus par identifiant fixe, jamais par chemin
+HTTP. Canonicalisation au chargement et avant service, confinement dans la racine,
+ouverture en lecture seule. Le dossier doit rester contrôlé par l'opérateur :
+la vérification canonique puis l'ouverture ne sont pas atomiques face à un
+écrivain local hostile (TOCTOU). Ce point doit être traité avant les bibliothèques
+réelles ; le banc ne prétend pas sécuriser un stockage modifiable par un adversaire.
+
+ffprobe est un adaptateur de découverte exécuté en sous-processus externe sans shell,
+consommant directement le descripteur/handle de fichier déjà ouvert et confiné transmis
+sur son entrée standard (`-`, via `Stdio::from(file)`), avec rembobinage préalable.
+Ses protocoles sont strictement restreints à `fd,pipe` (`-protocol_whitelist fd,pipe`),
+interdisant catégoriquement l'ouverture de chemins arbitraires (`file:`), de références
+externes (atomes MOV `dref`, segments Matroska externes) ou de ressources réseau (`http:`, `https:`).
+Le protocole effectivement mobilisé par ffprobe sur stdin est `fd:`. Ce protocole conserve
+la capacité de repositionnement (`lseek` sous Unix, `SetFilePointer` sous Windows) lorsque le
+descripteur pointe vers un fichier régulier du système de fichiers (à la différence d'un pipe
+anonyme non seekable). Cette capacité permet à ffprobe d'accéder directement aux atomes `moov`
+situés en fin de fichier dans les conteneurs MP4 non fragmentés sans nécessiter de réouverture par chemin.
+
+**Limite de sécurité documentée (Sandbox OS vs Whitelist applicative)** :
+Une liste blanche de protocoles FFmpeg (`-protocol_whitelist fd,pipe`) opère au niveau applicatif
+interne de `libavformat` ; **elle ne constitue pas un sandbox de sécurité au niveau du système d'exploitation**.
+Elle n'impose aucun filtrage des appels système (seccomp) ni d'isolation de l'espace de noms au processus fils `ffprobe`.
+Si un parseur C (`libavcodec` / `libavformat`) présentait une vulnérabilité de corruption mémoire (débordement
+de tas, entier non vérifié), le code attaquant s'exécuterait avec les privilèges de l'utilisateur hôte du processus.
+La défense en profondeur repose donc sur le confinement système complémentaire :
+1. Exécution sous Docker avec utilisateur non-privilégié dédié `aether` (`UID:GID 10001:10001`).
+2. Abandon strict de toutes les capacités Linux (`cap_drop: ALL`).
+3. Interdiction de toute élévation de privilèges (`no-new-privileges: true`).
+4. Montage des médias en lecture seule (`:ro`).
+5. Borne mémoire stricte par allocation (`-max_alloc 67108864`).
+6. Borne d'analyse (`-probesize 5000000`, `-analyzeduration 5000000`).
+7. Délai d'exécution maximal de 10 secondes avec terminaison forcée (`kill_on_drop(true)`).
+8. Plafond de capture de sortie standard limité à 1 Mio (`take(1_048_577)`).
+9. Contrôle d'intégrité avant et après exécution (`OpenedFile::verify_unchanged_sync`), détectant toute modification ou altération concurrente sur le disque.
+Les sorties publiques éliminent systématiquement `format.filename`.
+
+HTTP s'appuie sur ServeFile, chunks 64 KiB, lecture asynchrone et abandon du corps
+pour annuler l'I/O. Test sur copie temporaire portée à 1 GiB ; cela ne mesure pas
+la RSS ni une limite mémoire globale sous plusieurs connexions. Limitation des
+connexions, quotas, slow clients et budgets agrégés restent à établir avant exposition.
+
+Avant P1/P2 : bootstrap local sécurisé, hachage robuste, sessions révocables,
+CSRF/rate limiting, deux rôles exactement, RBAC sur chaque ressource ; OIDC
+Code+PKCE validant issuer/audience/signature/state/nonce, sans jetons localStorage.
+Appairage Node, capacités limitées, SSRF/IDOR, liens/junctions et TLS sur réseaux
+non fiables doivent recevoir des tests dédiés. Aucun de ces contrôles futurs
+n'est déclaré implémenté ici.
+
+### Banc MSE P0C
+
+Route expérimentale sur six noms fixes dans mse/verified, canonicalisation et
+refus horsracine, mêmes protections Host/Origin/cross-site. Aucun manifeste
+ou URL externe accepté. CSP media-src ajoute blob: uniquement pour MediaSource.
+Flux HTTP64KiB ; chargement client complet limité aux fixtures12s, plafond4MiB
+vérifié par piste après réception. Pas un garde-fou de streaming hostile ni un
+ordonnanceur de film long ; les fixtures locales restent de confiance.
+
+### Shaka et DASH expérimentaux
+
+Bundle Shaka5.2.13 préparé hors serveur, archive npm fixée SHA512, bundle SHA256,
+LICENSE conservé ; aucun CDN/runtime downloader. Manifeste et pistes servis
+sur huit noms fixes (sept médias/MPD + bundle), même canonicalisation et
+mêmes protections locales que MSE. Aucun assouplissement CSP ni URL entrante.
+Le MPD local est généré de données synthétiques de confiance ; ce banc n'est
+pas un service d'ingestion de manifestes hostiles. Sampler Windows ne journalise
+ni lignes de commande ni chemins de processus : PID/date/CPU/working set seulement.
+
+## P1 — intégration de fixtures uniquement
+
+/app sert le build statique local SvelteKit depuis apps/web/build. Mêmes gardes
+Host/Origin/Fetch-Site et loopback que P0 ; aucune bibliothèque réelle ni auth.
+Sources identifiées côté serveur, quatre fichiers mono-audio AV1/Opus, contrôle
+codecs/langues/profil au démarrage, pas d'entrée de chemin depuis le navigateur.
+Préparation hors serveur dans p1, quota documenté dans P1_WEB_INTEGRATION.md.
+Le bootstrap Web est externalisé pour script-src self ; seul le style fixe de
+svelte-announcer est autorisé par hash (style-src-attr unsafe-hashes SHA256),
+aucun unsafe-inline général. Aucune récupération audio automatique activée.
+Timeout terminal de chargement/seek/play et watchdog de blocage, retry explicite.
+Les protections d'authentification décrites plus haut restent à développer avant
+accès à de vraies bibliothèques.
+
+La refonte visuelle P1 ajoute img-src self à la CSP pour l'illustration originale
+et les SVG locaux. Aucune image tierce/data, aucun script distant ni
+assouplissement d'origine ajouté. Tests de violations CSP après refonte réussis.
+
+## Bootstrap initial et initialisation du premier administrateur
+
+L'initialisation d'une instance neuve peut s'effectuer de deux manières exclusives :
+1. **CLI interactive locale (`media-bootstrap`)** : accès direct au terminal et au système de fichiers, sans passer par HTTP.
+2. **API Web (`POST /api/v1/auth/bootstrap`) protégée par jeton secret** :
+   - Exige la fourniture d'un **secret d'installation à usage unique** (`bootstrap_token`).
+   - Ce jeton est configuré via `MEDIA_BOOTSTRAP_TOKEN` ou généré aléatoirement au démarrage (aléa cryptographique 128 bits), affiché dans les journaux console du conteneur et écrit dans `<data_dir>/.bootstrap_token` (droits `0o600`).
+   - L'endpoint vérifie l'Origine HTTP, applique une limitation de débit stricte et compare le jeton en **temps constant**.
+   - Dès la création du premier administrateur, le jeton est détruit en mémoire, le fichier `.bootstrap_token` est supprimé du disque et la route est **définitivement verrouillée** (`403 Forbidden`).
+   - **Option de verrouillage total HTTP** : la variable `MEDIA_DISABLE_HTTP_BOOTSTRAP=true` désactive intégralement la route HTTP de bootstrap, imposant l'usage exclusif de la CLI `media-bootstrap`.
+
+## P2 — transport et révocation, 17 octobre 2026
+
+Le contrat courant remplace les mentions historiques « Node futur » pour les
+chemins réalisés : [P2 Docker](P2_DOCKER_VALIDATION.md). TLS vérifié pour chaque
+URL HTTPS ; HTTP interne uniquement en loopback ou vers une autorité explicitement
+autorisée dans un réseau déclaré fiable. Les URL publiques porteuses de capacités
+refusent HTTP hors loopback. Aucun suivi de redirection ; DNS contrôlé puis
+connexion à l'adresse contrôlée. Les réseaux physiques/DSM restent à tester.
+
+Le MAC de contrôle lie désormais les octets des réponses JSON. Le relais lie ses
+métadonnées par signature et ses octets par TLS sur les liens non fiables. Ne pas
+confondre cela avec un MAC de contenu indépendant du transport sur un bridge HTTP.
+
+Chaque nouvelle requête directe consulte les droits et la session vivants du
+Core, sans cache positif, et réutilise la coalescence d'activité P1. La perte du
+Core bloque la requête. Un flux déjà ouvert n'est pas interrompu, comme en P1.
+Les URL sont porteuses : expurger leurs queries dans tout proxy/journal. Les
+anciens rapports synthétiques conservés ont été expurgés sans changer les
+observations de lecture ; aucune nouvelle preuve n'est déduite de ces anciens
+rapports. L'amorçage ne peut plus reconstituer une identité déjà appairée.
+
+## Durcissement opérationnel & Alignement OWASP ASVS 5.0.0 (Niveau 2)
+
+Aether applique les exigences du standard **OWASP ASVS 5.0.0 Niveau 2** pour les applications manipulant des médias et des données sensibles :
+
+1. **V2 — Authentification & Anti-automatisation (Anti-DoS / Brute Force)** :
+   - Hachage de mot de passe par **Argon2id** (64 Mio RAM, $t=3$, $p=1$, paramètres conformes OWASP).
+   - Limitation de débit scopée par **adresse IP cliente** (`login_throttle` indexée par clé IP, fenêtre glissante 60 s, budget de 10 tentatives/min par IP).
+   - Protection contre le déni de service (DoS) : les attaques par force brute ou bourrage d'identifiants provenant d'une IP malveillante ne bloquent aucun utilisateur légitime naviguant depuis une autre adresse.
+   - Nettoyage opportuniste et mémoire bornée des anciennes fenêtres d'étranglement.
+2. **V3 — Gestion des Sessions** :
+   - Jetons de session de 256 bits d'aléa système (`ring::rand::SystemRandom`).
+   - Secrets de session jamais persistés en clair en base (uniquement hash SHA-256).
+   - Cookies `HttpOnly`, `SameSite=Strict`, et `Secure` inconditionnel en HTTPS.
+   - Expiration absolue (12 h) et expiration d'inactivité (30 min) validées à chaque requête.
+   - **Révocation immédiate et complète** : toute rétrogradation de rôle (ex. retrait du groupe admin IdP) ou perte d'autorisation de groupe supprime instantanément toutes les sessions actives de l'utilisateur en base.
+3. **V4 — Contrôle d'Accès (RBAC strict)** :
+   - Rôles autorisés exactement : `administrator` et `user`. Aucun rôle implicite.
+   - Contrôle d'accès côté serveur à chaque route API ; aucune décision d'autorisation déléguée au client frontend.
+   - Isolation stricte des bibliothèques : un utilisateur standard ne peut lister ou lire que les bibliothèques et médias explicitement autorisés.
+4. **V5 — Validation des Entrées & Confinement Système** :
+   - Confinement strict des chemins fichiers (`O_NOFOLLOW`, interdiction des traversées de répertoires, symlinks et jonctions Windows).
+   - Montage des bibliothèques multimédia en **lecture seule (`:ro`)**.
+   - Pas de transcodage dynamique non maîtrisé ni d'exécution de processus arbitraires.
+5. **V14 — Configuration & Conteneurs Docker durcis** :
+   - Exécution sous utilisateur non-root non privilégié (`UID:GID 10001:10001`).
+   - `cap_drop: [ALL]` et `no-new-privileges: true`.
+   - Système de fichiers racine en lecture seule (`read_only: true`) avec `tmpfs` non exécutable (`/tmp:rw,noexec,nosuid,size=64m`).
+   - Limites de ressources explicites sur CPU (`cpus: 2.0`), mémoire (`memory: 1G`) et processus (`pids: 200`).
+

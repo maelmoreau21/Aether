@@ -1,0 +1,19 @@
+{
+  "fixture": "generated/p1/clip-mp4-fr.mp4",
+  "method": "FFmpeg stream copy to AV1 OBU and concatenated Opus payloads; originals read only",
+  "referenceVideoTimebase": "1/16000",
+  "referenceAudioTimebase": "1/48000",
+  "referenceAudioSampleRate": "48000",
+  "referenceAudioChannels": 6,
+  "referenceAudioInitBytes": 27,
+  "rawVideoPacketCount": 288,
+  "rawVideoPacketsWithoutPts": 0,
+  "referenceVideoDuration": "11.999000",
+  "rawVideoTimebase": "1/1200000",
+  "rawVideoLastPtsSeconds": "11.480000",
+  "referenceVideoLastPtsSeconds": "11.958000",
+  "rawOpusProbeExitCode": 1,
+  "rawOpusBytes": 389987,
+  "integrated": false,
+  "conclusion": "No demonstrated synchronized raw playback: AV1 timestamps and Opus packet boundaries/init/pre-skip must be retained in an explicit index. No production raw support claimed."
+}

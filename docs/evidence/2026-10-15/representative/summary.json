@@ -1,0 +1,314 @@
+[
+  {
+    "browser": "chrome",
+    "version": "155.0.8059.40",
+    "id": "fixture-representative-mkv",
+    "method": "multi-track-native-url",
+    "passed": true,
+    "decodedChannels": 6,
+    "channelGraphBeforeAndAfterSeekVerified": true,
+    "destinationChannels": 2,
+    "destinationMaxChannels": 2,
+    "subtitleApiTracks": 0,
+    "nativeAudioApiExposed": false,
+    "markerCount": 4,
+    "mediaClockSkewMs": [
+      10.67,
+      20
+    ],
+    "callbackWallSkewMs": [
+      14.4,
+      33.7
+    ],
+    "maxPollGapMs": 26.100000000558794,
+    "maxSeekErrorSeconds": 0.010667000000001536,
+    "physical51": "not-tested",
+    "display10bit": "not-tested"
+  },
+  {
+    "browser": "chrome",
+    "version": "155.0.8059.40",
+    "id": "fixture-representative-mp4",
+    "method": "multi-track-native-url",
+    "passed": true,
+    "decodedChannels": 6,
+    "channelGraphBeforeAndAfterSeekVerified": true,
+    "destinationChannels": 2,
+    "destinationMaxChannels": 2,
+    "subtitleApiTracks": 0,
+    "nativeAudioApiExposed": false,
+    "markerCount": 4,
+    "mediaClockSkewMs": [
+      -2.4,
+      12
+    ],
+    "callbackWallSkewMs": [
+      -12.2,
+      32.33
+    ],
+    "maxPollGapMs": 23.799999999813735,
+    "maxSeekErrorSeconds": 0.010667000000001536,
+    "physical51": "not-tested",
+    "display10bit": "not-tested"
+  },
+  {
+    "browser": "chrome",
+    "version": "155.0.8059.40",
+    "id": "fixture-representative-mkv-en",
+    "method": "prepared-en-remux-native-url",
+    "passed": true,
+    "decodedChannels": 2,
+    "channelGraphBeforeAndAfterSeekVerified": true,
+    "destinationChannels": 2,
+    "destinationMaxChannels": 2,
+    "subtitleApiTracks": 0,
+    "nativeAudioApiExposed": false,
+    "markerCount": 4,
+    "mediaClockSkewMs": [
+      7.4,
+      10.67
+    ],
+    "callbackWallSkewMs": [
+      5.7,
+      18.7
+    ],
+    "maxPollGapMs": 27.100000000558794,
+    "maxSeekErrorSeconds": 0.007556000000001006,
+    "physical51": "not-tested",
+    "display10bit": "not-tested"
+  },
+  {
+    "browser": "chrome",
+    "version": "155.0.8059.40",
+    "id": "fixture-representative-mp4-en",
+    "method": "prepared-en-remux-native-url",
+    "passed": true,
+    "decodedChannels": 2,
+    "channelGraphBeforeAndAfterSeekVerified": true,
+    "destinationChannels": 2,
+    "destinationMaxChannels": 2,
+    "subtitleApiTracks": 0,
+    "nativeAudioApiExposed": false,
+    "markerCount": 4,
+    "mediaClockSkewMs": [
+      -1.33,
+      20
+    ],
+    "callbackWallSkewMs": [
+      6.2,
+      33.9
+    ],
+    "maxPollGapMs": 23.90000000037253,
+    "maxSeekErrorSeconds": 0.010667000000001536,
+    "physical51": "not-tested",
+    "display10bit": "not-tested"
+  },
+  {
+    "browser": "msedge",
+    "version": "155.0.4283.45",
+    "id": "fixture-representative-mkv",
+    "method": "multi-track-native-url",
+    "passed": true,
+    "decodedChannels": 6,
+    "channelGraphBeforeAndAfterSeekVerified": true,
+    "destinationChannels": 2,
+    "destinationMaxChannels": 2,
+    "subtitleApiTracks": 0,
+    "nativeAudioApiExposed": false,
+    "markerCount": 4,
+    "mediaClockSkewMs": [
+      10.3,
+      20.97
+    ],
+    "callbackWallSkewMs": [
+      5.5,
+      50.5
+    ],
+    "maxPollGapMs": 22.700000000186265,
+    "maxSeekErrorSeconds": 0.008033000000001067,
+    "physical51": "not-tested",
+    "display10bit": "not-tested"
+  },
+  {
+    "browser": "msedge",
+    "version": "155.0.4283.45",
+    "id": "fixture-representative-mp4",
+    "method": "multi-track-native-url",
+    "passed": true,
+    "decodedChannels": 6,
+    "channelGraphBeforeAndAfterSeekVerified": true,
+    "destinationChannels": 2,
+    "destinationMaxChannels": 2,
+    "subtitleApiTracks": 0,
+    "nativeAudioApiExposed": false,
+    "markerCount": 4,
+    "mediaClockSkewMs": [
+      1.33,
+      19.55
+    ],
+    "callbackWallSkewMs": [
+      0.3,
+      36.1
+    ],
+    "maxPollGapMs": 27.5,
+    "maxSeekErrorSeconds": 0.010667000000001536,
+    "physical51": "not-tested",
+    "display10bit": "not-tested"
+  },
+  {
+    "browser": "msedge",
+    "version": "155.0.4283.45",
+    "id": "fixture-representative-mkv-en",
+    "method": "prepared-en-remux-native-url",
+    "passed": true,
+    "decodedChannels": 2,
+    "channelGraphBeforeAndAfterSeekVerified": true,
+    "destinationChannels": 2,
+    "destinationMaxChannels": 2,
+    "subtitleApiTracks": 0,
+    "nativeAudioApiExposed": false,
+    "markerCount": 4,
+    "mediaClockSkewMs": [
+      5.92,
+      20
+    ],
+    "callbackWallSkewMs": [
+      3.9,
+      35.4
+    ],
+    "maxPollGapMs": 22.200000000186265,
+    "maxSeekErrorSeconds": 0.0070190000000001085,
+    "physical51": "not-tested",
+    "display10bit": "not-tested"
+  },
+  {
+    "browser": "msedge",
+    "version": "155.0.4283.45",
+    "id": "fixture-representative-mp4-en",
+    "method": "prepared-en-remux-native-url",
+    "passed": true,
+    "decodedChannels": 2,
+    "channelGraphBeforeAndAfterSeekVerified": true,
+    "destinationChannels": 2,
+    "destinationMaxChannels": 2,
+    "subtitleApiTracks": 0,
+    "nativeAudioApiExposed": false,
+    "markerCount": 4,
+    "mediaClockSkewMs": [
+      -0.89,
+      20
+    ],
+    "callbackWallSkewMs": [
+      0.5,
+      29.3
+    ],
+    "maxPollGapMs": 27.399999999441206,
+    "maxSeekErrorSeconds": 0.017203999999999997,
+    "physical51": "not-tested",
+    "display10bit": "not-tested"
+  },
+  {
+    "browser": "firefox",
+    "version": "155.0.1",
+    "id": "fixture-representative-mkv",
+    "method": "multi-track-native-url",
+    "passed": true,
+    "decodedChannels": 6,
+    "channelGraphBeforeAndAfterSeekVerified": true,
+    "destinationChannels": 2,
+    "destinationMaxChannels": 2,
+    "subtitleApiTracks": 0,
+    "nativeAudioApiExposed": false,
+    "markerCount": 4,
+    "mediaClockSkewMs": [
+      -47.17,
+      -9.33
+    ],
+    "callbackWallSkewMs": [
+      -29.98,
+      -9.12
+    ],
+    "maxPollGapMs": 16,
+    "maxSeekErrorSeconds": 0,
+    "physical51": "not-tested",
+    "display10bit": "not-tested"
+  },
+  {
+    "browser": "firefox",
+    "version": "155.0.1",
+    "id": "fixture-representative-mp4",
+    "method": "multi-track-native-url",
+    "passed": true,
+    "decodedChannels": 6,
+    "channelGraphBeforeAndAfterSeekVerified": true,
+    "destinationChannels": 2,
+    "destinationMaxChannels": 2,
+    "subtitleApiTracks": 0,
+    "nativeAudioApiExposed": false,
+    "markerCount": 4,
+    "mediaClockSkewMs": [
+      -54,
+      6.5
+    ],
+    "callbackWallSkewMs": [
+      -31.98,
+      5.86
+    ],
+    "maxPollGapMs": 20,
+    "maxSeekErrorSeconds": 0,
+    "physical51": "not-tested",
+    "display10bit": "not-tested"
+  },
+  {
+    "browser": "firefox",
+    "version": "155.0.1",
+    "id": "fixture-representative-mkv-en",
+    "method": "prepared-en-remux-native-url",
+    "passed": true,
+    "decodedChannels": 2,
+    "channelGraphBeforeAndAfterSeekVerified": true,
+    "destinationChannels": 2,
+    "destinationMaxChannels": 2,
+    "subtitleApiTracks": 0,
+    "nativeAudioApiExposed": false,
+    "markerCount": 4,
+    "mediaClockSkewMs": [
+      -43.33,
+      -9.33
+    ],
+    "callbackWallSkewMs": [
+      -39.62,
+      -21.08
+    ],
+    "maxPollGapMs": 17,
+    "maxSeekErrorSeconds": 0,
+    "physical51": "not-tested",
+    "display10bit": "not-tested"
+  },
+  {
+    "browser": "firefox",
+    "version": "155.0.1",
+    "id": "fixture-representative-mp4-en",
+    "method": "prepared-en-remux-native-url",
+    "passed": true,
+    "decodedChannels": 2,
+    "channelGraphBeforeAndAfterSeekVerified": true,
+    "destinationChannels": 2,
+    "destinationMaxChannels": 2,
+    "subtitleApiTracks": 0,
+    "nativeAudioApiExposed": false,
+    "markerCount": 4,
+    "mediaClockSkewMs": [
+      -54,
+      1.33
+    ],
+    "callbackWallSkewMs": [
+      -22.36,
+      9.88
+    ],
+    "maxPollGapMs": 22,
+    "maxSeekErrorSeconds": 0,
+    "physical51": "not-tested",
+    "display10bit": "not-tested"
+  }
+]

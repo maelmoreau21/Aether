@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-18",
+  "branch": "develop",
+  "scope": "local player preparation and catalogue added dates",
+  "rust": {
+    "command": "cargo test --locked --workspace -j 1 -- --test-threads=1",
+    "passed": 127,
+    "ignored": 8,
+    "fmt": true,
+    "clippyAllTargetsWarningsDenied": true
+  },
+  "web": {
+    "testsPassed": 48,
+    "svelteErrors": 0,
+    "svelteWarnings": 0,
+    "lint": true,
+    "build": true
+  },
+  "chrome": {
+    "version": "155.0.8059.40",
+    "os": "10.0.26300",
+    "headless": true,
+    "shortMkvMp4": true,
+    "integratedSubtitleNegativeOffsetKeyboard": true,
+    "longMkvMp4": true,
+    "longMediaSeconds": 5400,
+    "observedContinuousSecondsPerContainer": 60,
+    "seekTargets": [
+      1,
+      2700,
+      5380
+    ],
+    "clockDeltaMs": {
+      "min": 67.23499999998239,
+      "max": 72.83899999993082
+    },
+    "audioRequestInterruptionExplicitRecovery": true,
+    "physicalAudioOutputTested": false,
+    "seriesRegression": true,
+    "seriesRegressionSeconds": 38.66
+  },
+  "cleanup": {
+    "earlierGlobalTemporaryCaches": 31,
+    "bytes": 1703262315,
+    "automaticReview": "blocked by policy",
+    "latestBrowserTestsUseDisposableTempRoot": true
+  },
+  "limitations": [
+    "ASS/SSA text fallback, no libass styling",
+    "Local preparation only; optional FFmpeg required",
+    "No continuous 90-minute observation or RSS leak proof",
+    "No new PostgreSQL runtime verification",
+    "No remote preparation, bitmap subtitle selection, raw integration or episode thumbnails"
+  ]
+}

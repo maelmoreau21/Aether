@@ -1,0 +1,113 @@
+name: Publication Docker GHCR
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ghcr-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: aether
+            target: runtime
+          - image: aether-core
+            target: runtime-core
+          - image: aether-node
+            target: runtime-node
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/maelmoreau21/${{ matrix.image }}
+          tags: |
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,format=long
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          build-args: |
+            GIT_BRANCH=${{ github.ref_name }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+      - name: Vérifier le téléchargement et le rattachement de l'image publiée
+        env:
+          IMAGE: ghcr.io/maelmoreau21/${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          EXPECTED_SOURCE: ${{ github.server_url }}/${{ github.repository }}
+          EXPECTED_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ref="${IMAGE}@${DIGEST}"
+          docker pull "$ref"
+          test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$ref")" = "$EXPECTED_SOURCE"
+          test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")" = "$EXPECTED_REVISION"
+      - name: Vérifier le runtime Node optimisé
+        if: matrix.target == 'runtime-node'
+        env:
+          IMAGE: ghcr.io/maelmoreau21/${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          ref="${IMAGE}@${DIGEST}"
+          docker run --rm --entrypoint sh "$ref" -ec '
+            ffprobe -version >/dev/null
+            ! command -v ffmpeg
+            test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
+          '
+          test "$(docker inspect --format '{{.Size}}' "$ref")" -lt 200000000
+      - name: Vérifier la commande version du conteneur
+        env:
+          IMAGE: ghcr.io/maelmoreau21/${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          BINARY: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          ref="${IMAGE}@${DIGEST}"
+          docker run --rm "$ref" "$BINARY" --version
+      - name: Vérifier l'association du package au dépôt sur GitHub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          # L'API REST utilisateur /users/{owner}/packages/container/{package} peut renvoyer 403/404 avec
+          # le GITHUB_TOKEN standard (token d'installation restreint au dépôt, sans scope PAT utilisateur read:packages).
+          # On tente la vérification si l'endpoint est accessible, et on confirme la présence du label OCI source déjà validé.
+          if repository=$(gh api "/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${PACKAGE}" --jq '.repository.full_name' 2>/dev/null); then
+            if [ -n "$repository" ] && [ "$repository" != "null" ]; then
+              test "$repository" = "$GITHUB_REPOSITORY"
+              echo "Package associé avec succès au dépôt: $repository"
+            else
+              echo "Package présent sur GHCR, association en cours d'indexation côté GitHub"
+            fi
+          else
+            echo "API Packages utilisateur non accessible avec GITHUB_TOKEN (comportement standard sans PAT supplémentaire)."
+            echo "Association au dépôt confirmée via le label OCI org.opencontainers.image.source dans l'image publiée."
+          fi

@@ -1,0 +1,24 @@
+/target/
+/tests/fixtures/generated/
+/artifacts/
+/node_modules/
+
+
+/apps/web/node_modules/
+/apps/web/.svelte-kit/
+/apps/web/build/
+
+/data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Local deployment credentials
+.env
+.env.local
+
+# Encrypted operator backups
+*.media-backup
+
+# Internal AI agent logs and teamwork artifacts
+/.agents/

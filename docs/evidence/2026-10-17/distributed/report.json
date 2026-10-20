@@ -1,0 +1,36 @@
+{
+  "browser": "155.0.8059.40",
+  "os": "10.0.26300",
+  "headless": true,
+  "origin": "http://127.0.0.1:3000",
+  "node1Url": "http://aether-node-films:4101",
+  "node1PublicUrl": "http://127.0.0.1:4101",
+  "node2Url": "http://aether-node-series:4102",
+  "node2PublicUrl": "http://127.0.0.1:4102",
+  "directStreamResponses": [
+    {
+      "url": "http://127.0.0.1:4101/stream/v1/assets/def03257-19a2-4847-8991-fb8467f20f68/content",
+      "status": 206,
+      "acceptRanges": "bytes",
+      "contentRange": "bytes 0-249149/249150"
+    },
+    {
+      "url": "http://127.0.0.1:4102/stream/v1/assets/bcc0cd13-1087-46c2-9452-814238332377/content",
+      "status": 206,
+      "acceptRanges": "bytes",
+      "contentRange": "bytes 0-246671/246672"
+    }
+  ],
+  "results": {
+    "login": true,
+    "pairNode1": true,
+    "pairNode2": true,
+    "librariesCreated": true,
+    "remoteScansCompleted": true,
+    "catalogLatencyMs": 272,
+    "filmVideoSrc": "http://127.0.0.1:4101/stream/v1/assets/def03257-19a2-4847-8991-fb8467f20f68/content",
+    "filmPlaybackAndSeek": true,
+    "episodeVideoSrc": "http://127.0.0.1:4102/stream/v1/assets/bcc0cd13-1087-46c2-9452-814238332377/content",
+    "episodePlaybackAndSeek": true
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "browser": "155.0.8059.82",
+  "os": "10.0.26300",
+  "headless": true,
+  "results": {
+    "scan": true,
+    "deferredMediaLoading": true,
+    "catalogueChanges": {
+      "privateFeedbackPersisted": true,
+      "seasonShortcuts": true,
+      "responsiveThemes": true
+    },
+    "episode1Playback": true,
+    "seekAndPause": true,
+    "nextEpisode": {
+      "manual": true,
+      "automaticOptIn": true,
+      "crossSeason": true
+    },
+    "seasonNavigation": true,
+    "season2Playback": true,
+    "revokedPermission403": true,
+    "restoredPermissionPlayback": true,
+    "filmPresentation": true,
+    "accountSwitchCacheIsolation": true,
+    "delayedLogoutDoesNotWipeNewLoginCookie": true,
+    "concurrentLoginsSequencedCorrectly": true,
+    "cspErrors": []
+  },
+  "passed": true
+}

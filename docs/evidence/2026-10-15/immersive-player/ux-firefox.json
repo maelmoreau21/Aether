@@ -1,0 +1,32 @@
+{
+  "results": [
+    {
+      "opening": {
+        "fullscreen": true,
+        "nativeControls": false,
+        "playing": true
+      }
+    },
+    {
+      "sourceAndAudioChange": {
+        "paused": true,
+        "position": 4.25,
+        "src": "http://127.0.0.1:3000/api/v1/assets/demo-mp4-en/content"
+      },
+      "forcedSubtitle": true
+    },
+    {
+      "realWebDriverKeyboard": true
+    },
+    {
+      "escapeMenuAndReturnCleanup": true
+    },
+    {
+      "fullscreenDeniedFallback": true
+    }
+  ],
+  "headless": true,
+  "browser": "155.0.1",
+  "driver": "0.37.1",
+  "passed": true
+}

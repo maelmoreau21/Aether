@@ -1,5 +1,40 @@
 # MEMORY.md — État et décisions Aether
 
+## 20 octobre 2026 — Unification du SDK, Broker HTTP sécurisé et Contrats de Métadonnées enrichis
+
+- **Résolution des verrous architecturaux des extensions** :
+  - **1. Unification du SDK (`media-extension-sdk`)** :
+    - [crates/extension-sdk](file:///c:/Users/Mael/Documents/GitHub/Aether/crates/extension-sdk/src/lib.rs) devient la source de vérité unique pour tous les types, l'ABI Wasm et les contrats de métadonnées.
+    - Intégration des modèles complets : `MediaType`, `PluginCapability`, `ImageType`, `MediaImage`, `ActorCredit`, `ProviderRating`, `StructuredMetadata`, `SearchQuery`, `SearchResultItem`, `DetailsRequest`, `ImagesRequest`, `PluginError`, `ConfigOption` (avec `From<&str>`), et `ConfigField` (`defaultValue` et `options` typées alignées sur l'UI Svelte).
+    - `Aether-Plugins` basculé sur `media-extension-sdk` dans son workspace Cargo ; `aether-plugin-api` réexporte directement le SDK officiel.
+  - **2. Broker HTTP sécurisé Wasm (`media_host_http`)** :
+    - [crates/core/src/extension_runtime.rs](file:///c:/Users/Mael/Documents/GitHub/Aether/crates/core/src/extension_runtime.rs) lève l'interdiction aveugle des imports pour autoriser exclusivement l'import hôte `("aether", "aether_host_http")`. Tout autre import (WASI, syscalls arbitraires) reste strictement interdit (`"imports_forbidden"`).
+    - **Sécurité & Protection SSRF** : Seul le protocole HTTPS est autorisé (`scheme_forbidden`). Blocage absolu des adresses loopback (`127.0.0.1`, `localhost`, `::1`), privées RFC1918 et documentation (`host_forbidden`).
+    - **Allowlist par extension** : Validation stricte que l'hôte distant fait partie des `allowed_hosts` autorisés pour le provider (ex: `api.themoviedb.org`, `image.tmdb.org`, `webservice.fanart.tv`, `v3.sg.media-imdb.com`).
+    - **Quotas stricts** : Plafond de 10 requêtes HTTP par invocation (`quota_exceeded`), timeout paramétré à 6s maximum, et taille de réponse limitée à 256 Ko.
+    - **Protection des secrets** : Core injecte automatiquement les headers d'authentification (`auth_headers`) depuis `extension_settings` sans exposition arbitraire à des serveurs tiers.
+  - **3. Contrat de métadonnées complet & Dispatcher Wasm** :
+    - Support des opérations `search`, `details`, `images`, `avatars` et rétro-compatibilité `metadata.propose`.
+    - `crates/extension-sdk/tests/contracts_test.rs` valide le roundtrip de l'ensemble des structures riches et du contrat de host call HTTP.
+- **Validations réelles exécutées** :
+  - `media-extension-sdk` : 3/3 tests passés (`cargo test -p media-extension-sdk`).
+  - `Aether Core` : 8/8 tests passés (`cargo test -p media-poc --test extensions` dont `http_broker_security_enforces_allowed_imports_and_allowlist` et `http_broker_rejects_ssrf_and_enforces_domain_allowlist`).
+  - `Aether-Plugins` : 19/19 tests passés (`cargo test` dans `Aether-Plugins`), `cargo fmt --check` validé et Clippy validé avec 0 erreur.
+
+- **Correction CI GitHub Actions (`npm run lint` & `npm run check`)** :
+  - `AdminExtensions.svelte` : Élimination des types `any` stricts (`@typescript-eslint/no-explicit-any`) via `SettingValue` (`string | number | boolean`) et `ExtensionSettings`.
+  - Élimination des balises `{@html}` (`svelte/no-at-html-tags`) sur `candidate.manifest.banner` et `extension.manifest.banner` : remplacées par une conversion sécurisée en data-URI SVG/image (`toBannerSrc(...)`) rendue via `<img src={bannerSrc} />`. Sécurisation anti-XSS conforme aux standards web (exécution de script bloquée dans les balises `<img>`) et suppression des erreurs de linter.
+  - Résolution du binding typé pour les cases à cocher de configuration dynamique via `checked` et `onchange`.
+- **Dossier de données et plugins locaux** :
+  - Explication du dossier `data` : ignoré par Git via `.gitignore`, stocké dans un volume Docker nommé `aether_data` par défaut en mode Compose.
+  - Robustesse Core : `crates/core/src/identity.rs` crée automatiquement le dossier parent (`data/`) lors de l'ouverture SQLite si inexistant (`fs::create_dir_all`).
+  - Création du dossier local `data/plugins/` avec son guide `README.md` pour le dépôt de paquets de plugins locaux hors-ligne.
+- **Validations réelles exécutées** :
+  - `npm --prefix apps/web run lint` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web run check` : 0 erreur.
+  - `npm --prefix apps/web run build` : build réussi.
+  - `cargo check -p media-poc` : réussi.
+
 ## 20 octobre 2026 — Extensions Rust, bannières Jellyfin, paramétrage dynamique et Avatar Plugin
 
 - **Extensions dans `C:\Users\Mael\Documents\GitHub\Aether-Plugins`** :

@@ -1,5 +1,33 @@
 # MEMORY.md — État et décisions Aether
 
+## 20 octobre 2026 — Correction syntaxe PostgreSQL migration 0028 et clarification de la consommation mémoire
+
+- **Diagnostic de l'échec CI PostgreSQL (`postgres18_http_contract_and_reopen`)** :
+  - **Symptôme** : Panique à la ligne 619 de `crates/core/tests/postgres.rs` :
+    `PgDatabaseError { code: "42601", message: "syntax error at or near \"WHERE\"", position: 562 }` lors de l'exécution de la migration 28.
+  - **Cause racine** : Dans `crates/core/migrations-postgres/0028_default_groups_and_library_exclusions.sql`, la vue `effective_library_permissions` contenait :
+    `SELECT l.library_id, u.id AS user_id FROM user_group_libraries l JOIN user_groups g ON g.id=l.group_id JOIN users u WHERE g.is_default=TRUE;`
+    En SQLite, une jointure `JOIN users u WHERE ...` sans clause `ON` est interprétée implicitement comme un produit cartésien (`CROSS JOIN`). En PostgreSQL (conformité SQL standard stricte), un `JOIN` sans `ON` déclenche une erreur de syntaxe à l'instruction `WHERE`.
+  - **Correctif appliqué** :
+    - Remplacement de `JOIN users u` par `CROSS JOIN users u` dans `crates/core/migrations-postgres/0028_default_groups_and_library_exclusions.sql` et dans la version SQLite `crates/core/migrations/0028_default_groups_and_library_exclusions.sql` pour assurer une syntaxe ANSI SQL uniforme et stricte.
+  - **Validations exécutées** :
+    - `cargo check --tests` : 0 erreur.
+    - `cargo test -p media-poc --lib` : 33/33 tests unitaires passés avec succès.
+    - `cargo test -p media-node --lib` : 38/38 tests unitaires passés avec succès.
+    - `cargo clippy --all-targets -- -D warnings` : 0 avertissement.
+    - `cargo fmt --check` : code formaté.
+
+- **Clarification et diagnostic de la consommation mémoire (affichage de ~514 MB au repos)** :
+  - **Mémoire RSS (processus Rust) vs Page Cache (noyau Linux)** :
+    - Les tests d'ingestion et de charge (`crates/core/tests/scanner_performance.rs`) démontrent que l'empreinte mémoire active réelle (RSS) de `media-poc` / `aether-core` se maintient entre **8 et 38 MiB**, même avec 10 000 médias catalogués.
+    - Lorsque l'application tourne dans un conteneur Docker (ex: sur Synology DSM via Container Manager ou sous Linux), la commande `docker stats` et les dashboards affichent par défaut `memory.usage_in_bytes` (cgroup v1) ou `memory.current` (cgroup v2), qui agrège :
+      `Mémoire affichée = RSS (mémoire vive du processus) + Page Cache (fichiers gardés en cache par le noyau)`.
+    - Les lectures de vidéos par `ffprobe`, l'analyse de NFO, les affiches et les accès SQLite dans `/media` et `/data` remplissent naturellement le cache de pages du noyau Linux. Ce cache disque n'est pas de la mémoire perdue ou consommée par le processus : le noyau Linux le libère instantanément dès qu'une autre application ou le conteneur en a besoin.
+  - **Mesures d'optimisation recommandées** :
+    - Pour observer la vraie mémoire du processus : `docker top aether -o pid,%mem,vsz,rss,comm` ou `cat /sys/fs/cgroup/memory/memory.stat`.
+    - Pour contenir les arènes mémoire Tokio sous glibc dans Docker, l'environnement peut être complété avec `MALLOC_ARENA_MAX=2`.
+
+
 ## 19 octobre 2026 — Correction du test d'intégration navigateur `browser_series` et archivage des preuves CI
 
 - **Diagnostic des échecs CI (`FileNotFoundError: docs/evidence/2026-10-17/series/report.json`)** :

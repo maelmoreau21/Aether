@@ -336,6 +336,7 @@ impl SessionToucher {
 pub struct AuthState {
     pub(crate) store: IdentityStore,
     origin: Arc<str>,
+    allowed_origins: Arc<[String]>,
     pub(crate) secure: bool,
     dummy_hash: Arc<str>,
     pub(crate) workers: Arc<Semaphore>,
@@ -404,6 +405,12 @@ struct SessionUserRow {
 impl AuthState {
     pub fn origin(&self) -> &str {
         &self.origin
+    }
+    pub fn allowed_origins(&self) -> &[String] {
+        &self.allowed_origins
+    }
+    pub fn is_origin_allowed(&self, candidate: &str) -> bool {
+        candidate == &*self.origin || self.allowed_origins.iter().any(|o| o.as_str() == candidate)
     }
     pub fn touch_stats(&self) -> SessionTouchStats {
         self.toucher.shared.stats()
@@ -517,9 +524,13 @@ impl AuthState {
             )
         };
 
+        let allowed_origins: Arc<[String]> =
+            resolve_allowed_origins(&origin).into_boxed_slice().into();
+
         Ok(Self {
             store,
             origin: origin.into(),
+            allowed_origins,
             secure,
             dummy_hash: dummy_hash.into(),
             workers: Arc::new(Semaphore::new(2)),
@@ -605,11 +616,18 @@ impl AuthState {
         Ok(())
     }
     pub(crate) fn check_origin(&self, headers: &HeaderMap) -> Result<(), StatusCode> {
-        if headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) != Some(&self.origin)
-            || headers
-                .get("sec-fetch-site")
-                .is_some_and(|v| v == "cross-site")
-        {
+        let origin_header = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
+        let is_primary_origin = origin_header == Some(&*self.origin);
+        let is_trusted_external = origin_header
+            .is_some_and(|cand| self.allowed_origins.iter().any(|ao| ao.as_str() == cand));
+
+        let is_cross_site = headers
+            .get("sec-fetch-site")
+            .is_some_and(|v| v == "cross-site");
+
+        // Allowed if primary origin and not cross-site, OR if explicitly trusted external origin
+        let allowed = (is_primary_origin && !is_cross_site) || is_trusted_external;
+        if !allowed {
             return Err(StatusCode::FORBIDDEN);
         }
         Ok(())
@@ -985,6 +1003,41 @@ pub(crate) fn random_token() -> String {
 pub(crate) fn hash(raw: &str) -> String {
     format!("{:x}", Sha256::digest(raw.as_bytes()))
 }
+pub(crate) fn resolve_allowed_origins(primary_origin: &str) -> Vec<String> {
+    let mut origins = Vec::new();
+
+    let env_val =
+        std::env::var("MEDIA_ALLOWED_ORIGINS").or_else(|_| std::env::var("MEDIA_TRUSTED_ORIGINS"));
+    if let Ok(raw) = env_val {
+        for item in raw.split(',') {
+            let trimmed = item.trim().trim_end_matches('/');
+            if !trimmed.is_empty()
+                && trimmed != primary_origin
+                && !origins.iter().any(|o| o == trimmed)
+                && let Ok(uri) = trimmed.parse::<axum::http::Uri>()
+                && uri.scheme().is_some()
+                && uri.authority().is_some()
+            {
+                origins.push(trimmed.to_string());
+            }
+        }
+    }
+
+    if let Ok(issuer) = std::env::var("MEDIA_OIDC_ISSUER")
+        && let Ok(parsed) = url::Url::parse(issuer.trim())
+    {
+        let issuer_origin = parsed.origin().ascii_serialization();
+        if issuer_origin != "null"
+            && issuer_origin != primary_origin
+            && !origins.iter().any(|o| o == &issuer_origin)
+        {
+            origins.push(issuer_origin);
+        }
+    }
+
+    origins
+}
+
 fn csrf(raw: &str) -> String {
     hash(&format!("csrf:{raw}"))
 }

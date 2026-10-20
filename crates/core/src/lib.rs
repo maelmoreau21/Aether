@@ -129,6 +129,7 @@ pub async fn secure_app_with_jobs(
     extensions::initialize(&auth).await?;
     let root = inventory.root().to_owned();
     let origin = auth.origin().to_owned();
+    let allowed_origins = auth.allowed_origins().to_vec();
     let store_for_csp = auth.store.clone();
     let replay_window = Arc::new(media_contracts::protocol::ReplayWindow::new());
     let media = media_routes(inventory)
@@ -184,6 +185,7 @@ pub async fn secure_app_with_jobs(
             .merge(oidc),
         origin,
         Some(store_for_csp),
+        allowed_origins,
     );
     Ok(health_routes(mode).merge(protected))
 }
@@ -333,13 +335,14 @@ fn public_routes(mode: &'static str) -> Router {
 
 #[cfg(feature = "fixture-bench")]
 fn local_security(router: Router, origin: String) -> Router {
-    local_security_with_store(router, origin, None)
+    local_security_with_store(router, origin, None, Vec::new())
 }
 
 fn local_security_with_store(
     router: Router,
     origin: String,
     store: Option<identity::IdentityStore>,
+    allowed_origins: Vec<String>,
 ) -> Router {
     let host = origin
         .parse::<axum::http::Uri>()
@@ -355,8 +358,12 @@ fn local_security_with_store(
             let internal_host = internal_host.clone();
             let origin = origin.clone();
             let store = store.clone();
+            let allowed_origins = allowed_origins.clone();
             async move {
-                let is_internal = req.uri().path().starts_with("/internal/v1/");
+                let req_path = req.uri().path();
+                let method = req.method();
+
+                let is_internal = req_path.starts_with("/internal/v1/");
                 let has_internal_proto = req
                     .headers()
                     .get(media_contracts::protocol::HDR_PROTOCOL)
@@ -366,20 +373,51 @@ fn local_security_with_store(
                 let host_ok = req_host == host.as_deref()
                     || (is_internal && has_internal_proto)
                     || (is_internal && internal_host.as_deref().is_some_and(|ih| req_host == Some(ih)));
-                // Only the exact OIDC callback accepts a cross-site top-level GET.
-                // Its single-use state is bound to an HttpOnly browser cookie.
-                let oidc_callback = req.method() == axum::http::Method::GET
-                    && req.uri().path() == "/api/v1/auth/oidc/callback"
+
+                // 1. OIDC callback accepts a cross-site top-level GET (single-use state bound to HttpOnly cookie).
+                let oidc_callback = method == axum::http::Method::GET
+                    && req_path == "/api/v1/auth/oidc/callback"
                     && req.headers().get("sec-fetch-mode").is_none_or(|v| v == "navigate")
                     && req.headers().get("sec-fetch-dest").is_none_or(|v| v == "document");
-                if !host_ok
-                    || (!oidc_callback && req.headers().get("sec-fetch-site").is_some_and(|h| h == "cross-site"))
-                    || (!oidc_callback && req.headers().get(header::ORIGIN).is_some_and(|h| h.as_bytes() != origin.as_bytes()))
-                {
+
+                // 2. Safe top-level web navigation to frontend routes (/, /app, /app/*, /favicon*)
+                // When an end-user navigates from an external portal (like Authentik) or third-party link,
+                // browsers send sec-fetch-mode: navigate (and/or sec-fetch-dest: document).
+                let is_web_route = req_path == "/"
+                    || req_path.starts_with("/app")
+                    || req_path.starts_with("/favicon");
+                let is_top_level_navigation = (method == axum::http::Method::GET || method == axum::http::Method::HEAD)
+                    && is_web_route
+                    && req.headers().get("sec-fetch-mode").is_some_and(|v| v == "navigate");
+
+                // 3. Check Origin header against primary and trusted external origins
+                let origin_header = req.headers().get(header::ORIGIN).and_then(|h| h.to_str().ok());
+                let is_primary_origin = origin_header == Some(origin.as_str());
+                let is_trusted_external = origin_header
+                    .is_some_and(|cand| allowed_origins.iter().any(|ao| ao.as_str() == cand));
+                let origin_matches = origin_header.is_none() || is_primary_origin || is_trusted_external;
+
+                let is_cross_site = req.headers().get("sec-fetch-site").is_some_and(|h| h == "cross-site");
+
+                let allowed = host_ok
+                    && (
+                        is_top_level_navigation
+                        || oidc_callback
+                        || (!is_cross_site && origin_matches && (origin_header.is_none() || is_primary_origin))
+                        || is_trusted_external
+                    );
+
+                if !allowed {
                     return StatusCode::FORBIDDEN.into_response();
                 }
                 let mut res = next.run(req).await;
                 let mut extra_origins = String::new();
+                for ao in &allowed_origins {
+                    let origin_str = format!(" {ao}");
+                    if !extra_origins.contains(&origin_str) {
+                        extra_origins.push_str(&origin_str);
+                    }
+                }
                 if let Some(store) = &store
                     && let Ok(urls) = sqlx::query_scalar::<_, String>(
                         "SELECT DISTINCT public_url FROM media_nodes WHERE kind='remote' AND status='connected' AND public_url IS NOT NULL AND public_url != ''",

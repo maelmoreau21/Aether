@@ -47,7 +47,7 @@ async fn preferences_are_account_owned_csrf_protected_bounded_and_persistent() {
             .await
             .unwrap();
         let hash = format!("{:x}", Sha256::digest(raw.as_bytes()));
-        media_poc::database::query("INSERT INTO sessions VALUES(?,?,?,?,?)")
+        media_poc::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,?,?,?)")
             .bind(hash)
             .bind(id)
             .bind(now)

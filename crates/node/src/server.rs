@@ -2060,17 +2060,16 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
 
 // Carry HEAD's resource length in existing signed range metadata while uploading zero bytes.
 fn encode_head_uplink(response: &mut Response) {
-    if response.status().is_success() && !response.headers().contains_key(header::CONTENT_RANGE) {
-        if let Some(length) = response
+    if response.status().is_success()
+        && !response.headers().contains_key(header::CONTENT_RANGE)
+        && let Some(length) = response
             .headers()
             .get(header::CONTENT_LENGTH)
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned)
-        {
-            if let Ok(value) = HeaderValue::from_str(&format!("bytes */{length}")) {
-                response.headers_mut().insert(header::CONTENT_RANGE, value);
-            }
-        }
+        && let Ok(value) = HeaderValue::from_str(&format!("bytes */{length}"))
+    {
+        response.headers_mut().insert(header::CONTENT_RANGE, value);
     }
     response
         .headers_mut()

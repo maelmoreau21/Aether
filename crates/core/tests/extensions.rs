@@ -786,3 +786,157 @@ fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
     );
     assert_eq!(res.unwrap_err().code, "quota_exceeded");
 }
+
+#[test]
+fn real_tmdb_wasm_executes_in_aether_runtime() {
+    use media_poc::extension_runtime::{Invocation, execute};
+
+    let tmdb_wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+        "../../../Aether-Plugins/target/wasm32-unknown-unknown/release/aether_plugin_tmdb.wasm",
+    );
+
+    if !tmdb_wasm_path.exists() {
+        eprintln!("TMDb wasm not found at {:?}, skipping", tmdb_wasm_path);
+        return;
+    }
+
+    let bytes = std::fs::read(&tmdb_wasm_path).unwrap();
+    let res = execute(Invocation {
+        wasm: STANDARD.encode(&bytes),
+        input: ExtensionRequest {
+            api_version: 1,
+            operation: "manifest".into(),
+            input: json!({}),
+        },
+        allowed_hosts: vec!["api.themoviedb.org".into(), "image.tmdb.org".into()],
+        auth_headers: std::collections::BTreeMap::new(),
+    });
+
+    assert!(res.is_ok(), "Failed to execute TMDb Wasm: {:?}", res.err());
+    let output = res.unwrap();
+    assert_eq!(output.api_version, 1);
+    assert_eq!(output.result["id"], "tmdb");
+    assert_eq!(output.result["provider"], "tmdb");
+    assert_eq!(output.result["capabilities"][0], "search");
+}
+
+#[test]
+fn real_avatar_wasm_executes_in_aether_runtime() {
+    use media_poc::extension_runtime::{Invocation, execute};
+
+    let avatar_wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+        "../../../Aether-Plugins/target/wasm32-unknown-unknown/release/aether_plugin_avatar.wasm",
+    );
+
+    if !avatar_wasm_path.exists() {
+        eprintln!("Avatar wasm not found at {:?}, skipping", avatar_wasm_path);
+        return;
+    }
+
+    let bytes = std::fs::read(&avatar_wasm_path).unwrap();
+    let res = execute(Invocation {
+        wasm: STANDARD.encode(&bytes),
+        input: ExtensionRequest {
+            api_version: 1,
+            operation: "avatars.generate".into(),
+            input: json!({"seed": "alice"}),
+        },
+        allowed_hosts: vec![],
+        auth_headers: std::collections::BTreeMap::new(),
+    });
+
+    assert!(
+        res.is_ok(),
+        "Failed to execute Avatar Wasm: {:?}",
+        res.err()
+    );
+    let output = res.unwrap();
+    assert_eq!(output.api_version, 1);
+    assert!(output.result["svg"].as_str().unwrap().contains("<svg"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn apply_extension_metadata_updates_inventory_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "extension-admin",
+            Zeroizing::new("synthetic extension password".into()),
+        )
+        .await
+        .unwrap();
+    media_poc::libraries::initialize_local(&store)
+        .await
+        .unwrap();
+
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work-1','films','work-1','Original Film','{}')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = extensions::router(auth.clone()).merge(auth::router(auth));
+
+    let (status, login, cookie) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        "",
+        json!({"login": "extension-admin", "password": "synthetic extension password"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let csrf = login["csrfToken"].as_str().unwrap();
+
+    let rich_metadata = json!({
+        "title": "Fight Club",
+        "plot": "An insomniac office worker...",
+        "year": 1999,
+        "actors": [
+            {"name": "Edward Norton", "role": "The Narrator"},
+            {"name": "Brad Pitt", "role": "Tyler Durden"}
+        ],
+        "ratings": [
+            {"provider": "tmdb", "value": 8.4, "max": 10.0}
+        ],
+        "posterUrl": "https://image.tmdb.org/t/p/original/poster.jpg"
+    });
+
+    let (status, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/tmdb/apply",
+        &cookie,
+        csrf,
+        json!({
+            "workId": "work-1",
+            "metadata": rich_metadata
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Verify detail reflects the applied metadata
+    let detail = media_poc::inventory::detail(&store, "work-1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(detail["title"], "Fight Club");
+    assert_eq!(detail["description"], "An insomniac office worker...");
+    assert_eq!(detail["actors"][0]["name"], "Edward Norton");
+    assert_eq!(detail["actors"][1]["name"], "Brad Pitt");
+    assert_eq!(
+        detail["posterUrl"],
+        "https://image.tmdb.org/t/p/original/poster.jpg"
+    );
+}

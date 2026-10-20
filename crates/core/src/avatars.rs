@@ -113,14 +113,13 @@ async fn write(
         .unwrap_or_default();
 
         for json_str in rows {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                if val
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
+                && val
                     .get("disallow_custom_avatars")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false)
-                {
-                    return Err(StatusCode::FORBIDDEN);
-                }
+            {
+                return Err(StatusCode::FORBIDDEN);
             }
         }
     }

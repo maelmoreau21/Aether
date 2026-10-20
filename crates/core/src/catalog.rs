@@ -252,8 +252,8 @@ pub async fn detail(
         return match store {
             Some(Extension(store)) => match crate::inventory::detail(&store, &id).await {
                 Ok(Some(mut value)) => {
-                    if let (Some(Extension(actor)), Some(Extension(visible))) = (&actor, &visible) {
-                        if crate::product::expand_detail(
+                    if let (Some(Extension(actor)), Some(Extension(visible))) = (&actor, &visible)
+                        && crate::product::expand_detail(
                             &store,
                             &actor.user.id,
                             &visible.0,
@@ -261,12 +261,8 @@ pub async fn detail(
                         )
                         .await
                         .is_err()
-                        {
-                            return error(
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "catalogue_unavailable",
-                            );
-                        }
+                    {
+                        return error(StatusCode::INTERNAL_SERVER_ERROR, "catalogue_unavailable");
                     }
                     Json(value).into_response()
                 }

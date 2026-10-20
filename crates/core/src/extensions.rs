@@ -131,6 +131,10 @@ pub fn router(auth: AuthState) -> Router {
             "/api/v1/admin/extensions/{id}/run",
             axum::routing::post(run),
         )
+        .route(
+            "/api/v1/admin/extensions/{id}/apply",
+            axum::routing::post(apply_metadata),
+        )
         .route("/api/v1/admin/extensions/{id}/works", get(works))
         .layer(DefaultBodyLimit::max(400_000))
         .layer(
@@ -530,6 +534,50 @@ async fn uninstall(
     tx.commit().await.map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyMetadata {
+    work_id: String,
+    metadata: Value,
+}
+
+async fn apply_metadata(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<ApplyMetadata>,
+) -> Result<StatusCode, Error> {
+    let actor = admin(&auth, &headers, true).await?;
+    let _lock = MUTATIONS.lock().await;
+
+    let exists: Option<(String, String)> =
+        query_as("SELECT library_id, title FROM inventory_works WHERE id=?")
+            .bind(&input.work_id)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?;
+    if exists.is_none() {
+        return Err(err(StatusCode::NOT_FOUND, "unknown_work"));
+    }
+
+    let meta_str = input.metadata.to_string();
+    if meta_str.len() > 65_536 {
+        return Err(err(StatusCode::BAD_REQUEST, "metadata_too_large"));
+    }
+
+    let mut tx = auth.store.pool().begin().await.map_err(db)?;
+    query("UPDATE inventory_works SET manual_json=? WHERE id=?")
+        .bind(&meta_str)
+        .bind(&input.work_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+    audit(&mut tx, &actor.user.id, &id, "metadata.applied").await?;
+    tx.commit().await.map_err(db)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Run {

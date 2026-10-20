@@ -1709,10 +1709,9 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
         .flatten()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
         .and_then(|v| v.as_object().cloned())
+        && let Some(object) = metadata.as_object_mut()
     {
-        if let Some(object) = metadata.as_object_mut() {
-            object.extend(manual);
-        }
+        object.extend(manual);
     }
     let kind: String = row.try_get("kind").unwrap_or_else(|_| "film".to_string());
     let season_count: Option<i64> = row.try_get("season_count").ok().flatten();
@@ -1744,8 +1743,15 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
         "metadataProvenance": metadata["provenance"].as_str().unwrap_or("local"),
         "metadataWarnings": metadata["warnings"].as_array().cloned().unwrap_or_default(),
         "synthetic": false,
-        "posterUrl": row.try_get::<Option<String>,_>("poster_url").ok().flatten(),
-        "artwork": { "backdrop": row.try_get::<Option<String>,_>("backdrop_url").ok().flatten(), "logo": row.try_get::<Option<String>,_>("logo_url").ok().flatten(), "thumb": row.try_get::<Option<String>,_>("thumb_url").ok().flatten() },
+        "posterUrl": row.try_get::<Option<String>,_>("poster_url").ok().flatten()
+            .or_else(|| metadata["poster_url"].as_str().or_else(|| metadata["posterUrl"].as_str()).map(str::to_owned)),
+        "artwork": {
+            "backdrop": row.try_get::<Option<String>,_>("backdrop_url").ok().flatten()
+                .or_else(|| metadata["backdrop_url"].as_str().or_else(|| metadata["backdropUrl"].as_str()).map(str::to_owned)),
+            "logo": row.try_get::<Option<String>,_>("logo_url").ok().flatten()
+                .or_else(|| metadata["logo_url"].as_str().or_else(|| metadata["logoUrl"].as_str()).map(str::to_owned)),
+            "thumb": row.try_get::<Option<String>,_>("thumb_url").ok().flatten()
+        },
         "nodeId": node_id.unwrap_or_else(|| "local".to_string()),
         "nodeStatus": node_status.unwrap_or_else(|| "connected".to_string()),
         "available": node_available

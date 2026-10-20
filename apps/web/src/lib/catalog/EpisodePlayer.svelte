@@ -1,10 +1,13 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import OfflineDownload from './OfflineDownload.svelte';
+  import { bestVersion } from '../player/version-choice';
   import {
     playbackIds,
     sourceLabel,
     fetchMediaDescriptor,
     revalidateMediaDescriptor,
+    fetchMediaDescriptors,
     getCachedMedia,
     type Work
   } from './api';
@@ -29,14 +32,15 @@
   } = $props();
 
   const versionIds = $derived(playbackIds(episode));
-  let selected = $state('');
+  let selected = $state('auto');
   let cacheVersion = $state(0);
+  let launchError=$state('');
   let prefetchController: AbortController | null = null;
   let inFlightPrefetches: string[] = [];
 
   $effect(() => {
-    if (!versionIds.includes(selected)) {
-      selected = versionIds[0] ?? '';
+    if (selected!=='auto' && !versionIds.includes(selected)) {
+      selected = 'auto';
     }
   });
 
@@ -83,14 +87,23 @@
   }
 
   async function handlePlay() {
+    launchError='';
+    try {
     onselect?.();
+    let id=selected;
+    if(id==='auto'){
+      const candidates=await fetchMediaDescriptors(versionIds,new AbortController().signal);
+      const probe=document.createElement('video');
+      id=bestVersion(candidates,mime=>probe.canPlayType(mime))?.id??versionIds[0]??'';
+    }
     if (onlaunch) {
-      await onlaunch(episode, selected);
+      await onlaunch(episode, id);
     } else {
       await tick();
-      const item = await revalidateMediaDescriptor(selected);
+      const item = await revalidateMediaDescriptor(id);
       immersive?.open(item);
     }
+    }catch(cause){launchError=cause instanceof Error?cause.message:'Lecture indisponible.';}
   }
 </script>
 
@@ -102,6 +115,7 @@
       onfocus={prefetchVersions}
       onpointerenter={prefetchVersions}
     >
+      <option value="auto">Meilleure version disponible</option>
       {#each versionIds as id, index (id)}
         <option value={id}>{getLabel(id, index)}</option>
       {/each}
@@ -120,6 +134,8 @@
     <span>Aucune version disponible.</span>
   {/if}
 </div>
+{#if launchError}<p role="alert">{launchError}</p>{/if}
+{#if !episode.synthetic && versionIds.length}<OfflineDownload url={`/api/v1/assets/${selected==='auto'?versionIds[0]:selected}/content`} title={episode.title} mime={(media.find(item=>item.id===(selected==='auto'?versionIds[0]:selected)))?.sources.find(source=>!source.prepare)?.mime??'video/mp4'} />{/if}
 
 <style>
   .episode-actions { display:flex; align-items:end; gap:14px; flex-wrap:wrap; }

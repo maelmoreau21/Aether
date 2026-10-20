@@ -29,7 +29,7 @@ export interface EnrollmentToken {
 export interface Library {
   id: string;
   name: string;
-  kind: 'films' | 'series';
+  kind: 'films' | 'series' | 'music';
   nodeId: string;
   root: string;
   enabled: boolean;

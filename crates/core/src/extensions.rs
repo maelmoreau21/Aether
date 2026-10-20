@@ -71,7 +71,17 @@ pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'st
         || m.version
             .split('.')
             .any(|s| s.is_empty() || s.len() > 8 || !s.bytes().all(|b| b.is_ascii_digit()))
-        || m.permissions != ["metadata.read"]
+        || m.permissions.is_empty()
+        || m.permissions.iter().any(|p| {
+            ![
+                "metadata.read",
+                "metadata.write",
+                "avatars",
+                "images",
+                "providers",
+            ]
+            .contains(&p.as_str())
+        })
     {
         return Err("invalid_manifest");
     }
@@ -112,6 +122,10 @@ pub fn router(auth: AuthState) -> Router {
         .route(
             "/api/v1/admin/extensions/{id}",
             put(configure).delete(uninstall),
+        )
+        .route(
+            "/api/v1/admin/extensions/{id}/settings",
+            get(get_settings).put(put_settings),
         )
         .route(
             "/api/v1/admin/extensions/{id}/run",
@@ -282,6 +296,7 @@ struct Installed {
     sha256: String,
     enabled: bool,
     library_ids: Vec<String>,
+    settings: Value,
 }
 async fn list(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
@@ -297,16 +312,26 @@ async fn list(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<
         let grants: Vec<String> = query_scalar(
             "SELECT library_id FROM extension_grants WHERE extension_id=? ORDER BY library_id",
         )
-        .bind(id)
+        .bind(&id)
         .fetch_all(auth.store.pool())
         .await
         .map_err(db)?;
+        let settings_str: Option<String> =
+            query_scalar("SELECT settings_json FROM extension_settings WHERE extension_id=?")
+                .bind(&id)
+                .fetch_optional(auth.store.pool())
+                .await
+                .map_err(db)?;
+        let settings: Value = settings_str
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_else(|| json!({}));
         installed.push(Installed {
             manifest: package.manifest,
             publisher_id: package.publisher_id,
             sha256: package.sha256,
             enabled: enabled == 1,
             library_ids: grants,
+            settings,
         });
     }
     Ok(Json(json!({"apiVersion":1,"extensions":installed})))
@@ -401,6 +426,67 @@ async fn configure(
     }
     let action = json!({"action": if input.enabled { "permissions.enabled" } else { "permissions.disabled" }, "libraryIds": input.library_ids}).to_string();
     audit(&mut tx, &actor.user.id, &id, &action).await?;
+    tx.commit().await.map_err(db)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn get_settings(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, false).await?;
+    let exists: Option<i64> = query_scalar("SELECT 1 FROM extensions WHERE id=?")
+        .bind(&id)
+        .fetch_optional(auth.store.pool())
+        .await
+        .map_err(db)?;
+    if exists.is_none() {
+        return Err(err(StatusCode::NOT_FOUND, "extension_not_found"));
+    }
+    let settings_str: Option<String> =
+        query_scalar("SELECT settings_json FROM extension_settings WHERE extension_id=?")
+            .bind(&id)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let settings: Value = settings_str
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| json!({}));
+    Ok(Json(json!({
+        "apiVersion": 1,
+        "extensionId": id,
+        "settings": settings,
+    })))
+}
+async fn put_settings(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(settings): Json<Value>,
+) -> Result<StatusCode, Error> {
+    let actor = admin(&auth, &headers, true).await?;
+    let _lock = MUTATIONS.lock().await;
+    let exists: Option<i64> = query_scalar("SELECT 1 FROM extensions WHERE id=?")
+        .bind(&id)
+        .fetch_optional(auth.store.pool())
+        .await
+        .map_err(db)?;
+    if exists.is_none() {
+        return Err(err(StatusCode::NOT_FOUND, "extension_not_found"));
+    }
+    let settings_str = serde_json::to_string(&settings)
+        .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_settings"))?;
+    if settings_str.len() > 65_536 {
+        return Err(err(StatusCode::BAD_REQUEST, "settings_too_large"));
+    }
+    let mut tx = auth.store.pool().begin().await.map_err(db)?;
+    query("INSERT INTO extension_settings(extension_id, settings_json) VALUES(?, ?) ON CONFLICT(extension_id) DO UPDATE SET settings_json=excluded.settings_json")
+        .bind(&id)
+        .bind(&settings_str)
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+    audit(&mut tx, &actor.user.id, &id, "settings.updated").await?;
     tx.commit().await.map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
 }

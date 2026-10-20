@@ -2,7 +2,10 @@
   export const navLinks = [
     { key: 'home', path: '/', label: 'Accueil', symbol: '⌂' },
     { key: 'films', path: 'films/', label: 'Films', symbol: '▤' },
-    { key: 'series', path: 'series/', label: 'Séries', symbol: '▥' }
+    { key: 'series', path: 'series/', label: 'Séries', symbol: '▥' },
+    { key: 'music', path: 'music/', label: 'Musique', symbol: '♫' },
+    { key: 'lists', path: 'lists/', label: 'Mes listes', symbol: '☷' },
+    { key: 'downloads', path: 'downloads/', label: 'Téléchargements', symbol: '↓' }
   ] as const;
 </script>
 
@@ -17,7 +20,7 @@
     section = 'home',
     name = 'Aether'
   }: {
-    section?: 'home' | 'films' | 'series' | 'search' | 'settings' | 'admin';
+    section?: 'home' | 'films' | 'series' | 'music' | 'lists' | 'downloads' | 'search' | 'settings' | 'admin';
     name?: string;
   } = $props();
 
@@ -46,6 +49,7 @@
           <a
             href={resolve(link.path)}
             class="nav-link"
+            aria-label={link.key==='music'||link.key==='lists'||link.key==='downloads'?link.label:$t(link.key)}
             class:active={section === link.key}
             aria-current={section === link.key ? 'page' : undefined}
           >
@@ -55,8 +59,10 @@
               <Icon name="film" size={16} />
             {:else if link.key === 'series'}
               <Icon name="tv" size={16} />
+            {:else}
+              <b class="nav-symbol" aria-hidden="true">{link.symbol}</b>
             {/if}
-            <span>{$t(link.key)}</span>
+            <span>{link.key === 'music' || link.key === 'lists' || link.key === 'downloads' ? link.label : $t(link.key)}</span>
           </a>
         {/each}
       </nav>
@@ -155,7 +161,12 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    overflow-x:auto;
+    min-width:0;
   }
+  .nav-symbol { font-size:16px;font-weight:400; }
+  .header-brand-group { min-width:0; }
+  .nav-link { flex-shrink:0;white-space:nowrap; }
 
   .nav-link {
     display: inline-flex;

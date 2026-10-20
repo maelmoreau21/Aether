@@ -30,7 +30,14 @@ pub fn router(auth: AuthState) -> Router {
         ))
         .with_state(auth)
 }
-fn normalize(bytes: Bytes, content_type: &str) -> Result<Vec<u8>, StatusCode> {
+pub(crate) fn normalize(bytes: Bytes, content_type: &str) -> Result<Vec<u8>, StatusCode> {
+    normalize_image(bytes, content_type, false)
+}
+pub(crate) fn normalize_image(
+    bytes: Bytes,
+    content_type: &str,
+    poster: bool,
+) -> Result<Vec<u8>, StatusCode> {
     let mut reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
@@ -59,7 +66,11 @@ fn normalize(bytes: Bytes, content_type: &str) -> Result<Vec<u8>, StatusCode> {
     if image.width() == 0 || image.height() == 0 {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
-    let resized = image.resize_to_fill(256, 256, image::imageops::FilterType::Triangle);
+    let resized = if poster {
+        image.resize(1000, 1500, image::imageops::FilterType::Triangle)
+    } else {
+        image.resize_to_fill(256, 256, image::imageops::FilterType::Triangle)
+    };
     let mut output = Cursor::new(Vec::new());
     resized
         .write_to(&mut output, ImageFormat::Png)
@@ -91,6 +102,28 @@ async fn write(
 ) -> Result<StatusCode, StatusCode> {
     let user = auth.authenticate(&headers).await?;
     auth.require_csrf(&headers, &user)?;
+    if user.user.role != crate::identity::Role::Administrator {
+        let rows: Vec<String> = query_scalar(
+            "SELECT es.settings_json FROM extension_settings es \
+             JOIN extensions e ON e.id = es.extension_id \
+             WHERE e.enabled = 1",
+        )
+        .fetch_all(&auth.store.pool)
+        .await
+        .unwrap_or_default();
+
+        for json_str in rows {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                if val
+                    .get("disallow_custom_avatars")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    return Err(StatusCode::FORBIDDEN);
+                }
+            }
+        }
+    }
     if bytes.is_empty() {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }

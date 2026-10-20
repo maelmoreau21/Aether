@@ -86,7 +86,7 @@ async fn save(
     if !(5..=10080).contains(&input.interval_minutes) {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
-    let exists:i64 = crate::database::query_scalar("SELECT COUNT(*) FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.kind IN ('films','series') AND l.id NOT IN ('fixture-films','fixture-series') AND n.status!='revoked'")
+    let exists:i64 = crate::database::query_scalar("SELECT COUNT(*) FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.kind IN ('films','series','music') AND l.id NOT IN ('fixture-films','fixture-series') AND n.status!='revoked'")
         .bind(&id).fetch_one(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     if exists == 0 {
         return Err(StatusCode::NOT_FOUND);

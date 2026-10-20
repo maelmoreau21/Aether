@@ -160,6 +160,7 @@ RUN mkdir -p /tmp/ffmpeg-src \
         --disable-postproc \
         --disable-network \
         --disable-encoders \
+        --enable-encoder=webvtt \
         --disable-devices \
         --disable-filters \
         --disable-hwaccels \

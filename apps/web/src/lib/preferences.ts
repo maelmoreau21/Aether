@@ -10,6 +10,8 @@ export type Preferences = {
 let current: Preferences = {};
 let owner: string | null = null;
 let queue: Promise<void> = Promise.resolve();
+let revision=0;
+let pendingSaves=0;
 export const preferenceSyncError = writable('');
 
 onSessionGenerationChange(() => {
@@ -75,14 +77,18 @@ function legacyPreferences(userId: string, loaded: Preferences): Preferences {
 }
 
 export async function hydratePreferences(): Promise<Preferences | null> {
+  const started=revision;
   const authenticated = get(session);
   const generation = getSessionGeneration();
   if (!authenticated) return null;
+  if(pendingSaves>0)await queue;
+  if(generation!==getSessionGeneration())return null;
   const response = await fetch('/api/v1/preferences', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
   if (generation !== getSessionGeneration()) return null;
   if (!response.ok) throw new Error('Impossible de charger vos préférences.');
   const loaded: Preferences = await response.json();
   if (generation !== getSessionGeneration()) return null;
+  if(started!==revision)return current;
   const migrated = legacyPreferences(authenticated.user.id, loaded);
   if (generation !== getSessionGeneration()) return null;
   if (Object.keys(migrated).length > 0) {
@@ -102,6 +108,7 @@ export function savePreferences(patch: Preferences): void {
   const authenticated = get(session);
   const generation = getSessionGeneration();
   if (!authenticated || owner !== authenticated.user.id) return;
+  revision++;
   current = { ...current, ...patch }; mirror(current, owner);
   const save = async () => {
     if (generation !== getSessionGeneration()) return;
@@ -116,5 +123,6 @@ export function savePreferences(patch: Preferences): void {
       if (generation === getSessionGeneration()) preferenceSyncError.set(error instanceof Error ? error.message : 'Enregistrement des préférences impossible.');
     }
   };
-  queue = queue.then(save, save);
+  pendingSaves++;
+  queue = queue.then(save, save).finally(()=>pendingSaves--);
 }

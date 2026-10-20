@@ -94,7 +94,7 @@ fn validate(role: &str, display: &Option<String>) -> Result<(), ApiError> {
     }
     Ok(())
 }
-async fn hash_password(auth: &AuthState, password: String) -> Result<String, ApiError> {
+pub(crate) async fn hash_password(auth: &AuthState, password: String) -> Result<String, ApiError> {
     let password = Zeroizing::new(password);
     if !(15..=128).contains(&password.chars().count())
         || password.len() > 512

@@ -21,6 +21,7 @@ export interface Source {
 }
 export interface Subtitle { id: string; language: string; label: string; url: string; forced?: boolean; sdh?: boolean; sourceFormat?: string }
 export interface Media {
+  chapters?: { start: number; title: string }[];
   id: string;
   workId?: string;
   title: string;

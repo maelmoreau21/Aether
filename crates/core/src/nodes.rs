@@ -150,6 +150,7 @@ pub fn router(auth: AuthState, replay_window: Arc<ReplayWindow>) -> Router {
     };
     Router::new()
         .route("/api/v1/admin/nodes", get(list_nodes))
+        .route("/internal/v1/core/music/tracks", post(receive_music_track))
         .route(
             "/api/v1/admin/nodes/enrollment-tokens",
             post(generate_enrollment_token_admin).get(list_enrollment_tokens_admin),
@@ -1381,6 +1382,53 @@ async fn receive_node_heartbeat(
     )
 }
 
+async fn receive_music_track(
+    State(state): State<NodesState>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    let pq = uri.path_and_query().map(|v| v.as_str()).unwrap_or("");
+    let (rec, nonce) =
+        match verify_signed_node_call(&state, &headers, &Method::POST, pq, &body).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let submission: media_node::music::Submission = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => return error(StatusCode::BAD_REQUEST, "invalid_music_track"),
+    };
+    let valid:i64=crate::database::query_scalar("SELECT COUNT(*) FROM libraries l JOIN music_scan_runs run ON run.library_id=l.id WHERE l.id=? AND l.node_id=? AND l.kind='music' AND l.enabled=1 AND l.root=? AND run.scan_id=?").bind(&submission.library_id).bind(&rec.id).bind(&submission.root_snapshot).bind(&submission.scan_id).fetch_one(&state.auth.store.pool).await.unwrap_or(0);
+    let path = std::path::Path::new(&submission.track.relative_path);
+    if valid != 1
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+        || submission.track.size > i64::MAX as u64
+        || !submission.track.mime.starts_with("audio/")
+    {
+        return error(StatusCode::FORBIDDEN, "music_track_denied");
+    }
+    if crate::music::publish_track(
+        &state.auth.store,
+        &submission.library_id,
+        &submission.root_snapshot,
+        &submission.scan_id,
+        submission.track,
+    )
+    .await
+    .is_err()
+    {
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "music_track_failed");
+    }
+    signed_core_response(
+        &rec,
+        &nonce,
+        StatusCode::OK,
+        &serde_json::json!({"accepted":true}),
+    )
+}
 async fn receive_scan_batch(
     State(state): State<NodesState>,
     AxumPath(scan_id): AxumPath<String>,
@@ -1480,27 +1528,39 @@ async fn receive_scan_complete(
             .await;
     }
 
-    let root_path = std::path::Path::new(&comp.root_snapshot);
-    if let Err(err) = inventory::publish_staged_scan(
-        &state.auth.store,
-        &scan_id,
-        lib_id,
-        root_path,
-        comp.finished.complete,
-    )
-    .await
-    {
-        eprintln!("[REMOTE SCAN PUBLISH ERROR in {lib_id}]: {err:?}");
-        let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
-        let _ = crate::database::query(
+    let library_kind: Option<String> =
+        crate::database::query_scalar("SELECT kind FROM libraries WHERE id=?")
+            .bind(lib_id)
+            .fetch_optional(&state.auth.store.pool)
+            .await
+            .ok()
+            .flatten();
+    if library_kind.as_deref() == Some("music") {
+        if comp.finished.complete {
+            let _=crate::database::query("UPDATE music_tracks SET available=0 WHERE library_id=? AND scan_id!=? AND EXISTS(SELECT 1 FROM music_scan_runs WHERE library_id=? AND scan_id=?)").bind(lib_id).bind(&scan_id).bind(lib_id).bind(&scan_id).execute(&state.auth.store.pool).await;
+        }
+    } else {
+        let root_path = std::path::Path::new(&comp.root_snapshot);
+        if let Err(err) = inventory::publish_staged_scan(
+            &state.auth.store,
+            &scan_id,
+            lib_id,
+            root_path,
+            comp.finished.complete,
+        )
+        .await
+        {
+            eprintln!("[REMOTE SCAN PUBLISH ERROR in {lib_id}]: {err:?}");
+            let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
+            let _ = crate::database::query(
             "UPDATE scan_jobs SET status='error', errors_json='[\"Échec de publication du scan distant\"]', errors_count=1 WHERE library_id=?",
         )
         .bind(lib_id)
         .execute(&state.auth.store.pool)
         .await;
-        return error(StatusCode::INTERNAL_SERVER_ERROR, "publish_scan_failed");
+            return error(StatusCode::INTERNAL_SERVER_ERROR, "publish_scan_failed");
+        }
     }
-
     let conflicts = inventory::editorial_warnings(&state.auth.store, lib_id)
         .await
         .unwrap_or_default();
@@ -1584,8 +1644,9 @@ pub async fn build_library_inventory_sync(
          FROM inventory_assets a
          LEFT JOIN inventory_audio au ON au.asset_id=a.id
          JOIN inventory_sources s ON s.id = a.source_id
-         WHERE a.library_id=? AND a.available=1",
+         WHERE a.library_id=? AND a.available=1 UNION ALL SELECT id,library_id,root_snapshot,relative_path,mime,size,modified_ns,NULL AS audios_json FROM music_tracks WHERE library_id=? AND available=1",
     )
+    .bind(library_id)
     .bind(library_id)
     .fetch_all(&store.pool)
     .await?;
@@ -1763,6 +1824,9 @@ pub async fn dispatch_remote_scan(
             .collect()
     };
 
+    if kind == "music" {
+        crate::database::query("INSERT INTO music_scan_runs(library_id,scan_id) VALUES(?,?) ON CONFLICT(library_id) DO UPDATE SET scan_id=excluded.scan_id").bind(library_id).bind(scan_id).execute(&store.pool).await.map_err(|e|e.to_string())?;
+    }
     let start_req = RemoteScanStartRequest {
         scan_id: ScanId::new(scan_id),
         node_id: NodeId::new(node_id),
@@ -1899,7 +1963,14 @@ pub async fn relay_from_remote_node(
     let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(&rec.id);
     if is_channel_active || rec.base_url.is_none() {
         let is_image = path_and_query.contains("/image");
-        let target_kind = if is_image { "image" } else { "asset" };
+        let prepared = path_and_query
+            .split("/prepared/")
+            .nth(1)
+            .and_then(|s| s.split('?').next())
+            .map(|s| format!("prepared:{s}"));
+        let target_kind = prepared
+            .as_deref()
+            .unwrap_or(if is_image { "image" } else { "asset" });
         let parts: Vec<&str> = path_and_query
             .split('?')
             .next()
@@ -1942,6 +2013,7 @@ pub async fn relay_from_remote_node(
                     command_id: format!("cmd-{}", uuid::Uuid::new_v4().simple()),
                     command_type: NodeCommandType::StreamRelay,
                     payload: serde_json::to_value(StreamRelayRequest {
+                        head: request.method() == Method::HEAD,
                         stream_id: stream_id.clone(),
                         target_kind: target_kind.to_owned(),
                         target_id: target_id.to_owned(),
@@ -1963,7 +2035,8 @@ pub async fn relay_from_remote_node(
         if sent {
             match tokio::time::timeout(Duration::from_secs(15), rx).await {
                 Ok(Ok(stream_res)) => {
-                    let mut out = Response::new(stream_res.body);
+                    let head = request.method() == Method::HEAD;
+                    let mut out = Response::new(if head { Body::empty() } else { stream_res.body });
                     *out.status_mut() = stream_res.status;
                     for header_name in [
                         header::CONTENT_TYPE,
@@ -1974,6 +2047,37 @@ pub async fn relay_from_remote_node(
                     ] {
                         if let Some(val) = stream_res.headers.get(&header_name) {
                             out.headers_mut().insert(header_name, val.clone());
+                        }
+                    }
+                    if head && out.status().is_success() {
+                        if let Some(range) = out
+                            .headers()
+                            .get(header::CONTENT_RANGE)
+                            .and_then(|v| v.to_str().ok())
+                            .map(str::to_owned)
+                        {
+                            let length = if let Some(total) = range.strip_prefix("bytes */") {
+                                total.parse::<u64>().ok()
+                            } else {
+                                range
+                                    .strip_prefix("bytes ")
+                                    .and_then(|v| v.split('/').next())
+                                    .and_then(|v| v.split_once('-'))
+                                    .and_then(|(start, end)| {
+                                        end.parse::<u64>()
+                                            .ok()?
+                                            .checked_sub(start.parse::<u64>().ok()?)?
+                                            .checked_add(1)
+                                    })
+                            };
+                            if let Some(length) =
+                                length.and_then(|v| HeaderValue::from_str(&v.to_string()).ok())
+                            {
+                                out.headers_mut().insert(header::CONTENT_LENGTH, length);
+                            }
+                            if out.status() == StatusCode::OK {
+                                out.headers_mut().remove(header::CONTENT_RANGE);
+                            }
                         }
                     }
                     return out;
@@ -2344,7 +2448,19 @@ async fn authorize_playback(
         .session_from_hash(&claims.session_hash)
         .await
         .is_ok();
+    let parental = match state.auth.session_from_hash(&claims.session_hash).await {
+        Ok(user) => crate::product::target_allowed(
+            &state.auth.store,
+            &user.id,
+            &claims.target_kind,
+            &claims.target_id,
+        )
+        .await
+        .unwrap_or(false),
+        Err(_) => false,
+    };
     let valid = valid_session
+        && parental
         && valid_target
         && allowed
         && claims.node_id.as_str() == rec.id

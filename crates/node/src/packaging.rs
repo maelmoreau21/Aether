@@ -11,7 +11,7 @@ use tokio::{
 const CACHE_LIMIT: u64 = 24 * 1024 * 1024 * 1024;
 const ENTRY_LIMIT: u64 = 16 * 1024 * 1024 * 1024;
 struct Entry {
-    directory: tempfile::TempDir,
+    directory: crate::cache_dirs::CacheDirectory,
 }
 #[derive(Default)]
 struct Cache {
@@ -24,6 +24,10 @@ pub struct Preparations {
 }
 impl Default for Preparations {
     fn default() -> Self {
+        // Recover orphaned entries at startup as well as before each new preparation.
+        if let Err(error) = crate::cache_dirs::CacheDirectory::new() {
+            eprintln!("[media cache] recovery deferred: {error}");
+        }
         Self {
             cache: Mutex::new(Cache::default()),
             worker: Semaphore::new(1),
@@ -80,9 +84,7 @@ impl Preparations {
             .map_err(|_| io::Error::other("preparation busy; retry explicitly"))?;
         let remaining = CACHE_LIMIT - cache.bytes;
         drop(cache);
-        let directory = tempfile::Builder::new()
-            .prefix("media-preparation-")
-            .tempdir()?;
+        let directory = crate::cache_dirs::CacheDirectory::new()?;
         let output = std::fs::File::create(directory.path().join("content"))?;
         let limit = remaining.min(match component {
             Component::Video => ENTRY_LIMIT,

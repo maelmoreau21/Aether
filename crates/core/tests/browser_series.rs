@@ -54,7 +54,30 @@ async fn browser_series_flow_and_playback() {
     let sample_mp4 = root.join("tests/fixtures/generated/p1/clip-mp4-fr.mp4");
 
     // Season 1: S01E01 (2 versions: MP4 + MKV) and S01E02
-    std::fs::copy(&sample_mp4, s01.join("Browser Series - S01E01.mp4")).unwrap();
+    let chapter_metadata = temp.path().join("chapters.txt");
+    std::fs::write(&chapter_metadata,";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1000\ntitle=Ouverture\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=1000\nEND=3000\ntitle=Deuxième chapitre\n").unwrap();
+    assert!(
+        std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-nostdin", "-i"])
+            .arg(&sample_mp4)
+            .args(["-f", "ffmetadata", "-i"])
+            .arg(&chapter_metadata)
+            .args([
+                "-map",
+                "0",
+                "-map_metadata",
+                "1",
+                "-map_chapters",
+                "1",
+                "-c",
+                "copy",
+                "-y"
+            ])
+            .arg(s01.join("Browser Series - S01E01.mp4"))
+            .status()
+            .unwrap()
+            .success()
+    );
     std::fs::copy(&sample_mkv, s01.join("Browser Series - S01E01 - 1080p.mkv")).unwrap();
     std::fs::write(
         s01.join("Browser Series - S01E01.nfo"),

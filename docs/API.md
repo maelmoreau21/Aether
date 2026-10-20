@@ -306,3 +306,10 @@ installation de paquets signés, consentements par bibliothèque, exécution Was
 propositions de métadonnées et historique. Aucun endpoint de catalogue distant,
 Trickplay ou Intro Skipper n'est annoncé. Preuves et limites :
 [evidence/2026-10-20/extensions/README.md](evidence/2026-10-20/extensions/README.md).
+# Fonctions produit du 20 octobre 2026
+
+Contrats comptes/sessions, musique, restrictions parentales, filtres, métadonnées,
+listes, copies multi-Node, chapitres et téléchargements :
+[PRODUCT_FEATURES.md](PRODUCT_FEATURES.md). Ces ajouts préservent les routes et
+les contrôles de session existants.
+

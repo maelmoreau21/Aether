@@ -533,3 +533,28 @@ Après build Web et compilation de la fixture SDK pour wasm32-unknown-unknown :
 Inclut Chrome réel, SDK compilé, signatures, limites runtime, consentements,
 révocation pendant exécution et cycle d'installation/désinstallation.
 Résultats et frontières : [evidence/2026-10-20/extensions/README.md](evidence/2026-10-20/extensions/README.md).
+# Lot produit du 20 octobre 2026
+
+Contrats et limites : [PRODUCT_FEATURES.md](PRODUCT_FEATURES.md).
+
+- `cargo test --locked -p media-poc --lib product_tests -j 1 -- --test-threads=1` :
+  migration de la version 31 avec conservation bibliothèques/droits/progression,
+  scan musical réel et UUID stables, Range, restrictions/HEAD/ressources dérivées,
+  filtres avant pagination, affiches, listes privées, groupes, partage de progression
+  et de favoris, préférences sur deux sessions, isolation des comptes et clés API.
+- `cargo test --locked -p media-poc --test account -j 1 -- --test-threads=1` :
+  secret actuel, CSRF, changement de mot de passe et révocation des cookies existants.
+- `cargo test --locked -p media-node --lib -j 1 -- --test-threads=1` : arrêt brutal
+  d’un sous-processus pendant une écriture cache, récupération et préservation d’une
+  entrée active, en plus des tests de confinement, probes et copie de paquets.
+- `distributed_multi_node` et `node_enrollment_and_relay` : deux Nodes locaux,
+  scan/stream musical distant, préparation distante et HEAD/Range/416 en mode
+  entrant ou sortant, révocation et perte/reprise d’un Node.
+- `browser_series` ignoré par défaut : Chrome réel headless, chapitres muxés depuis
+  une fixture légale, décodage vidéo, seek/pause, navigation série et comptes,
+  changement personnel de mot de passe et révocation d’un autre contexte navigateur.
+- Web : `npm run check`, `npm run lint`, `npm test`, `npm run build`,
+  `npx tsc -p src/service-worker/tsconfig.json --noEmit`, `node scripts/test-pwa.mjs`.
+  Le dernier utilise un serveur de fixture HTTP : chiffrement, refus de mauvaise
+  phrase, Opus PCM/440 Hz, déconnexion réseau, lecture/seek/Range et rendu mobile.
+

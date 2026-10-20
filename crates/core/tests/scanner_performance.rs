@@ -1137,6 +1137,7 @@ async fn test_10000_new_synthetic_media_cold_ingestion_benchmark() {
 
     // Realistic technical probe (AV1 10-bit Main10 + Opus 6ch + Opus 2ch + 3 Subtitles)
     let probe = media_contracts::media::Probe {
+        chapters: Vec::new(),
         format: {
             let mut m = std::collections::BTreeMap::new();
             m.insert("format_name".into(), json!("matroska,webm"));

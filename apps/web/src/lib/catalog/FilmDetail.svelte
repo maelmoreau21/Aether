@@ -1,4 +1,7 @@
 <script lang="ts">
+  import WorkTools from './WorkTools.svelte';
+  import OfflineDownload from './OfflineDownload.svelte';
+  import { bestVersion } from '../player/version-choice';
   import type { Work } from './api';
   import PersonalFeedback from './PersonalFeedback.svelte';
   import EditorialCredits from './EditorialCredits.svelte';
@@ -96,6 +99,8 @@
         {#if work.artwork?.logo}<img class="title-logo" src={work.artwork.logo} alt="" />{/if}
         <h1>{work.title}</h1>
         {#if !work.synthetic}<PersonalFeedback workId={work.id} />{/if}
+        {#if !work.synthetic}<WorkTools {work} />{/if}
+        {#if currentSelectedMedia && !work.synthetic}<OfflineDownload url={`/api/v1/assets/${currentSelectedMedia.id}/content`} title={work.title} mime={currentSelectedMedia.sources.find(s=>!s.prepare)?.mime??'video/mp4'} />{/if}
 
         {#if work.originalTitle && work.originalTitle !== work.title}
           <p class="original-title">Titre original : <em>{work.originalTitle}</em></p>
@@ -137,6 +142,7 @@
             <div class="versions-section">
               <span class="versions-label">Versions disponibles :</span>
               <div class="versions" aria-label="Versions disponibles">
+                <button class="version-choice" onclick={()=>{const probe=document.createElement('video');selected=bestVersion(playableMedia,mime=>probe.canPlayType(mime))?.id??selected;}}>Meilleure version disponible</button>
                 {#each playableMedia as item (item.id)}
                   <button
                     class="version-choice"

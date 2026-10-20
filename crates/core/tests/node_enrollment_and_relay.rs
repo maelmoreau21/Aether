@@ -460,6 +460,73 @@ async fn test_node_enrollment_outbound_channel_and_streaming_relay() {
             .starts_with("bytes 0-63/")
     );
 
+    // HEAD and prepared tracks must also travel through the outbound channel with no media body upload.
+    let prepared = media_val["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|source| source["prepare"] == true)
+        .unwrap();
+    for target in [
+        format!("/api/v1/assets/{asset_id}/content"),
+        prepared["url"].as_str().unwrap().into(),
+        prepared["externalAudioUrl"].as_str().unwrap().into(),
+    ] {
+        let (status, headers, body) = http_request(
+            &core_origin,
+            Method::HEAD,
+            &target,
+            &[("cookie", session_cookie)],
+            vec![],
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "HEAD {target}");
+        assert!(body.is_empty());
+        assert!(
+            headers[header::CONTENT_LENGTH]
+                .to_str()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
+                > 16
+        );
+        let (status, headers, body) = http_request(
+            &core_origin,
+            Method::HEAD,
+            &target,
+            &[("cookie", session_cookie), ("range", "bytes=0-15")],
+            vec![],
+        )
+        .await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert!(body.is_empty());
+        assert_eq!(headers[header::CONTENT_LENGTH], "16");
+        let (status, _, body) = http_request(
+            &core_origin,
+            Method::GET,
+            &target,
+            &[("cookie", session_cookie), ("range", "bytes=0-15")],
+            vec![],
+        )
+        .await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body.len(), 16);
+        assert_eq!(
+            http_request(
+                &core_origin,
+                Method::GET,
+                &target,
+                &[
+                    ("cookie", session_cookie),
+                    ("range", "bytes=999999999999999-")
+                ],
+                vec![]
+            )
+            .await
+            .0,
+            StatusCode::RANGE_NOT_SATISFIABLE
+        );
+    }
     // Allow channel worker to cycle gracefully after completing stream relay
     tokio::time::sleep(Duration::from_millis(150)).await;
 

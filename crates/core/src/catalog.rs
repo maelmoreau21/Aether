@@ -76,6 +76,11 @@ struct WorkDetail {
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CatalogQuery {
+    genre: Option<String>,
+    year: Option<i64>,
+    quality: Option<i64>,
+    codec: Option<String>,
+    language: Option<String>,
     kind: Option<String>,
     q: Option<String>,
     sort: Option<String>,
@@ -161,6 +166,7 @@ pub async fn list(
     query: Result<Query<CatalogQuery>, QueryRejection>,
     visible: Option<Extension<crate::permissions::VisibleLibraries>>,
     store: Option<Extension<crate::identity::IdentityStore>>,
+    actor: Option<Extension<crate::auth::Authenticated>>,
 ) -> Response {
     let Ok(Query(query)) = query else {
         return error(StatusCode::BAD_REQUEST, "invalid_catalog_query");
@@ -176,6 +182,11 @@ pub async fn list(
         )
         || !(1..=100).contains(&limit)
         || query.q.as_ref().is_some_and(|q| q.len() > 200)
+        || query.genre.as_ref().is_some_and(|v| v.len() > 100)
+        || query.codec.as_ref().is_some_and(|v| v.len() > 64)
+        || query.language.as_ref().is_some_and(|v| v.len() > 35)
+        || query.year.is_some_and(|v| !(1800..=2200).contains(&v))
+        || query.quality.is_some_and(|v| !(1..=16384).contains(&v))
     {
         return error(StatusCode::BAD_REQUEST, "invalid_catalog_query");
     }
@@ -183,7 +194,15 @@ pub async fn list(
     if let (Some(Extension(store)), Some(Extension(visible))) = (&store, &visible)
         && (!inventory.is_fixture_bench() || visible.0.iter().any(|id| !id.starts_with("fixture-")))
     {
-        return match crate::inventory::catalogue(
+        let filter = crate::inventory::CatalogueFilter {
+            user_id: actor.map(|v| v.0.user.id),
+            genre: query.genre,
+            year: query.year,
+            quality: query.quality,
+            codec: query.codec,
+            language: query.language,
+        };
+        return match crate::inventory::catalogue_filtered(
             store,
             &visible.0,
             query.kind.as_deref(),
@@ -191,6 +210,7 @@ pub async fn list(
             query.sort.as_deref().unwrap_or("title-asc"),
             offset,
             limit,
+            &filter,
         )
         .await
         {
@@ -225,11 +245,31 @@ pub async fn detail(
     State(inventory): State<Arc<Inventory>>,
     Path(id): Path<String>,
     store: Option<Extension<crate::identity::IdentityStore>>,
+    actor: Option<Extension<crate::auth::Authenticated>>,
+    visible: Option<Extension<crate::permissions::VisibleLibraries>>,
 ) -> Response {
     if !id.starts_with("fixture-") {
         return match store {
             Some(Extension(store)) => match crate::inventory::detail(&store, &id).await {
-                Ok(Some(value)) => Json(value).into_response(),
+                Ok(Some(mut value)) => {
+                    if let (Some(Extension(actor)), Some(Extension(visible))) = (&actor, &visible) {
+                        if crate::product::expand_detail(
+                            &store,
+                            &actor.user.id,
+                            &visible.0,
+                            &mut value,
+                        )
+                        .await
+                        .is_err()
+                        {
+                            return error(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "catalogue_unavailable",
+                            );
+                        }
+                    }
+                    Json(value).into_response()
+                }
                 Ok(None) => error(StatusCode::NOT_FOUND, "unknown_work"),
                 Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
             },

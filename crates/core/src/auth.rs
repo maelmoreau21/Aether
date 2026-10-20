@@ -802,6 +802,11 @@ async fn bootstrap(
     {
         return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
     }
+    let _ = crate::database::query("UPDATE sessions SET device_label=? WHERE token_hash=?")
+        .bind(device_label(&headers))
+        .bind(hash(&raw))
+        .execute(&state.store.pool)
+        .await;
     let mut auth_headers = HeaderMap::new();
     if let Ok(value) = HeaderValue::from_str(&format!("{COOKIE}={raw}")) {
         auth_headers.insert(header::COOKIE, value);
@@ -900,6 +905,11 @@ async fn login(
         return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
     }
     if crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+? FROM users WHERE id=? AND disabled_at IS NULL").bind(hash(&raw)).bind(ABSOLUTE_SECONDS).bind(&id).execute(&state.store.pool).await.is_err(){return failure(StatusCode::INTERNAL_SERVER_ERROR,"internal_error")}
+    let _ = crate::database::query("UPDATE sessions SET device_label=? WHERE token_hash=?")
+        .bind(device_label(&headers))
+        .bind(hash(&raw))
+        .execute(&state.store.pool)
+        .await;
     let mut auth_headers = HeaderMap::new();
     if let Ok(value) = HeaderValue::from_str(&format!("{COOKIE}={raw}")) {
         auth_headers.insert(header::COOKIE, value);
@@ -954,6 +964,16 @@ async fn logout(State(state): State<AuthState>, headers: HeaderMap) -> Response 
 }
 fn failure(status: StatusCode, code: &str) -> Response {
     (status, Json(serde_json::json!({"error":code}))).into_response()
+}
+pub(crate) fn device_label(headers: &HeaderMap) -> String {
+    headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("Navigateur")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(256)
+        .collect()
 }
 pub(crate) fn random_token() -> String {
     format!(

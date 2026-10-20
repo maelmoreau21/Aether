@@ -9,7 +9,7 @@
     onsave, onscan, onedit, onreset, onnodechange }: {
       libraries: Library[]; nodes: AdminNode[]; scans: Record<string, Scan>; pending: string[];
       availableRootsForNode: string[]; saving: boolean; editing: string | null; error: string;
-      name: string; kind: 'films' | 'series'; nodeId: string; root: string; enabled: boolean;
+      name: string; kind: 'films' | 'series' | 'music'; nodeId: string; root: string; enabled: boolean;
       excludedPatterns: string;
       onsave: (event: SubmitEvent) => Promise<boolean>; onscan: (library: Library, mode?: RefreshMode) => Promise<void>;
       onedit: (library: Library) => void; onreset: () => void; onnodechange: () => void;
@@ -36,7 +36,7 @@
   <div class="library-grid">
     {#each libraries as library (library.id)}<article class="library-card">
       <button class="library-cover" onclick={() => manage(library)} aria-label={`Gérer ${library.name}`}><Icon name={library.kind === 'films' ? 'film' : 'tv'} size={48} /><span>{library.name}</span></button>
-      <div class="card-bottom"><div class="card-text"><h3>{library.name}</h3><p>{library.kind === 'films' ? 'Films' : 'Séries'}{library.enabled ? '' : ' · Désactivée'}</p></div>
+      <div class="card-bottom"><div class="card-text"><h3>{library.name}</h3><p>{library.kind === 'music' ? 'Musique' : library.kind === 'films' ? 'Films' : 'Séries'}{library.enabled ? '' : ' · Désactivée'}</p></div>
         <details class="library-menu"><summary aria-label={`Actions ${library.name}`}>⋮</summary><div class="menu-actions">
           <button onclick={(event) => { closeMenu(event); manage(library); }}>Gérer la médiathèque</button>
           <button onclick={(event) => { closeMenu(event); manage(library); }}>Renommer</button>
@@ -52,7 +52,7 @@
   <h2 id="library-form">{editing ? 'Modifier la médiathèque' : 'Ajouter une médiathèque'}</h2>
   <form onsubmit={submit}><fieldset disabled={saving}>
     <label for="library-name">Nom de la bibliothèque</label><input id="library-name" bind:value={name} required maxlength="100" autocomplete="off" />
-    <label for="library-kind">Type de contenu</label><select id="library-kind" bind:value={kind}><option value="films">Films</option><option value="series">Séries</option></select>
+    <label for="library-kind">Type de contenu</label><select id="library-kind" bind:value={kind}><option value="films">Films</option><option value="series">Séries</option><option value="music">Musique</option></select>
     <label for="library-node">Media Node assigné</label><select id="library-node" bind:value={nodeId} onchange={onnodechange}><option value="local">Node local</option>{#each activeNodes.filter(n => n.id !== 'local') as node (node.id)}<option value={node.id}>{node.name}</option>{/each}</select>
     <label for="library-root">Racine autorisée sur le Node</label><select id="library-root" bind:value={root} required><option value="" disabled>Choisir une racine</option>{#each availableRootsForNode as item (item)}<option value={item}>{item}</option>{/each}</select>
     {#if availableRootsForNode.length === 0}<p>Aucune racine disponible sur ce Node.</p>{/if}

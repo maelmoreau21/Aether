@@ -1,5 +1,21 @@
 # MEMORY.md — État et décisions Aether
 
+## 20 octobre 2026 — Correction du verrou d'allocation cache sous Linux CI (`cache_dirs`)
+
+- **Analyse de la régression / échec CI GitHub Actions** :
+  - Le test `cache_dirs::tests::reclaims_orphan_but_preserves_active_and_unowned` échouait avec `called Result::unwrap() on an Err value: Custom { kind: Other, error: "cache allocation busy" }`.
+  - Cause racine : [crates/node/src/cache_dirs.rs](file:///c:/Users/Mael/Documents/GitHub/Aether/crates/node/src/cache_dirs.rs) utilisait un `global.try_lock()` immédiat sans attente sur `allocation.lock`. Lors de l'exécution concurrente des tests multi-threads sous Linux, des sous-processus lancés en parallèle (via `Command::new` dans `abrupt_exit_releases_lease`, `probe`, etc.) dupliquent les descripteurs de fichiers lors du `fork()` avant que `execve` ou la terminaison ne les libère. La contention même transitoire (quelques millisecondes) sur le verrou `flock(LOCK_EX)` provoquait un rejet immédiat par `try_lock()`.
+  - De plus, en production, deux requêtes concurrentes créant un cache échouaient immédiatement en erreur 500 au lieu d'attendre la libération du verrou (qui dure typiquement moins d'une milliseconde).
+- **Résolution** :
+  - Remplacement de `global.try_lock()` direct par une boucle d'attente bornée avec retours `TryLockError::WouldBlock` (timeout de 5 secondes, sleep de 5ms) et préservation du message typé en cas d'erreur I/O réelle.
+  - Silençage de la sortie stdout/stderr du sous-processus de test dans `abrupt_exit_releases_lease` pour éviter l'entrelacement de `running 1 test` dans les logs du runner de test.
+- **Validations réelles exécutées** :
+  - `cargo fmt --check` : 0 différence.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test -p media-node --lib` : 40 passed, 0 failed, 1 ignored.
+  - `cargo test --locked --workspace --all-features --lib --bins` : l'intégralité des tests unitaires et binaires passe avec succès.
+
+
 ## 20 octobre 2026 — Unification du SDK, Broker HTTP sécurisé et Contrats de Métadonnées enrichis
 
 - **Résolution des verrous architecturaux des extensions** :

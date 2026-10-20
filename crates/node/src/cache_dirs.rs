@@ -50,9 +50,22 @@ impl CacheDirectory {
             .create(true)
             .truncate(false)
             .open(lock_path)?;
-        global
-            .try_lock()
-            .map_err(|_| io::Error::other("cache allocation busy"))?;
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(5);
+        loop {
+            match global.try_lock() {
+                Ok(()) => break,
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    if start.elapsed() >= timeout {
+                        return Err(io::Error::other("cache allocation busy"));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(std::fs::TryLockError::Error(err)) => {
+                    return Err(io::Error::other(format!("cache lock failed: {err}")));
+                }
+            }
+        }
         for entry in fs::read_dir(root)?.take(4096) {
             let entry = entry?;
             let name = entry.file_name();
@@ -148,13 +161,10 @@ mod tests {
         let active = CacheDirectory::in_root(&root).unwrap();
         let active_path = active.path().to_owned();
         let status = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "cache_dirs::tests::crash_child",
-                "--ignored",
-                "--nocapture",
-            ])
+            .args(["--exact", "cache_dirs::tests::crash_child", "--ignored"])
             .env("MEDIA_TEST_CACHE_CRASH_ROOT", &root)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status()
             .unwrap();
         assert_eq!(status.code(), Some(17));

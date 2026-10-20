@@ -282,6 +282,9 @@ pub fn configured_path(media_root: &Path) -> Result<std::path::PathBuf, std::io:
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
+    if !parent.exists() {
+        std::fs::create_dir_all(parent)?;
+    }
     let parent = parent.canonicalize()?;
     let resolved = if path.exists() {
         path.canonicalize()?

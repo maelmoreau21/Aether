@@ -604,6 +604,38 @@ async fn run(
     }
     let package: Package = serde_json::from_str(&stored)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
+    let settings_str: Option<String> =
+        query_scalar("SELECT settings_json FROM extension_settings WHERE extension_id=?")
+            .bind(&id)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let settings: Value = settings_str
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| json!({}));
+
+    let mut allowed_hosts = Vec::new();
+    let mut auth_headers = std::collections::BTreeMap::new();
+    if id.contains("tmdb") {
+        allowed_hosts.push("api.themoviedb.org".into());
+        allowed_hosts.push("image.tmdb.org".into());
+        if let Some(key) = settings
+            .get("apiKey")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            && (key.len() > 40 || key.starts_with("ey"))
+        {
+            auth_headers.insert("Authorization".into(), format!("Bearer {}", key.trim()));
+        }
+    } else if id.contains("fanart") {
+        allowed_hosts.push("webservice.fanart.tv".into());
+        allowed_hosts.push("assets.fanart.tv".into());
+    } else if id.contains("imdb") {
+        allowed_hosts.push("v3.sg.media-imdb.com".into());
+        allowed_hosts.push("imdb.com".into());
+        allowed_hosts.push("www.imdb.com".into());
+    }
+
     let invocation = crate::extension_runtime::Invocation {
         wasm: package.wasm,
         input: ExtensionRequest {
@@ -616,6 +648,8 @@ async fn run(
                 title,
             }),
         },
+        allowed_hosts,
+        auth_headers,
     };
     let run_id = uuid::Uuid::new_v4().to_string();
     query("INSERT INTO extension_runs(id,extension_id,library_id,work_id,actor_id,started_at,status) VALUES(?,?,?,?,?,?,'running')")

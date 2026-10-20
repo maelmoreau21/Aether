@@ -1,12 +1,16 @@
-//! Extension API v1. No filesystem, network or host imports.
+//! Extension API v1 for Aether plugins.
+//! Designed for sandboxed WebAssembly execution (target wasm32-unknown-unknown)
+//! with host-brokered capabilities (secure HTTPS access, configuration, metadata contracts).
+
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub const API_VERSION: u32 = 1;
 pub const MAX_MODULE: usize = 262_144;
-pub const MAX_JSON: usize = 32_768;
+pub const MAX_JSON: usize = 65_536;
 
 /// Generic ABI envelope. Host adapters authorize operations before invocation.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExtensionRequest {
     pub api_version: u32,
@@ -14,7 +18,7 @@ pub struct ExtensionRequest {
     pub input: serde_json::Value,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExtensionResponse {
     pub api_version: u32,
@@ -28,6 +32,24 @@ pub struct ConfigOption {
     pub value: String,
 }
 
+impl From<&str> for ConfigOption {
+    fn from(s: &str) -> Self {
+        Self {
+            label: s.to_string(),
+            value: s.to_string(),
+        }
+    }
+}
+
+impl From<String> for ConfigOption {
+    fn from(s: String) -> Self {
+        Self {
+            label: s.clone(),
+            value: s,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigField {
@@ -36,8 +58,12 @@ pub struct ConfigField {
     #[serde(default)]
     pub description: String,
     pub field_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<String>,
     #[serde(default)]
-    pub default_value: String,
+    pub required: bool,
+    #[serde(default)]
+    pub secret: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<ConfigOption>,
 }
@@ -92,7 +118,193 @@ impl Package {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+// =========================================================================
+// Rich Metadata Contracts
+// =========================================================================
+
+/// Supported media types
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaType {
+    Movie,
+    TvShow,
+    Episode,
+    Anime,
+}
+
+/// Capabilities exposed by a plugin
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginCapability {
+    Search,
+    Details,
+    Images,
+    Avatars,
+}
+
+/// Image category
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageType {
+    Poster,
+    Backdrop,
+    Banner,
+    Logo,
+    ClearArt,
+    Thumb,
+    DiscArt,
+}
+
+/// A media image (poster, backdrop, logo, etc.)
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaImage {
+    pub url: String,
+    pub image_type: ImageType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rating: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vote_count: Option<u64>,
+    #[serde(default)]
+    pub is_primary: bool,
+}
+
+/// An actor or crew credit
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActorCredit {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumb_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<u32>,
+}
+
+/// A rating score from a specific provider
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderRating {
+    pub provider: String,
+    pub value: f64,
+    pub max: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub votes: Option<u64>,
+}
+
+/// Full structured metadata returned by a provider
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StructuredMetadata {
+    pub provider: String,
+    pub provider_id: String,
+    #[serde(default)]
+    pub external_ids: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tagline: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synopsis: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_minutes: Option<u32>,
+    #[serde(default)]
+    pub genres: Vec<String>,
+    #[serde(default)]
+    pub directors: Vec<String>,
+    #[serde(default)]
+    pub writers: Vec<String>,
+    #[serde(default)]
+    pub actors: Vec<ActorCredit>,
+    #[serde(default)]
+    pub ratings: Vec<ProviderRating>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mpaa: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub posters: Vec<MediaImage>,
+    #[serde(default)]
+    pub backdrops: Vec<MediaImage>,
+    #[serde(default)]
+    pub images: Vec<MediaImage>,
+}
+
+/// Search query payload sent to the extension
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchQuery {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<u16>,
+    #[serde(default = "default_media_type")]
+    pub media_type: MediaType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub external_ids: BTreeMap<String, String>,
+}
+
+fn default_media_type() -> MediaType {
+    MediaType::Movie
+}
+
+/// Individual item in search results
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResultItem {
+    pub id: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<u16>,
+    pub media_type: MediaType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+}
+
+/// Details request payload
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetailsRequest {
+    pub id: String,
+    #[serde(default = "default_media_type")]
+    pub media_type: MediaType,
+    #[serde(default)]
+    pub external_ids: BTreeMap<String, String>,
+}
+
+/// Images request payload
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImagesRequest {
+    pub id: String,
+    #[serde(default = "default_media_type")]
+    pub media_type: MediaType,
+    #[serde(default)]
+    pub external_ids: BTreeMap<String, String>,
+}
+
+/// Legacy / simple metadata proposal
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MetadataInput {
     pub api_version: u32,
@@ -101,12 +313,164 @@ pub struct MetadataInput {
     pub title: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MetadataProposal {
     pub title: String,
     pub summary: String,
 }
+
+/// Standard error structure for extension execution
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginError {
+    pub code: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_secs: Option<u64>,
+}
+
+impl std::fmt::Display for PluginError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}]: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for PluginError {}
+
+impl PluginError {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            retry_after_secs: None,
+        }
+    }
+
+    pub fn rate_limited(retry_after_secs: u64) -> Self {
+        Self {
+            code: "rate_limited".into(),
+            message: format!("Provider rate limit exceeded. Retry after {retry_after_secs}s"),
+            retry_after_secs: Some(retry_after_secs),
+        }
+    }
+
+    pub fn not_found(id: &str) -> Self {
+        Self {
+            code: "not_found".into(),
+            message: format!("Media '{id}' not found on provider"),
+            retry_after_secs: None,
+        }
+    }
+
+    pub fn missing_api_key(provider: &str) -> Self {
+        Self {
+            code: "missing_api_key".into(),
+            message: format!("API key is required for provider '{provider}'"),
+            retry_after_secs: None,
+        }
+    }
+}
+
+// =========================================================================
+// Host HTTP Brokering Contracts
+// =========================================================================
+
+/// Host HTTP request emitted by an extension through the Aether broker.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostHttpRequest {
+    pub url: String,
+    #[serde(default = "default_http_method")]
+    pub method: String,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u32>,
+}
+
+fn default_http_method() -> String {
+    "GET".into()
+}
+
+/// Host HTTP response returned by the Aether broker.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostHttpResponse {
+    pub status: u16,
+    pub headers: BTreeMap<String, String>,
+    pub body: Vec<u8>,
+}
+
+/// Host HTTP broker error.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostHttpError {
+    pub code: String,
+    pub message: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+unsafe extern "C" {
+    fn aether_host_http(req_ptr: u32, req_len: u32) -> u64;
+}
+
+/// Call the Aether host HTTP broker to execute a secure HTTPS request.
+/// On wasm32, invokes the host import `aether_host_http`.
+/// Outside of wasm32 (unit tests/native), returns an explicit error or test mock.
+pub fn host_http_fetch(request: &HostHttpRequest) -> Result<HostHttpResponse, HostHttpError> {
+    let req_bytes = serde_json::to_vec(request).map_err(|e| HostHttpError {
+        code: "invalid_request".into(),
+        message: e.to_string(),
+    })?;
+
+    if req_bytes.len() > MAX_JSON {
+        return Err(HostHttpError {
+            code: "request_too_large".into(),
+            message: format!(
+                "Request size {} exceeds maximum {}",
+                req_bytes.len(),
+                MAX_JSON
+            ),
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let ptr = req_bytes.as_ptr() as u32;
+        let packed = unsafe { aether_host_http(ptr, req_bytes.len() as u32) };
+        if packed == 0 {
+            return Err(HostHttpError {
+                code: "host_call_failed".into(),
+                message: "Host HTTP broker returned null pointer".into(),
+            });
+        }
+        let resp_ptr = (packed >> 32) as usize;
+        let resp_len = (packed & 0xffff_ffff) as usize;
+        let resp_bytes = unsafe { std::slice::from_raw_parts(resp_ptr as *const u8, resp_len) };
+        let response: Result<HostHttpResponse, HostHttpError> = serde_json::from_slice(resp_bytes)
+            .map_err(|e| HostHttpError {
+                code: "invalid_host_response".into(),
+                message: e.to_string(),
+            })?;
+        response
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Native fallback for local tests and mocks
+        Err(HostHttpError {
+            code: "unsupported_platform".into(),
+            message: "Host HTTP call requires wasm32 runtime or test mock".into(),
+        })
+    }
+}
+
+// =========================================================================
+// Wasm ABI Runner & Macro
+// =========================================================================
 
 /// Implement the ABI without exposing raw pointers to extension authors.
 /// Buffers live for one invocation; the host destroys the whole guest afterwards.

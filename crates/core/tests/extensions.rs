@@ -100,14 +100,14 @@ fn generic_abi_does_not_require_a_metadata_payload() {
     ))
     .unwrap();
     let response =
-        media_poc::extension_runtime::execute(media_poc::extension_runtime::Invocation {
-            wasm: STANDARD.encode(wasm),
-            input: ExtensionRequest {
+        media_poc::extension_runtime::execute(media_poc::extension_runtime::Invocation::new(
+            STANDARD.encode(wasm),
+            ExtensionRequest {
                 api_version: 1,
                 operation: "test.compute".into(),
                 input: json!({"a":3}),
             },
-        })
+        ))
         .unwrap();
     assert_eq!(response.result, json!({"accepted":true,"value":7}));
 }
@@ -115,12 +115,7 @@ fn generic_abi_does_not_require_a_metadata_payload() {
 #[test]
 fn sandbox_denies_imports_cpu_memory_invalid_pointers_and_output() {
     use media_poc::extension_runtime::{Invocation, execute};
-    let run = |wasm: Vec<u8>| {
-        execute(Invocation {
-            wasm: STANDARD.encode(wasm),
-            input: input(),
-        })
-    };
+    let run = |wasm: Vec<u8>| execute(Invocation::new(STANDARD.encode(wasm), input()));
     assert_eq!(
         run(good_module()).unwrap().result["title"],
         "Synthetic title"
@@ -590,10 +585,9 @@ fn real_rust_sdk_module_executes() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/wasm32-unknown-unknown/release/media_extension_sdk_fixture.wasm");
     let bytes = std::fs::read(path).unwrap();
-    let result = media_poc::extension_runtime::execute(media_poc::extension_runtime::Invocation {
-        wasm: STANDARD.encode(bytes),
-        input: input(),
-    })
+    let result = media_poc::extension_runtime::execute(
+        media_poc::extension_runtime::Invocation::new(STANDARD.encode(bytes), input()),
+    )
     .unwrap();
     assert_eq!(result.result["title"], "Original");
     assert!(result.result["summary"].as_str().unwrap().contains("work"));
@@ -662,4 +656,133 @@ async fn browser_extension_installs_and_executes_real_rust_module() {
     server.abort();
     store.close().await;
     assert!(status.success());
+}
+
+#[test]
+fn http_broker_security_enforces_allowed_imports_and_allowlist() {
+    use media_poc::extension_runtime::{Invocation, execute};
+
+    // 1. Module with unauthorized imports is rejected immediately
+    let bad_import_module = wat::parse_str(
+        r#"(module
+            (import "env" "unauthorized_syscall" (func))
+            (memory (export "memory") 1)
+            (func (export "media_alloc") (param i32) (result i32) i32.const 1024)
+            (func (export "media_run") (param i32 i32) (result i64) i64.const 0)
+        )"#,
+    )
+    .unwrap();
+    let res = execute(Invocation::new(STANDARD.encode(bad_import_module), input()));
+    assert_eq!(res.unwrap_err(), "imports_forbidden");
+
+    // 2. Module with legitimate "aether.aether_host_http" import is permitted by the runtime
+    let result_str = r#"{"apiVersion":1,"result":{"title":"Processed","summary":"With Broker"}}"#;
+    let data = result_str
+        .bytes()
+        .map(|b| format!("\\{b:02x}"))
+        .collect::<String>();
+    let packed_val = (4096u64 << 32) | (result_str.len() as u64);
+    let valid_import_module = wat::parse_str(format!(
+        r#"(module
+            (import "aether" "aether_host_http" (func $host_http (param i32 i32) (result i64)))
+            (memory (export "memory") 1)
+            (data (i32.const 4096) "{data}")
+            (func (export "media_alloc") (param i32) (result i32) i32.const 1024)
+            (func (export "media_run") (param i32 i32) (result i64)
+                (i64.const {packed_val})
+            )
+        )"#
+    ))
+    .unwrap();
+    let res = execute(Invocation {
+        wasm: STANDARD.encode(valid_import_module),
+        input: input(),
+        allowed_hosts: vec!["api.themoviedb.org".into()],
+        auth_headers: std::collections::BTreeMap::new(),
+    });
+    let output = res.unwrap();
+    assert_eq!(output.result["title"], "Processed");
+}
+
+#[test]
+fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
+    use media_extension_sdk::HostHttpRequest;
+    use media_poc::extension_runtime::{HostState, execute_host_http};
+    use wasmi::StoreLimitsBuilder;
+
+    let limits = StoreLimitsBuilder::new().build();
+    let mut state = HostState {
+        limits,
+        allowed_hosts: vec!["api.themoviedb.org".into()],
+        auth_headers: std::collections::BTreeMap::new(),
+        http_count: 0,
+        max_http_requests: 10,
+        max_response_size: 1024,
+    };
+
+    // 1. Non-HTTPS scheme is forbidden
+    let res = execute_host_http(
+        &mut state,
+        HostHttpRequest {
+            url: "http://api.themoviedb.org/3/movie/550".into(),
+            method: "GET".into(),
+            headers: Default::default(),
+            body: None,
+            timeout_secs: Some(1),
+        },
+    );
+    assert_eq!(res.unwrap_err().code, "scheme_forbidden");
+
+    // 2. SSRF loopback is forbidden
+    let res = execute_host_http(
+        &mut state,
+        HostHttpRequest {
+            url: "https://127.0.0.1:8080/admin".into(),
+            method: "GET".into(),
+            headers: Default::default(),
+            body: None,
+            timeout_secs: Some(1),
+        },
+    );
+    assert_eq!(res.unwrap_err().code, "host_forbidden");
+
+    // 3. Localhost is forbidden
+    let res = execute_host_http(
+        &mut state,
+        HostHttpRequest {
+            url: "https://localhost:8080/admin".into(),
+            method: "GET".into(),
+            headers: Default::default(),
+            body: None,
+            timeout_secs: Some(1),
+        },
+    );
+    assert_eq!(res.unwrap_err().code, "host_forbidden");
+
+    // 4. Unauthorized domain is forbidden
+    let res = execute_host_http(
+        &mut state,
+        HostHttpRequest {
+            url: "https://evil-attacker.example.com/steal".into(),
+            method: "GET".into(),
+            headers: Default::default(),
+            body: None,
+            timeout_secs: Some(1),
+        },
+    );
+    assert_eq!(res.unwrap_err().code, "domain_not_allowed");
+
+    // 5. Quota exceeded
+    state.http_count = 10;
+    let res = execute_host_http(
+        &mut state,
+        HostHttpRequest {
+            url: "https://api.themoviedb.org/3/movie/550".into(),
+            method: "GET".into(),
+            headers: Default::default(),
+            body: None,
+            timeout_secs: Some(1),
+        },
+    );
+    assert_eq!(res.unwrap_err().code, "quota_exceeded");
 }

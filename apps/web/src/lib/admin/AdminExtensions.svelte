@@ -25,7 +25,9 @@
     configSchema?: ConfigField[];
   };
   type Package = { manifest: Manifest; publisherId: string; sha256: string; signature: string; wasm: string };
-  type Installed = { manifest: Manifest; publisherId: string; sha256: string; enabled: boolean; libraryIds: string[]; settings?: Record<string, any> };
+  type SettingValue = string | number | boolean;
+  type ExtensionSettings = Record<string, SettingValue>;
+  type Installed = { manifest: Manifest; publisherId: string; sha256: string; enabled: boolean; libraryIds: string[]; settings?: ExtensionSettings };
   type Library = { id: string; name: string; enabled: boolean | number };
   type Run = { id: string; extensionId: string; status: string; durationMs: number; result: { title?: string; summary?: string; error?: string } };
   let installed = $state<Installed[]>([]);
@@ -41,11 +43,23 @@
   let queries = $state<Record<string, string>>({});
   let workOptions = $state<Record<string, { id: string; title: string }[]>>({});
   let purge = $state<Record<string, boolean>>({});
-  let editingSettings = $state<Record<string, Record<string, any>>>({});
+  let editingSettings = $state<Record<string, ExtensionSettings>>({});
   let activeSettingsId = $state<string | null>(null);
   let busy = $state(false);
   let error = $state('');
   let notice = $state('');
+
+  function toBannerSrc(banner?: string): string | null {
+    if (!banner) return null;
+    const trimmed = banner.trim();
+    if (trimmed.startsWith('<svg') || trimmed.includes('<svg')) {
+      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(trimmed)}`;
+    }
+    if (trimmed.startsWith('data:image/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed;
+    }
+    return null;
+  }
   async function refresh() {
     const [extensions, libs, history, keys, journal] = await Promise.all([
       adminRequest<{ extensions: Installed[] }>('/api/v1/admin/extensions'),
@@ -60,7 +74,7 @@
 
     for (const ext of installed) {
       if (!editingSettings[ext.manifest.id]) {
-        const defaults: Record<string, unknown> = {};
+        const defaults: ExtensionSettings = {};
         if (ext.manifest.configSchema) {
           for (const field of ext.manifest.configSchema) {
             if (field.fieldType === 'boolean') {
@@ -144,7 +158,12 @@
     {#if candidate}
       <div class="candidate-preview">
         {#if candidate.manifest.banner}
-          <div class="plugin-banner">{@html candidate.manifest.banner}</div>
+          {@const bannerSrc = toBannerSrc(candidate.manifest.banner)}
+          {#if bannerSrc}
+            <div class="plugin-banner">
+              <img src={bannerSrc} alt="" />
+            </div>
+          {/if}
         {/if}
         <p><strong>{candidate.manifest.name}</strong> · v{candidate.manifest.version} · {candidate.publisherId}</p>
         <p>{candidate.manifest.description}</p>
@@ -163,9 +182,12 @@
   {#each installed as extension (extension.manifest.id)}
     <article class="card plugin-card">
       {#if extension.manifest.banner}
-        <div class="plugin-banner">
-          {@html extension.manifest.banner}
-        </div>
+        {@const bannerSrc = toBannerSrc(extension.manifest.banner)}
+        {#if bannerSrc}
+          <div class="plugin-banner">
+            <img src={bannerSrc} alt="" />
+          </div>
+        {/if}
       {/if}
       <div class="plugin-header">
         <div class="plugin-title-row">
@@ -205,7 +227,8 @@
                     <label class="check">
                       <input
                         type="checkbox"
-                        bind:checked={editingSettings[extension.manifest.id][field.key]}
+                        checked={Boolean(editingSettings[extension.manifest.id]?.[field.key])}
+                        onchange={(e) => { editingSettings[extension.manifest.id][field.key] = (e.currentTarget as HTMLInputElement).checked; }}
                       />
                       <span><strong>{field.label}</strong>{#if field.description} — {field.description}{/if}</span>
                     </label>
@@ -310,7 +333,7 @@
   /* Jellyfin-style plugin presentation */
   .plugin-card { overflow: hidden; padding: 0; }
   .plugin-banner { width: 100%; max-height: 140px; overflow: hidden; background: #0b0f19; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; }
-  .plugin-banner :global(svg) { width: 100%; height: auto; display: block; }
+  .plugin-banner img { width: 100%; height: auto; max-height: 140px; object-fit: contain; display: block; }
   .plugin-header { padding: 1rem 1rem 0 1rem; }
   .plugin-title-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
   .plugin-badges { display: flex; gap: .4rem; flex-wrap: wrap; }

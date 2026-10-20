@@ -6,4 +6,4 @@ CREATE VIEW effective_library_permissions AS
     UNION
     SELECT l.library_id, m.user_id FROM user_group_libraries l JOIN user_group_members m ON m.group_id=l.group_id
     UNION
-    SELECT l.library_id, u.id AS user_id FROM user_group_libraries l JOIN user_groups g ON g.id=l.group_id JOIN users u WHERE g.is_default=1;
+    SELECT l.library_id, u.id AS user_id FROM user_group_libraries l JOIN user_groups g ON g.id=l.group_id CROSS JOIN users u WHERE g.is_default=1;

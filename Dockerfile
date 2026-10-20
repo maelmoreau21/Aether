@@ -34,6 +34,8 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/shared/Cargo.toml ./crates/shared/
 COPY crates/node/Cargo.toml ./crates/node/
 COPY crates/core/Cargo.toml ./crates/core/
+COPY crates/extension-sdk/ ./crates/extension-sdk/
+COPY tests/fixtures/extension-sdk/ ./tests/fixtures/extension-sdk/
 
 # Scaffold dummy source hierarchy for dependency precompilation caching
 # Explicit test/bin targets declared in crates/node/Cargo.toml and crates/core/Cargo.toml must exist
@@ -49,6 +51,8 @@ RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/s
     echo 'fn main() {}' > crates/core/src/bin/backup.rs && \
     echo 'fn main() {}' > crates/core/src/bin/restore.rs && \
     echo 'fn main() {}' > crates/core/src/bin/recover.rs && \
+    echo 'fn main() {}' > crates/core/src/bin/extension-worker.rs && \
+    echo 'fn main() {}' > crates/core/src/bin/extension-pack.rs && \
     touch crates/core/tests/p0.rs crates/core/tests/catalog.rs
 
 # Precompile workspace dependencies
@@ -61,7 +65,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         --bin media-bootstrap \
         --bin media-backup \
         --bin media-restore \
-        --bin media-recover
+        --bin media-recover \
+        --bin media-extension-worker \
+        --bin media-extension-pack
 
 # Copy actual workspace crates (shared contracts, node, and core with migrations)
 COPY crates/ ./crates/
@@ -77,7 +83,9 @@ RUN touch crates/shared/src/lib.rs \
           crates/core/src/bootstrap.rs \
           crates/core/src/bin/backup.rs \
           crates/core/src/bin/restore.rs \
-          crates/core/src/bin/recover.rs && \
+          crates/core/src/bin/recover.rs \
+          crates/core/src/bin/extension-worker.rs \
+          crates/core/src/bin/extension-pack.rs && \
     rm -f target/release/deps/*media_contracts* \
           target/release/deps/*media_node* \
           target/release/deps/*aether_node* \
@@ -101,7 +109,9 @@ RUN touch crates/shared/src/lib.rs \
         --bin media-bootstrap \
         --bin media-backup \
         --bin media-restore \
-        --bin media-recover && \
+        --bin media-recover \
+        --bin media-extension-worker \
+        --bin media-extension-pack && \
     strip --strip-all \
         target/release/media-poc \
         target/release/aether-core \
@@ -109,7 +119,9 @@ RUN touch crates/shared/src/lib.rs \
         target/release/media-bootstrap \
         target/release/media-backup \
         target/release/media-restore \
-        target/release/media-recover
+        target/release/media-recover \
+        target/release/media-extension-worker \
+        target/release/media-extension-pack
 
 # Minimal ffprobe build for Media Node discovery.
 # Builds a stripped, hardened ffprobe binary with native demuxers, parsers, and decoders.
@@ -202,6 +214,7 @@ COPY --from=rust-builder --chmod=0755 /build/target/release/media-bootstrap /usr
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-backup /usr/local/bin/media-backup
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-restore /usr/local/bin/media-restore
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-recover /usr/local/bin/media-recover
+COPY --from=rust-builder --chmod=0755 /build/target/release/media-extension-worker /usr/local/bin/media-extension-worker
 COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
 
 ENV MEDIA_MODE=distributed \
@@ -292,6 +305,7 @@ RUN mkdir -p /data /backups /media /app/apps/web/build \
     && chmod 0755 /media /app
 
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-poc /usr/local/bin/media-poc
+COPY --from=rust-builder --chmod=0755 /build/target/release/media-extension-worker /usr/local/bin/media-extension-worker
 COPY --from=rust-builder --chmod=0755 /build/target/release/aether-core /usr/local/bin/aether-core
 COPY --from=rust-builder --chmod=0755 /build/target/release/aether-node /usr/local/bin/aether-node
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-bootstrap /usr/local/bin/media-bootstrap

@@ -30,7 +30,7 @@ GET/HEAD `/api/v1/assets/{id}/image` : session et permission de bibliothèque
 réévaluées avant toute réponse, y compris conditionnelle/Range. Bibliothèque
 désactivée, grant ou session révoqué : accès refusé. UUID inconnu refusé sans
 révéler son existence ; fichier disparu/invalide/modifié hors scan :404.
-URL révisée par mtime/taille et `Cache-Control: private, no-store` ; MIME réel,
+URL révisée par mtime/taille et `Cache-Control: private, no-cache` (revalidation obligatoire, ETag et réponse 304 sans corps après contrôle des droits et du fichier) ; MIME réel,
 `X-Content-Type-Options: nosniff`, CSP inchangée. Les erreurs gardent les chemins
 privés. Une rescan actualise les données, puis une nouvelle requête catalogue
 ou un rechargement de page actualise l’image ; aucun push temps réel.

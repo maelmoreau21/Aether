@@ -290,6 +290,7 @@
           await playerPromise;
           if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
           detail = work;
+          busy = false;
           season = work.seasons?.[0]?.number ?? 1;
 
           if (work.kind === 'film') {
@@ -426,11 +427,6 @@
     </div>
 
   {:else if detail}
-    <!-- Back button navigation preserved -->
-    <a class="back-link" href={resolve(section === 'series' ? 'series/' : 'films/')}>
-      ← {section === 'series' ? 'Toutes les séries' : 'Tous les films'}
-    </a>
-
     {#if detail.kind === 'film'}
       <FilmDetail
         work={detail}
@@ -518,24 +514,6 @@
     margin: 0 auto;
     padding: 0 var(--page-gutter) 80px;
     min-height: 75vh;
-  }
-
-  .back-link {
-    position: relative;
-    z-index: 2;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    margin: 20px 0 10px;
-    color: var(--color-muted);
-    font-size: 13.5px;
-    font-weight: 600;
-    transition: color var(--transition-fast), transform var(--transition-fast);
-  }
-
-  .back-link:hover {
-    color: var(--color-accent-hover);
-    transform: translateX(-3px);
   }
 
   .page-heading {

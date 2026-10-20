@@ -39,10 +39,10 @@ export class NativePlayer implements Player {
   state(): PlaybackState {
     return { position: this.video.currentTime, duration: this.video.duration, paused: this.video.paused, volume: this.video.volume, speed: this.video.playbackRate };
   }
-  async load(media: Media) {
+  async load(media: Media, initialAudioTrackId?: string) {
     this.media = media;
     this.subtitle = null;
-    const source = media.sources.find(s => s.language === 'fr') ?? media.sources[0];
+    const source = media.sources.find(s => s.audioTrackId === initialAudioTrackId) ?? media.sources.find(s => s.language === 'fr') ?? media.sources[0];
     if (!source) throw new Error('Aucune source disponible pour ce média.');
     await this.replace(source, 0, true);
   }

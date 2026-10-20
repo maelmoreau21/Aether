@@ -30,19 +30,35 @@
   }
 </script>
 <div class="personal-feedback" aria-label="Vos préférences privées">
-  <button disabled={busy || !loaded} aria-pressed={value.favorite} onclick={() => save({...value,favorite:!value.favorite})}>{value.favorite ? '♥ Favori' : '♡ Ajouter aux favoris'}</button>
-  <label>Ma note privée
-    <select aria-label="Ma note privée" disabled={busy || !loaded} value={value.rating ?? ''} onchange={e => save({...value,rating:e.currentTarget.value ? Number(e.currentTarget.value) : null})}>
-      <option value="">Non noté</option>
-      {#each [1,2,3,4,5] as rating (rating)}<option value={rating}>{rating} / 5</option>{/each}
-    </select>
-  </label>
+  <button class="heart" disabled={busy || !loaded} aria-label={value.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} title={value.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} aria-pressed={value.favorite} onclick={() => save({...value,favorite:!value.favorite})}>{value.favorite ? '♥' : '♡'}</button>
+  <div class="stars" role="group" aria-label="Ma note privée sur 5, par demi-étoile">
+    {#each [1,2,3,4,5] as star (star)}
+      <span class="star">
+        <span class="outline" aria-hidden="true">★</span>
+        <span class="fill" class:full={(value.rating ?? 0) >= star} class:half-filled={value.rating === star - 0.5} aria-hidden="true">★</span>
+        {#each [star - 0.5, star] as rating (rating)}
+          <button class="half" disabled={busy || !loaded} aria-label={`${rating.toLocaleString('fr-FR')} sur 5`} title={`${rating.toLocaleString('fr-FR')} sur 5 — recliquer pour effacer`} aria-pressed={value.rating === rating} onclick={() => save({...value,rating:value.rating === rating ? null : rating})}></button>
+        {/each}
+      </span>
+    {/each}
+  </div>
   {#if error}<span role="alert">{error}</span>{/if}
 </div>
 <style>
-.personal-feedback { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-block:12px; }
-button,select { background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:6px;padding:10px; }
-button[aria-pressed="true"] { color:var(--accent-primary);border-color:var(--accent-primary); }
-select { width:auto;min-width:90px; }
-label { white-space:nowrap;display:flex;gap:8px;align-items:center; font-size:13px; } span { color:var(--status-error); }
+.personal-feedback { display:flex; flex-wrap:wrap; gap:16px; align-items:center; margin-block:12px; }
+button { color:var(--text-secondary); border:0; background:transparent; cursor:pointer; }
+button:disabled { opacity:.5; cursor:wait; }
+button:focus-visible { outline:2px solid var(--accent-primary); outline-offset:2px; border-radius:3px; }
+.heart { font-size:32px; width:44px; height:44px; padding:0; }
+.heart[aria-pressed="true"] { color:#ed718b; }
+.stars { display:flex; }
+.star { position:relative; display:flex; width:32px; height:44px; font-size:30px; line-height:44px; }
+.outline,.fill { position:absolute; inset:0; pointer-events:none; }
+.outline { color:var(--text-secondary); opacity:.5; }
+.fill { width:0; color:#f5c45b; overflow:hidden; white-space:nowrap; }
+.fill.full { width:100%; }
+.fill.half-filled { width:50%; }
+.half { z-index:1; width:50%; height:100%; padding:0; }
+.half:hover { background:rgba(245,196,91,.15); }
+span[role="alert"] { color:var(--status-error); }
 </style>

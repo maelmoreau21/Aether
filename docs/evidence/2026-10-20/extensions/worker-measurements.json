@@ -1,0 +1,20 @@
+{
+  "platform": "Windows local, debug build",
+  "moduleBytes": 106114,
+  "sampleIntervalMs": 2,
+  "note": "Observed process working set, not a hard RSS quota or production load test.",
+  "runs": [
+    {
+      "elapsedMs": 1319.14,
+      "observedPeakWorkingSetBytes": 10788864
+    },
+    {
+      "elapsedMs": 99.61,
+      "observedPeakWorkingSetBytes": 10858496
+    },
+    {
+      "elapsedMs": 100.63,
+      "observedPeakWorkingSetBytes": 10817536
+    }
+  ]
+}

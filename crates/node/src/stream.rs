@@ -92,7 +92,7 @@ pub fn parse_single_range(header_value: &str, file_size: u64) -> Option<ByteRang
     }
 }
 
-fn empty_body() -> BoxStreamBody {
+pub(crate) fn empty_body() -> BoxStreamBody {
     Empty::<Bytes>::new()
         .map_err(|never| match never {})
         .boxed()

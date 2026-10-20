@@ -55,6 +55,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
 
       - name: Cache des dépendances Cargo
         uses: Swatinem/rust-cache@v2
@@ -112,6 +113,11 @@ jobs:
 
       - name: Exécuter les tests unitaires (cargo test --lib --bins)
         run: cargo test --locked --workspace --all-features --lib --bins
+
+      - name: Vérifier l'ABI du SDK avec un module Rust de test
+        run: |
+          cargo build --locked -p media-extension-sdk-fixture --target wasm32-unknown-unknown --release
+          cargo test --locked -p media-poc --test extensions real_rust_sdk_module_executes -- --ignored
 
       - name: Exécuter les tests d'intégration (cargo test --test '*')
         # Les fixtures 1k/10k partagent CPU et disque du runner ; chaque test de

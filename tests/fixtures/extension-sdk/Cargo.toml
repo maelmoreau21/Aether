@@ -1,0 +1,12 @@
+[package]
+name = "media-extension-sdk-fixture"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+media-extension-sdk = { path = "../../../crates/extension-sdk" }

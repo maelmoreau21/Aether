@@ -43,7 +43,7 @@ async fn authorized(
 #[serde(deny_unknown_fields)]
 struct Feedback {
     favorite: bool,
-    rating: Option<i64>,
+    rating: Option<f64>,
 }
 async fn read(
     State(auth): State<AuthState>,
@@ -75,7 +75,10 @@ async fn write(
     Json(input): Json<Feedback>,
 ) -> Result<Json<Feedback>, StatusCode> {
     let user = authorized(&auth, &headers, &work, true).await?;
-    if input.rating.is_some_and(|r| !(1..=5).contains(&r)) {
+    if input
+        .rating
+        .is_some_and(|r| !r.is_finite() || !(0.5..=5.0).contains(&r) || (r * 2.0).fract() != 0.0)
+    {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
     query("INSERT INTO work_feedback(user_id,work_id,favorite,rating) VALUES(?,?,?,?) ON CONFLICT(user_id,work_id) DO UPDATE SET favorite=excluded.favorite,rating=excluded.rating")

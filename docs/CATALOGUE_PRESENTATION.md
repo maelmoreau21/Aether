@@ -2,7 +2,7 @@
 
 Les saisons retournées par le catalogue ont désormais des accès directs sous le titre de la série. Un clic sélectionne la saison et amène à ses épisodes. Le sélecteur détaillé reste disponible. Sans sélection valide, la première saison disponible est affichée, y compris les hors-série.
 
-La navigation conserve une seule recherche, sous forme de bouton avec loupe. Le pied de page du catalogue est supprimé. La pagination affiche la page courante et le nombre de pages (24 éléments par type ; en recherche mixte, le plus grand nombre de pages des deux listes). Les dégradés utilisent le fond du thème actif. L'arrière-plan des fiches ne recouvre plus le lien de retour.
+La navigation conserve une seule recherche, sous forme de bouton avec loupe. Le pied de page du catalogue est supprimé. La pagination affiche la page courante et le nombre de pages (24 éléments par type ; en recherche mixte, le plus grand nombre de pages des deux listes). Les dégradés utilisent le fond du thème actif. Le lien de retour sous la navigation principale est retiré des fiches ; les liens Films et Séries de la navigation restent disponibles.
 
 ## Images locales
 
@@ -29,10 +29,22 @@ Les pistes audio affichent individuellement langue, codec, canaux et titre lorsq
 
 ## Notes et favoris privés
 
-`GET` / `HEAD` et `PUT /api/v1/feedback/{workId}` utilisent exclusivement le compte de la session. PUT exige le jeton CSRF et accepte `{ "favorite": true, "rating": 4 }`. La note est un entier de 1 à 5, ou `null` pour la retirer. Les champs inconnus sont rejetés (422), le corps est limité à 2 Kio. Réponse `{ "favorite": bool, "rating": number|null }`, cache `private, no-store`. L'accès à la bibliothèque est revérifié à chaque requête, y compris après révocation. Sans session : 401 ; sans droit ou œuvre inconnue : 403.
+`GET` / `HEAD` et `PUT /api/v1/feedback/{workId}` utilisent exclusivement le compte de la session. PUT exige le jeton CSRF et accepte `{ "favorite": true, "rating": 4 }`. La note va de 0,5 à 5 par pas de 0,5, ou `null` pour la retirer. Le contrôle affiche un cœur et cinq étoiles : cliquer sur la moitié gauche sélectionne une demi-étoile, sur la moitié droite une étoile entière. Recliquer sur la note sélectionnée la retire. Les contrôles sont accessibles au clavier. La migration 0030 conserve les anciennes notes entières dans les deux moteurs SQL. Les champs inconnus sont rejetés (422), le corps est limité à 2 Kio. Réponse `{ "favorite": bool, "rating": number|null }`, cache `private, no-store`. L'accès à la bibliothèque est revérifié à chaque requête, y compris après révocation. Sans session : 401 ; sans droit ou œuvre inconnue : 403.
 
 La migration 0029 ajoute `work_feedback`, les rôles d'images et le stockage temporaire des visuels du scan, pour SQLite et PostgreSQL. Les préférences sont persistées par paire compte/œuvre, supprimées avec leur propriétaire ou l'œuvre, et absentes des réponses partagées du catalogue. Deux écritures concurrentes d'un même compte suivent la dernière écriture réussie. Aucun classement public ni moteur de recommandation n'est ajouté.
 
 ## Vérification
 
 Voir les tests `series_flow`, `nfo_flow`, `media-node nfo::` et le scénario navigateur `browser_series` / `scripts/browser-series.cjs`. Les fixtures sont synthétiques ; ces résultats ne constituent pas un scan du NAS ou un déploiement sur aether.dfmag.fr. Les preuves exécutées pour ce jalon sont consignées dans MEMORY.md.
+
+## Réactivité des fiches et du lecteur — 20 octobre 2026
+
+Les images du Node local utilisent `private, no-cache` et un ETag. Un navigateur peut conserver les octets, mais doit revalider chaque réutilisation : session, droits de bibliothèque, confinement et empreinte du fichier sont contrôlés avant une réponse 304 sans corps. Les erreurs restent non stockables. Le relais distant conserve ses limites de transmission des en-têtes conditionnels ; aucun gain 304 distant n'est revendiqué.
+
+Les images de saison et d'épisode ont des dimensions réservées et un décodage asynchrone. Une actualisation rapide après mise à jour du Core/Node découvre les visuels déjà présents (`season01-poster.jpg` dans le dossier série et `<nom exact vidéo>-thumb.jpg` dans le dossier épisode). Leur absence ne provoque aucun téléchargement externe.
+
+La fiche film s'affiche dès réception du catalogue pendant le chargement des descripteurs de lecture. Au lancement, le lecteur natif charge directement la piste audio préférée ; il ne charge plus d'abord le français avant de sélectionner une autre piste. La progression de reprise est récupérée en parallèle du chargement média, puis appliquée avant lecture. La préparation facultative de sources reste susceptible de prendre du temps ; les fichiers nécessitant cette préparation ne deviennent pas du Direct Play.
+
+Les quatre modes de scan restent disponibles pour préserver leurs comportements. Les libellés distinguent désormais l'actualisation rapide recommandée, la conservation des descriptions, le complément des descriptions manquantes et la réanalyse complète plus lente. Les explications précisent les effets sur les fichiers et les NFO locaux.
+
+Les mesures sur fixtures locales ne prouvent pas les temps de chargement NAS, WAN ou de médias arbitraires.

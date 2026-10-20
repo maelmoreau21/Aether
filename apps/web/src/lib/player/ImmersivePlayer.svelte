@@ -71,19 +71,21 @@
     if (!engine) return;
     busy = true; error = ''; wake();
     try {
-      await engine.load(media);
-      if (current !== generation) return;
       const source = media.sources.find(source => preferredAudio?.mediaId === media.id && source.audioTrackId === preferredAudio.trackId) ?? media.sources.find(source => source.language === preferredLanguage) ?? media.sources.find(source => source.language === 'fr') ?? media.sources[0];
       if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
+      const tracker = !restore && media.workId && !media.synthetic
+        ? new ProgressTracker(media.workId, message => { if (current === generation) notice = message; }) : undefined;
+      if (tracker) progressTracker = tracker;
+      const resume = tracker?.load();
+      await engine.load(media, source.audioTrackId);
+      if (current !== generation) return;
       if (source.language !== preferredLanguage) notice = 'Votre langue précédente est indisponible. Première source disponible sélectionnée.';
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
       await engine.selectSubtitle(usableSubtitle); subtitle = usableSubtitle;
-      if (!restore && media.workId && !media.synthetic) {
-        const tracker = new ProgressTracker(media.workId, message => { if (current === generation) notice = message; });
-        progressTracker = tracker;
-        const position = await tracker.load();
+      if (resume) {
+        const position = await resume;
         if (current !== generation) return;
         if (position > 0) engine.seek(position);
       }

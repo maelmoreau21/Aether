@@ -24,6 +24,7 @@
     <div class="card-header">
       <div class="card-title-group">
         <h3>Statut du fournisseur OIDC</h3>
+        <p class="card-subtitle">Le texte du bouton de connexion se modifie dans Général → Texte du bouton de connexion SSO.</p>
         <p class="card-subtitle">Protocole sécurisé Authorization Code avec vérification PKCE</p>
       </div>
       <span class="badge" data-status={oidcStatus?.enabled ? 'connected' : 'disconnected'}>

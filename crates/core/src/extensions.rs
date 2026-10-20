@@ -30,6 +30,20 @@ use tokio::{
 
 static MUTATIONS: Mutex<()> = Mutex::const_new(());
 static EXECUTIONS: Semaphore = Semaphore::const_new(1);
+
+fn metadata_input_with_settings(input: MetadataInput, settings: Value) -> Value {
+    // Configuration belongs only to this installed extension. It travels over the
+    // private worker pipe and is never included in package files or run history.
+    let mut value = json!(input);
+    if settings
+        .as_object()
+        .is_some_and(|fields| !fields.is_empty())
+    {
+        value["config"] = settings;
+    }
+    value
+}
+
 type Error = (StatusCode, Json<Value>);
 fn err(status: StatusCode, code: &str) -> Error {
     (status, Json(json!({"error": code})))
@@ -689,12 +703,15 @@ async fn run(
         input: ExtensionRequest {
             api_version: 1,
             operation: "metadata.propose".into(),
-            input: json!(MetadataInput {
-                api_version: 1,
-                work_id: input.work_id.clone(),
-                library_id: library.clone(),
-                title,
-            }),
+            input: metadata_input_with_settings(
+                MetadataInput {
+                    api_version: 1,
+                    work_id: input.work_id.clone(),
+                    library_id: library.clone(),
+                    title,
+                },
+                settings,
+            ),
         },
         allowed_hosts,
         auth_headers,
@@ -858,4 +875,35 @@ async fn audit_log(
     Ok(Json(
         json!({"audit":rows.into_iter().map(|(actor,id,action,time)| json!({"actorId":actor,"extensionId":id,"action":action,"createdAt":time})).collect::<Vec<_>>()}),
     ))
+}
+
+#[cfg(test)]
+mod configuration_tests {
+    use super::*;
+
+    #[test]
+    fn worker_receives_only_the_selected_extensions_configuration() {
+        let value = metadata_input_with_settings(
+            MetadataInput {
+                api_version: 1,
+                work_id: "work".into(),
+                library_id: "library".into(),
+                title: "Film".into(),
+            },
+            json!({"api_key": "synthetic-key", "language": "fr-FR"}),
+        );
+        assert_eq!(value["config"]["api_key"], "synthetic-key");
+        assert_eq!(value["title"], "Film");
+        assert!(value.get("settings").is_none());
+        let legacy = metadata_input_with_settings(
+            MetadataInput {
+                api_version: 1,
+                work_id: "work".into(),
+                library_id: "library".into(),
+                title: "Film".into(),
+            },
+            json!({}),
+        );
+        assert!(serde_json::from_value::<MetadataInput>(legacy).is_ok());
+    }
 }

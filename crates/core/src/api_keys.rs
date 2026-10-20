@@ -1,4 +1,4 @@
-//! Revocable, expiring, catalogue-only credentials for explicit integrations.
+//! Revocable, optionally expiring, catalogue-only credentials for explicit integrations.
 use crate::{
     auth::{AuthState, hash, random_token},
     database::{query, query_as, query_scalar},
@@ -34,7 +34,9 @@ struct Input {
     name: String,
     user_id: String,
     library_ids: Vec<String>,
-    expires_in_days: i64,
+    expires_in_days: Option<i64>,
+    #[serde(default)]
+    never_expires: bool,
 }
 async fn list(
     State(auth): State<AuthState>,
@@ -48,7 +50,7 @@ async fn list(
             .fetch_all(&mut *tx)
             .await
             .map_err(database)?;
-    let keys:Vec<_>=rows.into_iter().map(|(id,name,user,created,expires,revoked)|json!({"id":id,"name":name,"userId":user,"createdAt":created,"expiresAt":expires,"revokedAt":revoked,"scope":"catalog:read","libraryIds":libs.iter().filter(|v|v.0==id).map(|v|&v.1).collect::<Vec<_>>()})).collect();
+    let keys:Vec<_>=rows.into_iter().map(|(id,name,user,created,expires,revoked)|json!({"id":id,"name":name,"userId":user,"createdAt":created,"expiresAt":if expires == 0 { None } else { Some(expires) },"revokedAt":revoked,"scope":"catalog:read","libraryIds":libs.iter().filter(|v|v.0==id).map(|v|&v.1).collect::<Vec<_>>()})).collect();
     tx.commit().await.map_err(database)?;
     Ok(Json(json!({"keys":keys})))
 }
@@ -62,7 +64,10 @@ async fn create(
     if name.is_empty()
         || name.chars().count() > 80
         || name.chars().any(char::is_control)
-        || !(1..=365).contains(&input.expires_in_days)
+        || !matches!(
+            (input.never_expires, input.expires_in_days),
+            (true, None) | (false, Some(1..=365))
+        )
         || input.library_ids.is_empty()
         || input.library_ids.len() > 100
     {
@@ -99,7 +104,9 @@ async fn create(
         .fetch_one(&mut *tx)
         .await
         .map_err(database)?;
-    query("INSERT INTO api_keys(id,name,user_id,token_hash,created_at,expires_at,scope) VALUES(?,?,?,?,?,?,'catalog:read')").bind(&id).bind(name).bind(&input.user_id).bind(hash(&token)).bind(now).bind(now+input.expires_in_days*86400).execute(&mut *tx).await.map_err(database)?;
+    // Zero is the persisted no-expiration sentinel; never infer it from an omitted duration.
+    let expires = input.expires_in_days.map_or(0, |days| now + days * 86400);
+    query("INSERT INTO api_keys(id,name,user_id,token_hash,created_at,expires_at,scope) VALUES(?,?,?,?,?,?,'catalog:read')").bind(&id).bind(name).bind(&input.user_id).bind(hash(&token)).bind(now).bind(expires).execute(&mut *tx).await.map_err(database)?;
     for lib in input.library_ids {
         query(
             "INSERT INTO api_key_libraries(key_id,library_id) VALUES(?,?) ON CONFLICT DO NOTHING",
@@ -114,7 +121,7 @@ async fn create(
     Ok((
         StatusCode::CREATED,
         Json(
-            json!({"id":id,"token":token.as_str(),"expiresAt":now+input.expires_in_days*86400,"scope":"catalog:read"}),
+            json!({"id":id,"token":token.as_str(),"expiresAt":if expires == 0 { None } else { Some(expires) },"scope":"catalog:read"}),
         ),
     ))
 }
@@ -170,7 +177,7 @@ async fn catalog(
     }
     // Credential, owner and permissions are read from one live snapshot, every request.
     let mut tx = auth.store.pool.begin().await.map_err(database)?;
-    let credential:Option<(String,String,String)>=query_as("SELECT k.id,k.user_id,u.role FROM api_keys k JOIN users u ON u.id=k.user_id WHERE k.token_hash=? AND k.scope='catalog:read' AND k.revoked_at IS NULL AND k.expires_at>unixepoch() AND u.disabled_at IS NULL").bind(hash(token)).fetch_optional(&mut *tx).await.map_err(database)?;
+    let credential:Option<(String,String,String)>=query_as("SELECT k.id,k.user_id,u.role FROM api_keys k JOIN users u ON u.id=k.user_id WHERE k.token_hash=? AND k.scope='catalog:read' AND k.revoked_at IS NULL AND (k.expires_at=0 OR k.expires_at>unixepoch()) AND u.disabled_at IS NULL").bind(hash(token)).fetch_optional(&mut *tx).await.map_err(database)?;
     let (key, user, role) = credential.ok_or(StatusCode::UNAUTHORIZED)?;
     let sql = format!(
         "SELECT w.id,w.library_id,w.title,w.kind,w.year FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id JOIN api_key_libraries kl ON kl.library_id=l.id AND kl.key_id=? WHERE l.enabled=1 AND n.status!='revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND {} ORDER BY w.title_sort,w.id LIMIT ? OFFSET ?",

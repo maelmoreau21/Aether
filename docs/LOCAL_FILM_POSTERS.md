@@ -1,5 +1,23 @@
 # Affiches locales Films — P1
 
+## Chargement initial — 20 octobre 2026
+
+L’accueil affiche chaque rayon dès que sa requête catalogue répond, puis charge
+ses images sans attendre l’autre type de média. Une indication signale le rayon
+encore en cours ; une panne partielle conserve les résultats disponibles.
+Les six premières affiches du premier rayon et des grilles sont chargées
+immédiatement avec priorité haute ; les suivantes restent différées. Le bandeau
+et les cartes suivent l’URL effectivement chargée, sans réinitialisation tardive
+de leur visibilité après une réponse du cache navigateur.
+
+Le test navigateur `browser_posters` retient volontairement la réponse Séries
+et exige une affiche Film décodée et visible avant de la libérer, à 390 et
+1440 pixels. Ce scénario valide la suppression d’une attente côté interface.
+Il ne mesure pas les cinq secondes signalées sur l’installation personnelle.
+Les originaux restent servis sans réduction de dimensions ; le poids des images,
+le stockage NAS et le réseau peuvent encore dominer le premier chargement.
+Les contrôles session, bibliothèque et cache conditionnel restent appliqués.
+
 Le Node détecte les affiches sans écrire dans les bibliothèques ni appeler une API
 externe. Le Core conserve les associations et contrôle les accès. Aucun changement
 de lecteur, miniature, conversion ou illustration autre qu’une affiche.

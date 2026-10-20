@@ -202,6 +202,20 @@ async fn group_membership_grants_live_permissions_without_roles_or_loss_of_direc
     .await;
     assert_eq!(response.status(), StatusCode::CREATED);
     let id = body(response).await["id"].as_str().unwrap().to_owned();
+    let listing = req(
+        &app,
+        "/api/v1/admin/groups",
+        "GET",
+        &cookie,
+        "",
+        "",
+        json!(null),
+    )
+    .await;
+    assert_eq!(listing.status(), StatusCode::OK);
+    let listing = body(listing).await;
+    assert_eq!(listing["groups"][0]["id"], id);
+    assert_eq!(listing["groups"][0]["isDefault"], false);
     assert_eq!(
         req(
             &app,
@@ -285,6 +299,18 @@ async fn group_membership_grants_live_permissions_without_roles_or_loss_of_direc
         .status(),
         StatusCode::OK
     );
+    let listing = req(
+        &app,
+        "/api/v1/admin/groups",
+        "GET",
+        &cookie,
+        "",
+        "",
+        json!(null),
+    )
+    .await;
+    assert_eq!(listing.status(), StatusCode::OK);
+    assert_eq!(body(listing).await["groups"][0]["isDefault"], true);
     assert_eq!(
         req(
             &app,
@@ -348,6 +374,99 @@ async fn group_membership_grants_live_permissions_without_roles_or_loss_of_direc
         StatusCode::BAD_REQUEST
     );
 }
+#[tokio::test]
+async fn non_expiring_keys_require_explicit_choice_and_remain_revocable() {
+    let (_dir, store, app, cookie, csrf, user, _viewer) = setup().await;
+    query("INSERT INTO library_permissions(library_id,user_id) VALUES('first',?)")
+        .bind(&user)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    for expiry in [
+        json!({}),
+        json!({"expiresInDays":null}),
+        json!({"expiresInDays":0}),
+        json!({"expiresInDays":366}),
+        json!({"neverExpires":true,"expiresInDays":30}),
+    ] {
+        let mut input = json!({"name":"Integration","userId":user,"libraryIds":["first"]});
+        input
+            .as_object_mut()
+            .unwrap()
+            .extend(expiry.as_object().unwrap().clone());
+        assert_eq!(
+            req(
+                &app,
+                "/api/v1/admin/api-keys",
+                "POST",
+                &cookie,
+                &csrf,
+                "",
+                input
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let created = req(&app,"/api/v1/admin/api-keys","POST",&cookie,&csrf,"",
+        json!({"name":"Integration","userId":user,"libraryIds":["first"],"neverExpires":true,"expiresInDays":null})).await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let key = body(created).await;
+    assert!(key["expiresAt"].is_null());
+    let token = key["token"].as_str().unwrap();
+    assert_eq!(
+        req(
+            &app,
+            "/api/v1/integrations/catalog",
+            "GET",
+            "",
+            "",
+            token,
+            json!(null)
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    let listed = body(
+        req(
+            &app,
+            "/api/v1/admin/api-keys",
+            "GET",
+            &cookie,
+            "",
+            "",
+            json!(null),
+        )
+        .await,
+    )
+    .await;
+    assert!(listed["keys"][0]["expiresAt"].is_null());
+    assert!(!listed.to_string().contains(token));
+    let path = format!("/api/v1/admin/api-keys/{}", key["id"].as_str().unwrap());
+    assert_eq!(
+        req(&app, &path, "DELETE", &cookie, &csrf, "", json!(null))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        req(
+            &app,
+            "/api/v1/integrations/catalog",
+            "GET",
+            "",
+            "",
+            token,
+            json!(null)
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
+
 #[tokio::test]
 async fn integration_keys_are_scoped_hashed_live_and_never_administrator_sessions() {
     let (_dir, store, app, cookie, csrf, user, viewer) = setup().await;

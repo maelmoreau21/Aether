@@ -4,14 +4,14 @@
   import type { AuthUser } from '../auth/session';
   import type { Library } from './types';
   let { users, libraries }: { users: AuthUser[]; libraries: Library[] } = $props();
-  interface Key { id: string; name: string; userId: string; expiresAt: number; revokedAt: number | null; libraryIds: string[] }
+  interface Key { id: string; name: string; userId: string; expiresAt: number | null; revokedAt: number | null; libraryIds: string[] }
   let keys = $state<Key[]>([]); let name = $state(''); let userId = $state(''); let libraryIds = $state<string[]>([]);
-  let days = $state(30); let token = $state(''); let busy = $state(false); let error = $state(''); let loaded = $state(false);
+  let days = $state(30); let neverExpires = $state(false); let token = $state(''); let busy = $state(false); let error = $state(''); let loaded = $state(false);
   async function load() { try { keys = (await adminRequest<{ keys: Key[] }>('/api/v1/admin/api-keys')).keys; loaded = true; } catch (e) { error = e instanceof Error ? e.message : 'Chargement impossible.'; } }
   onMount(() => { void load(); });
   async function create(event: SubmitEvent) {
     event.preventDefault(); if (busy) return; busy = true; error = ''; token = '';
-    try { const result = await adminRequest<{ token: string }>('/api/v1/admin/api-keys', { method:'POST', body:JSON.stringify({ name, userId, libraryIds, expiresInDays: days }) }); token = result.token; name = ''; libraryIds = []; await load(); }
+    try { const result = await adminRequest<{ token: string }>('/api/v1/admin/api-keys', { method:'POST', body:JSON.stringify({ name, userId, libraryIds, expiresInDays: neverExpires ? null : days, neverExpires }) }); token = result.token; name = ''; libraryIds = []; await load(); }
     catch (e) { error = e instanceof Error ? e.message : 'Création impossible.'; } finally { busy = false; }
   }
   async function revoke(key: Key) {
@@ -23,17 +23,19 @@
 
 <section id="api-keys-section" aria-labelledby="api-keys-heading">
   <h2 id="api-keys-heading">Clés API</h2>
-  <p>Accès en lecture au catalogue pour vos intégrations. Chaque clé expire et reste limitée aux bibliothèques sélectionnées et aux droits actuels de son propriétaire.</p>
+  <p>Accès en lecture au catalogue pour vos intégrations. Choisissez une durée ou « Sans expiration ». Chaque clé reste révocable et limitée aux bibliothèques sélectionnées et aux droits actuels de son propriétaire.</p>
   <p>Portée <code>catalog:read</code> · endpoint <code>GET /api/v1/integrations/catalog</code> · authentification <code>Authorization: Bearer …</code>. Aucun accès aux sauvegardes, à l’administration ou aux flux vidéo.</p>
   {#if error}<p role="alert">{error}</p><button onclick={load}>Réessayer</button>{/if}
   {#if token}<aside role="status"><strong>Copiez cette clé maintenant : elle ne sera plus affichée.</strong><textarea readonly aria-label="Nouvelle clé API" value={token}></textarea><button onclick={() => token = ''}>Masquer la clé</button></aside>{/if}
   {#if !loaded}<p role="status">Chargement des clés…</p>{/if}
-  <div class="keys">{#each keys as key (key.id)}<article><div><h3>{key.name}</h3><p>{users.find(u => u.id === key.userId)?.login ?? 'Compte désactivé'} · {key.libraryIds.length} bibliothèque(s) · expire le {new Date(key.expiresAt * 1000).toLocaleDateString()}</p><span>{key.revokedAt ? 'Révoquée' : key.expiresAt * 1000 <= Date.now() ? 'Expirée' : 'Active'}</span></div><button disabled={busy || !!key.revokedAt} onclick={() => revoke(key)}>Révoquer</button></article>{:else}{#if loaded}<p>Aucune clé API.</p>{/if}{/each}</div>
+  <div class="keys">{#each keys as key (key.id)}<article><div><h3>{key.name}</h3><p>{users.find(u => u.id === key.userId)?.login ?? 'Compte désactivé'} · {key.libraryIds.length} bibliothèque(s) · {key.expiresAt === null ? 'Sans expiration' : `expire le ${new Date(key.expiresAt * 1000).toLocaleDateString()}`}</p><span>{key.revokedAt ? 'Révoquée' : key.expiresAt !== null && key.expiresAt * 1000 <= Date.now() ? 'Expirée' : 'Active'}</span></div><button disabled={busy || !!key.revokedAt} onclick={() => revoke(key)}>Révoquer</button></article>{:else}{#if loaded}<p>Aucune clé API.</p>{/if}{/each}</div>
   <form onsubmit={create}>
     <h3>Créer une clé</h3>
     <label>Nom <input required maxlength="80" bind:value={name} disabled={busy} /></label>
     <label>Propriétaire <select required bind:value={userId} disabled={busy}><option value="">Choisir un compte</option>{#each users.filter(user => user.disabledAt == null) as user (user.id)}<option value={user.id}>{user.displayName || user.login}</option>{/each}</select></label>
-    <label>Expiration en jours <input type="number" min="1" max="365" required bind:value={days} disabled={busy} /></label>
+    <label><input type="checkbox" bind:checked={neverExpires} disabled={busy} /> Sans expiration (jusqu’à révocation)</label>
+    <p>Une clé sans expiration reste révocable. Ce choix ne supprime ni les limites de portée ni celles d’un service externe.</p>
+    <label>Expiration en jours <input type="number" min="1" max="365" required={!neverExpires} bind:value={days} disabled={busy || neverExpires} /></label>
     <fieldset disabled={busy}><legend>Bibliothèques (droits vérifiés par le serveur)</legend>{#each libraries.filter(l => l.enabled) as library (library.id)}<label><input type="checkbox" value={library.id} bind:group={libraryIds} /> {library.name}</label>{/each}</fieldset>
     <button type="submit" disabled={busy || !libraryIds.length}>{busy ? 'Création…' : 'Créer la clé'}</button>
   </form>

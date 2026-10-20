@@ -113,6 +113,31 @@ fn generic_abi_does_not_require_a_metadata_payload() {
 }
 
 #[test]
+fn sandbox_bounds_recursion_separately_from_value_stack_bytes() {
+    use media_poc::extension_runtime::{Invocation, execute};
+    let wasm = |depth: u32| {
+        wat::parse_str(format!(
+            r#"(module
+        (memory (export "memory") 1)
+        (data (i32.const 4096) "{{\22apiVersion\22:1,\22result\22:{{}}}}")
+        (func (export "media_alloc") (param i32) (result i32) i32.const 1024)
+        (func $recur (param $n i32) (result i32)
+            local.get $n i32.eqz if (result i32) i32.const 0 else
+            local.get $n i32.const 1 i32.sub call $recur i32.const 1 i32.add end)
+        (func (export "media_run") (param i32 i32) (result i64)
+            i32.const {depth} call $recur drop i64.const {}))"#,
+            (4096u64 << 32) | r#"{"apiVersion":1,"result":{}}"#.len() as u64
+        ))
+        .unwrap()
+    };
+    assert!(execute(Invocation::new(STANDARD.encode(wasm(16)), input())).is_ok());
+    assert_eq!(
+        execute(Invocation::new(STANDARD.encode(wasm(2000)), input())).unwrap_err(),
+        "execution_trapped"
+    );
+}
+
+#[test]
 fn sandbox_denies_imports_cpu_memory_invalid_pointers_and_output() {
     use media_poc::extension_runtime::{Invocation, execute};
     let run = |wasm: Vec<u8>| execute(Invocation::new(STANDARD.encode(wasm), input()));
@@ -818,6 +843,23 @@ fn real_tmdb_wasm_executes_in_aether_runtime() {
     assert_eq!(output.result["id"], "tmdb");
     assert_eq!(output.result["provider"], "tmdb");
     assert_eq!(output.result["capabilities"][0], "search");
+
+    // A synthetic key supplied through the real settings wire format must get
+    // past provider key validation. The broker rejects localhost before I/O.
+    let configured = execute(Invocation {
+        wasm: STANDARD.encode(&bytes),
+        input: ExtensionRequest {
+            api_version: 1,
+            operation: "metadata.propose".into(),
+            input: json!({"title":"Synthetic fixture", "config": {
+                "api_key":"synthetic-test-key", "base_url":"https://localhost/3", "language":"en-US"
+            }}),
+        },
+        allowed_hosts: vec!["api.themoviedb.org".into()],
+        auth_headers: Default::default(),
+    })
+    .unwrap();
+    assert_eq!(configured.result["error"], "host_forbidden");
 }
 
 #[test]

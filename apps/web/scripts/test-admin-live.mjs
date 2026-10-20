@@ -1,9 +1,12 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
 const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !process.env.MEDIA_TEST_ROOT) throw new Error('Use the Rust browser_admin harness.');
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
+const evidence = process.env.MEDIA_REPORT_DIR || '../../docs/evidence/2026-10-20/admin-local';
+mkdirSync(evidence, {recursive:true});
 try {
   const page = await browser.newPage();
   const errors = [];
@@ -22,18 +25,35 @@ try {
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
   await page.goto(`${origin}/app/admin/libraries/#users-section`);
   const accounts = page.locator('#users-section');
+  await accounts.getByRole('button', { name: '+ Créer un compte local', exact: true }).click();
   await accounts.getByLabel('Identifiant', { exact: true }).fill('browser-viewer');
   await accounts.getByLabel('Nom affiché', { exact: true }).fill('Compte de test');
   await accounts.getByLabel('Mot de passe (15 à 128 caractères)', { exact: true }).fill('disposable viewer account secret');
   await accounts.getByRole('button', { name: 'Créer le compte', exact: true }).click();
-  await accounts.getByRole('row').filter({ hasText: 'browser-viewer' }).waitFor();
+  await accounts.getByRole('button', { name: 'Modifier Compte de test', exact: true }).waitFor();
+  await page.evaluate(() => window.scrollTo(0,0));
+  await page.screenshot({path:`${evidence}/users-desktop.png`,fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  await page.evaluate(() => window.scrollTo(0,0));
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),true);
+  await page.screenshot({path:`${evidence}/users-mobile.png`,fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
+  await accounts.getByRole('button', { name: 'Modifier Compte de test', exact: true }).click();
+  await accounts.getByRole('button', { name: 'Accès', exact: true }).click();
+  await page.screenshot({path:`${evidence}/user-access.png`,fullPage:true});
+  await accounts.getByLabel('Bibliothèque autorisée : Films de test', { exact: true }).check();
+  await accounts.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await accounts.getByRole('button', { name: 'Modifier Compte de test', exact: true }).waitFor();
   await page.locator('.admin-sidebar a[href$="#groups-section"]').click();
   const groups = page.locator('#groups-section');
   await groups.getByLabel('Nom', { exact: true }).fill('Famille de test');
   await groups.getByLabel('Membre : Compte de test', { exact: true }).check();
   await groups.getByLabel('Bibliothèque autorisée : Films de test', { exact: true }).check();
+  const groupCreated = page.waitForResponse(r => r.url().endsWith('/admin/groups') && r.request().method() === 'POST');
   await groups.getByRole('button', { name: 'Enregistrer', exact: true }).click();
-  await groups.getByRole('heading', { name: 'Famille de test' }).waitFor();
+  const groupResponse = await groupCreated;
+  assert.equal(groupResponse.status(),201,await groupResponse.text());
+  await groups.getByRole('heading', { name: 'Famille de test' }).waitFor({timeout:5000}).catch(async error => {console.log(await groups.innerText());throw error;});
   await page.locator('.admin-sidebar a[href$="#tasks-section"]').click();
   const tasks = page.locator('#tasks-section');
   await tasks.getByRole('link', { name: 'Configurer Indexer Films de test' }).click();
@@ -53,11 +73,13 @@ try {
   const users = await (await page.request.get(`${origin}/api/v1/admin/users`)).json();
   const viewer = users.users.find(user => user.login === 'browser-viewer');
   await keys.getByLabel('Propriétaire').selectOption(viewer.id);
+  await keys.getByLabel('Sans expiration (jusqu’à révocation)', {exact:true}).check();
   await keys.getByLabel('Films de test', { exact: true }).check();
   await keys.getByRole('button', { name: 'Créer la clé', exact: true }).click();
   const tokenBox = keys.getByLabel('Nouvelle clé API', { exact: true });
   await tokenBox.waitFor();
   const token = await tokenBox.inputValue();
+  assert.equal((await (await page.request.get(`${origin}/api/v1/admin/api-keys`)).json()).keys[0].expiresAt, null);
   const integration = await page.request.get(`${origin}/api/v1/integrations/catalog`, { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(integration.status(), 200);
   await keys.getByRole('button', { name: 'Masquer la clé' }).click();
@@ -65,6 +87,16 @@ try {
   await keys.getByRole('button', { name: 'Révoquer', exact: true }).click();
   await keys.getByText('Révoquée', { exact: true }).waitFor();
   assert.equal((await page.request.get(`${origin}/api/v1/integrations/catalog`, { headers: { Authorization: `Bearer ${token}` } })).status(), 401);
+  await page.locator('.admin-sidebar a[href$="#general-section"]').click();
+  const general = page.locator('#general-section');
+  await general.getByLabel('Texte du bouton de connexion SSO', {exact:true}).fill('Connexion avec mon compte');
+  const settingsSaved = page.waitForResponse(r => r.url().endsWith('/admin/settings') && r.request().method() === 'PUT');
+  await general.getByRole('button', {name:'Enregistrer',exact:true}).click();
+  assert.equal((await settingsSaved).status(),204);
+  await page.reload();
+  await page.waitForFunction(() => [...document.querySelectorAll('input')].some(input => input.value === 'Connexion avec mon compte'));
+  assert.equal(await general.getByLabel('Texte du bouton de connexion SSO', {exact:true}).inputValue(),'Connexion avec mon compte');
+  assert.equal((await (await page.request.get(`${origin}/api/v1/auth/oidc/status`)).json()).buttonLabel,'Connexion avec mon compte');
   await page.locator('.admin-sidebar a[href$="#backups-section"]').click();
   const backups = page.locator('#backups-section');
   await backups.getByRole('heading', { name: 'Sauvegardes et base de données' }).waitFor();
@@ -83,9 +115,9 @@ try {
   await page.locator('.admin-sidebar a[href$="#groups-section"]').click();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.screenshot({ path: '../../docs/evidence/admin-live-mobile.png', fullPage: true });
+  await page.screenshot({ path: `${evidence}/groups-mobile.png`, fullPage: true });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.screenshot({ path: '../../docs/evidence/admin-live-desktop.png', fullPage: true });
+  await page.screenshot({ path: `${evidence}/groups-desktop.png`, fullPage: true });
   await page.goto(`${origin}/app/admin/libraries/#tasks-section?task=backup`);
   await page.getByRole('button', { name: 'Modifier le déclencheur' }).click();
   await page.getByRole('dialog').getByLabel('Toutes les', { exact: true }).fill('2');
@@ -123,9 +155,13 @@ try {
   await page.getByLabel('Image de profil', { exact: true }).setInputFiles({ name: 'fixture.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
   await page.getByText('Image de profil enregistrée.', { exact: true }).waitFor();
   await page.waitForFunction(() => document.querySelector('.profile-header-row img')?.naturalWidth === 256);
-  await page.screenshot({ path: '../../docs/evidence/2026-10-19/settings-expanded/account-real.png', fullPage: true });
+  await page.screenshot({ path: `${evidence}/account-real.png`, fullPage: true });
   await page.reload(); await page.waitForFunction(() => document.querySelector('.profile-header-row img')?.naturalWidth === 256);
   const avatarRead = await page.request.get(`${origin}/api/v1/account/avatar`); assert.equal(avatarRead.status(), 200); assert.equal(avatarRead.headers()['content-type'], 'image/png');
+  await page.goto(`${origin}/app/admin/libraries/#users-section`);
+  await page.waitForFunction(() => [...document.querySelectorAll('#users-section .user-avatar img')].some(img => img.naturalWidth === 256));
+  await page.screenshot({path:`${evidence}/users-avatar.png`,fullPage:true});
+  await page.goto(`${origin}/app/settings/#account`);
   await page.getByRole('button', { name: 'Retirer l’image', exact: true }).click();
   await page.getByText('Image de profil supprimée.', { exact: true }).waitFor();
   assert.equal((await page.request.get(`${origin}/api/v1/account/avatar`)).status(), 404);
@@ -133,7 +169,7 @@ try {
   await page.getByLabel('Actions Films de test', { exact: true }).click();
   await page.getByRole('button', { name: 'Actualiser la médiathèque', exact: true }).click();
   await page.getByLabel('Mode d’actualisation', { exact: true }).selectOption('full');
-  await page.screenshot({ path: '../../docs/evidence/2026-10-19/settings-expanded/refresh-real.png', fullPage: true });
+  await page.screenshot({ path: `${evidence}/refresh-real.png`, fullPage: true });
   await page.getByRole('dialog').getByRole('button', { name: 'Actualiser', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
   await page.locator('.scan-status').getByText(/Terminé/).waitFor();
@@ -146,5 +182,6 @@ try {
   assert.equal((await (await page.request.get(`${origin}/api/v1/admin/libraries`)).json()).libraries.find(l => l.id === libraryId).name, 'Films renommés');
 
   assert.deepEqual(errors, []);
+  writeFileSync(`${evidence}/report.json`, JSON.stringify({passed:true,browser:browser.version(),platform:process.platform,backend:'real Core / temporary SQLite',checks:['user creation and library permissions','admin avatar decoded','non-expiring API key and revocation','persisted SSO label','groups','schedules','scans','encrypted backups','preferences','responsive layout'],jsErrors:errors},null,2));
   console.log('Real Core/SQLite administration browser flow passed: account, group, schedule, scan, key creation/revocation, task trigger deletion, backup task actions, persisted playback offsets, general settings/network, normalized avatar persistence/removal, full refresh dialog, responsive and JS checks.');
 } finally { await browser.close(); }

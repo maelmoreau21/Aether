@@ -62,8 +62,8 @@
       viewAllHref={resolve('films/')}
       viewAllLabel="Tout voir →"
     >
-      {#each films as work (work.id)}
-        <Poster {work} href={detailUrl(work)} />
+      {#each films as work, index (work.id)}
+        <Poster {work} href={detailUrl(work)} eager={index < 6} />
       {/each}
     </MediaShelf>
   {/if}
@@ -76,8 +76,8 @@
       viewAllHref={resolve('series/')}
       viewAllLabel="Tout voir →"
     >
-      {#each series as work (work.id)}
-        <Poster {work} href={detailUrl(work)} />
+      {#each series as work, index (work.id)}
+        <Poster {work} href={detailUrl(work)} eager={films.length === 0 && index < 6} />
       {/each}
     </MediaShelf>
   {/if}

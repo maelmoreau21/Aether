@@ -6,7 +6,7 @@ if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('iso
 const phase = process.env.MEDIA_TEST_PHASE || 'initial';
 const expectedTitle = 'NFO Film & <img src=x onerror=alert(1)>';
 const expectedSynopsis = 'Texte & <script>alert(1)</script>';
-const out = 'docs/evidence/2026-10-16/posters';
+const out = process.env.MEDIA_REPORT_DIR || 'docs/evidence/2026-10-16/posters';
 fs.mkdirSync(out, {recursive:true});
 (async () => {
   const browser = await chromium.launch({channel:'chrome', headless:true});
@@ -28,6 +28,7 @@ fs.mkdirSync(out, {recursive:true});
       if (phase === 'initial') {
         await page.getByRole('button',{name:'Ajouter une médiathèque',exact:true}).click();
         await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
+        await page.getByLabel('Racine autorisée sur le Node',{exact:true}).selectOption({index:1});
         await page.getByRole('dialog').getByRole('button',{name:'Enregistrer',exact:true}).click();
         await page.getByRole('heading',{name:'Films scanner navigateur',exact:true}).waitFor();
       }
@@ -51,6 +52,53 @@ fs.mkdirSync(out, {recursive:true});
       if (phase === 'initial') await runScan();
       await article.getByText(/Scan : .*0 analys.*2 r.utilis/).waitFor({timeout:60000});
       report.results.incrementalWithoutVideoProbe=true;
+    }
+    if (phase === 'initial') {
+      report.results.progressiveImages = [];
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({width, height:900});
+        let release;
+        let held = false;
+        const gate = new Promise(resolve => { release = resolve; });
+        const handler = async route => {
+          if (new URL(route.request().url()).searchParams.get('kind') === 'series') {
+            held = true;
+            await gate;
+          }
+          await route.continue();
+        };
+        await page.route('**/api/v1/catalog?*', handler);
+        const start = performance.now();
+        try {
+          await page.goto(origin+'/app/');
+          await page.waitForFunction(() => {
+            const img = document.querySelector('a.media-card img.poster-image');
+            return img?.complete && img.naturalWidth > 0 && Number(getComputedStyle(img).opacity) === 1;
+          });
+          assert.equal(held, true, 'Series request must still be pending when film poster is visible');
+          await page.getByText('Chargement du reste du catalogue…', {exact:true}).waitFor();
+          assert.equal(await page.locator('a.media-card img.poster-image').first().getAttribute('loading'), 'eager');
+          report.results.progressiveImages.push({width, firstPosterMs:Math.round(performance.now()-start), slowerShelfStillPending:true});
+          await page.screenshot({path:`${out}/progressive-${width}.png`,fullPage:true});
+        } finally {
+          release();
+          await page.unrouteAll({behavior:'wait'});
+        }
+        await page.getByText('Chargement du reste du catalogue…', {exact:true}).waitFor({state:'hidden'});
+      }
+      await page.setViewportSize({width:1440,height:900});
+      const failSeries = async route => {
+        if (new URL(route.request().url()).searchParams.get('kind') === 'series') {
+          await route.fulfill({status:503,contentType:'application/json',body:'{"error":"synthetic_unavailable"}'});
+        } else await route.continue();
+      };
+      await page.route('**/api/v1/catalog?*',failSeries);
+      try {
+        await page.goto(origin+'/app/');
+        await page.getByText('Une partie du catalogue est indisponible. Rechargez la page pour réessayer.',{exact:true}).waitFor();
+        await page.locator('a.media-card').filter({hasText:expectedTitle}).waitFor();
+        report.results.partialCatalogueFailureKeepsFilms = true;
+      } finally { await page.unrouteAll({behavior:'wait'}); }
     }
     for (const route of ['/app/','/app/search/?q='+encodeURIComponent(expectedTitle),'/app/films/']) {
       await page.goto(origin+route);
@@ -76,7 +124,7 @@ fs.mkdirSync(out, {recursive:true});
     } else {
       await poster.scrollIntoViewIfNeeded();
       await page.waitForFunction(() => {const img=document.querySelector('a.media-card img.poster-image');return img?.complete && img.naturalWidth > 0;});
-      assert.equal(await poster.getAttribute('loading'),'lazy');
+      assert.equal(await poster.getAttribute('loading'),'eager');
       const imageUrl=await poster.getAttribute('src');
       assert.equal(await poster.evaluate(img=>img.naturalWidth),phase==='update'?3:2);
       if(phase==='initial') fs.writeFileSync(out+'/initial-image-url.txt',imageUrl);
@@ -86,7 +134,7 @@ fs.mkdirSync(out, {recursive:true});
       assert.equal(response.status(),200);
       assert.equal(response.headers()['content-type'],'image/png');
       assert.equal(response.headers()['x-content-type-options'],'nosniff');
-      assert.match(response.headers()['cache-control'],/no-store/);
+      assert.match(response.headers()['cache-control'],/private, no-cache/);
       assert.equal((await context.request.head(origin+imageUrl)).status(),200);
       const anonymous=await browser.newContext();
       assert.equal((await anonymous.request.get(origin+imageUrl)).status(),401);
@@ -104,13 +152,13 @@ fs.mkdirSync(out, {recursive:true});
     await page.getByRole('heading',{name:expectedTitle,exact:true}).waitFor();
     {
       assert.equal(await page.locator('.synopsis').textContent(),expectedSynopsis);
-      assert.match(await page.locator('.genres').textContent(),/Drame/);
-      assert.match(await page.locator('.detail .metadata').first().textContent(),/2025/);
-      assert.equal(await page.locator('.detail-copy script').count(),0);
+      assert.match(await page.locator('.film-detail-view .genres-row').textContent(),/Drame/);
+      assert.match(await page.locator('.detail-info-column .badge-row').textContent(),/2025/);
+      assert.equal(await page.locator('.detail-info-column script').count(),0);
     }
     if (phase !== 'delete') {
-      await page.locator('.detail img').first().waitFor();
-      await page.waitForFunction(width=>{const img=document.querySelector('.detail img');return img?.complete && img.naturalWidth===width;},phase==='update'?3:2);
+      await page.locator('.detail-poster-column img.poster-image').waitFor();
+      await page.waitForFunction(width=>{const img=document.querySelector('.detail-poster-column img.poster-image');return img?.complete && img.naturalWidth===width;},phase==='update'?3:2);
     }
     await page.screenshot({path:`${out}/detail-${phase}.png`});
     await page.getByRole('button',{name:'Sélectionner la version MP4',exact:true}).click();

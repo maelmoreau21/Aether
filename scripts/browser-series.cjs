@@ -46,8 +46,9 @@ fs.mkdirSync(out, {recursive: true});
 
     // Grant library access directly on series-user-b in Users section
     await page.locator('a[href="#users-section"]').click();
-    const userRow = page.locator('tr').filter({hasText: 'series-user-b'});
-    await userRow.getByRole('button', {name: 'Modifier'}).click();
+    const accounts = page.locator('#users-section');
+    await accounts.getByRole('button', {name: 'Modifier series-user-b', exact: true}).click();
+    await accounts.getByRole('button', {name: 'Accès', exact: true}).click();
     await page.locator('#users-section').getByLabel('Bibliothèque autorisée : Séries Navigateur').check();
     await page.locator('#users-section').getByRole('button', {name: 'Enregistrer', exact: true}).click();
     await page.getByText('Compte enregistré').waitFor();

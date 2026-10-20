@@ -11,6 +11,7 @@
   let password = $state('');
   let ssoEnabled = $state(false);
   let ssoProvider = $state('SSO');
+  let ssoButtonLabel = $state('Se connecter avec SSO');
   let localLoginEnabled = $state(true);
   let needsBootstrap = $state(false);
   let busy = $state(false);
@@ -162,6 +163,9 @@
       .then(r => r.ok ? r.json() : { enabled: false })
       .then(data => {
         ssoEnabled = data.enabled === true;
+        if (typeof data.buttonLabel === 'string' && data.buttonLabel.trim()) {
+          ssoButtonLabel = data.buttonLabel;
+        }
         if (data.provider && typeof data.provider === 'string') {
           ssoProvider = data.provider;
         }
@@ -351,11 +355,11 @@
               class="btn-sso"
               onclick={sso}
               disabled={busy}
-              aria-label="Se connecter avec SSO"
+              aria-label={ssoButtonLabel}
             >
               <span class="btn-sso-left">
                 <span class="sso-icon"><Icon name="shield" size={20} /></span>
-                <span class="btn-sso-text">Se connecter avec SSO</span>
+                <span class="btn-sso-text">{ssoButtonLabel}</span>
               </span>
               <span class="btn-sso-right">
                 {#if ssoProvider && ssoProvider !== 'SSO'}

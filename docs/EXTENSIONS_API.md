@@ -11,8 +11,10 @@ contrat HTTP. SQLite reste le défaut; migrations PostgreSQL équivalentes.
 Le paquet est un objet JSON borné à 400 000 octets, sans archive à extraire :
 `manifest`, `publisherId`, `wasm` (Base64 standard), `sha256` (hex minuscule),
 `signature` (Ed25519, Base64 standard). Le manifeste Rust est dans
-`crates/extension-sdk/src/lib.rs`; tous les champs sont obligatoires et les champs
-inconnus sont refusés. Seule `permissions: ["metadata.read"]` est admise en v1.
+`crates/extension-sdk/src/lib.rs`; les champs d’identité sont obligatoires et les champs
+inconnus sont refusés. Les permissions reconnues sont `metadata.read`,
+`metadata.write`, `avatars`, `images` et `providers`. Un identifiant de permission
+ne crée pas à lui seul une opération métier dans l’interface.
 Les identifiants comportent 1–80 caractères ASCII minuscules, chiffres, `._-`.
 Version : trois composantes numériques. `apiVersion` doit valoir 1.
 
@@ -33,8 +35,10 @@ La conservation des résultats à la désinstallation est un choix explicite.
 
 ## ABI Rust/Wasm
 
-Compiler pour `wasm32-unknown-unknown`. Aucun import, accès WASI, réseau, disque,
-SQL, secret ou appel hôte. Exporter `memory`, `media_alloc(u32)->u32` et
+Compiler pour `wasm32-unknown-unknown`. Aucun accès WASI, disque ou SQL.
+Le seul import autorisé est `aether/aether_host_http`, pour le broker HTTPS
+contrôlé par le Core (hôtes autorisés par fournisseur, refus des adresses privées).
+Exporter `memory`, `media_alloc(u32)->u32` et
 `media_run(u32,u32)->u64`. Le SDK fournit la macro générique `extension!`.
 Le host écrit l'entrée JSON dans l'allocation puis appelle `media_run`.
 Le résultat encode le pointeur dans les 32 bits hauts et la longueur dans les
@@ -49,6 +53,14 @@ L’adaptateur actuellement raccordé est `metadata.propose` : entrée métier
 l'extension/version/digest, jamais une écriture automatique dans l'œuvre.
 Les chaînes sont affichées comme texte échappé, jamais HTML tiers.
 
+La configuration de l’installation est ajoutée dans `input.config`, uniquement
+sur le canal privé du worker. Les fournisseurs la lisent avec
+`ProviderConfig::from_extension_input`; les clés de formulaire `api_key` et
+`user_key` sont normalisées vers `apiKey` et `userKey`. Les secrets ne sont
+jamais incorporés au paquet signé. Le serveur stocke cette configuration dans
+la base applicative, accessible à l’administrateur ; cela ne constitue pas un
+coffre de secrets chiffrés autonome.
+
 ## Exécution et révocation
 
 Wasmi 2.0.0 dans un worker temporaire distinct du Core; aucun chargement natif
@@ -60,6 +72,10 @@ empreintes audio; ces opérations Node demandent leur propre contrat contrôlé.
 Limites fixes du premier runtime : module 256 Kio, entrée/sortie 32 Kio,
 une mémoire linéaire de 16 Mio, une table de 4096 éléments, 2 millions d'unités
 de fuel, délai maximal de 3 secondes et une invocation simultanée par Core.
+La pile de valeurs de l’interpréteur est bornée à 64 Kio et la profondeur
+d’appels à 128. Ces deux limites sont distinctes : Wasmi mesure la première
+en octets. L’ancienne valeur de 1 024 octets empêchait l’exécution du manifeste
+Rust/serde de TMDb (`call stack exhausted`).
 La compilation et l'interprétation du module se font dans le worker, jamais
 sur le chemin des requêtes de streaming. Les imports et fonctions start sont
 refusés. L'environnement du worker est vidé, stderr supprimé; il est arrêté
@@ -98,6 +114,10 @@ Un administrateur apporte le paquet signé d'un auteur tiers. Dans Administratio
 importer le paquet JSON, choisir les bibliothèques et activer. L'écran permet
 ensuite d'appeler les opérations métier réellement raccordées au Core.
 
+Pour un parcours Windows détaillé, voir [Installation locale](INSTALLATION_LOCALE.md)
+et le guide du dépôt voisin `Aether-Plugins`. Son script `Build-LocalPackage.ps1`
+compile le Wasm, convertit le manifeste fournisseur et crée le paquet signé.
+
 Pour l'auteur d'un paquet, l'outil de signature est générique :
 
 ```powershell
@@ -117,8 +137,11 @@ ne constitue pas encore une preuve de tâches exécutées sur un Node distant.
 
 ## Suite non livrée
 
-Catalogue officiel et dépôts personnalisés, mises à jour/rollback, schémas de
-configuration, hooks durables, traitements planifiés Node, I/O média contrôlées,
-stockage privé généralisé, broker réseau/secrets, traductions FR/EN complètes,
-Trickplay, Intro Skipper, fournisseurs externes et statistiques. Leur absence
+Catalogue officiel et dépôts personnalisés, mises à jour/rollback,
+hooks durables, traitements planifiés Node, I/O média contrôlées,
+stockage privé généralisé, coffre de secrets, traductions FR/EN complètes,
+Trickplay, Intro Skipper, récupération automatique et massive des affiches,
+parcours dédiés aux images fanart.tv/avatars et statistiques. TMDb et IMDb ont
+un premier parcours manuel de proposition ; leur fonctionnement sur un compte
+fournisseur réel reste à vérifier avec ses clés et conditions. Leur absence
 est signalée dans l'administration; le fonctionnement du serveur n'en dépend pas.

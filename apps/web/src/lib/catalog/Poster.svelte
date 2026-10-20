@@ -4,7 +4,7 @@
   import Icon from '../ui/Icon.svelte';
 
   let failedUrl = $state('');
-  let imageLoaded = $state(false);
+  let loadedUrl = $state('');
   let {
     work,
     href = '',
@@ -26,11 +26,6 @@
       : 0
   );
 
-  $effect(() => {
-    if (imageUrl) {
-      imageLoaded = false;
-    }
-  });
 </script>
 
 {#snippet posterBody()}
@@ -38,14 +33,15 @@
     {#if imageUrl}
       <img
         class="poster-image"
-        class:loaded={imageLoaded}
+        class:loaded={loadedUrl === imageUrl}
         src={imageUrl}
         alt={`Affiche de ${work.title}`}
         width="400"
         height="600"
         loading={eager ? 'eager' : 'lazy'}
+        fetchpriority={eager ? 'high' : 'auto'}
         decoding="async"
-        onload={() => { imageLoaded = true; }}
+        onload={() => { loadedUrl = imageUrl; }}
         onerror={() => { failedUrl = imageUrl; }}
       />
       <div class="poster-gradient" aria-hidden="true"></div>

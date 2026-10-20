@@ -2,11 +2,16 @@
 
 Parcours local dans la console : création de comptes locaux, modification du nom affiché et du rôle, désactivation/réactivation sans suppression, remplacement du mot de passe local. Les deux rôles restent `administrator` et `user`. Un nouveau compte n'obtient aucune bibliothèque implicitement. Les accès hérités de groupes sont signalés dans l'annuaire.
 
+L’annuaire présente une grille de comptes avec avatar personnel (ou initiales), rôle, type de connexion, état et nombre de bibliothèques actives accessibles. Une fiche séparée regroupe Profil, Accès, Contrôle parental et Mot de passe. Les droits directs restent distingués des droits hérités des groupes. La sélection de toutes les bibliothèques ne concerne que les bibliothèques actuelles ; elle n’accorde pas automatiquement les futures bibliothèques.
+
+La dernière activité est le maximum des `last_seen_at` des sessions encore conservées en base. Elle n’est pas un historique durable : après révocation ou nettoyage des sessions, elle peut redevenir indisponible. La grille n’invente aucune date en l’absence de session.
+
 ## Contrat
 
 Toutes les routes exigent une session administrateur. Toute mutation exige l'origine configurée et `x-csrf-token`. Corps JSON limités à 4 Kio, champs inconnus rejetés.
 
-- `GET /api/v1/admin/users` : `{users:[{id,login,role,displayName,sso,disabledAt}]}`, incluant les comptes désactivés.
+- `GET /api/v1/admin/users` : `{users:[{id,login,role,displayName,sso,disabledAt,lastSeenAt,hasAvatar}]}`, incluant les comptes désactivés.
+- `GET /api/v1/admin/users/{id}/avatar` : avatar PNG normalisé du compte ciblé, accès administrateur uniquement ; `404` en l’absence d’avatar, `private, no-store`, `nosniff`.
 - `POST /api/v1/admin/users` : `{login,password,role,displayName?}`, réponse `201 {id}`. Login local ASCII minuscule 3–64 caractères (lettres, chiffres, `.`, `_`, `-`), nom 128 caractères maximum, mot de passe 15–128 caractères et au plus 512 octets, sans contrôles. Aucun identifiant par défaut.
 - `PUT` ou `PATCH /api/v1/admin/users/{id}` : `{role,disabled,displayName?}` ; c'est une représentation complète des champs modifiables, réponse `204`.
 - `PUT /api/v1/admin/users/{id}/password` : `{password}`, `204`. Refuse les comptes sans credential local, sans leur en créer un. Les mots de passe SSO restent gérés par le fournisseur.

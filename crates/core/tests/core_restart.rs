@@ -109,7 +109,12 @@ async fn production_process_restart_keeps_session_and_logout_revokes_it() {
         .find(|v| v["id"] == "fixture-films")
         .unwrap()
         .clone();
-    library.as_object_mut().unwrap().remove("id");
+    if let Some(obj) = library.as_object_mut() {
+        obj.remove("id");
+        obj.remove("coverUrls");
+        obj.remove("imageKinds");
+        obj.remove("imageVersions");
+    }
     library["enabled"] = serde_json::json!(false);
     library["name"] = serde_json::json!("Restart library");
     let admin_headers = format!(

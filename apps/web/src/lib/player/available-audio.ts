@@ -11,7 +11,8 @@ export function audioChoices(media: Media, selectedId?: string): Source[] {
       ? source.tracks?.find(track => track.codec_type === 'audio')?.index : undefined;
     // The original default and the prepared form of that same indexed track
     // are packaging alternatives, not two language choices.
-    const key = firstAudio === undefined ? source.audioTrackId : `internal-${firstAudio}`;
+    const hasMultiple = media.sources.some(s => (s.tracks?.filter(t => t.codec_type === 'audio').length || 0) > 1);
+    const key = (!hasMultiple && firstAudio !== undefined) ? `internal-${firstAudio}` : source.audioTrackId;
     if (!choices.has(key) || source.audioTrackId === selectedId) choices.set(key, source);
   }
   return [...choices.values()];

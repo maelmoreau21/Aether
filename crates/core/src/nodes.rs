@@ -1960,6 +1960,12 @@ pub async fn relay_from_remote_node(
         return error(StatusCode::SERVICE_UNAVAILABLE, "node_revoked");
     }
 
+    // Only the response headers are bounded here; the media body remains streamed.
+    let head_wait = if path_and_query.contains("/prepared/") {
+        Duration::from_secs(125)
+    } else {
+        Duration::from_secs(6)
+    };
     let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(&rec.id);
     if is_channel_active || rec.base_url.is_none() {
         let is_image = path_and_query.contains("/image");
@@ -2047,7 +2053,7 @@ pub async fn relay_from_remote_node(
         }
 
         if sent {
-            match tokio::time::timeout(Duration::from_secs(15), rx).await {
+            match tokio::time::timeout(head_wait, rx).await {
                 Ok(Ok(stream_res)) => {
                     let head = request.method() == Method::HEAD;
                     let mut out = Response::new(if head { Body::empty() } else { stream_res.body });
@@ -2128,8 +2134,13 @@ pub async fn relay_from_remote_node(
         host.clone()
     };
 
-    let stream = match media_node::transport::connect(base_url).await {
-        Ok(s) => s,
+    let stream = match tokio::time::timeout(
+        Duration::from_secs(3),
+        media_node::transport::connect(base_url),
+    )
+    .await
+    {
+        Ok(Ok(s)) => s,
         _ => {
             let _ = crate::database::query(
                 "UPDATE media_nodes SET status='disconnected' WHERE id=? AND status != 'revoked'",
@@ -2194,18 +2205,19 @@ pub async fn relay_from_remote_node(
         Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "stream_error"),
     };
 
-    let upstream_res = match media_node::transport::send_request(&mut sender, upstream_req).await {
-        Ok(r) => r,
-        Err(_) => {
-            let _ = crate::database::query(
+    let upstream_res =
+        match tokio::time::timeout(head_wait, sender.send_request(upstream_req)).await {
+            Ok(Ok(r)) => r,
+            _ => {
+                let _ = crate::database::query(
                 "UPDATE media_nodes SET status='disconnected' WHERE id=? AND status != 'revoked'",
             )
             .bind(&rec.id)
             .execute(&store.pool)
             .await;
-            return error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
-        }
-    };
+                return error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
+            }
+        };
 
     let _ = crate::database::query(
         "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",

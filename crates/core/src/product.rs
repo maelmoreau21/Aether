@@ -9,7 +9,7 @@ use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
     http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::Response,
     routing::get,
 };
 use serde::Deserialize;
@@ -314,7 +314,7 @@ async fn upload_poster(
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
-    query("INSERT INTO work_posters(work_id,image_data) VALUES(?,?) ON CONFLICT(work_id) DO UPDATE SET image_data=excluded.image_data").bind(work).bind(image).execute(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    query("INSERT INTO work_posters(work_id,image_data,revision) VALUES(?,?,?) ON CONFLICT(work_id) DO UPDATE SET image_data=excluded.image_data,revision=excluded.revision").bind(work).bind(image).bind(uuid::Uuid::new_v4().to_string()).execute(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn remove_poster(
@@ -334,22 +334,10 @@ async fn poster(
     State(auth): State<AuthState>,
     headers: HeaderMap,
     Path(work): Path<String>,
+    axum::extract::Query(options): axum::extract::Query<crate::artwork::PreviewOptions>,
 ) -> Result<Response, Error> {
     crate::feedback::authorized(&auth, &headers, &work, false).await?;
-    let image: Vec<u8> = query_scalar("SELECT image_data FROM work_posters WHERE work_id=?")
-        .bind(work)
-        .fetch_optional(&auth.store.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
-    Ok((
-        [
-            (header::CONTENT_TYPE, "image/png"),
-            (header::CACHE_CONTROL, "private, no-store"),
-        ],
-        image,
-    )
-        .into_response())
+    crate::artwork::legacy(&auth.store, &work, options.width.unwrap_or(0), &headers).await
 }
 
 #[derive(Deserialize)]
@@ -609,22 +597,51 @@ async fn ungroup(
     Ok(StatusCode::NO_CONTENT)
 }
 pub async fn decorate(store: &IdentityStore, value: &mut Value) -> Result<(), sqlx::Error> {
-    let Some(id) = value["id"].as_str().map(str::to_owned) else {
+    decorate_many(store, std::slice::from_mut(value)).await
+}
+pub async fn decorate_many(store: &IdentityStore, values: &mut [Value]) -> Result<(), sqlx::Error> {
+    use sqlx::Execute;
+    let ids: Vec<String> = values
+        .iter()
+        .filter_map(|v| v["id"].as_str().map(str::to_owned))
+        .collect();
+    if ids.is_empty() {
         return Ok(());
-    };
-    let has_poster: i64 = query_scalar("SELECT COUNT(*) FROM work_posters WHERE work_id=?")
-        .bind(&id)
-        .fetch_one(&store.pool)
-        .await?;
-    if has_poster == 1 {
-        value["posterUrl"] = json!(format!("/api/v1/works/{id}/poster"));
     }
-    let group: Option<String> =
-        query_scalar("SELECT group_id FROM media_group_members WHERE work_id=?")
-            .bind(id)
-            .fetch_optional(&store.pool)
-            .await?;
-    value["globalMediaId"] = json!(group);
+    let images = crate::artwork::entries(store, &ids).await?;
+    let mut builder = sqlx::QueryBuilder::<sqlx::Any>::new(
+        "SELECT work_id,group_id FROM media_group_members WHERE work_id IN (",
+    );
+    let mut bind = builder.separated(",");
+    for id in &ids {
+        bind.push_bind(id);
+    }
+    bind.push_unseparated(")");
+    let sql = crate::database::normalize_sql(builder.sql().as_str());
+    let args = builder
+        .build()
+        .take_arguments()
+        .map_err(sqlx::Error::Encode)?
+        .unwrap_or_default();
+    let groups: Vec<(String, String)> = sqlx::query_as_with(sqlx::AssertSqlSafe(sql), args)
+        .fetch_all(&store.pool)
+        .await?;
+    for value in values {
+        let id = value["id"].as_str().unwrap_or_default().to_owned();
+        value["globalMediaId"] = json!(groups.iter().find(|g| g.0 == id).map(|g| &g.1));
+        let mut artwork = value["artwork"].as_object().cloned().unwrap_or_default();
+        for role in crate::artwork::ROLES {
+            artwork.remove(*role);
+        }
+        for image in images.iter().filter(|e| e.work_id == id) {
+            artwork
+                .entry(image.kind.clone())
+                .or_insert(json!(image.url));
+        }
+        value["posterUrl"] = artwork.get("poster").cloned().unwrap_or(Value::Null);
+        value["thumbUrl"] = artwork.get("thumb").cloned().unwrap_or(Value::Null);
+        value["artwork"] = Value::Object(artwork);
+    }
     Ok(())
 }
 
@@ -645,6 +662,9 @@ pub async fn expand_detail(
                         filtered.push(episode);
                     }
                 }
+                crate::product::decorate_many(store, &mut filtered)
+                    .await
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
                 *episodes = filtered;
             }
         }

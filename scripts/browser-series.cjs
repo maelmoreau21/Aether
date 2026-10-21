@@ -378,7 +378,7 @@ fs.mkdirSync(out, {recursive: true});
     assert.match(await page.locator('.profile-trigger').textContent(), /series-user-b/);
 
     // Navigate via SPA links to Series -> Browser Series (no full page reload)
-    await page.getByRole('navigation', {name: /^(Navigation principale|Main navigation)$/}).getByRole('link', {name: /^(Séries|TV Shows)$/, exact: true}).click();
+    await page.getByRole('navigation', {name: /^(Navigation principale|Main navigation)$/}).getByRole('link', {name: 'Séries Navigateur', exact: true}).click();
     await card.waitFor();
     const mediaCallsBeforeDetailB = requestedMediaUrls.length;
     await card.click();

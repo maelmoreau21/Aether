@@ -40,6 +40,7 @@ async fn allowed(auth: &AuthState, headers: &HeaderMap, library: &str) -> Result
 }
 #[derive(Default, Deserialize)]
 struct Filter {
+    library: Option<String>,
     q: Option<String>,
     offset: Option<i64>,
     limit: Option<i64>,
@@ -57,6 +58,10 @@ async fn list(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    let library = filter.library.unwrap_or_default();
+    if library.len() > 128 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let term = format!(
         "%{}%",
         filter
@@ -67,15 +72,16 @@ async fn list(
             .replace('%', "\\%")
             .replace('_', "\\_")
     );
-    let total: i64 = query_scalar("SELECT COUNT(*) FROM music_tracks t JOIN libraries l ON l.id=t.library_id JOIN media_nodes n ON n.id=l.node_id WHERE t.available=1 AND t.root_snapshot=l.root AND l.kind='music' AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND policy.allow_unrated=0) AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\'")
+    let total: i64 = query_scalar("SELECT COUNT(*) FROM music_tracks t JOIN libraries l ON l.id=t.library_id JOIN media_nodes n ON n.id=l.node_id WHERE t.available=1 AND t.root_snapshot=l.root AND l.kind='music' AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND policy.allow_unrated=0) AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (?='' OR l.id=?) AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\'")
         .bind(&actor.user.id)
         .bind(actor.user.role.as_str())
         .bind(&actor.user.id)
+        .bind(&library).bind(&library)
         .bind(&term)
         .fetch_one(&auth.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let rows=query("SELECT t.* FROM music_tracks t JOIN libraries l ON l.id=t.library_id JOIN media_nodes n ON n.id=l.node_id WHERE t.available=1 AND t.root_snapshot=l.root AND l.kind='music' AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND policy.allow_unrated=0) AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\' ORDER BY t.album_artist,t.album,t.disc_number,t.track_number,t.title,t.id LIMIT ? OFFSET ?").bind(&actor.user.id).bind(actor.user.role.as_str()).bind(&actor.user.id).bind(term).bind(limit).bind(offset).fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rows=query("SELECT t.* FROM music_tracks t JOIN libraries l ON l.id=t.library_id JOIN media_nodes n ON n.id=l.node_id WHERE t.available=1 AND t.root_snapshot=l.root AND l.kind='music' AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND policy.allow_unrated=0) AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (?='' OR l.id=?) AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\' ORDER BY t.album_artist,t.album,t.disc_number,t.track_number,t.title,t.id LIMIT ? OFFSET ?").bind(&actor.user.id).bind(actor.user.role.as_str()).bind(&actor.user.id).bind(&library).bind(&library).bind(term).bind(limit).bind(offset).fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     let items:Vec<Value>=rows.into_iter().map(|r|json!({"id":r.get::<String,_>("id"),"libraryId":r.get::<String,_>("library_id"),"title":r.get::<String,_>("title"),"artist":r.get::<String,_>("artist"),"albumArtist":r.get::<String,_>("album_artist"),"album":r.get::<String,_>("album"),"trackNumber":r.get::<Option<i64>,_>("track_number"),"duration":r.get::<Option<f64>,_>("duration"),"codec":r.get::<String,_>("codec"),"mime":r.get::<String,_>("mime")})).collect();
     Ok(Json(
         json!({"items":items,"total":total,"offset":offset,"limit":limit}),

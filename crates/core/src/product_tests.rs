@@ -913,4 +913,167 @@ async fn granular_parental_tags_schedules_downloads_and_library_images() {
             .status(),
         StatusCode::NOT_FOUND
     );
+    // Lightweight library list is scoped and does not expose disk paths or grants.
+    let libraries =
+        value(request(&app, "/api/v1/libraries", "GET", &b, "", Value::Null).await).await;
+    assert_eq!(libraries["libraries"][0]["name"], "Films");
+    assert!(libraries["libraries"][0].get("root").is_none());
+    assert_eq!(
+        request(
+            &app,
+            "/api/v1/catalog?library=not-granted",
+            "GET",
+            &b,
+            "",
+            Value::Null
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        value(
+            request(
+                &app,
+                "/api/v1/catalog?library=films",
+                "GET",
+                &b,
+                "",
+                Value::Null
+            )
+            .await
+        )
+        .await["total"],
+        1
+    );
+    let mut saved = vec![];
+    for kind in ["poster", "logo", "backdrop", "backdrop"] {
+        let url = format!("/api/v1/works/film/images/{kind}");
+        for (cookie, token, status) in [
+            (&b, csrf.as_str(), StatusCode::FORBIDDEN),
+            (&a, "", StatusCode::FORBIDDEN),
+            (&a, csrf.as_str(), StatusCode::CREATED),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(&url)
+                        .header("host", "127.0.0.1:3000")
+                        .header("origin", ORIGIN)
+                        .header("cookie", cookie)
+                        .header("x-csrf-token", token)
+                        .header("content-type", "image/png")
+                        .body(Body::from(output.get_ref().clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), status);
+            if status == StatusCode::CREATED {
+                saved.push(value(response).await["id"].as_str().unwrap().to_owned());
+            }
+        }
+    }
+    let entries = value(
+        request(
+            &app,
+            "/api/v1/works/film/images",
+            "GET",
+            &b,
+            "",
+            Value::Null,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(entries["images"].as_array().unwrap().len(), 4);
+    assert!(
+        entries["images"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["width"] == 20 && e["height"] == 30)
+    );
+    let url = format!("/api/v1/works/film/images/{}?width=320", saved[0]);
+    let image = request(&app, &url, "GET", &b, "", Value::Null).await;
+    assert_eq!(image.status(), StatusCode::OK);
+    let etag = image.headers()["etag"].to_str().unwrap().to_owned();
+    let bytes = image.into_body().collect().await.unwrap().to_bytes();
+    assert!(image::load_from_memory(&bytes).is_ok());
+    let conditional = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&url)
+                .header("host", "127.0.0.1:3000")
+                .header("cookie", &b)
+                .header("if-none-match", &etag)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(conditional.status(), StatusCode::NOT_MODIFIED);
+    let reverse = json!({"ids":[saved[3],saved[2]]});
+    assert_eq!(
+        request(
+            &app,
+            "/api/v1/works/film/images/order",
+            "PUT",
+            &a,
+            &csrf,
+            reverse
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let work = value(request(&app, "/api/v1/catalog/film", "GET", &b, "", Value::Null).await).await;
+    assert!(
+        work["artwork"]["backdrop"]
+            .as_str()
+            .unwrap()
+            .contains(&saved[3])
+    );
+    assert!(work["posterUrl"].as_str().unwrap().contains(&saved[0]));
+    let original = std::fs::read(root.join("clip.mp4")).unwrap();
+    assert_eq!(
+        request(
+            &app,
+            &format!("/api/v1/works/film/images/{}", saved[0]),
+            "DELETE",
+            &a,
+            &csrf,
+            Value::Null
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        request(&app, &url, "HEAD", &b, "", Value::Null)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    query("UPDATE libraries SET enabled=0 WHERE id='films'")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        request(
+            &app,
+            &format!("/api/v1/works/film/images/{}", saved[1]),
+            "HEAD",
+            &b,
+            "",
+            Value::Null
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(std::fs::read(root.join("clip.mp4")).unwrap(), original);
 }

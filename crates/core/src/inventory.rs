@@ -1866,13 +1866,32 @@ fn push_catalogue_filters(builder: &mut sqlx::QueryBuilder<sqlx::Any>, filter: &
             .push(")) ");
     }
 }
-fn push_group_filter(builder: &mut sqlx::QueryBuilder<sqlx::Any>, filter: &CatalogueFilter) {
+fn push_group_filter(
+    builder: &mut sqlx::QueryBuilder<sqlx::Any>,
+    filter: &CatalogueFilter,
+    visible: &[String],
+    search: &str,
+) {
     let Some(user) = &filter.user_id else {
         return;
     };
-    builder.push(" AND w.id IN (SELECT COALESCE(MIN(CASE WHEN gn.status='connected' THEN w.id END),MIN(w.id)) FROM inventory_works w LEFT JOIN media_group_members gm ON gm.work_id=w.id JOIN libraries gl ON gl.id=w.library_id JOIN media_nodes gn ON gn.id=gl.node_id WHERE gl.enabled=1 AND gn.status!='revoked' AND (EXISTS(SELECT 1 FROM users gu WHERE gu.id=").push_bind(user).push(" AND gu.role='administrator') OR EXISTS(SELECT 1 FROM effective_library_permissions gp WHERE gp.library_id=gl.id AND gp.user_id=").push_bind(user).push(")) AND (w.kind!='film' OR EXISTS(SELECT 1 FROM inventory_editions ge JOIN inventory_versions gv ON gv.edition_id=ge.id JOIN inventory_sources gs ON gs.version_id=gv.id JOIN inventory_assets ga ON ga.source_id=gs.id WHERE ge.work_id=w.id AND ga.available=1 AND gs.root_snapshot=gl.root)) ");
+    builder.push(" AND (NOT EXISTS(SELECT 1 FROM media_group_members own_group WHERE own_group.work_id=w.id) OR w.id IN (SELECT COALESCE(MIN(CASE WHEN gn.status='connected' THEN w.id END),MIN(w.id)) FROM media_group_members gm JOIN inventory_works w ON w.id=gm.work_id JOIN libraries gl ON gl.id=w.library_id JOIN media_nodes gn ON gn.id=gl.node_id WHERE gl.enabled=1 AND gn.status!='revoked' AND (EXISTS(SELECT 1 FROM users gu WHERE gu.id=").push_bind(user).push(" AND gu.role='administrator') OR EXISTS(SELECT 1 FROM effective_library_permissions gp WHERE gp.library_id=gl.id AND gp.user_id=").push_bind(user).push(")) AND (w.kind!='film' OR EXISTS(SELECT 1 FROM inventory_editions ge JOIN inventory_versions gv ON gv.edition_id=ge.id JOIN inventory_sources gs ON gs.version_id=gv.id JOIN inventory_assets ga ON ga.source_id=gs.id WHERE ge.work_id=w.id AND ga.available=1 AND gs.root_snapshot=gl.root)) ");
+    builder.push(" AND w.library_id IN (");
+    let mut ids = builder.separated(",");
+    for id in visible {
+        ids.push_bind(id);
+    }
+    ids.push_unseparated(") ");
+    if !search.is_empty() {
+        builder
+            .push(
+                " AND instr(lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)), ",
+            )
+            .push_bind(search.to_owned())
+            .push(")>0 ");
+    }
     push_catalogue_filters(builder, filter);
-    builder.push(" GROUP BY COALESCE(gm.group_id,w.id)) ");
+    builder.push(" GROUP BY gm.group_id)) ");
 }
 pub async fn catalogue(
     store: &IdentityStore,
@@ -2012,7 +2031,7 @@ pub async fn catalogue_filtered(
     }
 
     push_catalogue_filters(&mut count_builder, filter);
-    push_group_filter(&mut count_builder, filter);
+    push_group_filter(&mut count_builder, filter, visible, &search_clean);
     let count_sql = crate::database::normalize_sql(count_builder.sql().as_str());
     let arguments = count_builder
         .build()
@@ -2146,7 +2165,7 @@ pub async fn catalogue_filtered(
     }
 
     push_catalogue_filters(&mut data_builder, filter);
-    push_group_filter(&mut data_builder, filter);
+    push_group_filter(&mut data_builder, filter, visible, &search_clean);
     match sort {
         "title-desc" => {
             data_builder.push("ORDER BY lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)) DESC, w.id DESC ");
@@ -2183,9 +2202,7 @@ pub async fn catalogue_filtered(
         .fetch_all(&store.pool)
         .await?;
     let mut items: Vec<Value> = rows.iter().map(work).collect();
-    for item in &mut items {
-        crate::product::decorate(store, item).await?;
-    }
+    crate::product::decorate_many(store, &mut items).await?;
 
     Ok(json!({
         "items": items,
@@ -2416,7 +2433,6 @@ pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value
     };
 
     let mut value = work(&row);
-    crate::product::decorate(store, &mut value).await?;
     let images = query("SELECT i.id,i.role,i.modified_ns,i.size FROM inventory_images i JOIN libraries l ON l.id=i.library_id JOIN media_nodes n ON n.id=l.node_id WHERE i.work_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND n.status='connected' AND i.role!='poster' ORDER BY i.priority,i.relative_path,i.id").bind(work_id).fetch_all(&store.pool).await?;
     let mut artwork = serde_json::Map::new();
     for image in images {
@@ -2431,6 +2447,7 @@ pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value
         });
     }
     value["artwork"] = json!(artwork);
+    crate::product::decorate(store, &mut value).await?;
 
     let kind: String = row.try_get("kind").unwrap_or_else(|_| "film".to_string());
 

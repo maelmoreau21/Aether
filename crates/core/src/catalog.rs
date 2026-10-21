@@ -76,6 +76,7 @@ struct WorkDetail {
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CatalogQuery {
+    library: Option<String>,
     genre: Option<String>,
     year: Option<i64>,
     quality: Option<i64>,
@@ -164,7 +165,7 @@ fn available(inventory: &Inventory) -> bool {
 pub async fn list(
     State(inventory): State<Arc<Inventory>>,
     query: Result<Query<CatalogQuery>, QueryRejection>,
-    visible: Option<Extension<crate::permissions::VisibleLibraries>>,
+    mut visible: Option<Extension<crate::permissions::VisibleLibraries>>,
     store: Option<Extension<crate::identity::IdentityStore>>,
     actor: Option<Extension<crate::auth::Authenticated>>,
 ) -> Response {
@@ -172,6 +173,17 @@ pub async fn list(
         return error(StatusCode::BAD_REQUEST, "invalid_catalog_query");
     };
     let offset = query.offset.unwrap_or(0);
+    if let Some(library) = &query.library {
+        if library.is_empty() || library.len() > 128 {
+            return error(StatusCode::BAD_REQUEST, "invalid_library");
+        }
+        if let Some(Extension(visible)) = &mut visible {
+            if !visible.0.contains(library) {
+                return error(StatusCode::FORBIDDEN, "permission_denied");
+            }
+            visible.0.retain(|id| id == library);
+        }
+    }
     let limit = query.limit.unwrap_or(24);
     if !matches!(query.kind.as_deref(), None | Some("film" | "series"))
         || !matches!(

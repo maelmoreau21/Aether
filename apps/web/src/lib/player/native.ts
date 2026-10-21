@@ -10,7 +10,9 @@ export class NativePlayer implements Player {
   private audioOffset = 0;
   private subtitleOffset = 0;
   private cueTimes = new WeakMap<TextTrackCue, [number, number]>();
-  private preparation?: AbortController;
+  private preparations = new Set<AbortController>();
+  private status:(message:string)=>void = () => {};
+  setStatusListener(listener:(message:string)=>void) { this.status=listener; }
   private busy = false;
   private destroyed = false;
   private cancel?: () => void;
@@ -32,6 +34,7 @@ export class NativePlayer implements Player {
     video.addEventListener('pause', this.clearStall);
   }
   private mediaError = () => {
+    if(this.busy)return;
     this.video.pause();
     this.externalAudio?.destroy(); this.externalAudio = undefined;
     this.onError(`Lecture interrompue : ${this.video.error?.message || 'source indisponible ou codecs/conteneur incompatibles'} (MediaError ${this.video.error?.code ?? '?'})`);
@@ -47,12 +50,13 @@ export class NativePlayer implements Player {
     await this.replace(source, 0, true);
   }
   private async prepareUrl(url: string) {
-    const controller = new AbortController(); this.preparation = controller;
+    const controller = new AbortController(); this.preparations.add(controller);
+    this.status('Préparation des pistes sur le Media Node… Première préparation potentiellement longue.');
     const timeout = setTimeout(() => controller.abort(), 125000);
     try {
       const response = await fetch(url, { method: 'HEAD', signal: controller.signal });
       if (!response.ok) throw new Error('Préparation impossible : FFmpeg requis sur le Node, format incompatible ou cache occupé/plein. Réessayez explicitement.');
-    } finally { clearTimeout(timeout); if (this.preparation === controller) this.preparation = undefined; }
+    } finally { clearTimeout(timeout); this.preparations.delete(controller); }
     if (this.destroyed) throw new Error('Lecteur fermé.');
   }
   private async replace(source: Source, position: number, paused: boolean) {
@@ -62,8 +66,7 @@ export class NativePlayer implements Player {
     this.video.pause();
     try {
       if (source.prepare) {
-        if (previous?.url !== source.url) await this.prepareUrl(source.url);
-        if (source.externalAudioUrl) await this.prepareUrl(source.externalAudioUrl);
+        await Promise.all([...(previous?.url !== source.url ? [this.prepareUrl(source.url)] : []),...(source.externalAudioUrl ? [this.prepareUrl(source.externalAudioUrl)] : [])]);
       }
       // Independent Opus track switch: keep the same video element, URL and timeline.
       if (previous?.url === source.url && source.externalAudioUrl) {
@@ -74,7 +77,7 @@ export class NativePlayer implements Player {
         if (!paused) await this.play();
         return;
       }
-    } catch (error) { this.busy = false; throw error; }
+    } catch (error) { for(const controller of this.preparations)controller.abort();this.busy = false; throw error; }
     finally { if (this.source === source) this.busy = false; }
     this.source = undefined;
     const { volume, speed } = this.state();
@@ -93,7 +96,7 @@ export class NativePlayer implements Player {
         ? (source.relayUrl ?? source.url)
         : undefined;
 
-    const loadCandidate = (candidateUrl: string) =>
+    const loadCandidate = (candidateUrl: string, timeoutMs=10000) =>
       new Promise<void>((resolve, reject) => {
         const finish = (error?: Error) => {
           clearTimeout(timer);
@@ -123,7 +126,7 @@ export class NativePlayer implements Player {
             finish(
               new Error('Chargement ou seek expiré après 10 secondes. Réessayez explicitement.')
             ),
-          10000
+          timeoutMs
         );
         this.cancel = () => finish(new Error('Lecteur fermé.'));
         this.video.addEventListener('loadedmetadata', metadata);
@@ -135,10 +138,12 @@ export class NativePlayer implements Player {
 
     try {
       try {
-        await loadCandidate(primaryUrl);
+        this.status(hasFreshDirect ? 'Connexion directe au Media Node…' : 'Chargement de la vidéo…');
+        await loadCandidate(primaryUrl, fallbackUrl ? 2500 : 10000);
       } catch (primaryErr) {
         if (fallbackUrl && !this.destroyed) {
-          await loadCandidate(fallbackUrl);
+          this.status('Node direct indisponible. Connexion au relais…');
+          await loadCandidate(fallbackUrl,7500);
         } else {
           throw primaryErr;
         }
@@ -222,7 +227,7 @@ export class NativePlayer implements Player {
   setSpeed(speed: number) { if ([0.5, 1, 1.5, 2].includes(speed)) this.video.playbackRate = speed; }
   destroy() {
     this.destroyed = true;
-    this.preparation?.abort();
+    for(const controller of this.preparations)controller.abort();this.preparations.clear();
     this.cancel?.();
     this.clearStall();
     this.externalAudio?.destroy(); this.externalAudio = undefined;

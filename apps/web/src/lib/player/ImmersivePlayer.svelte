@@ -22,6 +22,7 @@
   let busy = $state(false);
   let error = $state('');
   let notice = $state('');
+  let loadStage = $state('Chargement de votre séance…');
   let audio = $state('');
   let preferredLanguage = 'fr';
   let preferredAudio: { mediaId: string; trackId: string } | undefined;
@@ -123,6 +124,7 @@
     // Requested synchronously from the opening user gesture, before any network await.
     requestFullscreen();
     engine = createPlayer(video, message => { if (current === generation) fail(message); });
+    engine.setStatusListener?.(message=>{if(current===generation)loadStage=message;});
     void prepare(media);
   }
   export function close() {
@@ -247,7 +249,7 @@
       <div class="title"><span>{active?.title ?? 'Votre séance'}</span><small>LECTURE LOCALE{active?.synthetic ? ' · MIRE SYNTHÉTIQUE' : ''}</small></div>
       {#if nextTitle && onNext}<div class="next-episode"><button disabled={busy} onclick={onNext}>Épisode suivant : {nextTitle}</button><label><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
     </div>
-    {#if busy}<div class="loading" role="status"><img src="{base}/images/logo-loading.svg" alt="" class="player-spinner" width="40" height="40" />Préparation de votre séance…</div>{/if}
+    {#if busy}<div class="loading" role="status"><img src="{base}/images/logo-loading.svg" alt="" class="player-spinner" width="40" height="40" />{loadStage}<button onclick={close}>Annuler</button></div>{/if}
     {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, playback); }}>Réessayer explicitement</button></div>{/if}
     <p class="fullscreen-notice" role="status">{notice}</p>
     {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
@@ -327,6 +329,8 @@
     font-weight: 500;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
   }
+  .loading { z-index:5; }
+  .loading button { pointer-events:auto;min-height:44px;padding:10px 20px; }
   .player-spinner {
     width: 40px;
     height: 40px;

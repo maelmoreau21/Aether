@@ -3,6 +3,7 @@
   import { resolve } from '$app/paths';
 </script>
 <details><summary>Filtrer le catalogue</summary><form method="GET" action={page.url.pathname} onsubmit={event=>{event.preventDefault();const params=new URLSearchParams();for(const [key,value] of new FormData(event.currentTarget)){if(typeof value==='string'&&value.trim())params.set(key,value.trim());}window.location.assign(page.url.pathname+'?'+params);}}>
+{#if page.url.searchParams.get('library')}<input type="hidden" name="library" value={page.url.searchParams.get('library')??''} />{/if}
 {#if page.url.searchParams.get('q')}<input type="hidden" name="q" value={page.url.searchParams.get('q')??''} />{/if}
 <label>Genre<input name="genre" value={page.url.searchParams.get('genre')??''} maxlength="100" placeholder="Animation" /></label>
 <label>Année<input type="number" name="year" value={page.url.searchParams.get('year')??''} min="1800" max="2200" /></label>

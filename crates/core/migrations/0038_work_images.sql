@@ -1,0 +1,10 @@
+CREATE INDEX media_group_members_group_work ON media_group_members(group_id,work_id);
+CREATE TABLE work_image_entries (id TEXT PRIMARY KEY,work_id TEXT NOT NULL REFERENCES inventory_works(id) ON DELETE CASCADE,kind TEXT NOT NULL,position INTEGER NOT NULL,width INTEGER NOT NULL,height INTEGER NOT NULL) STRICT;
+CREATE INDEX work_images_owner ON work_image_entries(work_id,kind,position,id);
+CREATE TABLE work_image_data (image_id TEXT NOT NULL REFERENCES work_image_entries(id) ON DELETE CASCADE,width INTEGER NOT NULL,mime TEXT NOT NULL,image_data BLOB NOT NULL,PRIMARY KEY(image_id,width)) STRICT;
+CREATE TABLE work_image_hidden (work_id TEXT NOT NULL REFERENCES inventory_works(id) ON DELETE CASCADE,image_id TEXT NOT NULL,PRIMARY KEY(work_id,image_id)) STRICT;
+CREATE TABLE work_image_order (work_id TEXT NOT NULL REFERENCES inventory_works(id) ON DELETE CASCADE,image_id TEXT NOT NULL,position INTEGER NOT NULL,PRIMARY KEY(work_id,image_id)) STRICT;
+ALTER TABLE work_posters ADD COLUMN revision TEXT NOT NULL DEFAULT 'legacy';
+CREATE TABLE poster_previews (work_id TEXT NOT NULL REFERENCES work_posters(work_id) ON DELETE CASCADE,width INTEGER NOT NULL,revision TEXT NOT NULL,mime TEXT NOT NULL,image_data BLOB NOT NULL,PRIMARY KEY(work_id,width)) STRICT;
+CREATE INDEX inventory_display_sort ON inventory_works(kind,lower(COALESCE(json_extract(manual_json,'$.title'),title_sort)),id);
+CREATE INDEX inventory_library_display_sort ON inventory_works(library_id,kind,lower(COALESCE(json_extract(manual_json,'$.title'),title_sort)),id);

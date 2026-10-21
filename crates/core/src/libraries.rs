@@ -68,6 +68,7 @@ struct LibraryInput {
 
 pub fn router(auth: AuthState, local_root: PathBuf) -> Router {
     Router::new()
+        .route("/api/v1/libraries", get(accessible))
         .route("/api/v1/admin/libraries", get(list).post(create))
         .route("/api/v1/admin/libraries/{id}", axum::routing::put(update))
         .route("/api/v1/admin/roots", get(roots))
@@ -80,6 +81,17 @@ pub fn router(auth: AuthState, local_root: PathBuf) -> Router {
             auth,
             root: local_root,
         })
+}
+async fn accessible(
+    State(state): State<LibraryState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let actor = state.auth.authenticate(&headers).await?;
+    let rows:Vec<(String,String,String)> = crate::database::query_as("SELECT l.id,l.name,l.kind FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND n.status!='revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) ORDER BY l.name,l.id")
+        .bind(actor.user.role.as_str()).bind(actor.user.id).fetch_all(&state.auth.store.pool).await.map_err(database)?;
+    Ok(Json(
+        serde_json::json!({"libraries":rows.into_iter().map(|(id,name,kind)|serde_json::json!({"id":id,"name":name,"kind":kind})).collect::<Vec<_>>()}),
+    ))
 }
 async fn administrator(
     state: &LibraryState,
@@ -164,7 +176,7 @@ async fn load(store: &IdentityStore) -> Result<Vec<Library>, StatusCode> {
         .await
         .map_err(database)?;
         library.image_versions = revisions.into_iter().collect();
-        library.cover_urls = crate::database::query_scalar("SELECT COALESCE((SELECT '/api/v1/works/' || w.id || '/poster' FROM work_posters wp WHERE wp.work_id=w.id),(SELECT '/api/v1/assets/' || i.id || '/image?width=320' FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root ORDER BY i.priority,i.id LIMIT 1)) AS url FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND n.status='connected' AND w.kind IN ('film','series') AND (w.kind='series' OR EXISTS(SELECT 1 FROM inventory_editions ce JOIN inventory_versions cv ON cv.edition_id=ce.id JOIN inventory_sources cs ON cs.version_id=cv.id JOIN inventory_assets ca ON ca.source_id=cs.id WHERE ce.work_id=w.id AND ca.available=1 AND cs.root_snapshot=l.root)) AND (EXISTS(SELECT 1 FROM work_posters wp WHERE wp.work_id=w.id) OR EXISTS(SELECT 1 FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root)) ORDER BY w.title_sort,w.id LIMIT 4")
+        library.cover_urls = crate::database::query_scalar("SELECT COALESCE((SELECT '/api/v1/works/' || w.id || '/images/' || wi.id || '?width=320' FROM work_image_entries wi WHERE wi.work_id=w.id AND wi.kind='poster' ORDER BY wi.position,wi.id LIMIT 1),(SELECT '/api/v1/works/' || w.id || '/poster' FROM work_posters wp WHERE wp.work_id=w.id),(SELECT '/api/v1/assets/' || i.id || '/image?width=320' FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root ORDER BY i.priority,i.id LIMIT 1)) AS url FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND n.status='connected' AND w.kind IN ('film','series') AND (w.kind='series' OR EXISTS(SELECT 1 FROM inventory_editions ce JOIN inventory_versions cv ON cv.edition_id=ce.id JOIN inventory_sources cs ON cs.version_id=cv.id JOIN inventory_assets ca ON ca.source_id=cs.id WHERE ce.work_id=w.id AND ca.available=1 AND cs.root_snapshot=l.root)) AND (EXISTS(SELECT 1 FROM work_image_entries wi WHERE wi.work_id=w.id AND wi.kind='poster') OR EXISTS(SELECT 1 FROM work_posters wp WHERE wp.work_id=w.id) OR EXISTS(SELECT 1 FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root)) ORDER BY w.title_sort,w.id LIMIT 4")
             .bind(&library.id).fetch_all(&mut *tx).await.map_err(database)?;
     }
     let grants = crate::database::query(

@@ -18,6 +18,8 @@ use wasmi::{
 pub const DEFAULT_MAX_HTTP_REQUESTS: usize = 10;
 pub const DEFAULT_MAX_RESPONSE_SIZE: usize = 262_144; // 256 KiB
 pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 6;
+// Ten bounded HTTP requests plus compilation/serialization, below the Web request deadline.
+pub const INVOCATION_TIMEOUT_SECS: u64 = 65;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -50,7 +52,7 @@ pub struct HostState {
     pub max_response_size: usize,
 }
 
-fn is_forbidden_ip(ip: IpAddr) -> bool {
+pub(crate) fn is_forbidden_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
             v4.is_loopback()
@@ -59,8 +61,21 @@ fn is_forbidden_ip(ip: IpAddr) -> bool {
                 || v4.is_broadcast()
                 || v4.is_documentation()
                 || v4.is_unspecified()
+                || v4.is_multicast()
+                || v4.octets()[0] == 0
+                || v4.octets()[0] >= 240
+                || (v4.octets()[0] == 100 && (64..=127).contains(&v4.octets()[1]))
         }
-        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || v6.is_multicast()
+                || v6
+                    .to_ipv4_mapped()
+                    .is_some_and(|v4| is_forbidden_ip(IpAddr::V4(v4)))
+        }
     }
 }
 
@@ -127,6 +142,16 @@ pub fn execute_host_http(
         });
     }
 
+    if !parsed_url.username().is_empty()
+        || parsed_url.password().is_some()
+        || parsed_url.port_or_known_default() != Some(443)
+    {
+        return Err(HostHttpError {
+            code: "invalid_url".into(),
+            message: "HTTPS on port 443 without URL credentials is required".into(),
+        });
+    }
+    let host = host.to_owned();
     let timeout_secs = req
         .timeout_secs
         .map(|s| (s as u64).min(DEFAULT_HTTP_TIMEOUT_SECS))
@@ -145,7 +170,30 @@ pub fn execute_host_http(
     let auth_headers = state.auth_headers.clone();
 
     rt.block_on(async move {
+        let addresses: Vec<_> = tokio::time::timeout(
+            Duration::from_secs(timeout_secs),
+            tokio::net::lookup_host((host.as_str(), 443)),
+        )
+        .await
+        .map_err(|_| HostHttpError {
+            code: "dns_timeout".into(),
+            message: "DNS lookup timed out".into(),
+        })?
+        .map_err(|_| HostHttpError {
+            code: "dns_error".into(),
+            message: "DNS lookup failed".into(),
+        })?
+        .collect();
+        if addresses.is_empty() || addresses.iter().any(|a| is_forbidden_ip(a.ip())) {
+            return Err(HostHttpError {
+                code: "host_forbidden".into(),
+                message: "Non-public address denied".into(),
+            });
+        }
         let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve_to_addrs(&host, &addresses)
             .timeout(Duration::from_secs(timeout_secs))
             .build()
             .map_err(|e| HostHttpError {
@@ -180,7 +228,7 @@ pub fn execute_host_http(
             builder = builder.body(body);
         }
 
-        let response = builder.send().await.map_err(|e| HostHttpError {
+        let mut response = builder.send().await.map_err(|e| HostHttpError {
             code: "network_error".into(),
             message: e.to_string(),
         })?;
@@ -193,20 +241,18 @@ pub fn execute_host_http(
             }
         }
 
-        let body_bytes = response.bytes().await.map_err(|e| HostHttpError {
+        let mut body_bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|_| HostHttpError {
             code: "read_error".into(),
-            message: e.to_string(),
-        })?;
-
-        if body_bytes.len() > max_resp {
-            return Err(HostHttpError {
-                code: "response_too_large".into(),
-                message: format!(
-                    "Response body size {} exceeds limit {}",
-                    body_bytes.len(),
-                    max_resp
-                ),
-            });
+            message: "Response read failed".into(),
+        })? {
+            if body_bytes.len() + chunk.len() > max_resp {
+                return Err(HostHttpError {
+                    code: "response_too_large".into(),
+                    message: "Response exceeds quota".into(),
+                });
+            }
+            body_bytes.extend_from_slice(&chunk);
         }
 
         Ok(HostHttpResponse {
@@ -224,7 +270,8 @@ fn write_host_result_to_guest(
     let Ok(bytes) = serde_json::to_vec(&result) else {
         return 0;
     };
-    if bytes.len() > MAX_JSON {
+    // HTTP bodies serialize as JSON byte arrays (up to four bytes per input byte).
+    if bytes.len() > DEFAULT_MAX_RESPONSE_SIZE * 4 + 8192 {
         return 0;
     }
     let Some(Extern::Func(alloc_func)) = caller.get_export("media_alloc") else {

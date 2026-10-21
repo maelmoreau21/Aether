@@ -213,7 +213,7 @@ async fn list(
     Ok(Json(json!({"images":images})))
 }
 #[derive(Default, Deserialize)]
-struct ImageQuery {
+pub(crate) struct ImageQuery {
     width: Option<u32>,
     replace: Option<String>,
 }
@@ -331,7 +331,7 @@ fn normalize(bytes: Bytes, content: &str) -> Result<Encoded, StatusCode> {
         variants,
     })
 }
-async fn upload(
+pub(crate) async fn upload(
     State(auth): State<AuthState>,
     Path((work, kind)): Path<(String, String)>,
     Query(options): Query<ImageQuery>,

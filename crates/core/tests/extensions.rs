@@ -1091,3 +1091,248 @@ async fn apply_extension_metadata_updates_inventory_work() {
         StatusCode::FORBIDDEN
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rich_operations_and_account_avatars_use_signed_permissions() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "extension-admin",
+            Zeroizing::new("synthetic extension password".into()),
+        )
+        .await
+        .unwrap();
+    media_poc::libraries::initialize_local(&store)
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
+    media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','films','work','Original','{}')").execute(store.pool()).await.unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = extensions::router(auth.clone())
+        .merge(media_poc::avatars::router(auth.clone()))
+        .merge(media_poc::admin_users::router(auth.clone()))
+        .merge(auth::router(auth));
+    let (_, login, cookie) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        "",
+        json!({"login":"extension-admin","password":"synthetic extension password"}),
+    )
+    .await;
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let signing = key();
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/publishers",
+            &cookie,
+            csrf,
+            json!({"id":"test","publicKey":STANDARD.encode(signing.public_key().as_ref())})
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><circle cx="128" cy="128" r="100" fill="#abcdef"/></svg>"##;
+    let cases = [
+        (
+            "search",
+            "metadata.search",
+            json!([{"id":"candidate","title":"Selected","mediaType":"movie","year":2020}]),
+            vec!["metadata.read"],
+        ),
+        (
+            "details",
+            "metadata.details",
+            json!({"provider":"synthetic","providerId":"candidate","title":"Selected","synopsis":"Full plot","externalIds":{"synthetic":"candidate"}}),
+            vec!["metadata.read", "metadata.write"],
+        ),
+        (
+            "images",
+            "metadata.images",
+            json!([{"url":"https://example.invalid/image.png","imageType":"poster","isPrimary":true}]),
+            vec!["images"],
+        ),
+        (
+            "failure",
+            "metadata.search",
+            json!({"error":"missing_api_key","message":"secret=not-for-history"}),
+            vec!["metadata.read"],
+        ),
+        (
+            "avatar",
+            "avatars.generate",
+            json!({"id":"one","label":"One","svg":svg}),
+            vec!["avatars"],
+        ),
+    ];
+    for (id, operation, result, permissions) in cases {
+        let response = json!({"apiVersion":1,"result":result}).to_string();
+        let data = response
+            .bytes()
+            .map(|b| format!("\\{b:02x}"))
+            .collect::<String>();
+        let wasm=wat::parse_str(format!(r#"(module (memory (export "memory") 1 256) (data (i32.const 4096) "{data}") (func (export "media_alloc") (param i32) (result i32) i32.const 1024) (func (export "media_run") (param i32 i32) (result i64) i64.const {}))"#,(4096u64<<32)|response.len() as u64)).unwrap();
+        let mut p = package(&signing, wasm);
+        p.manifest.id = format!("test.{id}");
+        p.manifest.permissions = permissions.into_iter().map(str::to_owned).collect();
+        p.signature = STANDARD.encode(signing.sign(&p.signing_bytes().unwrap()).as_ref());
+        assert_eq!(
+            call(
+                &app,
+                "POST",
+                "/api/v1/admin/extensions",
+                &cookie,
+                csrf,
+                json!(p)
+            )
+            .await
+            .0,
+            StatusCode::CREATED
+        );
+        let endpoint = format!("/api/v1/admin/extensions/test.{id}");
+        assert_eq!(
+            call(
+                &app,
+                "PUT",
+                &endpoint,
+                &cookie,
+                csrf,
+                json!({"enabled":true,"libraryIds":["films"]})
+            )
+            .await
+            .0,
+            StatusCode::NO_CONTENT
+        );
+        if id == "avatar" {
+            assert_eq!(call(&app,"POST","/api/v1/admin/users",&cookie,csrf,json!({"login":"avatar-user","password":"synthetic regular password","role":"user","displayName":null,"libraryIds":[]})).await.0,StatusCode::CREATED);
+            let (_, user_login, user_cookie) = call(
+                &app,
+                "POST",
+                "/api/v1/auth/login",
+                "",
+                "",
+                json!({"login":"avatar-user","password":"synthetic regular password"}),
+            )
+            .await;
+            let user_csrf = user_login["csrfToken"].as_str().unwrap();
+            let route = "/api/v1/account/avatar/extensions/test.avatar";
+            assert_eq!(
+                call(
+                    &app,
+                    "POST",
+                    route,
+                    &user_cookie,
+                    "",
+                    json!({"operation":operation,"apply":true})
+                )
+                .await
+                .0,
+                StatusCode::FORBIDDEN
+            );
+            let (status, output, _) = call(
+                &app,
+                "POST",
+                route,
+                &user_cookie,
+                user_csrf,
+                json!({"operation":operation,"apply":true}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{output}");
+            let data: Vec<u8> = media_poc::database::query_scalar(
+                "SELECT image_data FROM user_avatars WHERE user_id=?",
+            )
+            .bind(user_login["user"]["id"].as_str().unwrap())
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+            assert_eq!(data, svg.as_bytes());
+            assert_eq!(
+                call(
+                    &app,
+                    "POST",
+                    route,
+                    &user_cookie,
+                    user_csrf,
+                    json!({"operation":"metadata.details"})
+                )
+                .await
+                .0,
+                StatusCode::BAD_REQUEST
+            );
+            call(
+                &app,
+                "PUT",
+                &endpoint,
+                &cookie,
+                csrf,
+                json!({"enabled":false,"libraryIds":[]}),
+            )
+            .await;
+            assert_eq!(
+                call(
+                    &app,
+                    "POST",
+                    route,
+                    &user_cookie,
+                    user_csrf,
+                    json!({"operation":operation})
+                )
+                .await
+                .0,
+                StatusCode::FORBIDDEN
+            );
+        } else {
+            let (status, output, _) = call(
+                &app,
+                "POST",
+                &format!("{endpoint}/run"),
+                &cookie,
+                csrf,
+                json!({"workId":"work","operation":operation,"input":{"id":"candidate"}}),
+            )
+            .await;
+            if id == "failure" {
+                assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+                assert_eq!(output["pluginError"], "missing_api_key");
+                assert!(!output.to_string().contains("not-for-history"));
+            } else {
+                assert_eq!(status, StatusCode::OK, "{output}");
+                assert_eq!(output["proposal"], result);
+            }
+            if id == "details" {
+                assert_eq!(
+                    call(
+                        &app,
+                        "POST",
+                        &format!("{endpoint}/apply"),
+                        &cookie,
+                        csrf,
+                        json!({"workId":"work","metadata":result})
+                    )
+                    .await
+                    .0,
+                    StatusCode::NO_CONTENT
+                );
+                let saved: String = media_poc::database::query_scalar(
+                    "SELECT manual_json FROM inventory_works WHERE id='work'",
+                )
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+                let saved: Value = serde_json::from_str(&saved).unwrap();
+                assert_eq!(saved["plot"], "Full plot");
+                assert_eq!(saved["external_ids"]["synthetic"], "candidate");
+            }
+        }
+    }
+}

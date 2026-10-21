@@ -71,11 +71,46 @@ Le résultat encode le pointeur dans les 32 bits hauts et la longueur dans les
 Enveloppe générique entrante : `{apiVersion,operation,input}`; enveloppe sortante :
 `{apiVersion,result}`. Le runtime ne dépend pas du type métier. Chaque adaptateur
 Core autorise son opération avant invocation et valide le résultat ensuite.
-L’adaptateur actuellement raccordé est `metadata.propose` : entrée métier
+L’adaptateur historique `metadata.propose` reste compatible : entrée métier
 `{apiVersion,workId,libraryId,title}` issue du catalogue persistant, résultat
 `{title,summary}`. Le résultat est une proposition avec provenance de
 l'extension/version/digest, jamais une écriture automatique dans l'œuvre.
 Les chaînes sont affichées comme texte échappé, jamais HTML tiers.
+
+Le parcours d’administration utilise désormais `metadata.search`, puis un choix
+explicite de candidat et `metadata.details`. `POST .../{id}/run` accepte
+`{workId,operation,input:{id}}` ; `id` est requis pour details/images. Le Core
+fournit titre, année, type (`movie`, `tv_show`, `episode`) et identifiants externes
+issus de l’œuvre, en tenant compte des corrections manuelles. Les données de
+bibliothèque et la configuration ne peuvent pas être remplacées par le client.
+`metadata.read` autorise search/details/propose ; `images` autorise
+`metadata.images`. Les réponses sont validées selon leur opération et conservées
+dans l’historique sous `{operation,output}` (la proposition simple conserve son
+ancien format titre/résumé). Aucun premier résultat de recherche
+n’est appliqué automatiquement.
+
+Le bouton Appliquer fusionne les champs proposés avec les corrections existantes.
+Les noms du SDK (`synopsis`, `originalTitle`, `externalIds`, `releaseDate`) sont
+adaptés au catalogue ; les champs nuls et tableaux vides ne suppriment pas les
+données existantes. La provenance indique l’extension. Les URL d’images sont
+exclues de cette fusion.
+
+Les images proposées sont importées explicitement avec
+`POST .../{id}/image {workId,url,kind}` (`images` + `metadata.write`). HTTPS/443,
+hôte signé, DNS public vérifié et épinglé, aucun proxy implicite ni redirection,
+2 Mio maximum et délai 12 secondes. Le pipeline d’artwork existant réencode
+l’image et expose ses variantes par les routes protégées habituelles. Aucun
+secret du fournisseur n’est envoyé au serveur d’images.
+
+Les comptes authentifiés disposent de `GET /api/v1/account/avatar/extensions`
+et `POST /api/v1/account/avatar/extensions/{id}` avec
+`{operation:"avatars.list"|"avatars.generate",pack?,seed?,apply?}`. POST requiert
+CSRF ; extension active, éditeur actif et permission signée `avatars` sont
+revérifiés pendant l’exécution. Aucun accès aux bibliothèques, à la configuration
+privée ou au réseau n’est transmis. `apply:true` enregistre uniquement l’avatar
+du compte courant. Les SVG sont limités à 32 Kio, 512 éléments et un sous-ensemble
+de formes inertes sans scripts, styles, liens, références ou ressources externes.
+Ils sont servis comme images avec CSP restrictive ; aucun HTML tiers n’est injecté.
 
 La configuration de l’installation est ajoutée dans `input.config`, uniquement
 sur le canal privé du worker. Les fournisseurs la lisent avec
@@ -93,9 +128,14 @@ de l'utilisateur système, raison de son exclusion pour ce parcours sans I/O.
 Le choix ne prouve pas encore l'adéquation de Wasm/WASI pour FFmpeg ou les
 empreintes audio; ces opérations Node demandent leur propre contrat contrôlé.
 
-Limites fixes du premier runtime : module 256 Kio, entrée/sortie 32 Kio,
+Limites fixes du premier runtime : module 256 Kio, entrée/sortie 64 Kio,
 une mémoire linéaire de 16 Mio, une table de 4096 éléments, 2 millions d'unités
-de fuel, délai maximal de 3 secondes et une invocation simultanée par Core.
+de fuel, délai maximal de 65 secondes et une invocation simultanée par Core.
+Le broker autorise au plus 10 requêtes HTTP de 6 secondes et 256 Kio par réponse,
+avec lecture bornée, hôte signé, DNS public épinglé et redirections refusées.
+Le délai Web de ces opérations est de 70 secondes. Les erreurs fournisseurs
+conservent leur code borné dans `pluginError` ; les messages bruts potentiellement
+porteurs de secrets sont exclus des réponses et de l’historique.
 La pile de valeurs de l’interpréteur est bornée à 64 Kio et la profondeur
 d’appels à 128. Ces deux limites sont distinctes : Wasmi mesure la première
 en octets. L’ancienne valeur de 1 024 octets empêchait l’exécution du manifeste

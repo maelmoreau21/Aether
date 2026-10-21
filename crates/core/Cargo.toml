@@ -7,6 +7,7 @@ publish = false
 default-run = "media-poc"
 
 [dependencies]
+quick-xml = "=0.42.0"
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 media-contracts = { path = "../shared" }
 media-extension-sdk = { path = "../extension-sdk" }

@@ -1,5 +1,35 @@
 # MEMORY.md — État et décisions Aether
 
+## 21 octobre 2026 — Raccordement des opérations des extensions
+
+- Core générique : `/run` accepte search/details/images avec permissions signées,
+  contexte titre/année/type/identifiants du catalogue et choix manuel du candidat.
+  Proposition simple et ancien historique conservés pour les paquets existants.
+- Interface : recherche fournisseur, détails, application explicite et import
+  d’images par le pipeline d’artwork protégé. Adaptation des noms SDK au catalogue,
+  fusion des corrections et identifiants externes ; aucun remplacement par URL.
+- Avatars : liste des extensions actives et opérations authentifiées/CSRF depuis
+  les paramètres du compte, sans accès bibliothèque/configuration/réseau. SVG
+  inertes strictement validés et enregistrés pour le compte courant ; MIME/CSP
+  adaptés sur les routes utilisateur et administrateur. La politique d’upload
+  dépend seulement d’extensions avatars actives et d’éditeurs approuvés.
+- Worker 65 s, requêtes Web extensions 70 s, sortie alignée SDK 64 Kio. Erreurs
+  fournisseurs : code borné conservé, message brut exclu. Broker : résolution DNS
+  publique épinglée, aucun proxy implicite/redirection, réponse lue par morceaux.
+- Aether-Plugins : fanart search par ID existant (TVDB pour séries), contexte réel
+  et refus des correspondances ambiguës pour propositions TMDb/IMDb ; Avatar
+  Wasm indépendant de l’horloge. Script de paquetage accepte avatar et accorde
+  avatars seul, ou metadata.read/write + images aux fournisseurs. Paquets à
+  reconstruire/signer/réinstaller pour les nouvelles permissions et handlers.
+- Vérifié : tests extensions 9 réussis/3 ignorés ; filtre unitaire extension
+  6 réussis/1 ignoré, puis 2 tests adaptateurs rejoués après fusion des IDs ;
+  Clippy strict Core all-targets/all-features, Web check 0/0 + lint/build,
+  check workspace Aether-Plugins, compilation Wasm Avatar et exécution réelle
+  list (4 packs)/generate dans le worker ; syntaxe paquetage et OpenAPI valides.
+- Pas de navigateur E2E rejoué, d’appel fournisseur réel avec clé API, de paquet
+  signé publié, de push ou de déploiement. Quotas documentés conservés ; ces
+  vérifications ne prouvent pas tous les volumes de réponses des fournisseurs.
+
 ## 21 octobre 2026 — Fournisseurs externes et correction du test extensions
 
 - Suppression du traitement des domaines/Authorization en fonction du nom

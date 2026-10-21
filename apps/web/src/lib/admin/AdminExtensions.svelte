@@ -1,5 +1,6 @@
 <script lang="ts">
   import { adminRequest } from './request';
+  import { SvelteMap } from 'svelte/reactivity';
   type ConfigOption = { label: string; value: string };
   type ConfigField = {
     key: string;
@@ -28,6 +29,30 @@
   type SettingValue = string | number | boolean;
   type ExtensionSettings = Record<string, SettingValue>;
   type Installed = { manifest: Manifest; publisherId: string; sha256: string; enabled: boolean; libraryIds: string[]; settings?: ExtensionSettings };
+  type Repository = { id: string; name: string; url: string; refreshedAt: number };
+  type CatalogueEntry = { repositoryId: string; repositoryName: string; compatible: boolean; manifest: Manifest; publisherId: string; publicKey: string };
+  let tab = $state<'installed' | 'catalogue' | 'repositories'>('installed');
+  let repositories = $state<Repository[]>([]);
+  let catalogue = $state<CatalogueEntry[]>([]);
+  let repositoryName = $state('');
+  let repositoryUrl = $state('');
+  let catalogueVersions = $state<Record<string,string>>({});
+  const catalogueGroups = $derived.by(() => {
+    const groups = new SvelteMap<string,CatalogueEntry[]>();
+    for (const entry of catalogue) {
+      const key = `${entry.repositoryId}:${entry.manifest.id}`;
+      groups.set(key,[...(groups.get(key) ?? []),entry]);
+    }
+    return [...groups].map(([key, entries]) => ({key,entries:entries.sort((a,b) => {
+      const left=a.manifest.version.split('.').map(Number),right=b.manifest.version.split('.').map(Number);
+      return right[0]-left[0] || right[1]-left[1] || right[2]-left[2];
+    })}));
+  });
+  $effect(() => {
+    for (const group of catalogueGroups) {
+      if (!catalogueVersions[group.key]) catalogueVersions[group.key]=group.entries[0].manifest.version;
+    }
+  });
   type Library = { id: string; name: string; enabled: boolean | number };
   type Run = { id: string; extensionId: string; status: string; durationMs: number; result: { title?: string; summary?: string; error?: string } };
   let installed = $state<Installed[]>([]);
@@ -67,15 +92,18 @@
     return null;
   }
   async function refresh() {
-    const [extensions, libs, history, keys, journal] = await Promise.all([
+    const [extensions, libs, history, keys, journal, sources, available] = await Promise.all([
       adminRequest<{ extensions: Installed[] }>('/api/v1/admin/extensions'),
       adminRequest<{ libraries: Library[] }>('/api/v1/admin/libraries'),
       adminRequest<{ runs: Run[] }>('/api/v1/admin/extensions/runs'),
       adminRequest<{ publishers: typeof publishers }>('/api/v1/admin/extensions/publishers'),
-      adminRequest<{ audit: typeof audit }>('/api/v1/admin/extensions/audit')
+      adminRequest<{ audit: typeof audit }>('/api/v1/admin/extensions/audit'),
+      adminRequest<{ repositories: Repository[] }>('/api/v1/admin/extensions/repositories'),
+      adminRequest<{ entries: CatalogueEntry[] }>('/api/v1/admin/extensions/catalogue')
     ]);
     installed = extensions.extensions; libraries = libs.libraries; runs = history.runs; publishers = keys.publishers;
     audit = journal.audit;
+    repositories = sources.repositories; catalogue = available.entries;
     selected = Object.fromEntries(installed.map(e => [e.manifest.id, [...e.libraryIds]]));
 
     for (const ext of installed) {
@@ -137,10 +165,69 @@
     } catch (e) { error = e instanceof Error ? e.message : 'Recherche impossible.'; }
     finally { busy = false; }
   }
+  async function addRepository(event: SubmitEvent) {
+    event.preventDefault();
+    await perform(async () => {
+      await adminRequest('/api/v1/admin/extensions/repositories',{method:'POST',body:JSON.stringify({name:repositoryName,url:repositoryUrl})});
+      repositoryName=''; repositoryUrl=''; tab='catalogue';
+    },'Dépôt enregistré. Ses extensions sont disponibles dans le catalogue.');
+  }
+  async function installFromCatalogue(entry: CatalogueEntry) {
+    await perform(async () => {
+      await adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(entry.repositoryId)}/install`,{method:'POST',body:JSON.stringify({extensionId:entry.manifest.id,version:entry.manifest.version})});
+      tab='installed';
+    },'Extension installée. Configurez ses paramètres et ses bibliothèques puis activez-la. Aucun redémarrage nécessaire.');
+  }
 </script>
 
 <section id="extensions-section" aria-labelledby="extensions-heading">
   <div class="heading"><h2 id="extensions-heading">Extensions</h2><button disabled={busy} onclick={() => perform(refresh, '')}>Actualiser</button></div>
+  <nav class="extension-tabs" aria-label="Gestion des extensions">
+    <button aria-current={tab==='installed' ? 'page' : undefined} onclick={() => tab='installed'}>Installées</button>
+    <button aria-current={tab==='catalogue' ? 'page' : undefined} onclick={() => tab='catalogue'}>Catalogue</button>
+    <button aria-current={tab==='repositories' ? 'page' : undefined} onclick={() => tab='repositories'}>Dépôts</button>
+  </nav>
+  {#if error}<p role="alert">{error}</p>{/if}
+  {#if notice}<p role="status">{notice}</p>{/if}
+  {#if tab==='repositories'}
+    <h3>Dépôts d’extensions</h3>
+    <p>Ajoutez l’adresse HTTPS du manifeste fourni par l’auteur. Les dépôts et modules Jellyfin ne sont pas compatibles.</p>
+    <form class="repository-form" onsubmit={addRepository}>
+      <label>Nom du dépôt<input required maxlength="80" bind:value={repositoryName} disabled={busy} /></label>
+      <label>URL du manifeste<input type="url" required maxlength="2048" placeholder="https://exemple.fr/manifest.json" bind:value={repositoryUrl} disabled={busy} /></label>
+      <button disabled={busy}>Ajouter le dépôt</button>
+    </form>
+    {#each repositories as repository (repository.id)}
+      <article class="card"><h4>{repository.name}</h4><p class="repository-url">{repository.url}</p><p>Actualisé le {new Date(repository.refreshedAt*1000).toLocaleString()}</p>
+        <div class="actions"><button disabled={busy} onclick={() => perform(() => adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(repository.id)}/refresh`,{method:'POST'}),'Catalogue actualisé.')}>Actualiser ce dépôt</button>
+        <button disabled={busy} onclick={() => perform(() => adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(repository.id)}`,{method:'DELETE'}),'Dépôt retiré. Les extensions installées sont conservées.')}>Retirer le dépôt</button></div>
+      </article>
+    {:else}<p>Aucun dépôt enregistré.</p>{/each}
+  {:else if tab==='catalogue'}
+    <div class="heading"><h3>Catalogue</h3><button onclick={() => tab='repositories'}>+ Ajouter un dépôt</button></div>
+    <p>Choisissez une version puis installez-la. L’activation se fait dans Installées après configuration des accès.</p>
+    <div class="plugins-grid">
+    {#each catalogueGroups as group (group.key)}
+      {@const entry=group.entries.find(item => item.manifest.version===catalogueVersions[group.key]) ?? group.entries[0]}
+      {@const publisher=publishers.find(item => item.id===entry.publisherId)}
+      {@const trusted=publisher?.active && publisher.publicKey===entry.publicKey}
+      {@const existing=installed.find(item => item.manifest.id===entry.manifest.id)}
+      <article class="card plugin-card"><h4>{entry.manifest.name}</h4><p>{entry.manifest.description}</p><p>{entry.repositoryName} · {entry.manifest.author}</p>
+        <label for={`extension-version-${group.key}`}>Version de {entry.manifest.name}</label>
+        <select id={`extension-version-${group.key}`} bind:value={catalogueVersions[group.key]} disabled={busy}>{#each group.entries as option (option.manifest.version)}<option value={option.manifest.version}>{option.manifest.version}{option===group.entries[0] ? ' · la plus récente' : ''}{option.compatible ? '' : ' · incompatible'}</option>{/each}</select>
+        <p>Permissions : {entry.manifest.permissions.join(', ')}</p>
+        {#if !entry.compatible}<p>Cette version n’est pas compatible avec le serveur actuel.</p>{/if}
+        {#if existing}<p>Version {existing.manifest.version} déjà installée. Gérez-la dans Installées.</p>{/if}
+        {#if !trusted}
+          <details><summary>Vérifier l’éditeur {entry.publisherId}</summary><p>Comparez cette clé publique avec celle publiée par l’auteur sur un canal de confiance avant de l’approuver.</p><code class="repository-url">{entry.publicKey}</code>
+          {#if publisher}<p>Identifiant déjà approuvé avec une autre clé ou révoqué. Demandez à l’auteur un nouvel identifiant ; la clé existante ne sera pas remplacée.</p>
+          {:else}<button disabled={busy} onclick={() => perform(() => adminRequest('/api/v1/admin/extensions/publishers',{method:'POST',body:JSON.stringify({id:entry.publisherId,publicKey:entry.publicKey})}),'Éditeur approuvé.')}>J’ai vérifié cette clé : approuver</button>{/if}</details>
+        {/if}
+        <button disabled={busy || !trusted || !entry.compatible || !!existing} onclick={() => installFromCatalogue(entry)}>Installer {entry.manifest.name}</button>
+      </article>
+    {:else}<p>Aucune extension disponible. Ajoutez un dépôt pour remplir le catalogue. Aucun dépôt officiel distant n’est configuré sur ce serveur.</p>{/each}
+    </div>
+  {:else}
   <p>Installez un paquet signé, configurez ses paramètres, choisissez ses bibliothèques puis activez-le. Les originaux restent en lecture seule.</p>
   <details class="availability">
     <summary>Comment installer une extension en local ?</summary>
@@ -151,10 +238,8 @@
       <li>Ouvrez « Gérer cette extension », renseignez les paramètres du fournisseur, choisissez ses bibliothèques et activez-la.</li>
     </ol>
     <p>Une clé API Aether sert à lire le catalogue depuis une autre application. Une clé TMDb ou fanart.tv se renseigne dans les paramètres de l’extension. La clé privée de signature reste sur votre ordinateur.</p>
-    <p>Les dépôts Jellyfin et leurs fichiers DLL ne sont pas compatibles. L’installation actuelle utilise un paquet local ; l’ajout d’un catalogue distant n’est pas disponible.</p>
+    <p>L’onglet Dépôts permet aussi d’ajouter un manifeste HTTPS et de choisir une extension dans Catalogue. Les paquets Jellyfin et leurs fichiers DLL ne sont pas compatibles.</p>
   </details>
-  {#if error}<p role="alert">{error}</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
   <details>
     <summary>Éditeurs approuvés</summary>
     <p>Vérifiez la clé publique auprès de l’éditeur par un canal de confiance avant de l’approuver.</p>
@@ -340,9 +425,14 @@
       <p>{new Date(entry.createdAt * 1000).toLocaleString()} · {entry.extensionId} · {entry.action}</p>
     {/each}
   </details>
+  {/if}
 </section>
 
 <style>
+  .extension-tabs { display:flex;gap:.5rem;flex-wrap:wrap;margin-block:1rem; }
+  .extension-tabs button[aria-current="page"] { border-color:var(--color-accent);color:var(--color-accent); }
+  .repository-form { display:grid;gap:.8rem;max-width:800px; }
+  .repository-url { overflow-wrap:anywhere;white-space:normal; }
   section { padding: 1.5rem; border: 1px solid var(--border-subtle); background: var(--bg-surface); border-radius: 16px; }
   h2,h3,h4,strong,legend,summary { color: var(--text-primary); }
   h2 { margin: 0; font-size: 1.3rem; } h3 { font-size: 1.1rem; margin: 0; } h4 { margin: 0 0 .6rem 0; font-size: 1rem; }

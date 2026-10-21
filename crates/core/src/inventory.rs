@@ -2992,6 +2992,9 @@ pub async fn image(
         ids::{ImageId, LibraryId, NodeId},
         inventory::{ReadGrant, ReadTarget},
     };
+    if media_node::image_preview_width(request.uri().query()).is_err() {
+        return crate::error(StatusCode::BAD_REQUEST, "invalid_image_width");
+    }
     let row = query(
         "SELECT i.*,l.root,l.node_id \
          FROM inventory_images i \
@@ -3019,7 +3022,11 @@ pub async fn image(
         else {
             return crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
         };
-        let pq = format!("/internal/v1/node/assets/{image_id}/image");
+        let mut pq = format!("/internal/v1/node/assets/{image_id}/image");
+        if let Some(query) = request.uri().query() {
+            pq.push('?');
+            pq.push_str(query);
+        }
         return crate::nodes::relay_from_remote_node(store, &rec, &pq, request).await;
     }
     let grant = ReadGrant {

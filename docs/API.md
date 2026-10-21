@@ -298,13 +298,16 @@ Voir [Fiches, saisons, visuels et préférences privées](CATALOGUE_PRESENTATION
 
 Les images locales `GET`/`HEAD /api/v1/assets/{id}/image` portent `private, no-cache`. `If-None-Match` correspondant à l'ETag renvoie 304 sans corps après les vérifications de session, droits et fichier. Les requêtes Range conservent leur traitement existant. Le relais distant n'assure pas encore la transmission complète des conditions de cache.
 
+Depuis le 21 octobre, le paramètre facultatif `width=320|640|1280` demande une représentation réduite (hauteur maximale deux fois la largeur, sans agrandissement). Largeur inconnue ou paramètre répété : 400 `invalid_image_width`. Sans `width`, le contrat original est conservé. MIME JPEG ou PNG selon transparence, ou format original si une petite source est déjà plus légère ; GET/HEAD/Range/304 et contrôles des droits s'appliquent aussi aux représentations. Bornes et cache : [LOCAL_FILM_POSTERS.md](LOCAL_FILM_POSTERS.md).
+
 ## Extensions locales — 20 octobre 2026
 
 Le premier contrat HTTP opérationnel est décrit dans [EXTENSIONS_API.md](EXTENSIONS_API.md)
 et [extensions-v1.openapi.json](extensions-v1.openapi.json) : administration des éditeurs,
 installation de paquets signés, consentements par bibliothèque, exécution Wasm bornée,
-propositions de métadonnées et historique. Aucun endpoint de catalogue distant,
-Trickplay ou Intro Skipper n'est annoncé. Preuves et limites :
+propositions de métadonnées et historique. Le catalogue distant a été ajouté le
+21 octobre : [EXTENSION_REPOSITORIES.md](EXTENSION_REPOSITORIES.md). Trickplay et
+Intro Skipper restent absents. Preuves et limites du contrat local initial :
 [evidence/2026-10-20/extensions/README.md](evidence/2026-10-20/extensions/README.md).
 # Fonctions produit du 20 octobre 2026
 

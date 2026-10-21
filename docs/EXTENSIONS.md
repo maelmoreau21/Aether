@@ -4,8 +4,9 @@
 > et de propositions de métadonnées Wasm est validé localement sur SQLite et Chrome.
 > Contrat et limites actuels : [EXTENSIONS_API.md](EXTENSIONS_API.md).
 > Les sections ci-dessous conservent le projet initial; elles ne décrivent pas
-> l'état courant de ce sous-ensemble. Catalogue distant et extensions avancées
-> restent futurs.
+> l'état courant de ce sous-ensemble. Les dépôts HTTPS et le catalogue sont
+> décrits dans [EXTENSION_REPOSITORIES.md](EXTENSION_REPOSITORIES.md) ; extensions
+> avancées et catalogue officiel distant publié restent futurs.
 
 Décision du 19 octobre 2026, à la demande explicite de l'utilisateur : préparer
 un écosystème d'extensions avec dépôts, catalogue, installation et permissions

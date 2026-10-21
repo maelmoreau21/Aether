@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import OfflineDownload from './OfflineDownload.svelte';
   import { bestVersion } from '../player/version-choice';
+  import { preloadProgress } from '../player/progress';
   import {
     playbackIds,
     sourceLabel,
@@ -32,6 +33,13 @@
   } = $props();
 
   const versionIds = $derived(playbackIds(episode));
+  const downloadOptions = $derived.by(() => {
+    void cacheVersion;
+    return versionIds.map((id, index) => {
+      const item = getCachedMedia(id) ?? media.find(entry => entry.id === id);
+      return {url:`/api/v1/assets/${encodeURIComponent(id)}/content`,label:item ? sourceLabel(item) : `Fichier ${index + 1}`,mime:item?.sources.find(source => !source.prepare)?.mime ?? 'application/octet-stream'};
+    });
+  });
   let selected = $state('auto');
   let cacheVersion = $state(0);
   let launchError=$state('');
@@ -91,7 +99,8 @@
     try {
     onselect?.();
     let id=selected;
-    if(id==='auto'){
+    if(id==='auto' && versionIds.length === 1) id = versionIds[0];
+    else if(id==='auto'){
       const candidates=await fetchMediaDescriptors(versionIds,new AbortController().signal);
       const probe=document.createElement('video');
       id=bestVersion(candidates,mime=>probe.canPlayType(mime))?.id??versionIds[0]??'';
@@ -108,6 +117,7 @@
 </script>
 
 <div class="episode-actions">
+  {#if versionIds.length > 1}
   <label>Version
     <select
       aria-label={`Version de ${episode.title}`}
@@ -121,7 +131,10 @@
       {/each}
     </select>
   </label>
+  {/if}
   <button
+    onpointerenter={() => { if (!episode.synthetic) preloadProgress(episode.id); prefetchVersions(); }}
+    onfocus={() => { if (!episode.synthetic) preloadProgress(episode.id); prefetchVersions(); }}
     disabled={!versionIds.length || isLaunching || episode.available === false}
     onclick={handlePlay}
     aria-label={`Lire ${episode.title}`}
@@ -135,7 +148,7 @@
   {/if}
 </div>
 {#if launchError}<p role="alert">{launchError}</p>{/if}
-{#if !episode.synthetic && versionIds.length}<OfflineDownload url={`/api/v1/assets/${selected==='auto'?versionIds[0]:selected}/content`} title={episode.title} mime={(media.find(item=>item.id===(selected==='auto'?versionIds[0]:selected)))?.sources.find(source=>!source.prepare)?.mime??'video/mp4'} />{/if}
+{#if !episode.synthetic && versionIds.length}<OfflineDownload options={downloadOptions} url={`/api/v1/assets/${selected==='auto'?versionIds[0]:selected}/content`} title={episode.title} mime={(media.find(item=>item.id===(selected==='auto'?versionIds[0]:selected)))?.sources.find(source=>!source.prepare)?.mime??'application/octet-stream'} />{/if}
 
 <style>
   .episode-actions { display:flex; align-items:end; gap:14px; flex-wrap:wrap; }

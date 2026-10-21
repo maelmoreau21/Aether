@@ -2,8 +2,9 @@
   import type { Work } from './api';
   import { history } from './watch-state';
   import Icon from '../ui/Icon.svelte';
+  import { imagePreviewUrl } from './image-url';
 
-  let failedUrl = $state('');
+  let failedUrls = $state<string[]>([]);
   let loadedUrl = $state('');
   let {
     work,
@@ -17,7 +18,8 @@
     eager?: boolean;
   } = $props();
 
-  const imageUrl = $derived(work.posterUrl && work.posterUrl !== failedUrl ? work.posterUrl : '');
+  const previewUrl = $derived(imagePreviewUrl(work.posterUrl,showMetadata ? 320 : 640));
+  const imageUrl = $derived([previewUrl,work.posterUrl ?? ''].find(url => url && !failedUrls.includes(url)) ?? '');
   const watchProgress = $derived($history.find(item => item.workId === work.id));
   const isWatched = $derived(watchProgress?.watched ?? false);
   const progressRatio = $derived(
@@ -42,7 +44,7 @@
         fetchpriority={eager ? 'high' : 'auto'}
         decoding="async"
         onload={() => { loadedUrl = imageUrl; }}
-        onerror={() => { failedUrl = imageUrl; }}
+        onerror={() => { failedUrls = [...failedUrls.slice(-3), imageUrl]; }}
       />
       <div class="poster-gradient" aria-hidden="true"></div>
     {/if}

@@ -239,7 +239,7 @@
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = true; wake(); }} onkeydown={keyboard}
     onpointermove={event => { if (event.pointerType !== 'touch') wake(); }} onpointerdown={() => { keyboardPinned = false; surface?.focus(); }}>
-    <video bind:this={video} playsinline preload="metadata" ontimeupdate={sync} ondurationchange={sync} onplay={sync} onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }} onended={ended}><track kind="captions" /></video>
+    <video bind:this={video} playsinline preload="auto" ontimeupdate={sync} ondurationchange={sync} onplay={sync} onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }} onended={ended}><track kind="captions" /></video>
     {#if active?.chapters?.length && visible}<label class="chapters">Chapitres<select aria-label="Chapitres vidéo" disabled={busy} onchange={event => seek(Number(event.currentTarget.value))}><option value="" disabled selected>Choisir un chapitre</option>{#each active.chapters as chapter,i (`${chapter.start}-${i}`)}<option value={chapter.start}>{i+1}. {chapter.title}</option>{/each}</select></label>{/if}
     <button class="video-interaction" tabindex="-1" aria-label="Afficher ou masquer les commandes" onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
     <div class="top-bar" class:concealed={!visible} inert={!visible}>

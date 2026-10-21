@@ -49,7 +49,7 @@
   let immersive = $state<ImmersivePlayer>();
   let ImmersivePlayerComponent = $state<typeof ImmersivePlayer>();
   let createPlayer = $state<PlayerFactory>();
-  let playerLoading = false;
+  let playerLoading: Promise<void> | undefined;
   let launchingEpisodeId = $state<string | null>(null);
   let episodeLaunchController: AbortController | null = null;
 
@@ -69,7 +69,7 @@
     mediaError = '';
 
     try {
-      const item = await revalidateMediaDescriptor(versionId, controller.signal);
+      const [, item] = await Promise.all([loadPlayer(), revalidateMediaDescriptor(versionId, controller.signal)]);
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
       const cachedForEpisode = playbackIds(episode)
         .map(eid => (eid === item.id ? item : getCachedMedia(eid)))
@@ -96,18 +96,17 @@
 
   async function loadPlayer(): Promise<void> {
     if (ImmersivePlayerComponent && createPlayer) return;
-    if (playerLoading) return;
-    playerLoading = true;
-    try {
+    if (playerLoading) return playerLoading;
+    playerLoading = (async () => {
       const [{ default: comp }, { NativePlayer }] = await Promise.all([
         import('../player/ImmersivePlayer.svelte'),
         import('../player/native')
       ]);
       ImmersivePlayerComponent = comp;
       createPlayer = (video, onError) => new NativePlayer(video, onError);
-    } finally {
-      playerLoading = false;
-    }
+    })();
+    try { await playerLoading; }
+    finally { playerLoading = undefined; }
   }
 
   const workId = $derived(page.url.searchParams.get('work') ?? '');
@@ -176,10 +175,12 @@
     mediaError = '';
 
     try {
-      const item = await revalidateMediaDescriptor(targetId, controller.signal);
+      const [, item] = await Promise.all([loadPlayer(), revalidateMediaDescriptor(targetId, controller.signal)]);
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
       media = [...media.filter(m => m.id !== item.id), item];
       selected = item.id;
+      await tick();
+      if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
       immersive?.open(item);
     } catch (err) {
       if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
@@ -198,7 +199,6 @@
       window.location.href = detailUrl(work);
       return;
     }
-    await loadPlayer();
     const ids = playbackIds(work);
     const targetId = ids[0];
     if (!targetId) {
@@ -206,7 +206,7 @@
       return;
     }
     try {
-      const item = await revalidateMediaDescriptor(targetId);
+      const [, item] = await Promise.all([loadPlayer(), revalidateMediaDescriptor(targetId)]);
       detail = work;
       media = [item];
       selected = item.id;
@@ -285,7 +285,7 @@
           if (currentSection !== 'films' && currentSection !== 'series') {
             throw new Error('Ouvrez ce média depuis sa bibliothèque Films ou Séries.');
           }
-          const playerPromise = loadPlayer();
+          void loadPlayer().catch(() => { /* A playback attempt reports the import error and can retry. */ });
           const work = await request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}`, controller.signal);
           if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
           if (
@@ -294,8 +294,6 @@
           ) {
             throw new Error('Ce média appartient à une autre bibliothèque.');
           }
-          await playerPromise;
-          if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
           detail = work;
           busy = false;
           season = work.seasons?.[0]?.number ?? 1;

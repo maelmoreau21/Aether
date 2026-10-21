@@ -1,12 +1,43 @@
-# Travail produit du 20 octobre 2026
+# État de développement
 
-## Objectif et autorisation
+## 21 octobre 2026 — Lot ergonomie, performances et dépôts vérifié
+
+Téléchargement natif confirmé par l’utilisateur : fichier sur l’appareil, sans
+phrase ni nouvelle copie hors ligne. Miniatures 320/640/1280 avec cache borné,
+fond décoratif lourd supprimé du chargement initial, menu + des listes,
+étoiles réactives, contrôles mono-version/mono-audio masqués et lancement
+parallélisé. Dépôts HTTPS et catalogue de versions signées opérationnels,
+générateur de manifeste dans Aether-Plugins. Pas de dépôt distant publié inventé.
+
+Web : check 0 erreur/0 avertissement, lint, 68 tests et build réussis.
+Rust : 42 tests Node, 2 tests release miniatures, 2 tests Core dépôts,
+posters_flow, distributed_multi_node et node_enrollment_and_relay réussis.
+Chrome 155.0.8059.85 headless : téléchargement/PWA, dépôts, affiches en quatre
+phases et séries (notes rapides, listes, contrôles, décodage, seek, épisodes et
+sessions) réussis. `cargo fmt --all -- --check` et
+`cargo clippy --locked --workspace --all-targets -j 1 -- -D warnings` réussis.
+
+Preuves, commandes et limites :
+[evidence du lot](docs/evidence/2026-10-21/usability/README.md),
+[mesure des miniatures](docs/evidence/2026-10-21/image-preview-release.md).
+Le catalogue navigateur utilise un vrai Core/SQLite avec documents HTTPS
+substitués seulement dans le binaire de test. Aucun compte fournisseur réel,
+PostgreSQL réel, NAS ou comparaison Jellyfin vérifié dans ce lot.
+
+Dockerfile allégé d’un doublon Core et arènes glibc bornées ; Docker Desktop
+indisponible, donc poids final/RSS après cinq minutes non mesurés. Aucun push,
+déploiement ou remplacement de conteneur/volume. Prochain petit jalon de mesure :
+reproduire le poids, le RSS et les latences sur le déploiement Linux autorisé.
+
+## Notes historiques conservées du 20 octobre
+
+### Objectif et autorisation
 L’utilisateur a demandé de **tout réaliser** et a explicitement refusé l’arrêt
 après la PWA. Continuer les lots et leurs vérifications sans demander de validation
 intermédiaire. Token Saver : lectures ciblées, pas de sous-agent demandé.
 Préserver les deux rôles et les données/médias. Aucun push ni déploiement autorisé.
 
-## État en cours
+### État alors en cours
 - PWA et coffre hors ligne chiffré : parcours Chrome headless passé (manifeste,
   icônes, cache public seulement, téléchargement, mauvaise phrase, déverrouillage,
   Opus décodé, pause/seek/Range exact, verrouillage et reconnexion).
@@ -25,7 +56,7 @@ Préserver les deux rôles et les données/médias. Aucun push ni déploiement a
 - Sélection de version selon déclarations navigateur, disponibilité et résolution ;
   choix manuel conservé et absence de preuve physique de décodage signalée.
 
-## Contrôles restants
+### Contrôles alors restants
 Terminer compilation/tests Rust (sérialisés `-j 1`), tests nouveaux produits et
 distribués, cache Node, suite Web/check/lint/build, navigateur PWA et AV1/Opus,
 fmt/clippy/diff, documentation/API/MEMORY et revue des limites.

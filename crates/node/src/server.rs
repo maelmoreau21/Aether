@@ -2022,6 +2022,17 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
     if let Some(ref r) = req.range {
         builder = builder.header(header::RANGE, r);
     }
+    if req.target_kind == "image" {
+        if let Some(width) = req.image_width {
+            builder = builder.uri(format!(
+                "/internal/v1/node/assets/{}/image?width={width}",
+                req.target_id
+            ));
+        }
+        if let Some(ref etag) = req.if_none_match {
+            builder = builder.header(header::IF_NONE_MATCH, etag);
+        }
+    }
     let synthetic_req = builder.body(Body::empty()).unwrap_or_default();
 
     if let Some(component) = req.target_kind.strip_prefix("prepared:") {

@@ -22,7 +22,8 @@ Les bibliothèques et fichiers existants restent en lecture seule. Aucun nouveau
 | Listes/watchlists | Mes listes : création, ajout depuis une fiche, retrait, suppression ; propriété et droits vivants | Listes privées ; les œuvres devenues interdites disparaissent du contenu présenté |
 | Cache après crash | Récupération au démarrage et à la prochaine préparation ; répertoires versionnés avec leases/verrous OS | Seules les entrées identifiées de la nouvelle version sont récupérées ; anciens dossiers temporaires sans marqueur exclus |
 | Préparation distante | Copie AV1/Opus et conversion des sous-titres sur le Node propriétaire, stream via transport signé entrant ou canal sortant | FFmpeg facultatif requis pour la préparation ; aucun réencodage vidéo ajouté ; ASS/SSA en texte, pas de rendu stylisé promis |
-| Hors ligne | Téléchargement explicite chiffré AES-GCM par blocs, page disponible sans réseau, phrase locale, lecture/seek/Range, verrouillage et suppression | 4 Gio par fichier, quota navigateur vérifié ; fichier original complet, compatibilité dépend du navigateur. Pas de remux hors ligne ni de conservation des sélections de pistes préparées |
+| Téléchargement | Icône et téléchargement natif du fichier original ; choix uniquement si plusieurs versions | Nom proposé selon titre/format ; progression et espace disque gérés par le navigateur. Aucun mot de passe ou stockage IndexedDB ajouté |
+| Anciennes copies hors ligne | Page disponible sans réseau, lecture/seek/Range, récupération des copies à phrase et suppression durable | Compatibilité du navigateur ; copies IndexedDB existantes conservées, aucun remux hors ligne |
 
 ## Frontières de sécurité
 
@@ -45,11 +46,15 @@ Les bibliothèques et fichiers existants restent en lecture seule. Aucun nouveau
 - Cache de préparation : un répertoire privé contient un verrou d’allocation et
   des entrées louées. Un processus actif garde sa lease. Un arrêt brutal libère le
   verrou OS ; la récupération supprime l’entrée orpheline, sans parcourir les médias.
-- Hors ligne : seuls le HTML public de la page Téléchargements et les assets du
-  build sont placés dans CacheStorage. Les médias et leur titre sont chiffrés dans
-  IndexedDB ; aucune clé déchiffrante ni session n’y est conservée. Une phrase
-  oubliée ne peut pas être récupérée. Une copie déjà téléchargée reste lisible sans
-  serveur après révocation ; suppression locale nécessaire sur appareil partagé.
+- Téléchargement : lien de fichier protégé de même origine avec attribut
+  `download`, sans charger tout le média dans un Blob en mémoire. Le navigateur
+  enregistre le fichier original ; l’API applique toujours les droits serveur.
+- Anciennes copies hors ligne : seuls le HTML public de la page Téléchargements et
+  les assets du build sont placés dans CacheStorage. Les médias déjà enregistrés
+  dans IndexedDB et leurs clés restent lisibles ; ceux à phrase conservent leur
+  phrase d’origine. Une copie déjà téléchargée reste lisible après révocation ;
+  suppression locale nécessaire sur appareil partagé. La disparition de la carte
+  dans l’interface suit la suppression durable des blocs et de sa clé.
 
 ## Contrats HTTP
 

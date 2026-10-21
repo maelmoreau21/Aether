@@ -7,7 +7,9 @@
 mod cache_dirs;
 pub mod external_audio;
 pub mod files;
+mod image_preview;
 pub mod images;
+pub use image_preview::width as image_preview_width;
 pub mod inventory;
 pub mod music;
 pub mod nfo;
@@ -134,6 +136,7 @@ impl LocalNode {
         let grant = grant.clone();
         let method = req.method().clone();
         let headers = req.headers().clone();
+        let image_width = image_preview::width(req.uri().query());
         let node = self.clone();
         async move {
             let root = Path::new(&grant.root_snapshot);
@@ -163,6 +166,26 @@ impl LocalNode {
                         .open_media(root, relative)
                         .await
                         .map_err(|_| NodeErrorCode::UnavailableImage)?;
+                    if opened.size() != *expected_size
+                        || opened.modified_ns() != expected_modified_ns.as_str()
+                    {
+                        return Err(NodeErrorCode::ImageChangedRescanRequired);
+                    }
+                    if let Some(width) = image_width.map_err(|_| NodeErrorCode::InvalidImage)? {
+                        let preview = image_preview::generate(&opened, width)
+                            .await
+                            .map_err(|_| NodeErrorCode::InvalidImage)?;
+                        if preview.source_mime != grant.mime {
+                            return Err(NodeErrorCode::ImageChangedRescanRequired);
+                        }
+                        let etag = format!(
+                            "\"preview-v1-{}-{:x}-{width}\"",
+                            opened.modified_ns(),
+                            opened.size()
+                        );
+                        return image_preview::response(preview, &method, &headers, &etag)
+                            .map_err(|_| NodeErrorCode::ImageStreamError);
+                    }
                     let checked = images::validate_opened(&opened)
                         .await
                         .map_err(|_| NodeErrorCode::InvalidImage)?;

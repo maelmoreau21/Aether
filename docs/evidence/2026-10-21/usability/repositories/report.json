@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "browser": "155.0.8059.85",
+  "backend": "real Core / temporary SQLite",
+  "transport": "HTTPS documents injected only under cfg(test); no public repository claimed",
+  "checks": [
+    "private URL rejected",
+    "repository added and persisted",
+    "latest version selected",
+    "older version explicitly chosen",
+    "publisher trust required",
+    "signed package installed disabled",
+    "repository refresh and removal preserve installed extension",
+    "390px layout"
+  ],
+  "jsErrors": []
+}

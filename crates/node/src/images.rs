@@ -13,7 +13,7 @@ use tokio::sync::Semaphore;
 use crate::{files::OpenedFile, scanner::FolderVideos};
 
 pub const MAX_BYTES: u64 = 10 * 1024 * 1024;
-static VALIDATION: Semaphore = Semaphore::const_new(1);
+pub(crate) static VALIDATION: Semaphore = Semaphore::const_new(1);
 
 type ValidationKey = (PathBuf, u64, String);
 
@@ -43,6 +43,13 @@ fn invalid(message: &str) -> io::Error {
 }
 
 fn decode_and_verify(bytes: Vec<u8>, extension: &str) -> io::Result<&'static str> {
+    decode_image(&bytes, extension).map(|(mime, _)| mime)
+}
+
+pub(crate) fn decode_image(
+    bytes: &[u8],
+    extension: &str,
+) -> io::Result<(&'static str, image::DynamicImage)> {
     let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
     let mime = match reader.format() {
         Some(ImageFormat::Jpeg) => "image/jpeg",
@@ -70,9 +77,9 @@ fn decode_and_verify(bytes: Vec<u8>, extension: &str) -> io::Result<&'static str
     if decoder.total_bytes() > 32 * 1024 * 1024 {
         return Err(invalid("image decoded pixels exceed 32 MiB"));
     }
-    image::DynamicImage::from_decoder(decoder)
+    let image = image::DynamicImage::from_decoder(decoder)
         .map_err(|_| invalid("corrupt image or image decoding limit exceeded"))?;
-    Ok(mime)
+    Ok((mime, image))
 }
 
 /// Validate an already-confined `OpenedFile` handle without reopening by path.

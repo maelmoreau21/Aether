@@ -1,5 +1,9 @@
 # Extensions API v1 — premier parcours local
 
+Les dépôts HTTPS et l’installation depuis Catalogue sont désormais décrits dans
+[Dépôts et catalogue](EXTENSION_REPOSITORIES.md). Ils réutilisent les signatures,
+la confiance explicite et l’activation séparée du parcours local ci-dessous.
+
 Contrat indépendant du protocole interne Node, implémenté par le Core existant.
 Ce sous-ensemble permet une extension de propositions de métadonnées, installée
 sans recompiler le serveur. Il ne livre pas les quinze sections de la plateforme.
@@ -137,7 +141,7 @@ ne constitue pas encore une preuve de tâches exécutées sur un Node distant.
 
 ## Suite non livrée
 
-Catalogue officiel et dépôts personnalisés, mises à jour/rollback,
+Catalogue officiel distant publié, mises à jour/rollback,
 hooks durables, traitements planifiés Node, I/O média contrôlées,
 stockage privé généralisé, coffre de secrets, traductions FR/EN complètes,
 Trickplay, Intro Skipper, récupération automatique et massive des affiches,

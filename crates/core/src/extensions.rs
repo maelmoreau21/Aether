@@ -31,6 +31,9 @@ use tokio::{
 static MUTATIONS: Mutex<()> = Mutex::const_new(());
 static EXECUTIONS: Semaphore = Semaphore::const_new(1);
 
+#[path = "extension_repositories.rs"]
+mod repositories;
+
 fn metadata_input_with_settings(input: MetadataInput, settings: Value) -> Value {
     // Configuration belongs only to this installed extension. It travels over the
     // private worker pipe and is never included in package files or run history.
@@ -122,6 +125,7 @@ pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'st
 
 pub fn router(auth: AuthState) -> Router {
     Router::new()
+        .merge(repositories::router())
         .route("/api/v1/admin/extensions", get(list).post(install))
         .route(
             "/api/v1/admin/extensions/publishers",

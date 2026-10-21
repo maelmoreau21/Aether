@@ -1,0 +1,18 @@
+import type { Media, Source } from './types';
+
+// Count operational source choices, never the number of tracks detected by ffprobe.
+// A source URL still requires successful browser decoding before playback is proven.
+export function audioChoices(media: Media, selectedId?: string): Source[] {
+  if (media.available === false || media.nodeStatus === 'revoked' || media.nodeStatus === 'disconnected') return [];
+  const choices = new Map<string, Source>();
+  for (const source of media.sources) {
+    if (source.nodeStatus === 'revoked' || source.nodeStatus === 'disconnected') continue;
+    const firstAudio = source.audioTrackId === 'internal-default'
+      ? source.tracks?.find(track => track.codec_type === 'audio')?.index : undefined;
+    // The original default and the prepared form of that same indexed track
+    // are packaging alternatives, not two language choices.
+    const key = firstAudio === undefined ? source.audioTrackId : `internal-${firstAudio}`;
+    if (!choices.has(key) || source.audioTrackId === selectedId) choices.set(key, source);
+  }
+  return [...choices.values()];
+}

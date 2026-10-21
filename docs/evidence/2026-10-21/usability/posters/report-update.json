@@ -1,0 +1,22 @@
+{
+  "browser": "155.0.8059.85",
+  "os": "10.0.26300",
+  "headless": true,
+  "phase": "update",
+  "results": {
+    "incrementalWithoutVideoProbe": true,
+    "boundedPosterRepresentation": true,
+    "catalogue": true,
+    "singleWorkTwoVersions": true,
+    "metadata": true,
+    "localPoster": true,
+    "fallback": true,
+    "imageSessionPermissions": true,
+    "escapedHostileText": true,
+    "playback": true,
+    "seek": true,
+    "pause": true,
+    "cspErrors": []
+  },
+  "passed": true
+}

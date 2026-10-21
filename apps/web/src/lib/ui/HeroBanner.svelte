@@ -2,6 +2,7 @@
   import { resolve } from '$app/paths';
   import type { Work } from '../catalog/api';
   import Icon from './Icon.svelte';
+  import { imagePreviewUrl } from '../catalog/image-url';
 
   let loadedUrl = $state('');
 
@@ -13,7 +14,6 @@
     onPlay?: (work: Work) => void;
   } = $props();
 
-  const base = $derived(resolve('/').replace(/\/$/, ''));
   const detailUrl = $derived(
     featured
       ? featured.kind === 'series'
@@ -22,7 +22,7 @@
       : resolve('films/')
   );
 
-  const imageUrl = $derived(featured?.artwork?.backdrop || featured?.posterUrl || '');
+  const imageUrl = $derived(imagePreviewUrl(featured?.artwork?.backdrop || featured?.posterUrl,1280));
 </script>
 
 <section class="hero-banner" class:has-featured={!!featured} aria-label="Média en vedette">
@@ -30,7 +30,7 @@
   <div class="backdrop-wrapper" aria-hidden="true">
     <div
       class="backdrop-art"
-      style:background-image="url('{base}/images/cinematic-horizon.png')"
+      style:background-image="radial-gradient(ellipse at 75% 40%, var(--color-accent-soft), transparent 65%)"
     ></div>
     {#if featured?.artwork?.backdrop || featured?.posterUrl}
       <img

@@ -67,8 +67,9 @@ Administration → Extensions :
 L’installation ne déclenche pas automatiquement un scan, une récupération de
 toutes les affiches ou une modification du catalogue. fanart.tv et les avatars
 ont des opérations spécifiques qui ne sont pas accessibles depuis ce parcours
-manuel de proposition de métadonnées. Les mises à jour en place, dépôts distants
-et paquets Jellyfin ne sont pas pris en charge.
+manuel de proposition de métadonnées. Les mises à jour en place et paquets
+Jellyfin ne sont pas pris en charge. L’onglet Dépôts permet aussi d’ajouter un
+[catalogue HTTPS de paquets](EXTENSION_REPOSITORIES.md), lorsqu’un auteur en héberge un.
 
 Une clé API créée dans Aether sert à lire son catalogue depuis une application
 externe. Une clé TMDb/fanart.tv est délivrée par ce fournisseur : sa durée,

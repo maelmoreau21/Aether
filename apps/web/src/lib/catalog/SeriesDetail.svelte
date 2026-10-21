@@ -1,5 +1,6 @@
 <script lang="ts">
   import WorkTools from './WorkTools.svelte';
+  import { imagePreviewUrl } from './image-url';
   import type { Work } from './api';
   import PersonalFeedback from './PersonalFeedback.svelte';
   import EditorialCredits from './EditorialCredits.svelte';
@@ -47,7 +48,7 @@
           class="backdrop-art-image"
           class:artwork={!!work.artwork?.backdrop}
           class:loaded={backdropLoaded}
-          src={work.artwork?.backdrop || work.posterUrl || ''}
+          src={imagePreviewUrl(work.artwork?.backdrop || work.posterUrl, 1280)}
           alt=""
           loading="eager"
           decoding="async"
@@ -88,7 +89,7 @@
           </span>
         </div>
 
-        {#if work.artwork?.logo}<img class="title-logo" src={work.artwork.logo} alt="" />{/if}
+        {#if work.artwork?.logo}<img class="title-logo" src={imagePreviewUrl(work.artwork.logo, 640)} alt="" decoding="async" />{/if}
         <h1>{work.title}</h1>
         {#if !work.synthetic}<PersonalFeedback workId={work.id} />{/if}
         {#if !work.synthetic}<WorkTools {work} />{/if}
@@ -96,7 +97,7 @@
           <nav class="season-shortcuts" aria-label="Saisons disponibles">
             {#each work.seasons as item (item.id)}
               <button class:chosen={activeSeason?.number === item.number} onclick={() => selectSeason(item.number)}>
-                {#if work.artwork?.[`season${item.number}`]}<img src={work.artwork[`season${item.number}`] ?? ''} alt="" loading="lazy" decoding="async" width="80" height="120" />{:else}<span class="season-placeholder" aria-hidden="true">{item.number === 0 ? '★' : item.number}</span>{/if}
+                {#if work.artwork?.[`season${item.number}`]}<img src={imagePreviewUrl(work.artwork[`season${item.number}`], 320)} alt="" loading="lazy" decoding="async" width="80" height="120" />{:else}<span class="season-placeholder" aria-hidden="true">{item.number === 0 ? '★' : item.number}</span>{/if}
                 {item.number === 0 ? 'Hors-série' : `Saison ${item.number}`} · {item.episodes.length} {item.episodes.length > 1 ? 'épisodes' : 'épisode'}
               </button>
             {/each}
@@ -142,7 +143,7 @@
         {#if work.artwork?.illustration || work.artwork?.landscape}
           <div class="artwork-gallery" aria-label="Illustrations locales">
             {#each ['illustration','landscape'] as role (role)}
-              {#if work.artwork?.[role]}<img src={work.artwork[role] ?? ''} alt={role === 'illustration' ? `Illustration de ${work.title}` : `Visuel de ${work.title}`} loading="lazy" />{/if}
+              {#if work.artwork?.[role]}<img src={imagePreviewUrl(work.artwork[role], 640)} alt={role === 'illustration' ? `Illustration de ${work.title}` : `Visuel de ${work.title}`} loading="lazy" decoding="async" />{/if}
             {/each}
           </div>
         {/if}
@@ -187,7 +188,7 @@
     <div class="episodes-list">
       {#each activeSeason?.episodes ?? [] as episode (episode.id)}
         <article class="episode">
-          {#if episode.artwork?.thumb}<img class="episode-thumb" src={episode.artwork.thumb} alt="" loading="lazy" decoding="async" width="240" height="135" />{/if}
+          {#if episode.artwork?.thumb}<img class="episode-thumb" src={imagePreviewUrl(episode.artwork.thumb, 320)} alt="" loading="lazy" decoding="async" width="240" height="135" />{/if}
           <span class="episode-number">{String(episode.number).padStart(2, '0')}</span>
           <div class="episode-content">
             <div class="episode-title-row">

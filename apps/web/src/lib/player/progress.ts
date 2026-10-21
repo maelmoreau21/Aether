@@ -1,16 +1,40 @@
 import { get } from 'svelte/store';
-import { session, getSessionGeneration } from '../auth/session';
+import { session, getSessionGeneration, onSessionGenerationChange } from '../auth/session';
 import type { PlaybackState } from './types';
 
 export interface Progress { workId: string; position: number; duration: number; watched: boolean; revision: number; title?: string; kind?: string; seriesId?: string }
 
+const warmed = new Map<string, { at: number; value: Promise<Progress> }>();
+onSessionGenerationChange(() => warmed.clear());
+
+/** Read ahead on a play gesture's approach, never across accounts or progress writes. */
+export function preloadProgress(work: string): void {
+  if (!get(session)) return;
+  const existing = warmed.get(work);
+  if (existing && Date.now() - existing.at < 5000) return;
+  const oldest = warmed.keys().next().value;
+  if (warmed.size >= 32 && oldest !== undefined) warmed.delete(oldest);
+  const value = fetchProgress(work);
+  const entry = { at: Date.now(), value };
+  warmed.set(work, entry);
+  void value.catch(() => { if (warmed.get(work) === entry) warmed.delete(work); });
+}
+
 export async function readProgress(work: string): Promise<Progress> {
+  const ready = warmed.get(work);
+  warmed.delete(work);
+  if (ready && Date.now() - ready.at < 5000) return ready.value;
+  return fetchProgress(work);
+}
+
+async function fetchProgress(work: string): Promise<Progress> {
   const response = await fetch(`/api/v1/progress/${encodeURIComponent(work)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
   if (!response.ok) throw new Error('Reprise indisponible : progression non chargée.');
   return response.json();
 }
 
 export async function writeProgress(progress: Progress, keepalive = false): Promise<Progress> {
+  warmed.delete(progress.workId);
   const current = get(session);
   if (!current) throw new Error('Session requise pour enregistrer la progression.');
   const response = await fetch(`/api/v1/progress/${encodeURIComponent(progress.workId)}`, {

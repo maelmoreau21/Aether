@@ -235,6 +235,67 @@ async fn local_posters_refresh_preserve_media_and_enforce_library_permissions() 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(bytes, if method == "GET" { png() } else { vec![] });
     }
+    let preview_url = format!("{image_url}&width=320");
+    for width in [320, 640, 1280] {
+        let url = format!("{image_url}&width={width}");
+        for method in ["GET", "HEAD"] {
+            assert_eq!(
+                request(&app, method, &url, "", None, Value::Null, None)
+                    .await
+                    .0,
+                StatusCode::UNAUTHORIZED
+            );
+            let result = request(&app, method, &url, &cookie, None, Value::Null, None).await;
+            assert_eq!(result.0, StatusCode::OK);
+            if method == "GET" {
+                assert_eq!(image::load_from_memory(&result.2).unwrap().width(), 2);
+            } else {
+                assert!(result.2.is_empty());
+            }
+        }
+    }
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &preview_url,
+            &cookie,
+            None,
+            Value::Null,
+            Some("bytes=0-3")
+        )
+        .await
+        .0,
+        StatusCode::PARTIAL_CONTENT
+    );
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &preview_url,
+            &cookie,
+            None,
+            Value::Null,
+            Some("bytes=99999-")
+        )
+        .await
+        .0,
+        StatusCode::RANGE_NOT_SATISFIABLE
+    );
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &format!("{image_url}&width=99999"),
+            &cookie,
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
     assert_eq!(scan(&app, &library, &cookie, csrf).await["probed"], 0);
     assert_eq!(
         (hash(&video).await, hash(&nfo).await, hash(&poster).await),
@@ -258,6 +319,12 @@ async fn local_posters_refresh_preserve_media_and_enforce_library_permissions() 
     );
     // An invalid replacement must never be served, even before the next scan.
     tokio::fs::write(&poster, b"not a PNG").await.unwrap();
+    assert_ne!(
+        request(&app, "GET", &preview_url, &cookie, None, Value::Null, None)
+            .await
+            .0,
+        StatusCode::OK
+    );
     assert_ne!(
         request(&app, "GET", &image_url, &cookie, None, Value::Null, None)
             .await
@@ -318,6 +385,12 @@ async fn local_posters_refresh_preserve_media_and_enforce_library_permissions() 
         .execute(&pool)
         .await
         .unwrap();
+    assert_eq!(
+        request(&app, "GET", &preview_url, &cookie, None, Value::Null, None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
     for method in ["GET", "HEAD"] {
         assert_eq!(
             request(&app, method, &image_url, &cookie, None, Value::Null, None)
@@ -354,6 +427,12 @@ async fn local_posters_refresh_preserve_media_and_enforce_library_permissions() 
         .execute(&pool)
         .await
         .unwrap();
+    assert_eq!(
+        request(&app, "GET", &preview_url, &cookie, None, Value::Null, None)
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
     for method in ["GET", "HEAD"] {
         assert_eq!(
             request(&app, method, &image_url, &cookie, None, Value::Null, None)

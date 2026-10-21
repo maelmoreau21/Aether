@@ -555,6 +555,28 @@ Contrats et limites : [PRODUCT_FEATURES.md](PRODUCT_FEATURES.md).
   changement personnel de mot de passe et révocation d’un autre contexte navigateur.
 - Web : `npm run check`, `npm run lint`, `npm test`, `npm run build`,
   `npx tsc -p src/service-worker/tsconfig.json --noEmit`, `node scripts/test-pwa.mjs`.
-  Le dernier utilise un serveur de fixture HTTP : chiffrement, refus de mauvaise
-  phrase, Opus PCM/440 Hz, déconnexion réseau, lecture/seek/Range et rendu mobile.
+  Le dernier utilise un serveur de fixture HTTP. Depuis le 21 octobre, il vérifie
+  le téléchargement natif exact (nom/octet, sans copie IndexedDB), puis les copies
+  hors ligne antérieures, la clé d'appareil, la récupération des anciennes copies
+  protégées par phrase, Opus PCM/440 Hz, seek/Range, suppression et rendu mobile.
+
+## Miniatures, simplification média et dépôts — 21 octobre 2026
+
+- `cargo test --release --locked -p media-node --lib image_preview -j 1 -- --test-threads=1 --nocapture` :
+  poids/dimensions, cache invalidé après changement, transparence, conditions et Range.
+- `posters_flow` : largeurs 320/640/1280 sur GET/HEAD autorisés, mauvaise largeur,
+  Range/416, fichier modifié et permissions/session révoquées. `distributed_multi_node`
+  compare les mêmes miniatures en accès direct signé et via relais Core.
+- `browser_posters -- --ignored --test-threads=1` : cartes réellement décodées avec
+  `width=320`, absence de téléchargement du fond décoratif de 2 Mo, rayons indépendants,
+  cache et modifications/retrait de l'affiche. Fixture minuscule, sans preuve de débit NAS.
+- `browser_series -- --ignored --test-threads=1` : clics de notes rapprochés pendant
+  une écriture retenue, dernier choix persistant, listes via +, version/audio uniques
+  masqués, multi-version conservée, vidéo décodée, pause/seek et transitions.
+- `cargo test --locked -p media-poc --lib extensions::repositories -j 1 -- --test-threads=1` :
+  formats, adresses privées, bornes, droits/CSRF, signatures et snapshots des dépôts.
+- `cargo test --locked -p media-poc --lib browser_repository_catalogue_version_trust_and_install -j 1 -- --ignored --nocapture --test-threads=1` :
+  vrai Core/SQLite et navigateur, choix de deux versions, approbation explicite,
+  installation désactivée, actualisation, persistance et retrait. Les documents
+  HTTPS sont substitués uniquement sous `cfg(test)` ; ce n'est pas un essai d'hébergement public.
 

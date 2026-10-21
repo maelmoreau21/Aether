@@ -182,6 +182,10 @@ RUN mkdir -p /tmp/ffmpeg-src \
 # ==============================================================================
 FROM debian:bookworm-slim AS backup-runtime
 
+# Bound glibc allocator arenas independently of the host CPU count. This limits
+# per-thread heap retention after scans/Argon2; it is not an RSS or memory quota.
+ENV MALLOC_ARENA_MAX=2
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
@@ -242,6 +246,8 @@ CMD ["aether-core"]
 # Stage 4: Distributed Media Node Runtime (`aether-node`)
 # ==============================================================================
 FROM debian:bookworm-slim AS runtime-node
+
+ENV MALLOC_ARENA_MAX=2
 
 # Node performs ffprobe inspection, NFO/image validation, and confined HTTP Range streaming
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -305,7 +311,6 @@ RUN mkdir -p /data /backups /media /app/apps/web/build \
     && chmod 0700 /backups \
     && chmod 0755 /media /app
 
-COPY --from=rust-builder --chmod=0755 /build/target/release/media-poc /usr/local/bin/media-poc
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-extension-worker /usr/local/bin/media-extension-worker
 COPY --from=rust-builder --chmod=0755 /build/target/release/aether-core /usr/local/bin/aether-core
 COPY --from=rust-builder --chmod=0755 /build/target/release/aether-node /usr/local/bin/aether-node
@@ -313,7 +318,11 @@ COPY --from=rust-builder --chmod=0755 /build/target/release/media-bootstrap /usr
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-backup /usr/local/bin/media-backup
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-restore /usr/local/bin/media-restore
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-recover /usr/local/bin/media-recover
-RUN ln -s /usr/local/bin/media-poc /usr/local/bin/aether
+# The production standalone server is the same Core with its local Node.
+# Keep historical command names without shipping a second full Core executable.
+# The fixture-bench media-poc binary remains available in source builds only.
+RUN ln -s /usr/local/bin/aether-core /usr/local/bin/media-poc \
+    && ln -s /usr/local/bin/aether-core /usr/local/bin/aether
 
 COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
 
@@ -335,4 +344,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://127.0.0.1:3000/api/v1/health || exit 1
 
 ENTRYPOINT ["tini", "--"]
-CMD ["media-poc"]
+CMD ["aether-core"]

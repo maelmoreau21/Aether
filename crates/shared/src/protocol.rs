@@ -161,6 +161,10 @@ pub struct StreamRelayRequest {
     pub target_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub range: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub if_none_match: Option<String>,
 }
 
 /// Core -> Node or Node -> Core heartbeat payload.

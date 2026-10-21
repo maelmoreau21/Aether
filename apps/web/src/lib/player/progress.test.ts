@@ -1,10 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { session } from '../auth/session';
-import { ProgressTracker, writeProgress } from './progress';
+import { ProgressTracker, writeProgress, preloadProgress, readProgress } from './progress';
 afterEach(()=>{session.set(null);vi.unstubAllGlobals();vi.useRealTimers();});
 const state={position:4,duration:12,paused:true,volume:1,speed:1};
 function login() {session.set({user:{id:'user-a',login:'a',role:'user'},csrfToken:'test-csrf'});}
 describe('user progress',()=>{
+  it('consumes a recent hover prefetch once and otherwise reloads the live revision',async()=>{
+    login();const fetch=vi.fn().mockImplementation(async()=>Response.json({workId:'work',position:4,duration:12,watched:false,revision:7}));vi.stubGlobal('fetch',fetch);
+    preloadProgress('work');preloadProgress('work');
+    expect((await readProgress('work')).revision).toBe(7);expect(fetch).toHaveBeenCalledTimes(1);
+    await readProgress('work');expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it('expires prefetched progress and discards it when the account changes',async()=>{
+    vi.useFakeTimers();login();const fetch=vi.fn().mockImplementation(async()=>Response.json({position:4,watched:false,revision:1}));vi.stubGlobal('fetch',fetch);
+    preloadProgress('work');await vi.advanceTimersByTimeAsync(5001);await readProgress('work');expect(fetch).toHaveBeenCalledTimes(2);
+    preloadProgress('work');session.set(null);login();await readProgress('work');expect(fetch).toHaveBeenCalledTimes(4);
+  });
+  it('invalidates a prefetch before writing or retrying a progress update',async()=>{
+    login();const fetch=vi.fn().mockImplementation(async()=>Response.json({position:4,watched:false,revision:1}));vi.stubGlobal('fetch',fetch);
+    vi.stubGlobal('window',{dispatchEvent:vi.fn()});
+    preloadProgress('work');await writeProgress({workId:'work',position:1,duration:12,watched:false,revision:0});await readProgress('work');expect(fetch).toHaveBeenCalledTimes(3);
+  });
   it('does not overwrite a newer session revision after a conflict',async()=>{
     login();const error=vi.fn();const fetch=vi.fn().mockResolvedValueOnce(Response.json({workId:'work',position:4,duration:12,watched:false,revision:7})).mockResolvedValue(new Response(null,{status:409}));vi.stubGlobal('fetch',fetch);
     const tracker=new ProgressTracker('work',error);expect(await tracker.load()).toBe(4);tracker.save(state,true);

@@ -2908,3 +2908,59 @@ Validation finale Node : 10 tests politique + 2 suites statistiques =12/12, exit
   jalon recommandé : durcir les ouvertures de fichiers contre TOCTOU avant toute
   exposition à un stockage modifiable par un acteur hostile. Séries/backdrops/
   pistes externes/OIDC/multi-Node/PostgreSQL/Docker restent hors périmètre.
+## 21 octobre 2026 — Miniatures, téléchargements simples et dépôts
+
+- Demande poursuivie sans déploiement ni publication. L’utilisateur précise que
+  Télécharger doit enregistrer le fichier sur l’appareil depuis le site.
+- Téléchargement natif par lien protégé, nom proposé et choix des fichiers quand
+  plusieurs versions existent ; aucune phrase ni nouvelle copie IndexedDB dans
+  ce parcours. Anciennes copies hors ligne préservées, récupération des anciennes
+  copies avec phrase conservée ; suppression visible seulement après effacement
+  durable des blocs et de la clé. Bouton + pour créer une liste avec le média ou
+  ajouter à une liste existante. Notes optimistes avec écritures sérialisées et
+  dernier choix conservé pendant une réponse lente.
+- Miniatures autorisées sur la route image existante : largeurs 320/640/1280,
+  hauteur au plus deux fois la largeur, sans agrandissement, JPEG/PNG ou original
+  si déjà adapté et plus petit. LRU de 8 Mio/128 corps compressés, décodeur unique
+  partagé avec scans/originaux, fichier et droits revalidés avant cache. GET/HEAD,
+  Range et conditions conservés ; aucune écriture dans la bibliothèque. Largeur
+  transportée aux Nodes distants et au canal sortant. Le relais ne transmet pas
+  encore l’ETag de réponse. Fond décoratif de presque 2 Mo remplacé par dégradé
+  CSS pour éviter sa demande dès le chargement initial.
+- Mesure release unique Windows : JPEG synthétique 3 862 387 octets réduit à
+  86 620 octets en 320×480, génération 159,281 ms, cache 305,8 µs. Ce n’est pas une
+  mesure réseau/navigateur/NAS ni une limite RSS. Preuve :
+  `docs/evidence/2026-10-21/image-preview-release.md`.
+- Lecture : promesse d’import partagée, descripteur et import parallèles, montage
+  attendu avant ouverture, requête de choix de version évitée pour mono-version.
+  Progression préparée sur survol/focus cinq secondes, consommée une seule fois,
+  bornée à 32 œuvres et purgée aux écritures/changements de compte. Contrôles
+  Version et Audio masqués sans choix opérationnels distincts ; original/remux
+  d’une même piste dédupliqués. Aucune promesse de décodage fondée sur ffprobe.
+- Dépôts : migrations additives 0036 SQLite/PostgreSQL ; administration Dépôts,
+  Catalogue et Installées, choix de version, installation signée désactivée,
+  approbation explicite des éditeurs, accès/activation conservés. HTTPS public
+  uniquement, DNS vérifié et épinglé, aucun proxy/redirection, bornes de taille,
+  délai et concurrence. Pas de dépôt officiel publié inventé ni de compatibilité
+  avec les DLL/manifestes Jellyfin. Générateur fourni dans Aether-Plugins.
+- Tests déjà exécutés : Web check 0 erreur/0 avertissement, lint, 68 tests et
+  build ; 42 tests Node réussis (un helper ignoré appelé par son test parent),
+  2 tests release miniatures, 2 tests Core dépôts, posters_flow,
+  distributed_multi_node et node_enrollment_and_relay réussis. Chrome
+  155.0.8059.85 headless : PWA/téléchargement exact et copies anciennes, dépôts
+  réels Core/SQLite (documents HTTPS injectés uniquement sous cfg(test)),
+  affiches initial/redémarrage/modification/suppression réussis. Affiche minuscule
+  visible en 510 ms desktop/552 ms mobile, observations uniques sans comparaison.
+- Docker : arènes glibc bornées à 2 et suppression de la copie du second binaire
+  Core standalone, alias media-poc/aether vers aether-core ; outils de secours et
+  Node conservés. Moteur Docker Desktop absent : aucun poids final, RSS à cinq
+  minutes ou gain Linux mesuré, aucun conteneur/volume utilisateur modifié.
+- Preuves complémentaires et état final des contrôles :
+  `docs/evidence/2026-10-21/usability/README.md` et `DEV_STATE.md`.
+- Clôture locale : browser_series réussit après correction du sélecteur de test
+  du disclosure natif des listes ; notes rapides persistées, liste créée et
+  média ajouté, choix mono-version/mono-audio masqués, 7 images vidéo décodées,
+  seek/pause, chapitres, transitions et isolation des comptes vérifiés. Clic vers
+  lecture observée 1890 ms (Core debug, préparation et automatisation incluses),
+  sans comparaison Jellyfin. Fmt, Clippy strict workspace/all-targets et diff
+  checks des deux dépôts réussis.

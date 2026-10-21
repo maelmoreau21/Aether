@@ -29,7 +29,7 @@ Les pistes audio affichent individuellement langue, codec, canaux et titre lorsq
 
 ## Notes et favoris privés
 
-`GET` / `HEAD` et `PUT /api/v1/feedback/{workId}` utilisent exclusivement le compte de la session. PUT exige le jeton CSRF et accepte `{ "favorite": true, "rating": 4 }`. La note va de 0,5 à 5 par pas de 0,5, ou `null` pour la retirer. Le contrôle affiche un cœur et cinq étoiles : cliquer sur la moitié gauche sélectionne une demi-étoile, sur la moitié droite une étoile entière. Recliquer sur la note sélectionnée la retire. Les contrôles sont accessibles au clavier. La migration 0030 conserve les anciennes notes entières dans les deux moteurs SQL. Les champs inconnus sont rejetés (422), le corps est limité à 2 Kio. Réponse `{ "favorite": bool, "rating": number|null }`, cache `private, no-store`. L'accès à la bibliothèque est revérifié à chaque requête, y compris après révocation. Sans session : 401 ; sans droit ou œuvre inconnue : 403.
+`GET` / `HEAD` et `PUT /api/v1/feedback/{workId}` utilisent exclusivement le compte de la session. PUT exige le jeton CSRF et accepte `{ "favorite": true, "rating": 4 }`. La note va de 0,5 à 5 par pas de 0,5, ou `null` pour la retirer. Le contrôle affiche un cœur et cinq étoiles : cliquer sur la moitié gauche sélectionne une demi-étoile, sur la moitié droite une étoile entière. Recliquer sur la note sélectionnée la retire. Les contrôles sont accessibles au clavier. L’aperçu de la note suit le survol et le focus ; le choix est affiché immédiatement. Les écritures sont sérialisées et les clics rapides sont regroupés pour conserver le dernier choix, sans désactiver toutes les étoiles à chaque aller-retour réseau. Un échec rétablit la dernière valeur confirmée et affiche une erreur. La migration 0030 conserve les anciennes notes entières dans les deux moteurs SQL. Les champs inconnus sont rejetés (422), le corps est limité à 2 Kio. Réponse `{ "favorite": bool, "rating": number|null }`, cache `private, no-store`. L'accès à la bibliothèque est revérifié à chaque requête, y compris après révocation. Sans session : 401 ; sans droit ou œuvre inconnue : 403.
 
 La migration 0029 ajoute `work_feedback`, les rôles d'images et le stockage temporaire des visuels du scan, pour SQLite et PostgreSQL. Les préférences sont persistées par paire compte/œuvre, supprimées avec leur propriétaire ou l'œuvre, et absentes des réponses partagées du catalogue. Deux écritures concurrentes d'un même compte suivent la dernière écriture réussie. Aucun classement public ni moteur de recommandation n'est ajouté.
 
@@ -48,3 +48,12 @@ La fiche film s'affiche dès réception du catalogue pendant le chargement des d
 Les quatre modes de scan restent disponibles pour préserver leurs comportements. Les libellés distinguent désormais l'actualisation rapide recommandée, la conservation des descriptions, le complément des descriptions manquantes et la réanalyse complète plus lente. Les explications précisent les effets sur les fichiers et les NFO locaux.
 
 Les mesures sur fixtures locales ne prouvent pas les temps de chargement NAS, WAN ou de médias arbitraires.
+
+## Actions compactes
+
+Sur les fiches, le bouton « + » ouvre les listes existantes et la création d’une
+liste avec ajout immédiat du média. Les outils administrateur de métadonnées
+restent dans une action distincte avec une icône d’édition. Le téléchargement
+utilise une icône et enregistre le fichier original avec le navigateur, sans
+phrase ni nouvelle copie IndexedDB. Un choix n’apparaît que lorsque plusieurs
+sources sont disponibles ; voir [PWA et téléchargements](PWA.md).

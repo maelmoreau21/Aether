@@ -2018,6 +2018,20 @@ pub async fn relay_from_remote_node(
                         target_kind: target_kind.to_owned(),
                         target_id: target_id.to_owned(),
                         range: range.clone(),
+                        image_width: if is_image {
+                            request.uri().query().and_then(|q| {
+                                url::form_urlencoded::parse(q.as_bytes())
+                                    .find(|(k, _)| k == "width")
+                                    .and_then(|(_, v)| v.parse().ok())
+                            })
+                        } else {
+                            None
+                        },
+                        if_none_match: request
+                            .headers()
+                            .get(header::IF_NONE_MATCH)
+                            .and_then(|v| v.to_str().ok())
+                            .map(str::to_owned),
                     })
                     .unwrap_or_default(),
                 };
@@ -2170,6 +2184,9 @@ pub async fn relay_from_remote_node(
 
     if let Some(range) = request.headers().get(header::RANGE) {
         builder = builder.header(header::RANGE, range);
+    }
+    if let Some(condition) = request.headers().get(header::IF_NONE_MATCH) {
+        builder = builder.header(header::IF_NONE_MATCH, condition);
     }
 
     let upstream_req = match builder.body(Full::new(Bytes::new())) {

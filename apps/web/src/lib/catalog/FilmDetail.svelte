@@ -2,6 +2,8 @@
   import WorkTools from './WorkTools.svelte';
   import OfflineDownload from './OfflineDownload.svelte';
   import { bestVersion } from '../player/version-choice';
+  import { imagePreviewUrl } from './image-url';
+  import { preloadProgress } from '../player/progress';
   import type { Work } from './api';
   import PersonalFeedback from './PersonalFeedback.svelte';
   import EditorialCredits from './EditorialCredits.svelte';
@@ -42,6 +44,11 @@
     currentSelectedMedia?.sources[0]?.tracks?.find(t => t.codec_type === 'video')
   );
   const currentAudioTracks = $derived(inspectedAudioTracks(currentSelectedMedia));
+  const downloadOptions = $derived(playableMedia.filter(item => item.available !== false).map(item => ({
+    url: `/api/v1/assets/${encodeURIComponent(item.id)}/content`,
+    label: sourceLabel(item),
+    mime: item.sources.find(source => !source.prepare)?.mime ?? 'application/octet-stream'
+  })));
 </script>
 
 <div class="film-detail-view">
@@ -53,7 +60,7 @@
           class="backdrop-art-image"
           class:artwork={!!work.artwork?.backdrop}
           class:loaded={backdropLoaded}
-          src={work.artwork?.backdrop || work.posterUrl || ''}
+          src={imagePreviewUrl(work.artwork?.backdrop || work.posterUrl, 1280)}
           alt=""
           loading="eager"
           decoding="async"
@@ -96,11 +103,11 @@
           {/if}
         </div>
 
-        {#if work.artwork?.logo}<img class="title-logo" src={work.artwork.logo} alt="" />{/if}
+        {#if work.artwork?.logo}<img class="title-logo" src={imagePreviewUrl(work.artwork.logo, 640)} alt="" decoding="async" />{/if}
         <h1>{work.title}</h1>
         {#if !work.synthetic}<PersonalFeedback workId={work.id} />{/if}
         {#if !work.synthetic}<WorkTools {work} />{/if}
-        {#if currentSelectedMedia && !work.synthetic}<OfflineDownload url={`/api/v1/assets/${currentSelectedMedia.id}/content`} title={work.title} mime={currentSelectedMedia.sources.find(s=>!s.prepare)?.mime??'video/mp4'} />{/if}
+        {#if currentSelectedMedia && !work.synthetic}<OfflineDownload options={downloadOptions} url={`/api/v1/assets/${currentSelectedMedia.id}/content`} title={work.title} mime={currentSelectedMedia.sources.find(s=>!s.prepare)?.mime??'application/octet-stream'} />{/if}
 
         {#if work.originalTitle && work.originalTitle !== work.title}
           <p class="original-title">Titre original : <em>{work.originalTitle}</em></p>
@@ -160,6 +167,8 @@
           <div class="play-action-row">
             <button
               class="hero-cta"
+              onpointerenter={() => { if (!work.synthetic) preloadProgress(work.id); }}
+              onfocus={() => { if (!work.synthetic) preloadProgress(work.id); }}
               disabled={work.available === false || (!playableMedia.length && !allowedIds.length)}
               onclick={onPlay}
             >
@@ -234,7 +243,7 @@
         {#if work.artwork?.illustration || work.artwork?.landscape}
           <div class="artwork-gallery" aria-label="Illustrations locales">
             {#each ['illustration','landscape'] as role (role)}
-              {#if work.artwork?.[role]}<img src={work.artwork[role] ?? ''} alt={role === 'illustration' ? `Illustration de ${work.title}` : `Visuel de ${work.title}`} loading="lazy" />{/if}
+              {#if work.artwork?.[role]}<img src={imagePreviewUrl(work.artwork[role], 640)} alt={role === 'illustration' ? `Illustration de ${work.title}` : `Visuel de ${work.title}`} loading="lazy" decoding="async" />{/if}
             {/each}
           </div>
         {/if}

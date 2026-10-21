@@ -128,7 +128,7 @@ async fn populate_test_libraries(films_root: &Path, series_root: &Path) {
     )
     .await
     .expect("write movie.nfo");
-    image::DynamicImage::new_rgb8(32, 48)
+    image::DynamicImage::new_rgb8(960, 1440)
         .save(film_dir.join("poster.png"))
         .expect("write film poster");
 
@@ -1031,6 +1031,45 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     .await;
     assert_eq!(p_direct_st, StatusCode::OK);
     assert_eq!(p_direct_bytes, p_relay_bytes);
+
+    // The width option must survive both the Core -> Node relay query and the
+    // browser -> Node query alongside the signed token. This RGB PNG becomes
+    // an authorized 320px JPEG preview from the existing 960px poster.
+    let preview_relay = format!(
+        "{film_poster_relay}{}width=320",
+        if film_poster_relay.contains('?') {
+            '&'
+        } else {
+            '?'
+        }
+    );
+    let (preview_relay_status, preview_relay_headers, preview_relay_bytes) = http_request(
+        &core_origin,
+        Method::GET,
+        &preview_relay,
+        &[("cookie", &alice_cookie)],
+        vec![],
+    )
+    .await;
+    assert_eq!(preview_relay_status, StatusCode::OK);
+    assert_eq!(preview_relay_headers[header::CONTENT_TYPE], "image/jpeg");
+    let decoded_preview = image::load_from_memory(&preview_relay_bytes).unwrap();
+    assert_eq!(
+        (decoded_preview.width(), decoded_preview.height()),
+        (320, 480)
+    );
+    assert_ne!(preview_relay_bytes, p_relay_bytes);
+    let (preview_direct_status, preview_direct_headers, preview_direct_bytes) = http_request(
+        &node1_url,
+        Method::GET,
+        &format!("{poster_pq}&width=320"),
+        &[("origin", &core_origin)],
+        vec![],
+    )
+    .await;
+    assert_eq!(preview_direct_status, StatusCode::OK);
+    assert_eq!(preview_direct_headers[header::CONTENT_TYPE], "image/jpeg");
+    assert_eq!(preview_direct_bytes, preview_relay_bytes);
 
     // 10. Rescan Node 1 Films and verify UUID preservation + reused cache + zero writes in media folder
     let (rescan_st, _, _) = http_request(

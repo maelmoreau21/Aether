@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import { audioLabel, videoLabel, videoResolutionBadge, containerLabel } from './track-labels';
+  import { audioChoices } from './available-audio';
   import type { Media, PlaybackState } from './types';
 
   export type Menu = 'audio' | 'subtitles' | 'video' | 'speed' | null;
@@ -55,6 +56,9 @@
   let hoverTime = $state<number | null>(null);
 
   const source = $derived(media.sources.find(source => source.audioTrackId === audio) ?? media.sources[0]);
+  const selectableAudio = $derived(audioChoices(media, audio));
+  const selectableVersions = $derived(catalogue.filter(item => item.available !== false && item.nodeStatus !== 'revoked' && item.nodeStatus !== 'disconnected'));
+  $effect(() => { if (menu === 'audio' && selectableAudio.length <= 1) menu = null; });
   const videoTracks = $derived((source?.tracks?.some(track => track.codec_type === 'video') ? source.tracks : media.sources[0]?.tracks)?.filter(track => track.codec_type === 'video') ?? []);
   const remainingTime = $derived(Math.max(0, (playback.duration || 0) - (playback.position || 0)));
 
@@ -151,7 +155,7 @@
 
       {#if menu === 'audio'}
         <div role="group" aria-label="Langues audio">
-          {#each media.sources as item (item.id)}
+          {#each selectableAudio as item (item.id)}
             <button
               data-audio-id={item.audioTrackId}
               role="menuitemradio"
@@ -226,10 +230,11 @@
             Conteneur : {containerLabel(source?.mime)} · Décodage assuré par le navigateur.
           </p>
         </div>
+        {#if selectableVersions.length > 1}
         <div role="separator" class="menu-separator"></div>
         <div role="group" aria-label="Sources de démonstration">
           <p class="menu-section" role="presentation">Versions / Sources disponibles</p>
-          {#each catalogue as item (item.id)}
+          {#each selectableVersions as item (item.id)}
             <button
               data-source-id={item.id}
               role="menuitemradio"
@@ -245,6 +250,7 @@
             </button>
           {/each}
         </div>
+        {/if}
       {:else if menu === 'speed'}
         <div role="group" aria-label="Vitesses de lecture">
           {#each [0.5, 0.75, 1, 1.25, 1.5, 2] as speed (speed)}
@@ -351,6 +357,7 @@
     </div>
 
     <div class="right-controls" bind:this={triggers}>
+      {#if selectableAudio.length > 1}
       <button
         data-menu="audio"
         aria-label="Audio"
@@ -363,6 +370,7 @@
         <Icon name="globe" size={20} />
         <span class="control-label">Audio</span>
       </button>
+      {/if}
 
       <button
         data-menu="subtitles"

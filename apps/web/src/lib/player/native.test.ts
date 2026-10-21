@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { NativePlayer } from './native';
 import type { Media } from './types';
 vi.mock('./external-audio', () => ({ ExternalAudio: class {
-  async load() {} async play() {} destroy() {} setOffset() {}
+  async load() {} async play() {} destroy() {} setOffset() {} activate() {} pause() {} isBuffering() { return false; }
 } }));
 class Video extends EventTarget {
   currentTime = 0; duration = 12; paused = true; volume = 0.4; playbackRate = 1.5;
@@ -89,11 +89,15 @@ describe('native source replacement', () => {
     video.dispatchEvent(new Event('loadedmetadata'));await loading;
     expect(error).not.toHaveBeenCalled();expect(video.loads).toBe(2);
   });
-  it('prepares independent video and audio concurrently',async()=>{
+  it('serializes preparation to respect the single Node worker',async()=>{
     const replies:((value:Response)=>void)[]=[];
     const fetcher=vi.fn(()=>new Promise<Response>(resolve=>replies.push(resolve)));vi.stubGlobal('fetch',fetcher);
     const {player}=setup();const loading=player.load({...media,sources:[{...media.sources[0],prepare:true,url:'/prepared/video',externalAudioUrl:'/prepared/audio'}]});
-    expect(fetcher).toHaveBeenCalledTimes(2);for(const reply of replies)reply(new Response(null,{status:200}));await loading;
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    replies[0](new Response(null,{status:200}));
+    await vi.waitFor(()=>expect(fetcher).toHaveBeenCalledTimes(2));
+    replies[1](new Response(null,{status:200})); await loading;
+    player.destroy();
   });
 
 });

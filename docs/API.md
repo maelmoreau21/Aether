@@ -286,6 +286,18 @@ Une HEAD peut préparer le cache et prend jusqu'à 120 s ; le frontend attend
 expose `prepare: true` pour les sources concernées. Dépendance facultative,
 bornes et limites : [préparation](PLAYER_TRACK_PREPARATION.md).
 
+Depuis le correctif du 21 octobre 2026, une source originale avec plusieurs
+pistes audio expose `language: "und"` : ce champ ne garantit pas la piste choisie
+par le navigateur. Utiliser les sources `internal-N` pour une sélection précise.
+Les échecs de préparation répondent HTTP 503 et un code JSON distinct :
+`preparation_busy`, `preparation_cache_limit_reached`, `preparation_timeout`,
+`preparation_tool_or_source_unavailable`, `unsupported_preparation`,
+`preparation_configuration_invalid` ou `preparation_failed`. Le même code figure
+dans l'en-tête informatif `x-media-preparation-error`, également pour HEAD sans
+corps et après relais Core/Node. Il n'accorde aucun droit et ne remplace pas
+l'autorisation de chaque accès média. Une piste non supportée reste HTTP 422
+`unsupported_track` avant la préparation.
+
 Catalogue : `sort=year-asc|year-desc|added-asc|added-desc` en plus des tris titre.
 `addedAt` est un timestamp Unix ou NULL si la date historique est inconnue.
 

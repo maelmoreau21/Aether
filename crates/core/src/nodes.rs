@@ -1962,7 +1962,7 @@ pub async fn relay_from_remote_node(
 
     // Only the response headers are bounded here; the media body remains streamed.
     let head_wait = if path_and_query.contains("/prepared/") {
-        Duration::from_secs(125)
+        Duration::from_secs(media_node::packaging::MAX_PREPARATION_SECONDS + 5)
     } else {
         Duration::from_secs(6)
     };
@@ -2064,6 +2064,7 @@ pub async fn relay_from_remote_node(
                         header::CONTENT_RANGE,
                         header::ACCEPT_RANGES,
                         header::CACHE_CONTROL,
+                        axum::http::HeaderName::from_static("x-media-preparation-error"),
                     ] {
                         if let Some(val) = stream_res.headers.get(&header_name) {
                             out.headers_mut().insert(header_name, val.clone());
@@ -2271,6 +2272,7 @@ pub async fn relay_from_remote_node(
         header::CONTENT_RANGE,
         header::ACCEPT_RANGES,
         header::CACHE_CONTROL,
+        axum::http::HeaderName::from_static("x-media-preparation-error"),
     ] {
         if let Some(val) = parts.headers.get(&header_name) {
             out.headers_mut().insert(header_name, val.clone());

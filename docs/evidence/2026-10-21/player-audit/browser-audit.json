@@ -1,0 +1,20 @@
+{
+  "scope": "Chrome, synthetic fixtures, current NativePlayer/ExternalAudio, isolated test HTTP server",
+  "browser": "155.0.8059.85",
+  "os": "10.0.26300",
+  "failedSwitch": {
+    "failure": "Audio externe Ogg/Opus illisible.",
+    "errors": [
+      "Audio externe interrompu : source Ogg/Opus indisponible ou incompatible."
+    ],
+    "retainedFailedAudio": true,
+    "audioUrl": "http://127.0.0.1:1783/en",
+    "mediaError": 4
+  },
+  "originalDefault": {
+    "url": "http://127.0.0.1:1783/default-en",
+    "peakHz": 990.234375,
+    "peakDb": -70.04549407958984
+  },
+  "passed": true
+}

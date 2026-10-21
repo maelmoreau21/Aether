@@ -1,11 +1,13 @@
 import type { Media, Player, PlaybackState, Source } from './types';
 import { ExternalAudio } from './external-audio';
+import { chooseSource } from './source-selection';
 
 // One finite source replacement. No retries, silent fallback or player-specific API in the UI.
 export class NativePlayer implements Player {
   private media?: Media;
   private source?: Source;
   private externalAudio?: ExternalAudio;
+  private pendingAudio?: ExternalAudio;
   private subtitle: string | null = null;
   private audioOffset = 0;
   private subtitleOffset = 0;
@@ -37,25 +39,42 @@ export class NativePlayer implements Player {
     if(this.busy)return;
     this.video.pause();
     this.externalAudio?.destroy(); this.externalAudio = undefined;
+    this.source = undefined;
     this.onError(`Lecture interrompue : ${this.video.error?.message || 'source indisponible ou codecs/conteneur incompatibles'} (MediaError ${this.video.error?.code ?? '?'})`);
   };
+  private audioError = (message: string) => {
+    this.pause();
+    this.externalAudio?.destroy(); this.externalAudio = undefined;
+    this.source = undefined;
+    this.onError(message);
+  };
   state(): PlaybackState {
-    return { position: this.video.currentTime, duration: this.video.duration, paused: this.video.paused, volume: this.video.volume, speed: this.video.playbackRate };
+    return { position: this.video.currentTime, duration: this.video.duration, paused: this.video.paused && !this.externalAudio?.isBuffering(), volume: this.video.volume, speed: this.video.playbackRate };
   }
   async load(media: Media, initialAudioTrackId?: string) {
     this.media = media;
     this.subtitle = null;
-    const source = media.sources.find(s => s.audioTrackId === initialAudioTrackId) ?? media.sources.find(s => s.language === 'fr') ?? media.sources[0];
+    const source = chooseSource(media, initialAudioTrackId);
     if (!source) throw new Error('Aucune source disponible pour ce média.');
     await this.replace(source, 0, true);
   }
   private async prepareUrl(url: string) {
     const controller = new AbortController(); this.preparations.add(controller);
     this.status('Préparation des pistes sur le Media Node… Première préparation potentiellement longue.');
-    const timeout = setTimeout(() => controller.abort(), 125000);
+    const timeout = setTimeout(() => controller.abort(), 3610000);
     try {
       const response = await fetch(url, { method: 'HEAD', signal: controller.signal });
-      if (!response.ok) throw new Error('Préparation impossible : FFmpeg requis sur le Node, format incompatible ou cache occupé/plein. Réessayez explicitement.');
+      if (!response.ok) {
+        const messages: Record<string, string> = {
+          preparation_busy: 'Le Media Node prépare déjà une autre piste. Réessayez une fois cette préparation terminée.',
+          preparation_cache_limit_reached: 'La préparation dépasse la capacité du cache du Media Node. Augmentez sa limite ou libérez son cache.',
+          preparation_timeout: 'La préparation a dépassé le délai configuré sur le Media Node.',
+          preparation_tool_or_source_unavailable: 'FFmpeg ou la source est introuvable sur le Media Node.',
+          unsupported_preparation: 'Le Media Node ne peut pas préparer ce format sans réencodage.',
+          preparation_configuration_invalid: 'La configuration de préparation du Media Node est invalide.'
+        };
+        throw new Error(`Préparation impossible : ${messages[response.headers?.get('x-media-preparation-error') ?? ''] ?? 'source indisponible, format incompatible ou cache occupé/plein. Réessayez explicitement.'}`);
+      }
     } finally { clearTimeout(timeout); this.preparations.delete(controller); }
     if (this.destroyed) throw new Error('Lecteur fermé.');
   }
@@ -63,16 +82,24 @@ export class NativePlayer implements Player {
     if (this.busy || this.destroyed) throw new Error('Lecteur indisponible pendant le changement de source.');
     this.busy = true;
     const previous = this.source;
-    this.video.pause();
+    this.pause();
     try {
       if (source.prepare) {
-        await Promise.all([...(previous?.url !== source.url ? [this.prepareUrl(source.url)] : []),...(source.externalAudioUrl ? [this.prepareUrl(source.externalAudioUrl)] : [])]);
+        if (previous?.url !== source.url) await this.prepareUrl(source.url);
+        if (source.externalAudioUrl) await this.prepareUrl(source.externalAudioUrl);
       }
       // Independent Opus track switch: keep the same video element, URL and timeline.
       if (previous?.url === source.url && source.externalAudioUrl) {
-        this.externalAudio?.destroy(); this.externalAudio = undefined;
-        this.externalAudio = new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.onError);
-        await this.externalAudio.load(source.externalAudioUrl);
+        const candidate = new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError);
+        this.pendingAudio = candidate;
+        try {
+          await candidate.load(source.externalAudioUrl, false);
+          if (this.destroyed) throw new Error('Lecteur fermé.');
+          this.externalAudio?.destroy();
+          this.externalAudio = candidate;
+          candidate.activate();
+        } catch (error) { candidate.destroy(); throw error; }
+        finally { if (this.pendingAudio === candidate) this.pendingAudio = undefined; }
         this.source = source;
         if (!paused) await this.play();
         return;
@@ -150,7 +177,7 @@ export class NativePlayer implements Player {
       }
       this.source = source;
       if (source.externalAudioUrl) {
-        this.externalAudio = new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.onError);
+        this.externalAudio = new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError);
         await this.externalAudio.load(source.externalAudioUrl);
       }
       await this.selectSubtitle(this.subtitle);
@@ -193,6 +220,7 @@ export class NativePlayer implements Player {
     track.track.mode = 'showing';
   }
   async play() {
+    if (!this.source || this.destroyed) throw new Error('Source interrompue ou indisponible. Rechargez explicitement la source.');
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([(async () => {
@@ -203,9 +231,10 @@ export class NativePlayer implements Player {
       })(), new Promise<never>((_, reject) => {
         timer = setTimeout(() => { this.video.pause(); reject(new Error('Démarrage de lecture expiré après 10 secondes.')); }, 10000);
       })]);
-    } finally { clearTimeout(timer); }
+    } catch (error) { this.pause(); throw error; }
+    finally { clearTimeout(timer); }
   }
-  pause() { this.video.pause(); }
+  pause() { this.externalAudio?.pause(); this.video.pause(); }
   seek(position: number) { if (Number.isFinite(position)) this.video.currentTime = Math.max(0, Math.min(position, this.video.duration || 0)); }
   setVolume(volume: number) { this.video.volume = Math.max(0, Math.min(1, volume)); }
   setAudioOffset(seconds: number) {
@@ -229,6 +258,7 @@ export class NativePlayer implements Player {
     this.destroyed = true;
     for(const controller of this.preparations)controller.abort();this.preparations.clear();
     this.cancel?.();
+    this.pendingAudio?.destroy(); this.pendingAudio = undefined;
     this.clearStall();
     this.externalAudio?.destroy(); this.externalAudio = undefined;
     this.video.removeEventListener('error', this.mediaError);

@@ -2999,3 +2999,54 @@ Validation finale Node : 10 tests politique + 2 suites statistiques =12/12, exit
   lecture observée 1890 ms (Core debug, préparation et automatisation incluses),
   sans comparaison Jellyfin. Fmt, Clippy strict workspace/all-targets et diff
   checks des deux dépôts réussis.
+
+## 21 octobre 2026 — Audit ciblé du lecteur, sans correctif de production
+
+- Analyse des sept problèmes audio/vidéo : `docs/PLAYER_PLAYBACK_AUDIT.md`.
+  Préparation parallèle Web incompatible avec l'admission d'un seul worker Node
+  à froid ; test réel MKV/MP4 reproduisant le refus concurrent et la réussite en
+  série. Conservation de six canaux sur la piste FR extraite et hashes des
+  paquets AV1/Opus identiques dans le test de copie existant.
+- Chrome 155.0.8059.85 / Windows 10.0.26300, fixtures synthétiques et vrai code
+  lecteur : audio VO HTTP 404 laissé attaché, resélection VF ignorée ; original
+  étiqueté FR d'après la première piste mais piste EN default réellement décodée
+  à 990,23 Hz. Serveur de test isolé, pas une preuve Core/RBAC.
+- Cinq diagnostics déterministes reproduits, dont blocage audio seul sans
+  watchdog et dérive de 140 ms non corrigée après seek. Les 72 tests Web
+  existants passent. Parcours Core/SQLite/Chrome browser_scanner réussi en
+  56,08 s, MP4 puis MKV après redémarrage : VF/VO, PCM, seek/pause, progression
+  et sous-titres. Fmt et diff --check réussis.
+- Aucun code de production modifié ; tests, rapport et preuves seulement.
+  Corrections recommandées : préparations sérialisées, commutation atomique,
+  sélection explicite de piste et surveillance du buffering audio. POC MSE à
+  horloge commune seulement ensuite si nécessaire ; pas de refonte immédiate.
+  Pas de sortie physique 5.1/7.1, autre navigateur, NAS/4K réel ou endurance
+  validés. Les limites 120 s / 16 Gio vidéo / 1 Gio audio restent effectives.
+
+## 21 octobre 2026 — Correctifs du lecteur demandés après l'audit
+
+- État d'audit précédent remplacé pour le code de production : préparations
+  sérialisées, chargement et positionnement d'un candidat audio avant activation,
+  ancien audio préservé lors d'un échec, nettoyage/annulation complets et source
+  invalidée après erreur terminale. Intention de lecture conservée pendant une
+  pause technique, pause manuelle annulant la reprise automatique.
+- Sélection partagée normalisant les langues et privilégiant la piste concrète ;
+  original multi-audio exposé en `und`, libellé comme choix navigateur. Buffering
+  audio coordonné avec vidéo, seek explicite et seuil périodique 80 ms. Pas de
+  réencodage, filtre audio, downmix ou graphe WebAudio de production.
+- Limites via MEDIA_PREPARATION_* : cache 96 Gio, vidéo 64 Gio, audio 4096 Mio,
+  délai 900 s par défaut ; valeurs bornées et erreurs HTTP 503 différenciées,
+  en-tête informatif de préparation disponible sur HEAD et relais. Stockage
+  Docker corrigé vers /data/preparation-cache (ancien /tmp limité à 64 Mio dans
+  Compose). Variable MEDIA_PREPARATION_CACHE_DIR absolue, hors bibliothèques.
+  Toujours cache temporaire, un worker et copie entière avant lecture ; aucun
+  gain chiffré 4K annoncé, aucune image publiée ni conteneur remplacé.
+- Vérifications : check 0/0, lint/build, 73 tests Web + 5 régressions ciblées,
+  copie de paquets AV1/Opus dont 7.1 MKV/MP4, deux tests de leases réussis.
+  Chrome 155/Core/SQLite : VF/VO/PCM/seek/pause/progression/sous-titres, MP4 puis MKV
+  après redémarrage, réussi en 33,09 s. Premier essai en échec sur pause technique
+  pendant commutation, corrigé puis rejoué. Compose config --quiet, fmt/diff et
+  Clippy strict workspace/all-targets. Suite Rust générale non relancée.
+- Preuves après correction : docs/evidence/2026-10-21/player-audit/browser-fixed.json
+  et browser-fixed/. Sortie physique 5.1/7.1, Safari/Firefox/Edge, NAS/4K réel et
+  endurance non validés. Deux éléments ne garantissent pas une horloge commune.

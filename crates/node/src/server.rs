@@ -1336,10 +1336,14 @@ async fn prepare_asset(
                 cors_error_response(StatusCode::INTERNAL_SERVER_ERROR, "prepared_stream_failed")
             }
         },
-        Err(_) => cors_error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "preparation_failed_ffmpeg_required_or_cache_busy",
-        ),
+        Err(error) => {
+            let code = crate::packaging::preparation_error_code(&error);
+            let mut response = cors_error_response(StatusCode::SERVICE_UNAVAILABLE, code);
+            response
+                .headers_mut()
+                .insert("x-media-preparation-error", HeaderValue::from_static(code));
+            response
+        }
     }
 }
 async fn internal_prepared(
@@ -2126,6 +2130,7 @@ async fn send_stream_uplink_body(
         header::CONTENT_RANGE,
         header::ACCEPT_RANGES,
         header::CACHE_CONTROL,
+        axum::http::HeaderName::from_static("x-media-preparation-error"),
     ] {
         if let Some(v) = serve_res.headers().get(&name) {
             headers_to_send.insert(name, v.clone());

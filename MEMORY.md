@@ -1,6 +1,11 @@
 # MEMORY.md — État et décisions Aether
 
-## 21 octobre 2026 — Correction de la concurrence SQLite lors de la publication (library_create)
+## 21 octobre 2026 — Correction de la concurrence SQLite et désérialisation de mise à jour de bibliothèque
+
+- Résolution de core_restart : lors du PUT /api/v1/admin/libraries/{id}, les nouveaux champs exposés par GET (coverUrls, imageKinds, imageVersions) faisaient échouer la validation avec 422 Unprocessable Entity car LibraryInput impose #[serde(deny_unknown_fields)]. Les champs d'exposition ont été exclus du payload de mise à jour dans le test.
+- Résolution du test concurrency_writes_during_publication : acquisition d'une connexion et utilisation de crate::database::begin_write(&mut conn) dans crates/core/src/libraries.rs:save().
+- Élimine le code 500 / SQLITE_BUSY dû à une tentative d'élévation de transaction différée pendant le verrou d'écriture d'une publication.
+- Validation complète : cargo test --locked --workspace --all-features --test '*' -- --test-threads=1 passé avec 100% de succès (0 échec).
 
 - Résolution du test concurrency_writes_during_publication : acquisition d'une connexion et utilisation de crate::database::begin_write(&mut conn) dans crates/core/src/libraries.rs:save().
 - Élimine le code 500 / SQLITE_BUSY dû à une tentative d'élévation de transaction différée pendant le verrou d'écriture d'une publication.

@@ -1,5 +1,11 @@
 # MEMORY.md — État et décisions Aether
 
+## 21 octobre 2026 — Correction de la concurrence SQLite lors de la publication (library_create)
+
+- Résolution du test concurrency_writes_during_publication : acquisition d'une connexion et utilisation de crate::database::begin_write(&mut conn) dans crates/core/src/libraries.rs:save().
+- Élimine le code 500 / SQLITE_BUSY dû à une tentative d'élévation de transaction différée pendant le verrou d'écriture d'une publication.
+- Tests validés : concurrency_writes_during_publication, admin_users, permissions, clippy et cargo fmt.
+
 ## 21 octobre 2026 — Réglages locaux de bibliothèque et permissions (demande partiellement réalisée)
 
 - Options persistantes par bibliothèque : préférences langue/pays (stockées, pas encore consommées par des fournisseurs en ligne), import NFO, types d'images locales et actualisation 0/30/60/90 jours via la file existante. Filtres appliqués aux imports locaux/distants et au chemin historique ; anciens PUT sans options préservent la configuration. Migration 0037 SQLite/PostgreSQL, sans écriture dans les médias.

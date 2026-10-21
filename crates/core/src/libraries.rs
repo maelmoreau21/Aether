@@ -402,7 +402,10 @@ async fn save(
     };
     input.user_ids.sort();
     input.user_ids.dedup();
-    let mut tx = state.auth.store.pool.begin().await.map_err(database)?;
+    let mut conn = state.auth.store.pool.acquire().await.map_err(database)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(database)?;
     if existing {
         let active: i64 = crate::database::query_scalar(
             "SELECT COUNT(*) FROM scan_jobs WHERE library_id=? AND status IN ('queued','running')",

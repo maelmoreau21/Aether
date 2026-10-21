@@ -6,7 +6,7 @@ La navigation affiche les bibliothèques actives autorisées par le Core, avec l
 
 - `GET /api/v1/libraries` : session requise, `{libraries:[{id,name,kind}]}` ; aucun chemin disque ni droit d’un autre compte. Les nœuds révoqués et bibliothèques désactivées sont exclus.
 - `GET /api/v1/catalog?library=ID` : bibliothèque autorisée requise, sinon 403. `GET /api/v1/music?library=ID` restreint les résultats aux droits existants.
-- `GET /api/v1/works/{work}/images` : `{images:[{id,kind,url,origin,width,height}]}` ; images effectives, plusieurs arrière-plans possibles. Les dimensions locales non connues sont nulles.
+- `GET /api/v1/works/{work}/images` : `{images:[{id,workId,kind,position,url,origin,width,height}]}` ; images effectives, plusieurs arrière-plans possibles. Les dimensions locales non connues sont nulles.
 - `POST /api/v1/works/{work}/images/{kind}?replace=ID` : corps binaire PNG/JPEG/WebP, 2 Mio maximum, dimensions 4096 px maximum, administrateur et CSRF. Types : poster, thumb, logo, illustration, banner, disc, landscape, backdrop. Maximum 16 images personnalisées par œuvre. Remplacement facultatif de même type.
 - `GET/HEAD /api/v1/works/{work}/images/{image}` : image privée, `width=320|640|1280` ou original (0). Contrôle d’accès avant toute réponse 304. Image absente : 404 ; largeur invalide : 400.
 - `DELETE /api/v1/works/{work}/images/{image}` : administrateur et CSRF ; retire les données applicatives ou masque une image locale, sans supprimer le fichier média.

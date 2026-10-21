@@ -116,6 +116,7 @@ export async function request<T>(url: string, signal: AbortSignal, timeoutMs=100
   try{data=await response.json() as T;}
   catch(cause){if(!signal.aborted&&combinedSignal.aborted)throw new Error('Le serveur met trop de temps à répondre. Réessayez dans quelques instants.');throw cause;}
   if (combinedSignal.aborted) {
+    if (!signal.aborted) throw new Error('Le serveur met trop de temps à répondre. Réessayez dans quelques instants.');
     throw combinedSignal.reason ?? new DOMException('Aborted', 'AbortError');
   }
   if (requestSessionGen !== getSessionGeneration()) {

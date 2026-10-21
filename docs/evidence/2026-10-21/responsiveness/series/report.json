@@ -12,9 +12,9 @@
       "seasonShortcuts": true,
       "responsiveThemes": true
     },
-    "decodedVideoFrames": 7,
+    "decodedVideoFrames": 9,
     "episode1Playback": true,
-    "episodeLaunchMs": 1010,
+    "episodeLaunchMs": 1125,
     "realChapters": true,
     "seekAndPause": true,
     "simplePlaybackControls": {
@@ -28,7 +28,15 @@
       "crossSeason": true
     },
     "seasonNavigation": true,
-    "season2Playback": true
+    "season2Playback": true,
+    "revokedPermission403": true,
+    "restoredPermissionPlayback": true,
+    "filmPresentation": true,
+    "accountSwitchCacheIsolation": true,
+    "delayedLogoutDoesNotWipeNewLoginCookie": true,
+    "concurrentLoginsSequencedCorrectly": true,
+    "personalPasswordAndDeviceRevocation": true,
+    "cspErrors": []
   },
-  "failure": "locator.waitFor: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('alert').filter({ hasText: /n’a pas accès à cette ressource/ }) to be visible\u001b[22m\n\n    at C:\\Users\\Mael\\Documents\\GitHub\\Aether\\scripts\\browser-series.cjs:254:20"
+  "passed": true
 }

@@ -124,7 +124,7 @@ export class NativePlayer implements Player {
         const timer = setTimeout(
           () =>
             finish(
-              new Error('Chargement ou seek expiré après 10 secondes. Réessayez explicitement.')
+              new Error('Délai de chargement ou de seek expiré. Réessayez explicitement.')
             ),
           timeoutMs
         );

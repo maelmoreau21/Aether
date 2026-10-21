@@ -18,3 +18,17 @@ Les captures du parcours d’images utilisent des affiches synthétiques et un i
 ## Limites
 
 Pas de PostgreSQL réel, NAS, accès authentifié au serveur public ni fournisseur d’images en ligne vérifié. Une seule requête de santé distante HTTP 200 (~322 ms avec réseau/TLS) n’explique pas le timeout de recherche en production. Les options de bibliothèque/fournisseurs non réalisées au lot précédent restent ouvertes. Les médias existants ne sont pas modifiés.
+
+Le test de normalisation d’image synthétique vérifie le décodage et les dimensions : PNG 640×960 de 1 844 368 octets, aperçu 320×480 de 141 870 octets (environ 92 % de réduction sur cette fixture). Le gain dépend du contenu et du format source.
+
+Le premier scénario séries a détecté une régression du contrôle de lancement avec un cache de descripteur de cinq secondes. Cette optimisation a été retirée : les lancements revérifient toujours les droits côté serveur.
+
+Après correction et reconstruction Web, relance du binaire de test déjà compilé par Cargo : `target/debug/deps/browser_series-30d3b8009886e0d1.exe --ignored --nocapture --test-threads=1` : réussi. Core enfant réel, fichiers synthétiques AV1/Opus, 9 images vidéo décodées, pause/seek, épisodes manuels/automatiques entre saisons, refus 403 puis restauration, isolation des comptes, mots de passe/révocation et aucune erreur CSP. Rapport `series/report.json`. Lancement observé 1125 ms : mesure locale unique, sans comparaison avant/après ni garantie NAS/WAN.
+
+`cargo test -p media-poc --lib -j 1 -- --nocapture --test-threads=1` : 44 réussis, 0 échec, 1 scénario navigateur de dépôts ignoré (hors périmètre). Inclut migrations, normalisation/limites images, API et révocations, conservation du fichier média, NFO, musique/Range, parental et groupes. `cargo fmt --all -- --check` et `git diff --check` réussis.
+
+Dernière vérification visuelle après conservation des dimensions d’aperçu et ordre Principal/Vignette/Logo : `target/debug/deps/browser_admin-d7ba2eb90105cec2.exe browser_library_options_and_media_policy --ignored --nocapture --test-threads=1` réussi ; captures bureau/mobile régénérées et inspectées.
+
+`cargo test -p media-poc --test permissions --test posters_flow --test distributed_multi_node --test node_enrollment_and_relay -j 1 -- --test-threads=1` : 5 tests réussis, 0 échec (deux nœuds distants, canal sortant/relais, droits GET/HEAD/ressources dérivées, affiches et médias conservés).
+
+`cargo clippy --locked --workspace --all-targets -j 1 -- -D warnings` : réussi, sans avertissement. Contrôles finaux fmt et diff --check réussis.

@@ -179,6 +179,25 @@ async fn catalog(
     let mut tx = auth.store.pool.begin().await.map_err(database)?;
     let credential:Option<(String,String,String)>=query_as("SELECT k.id,k.user_id,u.role FROM api_keys k JOIN users u ON u.id=k.user_id WHERE k.token_hash=? AND k.scope='catalog:read' AND k.revoked_at IS NULL AND (k.expires_at=0 OR k.expires_at>unixepoch()) AND u.disabled_at IS NULL").bind(hash(token)).fetch_optional(&mut *tx).await.map_err(database)?;
     let (key, user, role) = credential.ok_or(StatusCode::UNAUTHORIZED)?;
+    if role != "administrator" {
+        let encoded: Option<String> =
+            query_scalar("SELECT access_schedule_json FROM parental_policies WHERE user_id=?")
+                .bind(&user)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(database)?;
+        if let Some(encoded) = encoded {
+            let windows: Vec<crate::product::AccessWindow> =
+                serde_json::from_str(&encoded).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let epoch: i64 = query_scalar("SELECT unixepoch()")
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(database)?;
+            if !crate::product::schedule_allows(&windows, epoch) {
+                return Err(StatusCode::FORBIDDEN);
+            }
+        }
+    }
     let sql = format!(
         "SELECT w.id,w.library_id,w.title,w.kind,w.year FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id JOIN api_key_libraries kl ON kl.library_id=l.id AND kl.key_id=? WHERE l.enabled=1 AND n.status!='revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND {} ORDER BY w.title_sort,w.id LIMIT ? OFFSET ?",
         crate::product::policy_sql()

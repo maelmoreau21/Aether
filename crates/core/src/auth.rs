@@ -583,6 +583,11 @@ impl AuthState {
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         let row = row.ok_or(StatusCode::UNAUTHORIZED)?;
+        if row.role == Role::User
+            && !crate::product::access_now(&self.store, &row.id, row.now).await?
+        {
+            return Err(StatusCode::FORBIDDEN);
+        }
         if row.now.saturating_sub(row.last_seen_at) >= self.toucher.shared.interval_seconds {
             self.toucher.shared.record(token_hash, row.now);
         }

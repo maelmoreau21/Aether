@@ -1,5 +1,16 @@
 # MEMORY.md — État et décisions Aether
 
+## 21 octobre 2026 — Réglages locaux de bibliothèque et permissions (demande partiellement réalisée)
+
+- Options persistantes par bibliothèque : préférences langue/pays (stockées, pas encore consommées par des fournisseurs en ligne), import NFO, types d'images locales et actualisation 0/30/60/90 jours via la file existante. Filtres appliqués aux imports locaux/distants et au chemin historique ; anciens PUT sans options préservent la configuration. Migration 0037 SQLite/PostgreSQL, sans écriture dans les médias.
+- Cartes admin : scan direct, progression indéterminée, mosaïque CSS de quatre affiches disponibles au maximum, import/retrait d'affiche et de fond normalisés en base avec révisions. Formats PNG/JPEG/WebP bornés, administrateur/CSRF et réponses privées.
+- Permission de téléchargement originale/hors ligne par compte, contrôlée dans le Core sur les nouvelles routes /download, y compris les téléchargements distants relayés. La lecture /content reste disponible ; ce droit ne protège pas contre la copie des octets du lecteur et ne révoque pas les copies déjà présentes.
+- Contrôle parental : tags NFO/manuels normalisés, héritage des tags série vers épisodes, filtrage avant pagination et sur ressources dérivées, classifications françaises usuelles. Plages hebdomadaires UTC vérifiées à chaque nouvelle authentification/session Node et catalogue API ; administrateurs exemptés des horaires, réponses déjà ouvertes non interrompues.
+- Vérifications : 10 tests contrats, 42 Node et 43 Core réussis (2 helpers/scénarios ignorés au total) ; permissions 2, scheduler 2, distributed_multi_node 1 et node_enrollment_and_relay 1 réussis. Web check 0/0, lint, 70 tests et build réussis. Deux scénarios Chrome headless Core/SQLite réel passent, plus PWA/téléchargement/coffre sur API fixture ; captures bureau/mobile inspectées. Détail des commandes et limites dans docs/evidence/2026-10-21/library-options/README.md.
+- La demande complète reste ouverte : multi-dossiers/Nodes par bibliothèque, priorités des fournisseurs, nombre/largeur des fonds, écritures NFO/artwork, suppression/téléversement de sous-titres, quotas réseau/écrans, surveillance temps réel, trickplay/chapitres/intros, regroupements automatiques et sous-titres automatiques. Voir docs/LIBRARY_OPTIONS.md ; ne pas annoncer ces fonctions comme livrées.
+- Pas de PostgreSQL réel, fournisseur réel, NAS, déploiement ou publication vérifiés dans ce lot. Prochain jalon fonctionnel : bibliothèque logique multi-racines en conservant les identités, droits et instantanés de sources.
+
+
 ## 20 octobre 2026 — Installation locale, administration et premiers visuels
 
 - Guides Windows `docs/INSTALLATION_LOCALE.md` et README Aether-Plugins : vrais binaires, bootstrap interactif sans argument, SQLite, racine média explicite, compilation/signature/import/configuration/activation des paquets, sauvegarde chiffrée facultative. `Aether-Plugins/scripts/Build-LocalPackage.ps1` prépare des modules Wasm optimisés pour rester sous 256 Kio ; pas de dépôt distant ou de compatibilité DLL Jellyfin annoncés.

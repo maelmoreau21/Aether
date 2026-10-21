@@ -1,5 +1,6 @@
 <script lang="ts">
   import ParentalPolicy from './ParentalPolicy.svelte';
+  import UserMediaPolicy from './UserMediaPolicy.svelte';
   import type { Library } from './types';
   import { session, readSession, type AuthUser } from '../auth/session';
   import Icon from '../ui/Icon.svelte';
@@ -31,7 +32,7 @@
   let failed = $state(false);
   let editing = $state<Account | null>(null);
   let editorOpen = $state(false);
-  let activeTab = $state<'profile' | 'access' | 'parental' | 'password'>('profile');
+  let activeTab = $state<'profile' | 'access' | 'parental' | 'password' | 'media'>('profile');
   let login = $state('');
   let displayName = $state('');
   let role = $state<'administrator' | 'user'>('user');
@@ -145,6 +146,7 @@
           <button type="button" aria-current={activeTab === 'profile' ? 'page' : undefined} onclick={() => activeTab = 'profile'}>Profil</button>
           <button type="button" aria-current={activeTab === 'access' ? 'page' : undefined} onclick={() => activeTab = 'access'}>Accès</button>
           <button type="button" aria-current={activeTab === 'parental' ? 'page' : undefined} onclick={() => activeTab = 'parental'}>Contrôle parental</button>
+          <button type="button" aria-current={activeTab === 'media' ? 'page' : undefined} onclick={() => activeTab = 'media'}>Permissions médias</button>
           <button type="button" aria-current={activeTab === 'password' ? 'page' : undefined} onclick={() => activeTab = 'password'}>Mot de passe</button>
         </nav>
       {/if}
@@ -188,6 +190,8 @@
           {/if}
           <div class="editor-actions"><button type="submit" class="btn btn-primary" disabled={busy}>{busy ? 'Enregistrement…' : editing ? 'Enregistrer' : 'Créer le compte'}</button><button type="button" class="btn btn-secondary" disabled={busy} onclick={() => { editorOpen = false; password = ''; newPassword = ''; }}>Annuler</button></div>
         </form>
+      {:else if editing && activeTab === 'media'}
+        <UserMediaPolicy userId={editing.id} />
       {:else if editing && activeTab === 'parental'}
         <ParentalPolicy userId={editing.id} />
       {:else if editing && activeTab === 'password'}

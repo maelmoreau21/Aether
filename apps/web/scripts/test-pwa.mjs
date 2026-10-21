@@ -10,6 +10,7 @@ import ts from 'typescript';
 const root = resolve('build');
 // Test fixture API only: creates a previously stored device-key copy, not a UI download.
 const fixtureVaultModule=ts.transpileModule(await readFile(resolve('src/lib/offline-vault.ts'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
+const fixtureDownloadModule=ts.transpileModule(await readFile(resolve('src/lib/download-url.ts'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
 const evidence=resolve(process.env.MEDIA_REPORT_DIR||'../../docs/evidence/2026-10-20/offline-simple');await mkdir(evidence,{recursive:true});
 const temporary=await mkdtemp(resolve(tmpdir(),'media-pwa-test-'));
 const fixture=resolve(temporary,'sample.opus');
@@ -18,12 +19,14 @@ const audio=await readFile(fixture);
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   if(path==='/__test__/offline-vault.js'){res.writeHead(200,{'Content-Type':'application/javascript','Cache-Control':'no-store'});res.end(fixtureVaultModule);return;}
+  if(path==='/__test__/download-url'){res.writeHead(200,{'Content-Type':'application/javascript','Cache-Control':'no-store'});res.end(fixtureDownloadModule);return;}
+  if(path==='/api/v1/me/media-policy'){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({allowMediaDownload:true}));return;}
   if (path === '/api/v1/auth/me') {
     res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({user:{id:'test-user',login:'test',role:'user'},csrfToken:'fixture'})); return;
   }
   if(path==='/api/v1/preferences'){res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');return;}
   if(path==='/api/v1/music'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({items:[{id:'sample',title:'Piste hors ligne',artist:'Artiste test',album:'Album test',mime:'audio/ogg',codec:'opus'}],total:1}));return;}
-  if(path==='/api/v1/music/tracks/sample/content'){res.writeHead(200,{'Content-Type':'audio/ogg','Content-Length':audio.length,'Accept-Ranges':'bytes'});res.end(audio);return;}
+  if(path==='/api/v1/music/tracks/sample/content'||path==='/api/v1/music/tracks/sample/download'){res.writeHead(200,{'Content-Type':'audio/ogg','Content-Length':audio.length,'Accept-Ranges':'bytes'});res.end(audio);return;}
   let file = resolve(root, '.' + path.replace(/^\/app/, ''));
   if (!file.startsWith(root)) { res.writeHead(403); res.end(); return; }
   if (path.endsWith('/')) file = resolve(file, 'index.html');

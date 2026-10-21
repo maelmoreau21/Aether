@@ -22,6 +22,10 @@ pub fn router(auth: AuthState) -> Router {
             "/api/v1/music/tracks/{id}/content",
             get(content).head(content),
         )
+        .route(
+            "/api/v1/music/tracks/{id}/download",
+            get(content).head(content),
+        )
         .with_state(auth)
 }
 async fn allowed(auth: &AuthState, headers: &HeaderMap, library: &str) -> Result<(), StatusCode> {
@@ -91,6 +95,12 @@ async fn content(
     )
     .await?;
     let node_id = row.get::<String, _>("node_id");
+    if request.uri().path().ends_with("/download") {
+        let actor = auth.authenticate(request.headers()).await?;
+        if !crate::user_media_policy::can_download(&auth.store, &actor.user.id).await? {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
     if node_id != "local" {
         let node = crate::nodes::load_node(&auth.store, &node_id)
             .await

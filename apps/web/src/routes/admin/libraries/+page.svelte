@@ -13,6 +13,7 @@
   import { serverPresentation } from '../../../lib/config/presentation';
   import { DEFAULT_NAME } from '../../../lib/config/brand';
   import AdminOverview from '../../../lib/admin/AdminOverview.svelte';
+  import { defaultLibraryOptions } from '../../../lib/admin/types';
   import AdminLibraries from '../../../lib/admin/AdminLibraries.svelte';
   import AdminNodes from '../../../lib/admin/AdminNodes.svelte';
   import AdminUsers from '../../../lib/admin/AdminUsers.svelte';
@@ -50,6 +51,7 @@
   let root = $state('');
   let enabled = $state(true);
   let excludedPatterns = $state('');
+  let libraryOptions = $state(defaultLibraryOptions());
   let userIds = $state<string[]>([]);
 
   let pairName = $state('');
@@ -94,6 +96,7 @@
     root = roots[0] ?? '';
     enabled = true;
     excludedPatterns = '';
+    libraryOptions = defaultLibraryOptions();
     userIds = [];
   }
 
@@ -112,6 +115,7 @@
     root = library.root;
     enabled = library.enabled;
     excludedPatterns = library.excludedPatterns ?? '';
+    libraryOptions = { ...defaultLibraryOptions(), ...library.options };
     userIds = [...library.userIds];
     error = '';
     notice = '';
@@ -170,7 +174,7 @@
       await request(editing ? `/api/v1/admin/libraries/${encodeURIComponent(editing)}` : '/api/v1/admin/libraries', {
         method: editing ? 'PUT' : 'POST',
         headers: { 'content-type': 'application/json', 'x-csrf-token': $session.csrfToken },
-        body: JSON.stringify({ name: name.trim(), kind, nodeId, root, enabled, excludedPatterns: excludedPatterns.trim(), userIds })
+        body: JSON.stringify({ name: name.trim(), kind, nodeId, root, enabled, excludedPatterns: excludedPatterns.trim(), userIds, options: libraryOptions })
       });
       const [data, nodeList] = await Promise.all([
         request<{ libraries: Library[] }>('/api/v1/admin/libraries'),
@@ -562,6 +566,8 @@
             bind:root
             bind:enabled
             bind:excludedPatterns
+            bind:options={libraryOptions}
+            onchanged={refreshAccess}
             onsave={save}
             onscan={scan}
             onedit={edit}

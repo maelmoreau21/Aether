@@ -1,20 +1,25 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import type { Library, AdminNode, Scan, RefreshMode } from './types';
+  import type { Library, AdminNode, Scan, RefreshMode, LibraryOptions } from './types';
+  import LibraryOptionsForm from './LibraryOptions.svelte';
+  import LibraryImages from './LibraryImages.svelte';
   import { scanLabels } from './types';
   import Icon from '../ui/Icon.svelte';
   let { libraries, nodes, scans, pending, availableRootsForNode, saving, editing, error,
     name = $bindable(), kind = $bindable(), nodeId = $bindable(), root = $bindable(), enabled = $bindable(),
     excludedPatterns = $bindable(''),
+    options = $bindable(), onchanged,
     onsave, onscan, onedit, onreset, onnodechange }: {
       libraries: Library[]; nodes: AdminNode[]; scans: Record<string, Scan>; pending: string[];
       availableRootsForNode: string[]; saving: boolean; editing: string | null; error: string;
       name: string; kind: 'films' | 'series' | 'music'; nodeId: string; root: string; enabled: boolean;
       excludedPatterns: string;
+      options: LibraryOptions; onchanged: () => Promise<void>;
       onsave: (event: SubmitEvent) => Promise<boolean>; onscan: (library: Library, mode?: RefreshMode) => Promise<void>;
       onedit: (library: Library) => void; onreset: () => void; onnodechange: () => void;
   } = $props();
   let editor = $state<HTMLDialogElement>(), refresher = $state<HTMLDialogElement>();
+  let imageTarget = $state<Library | null>(null);
   let target = $state<Library | null>(null), mode = $state<RefreshMode>('incremental'), refreshing = $state(false);
   const activeNodes = $derived(nodes.filter(n => n.status !== 'revoked'));
   function closeMenu(event: MouseEvent) { const details = (event.currentTarget as HTMLElement).closest('details'); details?.removeAttribute('open'); details?.querySelector('summary')?.focus(); }
@@ -35,16 +40,25 @@
   <div class="toolbar"><button class="primary" onclick={() => manage()}><span aria-hidden="true">+</span> Ajouter une médiathèque</button><button onclick={() => refreshLibrary(null)} disabled={libraries.length === 0 || refreshing}><Icon name="refresh" size={18} /> Actualiser toutes les médiathèques</button></div>
   <div class="library-grid">
     {#each libraries as library (library.id)}<article class="library-card">
-      <button class="library-cover" onclick={() => manage(library)} aria-label={`Gérer ${library.name}`}><Icon name={library.kind === 'films' ? 'film' : 'tv'} size={48} /><span>{library.name}</span></button>
+      <button class="library-cover" onclick={() => manage(library)} aria-label={`Gérer ${library.name}`}>
+        {#if library.imageKinds?.includes('backdrop') || library.imageKinds?.includes('poster')}
+          <img class="custom-cover" src={`/api/v1/admin/libraries/${encodeURIComponent(library.id)}/images/${library.imageKinds.includes('backdrop') ? 'backdrop' : 'poster'}?v=${library.imageVersions?.[library.imageKinds.includes('backdrop') ? 'backdrop' : 'poster'] ?? ''}`} alt="" loading="lazy" />
+        {:else if library.coverUrls?.length}<div class="cover-collage" aria-hidden="true">{#each library.coverUrls as url (url)}<img src={url} alt="" loading="lazy" decoding="async" />{/each}</div>
+        {:else}<Icon name={library.kind === 'films' ? 'film' : 'tv'} size={48} />{/if}
+        <span>{library.name}</span>
+      </button>
       <div class="card-bottom"><div class="card-text"><h3>{library.name}</h3><p>{library.kind === 'music' ? 'Musique' : library.kind === 'films' ? 'Films' : 'Séries'}{library.enabled ? '' : ' · Désactivée'}</p></div>
         <details class="library-menu"><summary aria-label={`Actions ${library.name}`}>⋮</summary><div class="menu-actions">
           <button onclick={(event) => { closeMenu(event); manage(library); }}>Gérer la médiathèque</button>
           <button onclick={(event) => { closeMenu(event); manage(library); }}>Renommer</button>
+          <button disabled={!library.enabled || pending.includes(library.id) || ['queued','running'].includes(scans[library.id]?.status)} onclick={(event) => { closeMenu(event); void onscan(library); }}>Scanner la bibliothèque</button>
+          <button onclick={(event) => { closeMenu(event); imageTarget = library; }}>Modifier les images</button>
           <button disabled={!library.enabled || pending.includes(library.id) || ['queued','running'].includes(scans[library.id]?.status)} onclick={(event) => { closeMenu(event); refreshLibrary(library); }}>Actualiser la médiathèque</button>
           <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(library.id)}`)}>Planifier l’actualisation</a>
         </div></details>
       </div>
       {#if scans[library.id]}<p class="scan-status scan-counters" role="status">Scan : {scanLabels[scans[library.id].status]} · {scans[library.id].discovered} fichier(s) découvert(s) · {scans[library.id].probed} analysé(s) · {scans[library.id].reused} réutilisé(s)</p>{/if}
+      {#if ['queued','running'].includes(scans[library.id]?.status)}<progress aria-label={`Scan de ${library.name} en cours`}></progress>{/if}
     </article>{:else}<p>Ajoutez votre première bibliothèque de films ou de séries.</p>{/each}
   </div>
 </section>
@@ -60,6 +74,7 @@
     <input id="library-excluded" bind:value={excludedPatterns} placeholder="ex: bonus, trailers, #recycle" autocomplete="off" />
     <p class="field-hint">Les dossiers système (#recycle, @eaDir, dossiers cachés) et les dossiers contenant un fichier .nomedia ou .ignore sont exclus automatiquement.</p>
     <label class="check"><input type="checkbox" bind:checked={enabled} /> Bibliothèque active</label>
+    <LibraryOptionsForm bind:options {kind} />
     <p>Les accès se règlent dans Utilisateurs et Groupes. Les médias restent en lecture seule.</p>
     <div class="actions"><button type="button" onclick={() => editor?.close()}>Annuler</button><button class="primary" type="submit" disabled={!availableRootsForNode.includes(root)}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div>
   </fieldset></form>
@@ -80,6 +95,7 @@
     <div class="actions"><button type="button" disabled={refreshing} onclick={() => refresher?.close()}>Annuler</button><button class="primary" type="submit" disabled={refreshing}>{refreshing ? 'Lancement…' : 'Actualiser'}</button></div>
   </form>
 </dialog>
+{#if imageTarget}<LibraryImages library={imageTarget} onclose={() => imageTarget = null} {onchanged} />{/if}
 <style>
   h2 { font-size: 28px; font-weight: 400; margin: 0 0 28px; overflow-wrap: anywhere; }
   .toolbar { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 32px; }
@@ -89,7 +105,13 @@
   .primary:hover:not(:disabled) { background: var(--brand-gradient); box-shadow: var(--shadow-sm); }
   .library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 24px; }
   .library-card { min-width: 0; background: var(--bg-surface); }
-  .library-cover { width: 100%; min-height: 175px; border: 0; border-radius: 0; display: flex; flex-direction: column; gap: 16px; padding: 24px; background: var(--bg-elevated); color: var(--text-primary); }
+  .library-cover { position:relative;overflow:hidden;isolation:isolate;width: 100%; min-height: 175px; border: 0; border-radius: 0; display: flex; flex-direction: column; gap: 16px; padding: 24px; background: var(--bg-elevated); color: var(--text-primary); }
+  .custom-cover,.cover-collage { position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-2; }
+  .cover-collage { display:flex;transform:rotate(-12deg) scale(1.3);gap:5px; }
+  .cover-collage img { flex:1;min-width:0;object-fit:cover; }
+  .library-cover:has(img)::after { content:'';position:absolute;inset:0;background:linear-gradient(transparent,rgb(0 0 0 / .8));z-index:-1; }
+  .library-cover:has(img) span { color:white;text-shadow:0 2px 5px black; }
+  progress { display:block;width:calc(100% - 36px);margin:0 18px 16px;accent-color:var(--accent-primary); }
   .library-cover span { font-size: clamp(22px, 2vw, 30px); font-weight: 650; overflow-wrap: anywhere; }
   .library-cover :global(svg) { color: var(--accent-secondary); flex-shrink: 0; }
   .card-bottom { display: flex; align-items: center; gap: 12px; padding: 18px; }

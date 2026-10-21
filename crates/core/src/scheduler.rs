@@ -165,6 +165,21 @@ pub async fn run_due(
     let due:Option<(String,i64,i64)>=crate::database::query_as("SELECT s.library_id,s.interval_minutes,s.next_run_at FROM scheduled_scans s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE s.enabled=1 AND s.next_run_at<=? AND l.enabled=1 AND n.status!='revoked' ORDER BY s.next_run_at,s.library_id LIMIT 1")
         .bind(timestamp).fetch_optional(&auth.store.pool).await?;
     let Some((id, minutes, previous)) = due else {
+        let due: Option<(String,String,i64)> = crate::database::query_as("SELECT l.id,l.options_json,l.next_metadata_refresh_at FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND l.id NOT IN ('fixture-films','fixture-series') AND l.kind!='music' AND n.status!='revoked' AND l.next_metadata_refresh_at<=? AND CAST(COALESCE(json_extract(l.options_json,'$.automaticRefreshIntervalDays'),'0') AS BIGINT)>0 ORDER BY l.next_metadata_refresh_at,l.id LIMIT 1")
+            .bind(timestamp).fetch_optional(&auth.store.pool).await?;
+        if let Some((id, encoded, previous)) = due {
+            let options: crate::library_options::LibraryOptions = serde_json::from_str(&encoded)
+                .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
+            let claimed = crate::database::query("UPDATE libraries SET next_metadata_refresh_at=? WHERE id=? AND next_metadata_refresh_at=?")
+                .bind(timestamp+i64::from(options.automatic_refresh_interval_days)*86400).bind(&id).bind(previous).execute(&auth.store.pool).await?;
+            if claimed.rows_affected() != 0 {
+                crate::scans::enqueue(auth, root.to_owned(), jobs.clone(), id)
+                    .await
+                    .map_err(|_| {
+                        sqlx::Error::Protocol("metadata refresh dispatch failed".into())
+                    })?;
+            }
+        }
         return Ok(());
     };
     // Compare-and-set prevents duplicate launches even if a tick is called concurrently.

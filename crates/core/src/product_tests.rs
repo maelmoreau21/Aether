@@ -15,6 +15,24 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 use zeroize::Zeroizing;
 const ORIGIN: &str = "http://127.0.0.1:3000";
+#[test]
+fn access_schedule_utc_boundaries_and_week_wrap() {
+    let windows = serde_json::from_value::<Vec<product::AccessWindow>>(json!([
+        {"day":0,"startMinute":480,"endMinute":1200},
+        {"day":6,"startMinute":1380,"endMinute":1440}
+    ]))
+    .unwrap();
+    let monday = 4 * 86400;
+    assert!(!product::schedule_allows(&windows, monday + 479 * 60 + 59));
+    assert!(product::schedule_allows(&windows, monday + 480 * 60));
+    assert!(!product::schedule_allows(&windows, monday + 1200 * 60));
+    assert!(product::schedule_allows(
+        &windows,
+        monday + 6 * 86400 + 86399
+    ));
+    assert!(!product::schedule_allows(&windows, monday + 7 * 86400));
+    assert!(product::schedule_allows(&[], monday));
+}
 #[tokio::test]
 async fn upgrade_keeps_existing_libraries_rights_inventory_and_progress() {
     let temporary = tempfile::tempdir().unwrap();
@@ -580,5 +598,319 @@ async fn music_scan_metadata_stable_identity_and_range() {
     assert_eq!(
         value(request(&app, "/api/v1/music", "GET", &cookie, "", Value::Null).await).await["total"],
         0
+    );
+}
+
+#[tokio::test]
+async fn granular_parental_tags_schedules_downloads_and_library_images() {
+    use sha2::{Digest, Sha256};
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("media");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("clip.mp4"), b"synthetic range fixture").unwrap();
+    let opened = media_node::OpenedFile::open_in_root(&root, std::path::Path::new("clip.mp4"))
+        .await
+        .unwrap();
+    let store = IdentityStore::open(&temp.path().join("options.sqlite"))
+        .await
+        .unwrap();
+    for (id, role, token) in [
+        ("admin", "administrator", "a".repeat(64)),
+        ("reader", "user", "b".repeat(64)),
+    ] {
+        query("INSERT INTO users(id,role) VALUES(?,?)")
+            .bind(id)
+            .bind(role)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,unixepoch(),unixepoch(),unixepoch()+3600)")
+            .bind(format!("{:x}",Sha256::digest(token.as_bytes()))).bind(id).execute(&store.pool).await.unwrap();
+    }
+    let root_string = root.to_string_lossy().to_string();
+    query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local',?,1)").bind(&root_string).execute(&store.pool).await.unwrap();
+    query("INSERT INTO library_permissions(library_id,user_id) VALUES('films','reader')")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    query("INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,kind,external_ids_json,editorial_json) VALUES('film','films','film','Film','film','film','{}','{\"mpaa\":\"-12\",\"tags\":[\"horreur\"]}')").execute(&store.pool).await.unwrap();
+    query("INSERT INTO inventory_editions(id,work_id) VALUES('edition','film')")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    query("INSERT INTO inventory_versions(id,edition_id) VALUES('version','edition')")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    query("INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES('source','version','films',?)").bind(&root_string).execute(&store.pool).await.unwrap();
+    query("INSERT INTO inventory_assets(id,source_id,library_id,relative_path,size,modified_ns,mime,probe_json,available) VALUES('asset','source','films','clip.mp4',?,?,'video/mp4','{\"streams\":[],\"format\":{}}',1)").bind(opened.size() as i64).bind(opened.modified_ns()).execute(&store.pool).await.unwrap();
+    let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
+    let a = format!("media_session={}", "a".repeat(64));
+    let b = format!("media_session={}", "b".repeat(64));
+    let csrf = format!(
+        "{:x}",
+        Sha256::digest(format!("csrf:{}", "a".repeat(64)).as_bytes())
+    );
+    let app = crate::secure_app(
+        crate::node::Inventory::local(root.clone()).await.unwrap(),
+        3000,
+        auth.clone(),
+    )
+    .await
+    .unwrap();
+    let permission = "/api/v1/admin/users/reader/media-policy";
+    for (cookie, token) in [(&b, csrf.as_str()), (&a, "")] {
+        assert_eq!(
+            request(
+                &app,
+                permission,
+                "PUT",
+                cookie,
+                token,
+                json!({"allowMediaDownload":false})
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    assert_eq!(
+        request(
+            &app,
+            "/api/v1/assets/asset/download",
+            "GET",
+            &b,
+            "",
+            Value::Null
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        request(
+            &app,
+            permission,
+            "PUT",
+            &a,
+            &csrf,
+            json!({"allowMediaDownload":false})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        value(request(&app, "/api/v1/me/media-policy", "GET", &b, "", Value::Null).await).await["allowMediaDownload"],
+        false
+    );
+    for method in ["GET", "HEAD"] {
+        assert_eq!(
+            request(
+                &app,
+                "/api/v1/assets/asset/download",
+                method,
+                &b,
+                "",
+                Value::Null
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            request(
+                &app,
+                "/api/v1/assets/asset/content",
+                method,
+                &b,
+                "",
+                Value::Null
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+    }
+    let range = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/assets/asset/content")
+                .header("host", "127.0.0.1:3000")
+                .header("cookie", &b)
+                .header("range", "bytes=0-3")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(range.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        &range.into_body().collect().await.unwrap().to_bytes()[..],
+        b"synt"
+    );
+    let parental = "/api/v1/admin/users/reader/parental";
+    assert_eq!(
+        request(
+            &app,
+            parental,
+            "PUT",
+            &a,
+            &csrf,
+            json!({"maximumAge":12,"allowUnrated":false})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(
+        product::parental_allowed(&store, "reader", "film")
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        request(
+            &app,
+            parental,
+            "PUT",
+            &a,
+            &csrf,
+            json!({"maximumAge":12,"allowUnrated":false,"blockedTags":["HORREUR"]})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let catalog = value(
+        request(
+            &app,
+            "/api/v1/catalog?kind=film",
+            "GET",
+            &b,
+            "",
+            Value::Null,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(catalog["total"], 0);
+    for path in [
+        "/api/v1/catalog/film",
+        "/api/v1/media/asset",
+        "/api/v1/assets/asset/content",
+        "/api/v1/assets/asset/download",
+        "/api/v1/assets/asset/prepared/video",
+    ] {
+        for method in ["GET", "HEAD"] {
+            assert_eq!(
+                request(&app, path, method, &b, "", Value::Null)
+                    .await
+                    .status(),
+                StatusCode::FORBIDDEN,
+                "{method} {path}"
+            );
+        }
+    }
+    // Exact matching: a substring must not block a tag.
+    assert_eq!(
+        request(
+            &app,
+            parental,
+            "PUT",
+            &a,
+            &csrf,
+            json!({"maximumAge":12,"allowUnrated":false,"blockedTags":["hor"]})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(
+        product::parental_allowed(&store, "reader", "film")
+            .await
+            .unwrap()
+    );
+    let epoch: i64 = query_scalar("SELECT unixepoch()")
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    let tomorrow = (epoch.div_euclid(86400) + 4).rem_euclid(7);
+    assert_eq!(request(&app,parental,"PUT",&a,&csrf,json!({"maximumAge":12,"allowUnrated":false,"accessSchedule":[{"day":tomorrow,"startMinute":0,"endMinute":1440}]})).await.status(),StatusCode::NO_CONTENT);
+    assert_eq!(
+        request(&app, "/api/v1/auth/me", "GET", &b, "", Value::Null)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        request(&app, "/api/v1/auth/me", "GET", &a, "", Value::Null)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(request(&app,parental,"PUT",&a,&csrf,json!({"maximumAge":12,"allowUnrated":false,"accessSchedule":[{"day":7,"startMinute":0,"endMinute":1440}]})).await.status(),StatusCode::BAD_REQUEST);
+    assert_eq!(
+        request(&app, parental, "DELETE", &a, &csrf, Value::Null)
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        request(&app, "/api/v1/auth/me", "GET", &b, "", Value::Null)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    let mut output = std::io::Cursor::new(vec![]);
+    image::DynamicImage::new_rgb8(20, 30)
+        .write_to(&mut output, image::ImageFormat::Png)
+        .unwrap();
+    let image_path = "/api/v1/admin/libraries/films/images/poster";
+    for (cookie, token, status) in [
+        (&b, csrf.as_str(), StatusCode::FORBIDDEN),
+        (&a, "", StatusCode::FORBIDDEN),
+        (&a, csrf.as_str(), StatusCode::NO_CONTENT),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(image_path)
+                    .header("host", "127.0.0.1:3000")
+                    .header("origin", ORIGIN)
+                    .header("cookie", cookie)
+                    .header("x-csrf-token", token)
+                    .header("content-type", "image/png")
+                    .body(Body::from(output.get_ref().clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+    }
+    let response = request(&app, image_path, "GET", &a, "", Value::Null).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "private, no-store");
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert!(image::load_from_memory(&bytes).is_ok());
+    assert_eq!(
+        request(&app, image_path, "GET", &b, "", Value::Null)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        request(&app, image_path, "DELETE", &a, &csrf, Value::Null)
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        request(&app, image_path, "GET", &a, "", Value::Null)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
     );
 }

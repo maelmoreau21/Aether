@@ -205,6 +205,8 @@ struct Editorial {
     #[serde(default)]
     genres: Vec<String>,
     #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
     directors: Vec<String>,
     #[serde(default)]
     writers: Vec<String>,
@@ -233,6 +235,11 @@ async fn metadata(
         || input.plot.len() > 20000
         || input.genres.len() > 32
         || input.genres.iter().any(|v| v.len() > 100)
+        || input.tags.len() > 64
+        || input
+            .tags
+            .iter()
+            .any(|v| v.len() > 100 || v.chars().any(char::is_control))
         || input.external_ids.len() > 16
         || input
             .external_ids
@@ -250,6 +257,7 @@ async fn metadata(
         "year": input.year,
         "plot": input.plot,
         "genres": input.genres,
+        "tags": input.tags.iter().map(|v| v.trim().to_lowercase()).filter(|v| !v.is_empty()).collect::<Vec<_>>(),
         "directors": input.directors,
         "writers": input.writers,
         "actors": input.actors,
@@ -349,6 +357,46 @@ async fn poster(
 struct Policy {
     maximum_age: i64,
     allow_unrated: bool,
+    #[serde(default)]
+    blocked_tags: Vec<String>,
+    #[serde(default)]
+    access_schedule: Vec<AccessWindow>,
+}
+#[derive(serde::Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AccessWindow {
+    /// Monday=0, Sunday=6. Minutes are UTC, end exclusive; split overnight windows.
+    day: i64,
+    start_minute: i64,
+    end_minute: i64,
+}
+pub(crate) fn schedule_allows(windows: &[AccessWindow], epoch: i64) -> bool {
+    let day = (epoch.div_euclid(86400) + 3).rem_euclid(7);
+    let minute = epoch.rem_euclid(86400) / 60;
+    windows.is_empty()
+        || windows
+            .iter()
+            .any(|w| w.day == day && w.start_minute <= minute && minute < w.end_minute)
+}
+pub(crate) async fn access_now(
+    store: &IdentityStore,
+    user: &str,
+    epoch: i64,
+) -> Result<bool, Error> {
+    let encoded: Option<String> =
+        query_scalar("SELECT access_schedule_json FROM parental_policies WHERE user_id=?")
+            .bind(user)
+            .fetch_optional(&store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    match encoded {
+        None => Ok(true),
+        Some(encoded) => {
+            let windows: Vec<AccessWindow> =
+                serde_json::from_str(&encoded).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            Ok(schedule_allows(&windows, epoch))
+        }
+    }
 }
 async fn parental(
     State(auth): State<AuthState>,
@@ -356,14 +404,14 @@ async fn parental(
     Path(user): Path<String>,
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
-    let row: Option<(i64, i64)> =
-        query_as("SELECT maximum_age,allow_unrated FROM parental_policies WHERE user_id=?")
+    let row: Option<(i64, i64, String, String)> =
+        query_as("SELECT maximum_age,allow_unrated,blocked_tags_json,access_schedule_json FROM parental_policies WHERE user_id=?")
             .bind(user)
             .fetch_optional(&auth.store.pool)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(
-        row.map(|(age, unrated)| json!({"maximumAge":age,"allowUnrated":unrated!=0}))
+        row.map(|(age, unrated, tags, schedule)| json!({"maximumAge":age,"allowUnrated":unrated!=0,"blockedTags":serde_json::from_str::<Value>(&tags).unwrap_or(Value::Null),"accessSchedule":serde_json::from_str::<Value>(&schedule).unwrap_or(Value::Null)}))
             .unwrap_or(Value::Null),
     ))
 }
@@ -374,10 +422,53 @@ async fn set_parental(
     Json(input): Json<Policy>,
 ) -> Result<StatusCode, Error> {
     admin(&auth, &headers, true).await?;
-    if !(0..=21).contains(&input.maximum_age) {
+    if !(0..=21).contains(&input.maximum_age)
+        || input.blocked_tags.len() > 64
+        || input
+            .blocked_tags
+            .iter()
+            .any(|v| v.trim().is_empty() || v.len() > 100 || v.chars().any(char::is_control))
+        || input.access_schedule.len() > 56
+        || input.access_schedule.iter().any(|w| {
+            !(0..=6).contains(&w.day)
+                || !(0..1440).contains(&w.start_minute)
+                || !(1..=1440).contains(&w.end_minute)
+                || w.start_minute >= w.end_minute
+        })
+    {
         return Err(StatusCode::BAD_REQUEST);
     }
-    query("INSERT INTO parental_policies(user_id,maximum_age,allow_unrated) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET maximum_age=excluded.maximum_age,allow_unrated=excluded.allow_unrated").bind(user).bind(input.maximum_age).bind(i64::from(input.allow_unrated)).execute(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let exists: i64 = query_scalar("SELECT COUNT(*) FROM users WHERE id=?")
+        .bind(&user)
+        .fetch_one(&auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if exists == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let tags: Vec<String> = input
+        .blocked_tags
+        .iter()
+        .map(|v| v.trim().to_lowercase())
+        .collect();
+    let mut tx = auth
+        .store
+        .pool
+        .begin()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    query("INSERT INTO parental_policies(user_id,maximum_age,allow_unrated,blocked_tags_json,access_schedule_json) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET maximum_age=excluded.maximum_age,allow_unrated=excluded.allow_unrated,blocked_tags_json=excluded.blocked_tags_json,access_schedule_json=excluded.access_schedule_json").bind(&user).bind(input.maximum_age).bind(i64::from(input.allow_unrated)).bind(json!(tags).to_string()).bind(json!(input.access_schedule).to_string()).execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    query("DELETE FROM parental_blocked_tags WHERE user_id=?")
+        .bind(&user)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    for tag in tags {
+        query("INSERT INTO parental_blocked_tags(user_id,tag_json) VALUES(?,?) ON CONFLICT DO NOTHING").bind(&user).bind(json!(tag).to_string()).execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn reset_parental(
@@ -395,12 +486,13 @@ async fn reset_parental(
 }
 
 // The same expression is used before catalogue pagination and on every derived resource.
-pub const AGE_SQL: &str = "COALESCE(w.minimum_age,(SELECT parent.minimum_age FROM inventory_episodes ep JOIN inventory_seasons season ON season.id=ep.season_id JOIN inventory_works parent ON parent.id=season.series_id WHERE ep.work_id=w.id),CASE upper(COALESCE(json_extract(w.manual_json,'$.mpaa'),json_extract(w.editorial_json,'$.mpaa'))) WHEN 'G' THEN 0 WHEN 'TV-G' THEN 0 WHEN 'PG' THEN 10 WHEN 'PG-13' THEN 13 WHEN 'TV-14' THEN 14 WHEN 'R' THEN 17 WHEN 'NC-17' THEN 18 WHEN 'TV-MA' THEN 18 ELSE NULL END)";
+pub const AGE_SQL: &str = "COALESCE(w.minimum_age,(SELECT parent.minimum_age FROM inventory_episodes ep JOIN inventory_seasons season ON season.id=ep.season_id JOIN inventory_works parent ON parent.id=season.series_id WHERE ep.work_id=w.id),CASE upper(COALESCE(json_extract(w.manual_json,'$.mpaa'),json_extract(w.editorial_json,'$.mpaa'))) WHEN 'G' THEN 0 WHEN 'TV-G' THEN 0 WHEN 'PG' THEN 10 WHEN 'PG-13' THEN 13 WHEN 'TV-14' THEN 14 WHEN 'R' THEN 17 WHEN 'NC-17' THEN 18 WHEN 'TV-MA' THEN 18 WHEN '-10' THEN 10 WHEN 'FR-10' THEN 10 WHEN '-12' THEN 12 WHEN 'FR-12' THEN 12 WHEN '-16' THEN 16 WHEN 'FR-16' THEN 16 WHEN '-18' THEN 18 WHEN 'FR-18' THEN 18 WHEN 'TOUS PUBLICS' THEN 0 ELSE NULL END)";
 pub fn policy_sql() -> String {
     format!(
-        "NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND (({AGE_SQL})>policy.maximum_age OR (({AGE_SQL}) IS NULL AND policy.allow_unrated=0)))"
+        "NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND (({AGE_SQL})>policy.maximum_age OR (({AGE_SQL}) IS NULL AND policy.allow_unrated=0) OR {BLOCKED_TAGS_SQL}))"
     )
 }
+pub const BLOCKED_TAGS_SQL: &str = "EXISTS(SELECT 1 FROM parental_blocked_tags bt WHERE bt.user_id=policy.user_id AND (instr(lower(COALESCE(json_extract(w.manual_json,'$.tags'),json_extract(w.editorial_json,'$.tags'),'[]')),bt.tag_json)>0 OR EXISTS(SELECT 1 FROM inventory_episodes te JOIN inventory_seasons ts ON ts.id=te.season_id JOIN inventory_works tw ON tw.id=ts.series_id WHERE te.work_id=w.id AND instr(lower(COALESCE(json_extract(tw.manual_json,'$.tags'),json_extract(tw.editorial_json,'$.tags'),'[]')),bt.tag_json)>0)))";
 pub async fn parental_allowed(
     store: &IdentityStore,
     user: &str,

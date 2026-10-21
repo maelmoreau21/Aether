@@ -5,7 +5,7 @@ import { resolve } from '$app/paths';
 export interface CatalogSource { id: string; assetIds: string[]; playbackMediaId: string }
 export interface Edition { id: string; label: string; versions: { id: string; label: string; sources: CatalogSource[] }[] }
 export interface Work {
-  minimumAge?: number | null; globalMediaId?: string | null;
+  tags?: string[]; minimumAge?: number | null; globalMediaId?: string | null;
   id: string; kind: 'film' | 'series' | 'episode'; title: string; year: number | null;
   description: string; libraryId: string; synthetic: boolean; number?: number;
   posterUrl?: string | null;

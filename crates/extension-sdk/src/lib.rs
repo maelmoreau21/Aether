@@ -80,6 +80,9 @@ pub struct Manifest {
     pub license: String,
     pub repository: String,
     pub permissions: Vec<String>,
+    /// Exact HTTPS hosts requested by this signed package; empty means no network access.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub http_hosts: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

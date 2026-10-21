@@ -8,8 +8,59 @@ use tokio::{
     sync::{Mutex, Semaphore},
 };
 
-const CACHE_LIMIT: u64 = 24 * 1024 * 1024 * 1024;
-const ENTRY_LIMIT: u64 = 16 * 1024 * 1024 * 1024;
+pub const MAX_PREPARATION_SECONDS: u64 = 3600;
+struct Limits {
+    cache: u64,
+    video: u64,
+    audio: u64,
+    seconds: u64,
+}
+impl Limits {
+    fn from_env() -> io::Result<Self> {
+        fn bounded(name: &str, fallback: u64, min: u64, max: u64) -> io::Result<u64> {
+            let invalid = || io::Error::new(io::ErrorKind::InvalidInput, format!("invalid {name}"));
+            match std::env::var(name) {
+                Ok(value) => value
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|n| (min..=max).contains(n))
+                    .ok_or_else(invalid),
+                Err(std::env::VarError::NotPresent) => Ok(fallback),
+                Err(_) => Err(invalid()),
+            }
+        }
+        let limits = Self {
+            cache: bounded("MEDIA_PREPARATION_CACHE_GIB", 96, 1, 2048)? * 1024 * 1024 * 1024,
+            video: bounded("MEDIA_PREPARATION_VIDEO_GIB", 64, 1, 1024)? * 1024 * 1024 * 1024,
+            audio: bounded("MEDIA_PREPARATION_AUDIO_MIB", 4096, 64, 16384)? * 1024 * 1024,
+            seconds: bounded(
+                "MEDIA_PREPARATION_SECONDS",
+                900,
+                30,
+                MAX_PREPARATION_SECONDS,
+            )?,
+        };
+        if limits.video > limits.cache || limits.audio > limits.cache {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "component limit exceeds preparation cache",
+            ));
+        }
+        Ok(limits)
+    }
+}
+
+pub fn preparation_error_code(error: &io::Error) -> &'static str {
+    match error.kind() {
+        io::ErrorKind::WouldBlock => "preparation_busy",
+        io::ErrorKind::StorageFull => "preparation_cache_limit_reached",
+        io::ErrorKind::TimedOut => "preparation_timeout",
+        io::ErrorKind::NotFound => "preparation_tool_or_source_unavailable",
+        io::ErrorKind::Unsupported => "unsupported_preparation",
+        io::ErrorKind::InvalidInput => "preparation_configuration_invalid",
+        _ => "preparation_failed",
+    }
+}
 struct Entry {
     directory: crate::cache_dirs::CacheDirectory,
 }
@@ -21,6 +72,7 @@ struct Cache {
 pub struct Preparations {
     cache: Mutex<Cache>,
     worker: Semaphore,
+    limits: io::Result<Limits>,
 }
 impl Default for Preparations {
     fn default() -> Self {
@@ -31,6 +83,7 @@ impl Default for Preparations {
         Self {
             cache: Mutex::new(Cache::default()),
             worker: Semaphore::new(1),
+            limits: Limits::from_env(),
         }
     }
 }
@@ -52,7 +105,7 @@ impl Component {
 }
 
 /// Call only with an inventory-resolved source and stream index verified by the caller.
-/// Cache is process-local, removed at shutdown, capped at 64 entries / 24 GiB.
+/// Cache is process-local, removed at shutdown, capped at 64 entries and configured bytes.
 /// Saturation fails explicitly: no unbounded queue, no eviction of playing files.
 impl Preparations {
     pub async fn prepare(
@@ -63,6 +116,10 @@ impl Preparations {
         expected_mtime: &str,
         component: Component,
     ) -> io::Result<OpenedFile> {
+        let limits = self
+            .limits
+            .as_ref()
+            .map_err(|e| io::Error::new(e.kind(), e.to_string()))?;
         let input = OpenedFile::open_in_root(root, relative).await?;
         if input.size() != expected_size || input.modified_ns() != expected_mtime {
             return Err(io::Error::other("source changed; rescan required"));
@@ -75,20 +132,25 @@ impl Preparations {
         if let Some(entry) = cache.entries.get(&key) {
             return OpenedFile::open_in_root(entry.directory.path(), Path::new("content")).await;
         }
-        if cache.entries.len() >= 64 || cache.bytes >= CACHE_LIMIT {
-            return Err(io::Error::other("preparation cache full; restart to clear"));
+        if cache.entries.len() >= 64 || cache.bytes >= limits.cache {
+            return Err(io::Error::new(
+                io::ErrorKind::StorageFull,
+                "preparation cache full; restart to clear",
+            ));
         }
-        let _worker = self
-            .worker
-            .try_acquire()
-            .map_err(|_| io::Error::other("preparation busy; retry explicitly"))?;
-        let remaining = CACHE_LIMIT - cache.bytes;
+        let _worker = self.worker.try_acquire().map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "preparation busy; retry explicitly",
+            )
+        })?;
+        let remaining = limits.cache - cache.bytes;
         drop(cache);
         let directory = crate::cache_dirs::CacheDirectory::new()?;
         let output = std::fs::File::create(directory.path().join("content"))?;
         let limit = remaining.min(match component {
-            Component::Video => ENTRY_LIMIT,
-            Component::Audio(_) => 1024 * 1024 * 1024,
+            Component::Video => limits.video,
+            Component::Audio(_) => limits.audio,
             Component::Subtitle(_) => 4 * 1024 * 1024,
         });
         let mut file = input.try_clone_std()?;
@@ -162,19 +224,25 @@ impl Preparations {
             .ok_or_else(|| io::Error::other("preparation output missing"))?;
         let mut bounded = stdout.take(limit + 1);
         let mut output = tokio::fs::File::from_std(output);
-        let size = tokio::time::timeout(Duration::from_secs(120), async {
+        let size = tokio::time::timeout(Duration::from_secs(limits.seconds), async {
             let size = tokio::io::copy(&mut bounded, &mut output).await?;
             if size > limit {
-                return Err(io::Error::other("preparation exceeds cache limit"));
+                return Err(io::Error::new(
+                    io::ErrorKind::StorageFull,
+                    "preparation exceeds cache limit",
+                ));
             }
             if !child.wait().await?.success() || size == 0 {
-                return Err(io::Error::other("unsupported packaging or stream"));
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "unsupported packaging or stream",
+                ));
             }
             input.verify_unchanged_sync()?;
             Ok::<_, io::Error>(size)
         })
         .await
-        .map_err(|_| io::Error::other("preparation timeout (120 seconds)"))??;
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "preparation timeout"))??;
         drop(output);
         let opened = OpenedFile::open_in_root(directory.path(), Path::new("content")).await?;
         let mut cache = self.cache.lock().await;
@@ -187,6 +255,62 @@ impl Preparations {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn preserves_eight_opus_channels_and_packets_in_both_containers() {
+        let temp = tempfile::tempdir().unwrap();
+        let reference = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/generated/representative/representative.mp4");
+        let preparations = Preparations::default();
+        for extension in ["mkv", "mp4"] {
+            let name = format!("eight.{extension}");
+            let status = Command::new("ffmpeg")
+                .args(["-v", "error", "-nostdin", "-i"])
+                .arg(&reference)
+                .args([
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "anullsrc=r=48000:cl=7.1",
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "1:a:0",
+                    "-c:v",
+                    "copy",
+                    "-c:a",
+                    "libopus",
+                    "-mapping_family",
+                    "1",
+                    "-t",
+                    "1",
+                ])
+                .arg(temp.path().join(&name))
+                .status()
+                .await
+                .unwrap();
+            assert!(status.success());
+            let original = OpenedFile::open_in_root(temp.path(), Path::new(&name))
+                .await
+                .unwrap();
+            let prepared = preparations
+                .prepare(
+                    temp.path(),
+                    Path::new(&name),
+                    original.size(),
+                    original.modified_ns(),
+                    Component::Audio(1),
+                )
+                .await
+                .unwrap();
+            let probe = crate::probe::probe_opened(&prepared).await.unwrap();
+            assert_eq!(probe.streams[0].details["channels"], serde_json::json!(8));
+            assert_eq!(
+                probe.streams[0].details["channel_layout"],
+                serde_json::json!("7.1")
+            );
+            assert_eq!(hashes(&original, 1).await, hashes(&prepared, 0).await);
+        }
+    }
     async fn hashes(file: &OpenedFile, index: u32) -> Vec<String> {
         let mut input = file.try_clone_std().unwrap();
         std::io::Seek::rewind(&mut input).unwrap();

@@ -178,6 +178,7 @@ COPY --from=rust-builder --chmod=0755 /build/target/release/media-extension-work
 COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
 
 ENV MEDIA_MODE=distributed \
+    MEDIA_PREPARATION_CACHE_DIR=/data/preparation-cache \
     MEDIA_PORT=3000 \
     MEDIA_BIND_ADDR=0.0.0.0 \
     MEDIA_DB_PATH=/data/core.sqlite3 \
@@ -230,6 +231,7 @@ RUN mkdir -p /data /media /app \
 COPY --from=rust-builder --chmod=0755 /build/target/release/aether-node /usr/local/bin/aether-node
 
 ENV MEDIA_NODE_PORT=4000 \
+    MEDIA_PREPARATION_CACHE_DIR=/data/preparation-cache \
     MEDIA_NODE_BIND_ADDR=0.0.0.0 \
     MEDIA_NODE_DATA_DIR=/data \
     MEDIA_NODE_ROOTS=/media
@@ -282,6 +284,7 @@ RUN ln -s /usr/local/bin/aether-core /usr/local/bin/media-poc \
 COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
 
 ENV MEDIA_PORT=3000 \
+    MEDIA_PREPARATION_CACHE_DIR=/data/preparation-cache \
     MEDIA_BIND_ADDR=0.0.0.0 \
     MEDIA_DB_PATH=/data/core.sqlite3 \
     MEDIA_BACKUP_DIR=/backups \

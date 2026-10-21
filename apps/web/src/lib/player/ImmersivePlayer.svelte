@@ -8,6 +8,7 @@
   import { ProgressTracker } from './progress';
   import { getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences } from '../preferences';
+  import { chooseSource, playbackMime, audioLanguage } from './source-selection';
   const base = resolve('/').replace(/\/$/, '');
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
@@ -72,8 +73,7 @@
     if (!engine) return;
     busy = true; error = ''; wake();
     try {
-      const compatible=media.sources.filter(source=>video.canPlayType(source.mime));
-      const source = media.sources.find(source => preferredAudio?.mediaId === media.id && source.audioTrackId === preferredAudio.trackId) ?? compatible.find(source => source.language === preferredLanguage) ?? compatible.find(source => source.language === 'fr') ?? compatible[0] ?? media.sources[0];
+      const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))));
       if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
       const tracker = !restore && media.workId && !media.synthetic
         ? new ProgressTracker(media.workId, message => { if (current === generation) notice = message; }) : undefined;
@@ -81,7 +81,7 @@
       const resume = tracker?.load();
       await engine.load(media, source.audioTrackId);
       if (current !== generation) return;
-      if (source.language !== preferredLanguage) notice = 'Votre langue précédente est indisponible. Première source disponible sélectionnée.';
+      if (audioLanguage(source.language) !== audioLanguage(preferredLanguage)) notice = 'Votre langue précédente est indisponible. Première source disponible sélectionnée.';
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);

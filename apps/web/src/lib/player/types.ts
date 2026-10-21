@@ -1,6 +1,7 @@
 export interface CodecTrack {
   index?: number; codec_type?: string; codec_name?: string; channels?: number; channel_layout?: string;
   width?: number; height?: number; pix_fmt?: string; tags?: Record<string, string>;
+  disposition?: { default?: number; comment?: number; hearing_impaired?: number };
 }
 export interface Source {
   id: string;

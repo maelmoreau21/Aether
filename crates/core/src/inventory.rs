@@ -2570,10 +2570,15 @@ pub async fn descriptor(
             session_hash,
         )
     });
-    let language = probe
+    let mut original_audios = probe
         .streams
         .iter()
-        .find(|s| s.codec_type.as_deref() == Some("audio"))
+        .filter(|s| s.codec_type.as_deref() == Some("audio"));
+    let first_audio = original_audios.next();
+    // A browser may select a different default track in a multi-audio container.
+    // Only a mono-audio original has an unambiguous language; explicit tracks follow below.
+    let language = first_audio
+        .filter(|_| original_audios.next().is_none())
         .and_then(|s| s.tags.get("language"))
         .and_then(Value::as_str)
         .unwrap_or("und");
@@ -2785,11 +2790,14 @@ pub async fn prepared(
         .await;
     let opened = match opened {
         Ok(file) => file,
-        Err(_) => {
-            return crate::error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "preparation_failed_ffmpeg_required_or_cache_busy",
+        Err(error) => {
+            let code = media_node::packaging::preparation_error_code(&error);
+            let mut response = crate::error(StatusCode::SERVICE_UNAVAILABLE, code);
+            response.headers_mut().insert(
+                "x-media-preparation-error",
+                axum::http::HeaderValue::from_static(code),
             );
+            return response;
         }
     };
     match media_node::serve_opened(opened, &request, selected.mime()).await {

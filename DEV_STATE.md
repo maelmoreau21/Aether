@@ -1,5 +1,24 @@
 # État de développement
 
+## 21 octobre 2026 — Correctifs ciblés du lecteur après audit
+
+- Préparations sérialisées, commutation audio avec candidat validé avant remplacement,
+  nettoyage des échecs/fermetures, état de lecture préservé pendant buffering,
+  sélection de langue/piste explicite et original multi-audio non étiqueté FR.
+- Seek/décalage recalés, buffering audio suspendant la vidéo avec reprise bornée
+  et pause manuelle prioritaire ; seuil de correction périodique 80 ms. Deux
+  horloges indépendantes, pas de garantie à l'échantillon ni de sortie physique 5.1/7.1.
+- Limites configurables de préparation : 900 s, vidéo 64 Gio, audio 4 Gio, cache
+  96 Gio par défaut, sans réencodage. Cache Docker dans `/data/preparation-cache`
+  au lieu du tmpfs `/tmp` 64 Mio. Toujours une copie complète avant première lecture,
+  un worker, cache temporaire borné ; aucun déploiement effectué.
+- Web check/lint/build, 73 tests et 5 régressions ciblées réussis. Tests Rust de
+  copie de paquets AV1/Opus, huit canaux et leases du cache réussis. Chrome/Core/
+  SQLite : MP4 puis MKV après redémarrage, VF/VO/PCM/seek/pause/progression/sous-titres
+  réussis (33,09 s). Compose validés par config seulement. Fmt/diff/Clippy stricts.
+- Rapport et commandes : `docs/PLAYER_PLAYBACK_AUDIT.md`. NAS/4K réel, autres
+  navigateurs, longue durée et restitution matérielle multicanal restent à vérifier.
+
 ## 21 octobre 2026 — Navigation par bibliothèque, éditeur d’images et réactivité
 
 - Le menu principal affiche les bibliothèques actives autorisées et leur nom réel via GET /api/v1/libraries ; filtre bibliothèque appliqué au catalogue et à la musique, conservé dans les formulaires/pagination. Aucun chemin disque exposé.

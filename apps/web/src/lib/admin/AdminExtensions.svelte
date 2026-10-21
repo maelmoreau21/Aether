@@ -17,6 +17,7 @@
     description: string;
     author: string;
     permissions: string[];
+    httpHosts?: string[];
     category?: string;
     targetAbi?: string;
     minServerVersion?: string;
@@ -138,6 +139,7 @@
       const parsed = JSON.parse(await file.text()) as Package;
       if (!parsed?.manifest || typeof parsed.manifest.id !== 'string' || typeof parsed.manifest.name !== 'string' ||
           !Array.isArray(parsed.manifest.permissions) || !parsed.manifest.permissions.every(p => typeof p === 'string') ||
+          (parsed.manifest.httpHosts !== undefined && (!Array.isArray(parsed.manifest.httpHosts) || !parsed.manifest.httpHosts.every(host => typeof host === 'string'))) ||
           typeof parsed.publisherId !== 'string' || typeof parsed.sha256 !== 'string') throw new Error('Paquet invalide.');
       candidate = parsed;
     } catch { error = 'Paquet JSON invalide.'; }
@@ -216,6 +218,7 @@
         <label for={`extension-version-${group.key}`}>Version de {entry.manifest.name}</label>
         <select id={`extension-version-${group.key}`} bind:value={catalogueVersions[group.key]} disabled={busy}>{#each group.entries as option (option.manifest.version)}<option value={option.manifest.version}>{option.manifest.version}{option===group.entries[0] ? ' · la plus récente' : ''}{option.compatible ? '' : ' · incompatible'}</option>{/each}</select>
         <p>Permissions : {entry.manifest.permissions.join(', ')}</p>
+        <p>Hôtes HTTPS demandés : {entry.manifest.httpHosts?.join(', ') || 'aucun'}</p>
         {#if !entry.compatible}<p>Cette version n’est pas compatible avec le serveur actuel.</p>{/if}
         {#if existing}<p>Version {existing.manifest.version} déjà installée. Gérez-la dans Installées.</p>{/if}
         {#if !trusted}
@@ -274,6 +277,7 @@
           {#if candidate.manifest.minServerVersion}<span class="badge server">Aether &ge; {candidate.manifest.minServerVersion}</span>{/if}
         </div>
         <p>Droits demandés : {candidate.manifest.permissions.join(', ')}</p>
+        <p>Hôtes HTTPS demandés : {candidate.manifest.httpHosts?.join(', ') || 'aucun'}</p>
         <code>SHA-256 : {candidate.sha256}</code>
         <p>L’installation vérifie la signature et conserve l’extension désactivée.</p>
         {#if !publishers.some(publisher => publisher.id === candidate?.publisherId && publisher.active)}
@@ -312,6 +316,7 @@
         </div>
         <p class="plugin-desc">{extension.manifest.description}</p>
         <p class="plugin-meta">{extension.enabled ? 'Activée' : 'Désactivée'} · Éditeur: {extension.publisherId} · Droits: {extension.manifest.permissions.join(', ')}</p>
+        <p>Hôtes HTTPS demandés : {extension.manifest.httpHosts?.join(', ') || 'aucun'}</p>
         {#if extension.manifest.checksum}
           <p class="checksum-info"><code>Checksum: {extension.manifest.checksum}</code></p>
         {/if}

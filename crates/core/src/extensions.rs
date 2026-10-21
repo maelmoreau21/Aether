@@ -68,6 +68,21 @@ fn identifier(value: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b".-_".contains(&c))
 }
 
+fn http_host(host: &str) -> bool {
+    host.len() <= 253
+        && host.contains('.')
+        && host.parse::<std::net::IpAddr>().is_err()
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .bytes()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+        })
+}
+
 pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'static str> {
     let m = &package.manifest;
     if m.api_version != API_VERSION {
@@ -89,6 +104,8 @@ pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'st
             .split('.')
             .any(|s| s.is_empty() || s.len() > 8 || !s.bytes().all(|b| b.is_ascii_digit()))
         || m.permissions.is_empty()
+        || m.http_hosts.len() > 16
+        || m.http_hosts.iter().any(|host| !http_host(host))
         || m.permissions.iter().any(|p| {
             ![
                 "metadata.read",
@@ -574,8 +591,27 @@ async fn apply_metadata(
             .fetch_optional(auth.store.pool())
             .await
             .map_err(db)?;
-    if exists.is_none() {
-        return Err(err(StatusCode::NOT_FOUND, "unknown_work"));
+    let (library, _) = exists.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let stored: Option<(String, String)> =
+        query_as("SELECT package_json,generation FROM extensions WHERE id=?")
+            .bind(&id)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let (stored, generation) =
+        stored.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
+    if !permitted(&auth, &headers, &id, &library, &generation).await? {
+        return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
+    }
+    let package: Package = serde_json::from_str(&stored)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
+    if !package
+        .manifest
+        .permissions
+        .iter()
+        .any(|permission| permission == "metadata.write")
+    {
+        return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
     }
 
     let meta_str = input.metadata.to_string();
@@ -680,28 +716,6 @@ async fn run(
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(|| json!({}));
 
-    let mut allowed_hosts = Vec::new();
-    let mut auth_headers = std::collections::BTreeMap::new();
-    if id.contains("tmdb") {
-        allowed_hosts.push("api.themoviedb.org".into());
-        allowed_hosts.push("image.tmdb.org".into());
-        if let Some(key) = settings
-            .get("apiKey")
-            .and_then(Value::as_str)
-            .filter(|s| !s.trim().is_empty())
-            && (key.len() > 40 || key.starts_with("ey"))
-        {
-            auth_headers.insert("Authorization".into(), format!("Bearer {}", key.trim()));
-        }
-    } else if id.contains("fanart") {
-        allowed_hosts.push("webservice.fanart.tv".into());
-        allowed_hosts.push("assets.fanart.tv".into());
-    } else if id.contains("imdb") {
-        allowed_hosts.push("v3.sg.media-imdb.com".into());
-        allowed_hosts.push("imdb.com".into());
-        allowed_hosts.push("www.imdb.com".into());
-    }
-
     let invocation = crate::extension_runtime::Invocation {
         wasm: package.wasm,
         input: ExtensionRequest {
@@ -717,8 +731,8 @@ async fn run(
                 settings,
             ),
         },
-        allowed_hosts,
-        auth_headers,
+        allowed_hosts: package.manifest.http_hosts.clone(),
+        auth_headers: std::collections::BTreeMap::new(),
     };
     let run_id = uuid::Uuid::new_v4().to_string();
     query("INSERT INTO extension_runs(id,extension_id,library_id,work_id,actor_id,started_at,status) VALUES(?,?,?,?,?,?,'running')")

@@ -12,6 +12,11 @@ contrat HTTP. SQLite reste le défaut; migrations PostgreSQL équivalentes.
 
 ## Paquet et identité
 
+Le Core ne contient aucun fournisseur de métadonnées intégré. Les fournisseurs
+officiels sont des extensions distinctes dans le dépôt `Aether-Plugins`, non
+installées et non activées par défaut. Les identifiants externes présents dans
+des NFO/noms de dossiers ne déclenchent aucun appel à un fournisseur.
+
 Le paquet est un objet JSON borné à 400 000 octets, sans archive à extraire :
 `manifest`, `publisherId`, `wasm` (Base64 standard), `sha256` (hex minuscule),
 `signature` (Ed25519, Base64 standard). Le manifeste Rust est dans
@@ -21,6 +26,19 @@ inconnus sont refusés. Les permissions reconnues sont `metadata.read`,
 ne crée pas à lui seul une opération métier dans l’interface.
 Les identifiants comportent 1–80 caractères ASCII minuscules, chiffres, `._-`.
 Version : trois composantes numériques. `apiVersion` doit valoir 1.
+
+Le manifeste signé peut déclarer `httpHosts`, liste de 0 à 16 noms DNS exacts en
+minuscules (sans URL, port, wildcard ni IP). Liste absente/vide : aucun accès
+réseau. Cette déclaration est affichée dans l'administration avant installation
+et activation. Modifier les domaines invalide la signature. Le Core transmet
+uniquement cette liste au broker ; aucun droit ou en-tête d'authentification
+n'est déduit du nom de l'extension. L'extension construit ses requêtes, paramètres
+et en-têtes à partir de sa configuration privée.
+
+Le champ vide est omis de la sérialisation afin de conserver la signature des
+anciens paquets sans réseau. Les anciens paquets réseau doivent être recréés,
+signés et réinstallés avec leurs domaines déclarés, puis activés explicitement.
+Aucune permission réseau n'est attribuée automatiquement aux paquets existants.
 
 La signature couvre les octets UTF-8 de la sérialisation compacte serde JSON du
 tuple `["media-extension-package-v1", manifest, publisherId, sha256]` avec les
@@ -42,6 +60,8 @@ La conservation des résultats à la désinstallation est un choix explicite.
 Compiler pour `wasm32-unknown-unknown`. Aucun accès WASI, disque ou SQL.
 Le seul import autorisé est `aether/aether_host_http`, pour le broker HTTPS
 contrôlé par le Core (hôtes autorisés par fournisseur, refus des adresses privées).
+Les hôtes proviennent du manifeste de l'extension, et non d'une table de fournisseurs
+maintenue dans le serveur.
 Exporter `memory`, `media_alloc(u32)->u32` et
 `media_run(u32,u32)->u64`. Le SDK fournit la macro générique `extension!`.
 Le host écrit l'entrée JSON dans l'allocation puis appelle `media_run`.
@@ -96,6 +116,13 @@ Le rôle administrateur ne contourne pas le consentement d'extension. Les mêmes
 états et la session sont revérifiés toutes les 30 ms et avant retour du résultat.
 Un identifiant de génération unique empêche de réutiliser un résultat après
 désactivation/réactivation ou désinstallation/réinstallation.
+
+L'application manuelle de métadonnées via `POST /api/v1/admin/extensions/{id}/apply`
+requiert aussi une extension installée/activée, son éditeur approuvé, la bibliothèque
+accordée et la permission signée `metadata.write`, en plus de l'administrateur et
+du CSRF. Extension inconnue : 404 ; permission/activation absente : 403. Les images
+exposées au catalogue restent celles du pipeline d'artwork protégé ; cette opération
+ne télécharge pas un `posterUrl` distant et n'écrase pas l'affiche choisie.
 
 L'exécution est manuelle, courte, liée à la requête; l'historique est persistant.
 Les 1 000 exécutions les plus récentes sont conservées; l'API en expose 100 à

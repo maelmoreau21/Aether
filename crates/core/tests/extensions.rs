@@ -211,6 +211,26 @@ fn package_authenticates_manifest_module_publisher_and_compatibility() {
         extensions::validate_package(&bad, key.public_key().as_ref()),
         Err("invalid_manifest")
     );
+    let mut with_network = p.clone();
+    with_network.manifest.http_hosts = vec!["api.provider.example".into()];
+    assert_eq!(
+        extensions::validate_package(&with_network, key.public_key().as_ref()),
+        Err("invalid_signature")
+    );
+    with_network.signature =
+        STANDARD.encode(key.sign(&with_network.signing_bytes().unwrap()).as_ref());
+    assert!(extensions::validate_package(&with_network, key.public_key().as_ref()).is_ok());
+    with_network.manifest.http_hosts = vec!["*.provider.example".into()];
+    assert_eq!(
+        extensions::validate_package(&with_network, key.public_key().as_ref()),
+        Err("invalid_manifest")
+    );
+    assert!(
+        serde_json::to_value(&p.manifest)
+            .unwrap()
+            .get("httpHosts")
+            .is_none()
+    );
 }
 async fn call(
     app: &Router,
@@ -722,7 +742,7 @@ fn http_broker_security_enforces_allowed_imports_and_allowlist() {
     let res = execute(Invocation {
         wasm: STANDARD.encode(valid_import_module),
         input: input(),
-        allowed_hosts: vec!["api.themoviedb.org".into()],
+        allowed_hosts: vec!["api.provider.example".into()],
         auth_headers: std::collections::BTreeMap::new(),
     });
     let output = res.unwrap();
@@ -738,7 +758,7 @@ fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
     let limits = StoreLimitsBuilder::new().build();
     let mut state = HostState {
         limits,
-        allowed_hosts: vec!["api.themoviedb.org".into()],
+        allowed_hosts: vec!["api.provider.example".into()],
         auth_headers: std::collections::BTreeMap::new(),
         http_count: 0,
         max_http_requests: 10,
@@ -749,7 +769,7 @@ fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
     let res = execute_host_http(
         &mut state,
         HostHttpRequest {
-            url: "http://api.themoviedb.org/3/movie/550".into(),
+            url: "http://api.provider.example/3/movie/550".into(),
             method: "GET".into(),
             headers: Default::default(),
             body: None,
@@ -802,7 +822,7 @@ fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
     let res = execute_host_http(
         &mut state,
         HostHttpRequest {
-            url: "https://api.themoviedb.org/3/movie/550".into(),
+            url: "https://api.provider.example/3/movie/550".into(),
             method: "GET".into(),
             headers: Default::default(),
             body: None,
@@ -813,88 +833,23 @@ fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
 }
 
 #[test]
-fn real_tmdb_wasm_executes_in_aether_runtime() {
+#[ignore = "requires MEDIA_TEST_EXTENSION_WASM pointing to an explicitly built external extension"]
+fn external_extension_wasm_manifest_uses_generic_runtime() {
     use media_poc::extension_runtime::{Invocation, execute};
-
-    let tmdb_wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
-        "../../../Aether-Plugins/target/wasm32-unknown-unknown/release/aether_plugin_tmdb.wasm",
-    );
-
-    if !tmdb_wasm_path.exists() {
-        eprintln!("TMDb wasm not found at {:?}, skipping", tmdb_wasm_path);
-        return;
-    }
-
-    let bytes = std::fs::read(&tmdb_wasm_path).unwrap();
-    let res = execute(Invocation {
-        wasm: STANDARD.encode(&bytes),
-        input: ExtensionRequest {
+    let path =
+        std::env::var_os("MEDIA_TEST_EXTENSION_WASM").expect("external test artifact required");
+    let bytes = std::fs::read(path).unwrap();
+    let output = execute(Invocation::new(
+        STANDARD.encode(bytes),
+        ExtensionRequest {
             api_version: 1,
             operation: "manifest".into(),
             input: json!({}),
         },
-        allowed_hosts: vec!["api.themoviedb.org".into(), "image.tmdb.org".into()],
-        auth_headers: std::collections::BTreeMap::new(),
-    });
-
-    assert!(res.is_ok(), "Failed to execute TMDb Wasm: {:?}", res.err());
-    let output = res.unwrap();
-    assert_eq!(output.api_version, 1);
-    assert_eq!(output.result["id"], "tmdb");
-    assert_eq!(output.result["provider"], "tmdb");
-    assert_eq!(output.result["capabilities"][0], "search");
-
-    // A synthetic key supplied through the real settings wire format must get
-    // past provider key validation. The broker rejects localhost before I/O.
-    let configured = execute(Invocation {
-        wasm: STANDARD.encode(&bytes),
-        input: ExtensionRequest {
-            api_version: 1,
-            operation: "metadata.propose".into(),
-            input: json!({"title":"Synthetic fixture", "config": {
-                "api_key":"synthetic-test-key", "base_url":"https://localhost/3", "language":"en-US"
-            }}),
-        },
-        allowed_hosts: vec!["api.themoviedb.org".into()],
-        auth_headers: Default::default(),
-    })
+    ))
     .unwrap();
-    assert_eq!(configured.result["error"], "host_forbidden");
-}
-
-#[test]
-fn real_avatar_wasm_executes_in_aether_runtime() {
-    use media_poc::extension_runtime::{Invocation, execute};
-
-    let avatar_wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
-        "../../../Aether-Plugins/target/wasm32-unknown-unknown/release/aether_plugin_avatar.wasm",
-    );
-
-    if !avatar_wasm_path.exists() {
-        eprintln!("Avatar wasm not found at {:?}, skipping", avatar_wasm_path);
-        return;
-    }
-
-    let bytes = std::fs::read(&avatar_wasm_path).unwrap();
-    let res = execute(Invocation {
-        wasm: STANDARD.encode(&bytes),
-        input: ExtensionRequest {
-            api_version: 1,
-            operation: "avatars.generate".into(),
-            input: json!({"seed": "alice"}),
-        },
-        allowed_hosts: vec![],
-        auth_headers: std::collections::BTreeMap::new(),
-    });
-
-    assert!(
-        res.is_ok(),
-        "Failed to execute Avatar Wasm: {:?}",
-        res.err()
-    );
-    let output = res.unwrap();
     assert_eq!(output.api_version, 1);
-    assert!(output.result["svg"].as_str().unwrap().contains("<svg"));
+    assert!(!output.result["id"].as_str().unwrap().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -926,7 +881,9 @@ async fn apply_extension_metadata_updates_inventory_work() {
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    let app = extensions::router(auth.clone()).merge(auth::router(auth));
+    let app = extensions::router(auth.clone())
+        .merge(media_poc::artwork::router(auth.clone()))
+        .merge(auth::router(auth));
 
     let (status, login, cookie) = call(
         &app,
@@ -940,24 +897,153 @@ async fn apply_extension_metadata_updates_inventory_work() {
     assert_eq!(status, StatusCode::OK);
     let csrf = login["csrfToken"].as_str().unwrap();
 
+    let endpoint = "/api/v1/admin/extensions/test.metadata/apply";
+    let apply_input = json!({"workId":"work-1", "metadata":{"title":"Synthetic enriched film"}});
+    assert_eq!(
+        call(&app, "POST", endpoint, &cookie, csrf, apply_input.clone())
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let signing_key = key();
+    let mut installed = package(&signing_key, good_module());
+    installed.manifest.permissions.push("metadata.write".into());
+    installed.signature = STANDARD.encode(
+        signing_key
+            .sign(&installed.signing_bytes().unwrap())
+            .as_ref(),
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/publishers",
+            &cookie,
+            csrf,
+            json!({"id":"test","publicKey":STANDARD.encode(signing_key.public_key().as_ref())})
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions",
+            &cookie,
+            csrf,
+            json!(installed)
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        call(&app, "POST", endpoint, &cookie, csrf, apply_input.clone())
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let mut read_only = package(&signing_key, good_module());
+    read_only.manifest.id = "test.readonly".into();
+    read_only.signature = STANDARD.encode(
+        signing_key
+            .sign(&read_only.signing_bytes().unwrap())
+            .as_ref(),
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions",
+            &cookie,
+            csrf,
+            json!(read_only)
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            "/api/v1/admin/extensions/test.readonly",
+            &cookie,
+            csrf,
+            json!({"enabled":true,"libraryIds":["films"]})
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/test.readonly/apply",
+            &cookie,
+            csrf,
+            apply_input.clone()
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            "/api/v1/admin/extensions/test.metadata",
+            &cookie,
+            csrf,
+            json!({"enabled":true,"libraryIds":["films"]})
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(2, 2)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let uploaded = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/works/work-1/images/poster")
+                .header(header::CONTENT_TYPE, "image/png")
+                .header(header::ORIGIN, "http://127.0.0.1:3000")
+                .header(header::COOKIE, &cookie)
+                .header("x-csrf-token", csrf)
+                .body(Body::from(png.into_inner()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(uploaded.status(), StatusCode::CREATED);
+
     let rich_metadata = json!({
-        "title": "Fight Club",
-        "plot": "An insomniac office worker...",
-        "year": 1999,
+        "title": "Synthetic enriched film",
+        "plot": "Synthetic extension proposal",
+        "year": 2026,
         "actors": [
-            {"name": "Edward Norton", "role": "The Narrator"},
-            {"name": "Brad Pitt", "role": "Tyler Durden"}
+            {"name": "Synthetic actor one", "role": "Narrator"},
+            {"name": "Synthetic actor two", "role": "Pilot"}
         ],
         "ratings": [
-            {"provider": "tmdb", "value": 8.4, "max": 10.0}
+            {"provider": "test.metadata", "value": 8.4, "max": 10.0}
         ],
-        "posterUrl": "https://image.tmdb.org/t/p/original/poster.jpg"
+        "posterUrl": "https://images.provider.example/poster.jpg"
     });
 
     let (status, _, _) = call(
         &app,
         "POST",
-        "/api/v1/admin/extensions/tmdb/apply",
+        endpoint,
         &cookie,
         csrf,
         json!({
@@ -973,12 +1059,35 @@ async fn apply_extension_metadata_updates_inventory_work() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(detail["title"], "Fight Club");
-    assert_eq!(detail["description"], "An insomniac office worker...");
-    assert_eq!(detail["actors"][0]["name"], "Edward Norton");
-    assert_eq!(detail["actors"][1]["name"], "Brad Pitt");
+    assert_eq!(detail["title"], "Synthetic enriched film");
+    assert_eq!(detail["description"], "Synthetic extension proposal");
+    assert_eq!(detail["actors"][0]["name"], "Synthetic actor one");
+    assert_eq!(detail["actors"][1]["name"], "Synthetic actor two");
+    assert_eq!(detail["ratings"][0]["provider"], "test.metadata");
+    // Metadata cannot bypass the protected artwork pipeline or overwrite a chosen poster.
+    assert!(
+        detail["posterUrl"]
+            .as_str()
+            .unwrap()
+            .starts_with("/api/v1/works/work-1/images/")
+    );
     assert_eq!(
-        detail["posterUrl"],
-        "https://image.tmdb.org/t/p/original/poster.jpg"
+        call(
+            &app,
+            "PUT",
+            "/api/v1/admin/extensions/test.metadata",
+            &cookie,
+            csrf,
+            json!({"enabled":false,"libraryIds":[]})
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(&app, "POST", endpoint, &cookie, csrf, apply_input)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
     );
 }

@@ -1,5 +1,21 @@
 # État de développement
 
+## 21 octobre 2026 — Extensions : fournisseurs séparés du Core
+
+- Core générique : domaines réseau tirés du manifeste signé `httpHosts`, sans
+  branchement TMDb/fanart/IMDb ni authentification déduite du nom. Domaines affichés
+  avant activation ; champ absent/vide = aucun réseau. Aucune extension intégrée
+  ou installée par défaut ; les fournisseurs restent dans Aether-Plugins.
+- Application de métadonnées contrôlant installation, activation, éditeur,
+  bibliothèque et metadata.write. Test CI devenu synthétique et vérifiant une
+  affiche servie par le pipeline protégé. Test de module externe opt-in générique.
+- Tests extensions 8/8 exécutés réussis (3 ignorés), cas apply read-only rejoué
+  réussi ; Clippy strict, check/lint/build Web et check Aether-Plugins réussis.
+  Contrats : docs/EXTENSIONS_API.md et OpenAPI. Anciens paquets réseau à recréer et
+  signer avec leurs domaines ; pas de migration implicite des permissions.
+- Modifications dans les deux dépôts, aucun push/déploiement ni appel fournisseur
+  réel. La CI complète GitHub reste à confirmer après publication autorisée.
+
 ## 21 octobre 2026 — Correctifs ciblés du lecteur après audit
 
 - Préparations sérialisées, commutation audio avec candidat validé avant remplacement,

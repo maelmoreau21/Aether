@@ -3,9 +3,33 @@
   "info": {
     "title": "Media extension administration API",
     "version": "1.0.0",
-    "description": "Local signed import-free Wasm metadata proposals. No repository, network or media-file host API is implemented. See EXTENSIONS_API.md for ABI and limits."
+    "description": "Generic signed Wasm extensions with explicit library grants and signed HTTPS host declarations. No built-in metadata provider. See EXTENSIONS_API.md for ABI and limits."
   },
   "paths": {
+    "/api/v1/admin/extensions/{id}/apply": {
+      "post": {
+        "summary": "Apply metadata from an installed, enabled extension with metadata.write and a library grant",
+        "security": [{"session": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "x-csrf-token", "in": "header", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object", "additionalProperties": false, "required": ["workId", "metadata"],
+            "properties": {"workId": {"type": "string"}, "metadata": {"description": "Generic metadata JSON, at most 65536 serialized bytes. Does not fetch image URLs or replace protected artwork."}}
+          }}}
+        },
+        "responses": {
+          "204": {"description": "Applied"},
+          "400": {"description": "Invalid or oversized metadata"},
+          "401": {"description": "Authentication required"},
+          "403": {"description": "Administrator, CSRF, active publisher, enabled extension, library grant or metadata.write missing"},
+          "404": {"description": "Unknown work or extension"}
+        }
+      }
+    },
     "/api/v1/admin/extensions": {
       "get": {
         "summary": "List installed extensions without Wasm payload",
@@ -1491,10 +1515,15 @@
           "permissions": {
             "type": "array",
             "minItems": 1,
-            "maxItems": 1,
             "items": {
-              "const": "metadata.read"
+              "enum": ["metadata.read", "metadata.write", "avatars", "images", "providers"]
             }
+          },
+          "httpHosts": {
+            "type": "array",
+            "maxItems": 16,
+            "description": "Exact lower-case DNS hosts signed in the package; absent or empty denies all HTTP access. No URLs, wildcards, ports or IP literals.",
+            "items": {"type": "string", "minLength": 3, "maxLength": 253}
           }
         }
       },

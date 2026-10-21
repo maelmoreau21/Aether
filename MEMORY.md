@@ -1,5 +1,30 @@
 # MEMORY.md — État et décisions Aether
 
+## 21 octobre 2026 — Fournisseurs externes et correction du test extensions
+
+- Suppression du traitement des domaines/Authorization en fonction du nom
+  tmdb/fanart/imdb dans le Core. `Manifest.httpHosts` déclare les hôtes HTTPS
+  exacts couverts par la signature, affichés avant installation/activation ;
+  liste absente/vide = aucun réseau. Le Core ne contient aucun fournisseur
+  installé par défaut. Les identifiants NFO/dossiers restent des données locales.
+- Aether-Plugins porte les domaines dans chaque manifeste fournisseur ; son
+  script de paquetage les copie et demande metadata.read/metadata.write. Les
+  anciennes signatures sans réseau restent compatibles (champ vide omis).
+  Anciens paquets réseau à recréer/signer/réinstaller, sans attribution automatique.
+- Application de métadonnées réservée à une extension installée/activée, éditeur
+  actif, bibliothèque accordée et permission metadata.write, administrateur/CSRF.
+  Le test CI utilise une extension synthétique et une affiche importée par l'API
+  d'artwork protégée ; une URL distante de métadonnées ne remplace pas cette image.
+- Les anciens tests de modules TMDb/Avatar cherchant des fichiers dans le dépôt
+  voisin sont remplacés par un test externe générique explicitement ignoré tant
+  qu'un module n'est pas fourni via MEDIA_TEST_EXTENSION_WASM. Aucune dépendance
+  des tests Core ordinaires envers un fournisseur ou un dépôt voisin.
+- Vérifications locales : tests extensions 8 réussis/3 ignorés, puis cas apply
+  rejoué avec refus de permission read-only (réussi) ; Clippy strict workspace/
+  all-targets ; Web check 0/0, lint/build ; cargo check workspace Aether-Plugins ;
+  JSON OpenAPI, syntaxe PowerShell et diff checks. Pas de suite Rust générale,
+  appel fournisseur réel, build de paquet publié, push ou déploiement.
+
 ## 21 octobre 2026 — Correction CI FFmpeg lavfi et artefacts absents
 
 - Le profil FFmpeg fixtures héritait de `--disable-avdevice`, rendant `-f lavfi`

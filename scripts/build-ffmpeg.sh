@@ -18,7 +18,10 @@ set -- --prefix="$prefix" --disable-autodetect --disable-network \
   --disable-programs --enable-ffmpeg --enable-ffprobe --disable-doc \
   --disable-debug --enable-small --disable-avdevice --disable-devices --disable-hwaccels
 if [ "$profile" = fixtures ]; then
-  set -- "$@" --enable-gpl --enable-libaom --enable-libopus --enable-libx264 --enable-libx265
+  # lavfi is an input device in libavdevice, not a libavformat demuxer.
+  # Enable only this synthetic input for fixtures; keep physical devices disabled.
+  set -- "$@" --enable-avdevice --enable-indev=lavfi \
+    --enable-gpl --enable-libaom --enable-libopus --enable-libx264 --enable-libx265
 else
   set -- "$@" --disable-swscale --disable-encoders --enable-encoder=webvtt --disable-filters
 fi

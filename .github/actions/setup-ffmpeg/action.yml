@@ -27,3 +27,8 @@ runs:
         echo "$RUNNER_TEMP/media-ffmpeg/bin" >> "$GITHUB_PATH"
         "$RUNNER_TEMP/media-ffmpeg/bin/ffmpeg" -version | head -n 1 | grep -F 'ffmpeg version 9.0.2'
         "$RUNNER_TEMP/media-ffmpeg/bin/ffprobe" -version | head -n 1 | grep -F 'ffprobe version 9.0.2'
+        # Check the fixture profile on both fresh builds and restored binary caches.
+        "$RUNNER_TEMP/media-ffmpeg/bin/ffmpeg" -hide_banner -v error \
+          -f lavfi -i 'testsrc2=size=16x16:rate=1' \
+          -f lavfi -i 'sine=frequency=440:sample_rate=48000' \
+          -map 0:v:0 -map 1:a:0 -t 0.1 -f null -

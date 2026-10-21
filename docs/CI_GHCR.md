@@ -1,5 +1,27 @@
 # CI et publication GHCR
 
+## Correctif FFmpeg des fixtures — 21 octobre 2026
+
+Le profil partagé désactivait `libavdevice`, qui fournit l'entrée synthétique
+`lavfi`. Le profil `fixtures` réactive désormais `--enable-avdevice` et seulement
+`--enable-indev=lavfi` ; le profil Docker `runtime` conserve les périphériques
+désactivés. L'action setup-ffmpeg exécute un court test `testsrc2` + `sine` après
+installation, y compris après restauration du cache. La clé binaire inclut déjà
+le script de construction ; les deux clés des fixtures l'incluent désormais aussi.
+
+Les anciennes preuves navigateur sont retirées immédiatement après checkout.
+L'upload des artefacts reste effectué après échec si des fichiers existent, mais
+est ignoré quand une panne de setup/fixtures n'a produit aucune preuve. Le contrôle
+des rapports `passed: true` et des captures sur un parcours réussi reste strict,
+ainsi que `if-no-files-found: error` lorsque l'upload est effectivement lancé.
+L'avertissement Node `punycode` ne provoque pas l'échec de génération.
+
+Validation locale ciblée : actionlint 1.7.12 sur les workflows, `bash -n` sur le
+script de construction, test court lavfi avec le FFmpeg Windows installé et
+`git diff --check`, tous réussis. Le test Windows ne prouve pas la reconstruction
+du profil Linux. Docker Desktop Linux est arrêté : aucune compilation Linux ni
+nouvelle exécution GitHub n'a été réalisée. Aucun push ni publication.
+
 ## Contrat
 
 `ci.yml` traite les push/PR vers `main` et `develop`, ainsi que les lancements

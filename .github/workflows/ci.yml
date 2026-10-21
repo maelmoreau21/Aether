@@ -65,7 +65,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: tests/fixtures/generated
-          key: fixtures-p0-p1-ffmpeg-9.0.2-${{ hashFiles('scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
+          key: fixtures-p0-p1-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
 
       - name: Installer FFmpeg (requis par les tests unitaires et intégration media-node)
         uses: ./.github/actions/setup-ffmpeg
@@ -196,6 +196,11 @@ jobs:
       - name: Récupérer le code source
         uses: actions/checkout@v4
 
+      - name: Purger les preuves navigateur préexistantes
+        run: |
+          rm -rf docs/evidence/2026-10-16/scanner
+          rm -rf docs/evidence/2026-10-17/series
+
       - name: Installer la toolchain Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -227,17 +232,12 @@ jobs:
           npm run build
           test -f build/index.html
 
-      - name: Purger les preuves navigateur préexistantes
-        run: |
-          rm -rf docs/evidence/2026-10-16/scanner
-          rm -rf docs/evidence/2026-10-17/series
-
       - name: Cache des fixtures synthétiques
         id: cache-fixtures
         uses: actions/cache@v4
         with:
           path: tests/fixtures/generated
-          key: fixtures-p0-p1-ffmpeg-9.0.2-${{ hashFiles('scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
+          key: fixtures-p0-p1-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
 
       - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
@@ -285,7 +285,9 @@ jobs:
               assert Path(img).is_file(), img
 
       - name: Archiver les rapports et captures navigateur
-        if: always()
+        # Keep partial failure reports, but do not mask a fixture/setup failure
+        # with a second error when no browser scenario could run.
+        if: ${{ always() && hashFiles('docs/evidence/2026-10-16/scanner/**', 'docs/evidence/2026-10-17/series/**') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: browser-evidence-films-series

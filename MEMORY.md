@@ -1,5 +1,20 @@
 # MEMORY.md — État et décisions Aether
 
+## 21 octobre 2026 — Correction CI FFmpeg lavfi et artefacts absents
+
+- Le profil FFmpeg fixtures héritait de `--disable-avdevice`, rendant `-f lavfi`
+  inconnu et bloquant generate-fixtures.ps1. Réactivation de libavdevice et du
+  seul input lavfi pour fixtures ; profil runtime inchangé. Smoke test testsrc2
+  et sine dans setup-ffmpeg, caches binaires/fixtures invalidés par le script.
+- Preuves navigateur nettoyées dès checkout ; upload conditionné à la présence
+  de fichiers, y compris partiels après panne. Assertions de fraîcheur/réussite
+  conservées. L'absence de rapports après échec fixtures ne masque plus la cause
+  par une seconde erreur upload-artifact. Punycode reste un avertissement amont.
+- Vérifications ciblées réussies : actionlint 1.7.12, bash -n, lavfi court sur
+  FFmpeg Windows installé et git diff --check. Docker Linux arrêté : profil Linux
+  non reconstruit, aucun run GitHub, push ou publication effectué. Détails dans
+  docs/CI_GHCR.md ; pas de relance des tests Rust/Web sans rapport avec ce défaut.
+
 ## 21 octobre 2026 — Navigation par bibliothèque, éditeur d’images et réactivité
 
 - Le menu principal affiche les bibliothèques actives autorisées et leur nom réel via GET /api/v1/libraries ; filtre bibliothèque appliqué au catalogue et à la musique, conservé dans les formulaires/pagination. Aucun chemin disque exposé.

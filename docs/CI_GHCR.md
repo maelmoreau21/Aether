@@ -28,8 +28,8 @@ garantie d'immutabilité imposée par GHCR : pour figer une installation, utilis
 peut laisser certains packages publiés. Ne pas utiliser ce run comme livraison
 complète tant que les trois jobs ne sont pas réussis.
 
-Avant publication, le Node est vérifié avec `ffprobe` fonctionnel, absence de
-commande FFmpeg et de bibliothèques partagées `libav*.so`, et taille inférieure
+Avant publication, le Node est vérifié avec `ffprobe` et `ffmpeg` 9.0.2 fonctionnels et absence de
+bibliothèques partagées `libav*.so`, et taille inférieure
 à 200 millions d'octets. Le runtime minimal du Dockerfile est conservé. Cette
 limite détecte une régression de taille ; elle ne mesure pas la RAM du Node.
 Après publication, chaque job télécharge son image par digest, contrôle les

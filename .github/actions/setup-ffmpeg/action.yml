@@ -1,0 +1,29 @@
+name: FFmpeg stable
+description: Build the pinned stable FFmpeg release used by Docker and fixtures
+runs:
+  using: composite
+  steps:
+    - name: Identify distribution
+      id: platform
+      shell: bash
+      run: |
+        . /etc/os-release
+        echo "distribution=$ID-$VERSION_ID" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      id: ffmpeg
+      with:
+        path: ${{ runner.temp }}/media-ffmpeg
+        key: ffmpeg-9.0.2-${{ runner.os }}-${{ runner.arch }}-${{ steps.platform.outputs.distribution }}-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+    - name: Install source build dependencies
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils nasm pkg-config libaom-dev libopus-dev libx264-dev libx265-dev
+    - name: Build FFmpeg 9.0.2
+      if: steps.ffmpeg.outputs.cache-hit != 'true'
+      shell: bash
+      run: bash scripts/build-ffmpeg.sh "$RUNNER_TEMP/media-ffmpeg" fixtures
+    - name: Activate and verify FFmpeg
+      shell: bash
+      run: |
+        echo "$RUNNER_TEMP/media-ffmpeg/bin" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/media-ffmpeg/bin/ffmpeg" -version | head -n 1 | grep -F 'ffmpeg version 9.0.2'
+        "$RUNNER_TEMP/media-ffmpeg/bin/ffprobe" -version | head -n 1 | grep -F 'ffprobe version 9.0.2'

@@ -15,7 +15,7 @@
   const imageUrl=(entry:Entry,small=true)=>workId?`${entry.url}${entry.url.includes('?')?'&':'?'}width=${small?320:1280}`:entry.url;
   async function load(){
     if(library){entries=(library.imageKinds??[]).map(kind=>({id:kind,kind,url:`${base}/${kind}?v=${library?.imageVersions?.[kind]??''}`,origin:'manual'}));loading=false;return;}
-    const response=await fetch(base,{cache:'no-store',signal:AbortSignal.timeout(8000)});if(!response.ok)throw new Error('Images indisponibles.');entries=(await response.json()).images;loading=false;
+    const response=await fetch(base,{cache:'no-store',signal:AbortSignal.timeout(8000)});if(!response.ok)throw new Error('Images indisponibles.');const incoming:Entry[]=(await response.json()).images;entries=incoming.map(entry=>{const previous=entries.find(old=>old.id===entry.id);return {...entry,width:entry.width??previous?.width,height:entry.height??previous?.height};});loading=false;
   }
   onMount(()=>{dialog.showModal();void load().catch(cause=>{error=cause.message;loading=false;});});
   function add(type='poster',entry:Entry|null=null){kind=type;replacing=entry;adding=true;}
@@ -57,10 +57,10 @@
       <section aria-label={backdrops?'Arrière-plans':'Images'}>
         <div class="section-heading"><h3>{backdrops?'Arrière-plans':'Images'}</h3><button class="round" type="button" disabled={busy} aria-label={backdrops?'Ajouter un arrière-plan':'Ajouter une image'} onclick={()=>add(backdrops?'backdrop':'poster')}>+</button></div>
         <div class="image-grid">
-          {#each entries.filter(e=>(e.kind==='backdrop')===backdrops) as entry(entry.id)}
+          {#each entries.filter(e=>(e.kind==='backdrop')===backdrops).sort((a,b)=>kinds.indexOf(a.kind)-kinds.indexOf(b.kind)) as entry(entry.id)}
             <article class="image-card" data-kind={entry.kind}>
               <button class="image-preview" type="button" aria-label={`Agrandir ${labels[entry.kind]}`} onclick={()=>{selected=entry;preview.showModal();}}><img src={imageUrl(entry)} alt={`${labels[entry.kind]} de ${title}`} loading="lazy" decoding="async" onload={event=>dimensions(event,entry)} /></button>
-              <div class="card-caption"><h4>{labels[entry.kind]}</h4><p>{entry.width&&entry.height?`${entry.width} × ${entry.height}`:entry.origin==='local'?'Image locale':'Image personnalisée'}{entry.origin==='local'&&workId?' · aperçu':''}</p>
+              <div class="card-caption"><h4>{labels[entry.kind]}</h4><p>{entry.width&&entry.height?`${entry.width} × ${entry.height}`:entry.origin==='local'?'Image locale':'Image personnalisée'}{entry.origin!=='manual'&&workId?' · aperçu':''}</p>
                 <div class="card-actions"><button type="button" aria-label={`Agrandir ${labels[entry.kind]}`} title="Agrandir" onclick={()=>{selected=entry;preview.showModal();}}><Icon name="search" size={18} /></button><button type="button" disabled={busy} aria-label={`Remplacer ${labels[entry.kind]}`} title="Remplacer" onclick={()=>add(entry.kind,entry)}>↥</button>
                   {#if backdrops&&workId}<button type="button" disabled={busy||entries.filter(e=>e.kind==='backdrop')[0]?.id===entry.id} aria-label="Déplacer l’arrière-plan à gauche" onclick={()=>move(entry,-1)}>‹</button><button type="button" disabled={busy||entries.filter(e=>e.kind==='backdrop').at(-1)?.id===entry.id} aria-label="Déplacer l’arrière-plan à droite" onclick={()=>move(entry,1)}>›</button>{/if}
                   <button type="button" class="danger" disabled={busy} aria-label={`Supprimer ${labels[entry.kind]}`} title={entry.origin==='local'?'Masquer cette image dans le catalogue, sans supprimer le fichier':'Supprimer cette image personnalisée'} onclick={()=>remove(entry)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg></button>

@@ -55,7 +55,33 @@
     }
   });
   type Library = { id: string; name: string; enabled: boolean | number };
-  type Run = { id: string; extensionId: string; status: string; durationMs: number; result: { title?: string; summary?: string; error?: string } };
+  type Run = { id: string; extensionId: string; workId: string; status: string; durationMs: number; result: { title?: string; summary?: string; error?: string; pluginError?: string; operation?: string; output?: Record<string, unknown> } };
+  type Candidate = { id: string; title: string; year?: number; overview?: string };
+  type ProviderImage = { url: string; imageType: string; language?: string; width?: number; height?: number };
+  type Proposal = { workId: string; value: Record<string, unknown> };
+  let proposals = $state<Record<string, Proposal>>({});
+  let candidates = $state<Record<string, Candidate[]>>({});
+  let providerImages = $state<Record<string, ProviderImage[]>>({});
+  let candidateIds = $state<Record<string, string>>({});
+  async function invoke(id: string, operation: string, candidate?: string) {
+    const workId = workIds[id];
+    if (operation === 'metadata.search') resetWork(id);
+    else if (operation !== 'metadata.images') { delete proposals[id]; delete providerImages[id]; delete candidateIds[id]; }
+    await perform(async () => {
+      const response = await adminRequest<{ proposal: unknown }>(`/api/v1/admin/extensions/${encodeURIComponent(id)}/run`, {
+        method: 'POST', body: JSON.stringify({ workId, operation, input: { id: candidate } })
+      });
+      if (workIds[id] !== workId) return;
+      if (operation === 'metadata.search') {
+        candidates[id] = response.proposal as Candidate[]; delete proposals[id]; delete providerImages[id]; delete candidateIds[id];
+      } else if (operation === 'metadata.images') providerImages[id] = response.proposal as ProviderImage[];
+      else { proposals[id] = { workId, value: response.proposal as Record<string, unknown> }; if (candidate) candidateIds[id] = candidate; }
+    }, operation === 'metadata.search' ? 'Choisissez le résultat correspondant à votre œuvre.' : operation === 'metadata.propose' ? 'Proposition générée. Consultez les résultats ci-dessous.' : 'Résultat reçu.');
+  }
+  function resetWork(id: string) { delete proposals[id]; delete candidates[id]; delete providerImages[id]; delete candidateIds[id]; }
+  function imageKind(type: string): string | undefined {
+    return ({ poster: 'poster', backdrop: 'backdrop', logo: 'logo', banner: 'banner', thumb: 'thumb', clear_art: 'illustration', disc_art: 'disc' } as Record<string,string>)[type];
+  }
   let installed = $state<Installed[]>([]);
   let libraries = $state<Library[]>([]);
   let runs = $state<Run[]>([]);
@@ -400,15 +426,46 @@
         <button disabled={busy} onclick={() => configure(extension, true)}>Enregistrer et activer</button>
         <button disabled={busy || !extension.enabled} onclick={() => configure(extension, false)}>Désactiver</button>
       </div>
-      <form onsubmit={event => { event.preventDefault(); void perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}/run`, { method: 'POST', body: JSON.stringify({ workId: workIds[extension.manifest.id] }) }), 'Proposition générée. Consultez les résultats ci-dessous.'); }}>
+      {#if extension.manifest.permissions.includes('metadata.read')}
+      <form onsubmit={event => { event.preventDefault(); void invoke(extension.manifest.id, 'metadata.search'); }}>
         <label>Rechercher une œuvre<input maxlength="120" bind:value={queries[extension.manifest.id]} /></label>
         <button type="button" disabled={busy || !extension.enabled} onclick={() => searchWorks(extension.manifest.id)}>Rechercher dans les bibliothèques autorisées</button>
         <label for={`extension-work-${extension.manifest.id}`}>Œuvre à analyser</label>
-        <select id={`extension-work-${extension.manifest.id}`} required bind:value={workIds[extension.manifest.id]}><option value="">Choisir une œuvre</option>
+        <select id={`extension-work-${extension.manifest.id}`} required disabled={busy} bind:value={workIds[extension.manifest.id]} onchange={() => resetWork(extension.manifest.id)}><option value="">Choisir une œuvre</option>
           {#each workOptions[extension.manifest.id] ?? [] as work (work.id)}<option value={work.id}>{work.title}</option>{/each}
         </select>
-        <button disabled={busy || !extension.enabled || !workIds[extension.manifest.id]}>Exécuter sur cette œuvre</button>
+        <button disabled={busy || !extension.enabled || !workIds[extension.manifest.id]}>Rechercher chez ce fournisseur</button>
+        <button type="button" disabled={busy || !extension.enabled || !workIds[extension.manifest.id]} onclick={() => invoke(extension.manifest.id, 'metadata.propose')}>Exécuter sur cette œuvre</button>
+        <small>Le second bouton utilise la proposition simple des anciens paquets.</small>
       </form>
+      {#each candidates[extension.manifest.id] ?? [] as match (match.id)}
+        <div class="card"><strong>{match.title}{match.year ? ` (${match.year})` : ''}</strong>
+          {#if match.overview}<p>{match.overview}</p>{/if}
+          <button disabled={busy || !extension.enabled} onclick={() => invoke(extension.manifest.id, 'metadata.details', match.id)}>Choisir ce résultat</button>
+        </div>
+      {/each}
+      {#if proposals[extension.manifest.id] && proposals[extension.manifest.id].workId === workIds[extension.manifest.id]}
+        {@const proposal = proposals[extension.manifest.id]}
+        <div class="card"><strong>{String(proposal.value.title ?? 'Métadonnées')}</strong>
+          <p>{String(proposal.value.synopsis ?? proposal.value.summary ?? '')}</p>
+          <details><summary>Tous les champs proposés</summary><pre>{JSON.stringify(proposal.value, null, 2)}</pre></details>
+          <button disabled={busy || !extension.enabled || !extension.manifest.permissions.includes('metadata.write')} onclick={() => perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}/apply`, {method:'POST',body:JSON.stringify({workId:proposal.workId,metadata:proposal.value})}), 'Métadonnées appliquées.')}>Appliquer ces métadonnées</button>
+          {#if extension.manifest.permissions.includes('images') && candidateIds[extension.manifest.id]}
+            <button disabled={busy || !extension.enabled} onclick={() => invoke(extension.manifest.id, 'metadata.images', candidateIds[extension.manifest.id])}>Charger les images proposees</button>
+          {/if}
+        </div>
+      {/if}
+      {#each providerImages[extension.manifest.id] ?? [] as image, index (index)}
+        {#if imageKind(image.imageType)}
+          <div class="card"><p>{image.imageType} - {image.language ?? 'Toutes langues'} - {image.width ?? '?'} x {image.height ?? '?'}</p>
+            <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+            <a href={image.url} target="_blank" rel="noreferrer">Voir cette image</a>
+            <button disabled={busy || !extension.enabled || !extension.manifest.permissions.includes('metadata.write')} onclick={() => perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}/image`, {method:'POST',body:JSON.stringify({workId:workIds[extension.manifest.id],url:image.url,kind:imageKind(image.imageType)})}), 'Image importee dans la mediatheque.')}>Utiliser cette image</button>
+          </div>
+        {/if}
+      {/each}
+      {/if}
+      {#if extension.manifest.permissions.includes('avatars')}<p>Les packs de cette extension sont disponibles dans les parametres de votre image de profil apres activation.</p>{/if}
       <details><summary>Désinstaller</summary>
         <label class="check"><input type="checkbox" bind:checked={purge[extension.manifest.id]} />Supprimer aussi les résultats conservés</label>
         <button disabled={busy} onclick={() => perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`, { method: 'DELETE', body: JSON.stringify({ deleteData: purge[extension.manifest.id] ?? false }) }), 'Extension désinstallée.')}>Désinstaller cette extension</button>
@@ -420,6 +477,9 @@
   <h3>Dernières exécutions</h3>
   {#each runs as run (run.id)}
     <div class="card"><p>{run.extensionId} · {run.status} · {run.durationMs} ms</p>
+      {#if run.result.operation}<p>{run.result.operation}</p>{/if}
+      {#if run.result.output}<details><summary>Résultat</summary><pre>{JSON.stringify(run.result.output, null, 2)}</pre></details>{/if}
+      {#if run.result.pluginError}<p>{run.result.pluginError}</p>{/if}
       {#if run.result.title}<strong>{run.result.title}</strong>{/if}
       {#if run.result.summary}<p>{run.result.summary}</p>{/if}
       {#if run.result.error}<p>{run.result.error}</p>{/if}
@@ -434,6 +494,7 @@
 </section>
 
 <style>
+  pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:24rem; overflow:auto; }
   .extension-tabs { display:flex;gap:.5rem;flex-wrap:wrap;margin-block:1rem; }
   .extension-tabs button[aria-current="page"] { border-color:var(--color-accent);color:var(--color-accent); }
   .repository-form { display:grid;gap:.8rem;max-width:800px; }

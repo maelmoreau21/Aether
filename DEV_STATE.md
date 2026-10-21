@@ -1,5 +1,25 @@
 # État de développement
 
+## 21 octobre 2026 — Parcours des extensions raccordés
+
+- Métadonnées : contexte catalogue réel, search → choix du candidat → details →
+  application explicite, adaptation des champs SDK, conservation des corrections
+  et IDs des autres fournisseurs. Import d’images séparé et protégé.
+- Avatars activés accessibles aux comptes depuis leurs paramètres : packs,
+  variante, aperçu et enregistrement. SVG inertes validés ; pas de dépendance
+  à une bibliothèque ni de droit réseau/configuration transmis à cet adaptateur.
+- Délais 65 s worker/70 s Web ; erreurs par code sans message brut. Permissions,
+  activation, éditeur et session revérifiés ; broker et imports bornés.
+- Fournisseurs toujours externes. Aether-Plugins corrigé : fanart par ID,
+  propositions ambiguës refusées, Avatar Wasm sans horloge, paquetage avatar et
+  permission images. Reconstruire/signer/réinstaller les anciens paquets.
+- Validation : 9 tests intégration extensions réussis/3 ignorés, 6 unitaires
+  ciblés réussis/1 ignoré et 2 adaptateurs rejoués ; Clippy Core strict tous
+  targets/features, Web check/lint/build, workspace plugins check. Avatar Wasm
+  compilé et exécuté (4 packs + génération). Contrats et syntaxe paquetage valides.
+- Limites : pas d’appels réels avec clés fournisseurs ni d’E2E navigateur rejoué.
+  Aucun push, déploiement ou publication. Les limites de taille/fuel demeurent.
+
 ## 21 octobre 2026 — Extensions : fournisseurs séparés du Core
 
 - Core générique : domaines réseau tirés du manifeste signé `httpHosts`, sans

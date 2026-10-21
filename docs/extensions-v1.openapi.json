@@ -9,24 +9,68 @@
     "/api/v1/admin/extensions/{id}/apply": {
       "post": {
         "summary": "Apply metadata from an installed, enabled extension with metadata.write and a library grant",
-        "security": [{"session": []}],
+        "security": [
+          {
+            "session": []
+          }
+        ],
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "x-csrf-token", "in": "header", "required": true, "schema": {"type": "string"}}
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": {"application/json": {"schema": {
-            "type": "object", "additionalProperties": false, "required": ["workId", "metadata"],
-            "properties": {"workId": {"type": "string"}, "metadata": {"description": "Generic metadata JSON, at most 65536 serialized bytes. Does not fetch image URLs or replace protected artwork."}}
-          }}}
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workId",
+                  "metadata"
+                ],
+                "properties": {
+                  "workId": {
+                    "type": "string"
+                  },
+                  "metadata": {
+                    "description": "Generic metadata JSON, at most 65536 serialized bytes. Does not fetch image URLs or replace protected artwork."
+                  }
+                }
+              }
+            }
+          }
         },
         "responses": {
-          "204": {"description": "Applied"},
-          "400": {"description": "Invalid or oversized metadata"},
-          "401": {"description": "Authentication required"},
-          "403": {"description": "Administrator, CSRF, active publisher, enabled extension, library grant or metadata.write missing"},
-          "404": {"description": "Unknown work or extension"}
+          "204": {
+            "description": "Applied"
+          },
+          "400": {
+            "description": "Invalid or oversized metadata"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Administrator, CSRF, active publisher, enabled extension, library grant or metadata.write missing"
+          },
+          "404": {
+            "description": "Unknown work or extension"
+          }
         }
       }
     },
@@ -965,7 +1009,7 @@
     },
     "/api/v1/admin/extensions/{id}/run": {
       "post": {
-        "summary": "Execute a metadata proposal for one indexed work",
+        "summary": "Execute a metadata operation with current catalogue context and signed permissions",
         "responses": {
           "200": {
             "description": "Success",
@@ -998,7 +1042,11 @@
                       "type": "integer"
                     },
                     "proposal": {
-                      "$ref": "#/components/schemas/Proposal"
+                      "description": "Operation-specific validated result",
+                      "type": [
+                        "object",
+                        "array"
+                      ]
                     }
                   }
                 }
@@ -1461,6 +1509,218 @@
           }
         }
       }
+    },
+    "/api/v1/admin/extensions/{id}/image": {
+      "post": {
+        "summary": "Import a selected provider image through the protected artwork pipeline",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workId",
+                  "url",
+                  "kind"
+                ],
+                "properties": {
+                  "workId": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "poster",
+                      "backdrop",
+                      "logo",
+                      "banner",
+                      "thumb",
+                      "illustration",
+                      "disc"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Imported image identifier"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Administrator, CSRF, signed permissions, library grant or public signed host missing"
+          },
+          "404": {
+            "description": "Unknown extension/work"
+          },
+          "409": {
+            "description": "Execution busy or image limit"
+          },
+          "413": {
+            "description": "Image exceeds 2 MiB"
+          },
+          "415": {
+            "description": "Unsupported image type"
+          },
+          "422": {
+            "description": "Invalid image"
+          },
+          "408": {
+            "description": "Download timeout"
+          },
+          "502": {
+            "description": "Download failed"
+          }
+        }
+      }
+    },
+    "/api/v1/account/avatar/extensions": {
+      "get": {
+        "summary": "List enabled approved extensions with avatars permission; no configuration exposed",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Extensions with id/name"
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      }
+    },
+    "/api/v1/account/avatar/extensions/{id}": {
+      "post": {
+        "summary": "List or generate avatars; optionally save for the current authenticated account",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "operation"
+                ],
+                "properties": {
+                  "operation": {
+                    "enum": [
+                      "avatars.list",
+                      "avatars.generate"
+                    ]
+                  },
+                  "pack": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 80
+                  },
+                  "seed": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 128
+                  },
+                  "apply": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validated result and applied flag"
+          },
+          "400": {
+            "description": "Unsupported operation or invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "CSRF, active publisher, enabled extension or signed avatars permission missing"
+          },
+          "404": {
+            "description": "Unknown extension"
+          },
+          "408": {
+            "description": "Execution timeout"
+          },
+          "409": {
+            "description": "Execution busy"
+          },
+          "422": {
+            "description": "Invalid output or sanitized provider error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1516,14 +1776,24 @@
             "type": "array",
             "minItems": 1,
             "items": {
-              "enum": ["metadata.read", "metadata.write", "avatars", "images", "providers"]
+              "enum": [
+                "metadata.read",
+                "metadata.write",
+                "avatars",
+                "images",
+                "providers"
+              ]
             }
           },
           "httpHosts": {
             "type": "array",
             "maxItems": 16,
             "description": "Exact lower-case DNS hosts signed in the package; absent or empty denies all HTTP access. No URLs, wildcards, ports or IP literals.",
-            "items": {"type": "string", "minLength": 3, "maxLength": 253}
+            "items": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 253
+            }
           }
         }
       },
@@ -1600,6 +1870,26 @@
         "properties": {
           "workId": {
             "type": "string"
+          },
+          "operation": {
+            "type": "string",
+            "default": "metadata.propose",
+            "enum": [
+              "metadata.propose",
+              "metadata.search",
+              "metadata.details",
+              "metadata.images"
+            ]
+          },
+          "input": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 256
+              }
+            },
+            "description": "Selected provider candidate ID; required for details/images. Catalogue context and private configuration are supplied by Core."
           }
         }
       },
@@ -1642,6 +1932,11 @@
         "properties": {
           "error": {
             "type": "string"
+          },
+          "pluginError": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "Sanitized provider machine code; raw provider messages are never exposed."
           }
         }
       },

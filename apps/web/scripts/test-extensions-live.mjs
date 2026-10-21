@@ -35,8 +35,8 @@ try {
   await extension.getByLabel('Œuvre à analyser', { exact: true }).selectOption('work-films');
   await extension.getByRole('button', { name: 'Exécuter sur cette œuvre', exact: true }).click();
   await panel.getByText('Proposition générée. Consultez les résultats ci-dessous.', { exact: true }).waitFor();
-  await panel.locator('strong').filter({ hasText: /^Titre original$/ }).waitFor();
-  await panel.getByText(/Proposition synthétique pour work-films/).waitFor();
+  await panel.locator('strong').filter({ hasText: /^Titre original$/ }).first().waitFor();
+  await panel.getByText(/Proposition synthétique pour work-films/).first().waitFor();
   await page.reload();
   await panel.locator('strong').filter({ hasText: /^Titre original$/ }).waitFor();
   await extension.getByText('Gérer cette extension', { exact: true }).click();

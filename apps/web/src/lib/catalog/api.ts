@@ -81,11 +81,16 @@ async function fetchWithAbort(url: string, signal: AbortSignal): Promise<Respons
   }
 }
 
-export async function request<T>(url: string, signal: AbortSignal): Promise<T> {
+export async function request<T>(url: string, signal: AbortSignal, timeoutMs=10000): Promise<T> {
   syncCacheWithSession();
   const requestSessionGen = getSessionGeneration();
-  const combinedSignal = AbortSignal.any([signal, AbortSignal.timeout(10000)]);
-  const response = await fetchWithAbort(url, combinedSignal);
+  const combinedSignal = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+  let response:Response;
+  try { response=await fetchWithAbort(url, combinedSignal); }
+  catch (cause) {
+    if(!signal.aborted && combinedSignal.aborted)throw new Error('Le serveur met trop de temps à répondre. Réessayez dans quelques instants.');
+    throw cause;
+  }
   if (response.status === 401) {
     if (invalidateSession(requestSessionGen)) {
       clearDescriptorCache();
@@ -107,8 +112,11 @@ export async function request<T>(url: string, signal: AbortSignal): Promise<T> {
   if (requestSessionGen !== getSessionGeneration()) {
     throw new Error('La session a changé pendant la requête.');
   }
-  const data = (await response.json()) as T;
+  let data:T;
+  try{data=await response.json() as T;}
+  catch(cause){if(!signal.aborted&&combinedSignal.aborted)throw new Error('Le serveur met trop de temps à répondre. Réessayez dans quelques instants.');throw cause;}
   if (combinedSignal.aborted) {
+    if (!signal.aborted) throw new Error('Le serveur met trop de temps à répondre. Réessayez dans quelques instants.');
     throw combinedSignal.reason ?? new DOMException('Aborted', 'AbortError');
   }
   if (requestSessionGen !== getSessionGeneration()) {
@@ -214,7 +222,7 @@ export async function fetchMediaDescriptor(
   }
 
   try {
-    const item = await request<Media>(`/api/v1/media/${encodeURIComponent(id)}`, sig);
+    const item = await request<Media>(`/api/v1/media/${encodeURIComponent(id)}`, sig, 6000);
     if (sig.aborted) {
       throw sig.reason ?? new DOMException('Aborted', 'AbortError');
     }

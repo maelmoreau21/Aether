@@ -7,6 +7,7 @@
   import { DEFAULT_NAME, fetchBrandName } from '../config/brand';
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
   import type { Media, PlayerFactory } from '../player/types';
+  import { accessibleLibraries } from './libraries';
   import Navbar from '../ui/Navbar.svelte';
   import CatalogFilters from './CatalogFilters.svelte';
   import { bestVersion } from '../player/version-choice';
@@ -51,6 +52,7 @@
   let createPlayer = $state<PlayerFactory>();
   let playerLoading: Promise<void> | undefined;
   let launchingEpisodeId = $state<string | null>(null);
+  let launching = $state(false);
   let episodeLaunchController: AbortController | null = null;
 
   // Account Preferences (saved in localStorage for persistence)
@@ -110,6 +112,8 @@
   }
 
   const workId = $derived(page.url.searchParams.get('work') ?? '');
+  const libraryId = $derived(page.url.searchParams.get('library') ?? '');
+  const library = $derived($accessibleLibraries.find(item=>item.id===libraryId));
   const query = $derived(page.url.searchParams.get('q') ?? '');
   const order = $derived(
     ['title-asc', 'title-desc', 'year-asc', 'year-desc', 'added-asc', 'added-desc'].includes(
@@ -122,7 +126,7 @@
   );
   const offset = $derived(Math.max(0, Number(page.url.searchParams.get('offset')) || 0));
   const title = $derived(
-    section === 'settings'
+    library?.name ?? (section === 'settings'
       ? 'Paramètres'
       : section === 'films'
         ? 'Films'
@@ -130,7 +134,7 @@
           ? 'Séries'
           : section === 'search'
             ? 'Recherche'
-            : 'Accueil'
+            : 'Accueil')
   );
   const allowedIds = $derived(detail ? playbackIds(detail) : []);
   const playableMedia = $derived(media.filter(item => allowedIds.includes(item.id)));
@@ -172,6 +176,7 @@
     const controller = new AbortController();
     episodeLaunchController = controller;
     const launchGen = getSessionGeneration();
+    launching = true;
     mediaError = '';
 
     try {
@@ -190,6 +195,7 @@
     } finally {
       if (episodeLaunchController === controller) {
         episodeLaunchController = null;
+        launching = false;
       }
     }
   }
@@ -238,7 +244,12 @@
       // localStorage may be disabled in private browsing
     }
 
-    return () => controller.abort();
+    const artworkChanged=(event:Event)=>{
+      const id=(event as CustomEvent<{id:string}>).detail.id;
+      if(detail?.id===id)void request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}`,controller.signal).then(work=>{if(!controller.signal.aborted&&detail?.id===id)detail=work;}).catch(()=>{});
+    };
+    window.addEventListener('media-artwork-updated',artworkChanged);
+    return () => {controller.abort();window.removeEventListener('media-artwork-updated',artworkChanged);};
   });
 
   function savePreference(key: string, value: string) {
@@ -254,6 +265,7 @@
   $effect(() => {
     const id = workId;
     const q = query;
+    const currentLibrary = libraryId;
     const sorting = order;
     const start = offset;
     const filters=Object.fromEntries(['genre','year','quality','codec','language'].flatMap(key=>{const value=page.url.searchParams.get(key);return value?[[key,value]]:[];}));
@@ -266,6 +278,7 @@
     search = q;
     sort = sorting;
     busy = true;
+    launching = false;
     pendingCatalogKinds = 0;
     partialCatalogError = '';
     error = '';
@@ -333,6 +346,7 @@
                 const result = await request<CatalogPage>(
                   `/api/v1/catalog?${new URLSearchParams({
                     ...filters,
+                    ...(currentLibrary ? {library:currentLibrary} : {}),
                     kind,
                     q,
                     sort: sorting,
@@ -397,6 +411,7 @@
 {#if !workId && section!=='settings'}<CatalogFilters />{/if}
 
 <main id="main-content" tabindex="-1">
+  {#if launching}<p role="status">Connexion à la source… <button onclick={()=>{episodeLaunchController?.abort();episodeLaunchController=null;launching=false;}}>Annuler</button></p>{/if}
   {#if !busy && pendingCatalogKinds > 0}<p role="status">Chargement du reste du catalogue…</p>{/if}
   {#if partialCatalogError}<p role="alert">{partialCatalogError}</p>{/if}
   {#if section === 'home' && $serverPresentation.welcomeMessage}<p class="server-welcome">{$serverPresentation.welcomeMessage}</p>{/if}

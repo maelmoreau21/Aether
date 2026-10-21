@@ -1,5 +1,18 @@
 # État de développement
 
+## 21 octobre 2026 — Navigation par bibliothèque, éditeur d’images et réactivité
+
+- Le menu principal affiche les bibliothèques actives autorisées et leur nom réel via GET /api/v1/libraries ; filtre bibliothèque appliqué au catalogue et à la musique, conservé dans les formulaires/pagination. Aucun chemin disque exposé.
+- Éditeur partagé façon galerie : affiche, vignette, logo, illustration, bannière, disque/paysage, plusieurs fonds ordonnables ; import/remplacement/agrandissement/retrait, dimensions, bureau/mobile. Migration 0038 SQLite/PostgreSQL ; stockage applicatif, masquage des images locales sans suppression physique. Administrateur/CSRF pour les écritures, droits actuels avant lectures et 304.
+- Aperçus persistants 320/640/1280, traitements bornés à deux décodeurs, attente de huit secondes ; ancien poster avec révision/ETag et cache persistant. Requêtes de décoration regroupées par page et représentants de groupes limités aux groupes existants et au filtre courant.
+- Mesure locale debug, 10000 films synthétiques et utilisateur authentifié : médiane catalogue 369,57 → 92,21 ms, recherche 165,60 → 12,06 ms. Ne pas extrapoler au NAS ni au serveur public.
+- Reprise bornée à 2,5 s sans écrasement d’une progression inconnue ; préparation parallèle des pistes, état visible/annulation, repli direct vers relais borné et délais d’en-têtes Node. Chaque lancement revérifie le descripteur : la tentative de cache de cinq secondes a été retirée après le test de révocation.
+- Web : check 0/0, lint, 72 tests et build réussis. Deux parcours admin Core/SQLite réel et PWA fixture réussis ; parcours séries réel Chrome réussi après correction (décodage, seek, épisodes, 403/restauration, isolation comptes). Mesure de lancement locale unique 1125 ms, pas une garantie ni un comparatif.
+- Tests Core : 44 réussis, 0 échec, 1 scénario navigateur hors périmètre ignoré ; 5 tests d’intégration droits/images/deux nœuds/relais réussis ; Clippy workspace/all-targets sans avertissement, fmt et diff --check réussis.
+- Aucun déploiement/push, PostgreSQL réel, NAS ou recherche authentifiée du serveur public vérifié. La demande antérieure de réglages Jellyfin reste partielle (multi-racines, fournisseurs et autres fonctions encore ouvertes).
+- Contrat : docs/RESPONSIVENESS_AND_ARTWORK.md ; commandes, captures et limites : docs/evidence/2026-10-21/responsiveness/README.md. Prochain jalon : mesurer le catalogue et les démarrages authentifiés sur le serveur après installation autorisée.
+
+
 ## 21 octobre 2026 — Bibliothèques et permissions : premier lot local vérifié
 
 La demande de paramètres détaillés façon Jellyfin est **partiellement réalisée**.

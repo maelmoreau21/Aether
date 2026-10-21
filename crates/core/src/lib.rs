@@ -16,6 +16,7 @@ pub mod postgres_backup;
 pub mod scheduler;
 pub mod server_settings;
 use media_contracts::brand;
+pub mod artwork;
 mod catalog;
 mod demo;
 pub mod feedback;
@@ -179,6 +180,7 @@ pub async fn secure_app_with_jobs(
             .merge(account::router(auth.clone()))
             .merge(music::router(auth.clone()))
             .merge(product::router(auth.clone()))
+            .merge(artwork::router(auth.clone()))
             .merge(user_media_policy::router(auth.clone()))
             .merge(avatars::router(auth.clone()))
             .merge(server_settings::router(auth.clone()))

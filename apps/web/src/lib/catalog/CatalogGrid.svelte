@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import type { Work } from './api';
   import Poster from './Poster.svelte';
@@ -89,6 +90,7 @@
 
   <!-- Filters & Search Form -->
   <form class="filters-bar" action={`${base}/${section}/`}>
+    {#if page.url.searchParams.get('library')}<input type="hidden" name="library" value={page.url.searchParams.get('library')??''} />{/if}
     <div class="search-field">
       <label for="catalog-search" class="field-label">Rechercher dans le catalogue</label>
       <div class="search-input-wrapper">
@@ -232,6 +234,7 @@
           class="page-nav-btn"
           href={resolve(
             `${section === 'films' ? 'films/' : section === 'series' ? 'series/' : 'search/'}?${new URLSearchParams({
+              ...Object.fromEntries(page.url.searchParams),
               q: query,
               sort,
               offset: String(Math.max(0, offset - 24))
@@ -247,6 +250,7 @@
           class="page-nav-btn"
           href={resolve(
             `${section === 'films' ? 'films/' : section === 'series' ? 'series/' : 'search/'}?${new URLSearchParams({
+              ...Object.fromEntries(page.url.searchParams),
               q: query,
               sort,
               offset: String(offset + 24)

@@ -1,19 +1,19 @@
 <script module lang="ts">
   export const navLinks = [
     { key: 'home', path: '/', label: 'Accueil', symbol: '⌂' },
-    { key: 'films', path: 'films/', label: 'Films', symbol: '▤' },
-    { key: 'series', path: 'series/', label: 'Séries', symbol: '▥' },
-    { key: 'music', path: 'music/', label: 'Musique', symbol: '♫' },
     { key: 'lists', path: 'lists/', label: 'Mes listes', symbol: '☷' },
     { key: 'downloads', path: 'downloads/', label: 'Téléchargements', symbol: '↓' }
   ] as const;
 </script>
 
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { page } from '$app/state';
+  import { session } from '../auth/session';
+  import { accessibleLibraries, loadLibraries } from '../catalog/libraries';
   import { resolve } from '$app/paths';
   import Icon from './Icon.svelte';
   import ProfileMenu from './ProfileMenu.svelte';
-  import { t } from '../i18n';
   import { serverPresentation } from '../config/presentation';
 
   let {
@@ -26,6 +26,9 @@
 
   const base = $derived(resolve('/').replace(/\/$/, ''));
   let scrolled = $state(false);
+  let libraryError = $state('');
+  $effect(()=>{const id=$session?.user.id;if(id)void loadLibraries().then(()=>libraryError='').catch(()=>libraryError='Bibliothèques indisponibles');});
+  onMount(()=>{const refresh=()=>{if(document.visibilityState==='visible')void loadLibraries(true).then(()=>libraryError='').catch(()=>{});};window.addEventListener('focus',refresh);return()=>window.removeEventListener('focus',refresh);});
 
   function handleScroll() {
     scrolled = window.scrollY > 20;
@@ -45,26 +48,24 @@
       </a>
 
       <nav class="main-nav" aria-label="Navigation principale">
-        {#each navLinks as link (link.key)}
+        {#each navLinks.filter(link=>link.key==='home') as link (link.key)}
           <a
             href={resolve(link.path)}
             class="nav-link"
-            aria-label={link.key==='music'||link.key==='lists'||link.key==='downloads'?link.label:$t(link.key)}
+            aria-label={link.label}
             class:active={section === link.key}
             aria-current={section === link.key ? 'page' : undefined}
           >
-            {#if link.key === 'home'}
-              <Icon name="sparkles" size={16} />
-            {:else if link.key === 'films'}
-              <Icon name="film" size={16} />
-            {:else if link.key === 'series'}
-              <Icon name="tv" size={16} />
-            {:else}
-              <b class="nav-symbol" aria-hidden="true">{link.symbol}</b>
-            {/if}
-            <span>{link.key === 'music' || link.key === 'lists' || link.key === 'downloads' ? link.label : $t(link.key)}</span>
+            <b class="nav-symbol" aria-hidden="true">{link.symbol}</b><span>{link.label}</span>
           </a>
         {/each}
+        {#each $accessibleLibraries as library (library.id)}
+          <a class="nav-link library-link" href={resolve(`${library.kind}/?library=${encodeURIComponent(library.id)}` as 'films/')} class:active={page.url.searchParams.get('library')===library.id} aria-current={page.url.searchParams.get('library')===library.id?'page':undefined}>
+            {#if library.kind==='music'}<b aria-hidden="true">♫</b>{:else}<Icon name={library.kind==='films'?'film':'tv'} size={16} />{/if}<span>{library.name}</span>
+          </a>
+        {/each}
+        {#each navLinks.filter(link=>link.key!=='home') as link (link.key)}<a class="nav-link" href={resolve(link.path)} class:active={section===link.key} aria-label={link.label}><b class="nav-symbol" aria-hidden="true">{link.symbol}</b><span>{link.label}</span></a>{/each}
+        {#if libraryError}<button class="nav-link" onclick={()=>loadLibraries(true).then(()=>libraryError='').catch(()=>{})}>{libraryError} · Réessayer</button>{/if}
       </nav>
     </div>
 
@@ -255,9 +256,9 @@
     text-overflow: ellipsis;
     white-space: nowrap; display: none; }
     .main-nav { gap: 2px; }
-    .nav-link span {
-      display: none;
-    }
+    .nav-link:not(.library-link) span { display: none; }
+    .library-link { border-radius:var(--radius-sm); }
+    .library-link span { max-width:160px;overflow:hidden;text-overflow:ellipsis; }
 
     .nav-link {
       padding: 8px;

@@ -24,6 +24,7 @@ const server = createServer(async (req, res) => {
   if (path === '/api/v1/auth/me') {
     res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({user:{id:'test-user',login:'test',role:'user'},csrfToken:'fixture'})); return;
   }
+  if(path==='/api/v1/libraries'){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({libraries:[{id:'music',name:'Musique de test',kind:'music'}]}));return;}
   if(path==='/api/v1/preferences'){res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');return;}
   if(path==='/api/v1/music'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({items:[{id:'sample',title:'Piste hors ligne',artist:'Artiste test',album:'Album test',mime:'audio/ogg',codec:'opus'}],total:1}));return;}
   if(path==='/api/v1/music/tracks/sample/content'||path==='/api/v1/music/tracks/sample/download'){res.writeHead(200,{'Content-Type':'audio/ogg','Content-Length':audio.length,'Accept-Ranges':'bytes'});res.end(audio);return;}

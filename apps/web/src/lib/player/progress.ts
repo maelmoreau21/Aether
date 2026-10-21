@@ -28,7 +28,7 @@ export async function readProgress(work: string): Promise<Progress> {
 }
 
 async function fetchProgress(work: string): Promise<Progress> {
-  const response = await fetch(`/api/v1/progress/${encodeURIComponent(work)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
+  const response = await fetch(`/api/v1/progress/${encodeURIComponent(work)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(2500) });
   if (!response.ok) throw new Error('Reprise indisponible : progression non chargée.');
   return response.json();
 }
@@ -63,7 +63,7 @@ export class ProgressTracker {
       if (this.generation !== getSessionGeneration()) { this.failed = true; return 0; }
       this.revision = progress.revision; this.watched = progress.watched;
       return progress.watched ? 0 : progress.position;
-    } catch (error) { this.fail(error); return 0; }
+    } catch (error) { this.fail(error instanceof DOMException && error.name==='TimeoutError' ? new Error('Reprise indisponible après 2,5 secondes. Lecture depuis le début ; progression conservée sur le serveur.') : error); return 0; }
   }
   private fail(error: unknown) { this.failed = true; this.onError(error instanceof Error ? error.message : 'Progression indisponible.'); }
   save(state: PlaybackState, force = false, ended = false) {

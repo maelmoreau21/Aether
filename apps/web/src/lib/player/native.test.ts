@@ -80,4 +80,20 @@ describe('native source replacement', () => {
     const { video, player } = setup(); video.auto = false;
     const result = expect(player.load(media)).rejects.toThrow('fermé'); player.destroy(); await result;
   });
+  it('falls back from an unreachable direct Node after 2.5s without a premature terminal error', async()=>{
+    vi.useFakeTimers();const {video,player,error}=setup();video.auto=false;
+    const direct={...media,sources:[{...media.sources[0],directUrl:'https://node.invalid/content',relayUrl:'/relay'}]};
+    const loading=player.load(direct);
+    await vi.advanceTimersByTimeAsync(2499);expect(video.src).toBe('https://node.invalid/content');
+    await vi.advanceTimersByTimeAsync(1);expect(video.src).toBe('/relay');
+    video.dispatchEvent(new Event('loadedmetadata'));await loading;
+    expect(error).not.toHaveBeenCalled();expect(video.loads).toBe(2);
+  });
+  it('prepares independent video and audio concurrently',async()=>{
+    const replies:((value:Response)=>void)[]=[];
+    const fetcher=vi.fn(()=>new Promise<Response>(resolve=>replies.push(resolve)));vi.stubGlobal('fetch',fetcher);
+    const {player}=setup();const loading=player.load({...media,sources:[{...media.sources[0],prepare:true,url:'/prepared/video',externalAudioUrl:'/prepared/audio'}]});
+    expect(fetcher).toHaveBeenCalledTimes(2);for(const reply of replies)reply(new Response(null,{status:200}));await loading;
+  });
+
 });

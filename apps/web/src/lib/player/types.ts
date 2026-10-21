@@ -34,6 +34,7 @@ export interface Media {
 }
 export interface PlaybackState { position: number; duration: number; paused: boolean; volume: number; speed: number }
 export interface Player {
+  setStatusListener?(listener:(message:string)=>void):void;
   load(media: Media, initialAudioTrackId?: string): Promise<void>;
   play(): Promise<void>;
   pause(): void;

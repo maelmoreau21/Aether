@@ -1,3 +1,5 @@
+> Navigation par bibliothèque et images multiples : [contrat du 21 octobre](RESPONSIVENESS_AND_ARTWORK.md).
+
 > Administration du 19 octobre 2026 : comptes [ADMIN_USERS.md](ADMIN_USERS.md),
 > groupes et clés API [ADMIN_ACCESS.md](ADMIN_ACCESS.md), planifications
 > [SCHEDULED_TASKS.md](SCHEDULED_TASKS.md), sauvegardes complètes

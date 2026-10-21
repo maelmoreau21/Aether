@@ -1,0 +1,36 @@
+{
+  "environment": "Windows, Rust debug, disposable SQLite, 10000 synthetic films, user reader, page 24",
+  "before_ms": {
+    "catalogue": [
+      395.9757,
+      349.1247,
+      364.3023,
+      378.848,
+      369.5734
+    ],
+    "search_999": [
+      164.0205,
+      165.0152,
+      167.9081,
+      176.0931,
+      165.6025
+    ]
+  },
+  "after_ms": {
+    "catalogue": [
+      121.7714,
+      92.3158,
+      86.8167,
+      92.2073,
+      90.078
+    ],
+    "search_999": [
+      17.1784,
+      11.9701,
+      10.8825,
+      12.0593,
+      34.9014
+    ]
+  },
+  "limit": "Query execution, not full page, NAS or production latency"
+}

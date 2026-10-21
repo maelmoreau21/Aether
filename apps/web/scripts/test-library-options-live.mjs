@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !process.env.MEDIA_TEST_ROOT) throw new Error('Use browser_admin Rust harness.');
-const output = '../../docs/evidence/2026-10-21/library-options';
+const output = process.env.MEDIA_OPTIONS_REPORT_DIR || '../../docs/evidence/2026-10-21/library-options';
 mkdirSync(output,{recursive:true});
 const browser = await chromium.launch({channel:'chrome',headless:true});
 try {
@@ -45,9 +45,9 @@ try {
   const imageDialog=page.getByRole('dialog');
   const poster=await (await page.request.get(`${origin}/api/v1/works/cover-0/poster`)).body();
   for (const kind of ['poster','backdrop']) {
-    const section=imageDialog.locator('section').filter({has:page.getByRole('heading',{name:kind==='poster'?'Affiche':'Fond',exact:true})});
+    await imageDialog.getByRole('button',{name:kind==='poster'?'Ajouter une image':'Ajouter un arrière-plan',exact:true}).click();
     const uploaded=page.waitForResponse(r=>r.url().endsWith(`/images/${kind}`) && r.request().method()==='PUT');
-    await section.locator('input[type=file]').setInputFiles({name:'cover.png',mimeType:'image/png',buffer:poster});
+    await imageDialog.locator('input[type=file]').setInputFiles({name:'cover.png',mimeType:'image/png',buffer:poster});
     assert.equal((await uploaded).status(),204);
     await page.waitForFunction(kind=>{const img=document.querySelector(`dialog img[src*="images/${kind}"]`);return img?.complete && img.naturalWidth>0;},kind);
   }
@@ -55,7 +55,7 @@ try {
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:`${output}/images-mobile.png`,fullPage:true});
-  await imageDialog.getByRole('button',{name:'Fermer',exact:true}).click();
+  await imageDialog.getByRole('button',{name:'Fermer l’éditeur d’images',exact:true}).click();
   await page.waitForFunction(()=>{const i=document.querySelector('.custom-cover');return i?.complete && i.naturalWidth>0;});
   await page.screenshot({path:`${output}/libraries-mobile.png`,fullPage:true});
   await page.setViewportSize({width:1440,height:1000});
@@ -84,7 +84,42 @@ try {
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:`${output}/parental-mobile.png`,fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
+  await page.goto(`${origin}/app/films/?work=cover-0`);
+  await page.getByRole('button',{name:'Modifier les images',exact:true}).click();
+  const manager=page.getByRole('dialog');
+  await manager.locator('[data-kind=poster]').waitFor();
+  for(const kind of ['logo','backdrop','backdrop']) {
+    await manager.getByRole('button',{name:kind==='backdrop'?'Ajouter un arrière-plan':'Ajouter une image',exact:true}).click();
+    await manager.getByLabel('Type d’image',{exact:true}).selectOption(kind);
+    const result=page.waitForResponse(r=>r.url().endsWith(`/images/${kind}`)&&r.request().method()==='POST');
+    await manager.locator('input[type=file]').setInputFiles({name:'manual.png',mimeType:'image/png',buffer:poster});
+    assert.equal((await result).status(),201);
+    await manager.locator('input[type=file]').waitFor({state:'hidden'});
+  }
+  assert.equal(await manager.locator('[data-kind=backdrop]').count(),2);
+  const orderSaved=page.waitForResponse(r=>r.url().endsWith('/images/order')&&r.request().method()==='PUT');
+  await manager.getByRole('button',{name:'Déplacer l’arrière-plan à gauche',exact:true}).last().click();
+  assert.equal((await orderSaved).status(),204);
+  await page.screenshot({path:`${output}/work-images-desktop.png`,fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.screenshot({path:`${output}/work-images-mobile.png`,fullPage:true});
+  await manager.getByRole('button',{name:'Fermer l’éditeur d’images',exact:true}).click();
+  const mainNavigation=page.getByRole('navigation',{name:'Navigation principale',exact:true});
+  await mainNavigation.getByRole('link',{name:'Mosaïque de test',exact:true}).waitFor();
+  assert.equal(await mainNavigation.getByRole('link',{name:'Films',exact:true}).count(),0);
+  await page.request.delete(`${origin}/api/v1/admin/users/${user.id}/parental`,{headers:{origin,'x-csrf-token':csrfToken}});
+  const restricted=await browser.newContext({viewport:{width:390,height:844}});
+  await restricted.request.post(`${origin}/api/v1/auth/login`,{headers:{origin},data:{login:'policy-user',password:'synthetic media permissions secret'}});
+  const viewer=await restricted.newPage();await viewer.goto(`${origin}/app/`);
+  const navigation=viewer.getByRole('navigation',{name:'Navigation principale',exact:true});
+  await navigation.getByRole('link',{name:'Options locales',exact:true}).waitFor();
+  assert.equal(await navigation.getByRole('link',{name:'Mosaïque de test',exact:true}).count(),0);
+  await navigation.getByRole('link',{name:'Options locales',exact:true}).click();
+  await viewer.waitForURL(`**/app/films/?library=${library.id}`);
+  await restricted.close();
   assert.deepEqual(errors,[]);
-  writeFileSync(`${output}/report.json`,JSON.stringify({passed:true,browser:browser.version(),platform:process.platform,headless:true,backend:'real Core, disposable SQLite, synthetic image/inventory data',checks:['four decoded posters in library collage','library options saved and reloaded','normalized poster and backdrop upload, decoded previews','390/1440 layouts','download permission saved through UI','parental tags and weekly UTC schedule saved through UI'],jsErrors:errors},null,2));
+  writeFileSync(`${output}/report.json`,JSON.stringify({passed:true,browser:browser.version(),platform:process.platform,headless:true,backend:'real Core, disposable SQLite, synthetic image/inventory data',checks:['four decoded posters in library collage','library options saved and reloaded','normalized poster and backdrop upload, decoded previews','390/1440 layouts','download permission saved through UI','parental tags and weekly UTC schedule saved through UI','work image grid and multiple backdrops, ordering','library names in navigation, denied library absent for user'],jsErrors:errors},null,2));
   console.log('Library options, collage, artwork, user download permission and parental UI passed.');
 } finally { await browser.close(); }

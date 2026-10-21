@@ -65,10 +65,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: tests/fixtures/generated
-          key: fixtures-p0-p1-${{ hashFiles('scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
+          key: fixtures-p0-p1-ffmpeg-9.0.2-${{ hashFiles('scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
 
       - name: Installer FFmpeg (requis par les tests unitaires et intégration media-node)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        uses: ./.github/actions/setup-ffmpeg
 
       - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
@@ -210,7 +210,7 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
 
       - name: Installer FFmpeg (génération des fixtures et ffprobe)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        uses: ./.github/actions/setup-ffmpeg
 
       - name: Installer les dépendances npm du frontend
         working-directory: apps/web
@@ -237,7 +237,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: tests/fixtures/generated
-          key: fixtures-p0-p1-${{ hashFiles('scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
+          key: fixtures-p0-p1-ffmpeg-9.0.2-${{ hashFiles('scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
 
       - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
@@ -321,8 +321,8 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm --entrypoint sh media-ci:runtime-node -ec '
-            ffprobe -version >/dev/null
-            ! command -v ffmpeg
+            ffprobe -version | head -n 1 | grep -F "ffprobe version 9.0.2"
+            ffmpeg -version | head -n 1 | grep -F "ffmpeg version 9.0.2"
             test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
           '
           test "$(docker inspect --format '{{.Size}}' media-ci:runtime-node)" -lt 200000000

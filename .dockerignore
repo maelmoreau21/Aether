@@ -46,7 +46,7 @@ docs/evidence/
 *.mov
 *.avi
 *.m4v
-*.ts
+# Keep TypeScript sources; generated media fixtures are excluded above.
 *.opus
 *.aac
 *.flac

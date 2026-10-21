@@ -24,20 +24,43 @@ pub fn current_version() -> &'static str {
 }
 
 #[cfg(test)]
+#[path = "version_policy.rs"]
+mod version_policy;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn test_version_not_empty_and_starts_with_base() {
-        let v = current_version();
-        assert!(!v.is_empty());
-        assert!(v.starts_with(BASE_VERSION));
+    fn version_is_available_with_runtime_overrides() {
+        assert!(!current_version().is_empty());
+        assert!(!COMPILED_VERSION.is_empty());
+        assert!(!BASE_VERSION.is_empty());
     }
-
     #[test]
-    fn test_develop_branch_evaluates_to_beta() {
-        // In local git checkout on develop branch, the compiled version must end with -beta
-        let v = COMPILED_VERSION;
-        assert_eq!(v, "0.1.0-beta");
+    fn develop_branch_evaluates_to_beta() {
+        for branch in [
+            "develop",
+            "refs/heads/develop",
+            "origin/develop",
+            " develop ",
+        ] {
+            assert_eq!(
+                version_policy::version_for_branch("0.2.3", Some(branch)),
+                "0.2.3-beta"
+            );
+        }
+    }
+    #[test]
+    fn other_branches_tags_and_detached_builds_use_base_version() {
+        for branch in [
+            None,
+            Some("main"),
+            Some("123/merge"),
+            Some("HEAD"),
+            Some("v0.2.3"),
+            Some("feature/develop-tools"),
+        ] {
+            assert_eq!(version_policy::version_for_branch("0.2.3", branch), "0.2.3");
+        }
     }
 }

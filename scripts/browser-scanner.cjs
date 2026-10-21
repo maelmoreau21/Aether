@@ -11,12 +11,14 @@ fs.mkdirSync(out, {recursive: true});
 (async () => {
   const browser = await chromium.launch({channel:'chrome', headless:true});
   const report = {browser:browser.version(), os:require('node:os').release(), headless:true, restart, results:{}};
+  const preparations=[];
   try {
     const context = await browser.newContext({viewport:{width:1440,height:900}, locale:'fr-FR'});
     const page = await context.newPage();
     page.setDefaultTimeout(30000);
     async function openMenu(name) { await page.keyboard.press('Shift'); await page.locator(`[data-menu="${name}"]`).click(); }
     const errors=[];
+    page.on('response', response=>{if(response.url().includes('/prepared/')&&preparations.length<128)preparations.push({path:new URL(response.url()).pathname,method:response.request().method(),status:response.status()});});
     page.on('response', async response=>{if(response.url().endsWith('/scan')) console.log('scan HTTP',response.status(),await response.text());});
     page.on('pageerror', error=>errors.push(String(error)));
     page.on('console', message=>{if(message.type()==='error' && /Content Security Policy/i.test(message.text())) errors.push(message.text());});
@@ -195,6 +197,6 @@ fs.mkdirSync(out, {recursive: true});
     report.results = {...report.results,catalogue:true,singleWorkTwoVersions:true,playback:true,seek:true,pause:true,cspErrors:errors};
     report.passed=true;
     await context.close();
-  } catch(error) {report.failure=String(error.stack);const p=browser.contexts()[0]?.pages()[0];if(p) report.diagnostic=await p.evaluate(()=>({url:location.href,buttons:[...document.querySelectorAll('button')].map(b=>b.textContent).slice(-30),error:document.querySelector('.player-error')?.textContent,notice:document.querySelector('.fullscreen-notice')?.textContent,video:{time:document.querySelector('video')?.currentTime,paused:document.querySelector('video')?.paused},audio:{time:document.querySelector('audio')?.currentTime,paused:document.querySelector('audio')?.paused}})).catch(()=>null);process.exitCode=1;}
+  } catch(error) {report.failure=String(error.stack);report.preparations=preparations;const p=browser.contexts()[0]?.pages()[0];if(p) report.diagnostic=await p.evaluate(()=>({url:location.href,buttons:[...document.querySelectorAll('button')].map(b=>b.textContent).slice(-30),error:document.querySelector('.player-error')?.textContent,notice:document.querySelector('.fullscreen-notice')?.textContent,video:{time:document.querySelector('video')?.currentTime,paused:document.querySelector('video')?.paused},audio:{time:document.querySelector('audio')?.currentTime,paused:document.querySelector('audio')?.paused}})).catch(()=>null);process.exitCode=1;}
   finally {await browser.close();fs.writeFileSync(`${out}/report${restart?'-restart':''}.json`, JSON.stringify(report,null,2));console.log(JSON.stringify(report));}
 })();

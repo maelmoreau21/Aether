@@ -77,8 +77,8 @@ jobs:
           set -euo pipefail
           ref="${IMAGE}@${DIGEST}"
           docker run --rm --entrypoint sh "$ref" -ec '
-            ffprobe -version >/dev/null
-            ! command -v ffmpeg
+            ffprobe -version | head -n 1 | grep -F "ffprobe version 9.0.2"
+            ffmpeg -version | head -n 1 | grep -F "ffmpeg version 9.0.2"
             test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
           '
           test "$(docker inspect --format '{{.Size}}' "$ref")" -lt 200000000

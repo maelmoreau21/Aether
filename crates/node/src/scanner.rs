@@ -1036,7 +1036,10 @@ where
         for (role, names) in [
             ("backdrop", vec!["backdrop", "fanart"]),
             ("logo", vec!["logo", "clearlogo"]),
-            ("landscape", vec!["landscape", "banner"]),
+            ("landscape", vec!["landscape"]),
+            ("banner", vec!["banner"]),
+            ("disc", vec!["disc", "discart"]),
+            ("thumb", vec!["thumb"]),
             ("illustration", vec!["clearart"]),
         ] {
             if !shared_artwork && !exact_artwork {

@@ -6,6 +6,16 @@ use zeroize::Zeroizing;
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires built Web assets and installed Chrome/Playwright"]
 async fn browser_administration_real_api() {
+    run_browser("scripts/test-admin-live.mjs", false).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires built Web assets and installed Chrome/Playwright"]
+async fn browser_library_options_and_media_policy() {
+    run_browser("scripts/test-library-options-live.mjs", true).await;
+}
+
+async fn run_browser(script: &str, seed: bool) {
     let temp = tempfile::tempdir().unwrap();
     let media = temp.path().join("media");
     std::fs::create_dir(&media).unwrap();
@@ -19,6 +29,43 @@ async fn browser_administration_real_api() {
         )
         .await
         .unwrap();
+    if seed {
+        use media_poc::database::query;
+        let root_string = media.to_string_lossy().to_string();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('collage','Mosaïque de test','films','local',?,1)").bind(&root_string).execute(store.pool()).await.unwrap();
+        for index in 0..4 {
+            let id = format!("cover-{index}");
+            query("INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,kind,external_ids_json) VALUES(?,'collage',?,?,?,'film','{}')").bind(&id).bind(&id).bind(&id).bind(&id).execute(store.pool()).await.unwrap();
+            query("INSERT INTO inventory_editions(id,work_id) VALUES(?,?)")
+                .bind(&id)
+                .bind(&id)
+                .execute(store.pool())
+                .await
+                .unwrap();
+            query("INSERT INTO inventory_versions(id,edition_id) VALUES(?,?)")
+                .bind(&id)
+                .bind(&id)
+                .execute(store.pool())
+                .await
+                .unwrap();
+            query("INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,'collage',?)").bind(&id).bind(&id).bind(&root_string).execute(store.pool()).await.unwrap();
+            query("INSERT INTO inventory_assets(id,source_id,library_id,relative_path,size,modified_ns,mime,probe_json,available) VALUES(?,?,'collage',?,1,'0','video/mp4','{}',1)").bind(&id).bind(&id).bind(format!("{id}.mp4")).execute(store.pool()).await.unwrap();
+            let mut bytes = std::io::Cursor::new(vec![]);
+            image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                100,
+                150,
+                image::Rgb([40 + index * 40, 100, 160]),
+            ))
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+            query("INSERT INTO work_posters(work_id,image_data) VALUES(?,?)")
+                .bind(&id)
+                .bind(bytes.into_inner())
+                .execute(store.pool())
+                .await
+                .unwrap();
+        }
+    }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let origin = format!("http://127.0.0.1:{port}");
@@ -39,7 +86,7 @@ async fn browser_administration_real_api() {
     .unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let status = tokio::process::Command::new("node")
-        .arg("scripts/test-admin-live.mjs")
+        .arg(script)
         .env("MEDIA_TEST_ORIGIN", origin)
         .env("MEDIA_TEST_ROOT", media)
         .current_dir(root.join("apps/web"))

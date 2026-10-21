@@ -26,6 +26,19 @@ export interface EnrollmentToken {
   coreUrl: string;
 }
 
+export interface LibraryOptions {
+  preferredMetadataLanguage: string;
+  metadataCountryCode: string;
+  readLocalNfo: boolean;
+  fetchPoster: boolean; fetchBackdrop: boolean; fetchLogo: boolean;
+  fetchThumb: boolean; fetchBanner: boolean; fetchDisc: boolean;
+  automaticRefreshIntervalDays: number;
+}
+export function defaultLibraryOptions(): LibraryOptions {
+  return { preferredMetadataLanguage: 'fr', metadataCountryCode: 'FR', readLocalNfo: true,
+    fetchPoster: true, fetchBackdrop: true, fetchLogo: true, fetchThumb: true, fetchBanner: true, fetchDisc: true,
+    automaticRefreshIntervalDays: 0 };
+}
 export interface Library {
   id: string;
   name: string;
@@ -34,6 +47,10 @@ export interface Library {
   root: string;
   enabled: boolean;
   excludedPatterns?: string;
+  options?: LibraryOptions;
+  coverUrls?: string[];
+  imageKinds?: string[];
+  imageVersions?: Record<string,string>;
   userIds: string[];
 }
 

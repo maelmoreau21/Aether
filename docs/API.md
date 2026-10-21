@@ -15,6 +15,9 @@
 
 # API expérimentale du banc P0
 
+Réglages locaux de bibliothèque, images admin, permissions de téléchargement et
+contrôle parental étendu (21 octobre 2026) : [contrat et limites](LIBRARY_OPTIONS.md).
+
 ## Clarification du 16 octobre 2026
 
 Contrat cible : chaque bibliothèque possède un Media Node et une racine explicite.

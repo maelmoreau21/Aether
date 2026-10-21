@@ -76,6 +76,7 @@ pub async fn require_media(
                 path.strip_prefix("/api/v1/assets/").and_then(|value| {
                     value
                         .strip_suffix("/content")
+                        .or_else(|| value.strip_suffix("/download"))
                         .or_else(|| value.strip_suffix("/image"))
                         .or_else(|| value.split_once("/subtitles/").map(|(id, _)| id))
                         .or_else(|| value.split_once("/audio/").map(|(id, _)| id))
@@ -133,7 +134,22 @@ pub async fn require_media(
             Err(status) => return error(status, "parental_policy_unavailable"),
         }
     }
+    let downloading = path.ends_with("/download");
+    if downloading {
+        match crate::user_media_policy::can_download(&state.auth.store, &identity.user.id).await {
+            Ok(true) => {}
+            Ok(false) => return error(StatusCode::FORBIDDEN, "media_download_disabled"),
+            Err(status) => return error(status, "media_policy_unavailable"),
+        }
+    }
     request.extensions_mut().insert(VisibleLibraries(visible));
     request.extensions_mut().insert(identity);
-    next.run(request).await
+    let mut response = next.run(request).await;
+    if downloading && response.status().is_success() {
+        response.headers_mut().insert(
+            axum::http::header::CONTENT_DISPOSITION,
+            axum::http::HeaderValue::from_static("attachment"),
+        );
+    }
+    response
 }

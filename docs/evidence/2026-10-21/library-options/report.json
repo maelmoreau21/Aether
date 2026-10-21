@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "browser": "155.0.8059.85",
+  "platform": "win32",
+  "headless": true,
+  "backend": "real Core, disposable SQLite, synthetic image/inventory data",
+  "checks": [
+    "four decoded posters in library collage",
+    "library options saved and reloaded",
+    "normalized poster and backdrop upload, decoded previews",
+    "390/1440 layouts",
+    "download permission saved through UI",
+    "parental tags and weekly UTC schedule saved through UI"
+  ],
+  "jsErrors": []
+}

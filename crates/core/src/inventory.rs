@@ -103,6 +103,12 @@ pub async fn ingest(
 ) -> Result<(), sqlx::Error> {
     let mut conn = store.pool.acquire().await?;
     let mut tx = crate::database::begin_write(&mut conn).await?;
+    let encoded: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
+        .bind(library_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let options: crate::library_options::LibraryOptions = serde_json::from_str(&encoded)
+        .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
     let configured: Option<String> = query_scalar(
         "SELECT l.root FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked'",
     )
@@ -144,6 +150,9 @@ pub async fn ingest(
             .await?;
     }
     for file in &report.files {
+        let mut filtered = file.clone();
+        options.filter_file(&mut filtered);
+        let file = &filtered;
         let identity_key = format!("{}\n{}", _root.to_string_lossy(), file.identity_key);
         let existing =
             query("SELECT a.id,w.identity_key,s.root_snapshot FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id WHERE a.library_id=? AND a.relative_path=?")
@@ -309,6 +318,12 @@ pub async fn stage_batch(
 ) -> Result<(), sqlx::Error> {
     let mut conn = store.pool.acquire().await?;
     let mut tx = crate::database::begin_write(&mut conn).await?;
+    let encoded: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
+        .bind(library_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let options: crate::library_options::LibraryOptions = serde_json::from_str(&encoded)
+        .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
 
     for issue in &batch.errors {
         query(
@@ -333,6 +348,9 @@ pub async fn stage_batch(
     }
 
     for file in &batch.files {
+        let mut filtered = file.clone();
+        options.filter_file(&mut filtered);
+        let file = &filtered;
         let (poster_path, poster_size, poster_modified_ns, poster_mime, poster_priority) =
             match &file.poster {
                 Some(img) => (
@@ -1513,6 +1531,21 @@ pub async fn publish_staged_scan(
     }
 
     refresh_editorial_for_works(&mut tx, &affected_work_ids).await?;
+    let encoded: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
+        .bind(library_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let options: crate::library_options::LibraryOptions = serde_json::from_str(&encoded)
+        .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
+    for role in ["poster", "backdrop", "logo", "thumb", "banner", "disc"] {
+        if !options.image_enabled(role) {
+            query("UPDATE inventory_images SET available=0 WHERE library_id=? AND role=?")
+                .bind(library_id)
+                .bind(role)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
 
     // Publish text snapshots atomically with assets, including unchanged video files.
     query("INSERT INTO inventory_subtitles(asset_id,subtitles_json) SELECT a.id,f.subtitles_json FROM scan_staging_files f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE SET subtitles_json=excluded.subtitles_json")
@@ -1730,6 +1763,7 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
         "description": metadata["plot"].as_str().or_else(||metadata["outline"].as_str()).unwrap_or("Média local indexé"),
         "plot": metadata["plot"],
         "genres": metadata["genres"].as_array().cloned().unwrap_or_default(),
+        "tags": metadata["tags"].as_array().cloned().unwrap_or_default(),
         "originalTitle": metadata["original_title"],
         "outline": metadata["outline"],
         "premiered": metadata["premiered"],
@@ -1827,7 +1861,9 @@ fn push_catalogue_filters(builder: &mut sqlx::QueryBuilder<sqlx::Any>, filter: &
             .push(crate::product::AGE_SQL)
             .push(")>policy.maximum_age OR ((")
             .push(crate::product::AGE_SQL)
-            .push(") IS NULL AND policy.allow_unrated=0))) ");
+            .push(") IS NULL AND policy.allow_unrated=0) OR ")
+            .push(crate::product::BLOCKED_TAGS_SQL)
+            .push(")) ");
     }
 }
 fn push_group_filter(builder: &mut sqlx::QueryBuilder<sqlx::Any>, filter: &CatalogueFilter) {
@@ -3318,6 +3354,35 @@ mod tests {
         assert_eq!(replacement["items"][0]["metadataProvenance"], "local");
         assert_ne!(replacement["items"][0]["id"], work_id);
         assert_eq!(load_cache(&store, "lib").await.unwrap().len(), 1);
+        report.files[0].editorial = NfoOutcome::Valid {
+            metadata: serde_json::from_value(json!({"title":"Ignored NFO"})).unwrap(),
+            path: "Film (2026)/movie.nfo".into(),
+            priority: 1,
+        };
+        report.files[0].poster = Some(media_contracts::media::LocalImage {
+            path: "poster.png".into(),
+            size_bytes: 10,
+            modified_ns: "1".into(),
+            mime: "image/png".into(),
+            priority: 1,
+        });
+        let logo = report.files[0].poster.clone().unwrap();
+        report.files[0].artwork.insert("logo".into(), logo);
+        query("UPDATE libraries SET options_json='{\"readLocalNfo\":false,\"fetchPoster\":false,\"fetchLogo\":false}' WHERE id='lib'").execute(&store.pool).await.unwrap();
+        ingest(&store, "lib", Path::new("/replacement"), &report)
+            .await
+            .unwrap();
+        let filtered = catalogue(&store, &["lib".into()], None, "", "title-asc", 0, 24)
+            .await
+            .unwrap();
+        assert_eq!(filtered["items"][0]["title"], "Replacement film");
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM inventory_images WHERE available=1")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap(),
+            0
+        );
     }
     #[tokio::test]
     async fn inventory_survives_reopen_is_idempotent_and_preserves_failed_scan() {

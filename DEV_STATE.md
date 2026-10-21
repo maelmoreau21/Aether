@@ -1,5 +1,24 @@
 # État de développement
 
+## 21 octobre 2026 — Bibliothèques et permissions : premier lot local vérifié
+
+La demande de paramètres détaillés façon Jellyfin est **partiellement réalisée**.
+Options NFO/images locales et actualisation périodique, cartes avec mosaïque et
+éditeur d'images, permission de téléchargement Core, tags parentaux et plages UTC
+sont intégrés. Les préférences langue/pays sont stockées pour le raccordement futur
+des fournisseurs. Les médias restent en lecture seule.
+
+95 tests Rust (10 contrats/42 Node/43 Core), 6 tests d'intégration,
+70 tests Web, check 0/0, lint et build réussis. Deux scénarios admin Chrome avec
+vrai Core/SQLite et le scénario PWA avec API fixture passent. Captures inspectées.
+Contrat, reste de la demande et limites : [réglages](docs/LIBRARY_OPTIONS.md).
+Preuves : [validation](docs/evidence/2026-10-21/library-options/README.md).
+
+Multi-racines, priorités fournisseurs, écritures dans les médias, quotas réseau/écrans,
+trickplay/intros, surveillance temps réel et sous-titres automatiques restent ouverts.
+Ne pas déclarer la liste entière terminée. Aucun déploiement ni push effectué.
+
+
 ## 21 octobre 2026 — Lot ergonomie, performances et dépôts vérifié
 
 Téléchargement natif confirmé par l’utilisateur : fichier sur l’appareil, sans

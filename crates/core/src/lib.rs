@@ -22,6 +22,7 @@ pub mod feedback;
 pub mod identity;
 pub mod inventory;
 pub mod libraries;
+pub mod library_options;
 pub mod media;
 pub mod music;
 pub mod node;
@@ -33,6 +34,7 @@ pub mod product;
 mod product_tests;
 pub mod progress;
 pub mod scans;
+pub mod user_media_policy;
 
 use axum::{
     Json, Router,
@@ -90,6 +92,10 @@ fn media_routes(inventory: node::Inventory) -> Router {
         )
         .route(
             "/api/v1/assets/{id}/content",
+            get(node::content).head(node::content),
+        )
+        .route(
+            "/api/v1/assets/{id}/download",
             get(node::content).head(node::content),
         );
     if is_bench {
@@ -173,6 +179,7 @@ pub async fn secure_app_with_jobs(
             .merge(account::router(auth.clone()))
             .merge(music::router(auth.clone()))
             .merge(product::router(auth.clone()))
+            .merge(user_media_policy::router(auth.clone()))
             .merge(avatars::router(auth.clone()))
             .merge(server_settings::router(auth.clone()))
             .merge(admin_users::router(auth.clone()))

@@ -40,6 +40,65 @@ async fn call(
         .unwrap()
 }
 #[tokio::test]
+async fn metadata_refresh_is_durable_bounded_and_reuses_the_scan_runner() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = tokio::fs::canonicalize(temp.path()).await.unwrap();
+    let store = IdentityStore::open(&root.join("metadata.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "admin",
+            Zeroizing::new("synthetic metadata scheduler secret".into()),
+        )
+        .await
+        .unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json,next_metadata_refresh_at) VALUES('metadata','Films','films','local',?,1,'{\"automaticRefreshIntervalDays\":30}',1000)").bind(root.to_string_lossy().as_ref()).execute(store.pool()).await.unwrap();
+    let jobs = Arc::new(ScanJobs::default());
+    scheduler::run_due(&auth, &root, &jobs, 999).await.unwrap();
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM scan_jobs")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        0
+    );
+    scheduler::run_due(&auth, &root, &jobs, 1000).await.unwrap();
+    jobs.shutdown().await;
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>(
+            "SELECT next_metadata_refresh_at FROM libraries WHERE id='metadata'"
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap(),
+        1000 + 30 * 86400
+    );
+    let mode: String = media_poc::database::query_scalar(
+        "SELECT refresh_mode FROM scan_jobs WHERE library_id='metadata'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(mode, "incremental");
+    store.close().await;
+    let reopened = IdentityStore::open(&root.join("metadata.sqlite"))
+        .await
+        .unwrap();
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>(
+            "SELECT next_metadata_refresh_at FROM libraries WHERE id='metadata'"
+        )
+        .fetch_one(reopened.pool())
+        .await
+        .unwrap(),
+        1000 + 30 * 86400
+    );
+}
+#[tokio::test]
 async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans() {
     let temp = tempfile::tempdir().unwrap();
     let media = temp.path().join("media");

@@ -53,6 +53,15 @@ fn apply(
         "plot" => metadata.plot = Some(text.into()),
         "outline" => metadata.outline = Some(text.into()),
         "mpaa" => metadata.mpaa = Some(text.into()),
+        "tag" => {
+            if metadata.tags.len() >= 64 || text.len() > 100 {
+                return Err("too many tags or tag too long".into());
+            }
+            let tag = text.to_lowercase();
+            if !metadata.tags.contains(&tag) {
+                metadata.tags.push(tag);
+            }
+        }
         "genre" => {
             if metadata.genres.len() >= 64 {
                 return Err("too many genres".into());

@@ -1,5 +1,6 @@
 // Encrypted, chunked local media. Device keys are non-extractable CryptoKeys;
 // legacy passphrase downloads remain readable without rewriting their data.
+import { downloadUrl } from './download-url';
 export const CHUNK_SIZE=1024*1024;
 export interface OfflineItem { id:string; salt:Uint8Array; size:number; chunks:number; complete:boolean; metadata?:{iv:Uint8Array;data:ArrayBuffer}; createdAt:number; deviceKey?:boolean }
 export interface OfflineDetails { title:string; mime:string; size:number }
@@ -21,7 +22,8 @@ export async function unlockDetails(item:OfflineItem,key:CryptoKey):Promise<Offl
 export async function saveOffline(url:string,title:string,mime:string,passphrase:string|null,signal:AbortSignal,progress:(bytes:number,total:number)=>void):Promise<void>{
  if(passphrase!==null&&passphrase.length<12)throw new Error('Choisissez une phrase de déverrouillage d’au moins 12 caractères.');
  if(!isSecureContext||!crypto.subtle)throw new Error('Le téléchargement hors ligne nécessite HTTPS ou localhost.');
- const response=await fetch(url,{signal,credentials:'same-origin',cache:'no-store'});
+ const source=downloadUrl(url,mime);if(!source)throw new Error('Source de téléchargement indisponible.');
+ const response=await fetch(source,{signal,credentials:'same-origin',cache:'no-store'});
  if(!response.ok||!response.body)throw new Error(`Téléchargement refusé (HTTP ${response.status}).`);
  const actualMime=response.headers.get('content-type')?.split(';')[0]??mime;
  if(!/^(audio|video)\/[a-z0-9.+-]+$/i.test(actualMime)){await response.body.cancel();throw new Error('La réponse reçue n’est pas un média.');}

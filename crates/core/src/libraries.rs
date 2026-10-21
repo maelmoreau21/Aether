@@ -6,8 +6,10 @@ use crate::{
 };
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Response},
     routing::get,
 };
 use serde::{Deserialize, Serialize};
@@ -33,6 +35,16 @@ pub(crate) struct Library {
     pub excluded_patterns: String,
     #[sqlx(skip)]
     pub user_ids: Vec<String>,
+    #[serde(skip)]
+    pub options_json: String,
+    #[sqlx(skip)]
+    pub options: crate::library_options::LibraryOptions,
+    #[sqlx(skip)]
+    pub cover_urls: Vec<String>,
+    #[sqlx(skip)]
+    pub image_kinds: Vec<String>,
+    #[sqlx(skip)]
+    pub image_versions: std::collections::BTreeMap<String, String>,
 }
 fn default_enabled() -> bool {
     true
@@ -50,6 +62,8 @@ struct LibraryInput {
     excluded_patterns: String,
     #[serde(default)]
     user_ids: Vec<String>,
+    #[serde(default)]
+    options: Option<crate::library_options::LibraryOptions>,
 }
 
 pub fn router(auth: AuthState, local_root: PathBuf) -> Router {
@@ -57,7 +71,11 @@ pub fn router(auth: AuthState, local_root: PathBuf) -> Router {
         .route("/api/v1/admin/libraries", get(list).post(create))
         .route("/api/v1/admin/libraries/{id}", axum::routing::put(update))
         .route("/api/v1/admin/roots", get(roots))
-        .layer(DefaultBodyLimit::max(64 * 1024))
+        .route(
+            "/api/v1/admin/libraries/{id}/images/{kind}",
+            get(image).put(upload_image).delete(remove_image),
+        )
+        .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .with_state(LibraryState {
             auth,
             root: local_root,
@@ -123,11 +141,32 @@ async fn load(store: &IdentityStore) -> Result<Vec<Library>, StatusCode> {
     // Same transaction gives a coherent configuration/grants snapshot.
     let mut tx = store.pool.begin().await.map_err(database)?;
     let mut libraries: Vec<Library> = crate::database::query_as(
-        "SELECT id,name,kind,node_id,root,enabled,excluded_patterns FROM libraries ORDER BY name,id",
+        "SELECT id,name,kind,node_id,root,enabled,excluded_patterns,options_json FROM libraries ORDER BY name,id",
     )
     .fetch_all(&mut *tx)
     .await
     .map_err(database)?;
+    for library in &mut libraries {
+        library.options = serde_json::from_str(&library.options_json)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        library.image_kinds = crate::database::query_scalar(
+            "SELECT kind FROM library_artwork WHERE library_id=? ORDER BY kind",
+        )
+        .bind(&library.id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(database)?;
+        let revisions: Vec<(String, String)> = crate::database::query_as(
+            "SELECT kind,revision FROM library_artwork WHERE library_id=?",
+        )
+        .bind(&library.id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(database)?;
+        library.image_versions = revisions.into_iter().collect();
+        library.cover_urls = crate::database::query_scalar("SELECT COALESCE((SELECT '/api/v1/works/' || w.id || '/poster' FROM work_posters wp WHERE wp.work_id=w.id),(SELECT '/api/v1/assets/' || i.id || '/image?width=320' FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root ORDER BY i.priority,i.id LIMIT 1)) AS url FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND n.status='connected' AND w.kind IN ('film','series') AND (w.kind='series' OR EXISTS(SELECT 1 FROM inventory_editions ce JOIN inventory_versions cv ON cv.edition_id=ce.id JOIN inventory_sources cs ON cs.version_id=cv.id JOIN inventory_assets ca ON ca.source_id=cs.id WHERE ce.work_id=w.id AND ca.available=1 AND cs.root_snapshot=l.root)) AND (EXISTS(SELECT 1 FROM work_posters wp WHERE wp.work_id=w.id) OR EXISTS(SELECT 1 FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root)) ORDER BY w.title_sort,w.id LIMIT 4")
+            .bind(&library.id).fetch_all(&mut *tx).await.map_err(database)?;
+    }
     let grants = crate::database::query(
         "SELECT library_id,user_id FROM library_permissions ORDER BY user_id",
     )
@@ -207,6 +246,88 @@ async fn create(
     let library = save(&state, uuid::Uuid::new_v4().to_string(), input, false).await?;
     Ok((StatusCode::CREATED, Json(library)))
 }
+async fn image_target(state: &LibraryState, id: &str, kind: &str) -> Result<(), StatusCode> {
+    if !matches!(kind, "poster" | "backdrop") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let count: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM libraries WHERE id=?")
+        .bind(id)
+        .fetch_one(&state.auth.store.pool)
+        .await
+        .map_err(database)?;
+    if count == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(())
+}
+async fn image(
+    State(state): State<LibraryState>,
+    Path((id, kind)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    administrator(&state, &headers, false).await?;
+    image_target(&state, &id, &kind).await?;
+    let bytes: Vec<u8> = crate::database::query_scalar(
+        "SELECT image_data FROM library_artwork WHERE library_id=? AND kind=?",
+    )
+    .bind(id)
+    .bind(kind)
+    .fetch_optional(&state.auth.store.pool)
+    .await
+    .map_err(database)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "private, no-store"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+static IMAGE_WORKERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+async fn upload_image(
+    State(state): State<LibraryState>,
+    Path((id, kind)): Path<(String, String)>,
+    headers: HeaderMap,
+    bytes: Bytes,
+) -> Result<StatusCode, StatusCode> {
+    administrator(&state, &headers, true).await?;
+    image_target(&state, &id, &kind).await?;
+    let content = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
+    let permit = IMAGE_WORKERS
+        .try_acquire()
+        .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
+    let normalized = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        crate::avatars::normalize_image(bytes, &content, true)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
+    crate::database::query("INSERT INTO library_artwork(library_id,kind,image_data,revision) VALUES(?,?,?,?) ON CONFLICT(library_id,kind) DO UPDATE SET image_data=excluded.image_data,revision=excluded.revision")
+        .bind(id).bind(kind).bind(normalized).bind(uuid::Uuid::new_v4().to_string()).execute(&state.auth.store.pool).await.map_err(database)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn remove_image(
+    State(state): State<LibraryState>,
+    Path((id, kind)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    administrator(&state, &headers, true).await?;
+    image_target(&state, &id, &kind).await?;
+    crate::database::query("DELETE FROM library_artwork WHERE library_id=? AND kind=?")
+        .bind(id)
+        .bind(kind)
+        .execute(&state.auth.store.pool)
+        .await
+        .map_err(database)?;
+    Ok(StatusCode::NO_CONTENT)
+}
 async fn update(
     State(state): State<LibraryState>,
     Path(id): Path<String>,
@@ -231,6 +352,9 @@ async fn save(
         || input.node_id.is_empty()
         || input.user_ids.len() > 1000
     {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if input.options.as_ref().is_some_and(|v| !v.validate()) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let root = if input.node_id == "local" {
@@ -279,6 +403,18 @@ async fn save(
     input.user_ids.sort();
     input.user_ids.dedup();
     let mut tx = state.auth.store.pool.begin().await.map_err(database)?;
+    if existing {
+        let active: i64 = crate::database::query_scalar(
+            "SELECT COUNT(*) FROM scan_jobs WHERE library_id=? AND status IN ('queued','running')",
+        )
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(database)?;
+        if active != 0 {
+            return Err(StatusCode::CONFLICT);
+        }
+    }
     for user in &input.user_ids {
         let valid: i64 = crate::database::query_scalar(
             "SELECT CAST(EXISTS(SELECT 1 FROM users WHERE id=? AND role='user' AND disabled_at IS NULL) AS INTEGER)",
@@ -291,6 +427,22 @@ async fn save(
             return Err(StatusCode::BAD_REQUEST);
         }
     }
+    let previous: Option<String> =
+        crate::database::query_scalar("SELECT options_json FROM libraries WHERE id=?")
+            .bind(&id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(database)?;
+    let options = match input.options {
+        Some(options) => options,
+        None => serde_json::from_str(previous.as_deref().unwrap_or("{}"))
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    };
+    let options_json =
+        serde_json::to_string(&options).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let previous_options: crate::library_options::LibraryOptions =
+        serde_json::from_str(previous.as_deref().unwrap_or("{}"))
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if existing {
         let result = crate::database::query(
             "UPDATE libraries SET name=?,kind=?,node_id=?,root=?,enabled=?,excluded_patterns=? WHERE id=?",
@@ -336,6 +488,22 @@ async fn save(
             .await
             .map_err(database)?;
     }
+    crate::database::query("UPDATE libraries SET options_json=? WHERE id=?")
+        .bind(&options_json)
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(database)?;
+    if options.automatic_refresh_interval_days != previous_options.automatic_refresh_interval_days {
+        crate::database::query(
+            "UPDATE libraries SET next_metadata_refresh_at=unixepoch()+? WHERE id=?",
+        )
+        .bind(i64::from(options.automatic_refresh_interval_days) * 86400)
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(database)?;
+    }
     tx.commit().await.map_err(database)?;
     Ok(Library {
         id,
@@ -346,6 +514,11 @@ async fn save(
         enabled: input.enabled,
         excluded_patterns: input.excluded_patterns,
         user_ids: input.user_ids,
+        options_json,
+        options,
+        cover_urls: vec![],
+        image_kinds: vec![],
+        image_versions: Default::default(),
     })
 }
 
@@ -380,7 +553,64 @@ mod tests {
             enabled: true,
             excluded_patterns: String::new(),
             user_ids: users,
+            options: None,
         }
+    }
+    #[tokio::test]
+    async fn options_validation_legacy_update_and_restart() {
+        let (temp, state, _) = setup().await;
+        let mut configured = input(&state, vec![]);
+        configured.options = Some(crate::library_options::LibraryOptions {
+            read_local_nfo: false,
+            fetch_logo: false,
+            automatic_refresh_interval_days: 30,
+            ..Default::default()
+        });
+        save(&state, "fixture-films".into(), configured, true)
+            .await
+            .unwrap();
+        // Old clients omitting options must preserve the new configuration.
+        save(&state, "fixture-films".into(), input(&state, vec![]), true)
+            .await
+            .unwrap();
+        let next: i64 = crate::database::query_scalar(
+            "SELECT next_metadata_refresh_at FROM libraries WHERE id='fixture-films'",
+        )
+        .fetch_one(&state.auth.store.pool)
+        .await
+        .unwrap();
+        assert!(next > 0);
+        let mut invalid = input(&state, vec![]);
+        invalid.options = Some(crate::library_options::LibraryOptions {
+            metadata_country_code: "fra".into(),
+            ..Default::default()
+        });
+        assert_eq!(
+            save(&state, "fixture-films".into(), invalid, true)
+                .await
+                .err(),
+            Some(StatusCode::BAD_REQUEST)
+        );
+        state.auth.store.close().await;
+        let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+            .await
+            .unwrap();
+        let films = load(&store)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|l| l.id == "fixture-films")
+            .unwrap();
+        assert!(!films.options.read_local_nfo);
+        assert!(!films.options.fetch_logo);
+        assert_eq!(films.options.automatic_refresh_interval_days, 30);
+        // Unsafe writers / unsupported features cannot be silently accepted as active.
+        assert!(
+            serde_json::from_value::<crate::library_options::LibraryOptions>(
+                serde_json::json!({"saveLocalNfo":true})
+            )
+            .is_err()
+        );
     }
     #[tokio::test]
     async fn persistence_revocation_and_restart_do_not_restore_defaults() {

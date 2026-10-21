@@ -47,6 +47,7 @@ pub struct FilmMetadata {
     pub year: Option<u16>,
     pub premiered: Option<String>,
     pub genres: Vec<String>,
+    pub tags: Vec<String>,
     pub rating: Option<f64>,
     pub mpaa: Option<String>,
     pub actors: Vec<Credit>,

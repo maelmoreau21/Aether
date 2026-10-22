@@ -251,7 +251,12 @@ async fn representative_tracks_and_ten_bit_profile() {
         let case = asset.representative.as_ref().unwrap();
         let video = &asset.probe.streams[0];
         assert_eq!(video.codec_name.as_deref(), Some("av1"));
-        assert_eq!(video.details["profile"], "Main");
+        // FFmpeg's small builds expose AV1 profile 0 numerically instead of "Main".
+        assert!(
+            matches!(video.details["profile"].as_str(), Some("Main" | "0")),
+            "Unexpected AV1 profile: {}",
+            video.details["profile"]
+        );
         assert_eq!(video.details["pix_fmt"], "yuv420p10le");
         assert_eq!(video.details["color_space"], "bt709");
         let audio: Vec<_> = asset

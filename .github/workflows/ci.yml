@@ -65,7 +65,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: tests/fixtures/generated
-          key: fixtures-p0-p1-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
+          key: fixtures-p0-full-v2-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py', 'scripts/validate-prepared-fixtures.py') }}
 
       - name: Installer FFmpeg (requis par les tests unitaires et intégration media-node)
         uses: ./.github/actions/setup-ffmpeg
@@ -95,6 +95,11 @@ jobs:
       - name: Prepare P1 fixture sources
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
         run: python3 scripts/prepare-p1.py
+
+      - name: Vérifier les fixtures MSE/DASH préparées, y compris après restauration du cache
+        # The browser job intentionally prepares a smaller, separate fixture set.
+        # Check restored caches too, before opaque HTTP 404 failures in Cargo.
+        run: python3 scripts/validate-prepared-fixtures.py
 
       - name: Valider les métriques de comparaison des lecteurs
         run: node scripts/player-comparison-stats.test.cjs
@@ -237,7 +242,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: tests/fixtures/generated
-          key: fixtures-p0-p1-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
+          key: fixtures-p1-browser-v2-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-p1.py') }}
 
       - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
         if: steps.cache-fixtures.outputs.cache-hit != 'true'

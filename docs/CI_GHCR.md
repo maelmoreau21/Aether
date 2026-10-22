@@ -1,5 +1,24 @@
 # CI et publication GHCR
 
+## Cache des fixtures P0 et profil AV1 — 22 octobre 2026
+
+Les jobs Rust et navigateur utilisaient la même clé alors que seul Rust préparait
+MSE/DASH. Un cache créé par le navigateur pouvait donc faire sauter la préparation
+Rust et provoquer des 404 et fichiers VTT absents. Les clés sont maintenant
+distinctes (`fixtures-p0-full-v2` / `fixtures-p1-browser-v2`), ce qui écarte aussi
+les anciennes entrées incomplètes. Le job Rust vérifie les fichiers non vides et
+les rapports MSE/DASH `passed`/`originals_unchanged`, même après restauration.
+
+Le test du profil AV1 accepte les deux représentations du profil 0/Main, dont
+la chaîne `"0"` observée avec le build CI. Codec AV1, format 10 bits, couleurs et
+canaux restent contrôlés ; aucune assertion de lecture n'est désactivée.
+
+Validation locale : `python scripts/validate-prepared-fixtures.py`, rejet d'un
+répertoire incomplet, parsing YAML et distinction des clés, `cargo fmt --all --check`
+et `cargo test --locked -p media-poc --all-features --test p0 -j 1 -- --test-threads=1`
+(11 réussis sous Windows). Le douzième test Linux sur les symlinks n'est pas
+compilé sous Windows. La CI Linux complète reste à relancer ; aucun push effectué.
+
 ## Correctif FFmpeg des fixtures — 21 octobre 2026
 
 Le profil partagé désactivait `libavdevice`, qui fournit l'entrée synthétique

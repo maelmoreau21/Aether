@@ -8,7 +8,7 @@
   import { ProgressTracker } from './progress';
   import { getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences } from '../preferences';
-  import { chooseSource, playbackMime, audioLanguage } from './source-selection';
+  import { chooseSource, playbackMime, audioLanguage, audioSelectionNotice } from './source-selection';
   const base = resolve('/').replace(/\/$/, '');
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
@@ -71,7 +71,7 @@
   async function prepare(media: Media, restore?: PlaybackState) {
     const current = generation;
     if (!engine) return;
-    busy = true; error = ''; wake();
+    busy = true; error = ''; notice = ''; wake();
     try {
       const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))));
       if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
@@ -81,7 +81,7 @@
       const resume = tracker?.load();
       await engine.load(media, source.audioTrackId);
       if (current !== generation) return;
-      if (audioLanguage(source.language) !== audioLanguage(preferredLanguage)) notice = 'Votre langue précédente est indisponible. Première source disponible sélectionnée.';
+      notice = audioSelectionNotice(media, source, preferredLanguage);
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
@@ -108,7 +108,8 @@
       const offsets = account.offsets;
       if (offsets && Number.isFinite(offsets.audio) && Math.abs(offsets.audio) <= 30) audioOffset = offsets.audio;
       if (offsets && Number.isFinite(offsets.subtitle) && Math.abs(offsets.subtitle) <= 30) subtitleOffset = offsets.subtitle;
-      preferredLanguage = account.audioLanguage ?? 'fr';
+      const language = audioLanguage(account.audioLanguage ?? 'fr');
+      preferredLanguage = language && language !== 'und' ? language : 'fr';
       const initialSubtitles = account.subtitles;
       if (initialSubtitles === 'off') subtitlePreference = { enabled: false };
       else if (initialSubtitles === 'always') subtitlePreference = { enabled: true, language: 'fr', forced: false };
@@ -174,7 +175,9 @@
   function seek(value: number) { if (!busy) { engine?.seek(value); sync(); wake(); } }
   function selectAudio(id: string) {
     const accountGeneration = getSessionGeneration();
-    void action(async player => { await player.selectAudio(id); audio = id; preferredLanguage = active?.sources.find(source => source.audioTrackId === id)?.language ?? preferredLanguage;
+    void action(async player => { await player.selectAudio(id); audio = id; notice = '';
+      const language = audioLanguage(active?.sources.find(source => source.audioTrackId === id)?.language ?? 'und');
+      if (language && language !== 'und') preferredLanguage = language;
       if (accountGeneration !== getSessionGeneration()) return;
       preferredAudio = { mediaId: active?.id ?? '', trackId: id };
       savePreferences({ audioTrack: preferredAudio, audioLanguage: preferredLanguage });

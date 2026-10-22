@@ -1,5 +1,29 @@
 # MEMORY.md — État et décisions Aether
 
+## 22 octobre 2026 — Sélection AV1/Opus et préférences FR/EN
+
+- Cause reproduite : `playbackMime` fabriquait un codecs AV1 incomplet (`av01`),
+  rejeté par Chrome/Edge. Les sources FR/EN préparées étaient filtrées, puis
+  l'original multiaudio `und` déclenchait à tort l'avis de langue indisponible.
+- MIME conteneur sans configuration inventée ; capacité indicative sans exclusion
+  de langue, restauration indexée et migration de l'ancien choix ambigu ; `und`
+  ne remplace plus la préférence linguistique. Original retiré du menu audio
+  quand toutes les pistes sont explicitement proposées, source originale conservée.
+- Nouveau MP4 synthétique 1080p AV1 Main 10 bits avec deux Opus 5.1 : Chrome
+  155.0.8059.85 et Edge 155.0.4283.62 headless passent FR/EN/FR, PCM distinct,
+  un seul chargement vidéo, plein écran, pause/seeks/reprise, erreur Ogg 404 et
+  réouverture. Test Rust explicite : paquets identiques, six canaux conservés.
+- Core/SQLite/Chrome MP4 puis MKV après redémarrage : réussi en 39,96 s,
+  préférence serveur EN puis FR conservée et faux avis absent. Web 80 tests,
+  cinq régressions d'audit, check 0/0, lint/build réussis ; deux anciens tests
+  packaging réussis, dont 7.1. Détails/commandes : docs/AV1_OPUS_AUDIO_FIX.md.
+- scanner_flow et distributed_multi_node réussis : droits vivants, HEAD/GET/Range,
+  deux Nodes distants locaux ; aucune preuve multi-machine déduite.
+- Fmt, Clippy workspace/all-targets strict et diff check réussis ; suite Rust
+  workspace générale non rejouée.
+- Aucun Tdarr, média personnel, push ou déploiement modifié. Avatar, NAS,
+  réseau physique multi-machine, sortie matérielle 5.1 et endurance non testés.
+
 ## 22 octobre 2026 — Assertion scanner_flow alignée sur les langues explicites
 
 - Le journal GitHub fourni confirme P0 Linux 12/12, puis scanner_flow échouait

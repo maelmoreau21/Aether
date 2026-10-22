@@ -345,6 +345,48 @@ mod tests {
             .collect()
     }
     #[tokio::test]
+    #[ignore = "run python scripts/generate-dual-opus-fixture.py first; requires FFmpeg"]
+    async fn copies_dual_51_opus_mp4_without_changing_packets_or_channels() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/generated/dual-opus");
+        let name = Path::new("dual-opus.mp4");
+        let original = OpenedFile::open_in_root(&root, name).await.unwrap();
+        let preparations = Preparations::default();
+        for index in 0..=2 {
+            let component = if index == 0 {
+                Component::Video
+            } else {
+                Component::Audio(index)
+            };
+            let file = preparations
+                .prepare(
+                    &root,
+                    name,
+                    original.size(),
+                    original.modified_ns(),
+                    component,
+                )
+                .await
+                .unwrap();
+            let probe = crate::probe::probe_opened(&file).await.unwrap();
+            assert_eq!(probe.streams.len(), 1);
+            let track = &probe.streams[0];
+            if index == 0 {
+                assert_eq!(track.codec_name.as_deref(), Some("av1"));
+                assert_eq!(track.details["pix_fmt"], "yuv420p10le");
+                assert_eq!(track.details["width"], 1920);
+                assert_eq!(track.details["height"], 1080);
+            } else {
+                assert_eq!(track.codec_name.as_deref(), Some("opus"));
+                assert_eq!(track.details["channels"], 6);
+                assert_eq!(track.details["channel_layout"], "5.1");
+            }
+            assert_eq!(hashes(&original, index).await, hashes(&file, 0).await);
+        }
+        assert_ne!(hashes(&original, 1).await, hashes(&original, 2).await);
+    }
+
+    #[tokio::test]
     async fn copies_av1_opus_tracks_and_reuses_cache_with_source_validation() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../tests/fixtures/generated/representative");

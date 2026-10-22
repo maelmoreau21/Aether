@@ -1,3 +1,10 @@
+## Audio AV1/Opus — 22 octobre 2026
+
+Voir [AV1_OPUS_AUDIO_FIX.md](AV1_OPUS_AUDIO_FIX.md) pour génération légale du vrai
+MP4 1080p AV1 10 bits avec deux Opus 5.1, tests de copie sans perte, scripts
+Chrome/Edge et parcours Core avec préférences restaurées. Les tests unitaires
+de sélection sont inclus dans `npm test --prefix apps/web`.
+
 ## Administration complète — 19 octobre 2026
 
 Vérifications ciblées : `cargo test --locked -p media-poc --test admin_users --test admin_access --test admin_backups --test backup_bundle --test scheduler --test preferences`. Comptes, rôle/session/CSRF, protection du dernier administrateur, groupes/droits vivants, clés expirables et révocables, scans planifiés, archivage chiffré et restauration réelle SQLite. Les tests du paquet couvrent altération, troncature, permutation, clé incorrecte, base vide, destinations existantes et certificats.

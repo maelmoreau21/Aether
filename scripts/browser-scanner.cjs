@@ -5,7 +5,7 @@ const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('isolated test origin required');
 const restart = process.env.MEDIA_TEST_RESTART === '1';
 const long = process.env.MEDIA_TEST_LONG === '1';
-const out = process.env.MEDIA_REPORT_DIR || (long ? 'docs/evidence/2026-10-18/player-long' : 'docs/evidence/2026-10-16/scanner');
+const out = process.env.MEDIA_REPORT_DIR || (long ? 'target/player-long' : 'target/browser-scanner');
 // Keep previous evidence; each successful run replaces its own reports only.
 fs.mkdirSync(out, {recursive: true});
 (async () => {
@@ -59,6 +59,11 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByRole('button',{name:`Sélectionner la version ${container}`,exact:true}).click();
     await page.locator('.hero-cta').click();
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>0.2);
+    if (!restart) {
+      assert.match(await page.locator('audio[data-external-audio]').evaluate(a=>a.currentSrc), /\/prepared\/audio-1$/);
+      assert.equal(await page.getByText('Votre langue précédente est indisponible.',{exact:false}).count(),0);
+      report.results.defaultFrench=true;
+    }
     await page.waitForFunction(()=>{ const v=document.querySelector('video'); return [...v.textTracks].some(t=>t.mode==='showing' && t.activeCues?.length && t.activeCues[0].text.includes('Sous-titre externe')); });
     // Internal multi-track Opus: decode distinguishable synthetic FR/EN signals.
     report.results.internalSwitches = [];
@@ -79,6 +84,17 @@ fs.mkdirSync(out, {recursive: true});
       if(preparedVideoUrl) assert.equal(sample.url,preparedVideoUrl); preparedVideoUrl=sample.url;
       assert.equal(sample.fullscreen,true);
       report.results.internalSwitches.push({id,...sample});
+    }
+    // Reopen with server-persisted indexed language preferences, in both directions.
+    report.results.reopenedAudio=[];
+    for (const [id,language] of [['internal-2','en'],['internal-1','fr']]) {
+      await openMenu('audio');await page.locator(`[data-audio-id="${id}"]`).click();
+      await page.waitForFunction(async language=>{const r=await fetch('/api/v1/preferences');return (await r.json()).audioLanguage===language;},language);
+      await page.keyboard.press('Shift');await page.locator('button.return').click();
+      await page.locator('.hero-cta').click();
+      await page.waitForFunction(id=>{const v=document.querySelector('video'),a=document.querySelector('audio');return a&&a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1])&&!a.paused&&!v.paused;},id);
+      assert.equal(await page.getByText('Votre langue précédente est indisponible.',{exact:false}).count(),0);
+      report.results.reopenedAudio.push({id,language,passed:true});
     }
     if (long) {
       const cdp = await context.newCDPSession(page); await cdp.send('Performance.enable');

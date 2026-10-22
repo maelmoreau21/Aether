@@ -263,6 +263,10 @@ jobs:
         run: python3 scripts/prepare-p1.py
 
       - name: Exécuter le parcours navigateur Films (scan, incrémental, lecture, seek, redémarrage Core)
+        env:
+          # Keep generation aligned with report validation and artifact upload,
+          # independently of the script's local default under target/.
+          MEDIA_REPORT_DIR: docs/evidence/2026-10-16/scanner
         run: cargo test --locked --test browser_scanner -- --ignored --nocapture
 
       - name: Exécuter le parcours navigateur Séries (scan, saisons, lecture, 403, transition cookies HttpOnly)

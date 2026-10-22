@@ -1,5 +1,18 @@
 # CI et publication GHCR
 
+## Dossier des rapports navigateur Films — 22 octobre 2026
+
+Le script local écrit désormais dans `target/browser-scanner` par défaut, alors
+que le workflow vérifie et archive `docs/evidence/2026-10-16/scanner`. Cette
+divergence provoquait un `FileNotFoundError` malgré la fin du parcours navigateur.
+L'étape Films fixe maintenant `MEDIA_REPORT_DIR` au dossier attendu par la CI ;
+le test Rust transmet déjà cette variable au script navigateur. Le nettoyage,
+les assertions `passed: true`, les captures obligatoires et l'upload restent stricts.
+
+Vérifié localement : parsing YAML et concordance du dossier de génération avec
+le nettoyage, les deux rapports, les trois captures et l'archivage ; actionlint
+1.7.12 et `git diff --check`. Pas de nouvelle exécution GitHub Linux ni de push.
+
 ## Assertion de langue du scanner — 22 octobre 2026
 
 Le journal GitHub fourni confirme les 12 tests P0 réussis. L’échec suivant était

@@ -22,6 +22,7 @@ const out=process.env.MEDIA_REPORT_DIR||'target/playlists-browser';fs.mkdirSync(
     await page.waitForFunction(()=>document.querySelector('.music-player .now strong')?.textContent==='Next Song');
     await page.getByRole('button',{name:'Piste précédente',exact:true}).click();
     await page.waitForFunction(()=>document.querySelector('.music-player .now strong')?.textContent==='Song');
+    await page.waitForFunction(()=>{const a=document.querySelector('audio');return a&&Number.isFinite(a.duration)&&a.duration>1&&a.readyState>=1;});
     await page.locator('audio').evaluate(audio=>{audio.currentTime=audio.duration-.2;});
     await page.waitForFunction(()=>document.querySelector('.music-player .now strong')?.textContent==='Next Song');
     await page.getByRole('button',{name:'Piste précédente',exact:true}).click();

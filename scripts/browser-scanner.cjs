@@ -5,18 +5,20 @@ const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('isolated test origin required');
 const restart = process.env.MEDIA_TEST_RESTART === '1';
 const long = process.env.MEDIA_TEST_LONG === '1';
-const out = process.env.MEDIA_REPORT_DIR || (long ? 'docs/evidence/2026-10-18/player-long' : 'docs/evidence/2026-10-16/scanner');
+const out = process.env.MEDIA_REPORT_DIR || (long ? 'target/player-long' : 'target/browser-scanner');
 // Keep previous evidence; each successful run replaces its own reports only.
 fs.mkdirSync(out, {recursive: true});
 (async () => {
   const browser = await chromium.launch({channel:'chrome', headless:true});
   const report = {browser:browser.version(), os:require('node:os').release(), headless:true, restart, results:{}};
+  const preparations=[];
   try {
     const context = await browser.newContext({viewport:{width:1440,height:900}, locale:'fr-FR'});
     const page = await context.newPage();
     page.setDefaultTimeout(30000);
     async function openMenu(name) { await page.keyboard.press('Shift'); await page.locator(`[data-menu="${name}"]`).click(); }
     const errors=[];
+    page.on('response', response=>{if(response.url().includes('/prepared/')&&preparations.length<128)preparations.push({path:new URL(response.url()).pathname,method:response.request().method(),status:response.status()});});
     page.on('response', async response=>{if(response.url().endsWith('/scan')) console.log('scan HTTP',response.status(),await response.text());});
     page.on('pageerror', error=>errors.push(String(error)));
     page.on('console', message=>{if(message.type()==='error' && /Content Security Policy/i.test(message.text())) errors.push(message.text());});
@@ -28,12 +30,18 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForURL(origin+'/app/');
     if (!restart) {
       await page.goto(origin+'/app/admin/libraries/');
-      await page.getByRole('button',{name:'Ajouter une médiathèque',exact:true}).click();
+      await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();
       await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
+      await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
+      await page.getByRole('dialog').screenshot({path:`${out}/library-editor.png`});
+      await page.setViewportSize({width:390,height:844});
+      assert.ok(await page.getByRole('dialog').evaluate(dialog=>dialog.scrollWidth<=dialog.clientWidth+1),'library editor must fit mobile width');
+      await page.getByRole('dialog').screenshot({path:`${out}/library-editor-mobile.png`});
+      await page.setViewportSize({width:1440,height:900});
       await page.getByRole('dialog').getByRole('button',{name:'Enregistrer',exact:true}).click();
       await page.getByRole('heading',{name:'Films scanner navigateur',exact:true}).waitFor();
       await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
-      await page.getByRole('button',{name:'Actualiser la médiathèque',exact:true}).click();
+      await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
       await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
       const article = page.locator('article').filter({has:page.getByRole('heading',{name:'Films scanner navigateur',exact:true})});
       await article.getByText(/Terminé/).waitFor({timeout:60000});
@@ -41,7 +49,7 @@ fs.mkdirSync(out, {recursive: true});
       report.results.scan = true;
       await page.screenshot({path:`${out}/scan.png`});
       await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
-      await page.getByRole('button',{name:'Actualiser la médiathèque',exact:true}).click();
+      await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
       await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
       await article.locator('.scan-counters').filter({hasText:/0 analysé.*2 réutilisé/}).waitFor({timeout:60000});
       await article.getByText(/Terminé/).waitFor({timeout:60000});
@@ -57,6 +65,11 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByRole('button',{name:`Sélectionner la version ${container}`,exact:true}).click();
     await page.locator('.hero-cta').click();
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>0.2);
+    if (!restart) {
+      assert.equal(await page.locator('audio[data-external-audio]').evaluate(a=>a.dataset.internalAudioTrack==='internal-1'||a.currentSrc.endsWith('/prepared/audio-1')),true);
+      assert.equal(await page.getByText('Votre langue précédente est indisponible.',{exact:false}).count(),0);
+      report.results.defaultFrench=true;
+    }
     await page.waitForFunction(()=>{ const v=document.querySelector('video'); return [...v.textTracks].some(t=>t.mode==='showing' && t.activeCues?.length && t.activeCues[0].text.includes('Sous-titre externe')); });
     // Internal multi-track Opus: decode distinguishable synthetic FR/EN signals.
     report.results.internalSwitches = [];
@@ -64,11 +77,11 @@ fs.mkdirSync(out, {recursive: true});
     for (const id of ['internal-1','internal-2','internal-1','internal-2']) {
       await openMenu('audio');
       await page.locator(`[data-audio-id="${id}"]`).click();
-      await page.waitForFunction(id=>{const a=document.querySelector('audio[data-external-audio]'); const v=document.querySelector('video'); return a && a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1]) && !a.paused && !v.paused && v.currentTime>.2 && Math.abs(a.currentTime-v.currentTime)<.3;},id,{timeout:30000});
+      await page.waitForFunction(id=>{const a=document.querySelector('audio[data-external-audio]'); const v=document.querySelector('video'); return a && (a.dataset.internalAudioTrack===id||a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1])) && !a.paused && !v.paused && v.currentTime>.2 && Math.abs(a.currentTime-v.currentTime)<.3;},id,{timeout:30000});
       const sample = await page.evaluate(async()=>{
         const v=document.querySelector('video'), a=document.querySelector('audio[data-external-audio]');
         const c=new AudioContext(); await c.resume(); const s=c.createMediaElementSource(a), n=c.createAnalyser(); n.fftSize=8192;s.connect(n);n.connect(c.destination);
-        await new Promise(r=>setTimeout(r,250));const bins=new Float32Array(n.frequencyBinCount);n.getFloatFrequencyData(bins);
+        await new Promise(r=>setTimeout(r,600));const bins=new Float32Array(n.frequencyBinCount);n.getFloatFrequencyData(bins);
         let peak=0;for(let i=1;i<bins.length;i++)if(bins[i]>bins[peak])peak=i;
         const result={frequency:peak*c.sampleRate/n.fftSize,db:bins[peak],url:v.currentSrc,time:v.currentTime,fullscreen:!!document.fullscreenElement};s.disconnect();await c.close();return result;
       });
@@ -77,6 +90,29 @@ fs.mkdirSync(out, {recursive: true});
       if(preparedVideoUrl) assert.equal(sample.url,preparedVideoUrl); preparedVideoUrl=sample.url;
       assert.equal(sample.fullscreen,true);
       report.results.internalSwitches.push({id,...sample});
+    }
+    // The real Svelte UI must report a rejected language without pausing the
+    // retained presentation or overwriting its persisted preference.
+    const retained=await page.locator('video').evaluate(v=>({time:v.currentTime,url:v.currentSrc}));
+    await page.route('**/prepared/audio-1*',route=>route.abort('internetdisconnected'));
+    await openMenu('audio');await page.locator('[data-audio-id="internal-1"]').click();
+    await page.locator('.fullscreen-notice').filter({hasText:/piste précédente.*conservée/i}).waitFor();
+    assert.equal(await page.locator('.player-error').count(),0);
+    await page.waitForFunction(t=>{const v=document.querySelector('video'),a=document.querySelector('audio');return !v.paused&&a&&!a.paused&&v.currentTime>t;},retained.time);
+    assert.equal(await page.locator('video').evaluate(v=>v.currentSrc),retained.url);
+    assert.equal(await page.evaluate(async()=>(await(await fetch('/api/v1/preferences')).json()).audioLanguage),'en');
+    await page.unroute('**/prepared/audio-1*');
+    report.results.failedLanguageRetainedWithoutPause=true;
+    // Reopen with server-persisted indexed language preferences, in both directions.
+    report.results.reopenedAudio=[];
+    for (const [id,language] of [['internal-2','en'],['internal-1','fr']]) {
+      await openMenu('audio');await page.locator(`[data-audio-id="${id}"]`).click();
+      await page.waitForFunction(async language=>{const r=await fetch('/api/v1/preferences');return (await r.json()).audioLanguage===language;},language);
+      await page.keyboard.press('Shift');await page.locator('button.return').click();
+      await page.locator('.hero-cta').click();
+      await page.waitForFunction(id=>{const v=document.querySelector('video'),a=document.querySelector('audio');return a&&(a.dataset.internalAudioTrack===id||a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1]))&&!a.paused&&!v.paused;},id);
+      assert.equal(await page.getByText('Votre langue précédente est indisponible.',{exact:false}).count(),0);
+      report.results.reopenedAudio.push({id,language,passed:true});
     }
     if (long) {
       const cdp = await context.newCDPSession(page); await cdp.send('Performance.enable');
@@ -89,7 +125,7 @@ fs.mkdirSync(out, {recursive: true});
         await page.waitForFunction(t=>{const v=document.querySelector('video'),a=document.querySelector('audio');return v.paused && !v.seeking && Math.abs(v.currentTime-t)<.3 && a && a.paused && Math.abs(a.currentTime-t)<.3;},target);
         const beforeSwitch=await page.locator('video').evaluate(v=>({time:v.currentTime,url:v.currentSrc}));
         await openMenu('audio');await page.locator(`[data-audio-id="${switchId}"]`).click();
-        await page.waitForFunction(({t,id})=>{const v=document.querySelector('video'),a=document.querySelector('audio');return v.paused && a && a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1]) && a.paused && Math.abs(v.currentTime-t)<.3 && Math.abs(a.currentTime-t)<.3;},{t:target,id:switchId});
+        await page.waitForFunction(({t,id})=>{const v=document.querySelector('video'),a=document.querySelector('audio');return v.paused && a && (a.dataset.internalAudioTrack===id||a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1])) && a.paused && Math.abs(v.currentTime-t)<.3 && Math.abs(a.currentTime-t)<.3;},{t:target,id:switchId});
         assert.equal(await page.locator('video').evaluate(v=>v.currentSrc),beforeSwitch.url);
         await page.locator('video').evaluate(v=>v.play());
         await page.waitForFunction(t=>document.querySelector('video').currentTime>t+.3,target);
@@ -107,10 +143,10 @@ fs.mkdirSync(out, {recursive: true});
       const interruptedAt=await page.locator('video').evaluate(v=>v.currentTime);
       await page.route('**/prepared/audio-*',route=>route.abort('internetdisconnected'));
       await openMenu('audio');await page.locator('[data-audio-id="internal-2"]').click();
-      await page.locator('.player-error').waitFor();
+      await page.locator('.fullscreen-notice').filter({hasText:'Piste précédente conservée'}).waitFor();
       await page.unroute('**/prepared/audio-*');
-      await page.getByRole('button',{name:'Réessayer explicitement',exact:true}).click();
-      await page.locator('.loading').waitFor({state:'detached'});await page.locator('.player-error').waitFor({state:'detached'});
+      assert.equal(await page.locator('.player-error').count(),0);
+      await page.waitForFunction(()=>{const v=document.querySelector('video'),a=document.querySelector('audio');return !v.paused&&a&&!a.paused;});
       assert.ok(Math.abs(await page.locator('video').evaluate(v=>v.currentTime)-interruptedAt)<1);
       report.results.long.interruptedAudioRequestRecovered=true;
       await page.locator('video').evaluate(v=>{v.pause();v.currentTime=2;});await page.waitForFunction(()=>!document.querySelector('video').seeking);await page.locator('video').evaluate(v=>v.play());
@@ -195,6 +231,6 @@ fs.mkdirSync(out, {recursive: true});
     report.results = {...report.results,catalogue:true,singleWorkTwoVersions:true,playback:true,seek:true,pause:true,cspErrors:errors};
     report.passed=true;
     await context.close();
-  } catch(error) {report.failure=String(error.stack);const p=browser.contexts()[0]?.pages()[0];if(p) report.diagnostic=await p.evaluate(()=>({url:location.href,buttons:[...document.querySelectorAll('button')].map(b=>b.textContent).slice(-30),error:document.querySelector('.player-error')?.textContent,notice:document.querySelector('.fullscreen-notice')?.textContent,video:{time:document.querySelector('video')?.currentTime,paused:document.querySelector('video')?.paused},audio:{time:document.querySelector('audio')?.currentTime,paused:document.querySelector('audio')?.paused}})).catch(()=>null);process.exitCode=1;}
+  } catch(error) {report.failure=String(error.stack);report.preparations=preparations;const p=browser.contexts()[0]?.pages()[0];if(p) report.diagnostic=await p.evaluate(()=>({url:location.href,buttons:[...document.querySelectorAll('button')].map(b=>b.textContent).slice(-30),error:document.querySelector('.player-error')?.textContent,notice:document.querySelector('.fullscreen-notice')?.textContent,video:{time:document.querySelector('video')?.currentTime,paused:document.querySelector('video')?.paused},audio:{time:document.querySelector('audio')?.currentTime,paused:document.querySelector('audio')?.paused}})).catch(()=>null);process.exitCode=1;}
   finally {await browser.close();fs.writeFileSync(`${out}/report${restart?'-restart':''}.json`, JSON.stringify(report,null,2));console.log(JSON.stringify(report));}
 })();

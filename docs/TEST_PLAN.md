@@ -1,3 +1,31 @@
+## Bibliothèques multi-dossiers — 22 octobre 2026
+
+Contrat : [LIBRARY_FOLDERS.md](LIBRARY_FOLDERS.md).
+Tests ciblés : `libraries::tests`, `scanner_flow`, `distributed_multi_node`.
+Ils couvrent persistance, validation des racines par nœud, permissions héritées,
+catalogue commun, scans et retrait avec refus GET/HEAD/Range. Le scénario
+`browser_scanner` contrôle le formulaire desktop/mobile et la lecture après
+redémarrage. L'assertion d'échec de langue recherche le sens du message de
+conservation de piste ; la reprise audio/vidéo et les préférences restent vérifiées.
+
+## Audio AV1/Opus — 22 octobre 2026
+
+Audit et corrections de fiabilité P0 du lecteur :
+[PLAYER_PERFORMANCE_P0.md](PLAYER_PERFORMANCE_P0.md). Comprend refus DTS selon
+capacités réelles Chrome/Edge, restauration audio sans pause terminale de l'UI,
+races de seek MSE, diagnostics HTTP et rapports avant/après avec limites explicites.
+
+Le parcours MP4 original + audio MSE segmenté est décrit dans
+[NAS_PLAYBACK_DIAGNOSTICS.md](NAS_PLAYBACK_DIAGNOSTICS.md) : petite fixture et gros
+MP4, décodage FR/EN, limites Docker, vrai Nginx, pause/seek/annulation, première
+image et audio prêt. Le job navigateur CI exécute aussi ce scénario sur la
+fixture dual-5.1, avec rapport obligatoire et artefact archivé.
+
+Voir [AV1_OPUS_AUDIO_FIX.md](AV1_OPUS_AUDIO_FIX.md) pour génération légale du vrai
+MP4 1080p AV1 10 bits avec deux Opus 5.1, tests de copie sans perte, scripts
+Chrome/Edge et parcours Core avec préférences restaurées. Les tests unitaires
+de sélection sont inclus dans `npm test --prefix apps/web`.
+
 ## Administration complète — 19 octobre 2026
 
 Vérifications ciblées : `cargo test --locked -p media-poc --test admin_users --test admin_access --test admin_backups --test backup_bundle --test scheduler --test preferences`. Comptes, rôle/session/CSRF, protection du dernier administrateur, groupes/droits vivants, clés expirables et révocables, scans planifiés, archivage chiffré et restauration réelle SQLite. Les tests du paquet couvrent altération, troncature, permutation, clé incorrecte, base vide, destinations existantes et certificats.
@@ -580,3 +608,7 @@ Contrats et limites : [PRODUCT_FEATURES.md](PRODUCT_FEATURES.md).
   installation désactivée, actualisation, persistance et retrait. Les documents
   HTTPS sont substitués uniquement sous `cfg(test)` ; ce n'est pas un essai d'hébergement public.
 
+
+
+État des médias indépendants, manifeste d’association versionné et limites raw :
+[SEPARATED_MEDIA.md](SEPARATED_MEDIA.md).

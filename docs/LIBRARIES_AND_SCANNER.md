@@ -1,5 +1,9 @@
 # Bibliothèques et permissions P1 — 16 octobre 2026
 
+> Plusieurs dossiers et plusieurs nœuds dans une même bibliothèque :
+> [contrat du 22 octobre 2026](LIBRARY_FOLDERS.md). Les descriptions historiques
+> d'une seule racine ci-dessous décrivent le premier jalon.
+
 Les métadonnées NFO Films sont maintenant traitées par le Node et persistées
 sans modifier les droits ni le cache technique : [LOCAL_FILM_NFO.md](LOCAL_FILM_NFO.md).
 

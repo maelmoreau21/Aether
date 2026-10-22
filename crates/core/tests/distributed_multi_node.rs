@@ -829,6 +829,17 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
             String::from_utf8_lossy(&bytes)
         );
         assert_eq!(&bytes[..], b"OggS");
+        let chunk = format!("{audio}-chunk-0");
+        let (status, _, bytes) = http_request(
+            &core_origin,
+            Method::GET,
+            &chunk,
+            &[("cookie", &alice_cookie), ("range", "bytes=0-31")],
+            vec![],
+        )
+        .await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT, "remote audio chunk");
+        assert_eq!(&bytes[4..8], b"ftyp");
         let video = prepared["url"].as_str().unwrap();
         let (status, _, bytes) = http_request(
             &core_origin,
@@ -1431,6 +1442,107 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     )
     .await;
     assert_eq!(unk_st, StatusCode::FORBIDDEN);
+
+    // One logical library scans independent folders on both real Node servers.
+    let mut grouped_config = json!({"name":"Films_UHD","kind":"films","enabled":true,"userIds":[&alice_id],"folders":[{"nodeId":&node1_id,"root":&node1_root},{"nodeId":&node2_id,"root":&node2_root}]});
+    let admin_headers = [
+        ("origin", core_origin.as_str()),
+        ("cookie", admin_cookie.as_str()),
+        ("x-csrf-token", admin_csrf.as_str()),
+        ("content-type", "application/json"),
+    ];
+    let (created, _, body) = http_request(
+        &core_origin,
+        Method::POST,
+        "/api/v1/admin/libraries",
+        &admin_headers,
+        serde_json::to_vec(&grouped_config).unwrap(),
+    )
+    .await;
+    assert_eq!(
+        created,
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let grouped: Value = serde_json::from_slice(&body).unwrap();
+    let grouped_id = grouped["id"].as_str().unwrap();
+    let scan_uri = format!("/api/v1/admin/libraries/{grouped_id}/scan");
+    assert_eq!(
+        http_request(
+            &core_origin,
+            Method::POST,
+            &scan_uri,
+            &admin_headers,
+            vec![]
+        )
+        .await
+        .0,
+        StatusCode::ACCEPTED
+    );
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let (_, _, body) = http_request(
+                &core_origin,
+                Method::GET,
+                &scan_uri,
+                &[("cookie", &admin_cookie)],
+                vec![],
+            )
+            .await;
+            let status: Value = serde_json::from_slice(&body).unwrap();
+            assert_ne!(status["status"], "error", "{status}");
+            if status["status"] == "completed" {
+                assert!(status["discovered"].as_i64().unwrap() >= 2);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let (_, _, body) = http_request(
+        &core_origin,
+        Method::GET,
+        &format!("/api/v1/catalog?library={grouped_id}"),
+        &[("cookie", &alice_cookie)],
+        vec![],
+    )
+    .await;
+    let grouped_catalog: Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        grouped_catalog["total"].as_i64().unwrap() >= 2,
+        "{grouped_catalog}"
+    );
+    let items = grouped_catalog["items"].as_array().unwrap();
+    assert!(items.iter().all(|item| item["libraryId"] == grouped_id));
+    assert!(items.iter().any(|item| item["nodeId"] == node1_id));
+    assert!(items.iter().any(|item| item["nodeId"] == node2_id));
+    assert_eq!(
+        http_request(
+            &core_origin,
+            Method::GET,
+            &format!("/api/v1/catalog?library={grouped_id}"),
+            &[("cookie", &bob_cookie)],
+            vec![]
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    grouped_config["enabled"] = json!(false);
+    assert_eq!(
+        http_request(
+            &core_origin,
+            Method::PUT,
+            &format!("/api/v1/admin/libraries/{grouped_id}"),
+            &admin_headers,
+            serde_json::to_vec(&grouped_config).unwrap()
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
 
     // Revoke Node 1 and verify its works are excluded from the active catalogue and direct tokens are refused
     let (rev_st, _, rev_body) = http_request(

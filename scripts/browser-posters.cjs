@@ -28,9 +28,10 @@ fs.mkdirSync(out, {recursive:true});
     if (phase !== 'restart') {
       await page.goto(origin+'/app/admin/libraries/');
       if (phase === 'initial') {
-        await page.getByRole('button',{name:'Ajouter une médiathèque',exact:true}).click();
+        await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();
         await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
         await page.getByLabel('Racine autorisée sur le Node',{exact:true}).selectOption({index:1});
+        await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
         await page.getByRole('dialog').getByRole('button',{name:'Enregistrer',exact:true}).click();
         await page.getByRole('heading',{name:'Films scanner navigateur',exact:true}).waitFor();
       }
@@ -38,7 +39,7 @@ fs.mkdirSync(out, {recursive:true});
       const runScan = async () => {
         const posted=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/scan'));
         await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
-      await page.getByRole('button',{name:'Actualiser la médiathèque',exact:true}).click();
+      await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
       await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
         assert.equal((await posted).status(),202);
         await page.waitForFunction(async()=>{

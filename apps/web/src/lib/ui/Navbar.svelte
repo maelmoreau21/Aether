@@ -1,7 +1,7 @@
 <script module lang="ts">
   export const navLinks = [
     { key: 'home', path: '/', label: 'Accueil', symbol: '⌂' },
-    { key: 'lists', path: 'lists/', label: 'Mes listes', symbol: '☷' },
+    { key: 'lists', path: 'lists/', label: 'Playlists', symbol: '☷' },
     { key: 'downloads', path: 'downloads/', label: 'Téléchargements', symbol: '↓' }
   ] as const;
 </script>

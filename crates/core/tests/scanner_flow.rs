@@ -111,6 +111,159 @@ async fn hash(path: &Path) -> Vec<u8> {
 }
 
 #[tokio::test]
+async fn grouped_folders_scan_filter_stream_and_remove() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("media");
+    let a = root.join("a");
+    let b = root.join("b");
+    tokio::fs::create_dir_all(&a).await.unwrap();
+    tokio::fs::create_dir_all(&b).await.unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/generated/p1/clip-mp4-en.mp4");
+    tokio::fs::copy(&fixture, a.join("First (2026).mp4"))
+        .await
+        .unwrap();
+    tokio::fs::copy(&fixture, b.join("Second (2026).mp4"))
+        .await
+        .unwrap();
+    let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "folder-admin",
+            Zeroizing::new("disposable folder test password".into()),
+        )
+        .await
+        .unwrap();
+    let app = router(&root, &store).await;
+    let (_, login, _, cookie) = request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        None,
+        json!({"login":"folder-admin","password":"disposable folder test password"}),
+        None,
+    )
+    .await;
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let mut configuration = json!({"name":"Films_UHD","kind":"films","nodeId":"local","root":a.to_string_lossy(),"folders":[{"nodeId":"local","root":a.to_string_lossy()},{"nodeId":"local","root":b.to_string_lossy()}],"userIds":[]});
+    let (status, library, _, _) = request(
+        &app,
+        "POST",
+        "/api/v1/admin/libraries",
+        &cookie,
+        Some(csrf),
+        configuration.clone(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{library}");
+    let id = library["id"].as_str().unwrap();
+    let scanned = scan(&app, id, &cookie, csrf).await;
+    assert_eq!(scanned["discovered"], 2, "{scanned}");
+    let (_, catalog, _, _) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/catalog?library={id}"),
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    assert_eq!(catalog["total"], 2, "{catalog}");
+    assert!(
+        catalog["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|w| w["libraryId"] == id)
+    );
+    let second = catalog["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["title"] == "Second")
+        .unwrap();
+    let (_, detail, _, _) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/catalog/{}", second["id"].as_str().unwrap()),
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    let asset = detail["editions"][0]["versions"][0]["sources"][0]["assetIds"][0]
+        .as_str()
+        .unwrap();
+    let uri = format!("/api/v1/assets/{asset}/content");
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &uri,
+            &cookie,
+            None,
+            Value::Null,
+            Some("bytes=0-15")
+        )
+        .await
+        .0,
+        StatusCode::PARTIAL_CONTENT
+    );
+    configuration["folders"] = json!([{"nodeId":"local","root":a.to_string_lossy()}]);
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            &format!("/api/v1/admin/libraries/{id}"),
+            &cookie,
+            Some(csrf),
+            configuration,
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        request(&app, "GET", &uri, &cookie, None, Value::Null, None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        request(
+            &app,
+            "HEAD",
+            &uri,
+            &cookie,
+            None,
+            Value::Null,
+            Some("bytes=0-15")
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (_, catalog, _, _) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/catalog?library={id}"),
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    assert_eq!(catalog["total"], 1, "{catalog}");
+}
+
+#[tokio::test]
 async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permissions() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("media");
@@ -227,7 +380,14 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(media["synthetic"], false);
-        for component in ["video", "audio-1", "audio-2", "subtitle-4"] {
+        for component in [
+            "video",
+            "audio-1",
+            "audio-2",
+            "audio-1-chunk-0",
+            "audio-2-chunk-0",
+            "subtitle-4",
+        ] {
             let tracks = media["sources"][0]["tracks"].as_array().unwrap();
             if component != "video" {
                 let index: u64 = component.split('-').nth(1).unwrap().parse().unwrap();
@@ -292,7 +452,21 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
             assert_eq!(audio[1]["tags"]["language"], "eng");
             assert_ne!(audio[0]["index"], audio[1]["index"]);
             assert_eq!(audio[0]["channels"], 6);
-            assert_eq!(source["language"], "fr");
+            // The original container cannot guarantee the browser's default audio.
+            assert_eq!(source["audioTrackId"], "internal-default");
+            assert_eq!(source["language"], "und");
+            for (track, language) in audio.iter().zip(["fr", "en"]) {
+                let track_id = format!("internal-{}", track["index"].as_u64().unwrap());
+                let explicit = media["sources"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|candidate| candidate["audioTrackId"] == track_id)
+                    .expect("each internal audio track must have an explicit source");
+                assert_eq!(explicit["language"], language);
+                assert_eq!(explicit["tracks"][0]["index"], track["index"]);
+                assert_eq!(explicit["tracks"][0]["channels"], track["channels"]);
+            }
             assert_eq!(
                 tracks
                     .iter()
@@ -301,6 +475,7 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
                 3
             );
         } else {
+            assert_eq!(source["language"], "en");
             assert_eq!(media["subtitles"][0]["language"], "fr");
             assert_eq!(media["subtitles"][0]["forced"], true);
             let url = media["subtitles"][0]["url"].as_str().unwrap();
@@ -555,5 +730,176 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
     );
     drop(app);
     pool.close().await;
+    store.close().await;
+}
+
+#[tokio::test]
+async fn webm_uses_original_video_and_authorizes_explicit_external_audio() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("media");
+    tokio::fs::create_dir(&root).await.unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/generated/representative/representative.mp4");
+    for (name, args) in [
+        (
+            "film.webm",
+            vec!["-map", "0:v:0", "-map", "0:a", "-c", "copy"],
+        ),
+        ("voice.opus", vec!["-map", "0:a:0", "-vn", "-c:a", "copy"]),
+    ] {
+        let output = tokio::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-nostdin", "-n", "-i"])
+            .arg(&fixture)
+            .args(args)
+            .arg(root.join(name))
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    tokio::fs::write(
+        root.join("film.webm.media.json"),
+        br#"{"version":1,"audio":[{"file":"voice.opus","language":"fra","offset_seconds":0.25}]}"#,
+    )
+    .await
+    .unwrap();
+    let store = IdentityStore::open(&temp.path().join("db.sqlite3"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "webm-admin",
+            Zeroizing::new("disposable webm password".into()),
+        )
+        .await
+        .unwrap();
+    let app = router(&root, &store).await;
+    let (status, login, _, cookie) = request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        None,
+        json!({"login":"webm-admin","password":"disposable webm password"}),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let library = create_library(&app, &root, &cookie, csrf, "WebM").await;
+    let report = scan(&app, &library, &cookie, csrf).await;
+    assert_eq!(report["errors"], json!([]));
+    let (_, catalog, _, _) = request(
+        &app,
+        "GET",
+        "/api/v1/catalog",
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    let work = catalog["items"][0]["id"].as_str().unwrap();
+    let (_, detail, _, _) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/catalog/{work}"),
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    let asset = detail["editions"][0]["versions"][0]["sources"][0]["assetIds"][0]
+        .as_str()
+        .unwrap();
+    let (_, media, _, _) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/media/{asset}"),
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    let sources = media["sources"].as_array().unwrap();
+    let original = sources
+        .iter()
+        .find(|source| source["audioTrackId"] == "internal-default")
+        .unwrap();
+    assert_eq!(original["mime"], "video/webm");
+    for source in sources.iter().filter(|source| {
+        source["audioTrackId"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("internal-") && id != "internal-default")
+    }) {
+        assert_eq!(source["url"], original["url"]);
+        assert_eq!(source["mime"], "video/webm");
+        assert_eq!(source["prepareVideo"], false);
+        assert!(
+            source["audioSegmentUrl"]
+                .as_str()
+                .unwrap()
+                .contains("-chunk-")
+        );
+    }
+    let external = sources
+        .iter()
+        .find(|source| source["audioTrackId"] == "external-0")
+        .unwrap();
+    assert_eq!(external["language"], "fr");
+    assert_eq!(external["audioOffsetSeconds"], 0.25);
+    assert_eq!(external["tracks"][0]["channels"], 6);
+    assert!(!media.to_string().contains("voice.opus"));
+    for url in [
+        external["externalAudioUrl"].as_str().unwrap().to_owned(),
+        format!("/api/v1/assets/{asset}/prepared/audio-1-chunk-0"),
+    ] {
+        assert_eq!(
+            request(&app, "GET", &url, "", None, Value::Null, None)
+                .await
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            request(&app, "HEAD", &url, &cookie, None, Value::Null, None)
+                .await
+                .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            request(
+                &app,
+                "GET",
+                &url,
+                &cookie,
+                None,
+                Value::Null,
+                Some("bytes=0-5")
+            )
+            .await
+            .0,
+            StatusCode::PARTIAL_CONTENT
+        );
+        assert_eq!(
+            request(
+                &app,
+                "GET",
+                &url,
+                &cookie,
+                None,
+                Value::Null,
+                Some("bytes=999999999999-")
+            )
+            .await
+            .0,
+            StatusCode::RANGE_NOT_SATISFIABLE
+        );
+    }
     store.close().await;
 }

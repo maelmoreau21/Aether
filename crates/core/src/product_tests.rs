@@ -528,6 +528,11 @@ async fn music_scan_metadata_stable_identity_and_range() {
         .status()
         .unwrap();
     assert!(generated.success());
+    std::fs::write(
+        root.join("track.lrc"),
+        "[00:00.00]Paroles de test\n[00:00.50]Deuxième ligne",
+    )
+    .unwrap();
     let store = IdentityStore::open(&temp.path().join("music.db"))
         .await
         .unwrap();
@@ -550,6 +555,13 @@ async fn music_scan_metadata_stable_identity_and_range() {
         .fetch_one(&store.pool)
         .await
         .unwrap();
+    assert_eq!(
+        query_scalar::<_, String>("SELECT lyrics FROM music_tracks")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap(),
+        "[00:00.00]Paroles de test\n[00:00.50]Deuxième ligne"
+    );
     crate::music::scan(&store, "music", &root, &cancel)
         .await
         .unwrap();
@@ -1076,4 +1088,383 @@ async fn granular_parental_tags_schedules_downloads_and_library_images() {
         StatusCode::FORBIDDEN
     );
     assert_eq!(std::fs::read(root.join("clip.mp4")).unwrap(), original);
+}
+
+#[tokio::test]
+async fn mixed_playlists_share_only_with_authenticated_accounts_and_keep_library_grants() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("playlists.db"))
+        .await
+        .unwrap();
+    for (id, role, token) in [
+        ("owner", "user", "b"),
+        ("peer", "user", "c"),
+        ("admin", "administrator", "a"),
+    ] {
+        query("INSERT INTO users(id,role,display_name) VALUES(?,?,?)")
+            .bind(id)
+            .bind(role)
+            .bind(id)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,unixepoch(),unixepoch(),unixepoch()+3600)").bind(auth::hash(&token.repeat(64))).bind(id).execute(&store.pool).await.unwrap();
+    }
+    let root = temp.path().to_string_lossy().into_owned();
+    for (id, kind) in [("music", "music"), ("films", "films")] {
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,?,'local',?,1)")
+            .bind(id)
+            .bind(id)
+            .bind(kind)
+            .bind(&root)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO library_permissions(library_id,user_id) VALUES(?,'owner')")
+            .bind(id)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+    }
+    query("INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,kind,external_ids_json) VALUES('film','films','film','Synthetic Film','synthetic film','film','{}')").execute(&store.pool).await.unwrap();
+    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,codec,mime,scan_id,lyrics) VALUES('song','music',?,'song.opus',1,'0','Song','Artist','Album','Artist','opus','audio/ogg','test','[00:00]Hello')").bind(&root).execute(&store.pool).await.unwrap();
+    let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
+    let owner_cookie = format!("media_session={}", "b".repeat(64));
+    let peer_cookie = format!("media_session={}", "c".repeat(64));
+    let admin_cookie = format!("media_session={}", "a".repeat(64));
+    let csrf = |cookie: &str| {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("cookie", cookie.parse().unwrap());
+        headers
+    };
+    let owner_csrf = auth
+        .authenticate(&csrf(&owner_cookie))
+        .await
+        .unwrap()
+        .csrf_token;
+    let admin_csrf = auth
+        .authenticate(&csrf(&admin_cookie))
+        .await
+        .unwrap()
+        .csrf_token;
+    let peer_csrf = auth
+        .authenticate(&csrf(&peer_cookie))
+        .await
+        .unwrap()
+        .csrf_token;
+    let app = product::router(auth.clone())
+        .merge(crate::playlists::router(auth.clone()))
+        .merge(crate::music::router(auth));
+    assert_eq!(
+        request(&app, "/api/v1/lists", "GET", "", "", Value::Null)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let created = value(
+        request(
+            &app,
+            "/api/v1/lists",
+            "POST",
+            &owner_cookie,
+            &owner_csrf,
+            json!({"name":"Mixed"}),
+        )
+        .await,
+    )
+    .await;
+    let id = created["id"].as_str().unwrap();
+    let settings = format!("/api/v1/playlists/{id}/settings");
+    assert_eq!(
+        request(
+            &app,
+            &settings,
+            "PUT",
+            &owner_cookie,
+            &owner_csrf,
+            json!({"name":"Mixed","visibility":"public"})
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        request(
+            &app,
+            "/api/v1/admin/playlists/policy",
+            "PUT",
+            &peer_cookie,
+            &peer_csrf,
+            json!({"allowPublic":true,"allowSharing":true})
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        request(
+            &app,
+            "/api/v1/admin/playlists/policy",
+            "PUT",
+            &admin_cookie,
+            &admin_csrf,
+            json!({"allowPublic":true,"allowSharing":true})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        request(
+            &app,
+            &format!("/api/v1/lists/{id}/items/film"),
+            "PUT",
+            &owner_cookie,
+            &owner_csrf,
+            Value::Null
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        request(
+            &app,
+            &format!("/api/v1/playlists/{id}/music/song"),
+            "PUT",
+            &owner_cookie,
+            &owner_csrf,
+            Value::Null
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let list_path = format!("/api/v1/lists/{id}");
+    let mine = value(request(&app, &list_path, "GET", &owner_cookie, "", Value::Null).await).await;
+    assert_eq!(mine["entries"].as_array().unwrap().len(), 2);
+    assert_eq!(mine["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        request(
+            &app,
+            &settings,
+            "PUT",
+            &owner_cookie,
+            "bad",
+            json!({"name":"Mixed","visibility":"shared","userIds":["peer"]})
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        request(
+            &app,
+            &settings,
+            "PUT",
+            &owner_cookie,
+            &owner_csrf,
+            json!({"name":"Mixed","visibility":"shared","userIds":["peer"]})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let shared = value(request(&app, &list_path, "GET", &peer_cookie, "", Value::Null).await).await;
+    assert_eq!(shared["entries"].as_array().unwrap().len(), 0);
+    assert_eq!(shared["owned"], false);
+    assert_eq!(shared["shares"], json!([]));
+    assert_eq!(
+        request(
+            &app,
+            &list_path,
+            "DELETE",
+            &peer_cookie,
+            &peer_csrf,
+            Value::Null
+        )
+        .await
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        request(
+            &app,
+            "/api/v1/music/tracks/song/content",
+            "HEAD",
+            &peer_cookie,
+            "",
+            Value::Null
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        request(
+            &app,
+            "/api/v1/music/tracks/song/lyrics",
+            "GET",
+            &peer_cookie,
+            "",
+            Value::Null
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    query("INSERT INTO library_permissions(library_id,user_id) VALUES('music','peer')")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    let shared = value(request(&app, &list_path, "GET", &peer_cookie, "", Value::Null).await).await;
+    assert_eq!(shared["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        value(
+            request(
+                &app,
+                "/api/v1/music/tracks/song/lyrics",
+                "GET",
+                &peer_cookie,
+                "",
+                Value::Null
+            )
+            .await
+        )
+        .await["text"],
+        "[00:00]Hello"
+    );
+    let reorder = format!("/api/v1/playlists/{id}/order");
+    assert_eq!(
+        request(
+            &app,
+            &reorder,
+            "PUT",
+            &owner_cookie,
+            &owner_csrf,
+            json!([{"kind":"music","id":"song"},{"kind":"work","id":"film"}])
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        value(request(&app, &list_path, "GET", &owner_cookie, "", Value::Null).await).await["entries"]
+            [0]["kind"],
+        "music"
+    );
+    assert_eq!(
+        request(
+            &app,
+            &reorder,
+            "PUT",
+            &owner_cookie,
+            &owner_csrf,
+            json!([{"kind":"music","id":"song"},{"kind":"music","id":"song"}])
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        request(
+            &app,
+            "/api/v1/admin/playlists/policy",
+            "PUT",
+            &admin_cookie,
+            &admin_csrf,
+            json!({"allowPublic":false,"allowSharing":false})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        request(&app, &list_path, "GET", &peer_cookie, "", Value::Null)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        request(&app, &list_path, "GET", &owner_cookie, "", Value::Null)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    if std::env::var("MEDIA_TEST_PLAYLIST_BROWSER").as_deref() == Ok("1") {
+        for (file, title, frequency, number) in [
+            ("song.opus", "Song", "440", "1"),
+            ("next.opus", "Next Song", "880", "2"),
+        ] {
+            let status = tokio::process::Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    &format!("sine=frequency={frequency}:duration=30"),
+                    "-c:a",
+                    "libopus",
+                    "-metadata",
+                    &format!("title={title}"),
+                    "-metadata",
+                    "artist=Synthetic Artist",
+                    "-metadata",
+                    "album=Browser Test",
+                    "-metadata",
+                    &format!("track={number}"),
+                    "-n",
+                ])
+                .arg(temp.path().join(file))
+                .status()
+                .await
+                .unwrap();
+            assert!(status.success());
+        }
+        std::fs::write(
+            temp.path().join("song.lrc"),
+            "[00:00.00]Hello from the fixture\n[00:10.00]Second line",
+        )
+        .unwrap();
+        crate::music::scan(
+            &store,
+            "music",
+            temp.path(),
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .await
+        .unwrap();
+        query("UPDATE playlist_policy SET allow_public=1,allow_sharing=1")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let origin = format!("http://127.0.0.1:{port}");
+        let auth = AuthState::new(store.clone(), origin.clone()).await.unwrap();
+        let app = crate::secure_app(
+            crate::node::Inventory::local(temp.path().to_owned())
+                .await
+                .unwrap(),
+            port,
+            auth,
+        )
+        .await
+        .unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let result = tokio::process::Command::new("node")
+            .arg("scripts/browser-playlists.cjs")
+            .current_dir(root)
+            .env("MEDIA_TEST_ORIGIN", origin)
+            .status()
+            .await
+            .unwrap();
+        server.abort();
+        assert!(result.success(), "playlist browser scenario failed");
+    }
 }

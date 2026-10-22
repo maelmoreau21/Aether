@@ -1,5 +1,144 @@
 # CI et publication GHCR
 
+## Réduction de l'attente CI — 22 octobre 2026
+
+Le run `39827517263` a pris 22 min 25 s. Les logs montrent 13 min 27 s
+pour l'étape d'intégration Rust ; dans le job navigateur, 7 min 06 s pour
+FFmpeg et 10 min 08 s pour Chrome/dépendances. FFmpeg était pourtant restauré
+du cache : les installations apt ont téléchargé 15,5 Mio puis 22,8 Mio à
+environ 38 Kio/s. Ce sont des mesures du run précédent, pas un benchmark après.
+
+Changements :
+
+- Les cibles d'intégration Cargo sont découvertes via `cargo metadata` et
+  réparties de façon déterministe sur trois runners isolés. Les 44 cibles
+  actuelles sont réparties en 15/15/14 ; aucune liste manuelle à maintenir.
+  Chaque cible reste séquentielle (`--test-threads=1`) ; les scénarios de
+  concurrence conservent leurs tâches et assertions. Les cibles ignorées le
+  restent, comme auparavant, et les parcours navigateur gardent leur job dédié.
+- Format, Clippy strict, unitaires, ABI Wasm et contrats PostgreSQL restent
+  obligatoires, exécutés une fois dans la partition 0. Le cache Cargo est
+  partagé (`shared-key: rust`), avec sauvegarde par cette partition uniquement.
+- Le contrôle `Rust (Format, Clippy, Tests)` garde son nom et agrège la réussite
+  des trois partitions. Un échec, une annulation ou une partition ignorée le
+  fait échouer ; la publication dépend toujours de ce contrôle et des autres
+  validations. `fail-fast: false` laisse les autres partitions finir leurs tests.
+- Chrome préinstallé est lancé et vérifié avant toute installation. Seul un
+  échec déclenche l'installateur Playwright existant, puis une nouvelle
+  vérification obligatoire. Aucun remplacement par Chromium ou faux rapport.
+- FFmpeg mis en cache est exécuté avant d'installer quoi que ce soit. S'il est
+  fonctionnel, aucune opération apt. Si les bibliothèques partagées manquent,
+  seules les bibliothèques de codecs sont installées ; les outils de compilation
+  sont réservés à un cache manquant. Versions 9.0.2 et test lavfi toujours exigés.
+- Les jobs Rust/navigateur ont un plafond de 35 minutes, le contrôle agrégé de
+  5 minutes. Cela borne un vrai blocage ; cela ne répare pas un check GitHub
+  incohérent dont les logs et le workflow sont déjà terminés.
+
+Le gain dépend du cache, du téléchargement apt et du nombre de runners
+disponibles. Trois runners peuvent consommer davantage de minutes cumulées et
+compiler des dépendances communes en parallèle. Un démarrage sans cache peut
+donc rester long ; aucune durée après modification n'est garantie.
+
+Vérifications locales :
+
+```powershell
+python scripts/test-ci-integration-shard.py
+python scripts/ci-integration-shard.py --index 0 --count 3 --list
+python scripts/ci-integration-shard.py --index 1 --count 3 --list
+python scripts/ci-integration-shard.py --index 2 --count 3 --list
+node scripts/ci-ensure-chrome.cjs
+docker run --rm -v "${PWD}:/repo:ro" -w /repo rhysd/actionlint:1.7.12
+```
+
+Trois tests de répartition passent (couverture exhaustive sans doublon,
+découverte des seuls tests du workspace et rejet des paramètres invalides).
+Chrome Windows local réutilisé avec succès ; actionlint et ShellCheck des
+scripts FFmpeg passent. Invocation réelle multi-package `cargo test --locked
+--workspace --all-features --test contracts_test --test version_and_nodes -j 1
+-- --test-threads=1` : 5 tests réussis. Le script de partition a aussi exécuté
+réellement la cible `version_and_nodes` avec succès (2 tests), au-delà du plan.
+Les chemins apt Linux, les trois runners GitHub et le
+gain de temps distant nécessitent encore un nouveau run après push autorisé.
+Pas de tests fonctionnels supprimés, de publication déclenchée ou de média modifié.
+
+## Non-régression audio segmenté — 22 octobre 2026
+
+Le job navigateur génère/valide désormais aussi `dual-opus.mp4` (AV1 10 bits
+1080p, deux Opus 5.1) puis exécute `browser-dual-opus.cjs` avec
+`MEDIA_TEST_SEGMENTED=1`. Son rapport `passed` est obligatoire, purgé avant test,
+vérifié au même titre que Films/Séries et archivé dans le même artefact. La clé
+du cache navigateur inclut le générateur ; la CI Rust garde son cache distinct.
+Le benchmark Docker/Nginx de 336 Mio reste une commande locale documentée,
+pas un benchmark NAS ni un nouveau service permanent de CI.
+
+## Dossier des rapports navigateur Films — 22 octobre 2026
+
+Le script local écrit désormais dans `target/browser-scanner` par défaut, alors
+que le workflow vérifie et archive `docs/evidence/2026-10-16/scanner`. Cette
+divergence provoquait un `FileNotFoundError` malgré la fin du parcours navigateur.
+L'étape Films fixe maintenant `MEDIA_REPORT_DIR` au dossier attendu par la CI ;
+le test Rust transmet déjà cette variable au script navigateur. Le nettoyage,
+les assertions `passed: true`, les captures obligatoires et l'upload restent stricts.
+
+Vérifié localement : parsing YAML et concordance du dossier de génération avec
+le nettoyage, les deux rapports, les trois captures et l'archivage ; actionlint
+1.7.12 et `git diff --check`. Pas de nouvelle exécution GitHub Linux ni de push.
+
+## Assertion de langue du scanner — 22 octobre 2026
+
+Le journal GitHub fourni confirme les 12 tests P0 réussis. L’échec suivant était
+une ancienne assertion de `scanner_flow` attribuant `fr` à l’original MKV bilingue.
+Le contrat documenté depuis le 21 octobre expose `und` pour cet original : sa
+première piste n’est pas une garantie de sélection par le navigateur.
+
+Le test vérifie désormais `internal-default`/`und`, les sources explicites FR/EN
+avec leurs index et canaux, et `en` pour l’original MP4 mono-audio. Les tags bruts
+`fra`/`eng` restent vérifiés. Aucun code de scan ou de lecture n’a été modifié.
+Commande ciblée : `cargo test --locked -p media-poc --all-features --test scanner_flow
+-j 1 -- --test-threads=1` : 1 réussi Windows, ainsi que fmt/diff checks.
+La suite GitHub complète reste à relancer ; aucun push effectué.
+
+## Cache des fixtures P0 et profil AV1 — 22 octobre 2026
+
+Les jobs Rust et navigateur utilisaient la même clé alors que seul Rust préparait
+MSE/DASH. Un cache créé par le navigateur pouvait donc faire sauter la préparation
+Rust et provoquer des 404 et fichiers VTT absents. Les clés sont maintenant
+distinctes (`fixtures-p0-full-v2` / `fixtures-p1-browser-v2`), ce qui écarte aussi
+les anciennes entrées incomplètes. Le job Rust vérifie les fichiers non vides et
+les rapports MSE/DASH `passed`/`originals_unchanged`, même après restauration.
+
+Le test du profil AV1 accepte les deux représentations du profil 0/Main, dont
+la chaîne `"0"` observée avec le build CI. Codec AV1, format 10 bits, couleurs et
+canaux restent contrôlés ; aucune assertion de lecture n'est désactivée.
+
+Validation locale : `python scripts/validate-prepared-fixtures.py`, rejet d'un
+répertoire incomplet, parsing YAML et distinction des clés, `cargo fmt --all --check`
+et `cargo test --locked -p media-poc --all-features --test p0 -j 1 -- --test-threads=1`
+(11 réussis sous Windows). Le douzième test Linux sur les symlinks n'est pas
+compilé sous Windows. La CI Linux complète reste à relancer ; aucun push effectué.
+
+## Correctif FFmpeg des fixtures — 21 octobre 2026
+
+Le profil partagé désactivait `libavdevice`, qui fournit l'entrée synthétique
+`lavfi`. Le profil `fixtures` réactive désormais `--enable-avdevice` et seulement
+`--enable-indev=lavfi` ; le profil Docker `runtime` conserve les périphériques
+désactivés. L'action setup-ffmpeg exécute un court test `testsrc2` + `sine` après
+installation, y compris après restauration du cache. La clé binaire inclut déjà
+le script de construction ; les deux clés des fixtures l'incluent désormais aussi.
+
+Les anciennes preuves navigateur sont retirées immédiatement après checkout.
+L'upload des artefacts reste effectué après échec si des fichiers existent, mais
+est ignoré quand une panne de setup/fixtures n'a produit aucune preuve. Le contrôle
+des rapports `passed: true` et des captures sur un parcours réussi reste strict,
+ainsi que `if-no-files-found: error` lorsque l'upload est effectivement lancé.
+L'avertissement Node `punycode` ne provoque pas l'échec de génération.
+
+Validation locale ciblée : actionlint 1.7.12 sur les workflows, `bash -n` sur le
+script de construction, test court lavfi avec le FFmpeg Windows installé et
+`git diff --check`, tous réussis. Le test Windows ne prouve pas la reconstruction
+du profil Linux. Docker Desktop Linux est arrêté : aucune compilation Linux ni
+nouvelle exécution GitHub n'a été réalisée. Aucun push ni publication.
+
 ## Contrat
 
 `ci.yml` traite les push/PR vers `main` et `develop`, ainsi que les lancements
@@ -28,8 +167,8 @@ garantie d'immutabilité imposée par GHCR : pour figer une installation, utilis
 peut laisser certains packages publiés. Ne pas utiliser ce run comme livraison
 complète tant que les trois jobs ne sont pas réussis.
 
-Avant publication, le Node est vérifié avec `ffprobe` fonctionnel, absence de
-commande FFmpeg et de bibliothèques partagées `libav*.so`, et taille inférieure
+Avant publication, le Node est vérifié avec `ffprobe` et `ffmpeg` 9.0.2 fonctionnels et absence de
+bibliothèques partagées `libav*.so`, et taille inférieure
 à 200 millions d'octets. Le runtime minimal du Dockerfile est conservé. Cette
 limite détecte une régression de taille ; elle ne mesure pas la RAM du Node.
 Après publication, chaque job télécharge son image par digest, contrôle les

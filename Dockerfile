@@ -123,58 +123,13 @@ RUN touch crates/shared/src/lib.rs \
         target/release/media-extension-worker \
         target/release/media-extension-pack
 
-# Minimal ffprobe build for Media Node discovery.
-# Builds a stripped, hardened ffprobe binary with native demuxers, parsers, and decoders.
-# All encoders, muxers, filters, graphics/GUI libraries, and hardware accelerators are omitted.
-# Dynamically links exclusively against libc6/libm, eliminating hundreds of megabytes of unused packages.
+# FFmpeg/ffprobe 9.0.2: same verified source as CI, packet-copy runtime profile.
 FROM debian:bookworm-slim AS probe-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        ca-certificates \
-        curl \
-        pkg-config \
-        yasm \
+        build-essential ca-certificates curl pkg-config nasm xz-utils \
     && rm -rf /var/lib/apt/lists/*
-
-ARG FFMPEG_VERSION=6.1.2
-RUN mkdir -p /tmp/ffmpeg-src \
-    && ( \
-        curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o /tmp/ffmpeg.tar.xz \
-        && tar -xJ -f /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg-src --strip-components=1 \
-        && rm -f /tmp/ffmpeg.tar.xz \
-    ) || ( \
-        echo "Primary ffmpeg.org download failed; falling back to GitHub mirror" \
-        && curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n${FFMPEG_VERSION}.tar.gz" -o /tmp/ffmpeg.tar.gz \
-        && tar -xz -f /tmp/ffmpeg.tar.gz -C /tmp/ffmpeg-src --strip-components=1 \
-        && rm -f /tmp/ffmpeg.tar.gz \
-    ) \
-    && cd /tmp/ffmpeg-src \
-    && ./configure \
-        --prefix=/probe \
-        --disable-programs \
-        --enable-ffmpeg \
-        --enable-ffprobe \
-        --disable-doc \
-        --disable-avdevice \
-        --disable-swscale \
-        --disable-postproc \
-        --disable-network \
-        --disable-encoders \
-        --enable-encoder=webvtt \
-        --disable-devices \
-        --disable-filters \
-        --disable-hwaccels \
-        --enable-protocol=file,pipe,fd \
-        --disable-debug \
-        --enable-small \
-    && make -j$(nproc) \
-    && make install \
-    && strip --strip-all /probe/bin/ffmpeg /probe/bin/ffprobe \
-    && mkdir -p /probe/share/media-probe \
-    && /probe/bin/ffprobe -version > /probe/share/media-probe/version.txt \
-    && cp COPYING.LGPLv2.1 /probe/share/media-probe/LICENSE \
-    && cp -r /usr/share/common-licenses /probe/share/media-probe/common-licenses \
-    && rm -rf /tmp/ffmpeg-src
+COPY scripts/build-ffmpeg.sh /tmp/build-ffmpeg.sh
+RUN bash /tmp/build-ffmpeg.sh /probe runtime
 
 # ==============================================================================
 # PostgreSQL client tools for offline and Web backups, shared by Core/standalone.
@@ -223,6 +178,7 @@ COPY --from=rust-builder --chmod=0755 /build/target/release/media-extension-work
 COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
 
 ENV MEDIA_MODE=distributed \
+    MEDIA_PREPARATION_CACHE_DIR=/data/preparation-cache \
     MEDIA_PORT=3000 \
     MEDIA_BIND_ADDR=0.0.0.0 \
     MEDIA_DB_PATH=/data/core.sqlite3 \
@@ -275,6 +231,7 @@ RUN mkdir -p /data /media /app \
 COPY --from=rust-builder --chmod=0755 /build/target/release/aether-node /usr/local/bin/aether-node
 
 ENV MEDIA_NODE_PORT=4000 \
+    MEDIA_PREPARATION_CACHE_DIR=/data/preparation-cache \
     MEDIA_NODE_BIND_ADDR=0.0.0.0 \
     MEDIA_NODE_DATA_DIR=/data \
     MEDIA_NODE_ROOTS=/media
@@ -327,6 +284,7 @@ RUN ln -s /usr/local/bin/aether-core /usr/local/bin/media-poc \
 COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
 
 ENV MEDIA_PORT=3000 \
+    MEDIA_PREPARATION_CACHE_DIR=/data/preparation-cache \
     MEDIA_BIND_ADDR=0.0.0.0 \
     MEDIA_DB_PATH=/data/core.sqlite3 \
     MEDIA_BACKUP_DIR=/backups \

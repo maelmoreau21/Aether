@@ -1,10 +1,15 @@
+#[path = "src/version_policy.rs"]
+mod version_policy;
+
 fn main() {
     println!("cargo:rerun-if-env-changed=MEDIA_VERSION");
     println!("cargo:rerun-if-env-changed=AETHER_VERSION");
     println!("cargo:rerun-if-env-changed=GIT_BRANCH");
     println!("cargo:rerun-if-env-changed=GITHUB_REF_NAME");
+    println!("cargo:rerun-if-env-changed=GITHUB_HEAD_REF");
     println!("cargo:rerun-if-env-changed=GITHUB_REF");
     println!("cargo:rerun-if-changed=../../.git/HEAD");
+    println!("cargo:rerun-if-changed=src/version_policy.rs");
 
     let base_version = env!("CARGO_PKG_VERSION");
 
@@ -20,19 +25,16 @@ fn main() {
     }
 
     // 2. Branch detection from environment (Docker build args, GitHub Actions)
-    let env_branch = std::env::var("GIT_BRANCH")
-        .or_else(|_| std::env::var("GITHUB_REF_NAME"))
-        .or_else(|_| {
-            std::env::var("GITHUB_REF").map(|ref_str| {
-                ref_str
-                    .strip_prefix("refs/heads/")
-                    .unwrap_or(&ref_str)
-                    .to_string()
-            })
-        })
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    let env_branch = [
+        "GIT_BRANCH",
+        "GITHUB_HEAD_REF",
+        "GITHUB_REF_NAME",
+        "GITHUB_REF",
+    ]
+    .into_iter()
+    .filter_map(|name| std::env::var(name).ok())
+    .map(|value| value.trim().to_owned())
+    .find(|value| !value.is_empty());
 
     // 3. Branch detection from local git repository
     let branch = env_branch
@@ -71,17 +73,7 @@ fn main() {
             None
         });
 
-    let is_develop = match branch.as_deref() {
-        Some("develop") => true,
-        Some(b) if b.contains("develop") => true,
-        _ => false,
-    };
-
-    let computed_version = if is_develop {
-        format!("{base_version}-beta")
-    } else {
-        base_version.to_string()
-    };
+    let computed_version = version_policy::version_for_branch(base_version, branch.as_deref());
 
     println!("cargo:rustc-env=AETHER_APP_VERSION={computed_version}");
 }

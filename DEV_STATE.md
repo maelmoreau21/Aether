@@ -1,5 +1,60 @@
 # État de développement
 
+## 21 octobre 2026 — Parcours des extensions raccordés
+
+- Métadonnées : contexte catalogue réel, search → choix du candidat → details →
+  application explicite, adaptation des champs SDK, conservation des corrections
+  et IDs des autres fournisseurs. Import d’images séparé et protégé.
+- Avatars activés accessibles aux comptes depuis leurs paramètres : packs,
+  variante, aperçu et enregistrement. SVG inertes validés ; pas de dépendance
+  à une bibliothèque ni de droit réseau/configuration transmis à cet adaptateur.
+- Délais 65 s worker/70 s Web ; erreurs par code sans message brut. Permissions,
+  activation, éditeur et session revérifiés ; broker et imports bornés.
+- Fournisseurs toujours externes. Aether-Plugins corrigé : fanart par ID,
+  propositions ambiguës refusées, Avatar Wasm sans horloge, paquetage avatar et
+  permission images. Reconstruire/signer/réinstaller les anciens paquets.
+- Validation : 9 tests intégration extensions réussis/3 ignorés, 6 unitaires
+  ciblés réussis/1 ignoré et 2 adaptateurs rejoués ; Clippy Core strict tous
+  targets/features, Web check/lint/build, workspace plugins check. Avatar Wasm
+  compilé et exécuté (4 packs + génération). Contrats et syntaxe paquetage valides.
+- Limites : pas d’appels réels avec clés fournisseurs ni d’E2E navigateur rejoué.
+  Aucun push, déploiement ou publication. Les limites de taille/fuel demeurent.
+
+## 21 octobre 2026 — Extensions : fournisseurs séparés du Core
+
+- Core générique : domaines réseau tirés du manifeste signé `httpHosts`, sans
+  branchement TMDb/fanart/IMDb ni authentification déduite du nom. Domaines affichés
+  avant activation ; champ absent/vide = aucun réseau. Aucune extension intégrée
+  ou installée par défaut ; les fournisseurs restent dans Aether-Plugins.
+- Application de métadonnées contrôlant installation, activation, éditeur,
+  bibliothèque et metadata.write. Test CI devenu synthétique et vérifiant une
+  affiche servie par le pipeline protégé. Test de module externe opt-in générique.
+- Tests extensions 8/8 exécutés réussis (3 ignorés), cas apply read-only rejoué
+  réussi ; Clippy strict, check/lint/build Web et check Aether-Plugins réussis.
+  Contrats : docs/EXTENSIONS_API.md et OpenAPI. Anciens paquets réseau à recréer et
+  signer avec leurs domaines ; pas de migration implicite des permissions.
+- Modifications dans les deux dépôts, aucun push/déploiement ni appel fournisseur
+  réel. La CI complète GitHub reste à confirmer après publication autorisée.
+
+## 21 octobre 2026 — Correctifs ciblés du lecteur après audit
+
+- Préparations sérialisées, commutation audio avec candidat validé avant remplacement,
+  nettoyage des échecs/fermetures, état de lecture préservé pendant buffering,
+  sélection de langue/piste explicite et original multi-audio non étiqueté FR.
+- Seek/décalage recalés, buffering audio suspendant la vidéo avec reprise bornée
+  et pause manuelle prioritaire ; seuil de correction périodique 80 ms. Deux
+  horloges indépendantes, pas de garantie à l'échantillon ni de sortie physique 5.1/7.1.
+- Limites configurables de préparation : 900 s, vidéo 64 Gio, audio 4 Gio, cache
+  96 Gio par défaut, sans réencodage. Cache Docker dans `/data/preparation-cache`
+  au lieu du tmpfs `/tmp` 64 Mio. Toujours une copie complète avant première lecture,
+  un worker, cache temporaire borné ; aucun déploiement effectué.
+- Web check/lint/build, 73 tests et 5 régressions ciblées réussis. Tests Rust de
+  copie de paquets AV1/Opus, huit canaux et leases du cache réussis. Chrome/Core/
+  SQLite : MP4 puis MKV après redémarrage, VF/VO/PCM/seek/pause/progression/sous-titres
+  réussis (33,09 s). Compose validés par config seulement. Fmt/diff/Clippy stricts.
+- Rapport et commandes : `docs/PLAYER_PLAYBACK_AUDIT.md`. NAS/4K réel, autres
+  navigateurs, longue durée et restitution matérielle multicanal restent à vérifier.
+
 ## 21 octobre 2026 — Navigation par bibliothèque, éditeur d’images et réactivité
 
 - Le menu principal affiche les bibliothèques actives autorisées et leur nom réel via GET /api/v1/libraries ; filtre bibliothèque appliqué au catalogue et à la musique, conservé dans les formulaires/pagination. Aucun chemin disque exposé.

@@ -85,3 +85,7 @@ et FRforced sont détectés/sélectionnés par Shaka5.2.13 sur les trois navigat
 choix manuels conservés après seek. Cela ne rend pas accessibles les pistes
 intégrées par l'API HTML5 native. Nombre de canaux conservé par piste ; mono/7.1
 et restitution physique multicanal restent NT. Voir P0C_SHAKA_EXPERIMENT.md.
+
+
+État des médias indépendants, manifeste d’association versionné et limites raw :
+[SEPARATED_MEDIA.md](SEPARATED_MEDIA.md).

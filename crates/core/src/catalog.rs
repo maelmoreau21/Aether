@@ -178,10 +178,32 @@ pub async fn list(
             return error(StatusCode::BAD_REQUEST, "invalid_library");
         }
         if let Some(Extension(visible)) = &mut visible {
-            if !visible.0.contains(library) {
+            let children: Vec<String> = if let Some(Extension(store)) = &store {
+                match crate::database::query_scalar(
+                    "SELECT library_id FROM library_folders WHERE parent_id=? AND active=1",
+                )
+                .bind(library)
+                .fetch_all(&store.pool)
+                .await
+                {
+                    Ok(ids) => ids,
+                    Err(_) => {
+                        return error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable");
+                    }
+                }
+            } else {
+                vec![]
+            };
+            if !visible
+                .0
+                .iter()
+                .any(|id| id == library || children.contains(id))
+            {
                 return error(StatusCode::FORBIDDEN, "permission_denied");
             }
-            visible.0.retain(|id| id == library);
+            visible
+                .0
+                .retain(|id| id == library || children.contains(id));
         }
     }
     let limit = query.limit.unwrap_or(24);

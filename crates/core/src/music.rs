@@ -18,6 +18,8 @@ use std::{path::Path as DiskPath, sync::atomic::AtomicBool};
 pub fn router(auth: AuthState) -> Router {
     Router::new()
         .route("/api/v1/music", get(list))
+        .route("/api/v1/music/tracks/{id}", get(read_detail))
+        .route("/api/v1/music/tracks/{id}/lyrics", get(lyrics))
         .route(
             "/api/v1/music/tracks/{id}/content",
             get(content).head(content),
@@ -27,6 +29,36 @@ pub fn router(auth: AuthState) -> Router {
             get(content).head(content),
         )
         .with_state(auth)
+}
+pub async fn detail(auth: &AuthState, headers: &HeaderMap, id: &str) -> Result<Value, StatusCode> {
+    auth.authenticate(headers).await?;
+    let row=query("SELECT t.* FROM music_tracks t JOIN libraries l ON l.id=t.library_id WHERE t.id=? AND t.available=1 AND t.root_snapshot=l.root").bind(id).fetch_optional(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    allowed(auth, headers, &row.get::<String, _>("library_id")).await?;
+    Ok(
+        json!({"id":id,"title":row.get::<String,_>("title"),"artist":row.get::<String,_>("artist"),"album":row.get::<String,_>("album"),"albumArtist":row.get::<String,_>("album_artist"),"mime":row.get::<String,_>("mime"),"codec":row.get::<String,_>("codec"),"duration":row.get::<Option<f64>,_>("duration")}),
+    )
+}
+async fn read_detail(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    Ok(Json(detail(&auth, &headers, &id).await?))
+}
+async fn lyrics(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    detail(&auth, &headers, &id).await?;
+    let text: String = query_scalar("SELECT lyrics FROM music_tracks WHERE id=?")
+        .bind(id)
+        .fetch_one(&auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(
+        json!({"text":text,"source":if text.is_empty(){"unavailable"}else{"library"}}),
+    ))
 }
 async fn allowed(auth: &AuthState, headers: &HeaderMap, library: &str) -> Result<(), StatusCode> {
     let actor = auth.authenticate(headers).await?;
@@ -72,7 +104,7 @@ async fn list(
             .replace('%', "\\%")
             .replace('_', "\\_")
     );
-    let total: i64 = query_scalar("SELECT COUNT(*) FROM music_tracks t JOIN libraries l ON l.id=t.library_id JOIN media_nodes n ON n.id=l.node_id WHERE t.available=1 AND t.root_snapshot=l.root AND l.kind='music' AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND policy.allow_unrated=0) AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (?='' OR l.id=?) AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\'")
+    let total: i64 = query_scalar("SELECT COUNT(*) FROM music_tracks t JOIN libraries l ON l.id=t.library_id JOIN media_nodes n ON n.id=l.node_id WHERE t.available=1 AND t.root_snapshot=l.root AND l.kind='music' AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND policy.allow_unrated=0) AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (?='' OR COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=l.id AND f.active=1),l.id)=?) AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\'")
         .bind(&actor.user.id)
         .bind(actor.user.role.as_str())
         .bind(&actor.user.id)
@@ -81,7 +113,7 @@ async fn list(
         .fetch_one(&auth.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let rows=query("SELECT t.* FROM music_tracks t JOIN libraries l ON l.id=t.library_id JOIN media_nodes n ON n.id=l.node_id WHERE t.available=1 AND t.root_snapshot=l.root AND l.kind='music' AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND policy.allow_unrated=0) AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (?='' OR l.id=?) AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\' ORDER BY t.album_artist,t.album,t.disc_number,t.track_number,t.title,t.id LIMIT ? OFFSET ?").bind(&actor.user.id).bind(actor.user.role.as_str()).bind(&actor.user.id).bind(&library).bind(&library).bind(term).bind(limit).bind(offset).fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rows=query("SELECT t.* FROM music_tracks t JOIN libraries l ON l.id=t.library_id JOIN media_nodes n ON n.id=l.node_id WHERE t.available=1 AND t.root_snapshot=l.root AND l.kind='music' AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND policy.allow_unrated=0) AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (?='' OR COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=l.id AND f.active=1),l.id)=?) AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\' ORDER BY t.album_artist,t.album,t.disc_number,t.track_number,t.title,t.id LIMIT ? OFFSET ?").bind(&actor.user.id).bind(actor.user.role.as_str()).bind(&actor.user.id).bind(&library).bind(&library).bind(term).bind(limit).bind(offset).fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     let items:Vec<Value>=rows.into_iter().map(|r|json!({"id":r.get::<String,_>("id"),"libraryId":r.get::<String,_>("library_id"),"title":r.get::<String,_>("title"),"artist":r.get::<String,_>("artist"),"albumArtist":r.get::<String,_>("album_artist"),"album":r.get::<String,_>("album"),"trackNumber":r.get::<Option<i64>,_>("track_number"),"duration":r.get::<Option<f64>,_>("duration"),"codec":r.get::<String,_>("codec"),"mime":r.get::<String,_>("mime")})).collect();
     Ok(Json(
         json!({"items":items,"total":total,"offset":offset,"limit":limit}),
@@ -180,8 +212,14 @@ pub async fn publish_track(
     scan: &str,
     track: media_node::music::MusicTrack,
 ) -> std::io::Result<()> {
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,available) SELECT ?,id,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1 FROM libraries WHERE id=? AND root=? AND enabled=1 AND kind='music' ON CONFLICT(library_id,root_snapshot,relative_path) DO UPDATE SET size=excluded.size,modified_ns=excluded.modified_ns,title=excluded.title,artist=excluded.artist,album=excluded.album,album_artist=excluded.album_artist,track_number=excluded.track_number,disc_number=excluded.disc_number,duration=excluded.duration,codec=excluded.codec,mime=excluded.mime,scan_id=excluded.scan_id,available=1")
-                .bind(uuid::Uuid::new_v4().to_string()).bind(root).bind(track.relative_path).bind(track.size as i64).bind(track.modified_ns).bind(track.title).bind(track.artist).bind(track.album).bind(track.album_artist).bind(track.track_number).bind(track.disc_number).bind(track.duration).bind(track.codec).bind(track.mime).bind(scan).bind(library).bind(root).execute(&store.pool).await.map_err(std::io::Error::other)?;
+    if track.lyrics.len() > 32768 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "lyrics exceed snapshot limit",
+        ));
+    }
+    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,available,lyrics) SELECT ?,id,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,? FROM libraries WHERE id=? AND root=? AND enabled=1 AND kind='music' ON CONFLICT(library_id,root_snapshot,relative_path) DO UPDATE SET size=excluded.size,modified_ns=excluded.modified_ns,title=excluded.title,artist=excluded.artist,album=excluded.album,album_artist=excluded.album_artist,track_number=excluded.track_number,disc_number=excluded.disc_number,duration=excluded.duration,codec=excluded.codec,mime=excluded.mime,scan_id=excluded.scan_id,available=1,lyrics=excluded.lyrics")
+                .bind(uuid::Uuid::new_v4().to_string()).bind(root).bind(track.relative_path).bind(track.size as i64).bind(track.modified_ns).bind(track.title).bind(track.artist).bind(track.album).bind(track.album_artist).bind(track.track_number).bind(track.disc_number).bind(track.duration).bind(track.codec).bind(track.mime).bind(scan).bind(track.lyrics).bind(library).bind(root).execute(&store.pool).await.map_err(std::io::Error::other)?;
 
     Ok(())
 }

@@ -7,6 +7,11 @@ export function audioChoices(media: Media, selectedId?: string): Source[] {
   const choices = new Map<string, Source>();
   for (const source of media.sources) {
     if (source.nodeStatus === 'revoked' || source.nodeStatus === 'disconnected') continue;
+    const internalTracks = source.tracks?.filter(track => track.codec_type === 'audio') ?? [];
+    if (source.tracks && internalTracks.length === 0 && !source.externalAudioUrl && !source.audioSegmentUrl) continue;
+    if (source.audioTrackId === 'internal-default' && source.audioTrackId !== selectedId && internalTracks.length > 1 &&
+      internalTracks.every(track => media.sources.some(candidate => candidate.audioTrackId === `internal-${track.index}` &&
+        candidate.nodeStatus !== 'revoked' && candidate.nodeStatus !== 'disconnected'))) continue;
     const firstAudio = source.audioTrackId === 'internal-default'
       ? source.tracks?.find(track => track.codec_type === 'audio')?.index : undefined;
     // The original default and the prepared form of that same indexed track

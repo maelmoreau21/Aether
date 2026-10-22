@@ -1,3 +1,4 @@
+> Bibliothèques avec plusieurs dossiers/nœuds : [contrat du 22 octobre](LIBRARY_FOLDERS.md).
 > Navigation par bibliothèque et images multiples : [contrat du 21 octobre](RESPONSIVENESS_AND_ARTWORK.md).
 
 > Administration du 19 octobre 2026 : comptes [ADMIN_USERS.md](ADMIN_USERS.md),
@@ -278,13 +279,37 @@ Contrat et limites : [P3/P4](P3_P4_FEATURES.md).
 `GET|HEAD /api/v1/assets/{id}/prepared/{component}` : session et droits bibliothèque
 actuels obligatoires, y compris Range. `component` = `video` (AV1 vers fMP4 sans
 audio), `audio-{index}` (Opus vers Ogg) ou `subtitle-{index}` (texte vers WebVTT).
+Depuis le 22 octobre : `audio-{index}-chunk-{n}` copie une courte fenêtre Opus
+en MP4 fragmenté (tranches de 10 s, une seconde de preroll, sortie bornée à 12 s).
+Les indices et le début de fenêtre sont validés dans le probe inventorié avant
+accès local ou relais distant. Maximum 8640 fenêtres ; pas de chemin client.
+Un MP4 AV1 expose `prepareVideo: false`, `url` vers le contenu original avec
+son index Range, `audioSegmentUrl` comme préfixe des fenêtres, et conserve
+`externalAudioUrl` pour le repli Ogg si MSE Opus n'est pas disponible.
+
 Indices validés dans le probe inventorié, jamais un chemin. 200/206/416 selon
 Range, 401 anonyme, 403 sans droits, 422 piste absente/incompatible, 503 en cas
-FFmpeg absent, préparation occupée/expirée ou saturation du cache. Remote : 501.
-Une HEAD peut préparer le cache et prend jusqu'à 120 s ; le frontend attend
-125 s et permet de fermer le lecteur pour annuler son attente. Le descripteur
+FFmpeg absent, préparation occupée/expirée ou saturation du cache. Les Nodes
+distants utilisent le relais signé existant, y compris HEAD/Range et erreurs.
+Une HEAD peut préparer le cache complet sur les anciens composants (borne
+configurable, 900 s par défaut). Les nouvelles fenêtres passent directement
+par GET borné, sans HEAD longue : travail FFmpeg plafonné à 20 s, deux attentes
+au maximum de 5 s derrière le worker unique. Le frontend ferme et annule ses
+requêtes à la fermeture du lecteur. Le descripteur
 expose `prepare: true` pour les sources concernées. Dépendance facultative,
 bornes et limites : [préparation](PLAYER_TRACK_PREPARATION.md).
+
+Depuis le correctif du 21 octobre 2026, une source originale avec plusieurs
+pistes audio expose `language: "und"` : ce champ ne garantit pas la piste choisie
+par le navigateur. Utiliser les sources `internal-N` pour une sélection précise.
+Les échecs de préparation répondent HTTP 503 et un code JSON distinct :
+`preparation_busy`, `preparation_cache_limit_reached`, `preparation_timeout`,
+`preparation_tool_or_source_unavailable`, `unsupported_preparation`,
+`preparation_configuration_invalid` ou `preparation_failed`. Le même code figure
+dans l'en-tête informatif `x-media-preparation-error`, également pour HEAD sans
+corps et après relais Core/Node. Il n'accorde aucun droit et ne remplace pas
+l'autorisation de chaque accès média. Une piste non supportée reste HTTP 422
+`unsupported_track` avant la préparation.
 
 Catalogue : `sort=year-asc|year-desc|added-asc|added-desc` en plus des tris titre.
 `addedAt` est un timestamp Unix ou NULL si la date historique est inconnue.
@@ -321,3 +346,5 @@ listes, copies multi-Node, chapitres et téléchargements :
 [PRODUCT_FEATURES.md](PRODUCT_FEATURES.md). Ces ajouts préservent les routes et
 les contrôles de session existants.
 
+
+Playlists et musique : [contrats, autorisations et limites](PLAYLISTS_AND_MUSIC.md#contrat-http).

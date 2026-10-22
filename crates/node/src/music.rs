@@ -21,6 +21,8 @@ pub struct MusicTrack {
     pub duration: Option<f64>,
     pub codec: String,
     pub mime: String,
+    #[serde(default)]
+    pub lyrics: String,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,6 +129,41 @@ where
                     .map(|v| v.chars().filter(|c| !c.is_control()).take(512).collect())
             };
             let artist = tag("artist").unwrap_or_else(|| "Artiste inconnu".into());
+            let mut lyrics = tags
+                .and_then(|tags| {
+                    tags.iter().find(|(key, _)| {
+                        key.eq_ignore_ascii_case("lyrics")
+                            || key.eq_ignore_ascii_case("unsyncedlyrics")
+                    })
+                })
+                .and_then(|(_, value)| value.as_str())
+                .unwrap_or("")
+                .to_owned();
+            // The Node alone resolves same-stem sidecars through confined handles.
+            // No browser-provided path or network lyrics provider is involved.
+            for extension in ["lrc", "txt"] {
+                if let Ok(sidecar) =
+                    OpenedFile::open_in_root(&root, &path.with_extension(extension)).await
+                    && sidecar.size() <= 32768
+                {
+                    use tokio::io::AsyncReadExt;
+                    let mut text = String::new();
+                    let read = tokio::fs::File::from_std(sidecar.try_clone_std()?)
+                        .take(32769)
+                        .read_to_string(&mut text)
+                        .await;
+                    if read.is_ok()
+                        && text.len() <= 32768
+                        && sidecar.verify_unchanged_sync().is_ok()
+                    {
+                        lyrics = text;
+                        break;
+                    }
+                }
+            }
+            if lyrics.len() > 32768 {
+                lyrics.clear();
+            }
             let track = MusicTrack {
                 relative_path: path.to_string_lossy().into_owned(),
                 size: opened.size(),
@@ -158,6 +195,7 @@ where
                     .filter(|v| v.is_finite() && *v >= 0.),
                 codec: audio.codec_name.clone().unwrap_or_default(),
                 mime: mime.into(),
+                lyrics,
             };
             opened.verify_unchanged_sync()?;
             publish(track).await?;

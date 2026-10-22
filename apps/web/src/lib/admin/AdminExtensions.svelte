@@ -17,6 +17,7 @@
     description: string;
     author: string;
     permissions: string[];
+    httpHosts?: string[];
     category?: string;
     targetAbi?: string;
     minServerVersion?: string;
@@ -25,7 +26,6 @@
     banner?: string;
     configSchema?: ConfigField[];
   };
-  type Package = { manifest: Manifest; publisherId: string; sha256: string; signature: string; wasm: string };
   type SettingValue = string | number | boolean;
   type ExtensionSettings = Record<string, SettingValue>;
   type Installed = { manifest: Manifest; publisherId: string; sha256: string; enabled: boolean; libraryIds: string[]; settings?: ExtensionSettings };
@@ -54,13 +54,38 @@
     }
   });
   type Library = { id: string; name: string; enabled: boolean | number };
-  type Run = { id: string; extensionId: string; status: string; durationMs: number; result: { title?: string; summary?: string; error?: string } };
+  type Run = { id: string; extensionId: string; workId: string; status: string; durationMs: number; result: { title?: string; summary?: string; error?: string; pluginError?: string; operation?: string; output?: Record<string, unknown> } };
+  type Candidate = { id: string; title: string; year?: number; overview?: string };
+  type ProviderImage = { url: string; imageType: string; language?: string; width?: number; height?: number };
+  type Proposal = { workId: string; value: Record<string, unknown> };
+  let proposals = $state<Record<string, Proposal>>({});
+  let candidates = $state<Record<string, Candidate[]>>({});
+  let providerImages = $state<Record<string, ProviderImage[]>>({});
+  let candidateIds = $state<Record<string, string>>({});
+  async function invoke(id: string, operation: string, candidate?: string) {
+    const workId = workIds[id];
+    if (operation === 'metadata.search') resetWork(id);
+    else if (operation !== 'metadata.images') { delete proposals[id]; delete providerImages[id]; delete candidateIds[id]; }
+    await perform(async () => {
+      const response = await adminRequest<{ proposal: unknown }>(`/api/v1/admin/extensions/${encodeURIComponent(id)}/run`, {
+        method: 'POST', body: JSON.stringify({ workId, operation, input: { id: candidate } })
+      });
+      if (workIds[id] !== workId) return;
+      if (operation === 'metadata.search') {
+        candidates[id] = response.proposal as Candidate[]; delete proposals[id]; delete providerImages[id]; delete candidateIds[id];
+      } else if (operation === 'metadata.images') providerImages[id] = response.proposal as ProviderImage[];
+      else { proposals[id] = { workId, value: response.proposal as Record<string, unknown> }; if (candidate) candidateIds[id] = candidate; }
+    }, operation === 'metadata.search' ? 'Choisissez le résultat correspondant à votre œuvre.' : operation === 'metadata.propose' ? 'Proposition générée. Consultez les résultats ci-dessous.' : 'Résultat reçu.');
+  }
+  function resetWork(id: string) { delete proposals[id]; delete candidates[id]; delete providerImages[id]; delete candidateIds[id]; }
+  function imageKind(type: string): string | undefined {
+    return ({ poster: 'poster', backdrop: 'backdrop', logo: 'logo', banner: 'banner', thumb: 'thumb', clear_art: 'illustration', disc_art: 'disc' } as Record<string,string>)[type];
+  }
   let installed = $state<Installed[]>([]);
   let libraries = $state<Library[]>([]);
   let runs = $state<Run[]>([]);
   let publishers = $state<{ id: string; publicKey: string; active: boolean }[]>([]);
   let audit = $state<{ actorId: string; extensionId: string; action: string; createdAt: number }[]>([]);
-  let candidate = $state<Package | null>(null);
   let publisherId = $state('');
   let publicKey = $state('');
   let selected = $state<Record<string, string[]>>({});
@@ -129,19 +154,6 @@
     finally { busy = false; }
   }
   $effect(() => { void perform(refresh, ''); });
-  async function readPackage(event: Event) {
-    candidate = null; error = '';
-    const file = (event.currentTarget as HTMLInputElement).files?.[0];
-    if (!file) return;
-    if (file.size > 400000) { error = 'Paquet limité à 400 Ko.'; return; }
-    try {
-      const parsed = JSON.parse(await file.text()) as Package;
-      if (!parsed?.manifest || typeof parsed.manifest.id !== 'string' || typeof parsed.manifest.name !== 'string' ||
-          !Array.isArray(parsed.manifest.permissions) || !parsed.manifest.permissions.every(p => typeof p === 'string') ||
-          typeof parsed.publisherId !== 'string' || typeof parsed.sha256 !== 'string') throw new Error('Paquet invalide.');
-      candidate = parsed;
-    } catch { error = 'Paquet JSON invalide.'; }
-  }
   function configure(extension: Installed, enabled: boolean) {
     return perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`, {
       method: 'PUT', body: JSON.stringify({ enabled, libraryIds: selected[extension.manifest.id] ?? [] })
@@ -168,7 +180,7 @@
   async function addRepository(event: SubmitEvent) {
     event.preventDefault();
     await perform(async () => {
-      await adminRequest('/api/v1/admin/extensions/repositories',{method:'POST',body:JSON.stringify({name:repositoryName,url:repositoryUrl})});
+      await adminRequest('/api/v1/admin/extensions/repositories',{method:'POST',body:JSON.stringify({name:repositoryName.trim() || new URL(repositoryUrl).hostname.slice(0,80),url:repositoryUrl})});
       repositoryName=''; repositoryUrl=''; tab='catalogue';
     },'Dépôt enregistré. Ses extensions sont disponibles dans le catalogue.');
   }
@@ -181,20 +193,20 @@
 </script>
 
 <section id="extensions-section" aria-labelledby="extensions-heading">
-  <div class="heading"><h2 id="extensions-heading">Extensions</h2><button disabled={busy} onclick={() => perform(refresh, '')}>Actualiser</button></div>
+  <div class="heading"><div><p class="eyebrow">PERSONNALISER VOTRE SERVEUR</p><h2 id="extensions-heading">Extensions</h2><p>Un dépôt, un catalogue et vos extensions installées.</p></div><button disabled={busy} onclick={() => perform(refresh, '')}>Actualiser</button></div>
   <nav class="extension-tabs" aria-label="Gestion des extensions">
-    <button aria-current={tab==='installed' ? 'page' : undefined} onclick={() => tab='installed'}>Installées</button>
-    <button aria-current={tab==='catalogue' ? 'page' : undefined} onclick={() => tab='catalogue'}>Catalogue</button>
-    <button aria-current={tab==='repositories' ? 'page' : undefined} onclick={() => tab='repositories'}>Dépôts</button>
+    <button class:active={tab==='installed'} aria-current={tab==='installed' ? 'page' : undefined} onclick={() => tab='installed'}>Installées ({installed.length})</button>
+    <button class:active={tab==='catalogue'} aria-current={tab==='catalogue' ? 'page' : undefined} onclick={() => tab='catalogue'}>Catalogue</button>
+    <button class:active={tab==='repositories'} aria-current={tab==='repositories' ? 'page' : undefined} onclick={() => tab='repositories'}>Dépôts ({repositories.length})</button>
   </nav>
   {#if error}<p role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if tab==='repositories'}
-    <h3>Dépôts d’extensions</h3>
-    <p>Ajoutez l’adresse HTTPS du manifeste fourni par l’auteur. Les dépôts et modules Jellyfin ne sont pas compatibles.</p>
+    <h3>Ajouter un dépôt</h3>
+    <p>Collez l’adresse HTTPS fournie par l’auteur. Vous pourrez ensuite choisir ses extensions dans le catalogue.</p>
     <form class="repository-form" onsubmit={addRepository}>
-      <label>Nom du dépôt<input required maxlength="80" bind:value={repositoryName} disabled={busy} /></label>
-      <label>URL du manifeste<input type="url" required maxlength="2048" placeholder="https://exemple.fr/manifest.json" bind:value={repositoryUrl} disabled={busy} /></label>
+      <label>Nom du dépôt (facultatif)<input maxlength="80" bind:value={repositoryName} disabled={busy} /></label>
+      <label>Adresse du dépôt<input type="url" required maxlength="2048" placeholder="https://exemple.fr/manifest.json" bind:value={repositoryUrl} disabled={busy} /></label>
       <button disabled={busy}>Ajouter le dépôt</button>
     </form>
     {#each repositories as repository (repository.id)}
@@ -205,9 +217,10 @@
     {:else}<p>Aucun dépôt enregistré.</p>{/each}
   {:else if tab==='catalogue'}
     <div class="heading"><h3>Catalogue</h3><button onclick={() => tab='repositories'}>+ Ajouter un dépôt</button></div>
+    <label class="catalogue-search">Rechercher dans le catalogue<input type="search" bind:value={search} placeholder="Nom ou description" /></label>
     <p>Choisissez une version puis installez-la. L’activation se fait dans Installées après configuration des accès.</p>
     <div class="plugins-grid">
-    {#each catalogueGroups as group (group.key)}
+    {#each catalogueGroups.filter(group=>`${group.entries[0].manifest.name} ${group.entries[0].manifest.description}`.toLowerCase().includes(search.toLowerCase())) as group (group.key)}
       {@const entry=group.entries.find(item => item.manifest.version===catalogueVersions[group.key]) ?? group.entries[0]}
       {@const publisher=publishers.find(item => item.id===entry.publisherId)}
       {@const trusted=publisher?.active && publisher.publicKey===entry.publicKey}
@@ -216,6 +229,7 @@
         <label for={`extension-version-${group.key}`}>Version de {entry.manifest.name}</label>
         <select id={`extension-version-${group.key}`} bind:value={catalogueVersions[group.key]} disabled={busy}>{#each group.entries as option (option.manifest.version)}<option value={option.manifest.version}>{option.manifest.version}{option===group.entries[0] ? ' · la plus récente' : ''}{option.compatible ? '' : ' · incompatible'}</option>{/each}</select>
         <p>Permissions : {entry.manifest.permissions.join(', ')}</p>
+        <p>Hôtes HTTPS demandés : {entry.manifest.httpHosts?.join(', ') || 'aucun'}</p>
         {#if !entry.compatible}<p>Cette version n’est pas compatible avec le serveur actuel.</p>{/if}
         {#if existing}<p>Version {existing.manifest.version} déjà installée. Gérez-la dans Installées.</p>{/if}
         {#if !trusted}
@@ -225,21 +239,10 @@
         {/if}
         <button disabled={busy || !trusted || !entry.compatible || !!existing} onclick={() => installFromCatalogue(entry)}>Installer {entry.manifest.name}</button>
       </article>
-    {:else}<p>Aucune extension disponible. Ajoutez un dépôt pour remplir le catalogue. Aucun dépôt officiel distant n’est configuré sur ce serveur.</p>{/each}
+    {:else}<p>Aucune extension ne correspond. Ajoutez un dépôt ou modifiez votre recherche.</p>{/each}
     </div>
   {:else}
-  <p>Installez un paquet signé, configurez ses paramètres, choisissez ses bibliothèques puis activez-le. Les originaux restent en lecture seule.</p>
-  <details class="availability">
-    <summary>Comment installer une extension en local ?</summary>
-    <ol>
-      <li>Préparez le fichier <code>*.package.json</code> signé avec le script <code>Aether-Plugins/scripts/Build-LocalPackage.ps1</code>.</li>
-      <li>Dans « Éditeurs approuvés », ajoutez l’identifiant et la clé publique affichée lors de la création de votre clé de signature.</li>
-      <li>Importez le paquet ci-dessous. Le serveur vérifie sa signature.</li>
-      <li>Ouvrez « Gérer cette extension », renseignez les paramètres du fournisseur, choisissez ses bibliothèques et activez-la.</li>
-    </ol>
-    <p>Une clé API Aether sert à lire le catalogue depuis une autre application. Une clé TMDb ou fanart.tv se renseigne dans les paramètres de l’extension. La clé privée de signature reste sur votre ordinateur.</p>
-    <p>L’onglet Dépôts permet aussi d’ajouter un manifeste HTTPS et de choisir une extension dans Catalogue. Les paquets Jellyfin et leurs fichiers DLL ne sont pas compatibles.</p>
-  </details>
+  <div class="install-intro"><div><h3>Vos extensions</h3><p>Installez depuis un dépôt, puis choisissez les bibliothèques et les options de chaque extension.</p></div><button onclick={() => tab='catalogue'}>Parcourir le catalogue</button></div>
   <details>
     <summary>Éditeurs approuvés</summary>
     <p>Vérifiez la clé publique auprès de l’éditeur par un canal de confiance avant de l’approuver.</p>
@@ -253,36 +256,6 @@
         <button disabled={busy || !publisher.active} onclick={() => perform(() => adminRequest(`/api/v1/admin/extensions/publishers/${encodeURIComponent(publisher.id)}`, { method: 'DELETE' }), 'Éditeur révoqué.')}>Révoquer</button></div>
     {/each}
   </details>
-  <div class="card">
-    <h3>Installer un paquet local</h3>
-    <label>Paquet JSON signé<input type="file" accept="application/json,.json" onchange={readPackage} disabled={busy} /></label>
-    {#if candidate}
-      <div class="candidate-preview">
-        {#if candidate.manifest.banner}
-          {@const bannerSrc = toBannerSrc(candidate.manifest.banner)}
-          {#if bannerSrc}
-            <div class="plugin-banner">
-              <img src={bannerSrc} alt="" />
-            </div>
-          {/if}
-        {/if}
-        <p><strong>{candidate.manifest.name}</strong> · v{candidate.manifest.version} · {candidate.publisherId}</p>
-        <p>{candidate.manifest.description}</p>
-        <div class="plugin-badges">
-          {#if candidate.manifest.category}<span class="badge category">{candidate.manifest.category}</span>{/if}
-          {#if candidate.manifest.targetAbi}<span class="badge abi">ABI {candidate.manifest.targetAbi}</span>{/if}
-          {#if candidate.manifest.minServerVersion}<span class="badge server">Aether &ge; {candidate.manifest.minServerVersion}</span>{/if}
-        </div>
-        <p>Droits demandés : {candidate.manifest.permissions.join(', ')}</p>
-        <code>SHA-256 : {candidate.sha256}</code>
-        <p>L’installation vérifie la signature et conserve l’extension désactivée.</p>
-        {#if !publishers.some(publisher => publisher.id === candidate?.publisherId && publisher.active)}
-          <p>Approuvez d’abord l’éditeur « {candidate.publisherId} » avec sa clé publique dans « Éditeurs approuvés ».</p>
-        {/if}
-        <button disabled={busy || !publishers.some(publisher => publisher.id === candidate?.publisherId && publisher.active)} onclick={() => perform(async () => { await adminRequest('/api/v1/admin/extensions', { method: 'POST', body: JSON.stringify(candidate) }); candidate = null; }, 'Paquet installé, encore désactivé.')}>Vérifier et installer</button>
-      </div>
-    {/if}
-  </div>
   <div class="heading"><h3>Installées ({installed.length})</h3>
     <div class="row">
       <label>Rechercher une extension<input type="search" bind:value={search} /></label>
@@ -312,6 +285,7 @@
         </div>
         <p class="plugin-desc">{extension.manifest.description}</p>
         <p class="plugin-meta">{extension.enabled ? 'Activée' : 'Désactivée'} · Éditeur: {extension.publisherId} · Droits: {extension.manifest.permissions.join(', ')}</p>
+        <p>Hôtes HTTPS demandés : {extension.manifest.httpHosts?.join(', ') || 'aucun'}</p>
         {#if extension.manifest.checksum}
           <p class="checksum-info"><code>Checksum: {extension.manifest.checksum}</code></p>
         {/if}
@@ -395,15 +369,46 @@
         <button disabled={busy} onclick={() => configure(extension, true)}>Enregistrer et activer</button>
         <button disabled={busy || !extension.enabled} onclick={() => configure(extension, false)}>Désactiver</button>
       </div>
-      <form onsubmit={event => { event.preventDefault(); void perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}/run`, { method: 'POST', body: JSON.stringify({ workId: workIds[extension.manifest.id] }) }), 'Proposition générée. Consultez les résultats ci-dessous.'); }}>
+      {#if extension.manifest.permissions.includes('metadata.read')}
+      <form onsubmit={event => { event.preventDefault(); void invoke(extension.manifest.id, 'metadata.search'); }}>
         <label>Rechercher une œuvre<input maxlength="120" bind:value={queries[extension.manifest.id]} /></label>
         <button type="button" disabled={busy || !extension.enabled} onclick={() => searchWorks(extension.manifest.id)}>Rechercher dans les bibliothèques autorisées</button>
         <label for={`extension-work-${extension.manifest.id}`}>Œuvre à analyser</label>
-        <select id={`extension-work-${extension.manifest.id}`} required bind:value={workIds[extension.manifest.id]}><option value="">Choisir une œuvre</option>
+        <select id={`extension-work-${extension.manifest.id}`} required disabled={busy} bind:value={workIds[extension.manifest.id]} onchange={() => resetWork(extension.manifest.id)}><option value="">Choisir une œuvre</option>
           {#each workOptions[extension.manifest.id] ?? [] as work (work.id)}<option value={work.id}>{work.title}</option>{/each}
         </select>
-        <button disabled={busy || !extension.enabled || !workIds[extension.manifest.id]}>Exécuter sur cette œuvre</button>
+        <button disabled={busy || !extension.enabled || !workIds[extension.manifest.id]}>Rechercher chez ce fournisseur</button>
+        <button type="button" disabled={busy || !extension.enabled || !workIds[extension.manifest.id]} onclick={() => invoke(extension.manifest.id, 'metadata.propose')}>Exécuter sur cette œuvre</button>
+        <small>Le second bouton utilise la proposition simple des anciens paquets.</small>
       </form>
+      {#each candidates[extension.manifest.id] ?? [] as match (match.id)}
+        <div class="card"><strong>{match.title}{match.year ? ` (${match.year})` : ''}</strong>
+          {#if match.overview}<p>{match.overview}</p>{/if}
+          <button disabled={busy || !extension.enabled} onclick={() => invoke(extension.manifest.id, 'metadata.details', match.id)}>Choisir ce résultat</button>
+        </div>
+      {/each}
+      {#if proposals[extension.manifest.id] && proposals[extension.manifest.id].workId === workIds[extension.manifest.id]}
+        {@const proposal = proposals[extension.manifest.id]}
+        <div class="card"><strong>{String(proposal.value.title ?? 'Métadonnées')}</strong>
+          <p>{String(proposal.value.synopsis ?? proposal.value.summary ?? '')}</p>
+          <details><summary>Tous les champs proposés</summary><pre>{JSON.stringify(proposal.value, null, 2)}</pre></details>
+          <button disabled={busy || !extension.enabled || !extension.manifest.permissions.includes('metadata.write')} onclick={() => perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}/apply`, {method:'POST',body:JSON.stringify({workId:proposal.workId,metadata:proposal.value})}), 'Métadonnées appliquées.')}>Appliquer ces métadonnées</button>
+          {#if extension.manifest.permissions.includes('images') && candidateIds[extension.manifest.id]}
+            <button disabled={busy || !extension.enabled} onclick={() => invoke(extension.manifest.id, 'metadata.images', candidateIds[extension.manifest.id])}>Charger les images proposees</button>
+          {/if}
+        </div>
+      {/if}
+      {#each providerImages[extension.manifest.id] ?? [] as image, index (index)}
+        {#if imageKind(image.imageType)}
+          <div class="card"><p>{image.imageType} - {image.language ?? 'Toutes langues'} - {image.width ?? '?'} x {image.height ?? '?'}</p>
+            <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+            <a href={image.url} target="_blank" rel="noreferrer">Voir cette image</a>
+            <button disabled={busy || !extension.enabled || !extension.manifest.permissions.includes('metadata.write')} onclick={() => perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}/image`, {method:'POST',body:JSON.stringify({workId:workIds[extension.manifest.id],url:image.url,kind:imageKind(image.imageType)})}), 'Image importee dans la mediatheque.')}>Utiliser cette image</button>
+          </div>
+        {/if}
+      {/each}
+      {/if}
+      {#if extension.manifest.permissions.includes('avatars')}<p>Les packs de cette extension sont disponibles dans les parametres de votre image de profil apres activation.</p>{/if}
       <details><summary>Désinstaller</summary>
         <label class="check"><input type="checkbox" bind:checked={purge[extension.manifest.id]} />Supprimer aussi les résultats conservés</label>
         <button disabled={busy} onclick={() => perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`, { method: 'DELETE', body: JSON.stringify({ deleteData: purge[extension.manifest.id] ?? false }) }), 'Extension désinstallée.')}>Désinstaller cette extension</button>
@@ -415,6 +420,9 @@
   <h3>Dernières exécutions</h3>
   {#each runs as run (run.id)}
     <div class="card"><p>{run.extensionId} · {run.status} · {run.durationMs} ms</p>
+      {#if run.result.operation}<p>{run.result.operation}</p>{/if}
+      {#if run.result.output}<details><summary>Résultat</summary><pre>{JSON.stringify(run.result.output, null, 2)}</pre></details>{/if}
+      {#if run.result.pluginError}<p>{run.result.pluginError}</p>{/if}
       {#if run.result.title}<strong>{run.result.title}</strong>{/if}
       {#if run.result.summary}<p>{run.result.summary}</p>{/if}
       {#if run.result.error}<p>{run.result.error}</p>{/if}
@@ -429,8 +437,11 @@
 </section>
 
 <style>
+  .eyebrow{font-size:11px;letter-spacing:.14em;color:var(--color-accent);margin:0 0 8px}.install-intro{display:flex;justify-content:space-between;gap:20px;align-items:center;margin:24px 0;padding:22px;background:var(--color-surface);border:1px solid var(--color-line);border-radius:14px}.install-intro h3{margin:0}.install-intro p{color:var(--color-muted);max-width:650px}.catalogue-search{display:grid;gap:8px;max-width:520px;margin-block:20px}.extension-tabs{margin-block:24px!important}.repository-form{padding:20px;background:var(--color-surface);border:1px solid var(--color-line);border-radius:14px}
+
+  pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:24rem; overflow:auto; }
   .extension-tabs { display:flex;gap:.5rem;flex-wrap:wrap;margin-block:1rem; }
-  .extension-tabs button[aria-current="page"] { border-color:var(--color-accent);color:var(--color-accent); }
+  .extension-tabs button.active { border-color:var(--color-accent);color:var(--color-accent); }
   .repository-form { display:grid;gap:.8rem;max-width:800px; }
   .repository-url { overflow-wrap:anywhere;white-space:normal; }
   section { padding: 1.5rem; border: 1px solid var(--border-subtle); background: var(--bg-surface); border-radius: 16px; }
@@ -439,8 +450,7 @@
   p,label { color: var(--text-secondary); line-height: 1.6; }
   .heading,.row,.actions,.settings-actions { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
   .heading { justify-content: space-between; }
-  .card,.availability,details { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border-subtle); border-radius: 10px; }
-  .availability { background: var(--bg-elevated); }
+  .card,details { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border-subtle); border-radius: 10px; }
   form { display: grid; gap: .7rem; margin-block: 1rem; }
   label { display: grid; gap: .3rem; } .check { display: flex; align-items: center; gap: .5rem; }
   input:not([type=checkbox]),select { min-width: 0; width: 100%; padding: .6rem; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); box-sizing: border-box; }

@@ -1,5 +1,58 @@
 # P3/P4 — préparation des pistes (18 octobre 2026)
 
+## MP4 sans copie vidéo complète — 22 octobre 2026
+
+Pour les MP4 AV1, la vidéo est maintenant l'original servi avec Range. Chrome/Edge
+acceptant MSE Opus chargent seulement l'audio sélectionné en fenêtres de 10 s,
+copiées vers fMP4. La préparation vidéo complète n'est plus un préalable. La
+fenêtre courante et la suivante sont seules préchargées ; les seeks demandent
+les fenêtres visées. Les anciens parcours MKV/Ogg restent disponibles.
+
+Preroll, alignement temporel, cache avec leases, logs FFmpeg bornés, mesures et
+limites de la validation NAS : [NAS_PLAYBACK_DIAGNOSTICS.md](NAS_PLAYBACK_DIAGNOSTICS.md).
+Cette section remplace, pour ce parcours MP4, les mentions de copie complète
+et de préparation uniquement locale dans l'historique ci-dessous.
+
+## Corrections du 21 octobre 2026
+
+Le lecteur prépare vidéo et audio en série, conformément au worker unique du
+Node. Un changement entre pistes partageant la même vidéo charge et positionne
+le nouvel audio en pause avant de remplacer l'ancien. Un échec détruit le candidat
+et laisse l'ancienne piste disponible ; la fermeture annule aussi le candidat.
+Les erreurs terminales invalident la source pour permettre une vraie nouvelle
+tentative. Aucun réencodage vidéo ou audio n'est introduit.
+
+La sélection automatique privilégie une piste précise dans la langue préférée,
+puis le français ; le choix manuel garde priorité. La langue d'un original avec
+plusieurs audios vaut `und`, car le navigateur peut choisir une autre piste que
+la première. Les codes `fra/fre/fr-FR` sont reconnus comme français. L'interface
+identifie cet original comme « piste choisie par le navigateur ».
+
+Le chargement audio attend une position exploitable et des données décodables.
+Le seek et le décalage recalent explicitement l'audio ; un blocage audio suspend aussi
+la vidéo, avec reprise sur `canplay` et erreur après dix secondes. Une pause
+manuelle annule cette reprise. La correction périodique intervient au-delà de
+80 ms, sans modification de vitesse pour rattrapage. Les deux horloges restent
+indépendantes : aucun engagement de précision physique à l'échantillon.
+
+Les limites configurables sont documentées ci-dessous. L'augmentation des bornes
+ne rend pas le remux instantané : la première préparation lit et écrit toujours
+le composant complet avant sa lecture. Une piste non sélectionnée n'est pas
+extraite préventivement. Le Direct Play mono-audio approprié reste prioritaire.
+Le cache reste temporaire, borné et sans éviction de composants pendant lecture.
+Les chemins préparés distants utilisent le même contrat via Core/Node.
+
+Les paquets AV1/Opus sont copiés, sans `-ac`, filtre, réencodage ou graphe WebAudio
+de production. Les tests couvrent la conservation de six et huit canaux ; la
+sortie matérielle 5.1/7.1 dépend du navigateur, de l'OS et de l'équipement et
+n'est pas certifiée par ces tests. Les sondes de type MIME/codec guident le choix,
+elles ne remplacent pas une preuve de décodage.
+
+Résultats et limites : [audit et corrections](PLAYER_PLAYBACK_AUDIT.md).
+
+Le texte historique ci-dessous décrit le premier jalon ; les points ci-dessus
+et les nouvelles limites remplacent ses anciennes restrictions.
+
 Le lecteur conserve le parcours direct original et ajoute, pour les assets locaux
 AV1, un choix par piste Opus interne. Le Node prépare une vidéo MP4 fragmentée
 sans audio et un fichier Ogg par piste sélectionnée, uniquement par copie de
@@ -12,7 +65,7 @@ Le premier passage à une piste préparée change la source vidéo en conservant
 position et la pause. Les passages entre pistes préparées partagent la même
 vidéo : aucun rechargement vidéo, plein écran conservé. Chaque nouvel audio est
 chargé séparément ; une courte pause de commutation reste possible. Le mécanisme
-à deux éléments média corrige une dérive de plus de 150 ms toutes les 100 ms ;
+à deux éléments média corrige une dérive de plus de 80 ms toutes les 100 ms ;
 il ne garantit pas une synchronisation à l'échantillon.
 
 Les sous-titres intégrés textuels SubRip, WebVTT, mov_text, ASS/SSA sont extraits
@@ -35,9 +88,27 @@ un handle confiné, avec protocoles fd/pipe et formats MKV/MP4 autorisés ; aucu
 chemin ou URL fourni par le navigateur, aucune écriture dans les bibliothèques.
 Cette restriction de protocoles n'est pas un sandbox système.
 
-Une préparation à la fois, refus immédiat si occupé, 120 secondes maximum,
-copie des sorties par blocs, 64 entrées et 24 Gio par instance Core (16 Gio
-vidéo, 1 Gio audio, 4 Mio sous-titre). Les réponses déjà en cache restent
+Une préparation à la fois, refus immédiat si occupé, copie des sorties par blocs,
+64 entrées maximum. Bornes par processus standalone/Node, chargées au démarrage :
+
+| Variable | Défaut | Plage |
+| --- | --- | --- |
+| `MEDIA_PREPARATION_SECONDS` | 900 secondes | 30–3600 |
+| `MEDIA_PREPARATION_CACHE_GIB` | 96 Gio | 1–2048 |
+| `MEDIA_PREPARATION_VIDEO_GIB` | 64 Gio | 1–1024 |
+| `MEDIA_PREPARATION_AUDIO_MIB` | 4096 Mio | 64–16384 |
+
+Les composants doivent tenir dans la borne du cache ; une configuration invalide
+refuse la préparation. Les sous-titres restent bornés à 4 Mio. Ces plafonds ne
+réservent pas le disque ; dimensionner le stockage applicatif séparé en conséquence.
+`MEDIA_PREPARATION_CACHE_DIR` accepte un chemin absolu avec parent existant,
+hors bibliothèques. Les images Docker placent ce cache dans `/data/preparation-cache`
+plutôt que dans le tmpfs `/tmp` limité à 64 Mio par les Compose : les fichiers
+préparés ne sont donc pas plafonnés involontairement à 64 Mio. Aucun volume média
+n'est modifié. Sans cette variable, un lancement natif utilise le dossier temporaire
+privé existant. Les entrées restent sous lease et sont nettoyées comme auparavant ;
+un stockage sur `/data` n'en fait pas un cache réutilisable après redémarrage.
+Les réponses déjà en cache restent
 accessibles pendant une autre préparation. Cache plein = erreur explicite ;
 pas d'éviction d'un fichier en cours de lecture. Les répertoires temporaires
 sont nettoyés à la destruction normale du service. Un arrêt brutal peut laisser

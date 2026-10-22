@@ -8,6 +8,7 @@ pub mod avatars;
 pub mod backup;
 pub mod backup_bundle;
 pub mod database;
+pub mod extension_files;
 pub mod extension_runtime;
 pub mod extensions;
 pub mod groups;
@@ -29,6 +30,7 @@ pub mod music;
 pub mod node;
 pub mod nodes;
 pub mod permissions;
+pub mod playlists;
 pub mod preferences;
 pub mod product;
 #[cfg(test)]
@@ -179,6 +181,7 @@ pub async fn secure_app_with_jobs(
             .merge(preferences::router(auth.clone()))
             .merge(account::router(auth.clone()))
             .merge(music::router(auth.clone()))
+            .merge(playlists::router(auth.clone()))
             .merge(product::router(auth.clone()))
             .merge(artwork::router(auth.clone()))
             .merge(user_media_policy::router(auth.clone()))

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ExternalAudio } from './external-audio';
 class Element extends EventTarget {
   currentTime = 0; duration = 12; paused = true; seeking = false; volume = .4; playbackRate = 1; muted = false;
-  readyState = 1; dataset = {}; preload = ''; hidden = false; src = ''; auto = true;
+  readyState = 4; dataset = {}; preload = ''; hidden = false; src = ''; auto = true;
   canPlayType() { return 'probably'; }
   insertAdjacentElement() {} remove() {} removeAttribute() {}
   play() { this.paused=false; return Promise.resolve(); }
@@ -42,5 +42,15 @@ describe('independent audio timeline',()=>{
   it('bounds pending metadata loads and supports cancellation',async()=>{
     vi.useFakeTimers();const {audio,bridge}=setup();audio.auto=false;
     const load=expect(bridge.load('/audio')).rejects.toThrow('expiré');await vi.advanceTimersByTimeAsync(10000);await load;bridge.destroy();
+  });
+  it('resumes after audio buffering but respects a manual pause during recovery',async()=>{
+    vi.useFakeTimers(); const {video,audio,bridge,error}=setup(); await bridge.load('/audio');
+    await video.play(); await bridge.play(); audio.dispatchEvent(new Event('waiting'));
+    expect(video.paused).toBe(true);
+    audio.dispatchEvent(new Event('canplay')); await vi.advanceTimersByTimeAsync(0);
+    expect(video.paused).toBe(false); expect(audio.paused).toBe(false);
+    audio.dispatchEvent(new Event('waiting')); audio.dispatchEvent(new Event('canplay'));
+    bridge.pause(); video.pause(); await vi.advanceTimersByTimeAsync(11000);
+    expect(video.paused).toBe(true); expect(error).not.toHaveBeenCalled(); bridge.destroy();
   });
 });

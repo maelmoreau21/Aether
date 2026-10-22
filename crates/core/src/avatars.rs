@@ -77,6 +77,113 @@ pub(crate) fn normalize_image(
         .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
     Ok(output.into_inner())
 }
+/// Deliberately small inert SVG subset for extension avatars: no scripts, links,
+/// styles, embedded images, references, entities or animation. Never inline HTML.
+pub(crate) fn validate_svg(svg: &str) -> Result<(), StatusCode> {
+    use quick_xml::events::Event;
+    let invalid = StatusCode::UNPROCESSABLE_ENTITY;
+    if svg.len() > 32_768 || !svg.starts_with("<svg ") || svg.contains('&') {
+        return Err(invalid);
+    }
+    let mut reader = quick_xml::Reader::from_str(svg);
+    let mut depth = 0usize;
+    let mut roots = 0;
+    let mut count = 0;
+    loop {
+        let event = reader.read_event().map_err(|_| invalid)?;
+        let empty = matches!(event, Event::Empty(_));
+        match event {
+            Event::Start(ref element) | Event::Empty(ref element) => {
+                count += 1;
+                if count > 512 {
+                    return Err(invalid);
+                }
+                let name = element.name();
+                if !matches!(
+                    name.as_ref(),
+                    "svg"
+                        | "g"
+                        | "rect"
+                        | "circle"
+                        | "ellipse"
+                        | "path"
+                        | "line"
+                        | "polygon"
+                        | "polyline"
+                ) {
+                    return Err(invalid);
+                }
+                if depth == 0 {
+                    roots += 1;
+                    if roots != 1 || name.as_ref() != "svg" {
+                        return Err(invalid);
+                    }
+                }
+                for attr in element.attributes() {
+                    let attr = attr.map_err(|_| invalid)?;
+                    let key = attr.key.as_ref();
+                    let value = attr.value.as_ref();
+                    match key {
+                        "xmlns"
+                            if name.as_ref() == "svg" && value == "http://www.w3.org/2000/svg" => {}
+                        "fill" | "stroke" => {
+                            if value != "none"
+                                && !(value.starts_with('#')
+                                    && matches!(value.len(), 4 | 7 | 9)
+                                    && value[1..].bytes().all(|b| b.is_ascii_hexdigit()))
+                            {
+                                return Err(invalid);
+                            }
+                        }
+                        "stroke-linecap" if matches!(value, "round" | "butt" | "square") => {}
+                        "viewBox" | "width" | "height" | "x" | "y" | "rx" | "ry" | "cx" | "cy"
+                        | "r" | "x1" | "x2" | "y1" | "y2" | "opacity" | "fill-opacity"
+                        | "stroke-opacity" | "stroke-width" => {
+                            if value.len() > 128
+                                || !value
+                                    .bytes()
+                                    .all(|b| b.is_ascii_digit() || b" .,+-eE".contains(&b))
+                            {
+                                return Err(invalid);
+                            }
+                        }
+                        "d" | "points" => {
+                            if !value.bytes().all(|b| {
+                                b.is_ascii_digit() || b"MmZzLlHhVvCcSsQqTtAaEe .,+-".contains(&b)
+                            }) {
+                                return Err(invalid);
+                            }
+                        }
+                        _ => return Err(invalid),
+                    }
+                }
+                if !empty {
+                    depth += 1;
+                    if depth > 16 {
+                        return Err(invalid);
+                    }
+                }
+            }
+            Event::End(_) => {
+                depth = depth.checked_sub(1).ok_or(invalid)?;
+            }
+            Event::Text(text) if text.as_ref().bytes().all(|b| b.is_ascii_whitespace()) => {}
+            Event::Eof => break,
+            _ => return Err(invalid),
+        }
+    }
+    if roots != 1 || depth != 0 {
+        return Err(invalid);
+    }
+    Ok(())
+}
+pub(crate) fn content_type(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(b"<svg ") {
+        "image/svg+xml"
+    } else {
+        "image/png"
+    }
+}
 async fn read(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Response, StatusCode> {
     let user = auth.authenticate(&headers).await?;
     let bytes: Option<Vec<u8>> =
@@ -85,13 +192,18 @@ async fn read(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Respo
             .fetch_optional(&auth.store.pool)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let bytes = bytes.ok_or(StatusCode::NOT_FOUND)?;
     Ok((
         [
-            (header::CONTENT_TYPE, "image/png"),
+            (header::CONTENT_TYPE, content_type(&bytes)),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; sandbox",
+            ),
             (header::CACHE_CONTROL, "private, no-store"),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         ],
-        bytes.ok_or(StatusCode::NOT_FOUND)?,
+        bytes,
     )
         .into_response())
 }
@@ -103,16 +215,22 @@ async fn write(
     let user = auth.authenticate(&headers).await?;
     auth.require_csrf(&headers, &user)?;
     if user.user.role != crate::identity::Role::Administrator {
-        let rows: Vec<String> = query_scalar(
-            "SELECT es.settings_json FROM extension_settings es \
+        let rows: Vec<(String, String)> = crate::database::query_as(
+            "SELECT es.settings_json,e.package_json FROM extension_settings es \
              JOIN extensions e ON e.id = es.extension_id \
-             WHERE e.enabled = 1",
+             JOIN extension_publishers p ON p.id=e.publisher_id \
+             WHERE e.enabled = 1 AND p.active=1",
         )
         .fetch_all(&auth.store.pool)
         .await
-        .unwrap_or_default();
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        for json_str in rows {
+        for (json_str, package) in rows {
+            let package: media_extension_sdk::Package =
+                serde_json::from_str(&package).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            if !package.manifest.permissions.iter().any(|p| p == "avatars") {
+                continue;
+            }
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
                 && val
                     .get("disallow_custom_avatars")
@@ -160,6 +278,21 @@ async fn remove(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn extension_svg_only_accepts_inert_bounded_shapes() {
+        assert!(validate_svg(r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" fill="#fff"/><g><path d="M 0,0 L 10,10 Z" stroke="#abcdef"/></g></svg>"##).is_ok());
+        for svg in [
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><image href="https://example.invalid/"/></svg>"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><foreignObject/></svg>"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><path fill="url(#x)"/></svg>"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg"/><svg/>"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><g></svg>"#,
+        ] {
+            assert!(validate_svg(svg).is_err(), "{svg}");
+        }
+    }
     #[test]
     fn avatar_formats_are_reencoded_and_dimensions_are_bounded() {
         for (format, mime) in [

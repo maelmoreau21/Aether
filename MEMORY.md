@@ -1,5 +1,202 @@
 # MEMORY.md — État et décisions Aether
 
+## 22 octobre 2026 — CI raccourcie localement, mesure distante en attente
+
+- Intégration Rust répartie automatiquement sur trois runners par cibles Cargo
+  (44 actuelles, 15/15/14), séquentielles dans chaque runner. Format/Clippy strict,
+  unitaires/ABI/PostgreSQL une fois ; contrôle Rust historique agrège les trois
+  partitions et reste obligatoire avant publication.
+- Chrome préinstallé testé avant repli Playwright ; FFmpeg cache fonctionnel
+  évite apt, outils de compilation seulement à froid, bibliothèques runtime
+  restaurées si nécessaires. Version 9.0.2 et smoke check préservés.
+- Tests de répartition 3/3, plans exhaustifs réels, Chrome local, actionlint et
+  ShellCheck vérifiés. Pas de nouvelle CI distante, gain non mesuré, push ou
+  publication. Trois runners réduisent l'attente visée mais peuvent augmenter
+  les minutes cumulées. Détails : docs/CI_GHCR.md.
+
+## 22 octobre 2026 — Audit performance lecteur, jalon P0 local
+
+- `develop` : rejet immédiat DTS/DTS-HD MA quand le navigateur refuse la
+  déclaration codec/conteneur. Cas utilisateur : MKV H.264/DTS-HD MA DUT,
+  fichier et transport NAS indisponibles ; cause réelle du timeout non clôturée.
+  Chrome/Edge Windows déclarent H.264/MKV mais pas DTS ; test de descripteur,
+  pas de décodage d'une fixture DTS-HD MA ou du fichier personnel.
+- Échec d'une langue : ancienne lecture reprise, erreur récupérable dans l'UI,
+  sélection/préférences conservées. Seeks obsolètes : garde de génération avant
+  append et reprise immédiate à la nouvelle position. Timeout métadonnées/seek
+  distingué ; logs numériques navigateur et HTTP original Core/Node sans jeton.
+- Sous-titres externes : labels UTF-8 réparés après un premier essai UI échoué.
+  Essai suivant Core/SQLite/Svelte/Chrome réussi en MP4 puis MKV après redémarrage.
+- Web 91 tests/check/lint/build ; stream 3, scanner_flow/distributed 3,
+  label UTF-8, packaging copie/cache/7.1 et dual-5.1 explicite réussis ;
+  fmt et Clippy workspace/all-targets strict vérifiés. Pas de suite Rust générale.
+- Chrome/Edge headless : PCM FR/EN, frames, pause/seeks, 404 avec reprise,
+  fermeture et refus DTS immédiat ; Edge gros MP4 3500 s, seeks jusqu'à 3480 s.
+  Derniers essais : première image Chrome 291 ms/Edge 264 ms, lecture prête
+  613/355 ms. Référence Chrome 186/188 ms : aucun gain de latence revendiqué.
+- P1–P4 restent ouverts : silence réel, ressources, NAS, 4K, endurance et
+  pipeline commun non validés. Aucun réencodage serveur, média personnel,
+  push ou déploiement. Méthode/preuves : docs/PLAYER_PERFORMANCE_P0.md.
+
+## 22 octobre 2026 — MP4 original et fenêtres Opus, incident NAS non clôturé
+
+- Retour utilisateur : Node local Synology/Docker, MP4 AV1 10 bits 1080p,
+  FR et EN Opus 5.1 ; un échec immédiat et une attente longue, indices absolus
+  et stderr indisponibles. Avatar et NAS non accessibles ici : piste fautive
+  et cause spécifique non identifiées ; ne pas annoncer l'incident résolu.
+- MP4 : vidéo originale avec Range, plus de copie vidéo complète préalable.
+  MSE Opus : fenêtres fMP4 de 10 s avec preroll, copie bornée 12 s, seek fd
+  puis output -ss 0 pour exclure l'audio de la précédente image clé. Pas de
+  transcodage/downmix ; paquet/canaux/placement temporel testés. Repli Ogg et
+  MKV historiques conservés, avec leurs limites de préparation complète.
+- Cache : LRU des fenêtres inactives, leases jusqu'à fin HTTP, worker unique,
+  deux attentes 5 s, coalescence ; job fenêtre 20 s/16 Mio max. Logs JSON
+  asset/composant/indice/langue/canaux/méthode/erreur/durée et stderr drainé 16 Kio.
+- Chrome/Edge headless, vrai FFmpeg runtime Docker sans encodeur sous 2 CPU/
+  256 Mio et Nginx buffering actif/timeout10 s : décodage FR/EN/FR et seeks
+  8/900/1800/3480/2 s sur MP4 synthétique 336 Mio, 12 fps/3500 s. Dernière
+  mesure proxy : première image 529 ms, audio prêt 1470 ms, environ 5 Mo de
+  fenêtres préparées. Réouvertures EN/FR 430/410 ms ; annulation après réception
+  HTTP nettoyée en 2,1 ms, socket amont fermé dans cet essai. Pas de preuve NAS.
+- Web 81 tests/check/lint/build, Node 44 tests puis packaging dual-5.1/7.1
+  et streaming/leases, Core scanner_flow/distributed_multi_node/browser_scanner,
+  fmt/Clippy strict/actionlint vérifiés. CI inclut la petite fixture segmentée,
+  contrôle son rapport et l'archive ; nouvelle CI distante pas exécutée.
+- Docs/commandes/preuves : docs/NAS_PLAYBACK_DIAGNOSTICS.md. Core complet en
+  conteneur, appareil physique/sortie surround, média personnel et séance entière
+  non validés. Aucun média original modifié, push ni déploiement applicatif.
+
+## 22 octobre 2026 — Chemin des rapports Films fixé dans la CI
+
+- Régression de la correction lecteur : défaut local déplacé vers
+  target/browser-scanner, mais vérification/upload CI restés dans
+  docs/evidence/2026-10-16/scanner, causant FileNotFoundError.
+- L'étape browser_scanner définit désormais MEDIA_REPORT_DIR explicitement au
+  dossier CI attendu ; assertions de réussite et de fraîcheur conservées.
+- Parsing YAML et concordance génération/nettoyage/rapports/captures/upload,
+  actionlint 1.7.12 et diff check vérifiés. Pas de navigateur rejoué pour ce
+  changement de configuration seul, de nouvelle CI Linux ou de push.
+
+## 22 octobre 2026 — Sélection AV1/Opus et préférences FR/EN
+
+- Cause reproduite : `playbackMime` fabriquait un codecs AV1 incomplet (`av01`),
+  rejeté par Chrome/Edge. Les sources FR/EN préparées étaient filtrées, puis
+  l'original multiaudio `und` déclenchait à tort l'avis de langue indisponible.
+- MIME conteneur sans configuration inventée ; capacité indicative sans exclusion
+  de langue, restauration indexée et migration de l'ancien choix ambigu ; `und`
+  ne remplace plus la préférence linguistique. Original retiré du menu audio
+  quand toutes les pistes sont explicitement proposées, source originale conservée.
+- Nouveau MP4 synthétique 1080p AV1 Main 10 bits avec deux Opus 5.1 : Chrome
+  155.0.8059.85 et Edge 155.0.4283.62 headless passent FR/EN/FR, PCM distinct,
+  un seul chargement vidéo, plein écran, pause/seeks/reprise, erreur Ogg 404 et
+  réouverture. Test Rust explicite : paquets identiques, six canaux conservés.
+- Core/SQLite/Chrome MP4 puis MKV après redémarrage : réussi en 39,96 s,
+  préférence serveur EN puis FR conservée et faux avis absent. Web 80 tests,
+  cinq régressions d'audit, check 0/0, lint/build réussis ; deux anciens tests
+  packaging réussis, dont 7.1. Détails/commandes : docs/AV1_OPUS_AUDIO_FIX.md.
+- scanner_flow et distributed_multi_node réussis : droits vivants, HEAD/GET/Range,
+  deux Nodes distants locaux ; aucune preuve multi-machine déduite.
+- Fmt, Clippy workspace/all-targets strict et diff check réussis ; suite Rust
+  workspace générale non rejouée.
+- Aucun Tdarr, média personnel, push ou déploiement modifié. Avatar, NAS,
+  réseau physique multi-machine, sortie matérielle 5.1 et endurance non testés.
+
+## 22 octobre 2026 — Assertion scanner_flow alignée sur les langues explicites
+
+- Le journal GitHub fourni confirme P0 Linux 12/12, puis scanner_flow échouait
+  sur une ancienne attente `source.language == fr` pour le MKV à deux audios.
+- Contrat déjà implémenté/documenté : original multiaudio = und ; seules les
+  sources internal-N garantissent la piste et sa langue. Test corrigé : original
+  internal-default/und, sources explicites fr/en et conservation index/canaux,
+  langue en de l’original MP4 mono-audio. Tags techniques fra/eng toujours vérifiés.
+- Aucun changement de production, des fixtures ou des médias. Test ciblé
+  cargo test --locked -p media-poc --all-features --test scanner_flow -j 1
+  -- --test-threads=1 : 1 réussi Windows ; fmt et diff checks réussis.
+- Pas de suite workspace rejouée, push ni déploiement. CI complète à relancer.
+
+## 22 octobre 2026 — Correction CI P0 : caches et profil AV1
+
+- Cause des 404 MSE/DASH et VTT absents : cache partagé entre Rust (jeu complet)
+  et navigateur (jeu sans MSE/DASH). Clés distinctes versionnées, anciennes entrées
+  écartées ; vérification des fichiers/rapports préparés avant Cargo, cache inclus.
+- Profil AV1 : accepter Main ou sa représentation numérique chaîne 0 observée
+  en CI, sans relâcher les vérifications codec, pixels 10 bits, couleurs et audio.
+- Validation : garde-fou positif + cache incomplet rejeté, YAML/ordre/clé valides,
+  fmt et diff checks ; cargo test --locked -p media-poc --all-features --test p0
+  -j 1 -- --test-threads=1 : 11 réussis Windows. Test symlink Linux non compilé
+  sur cet OS ; pas de suite workspace générale ni nouvelle CI Linux exécutée.
+- Aucun média modifié, push, déploiement ni publication. Voir docs/CI_GHCR.md.
+
+## 21 octobre 2026 — Raccordement des opérations des extensions
+
+- Core générique : `/run` accepte search/details/images avec permissions signées,
+  contexte titre/année/type/identifiants du catalogue et choix manuel du candidat.
+  Proposition simple et ancien historique conservés pour les paquets existants.
+- Interface : recherche fournisseur, détails, application explicite et import
+  d’images par le pipeline d’artwork protégé. Adaptation des noms SDK au catalogue,
+  fusion des corrections et identifiants externes ; aucun remplacement par URL.
+- Avatars : liste des extensions actives et opérations authentifiées/CSRF depuis
+  les paramètres du compte, sans accès bibliothèque/configuration/réseau. SVG
+  inertes strictement validés et enregistrés pour le compte courant ; MIME/CSP
+  adaptés sur les routes utilisateur et administrateur. La politique d’upload
+  dépend seulement d’extensions avatars actives et d’éditeurs approuvés.
+- Worker 65 s, requêtes Web extensions 70 s, sortie alignée SDK 64 Kio. Erreurs
+  fournisseurs : code borné conservé, message brut exclu. Broker : résolution DNS
+  publique épinglée, aucun proxy implicite/redirection, réponse lue par morceaux.
+- Aether-Plugins : fanart search par ID existant (TVDB pour séries), contexte réel
+  et refus des correspondances ambiguës pour propositions TMDb/IMDb ; Avatar
+  Wasm indépendant de l’horloge. Script de paquetage accepte avatar et accorde
+  avatars seul, ou metadata.read/write + images aux fournisseurs. Paquets à
+  reconstruire/signer/réinstaller pour les nouvelles permissions et handlers.
+- Vérifié : tests extensions 9 réussis/3 ignorés ; filtre unitaire extension
+  6 réussis/1 ignoré, puis 2 tests adaptateurs rejoués après fusion des IDs ;
+  Clippy strict Core all-targets/all-features, Web check 0/0 + lint/build,
+  check workspace Aether-Plugins, compilation Wasm Avatar et exécution réelle
+  list (4 packs)/generate dans le worker ; syntaxe paquetage et OpenAPI valides.
+- Pas de navigateur E2E rejoué, d’appel fournisseur réel avec clé API, de paquet
+  signé publié, de push ou de déploiement. Quotas documentés conservés ; ces
+  vérifications ne prouvent pas tous les volumes de réponses des fournisseurs.
+
+## 21 octobre 2026 — Fournisseurs externes et correction du test extensions
+
+- Suppression du traitement des domaines/Authorization en fonction du nom
+  tmdb/fanart/imdb dans le Core. `Manifest.httpHosts` déclare les hôtes HTTPS
+  exacts couverts par la signature, affichés avant installation/activation ;
+  liste absente/vide = aucun réseau. Le Core ne contient aucun fournisseur
+  installé par défaut. Les identifiants NFO/dossiers restent des données locales.
+- Aether-Plugins porte les domaines dans chaque manifeste fournisseur ; son
+  script de paquetage les copie et demande metadata.read/metadata.write. Les
+  anciennes signatures sans réseau restent compatibles (champ vide omis).
+  Anciens paquets réseau à recréer/signer/réinstaller, sans attribution automatique.
+- Application de métadonnées réservée à une extension installée/activée, éditeur
+  actif, bibliothèque accordée et permission metadata.write, administrateur/CSRF.
+  Le test CI utilise une extension synthétique et une affiche importée par l'API
+  d'artwork protégée ; une URL distante de métadonnées ne remplace pas cette image.
+- Les anciens tests de modules TMDb/Avatar cherchant des fichiers dans le dépôt
+  voisin sont remplacés par un test externe générique explicitement ignoré tant
+  qu'un module n'est pas fourni via MEDIA_TEST_EXTENSION_WASM. Aucune dépendance
+  des tests Core ordinaires envers un fournisseur ou un dépôt voisin.
+- Vérifications locales : tests extensions 8 réussis/3 ignorés, puis cas apply
+  rejoué avec refus de permission read-only (réussi) ; Clippy strict workspace/
+  all-targets ; Web check 0/0, lint/build ; cargo check workspace Aether-Plugins ;
+  JSON OpenAPI, syntaxe PowerShell et diff checks. Pas de suite Rust générale,
+  appel fournisseur réel, build de paquet publié, push ou déploiement.
+
+## 21 octobre 2026 — Correction CI FFmpeg lavfi et artefacts absents
+
+- Le profil FFmpeg fixtures héritait de `--disable-avdevice`, rendant `-f lavfi`
+  inconnu et bloquant generate-fixtures.ps1. Réactivation de libavdevice et du
+  seul input lavfi pour fixtures ; profil runtime inchangé. Smoke test testsrc2
+  et sine dans setup-ffmpeg, caches binaires/fixtures invalidés par le script.
+- Preuves navigateur nettoyées dès checkout ; upload conditionné à la présence
+  de fichiers, y compris partiels après panne. Assertions de fraîcheur/réussite
+  conservées. L'absence de rapports après échec fixtures ne masque plus la cause
+  par une seconde erreur upload-artifact. Punycode reste un avertissement amont.
+- Vérifications ciblées réussies : actionlint 1.7.12, bash -n, lavfi court sur
+  FFmpeg Windows installé et git diff --check. Docker Linux arrêté : profil Linux
+  non reconstruit, aucun run GitHub, push ou publication effectué. Détails dans
+  docs/CI_GHCR.md ; pas de relance des tests Rust/Web sans rapport avec ce défaut.
+
 ## 21 octobre 2026 — Navigation par bibliothèque, éditeur d’images et réactivité
 
 - Le menu principal affiche les bibliothèques actives autorisées et leur nom réel via GET /api/v1/libraries ; filtre bibliothèque appliqué au catalogue et à la musique, conservé dans les formulaires/pagination. Aucun chemin disque exposé.
@@ -2999,3 +3196,101 @@ Validation finale Node : 10 tests politique + 2 suites statistiques =12/12, exit
   lecture observée 1890 ms (Core debug, préparation et automatisation incluses),
   sans comparaison Jellyfin. Fmt, Clippy strict workspace/all-targets et diff
   checks des deux dépôts réussis.
+
+## 21 octobre 2026 — Audit ciblé du lecteur, sans correctif de production
+
+- Analyse des sept problèmes audio/vidéo : `docs/PLAYER_PLAYBACK_AUDIT.md`.
+  Préparation parallèle Web incompatible avec l'admission d'un seul worker Node
+  à froid ; test réel MKV/MP4 reproduisant le refus concurrent et la réussite en
+  série. Conservation de six canaux sur la piste FR extraite et hashes des
+  paquets AV1/Opus identiques dans le test de copie existant.
+- Chrome 155.0.8059.85 / Windows 10.0.26300, fixtures synthétiques et vrai code
+  lecteur : audio VO HTTP 404 laissé attaché, resélection VF ignorée ; original
+  étiqueté FR d'après la première piste mais piste EN default réellement décodée
+  à 990,23 Hz. Serveur de test isolé, pas une preuve Core/RBAC.
+- Cinq diagnostics déterministes reproduits, dont blocage audio seul sans
+  watchdog et dérive de 140 ms non corrigée après seek. Les 72 tests Web
+  existants passent. Parcours Core/SQLite/Chrome browser_scanner réussi en
+  56,08 s, MP4 puis MKV après redémarrage : VF/VO, PCM, seek/pause, progression
+  et sous-titres. Fmt et diff --check réussis.
+- Aucun code de production modifié ; tests, rapport et preuves seulement.
+  Corrections recommandées : préparations sérialisées, commutation atomique,
+  sélection explicite de piste et surveillance du buffering audio. POC MSE à
+  horloge commune seulement ensuite si nécessaire ; pas de refonte immédiate.
+  Pas de sortie physique 5.1/7.1, autre navigateur, NAS/4K réel ou endurance
+  validés. Les limites 120 s / 16 Gio vidéo / 1 Gio audio restent effectives.
+
+## 21 octobre 2026 — Correctifs du lecteur demandés après l'audit
+
+- État d'audit précédent remplacé pour le code de production : préparations
+  sérialisées, chargement et positionnement d'un candidat audio avant activation,
+  ancien audio préservé lors d'un échec, nettoyage/annulation complets et source
+  invalidée après erreur terminale. Intention de lecture conservée pendant une
+  pause technique, pause manuelle annulant la reprise automatique.
+- Sélection partagée normalisant les langues et privilégiant la piste concrète ;
+  original multi-audio exposé en `und`, libellé comme choix navigateur. Buffering
+  audio coordonné avec vidéo, seek explicite et seuil périodique 80 ms. Pas de
+  réencodage, filtre audio, downmix ou graphe WebAudio de production.
+- Limites via MEDIA_PREPARATION_* : cache 96 Gio, vidéo 64 Gio, audio 4096 Mio,
+  délai 900 s par défaut ; valeurs bornées et erreurs HTTP 503 différenciées,
+  en-tête informatif de préparation disponible sur HEAD et relais. Stockage
+  Docker corrigé vers /data/preparation-cache (ancien /tmp limité à 64 Mio dans
+  Compose). Variable MEDIA_PREPARATION_CACHE_DIR absolue, hors bibliothèques.
+  Toujours cache temporaire, un worker et copie entière avant lecture ; aucun
+  gain chiffré 4K annoncé, aucune image publiée ni conteneur remplacé.
+- Vérifications : check 0/0, lint/build, 73 tests Web + 5 régressions ciblées,
+  copie de paquets AV1/Opus dont 7.1 MKV/MP4, deux tests de leases réussis.
+  Chrome 155/Core/SQLite : VF/VO/PCM/seek/pause/progression/sous-titres, MP4 puis MKV
+  après redémarrage, réussi en 33,09 s. Premier essai en échec sur pause technique
+  pendant commutation, corrigé puis rejoué. Compose config --quiet, fmt/diff et
+  Clippy strict workspace/all-targets. Suite Rust générale non relancée.
+- Preuves après correction : docs/evidence/2026-10-21/player-audit/browser-fixed.json
+  et browser-fixed/. Sortie physique 5.1/7.1, Safari/Firefox/Edge, NAS/4K réel et
+  endurance non validés. Deux éléments ne garantissent pas une horloge commune.
+
+
+## 2026-10-22 — Médias indépendants, premier lot vérifié
+
+- Bouton manuel Épisode suivant retiré en haut du lecteur ; option d’enchaînement
+  automatique volontaire conservée. Parcours Chrome/Core/SQLite Séries réussi,
+  y compris transitions inter-saisons et permissions ; preuve dans
+  docs/evidence/2026-10-22/separated-media/series/report.json.
+- WebM ajouté à la découverte et aux associations Opus/sous-titres existantes.
+  Vidéo détectée sans audio exclue des choix audio fictifs. WebM AV1 avec Opus
+  internes conserve la vidéo originale et les fenêtres MSE audio, comme MP4.
+- Association explicite facultative `<video filename>.media.json` v1, 64 Kio,
+  8 audios/64 sous-titres : noms locaux seulement, langues normalisées,
+  offset audio borné ±30 s, forced/SDH. Document invalide refusé sans association
+  implicite ; mêmes sondes/confinement/autorisations. Relecture à chaque scan.
+- Tests : Node 46 réussis/2 ignorés ; scanner_flow 2 réussis (dont WebM,
+  manifeste et accès audio HEAD/GET/Range 401/200/206/416) ; Web 82 tests,
+  check sans erreur/avertissement, lint/build réussis. Mires légales : images
+  et PCM Chrome/Edge, vidéo seule MP4/WebM + Opus 2/6/8 canaux, FR/EN/FR,
+  pause/seeks/plein écran/404/réouverture ; empreintes paquets préservées.
+  WebM interne segmenté Chrome : changements/frontière/annulation réussis.
+- CI étendue aux mêmes scénarios, purge/validation/archivage alignés sur les
+  rapports générés ; exécution GitHub non observée. Voir docs/SEPARATED_MEDIA.md.
+- Limites : P0 Avatar/NAS encore ouvert, fichier/NAS non disponibles. Aucun
+  nouveau test physique NAS, Docker, Node distant, Firefox, H264/HEVC navigateur,
+  séance longue ou sortie physique multicanal dans ce lot. `.obu` désormais
+  signalé par erreur explicite de scan ; index/packager raw AV1 non implémenté.
+  Véritable Opus brut étudié et refusé, distinct d’Ogg Opus. Le support complet
+  des flux bruts n’est pas livré et ne doit pas être annoncé comme terminé.
+
+Validation finale de ce lot : Clippy strict workspace/all-targets, cargo fmt,
+actionlint et git diff --check réussis. Suite Rust workspace complète non relancée.
+
+## 22 octobre 2026 — Playlists et lecteur musical
+
+- Playlists mixtes, partage nominatif et visibilité publique uniquement entre comptes connectés ; politiques administrateur désactivées par défaut et droits des bibliothèques conservés.
+- Lecteur musical global natif, file bornée, suivant/précédent, aléatoire, répétition, Media Session et paroles locales LRC/texte. Aucun transcodage ; pas d'enchaînement automatique vidéo/musique.
+- Extensions : Installées/Catalogue/Dépôts ; import manuel signé par fichiers avec MEDIA_EXTENSION_IMPORT_DIR, confiance explicite, sans activation ou permission automatique.
+- 96 tests Web, Svelte/lint/build, Clippy strict, scan musical, import signé et parcours Chrome/Core/SQLite ciblés passés. Ni Edge/NAS ni nouveau PostgreSQL réel validés pour ce jalon.
+- Contrats, commandes, limites et preuves : docs/PLAYLISTS_AND_MUSIC.md. Aucun push ou déploiement.
+
+## 22 octobre 2026 - Presentation connexion et lecteur
+
+- Retour SSO : document sombre centre, CSS externe, script de navigation conserve.
+- Lecteur : chargement simple, diagnostics dans Statistiques du flux optionnelles ;
+  mesures video navigateur chaque seconde pendant ouverture du panneau seulement.
+- Web : 96 tests reussis. Verification SSO reel et NAS non effectuee pour ce jalon.

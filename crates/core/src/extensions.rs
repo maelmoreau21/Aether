@@ -12,8 +12,8 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use media_extension_sdk::{
-    API_VERSION, ExtensionRequest, ExtensionResponse, MAX_MODULE, Manifest, MetadataInput,
-    MetadataProposal, Package,
+    API_VERSION, ExtensionRequest, ExtensionResponse, MAX_MODULE, Manifest, MetadataProposal,
+    Package,
 };
 use ring::signature::{ED25519, UnparsedPublicKey};
 use serde::{Deserialize, Serialize};
@@ -31,13 +31,15 @@ use tokio::{
 static MUTATIONS: Mutex<()> = Mutex::const_new(());
 static EXECUTIONS: Semaphore = Semaphore::const_new(1);
 
+#[path = "extension_adapters.rs"]
+mod adapters;
 #[path = "extension_repositories.rs"]
 mod repositories;
 
-fn metadata_input_with_settings(input: MetadataInput, settings: Value) -> Value {
+fn metadata_input_with_settings(input: Value, settings: Value) -> Value {
     // Configuration belongs only to this installed extension. It travels over the
     // private worker pipe and is never included in package files or run history.
-    let mut value = json!(input);
+    let mut value = input;
     if settings
         .as_object()
         .is_some_and(|fields| !fields.is_empty())
@@ -68,6 +70,21 @@ fn identifier(value: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b".-_".contains(&c))
 }
 
+fn http_host(host: &str) -> bool {
+    host.len() <= 253
+        && host.contains('.')
+        && host.parse::<std::net::IpAddr>().is_err()
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .bytes()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+        })
+}
+
 pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'static str> {
     let m = &package.manifest;
     if m.api_version != API_VERSION {
@@ -89,6 +106,8 @@ pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'st
             .split('.')
             .any(|s| s.is_empty() || s.len() > 8 || !s.bytes().all(|b| b.is_ascii_digit()))
         || m.permissions.is_empty()
+        || m.http_hosts.len() > 16
+        || m.http_hosts.iter().any(|host| !http_host(host))
         || m.permissions.iter().any(|p| {
             ![
                 "metadata.read",
@@ -154,6 +173,18 @@ pub fn router(auth: AuthState) -> Router {
             axum::routing::post(apply_metadata),
         )
         .route("/api/v1/admin/extensions/{id}/works", get(works))
+        .route(
+            "/api/v1/admin/extensions/{id}/image",
+            axum::routing::post(adapters::import_image),
+        )
+        .route(
+            "/api/v1/account/avatar/extensions",
+            get(adapters::avatar_extensions),
+        )
+        .route(
+            "/api/v1/account/avatar/extensions/{id}",
+            axum::routing::post(adapters::avatar_operation),
+        )
         .layer(DefaultBodyLimit::max(400_000))
         .layer(
             tower_http::set_header::SetResponseHeaderLayer::if_not_present(
@@ -574,11 +605,39 @@ async fn apply_metadata(
             .fetch_optional(auth.store.pool())
             .await
             .map_err(db)?;
-    if exists.is_none() {
-        return Err(err(StatusCode::NOT_FOUND, "unknown_work"));
+    let (library, _) = exists.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let stored: Option<(String, String)> =
+        query_as("SELECT package_json,generation FROM extensions WHERE id=?")
+            .bind(&id)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let (stored, generation) =
+        stored.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
+    if !permitted(&auth, &headers, &id, &library, &generation).await? {
+        return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
+    }
+    let package: Package = serde_json::from_str(&stored)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
+    if !package
+        .manifest
+        .permissions
+        .iter()
+        .any(|permission| permission == "metadata.write")
+    {
+        return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
     }
 
-    let meta_str = input.metadata.to_string();
+    let mut normalized = adapters::catalogue_metadata(input.metadata)?;
+    normalized.insert("provenance".into(), json!(format!("extension:{id}")));
+    let previous: Option<String> =
+        query_scalar("SELECT manual_json FROM inventory_works WHERE id=?")
+            .bind(&input.work_id)
+            .fetch_one(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let merged = adapters::merge_metadata(previous, normalized);
+    let meta_str = merged.to_string();
     if meta_str.len() > 65_536 {
         return Err(err(StatusCode::BAD_REQUEST, "metadata_too_large"));
     }
@@ -600,6 +659,13 @@ async fn apply_metadata(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Run {
     work_id: String,
+    #[serde(default = "default_operation")]
+    operation: String,
+    #[serde(default)]
+    input: Value,
+}
+fn default_operation() -> String {
+    "metadata.propose".into()
 }
 
 #[derive(Default, Deserialize)]
@@ -634,6 +700,14 @@ async fn permitted(
     library: &str,
     generation: &str,
 ) -> Result<bool, Error> {
+    if library.is_empty() {
+        auth.authenticate(headers)
+            .await
+            .map_err(|status| err(status, "authentication_required"))?;
+        let count: i64 = query_scalar("SELECT COUNT(*) FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.id=? AND e.generation=? AND e.enabled=1 AND p.active=1")
+            .bind(id).bind(generation).fetch_one(auth.store.pool()).await.map_err(db)?;
+        return Ok(count == 1);
+    }
     admin(auth, headers, false).await?;
     let count: i64 = query_scalar("SELECT COUNT(*) FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id JOIN extension_grants g ON g.extension_id=e.id JOIN libraries l ON l.id=g.library_id JOIN media_nodes n ON n.id=l.node_id WHERE e.id=? AND g.library_id=? AND e.generation=? AND e.enabled=1 AND p.active=1 AND l.enabled=1 AND n.status!='revoked'")
         .bind(id).bind(library).bind(generation).fetch_one(auth.store.pool()).await.map_err(db)?;
@@ -650,13 +724,14 @@ async fn run(
     let _slot = EXECUTIONS
         .try_acquire()
         .map_err(|_| err(StatusCode::CONFLICT, "extension_busy"))?;
-    let resource: Option<(String, String)> =
-        query_as("SELECT library_id,title FROM inventory_works WHERE id=?")
+    let resource: Option<adapters::WorkContext> =
+        query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
             .bind(&input.work_id)
             .fetch_optional(auth.store.pool())
             .await
             .map_err(db)?;
-    let (library, title) = resource.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let context = resource.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let library = context.library_id.clone();
     let stored: Option<(String, String)> =
         query_as("SELECT package_json,generation FROM extensions WHERE id=?")
             .bind(&id)
@@ -680,45 +755,20 @@ async fn run(
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(|| json!({}));
 
-    let mut allowed_hosts = Vec::new();
-    let mut auth_headers = std::collections::BTreeMap::new();
-    if id.contains("tmdb") {
-        allowed_hosts.push("api.themoviedb.org".into());
-        allowed_hosts.push("image.tmdb.org".into());
-        if let Some(key) = settings
-            .get("apiKey")
-            .and_then(Value::as_str)
-            .filter(|s| !s.trim().is_empty())
-            && (key.len() > 40 || key.starts_with("ey"))
-        {
-            auth_headers.insert("Authorization".into(), format!("Bearer {}", key.trim()));
-        }
-    } else if id.contains("fanart") {
-        allowed_hosts.push("webservice.fanart.tv".into());
-        allowed_hosts.push("assets.fanart.tv".into());
-    } else if id.contains("imdb") {
-        allowed_hosts.push("v3.sg.media-imdb.com".into());
-        allowed_hosts.push("imdb.com".into());
-        allowed_hosts.push("www.imdb.com".into());
-    }
-
+    adapters::authorize_operation(&package.manifest, &input.operation)?;
+    let mut payload =
+        adapters::metadata_input(&context, &input.work_id, &input.operation, &input.input)?;
+    payload = metadata_input_with_settings(payload, settings);
+    let operation = input.operation.clone();
     let invocation = crate::extension_runtime::Invocation {
         wasm: package.wasm,
         input: ExtensionRequest {
             api_version: 1,
-            operation: "metadata.propose".into(),
-            input: metadata_input_with_settings(
-                MetadataInput {
-                    api_version: 1,
-                    work_id: input.work_id.clone(),
-                    library_id: library.clone(),
-                    title,
-                },
-                settings,
-            ),
+            operation: operation.clone(),
+            input: payload,
         },
-        allowed_hosts,
-        auth_headers,
+        allowed_hosts: package.manifest.http_hosts.clone(),
+        auth_headers: std::collections::BTreeMap::new(),
     };
     let run_id = uuid::Uuid::new_v4().to_string();
     query("INSERT INTO extension_runs(id,extension_id,library_id,work_id,actor_id,started_at,status) VALUES(?,?,?,?,?,?,'running')")
@@ -734,7 +784,11 @@ async fn run(
     let (status, mut details) = match &result {
         Ok(proposal) => (
             "completed",
-            json!({"title": proposal.title, "summary": proposal.summary}),
+            if operation == "metadata.propose" {
+                proposal.clone()
+            } else {
+                json!({"operation":operation,"output":proposal})
+            },
         ),
         Err((_, body)) => ("error", body.0.clone()),
     };
@@ -753,7 +807,7 @@ async fn run(
         .execute(auth.store.pool()).await.map_err(db)?;
     let proposal = result?;
     Ok(Json(
-        json!({"runId":run_id,"extensionId":id,"version":package.manifest.version,"sha256":package.sha256,"durationMs":duration,"proposal":proposal}),
+        json!({"runId":run_id,"extensionId":id,"version":package.manifest.version,"sha256":package.sha256,"durationMs":duration,"operation":operation,"proposal":proposal}),
     ))
 }
 
@@ -764,7 +818,8 @@ async fn invoke_worker(
     library: &str,
     generation: &str,
     invocation: crate::extension_runtime::Invocation,
-) -> Result<MetadataProposal, Error> {
+) -> Result<Value, Error> {
+    let requested_operation = invocation.input.operation.clone();
     let exe = std::env::current_exe()
         .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
     let mut dir = exe
@@ -808,7 +863,7 @@ async fn invoke_worker(
             .stdout
             .take()
             .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?
-            .take(32_769);
+            .take((media_extension_sdk::MAX_JSON + 1) as u64);
         let mut bytes = Vec::new();
         stdout
             .read_to_end(&mut bytes)
@@ -818,25 +873,20 @@ async fn invoke_worker(
             .wait()
             .await
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
-        if !status.success() || bytes.len() > 32_768 {
+        if !status.success() || bytes.len() > media_extension_sdk::MAX_JSON {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "extension_failed"));
         }
         let response: ExtensionResponse = serde_json::from_slice(&bytes)
             .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
-        let proposal: MetadataProposal = serde_json::from_value(response.result)
-            .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
-        if response.api_version != 1
-            || proposal.title.is_empty()
-            || proposal.title.len() > 512
-            || proposal.summary.len() > 16_384
-            || proposal.title.chars().any(char::is_control)
-        {
+        if response.api_version != 1 {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"));
         }
-        Ok(proposal)
+        adapters::validate_result(&requested_operation, response.result)
     };
     tokio::pin!(operation);
-    let deadline = tokio::time::sleep(Duration::from_secs(3));
+    let deadline = tokio::time::sleep(Duration::from_secs(
+        crate::extension_runtime::INVOCATION_TIMEOUT_SECS,
+    ));
     tokio::pin!(deadline);
     let mut check = tokio::time::interval(Duration::from_millis(30));
     loop {
@@ -884,28 +934,29 @@ async fn audit_log(
 #[cfg(test)]
 mod configuration_tests {
     use super::*;
+    use media_extension_sdk::MetadataInput;
 
     #[test]
     fn worker_receives_only_the_selected_extensions_configuration() {
         let value = metadata_input_with_settings(
-            MetadataInput {
+            json!(MetadataInput {
                 api_version: 1,
                 work_id: "work".into(),
                 library_id: "library".into(),
                 title: "Film".into(),
-            },
+            }),
             json!({"api_key": "synthetic-key", "language": "fr-FR"}),
         );
         assert_eq!(value["config"]["api_key"], "synthetic-key");
         assert_eq!(value["title"], "Film");
         assert!(value.get("settings").is_none());
         let legacy = metadata_input_with_settings(
-            MetadataInput {
+            json!(MetadataInput {
                 api_version: 1,
                 work_id: "work".into(),
                 library_id: "library".into(),
                 title: "Film".into(),
-            },
+            }),
             json!({}),
         );
         assert!(serde_json::from_value::<MetadataInput>(legacy).is_ok());

@@ -1,3 +1,4 @@
+> Bibliothèques avec plusieurs dossiers/nœuds : [contrat du 22 octobre](LIBRARY_FOLDERS.md).
 > Navigation par bibliothèque et images multiples : [contrat du 21 octobre](RESPONSIVENESS_AND_ARTWORK.md).
 
 > Administration du 19 octobre 2026 : comptes [ADMIN_USERS.md](ADMIN_USERS.md),

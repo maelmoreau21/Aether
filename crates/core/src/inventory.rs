@@ -1754,7 +1754,7 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
     let node_available = node_status.as_deref().unwrap_or("connected") == "connected";
     let mut val = json!({
         "id": row.get::<String,_>("id"),
-        "libraryId": row.get::<String,_>("library_id"),
+        "libraryId": row.try_get::<String,_>("display_library_id").unwrap_or_else(|_|row.get("library_id")),
         "kind": kind,
         "title": metadata["title"].as_str().map(str::to_owned).unwrap_or_else(||row.get::<String,_>("title")),
         "year": metadata["year"].as_i64().or_else(||row.get::<Option<i64>,_>("year")),
@@ -2056,7 +2056,7 @@ pub async fn catalogue_filtered(
     }
 
     let mut data_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
-        "SELECT w.*, wl.node_id AS node_id, wn.status AS node_status, \
+        "SELECT w.*, COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=w.library_id AND f.active=1),w.library_id) AS display_library_id, wl.node_id AS node_id, wn.status AS node_status, \
            CASE WHEN w.kind = 'series' THEN ( \
              SELECT COUNT(DISTINCT s.id) FROM inventory_seasons s \
              JOIN inventory_episodes ep ON ep.season_id=s.id \
@@ -2413,7 +2413,7 @@ async fn load_series_editions(
 
 pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value>, sqlx::Error> {
     let Some(row) = query(
-        "SELECT w.*, wl.node_id AS node_id, wn.status AS node_status, \
+        "SELECT w.*, COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=w.library_id AND f.active=1),w.library_id) AS display_library_id, wl.node_id AS node_id, wn.status AS node_status, \
          (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
           FROM inventory_images i JOIN libraries il ON il.id=i.library_id JOIN media_nodes in_node ON in_node.id=il.node_id \
           WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND in_node.status='connected' \

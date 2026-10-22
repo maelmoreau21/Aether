@@ -1,3 +1,13 @@
+## Bibliothèques multi-dossiers — 22 octobre 2026
+
+Contrat : [LIBRARY_FOLDERS.md](LIBRARY_FOLDERS.md).
+Tests ciblés : `libraries::tests`, `scanner_flow`, `distributed_multi_node`.
+Ils couvrent persistance, validation des racines par nœud, permissions héritées,
+catalogue commun, scans et retrait avec refus GET/HEAD/Range. Le scénario
+`browser_scanner` contrôle le formulaire desktop/mobile et la lecture après
+redémarrage. L'assertion d'échec de langue recherche le sens du message de
+conservation de piste ; la reprise audio/vidéo et les préférences restent vérifiées.
+
 ## Audio AV1/Opus — 22 octobre 2026
 
 Audit et corrections de fiabilité P0 du lecteur :

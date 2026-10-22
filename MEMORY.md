@@ -1,5 +1,16 @@
 # MEMORY.md — État et décisions Aether
 
+## 22 octobre 2026 — Chemin des rapports Films fixé dans la CI
+
+- Régression de la correction lecteur : défaut local déplacé vers
+  target/browser-scanner, mais vérification/upload CI restés dans
+  docs/evidence/2026-10-16/scanner, causant FileNotFoundError.
+- L'étape browser_scanner définit désormais MEDIA_REPORT_DIR explicitement au
+  dossier CI attendu ; assertions de réussite et de fraîcheur conservées.
+- Parsing YAML et concordance génération/nettoyage/rapports/captures/upload,
+  actionlint 1.7.12 et diff check vérifiés. Pas de navigateur rejoué pour ce
+  changement de configuration seul, de nouvelle CI Linux ou de push.
+
 ## 22 octobre 2026 — Sélection AV1/Opus et préférences FR/EN
 
 - Cause reproduite : `playbackMime` fabriquait un codecs AV1 incomplet (`av01`),

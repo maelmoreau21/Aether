@@ -38,9 +38,10 @@ fs.mkdirSync(out, {recursive: true});
 
     // 2. Admin libraries: add Séries library, grant access to series-user-b in Users section, and scan
     await page.goto(origin + '/app/admin/libraries/');
-    await page.getByRole('button', {name:'Ajouter une médiathèque', exact:true}).click();
+    await page.getByRole('button', {name:'Ajouter une bibliothèque', exact:true}).click();
     await page.locator('#library-name').fill('Séries Navigateur');
     await page.locator('#library-kind').selectOption('series');
+    await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
     await page.getByRole('button', {name:'Enregistrer', exact:true}).click();
     await page.getByRole('heading', {name:'Séries Navigateur', exact:true}).waitFor();
 
@@ -55,7 +56,7 @@ fs.mkdirSync(out, {recursive: true});
 
     await page.locator('a[href="#libraries-section"]').click();
     await page.getByLabel('Actions Séries Navigateur', {exact:true}).click();
-    await page.getByRole('button', {name:'Actualiser la médiathèque', exact:true}).click();
+    await page.getByRole('button', {name:'Actualiser la bibliothèque', exact:true}).click();
     await page.getByRole('dialog').getByRole('button', {name:'Actualiser', exact:true}).click();
     const article = page.locator('article').filter({has: page.getByRole('heading', {name:'Séries Navigateur', exact:true})});
     await article.getByText(/Terminé/).waitFor({timeout:60000});
@@ -119,7 +120,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.reload();
     await page.getByRole('button',{name:'Retirer des favoris',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'4,5 sur 5',exact:true}).getAttribute('aria-pressed'),'true');
-    await page.locator('summary[aria-label="Ajouter à une liste"]').click();
+    await page.locator('summary[aria-label="Ajouter à une playlist"]').click();
     await page.getByLabel('Nouvelle liste',{exact:true}).fill('Sélection navigateur');
     const listCreated=page.waitForResponse(r=>r.url().endsWith('/api/v1/lists')&&r.request().method()==='POST');
     const listAdded=page.waitForResponse(r=>r.url().includes('/api/v1/lists/')&&r.url().includes('/items/')&&r.request().method()==='PUT');
@@ -129,7 +130,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByRole('button',{name:'Sélection navigateur',exact:true}).waitFor();
     const listRead=await page.request.get(origin+'/api/v1/lists/'+encodeURIComponent(createdId));assert.equal(listRead.status(),200);
     assert.ok((await listRead.json()).items.length>0);
-    await page.locator('summary[aria-label="Ajouter à une liste"]').click();
+    await page.locator('summary[aria-label="Ajouter à une playlist"]').click();
     report.results.quickFeedbackAndListMenu=true;
     await page.getByText('Synthetic Actor',{exact:true}).waitFor();
     await page.locator('.season-shortcuts img').first().scrollIntoViewIfNeeded();
@@ -198,18 +199,20 @@ fs.mkdirSync(out, {recursive: true});
     report.results.seekAndPause = true;
     await page.screenshot({path:`${out}/immersive-playback.png`});
 
-    // P4: explicit next episode and user-controlled continuous playback across seasons.
-    const nextButton=page.getByRole('button',{name:/^Épisode suivant :/});
-    const nextTitle=(await nextButton.textContent()).replace('Épisode suivant : ','');
+    // Continuous playback is opt-in; the manual next-episode button is removed.
+    assert.equal(await page.getByRole('button',{name:/^Épisode suivant :/}).count(),0);
+    const nextControl=page.getByLabel('Enchaîner automatiquement');
+    const nextTitle=await nextControl.locator('..').getAttribute('title');
     await page.setViewportSize({width:390,height:844});
-    const fits=await nextButton.evaluate(button=>{const r=button.getBoundingClientRect();return r.left>=0 && r.right<=innerWidth;});
+    const fits=await nextControl.locator('..').evaluate(button=>{const r=button.getBoundingClientRect();return r.left>=0 && r.right<=innerWidth;});
     assert.ok(fits,'Next episode controls must fit on mobile');
     await page.screenshot({path:`${out}/next-episode-mobile.png`});
     await page.setViewportSize({width:1440,height:900});
     assert.equal(await page.getByLabel('Enchaîner automatiquement').isChecked(),false);
     const initialFullscreen=await page.evaluate(()=>Boolean(document.fullscreenElement));
     const nextDescriptor = page.waitForResponse(response => response.url().includes('/api/v1/media/') && response.request().method()==='GET');
-    await nextButton.click();
+    await nextControl.check();
+    await page.evaluate(async()=>{const v=document.querySelector('video');v.currentTime=v.duration-.3;await v.play();});
     await page.waitForFunction(title=>document.querySelector('.top-bar .title>span')?.textContent===title,nextTitle);
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>.1);
     const monoDescriptor = await (await nextDescriptor).json();
@@ -223,7 +226,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.evaluate(async()=>{const v=document.querySelector('video');v.currentTime=v.duration-.3;await v.play();});
     await page.waitForFunction(()=>document.querySelector('.top-bar .title>span')?.textContent==='Season Two Episode');
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>.1);
-    report.results.nextEpisode={manual:true,automaticOptIn:true,crossSeason:true};
+    report.results.nextEpisode={manualButtonRemoved:true,automaticOptIn:true,crossSeason:true};
 
     // Close immersive player
     const closeBtn = page.getByRole('button', {name: 'Retour à l’accueil'});

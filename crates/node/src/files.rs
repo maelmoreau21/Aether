@@ -111,9 +111,22 @@ pub struct OpenedFile {
     metadata: Metadata,
     modified_ns: String,
     canonical_path: PathBuf,
+    cache_lease: Option<std::sync::Arc<crate::cache_dirs::CacheDirectory>>,
 }
 
 impl OpenedFile {
+    pub(crate) fn with_cache_lease(
+        mut self,
+        lease: std::sync::Arc<crate::cache_dirs::CacheDirectory>,
+    ) -> Self {
+        self.cache_lease = Some(lease);
+        self
+    }
+    pub(crate) fn take_cache_lease(
+        &mut self,
+    ) -> Option<std::sync::Arc<crate::cache_dirs::CacheDirectory>> {
+        self.cache_lease.take()
+    }
     /// Open a file relative to `root` in strict read-only mode, rejecting symlinks,
     /// junctions/reparse points, parent directory traversal, and non-regular files.
     pub async fn open_in_root(root: &Path, relative: &Path) -> io::Result<Self> {
@@ -230,6 +243,7 @@ impl OpenedFile {
             metadata,
             modified_ns,
             canonical_path,
+            cache_lease: None,
         })
     }
 
@@ -384,6 +398,7 @@ impl OpenedFile {
             metadata,
             modified_ns,
             canonical_path: canonical_target,
+            cache_lease: None,
         })
     }
 
@@ -417,6 +432,7 @@ impl OpenedFile {
             metadata: self.metadata.clone(),
             modified_ns: self.modified_ns.clone(),
             canonical_path: self.canonical_path.clone(),
+            cache_lease: self.cache_lease.clone(),
         })
     }
 

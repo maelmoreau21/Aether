@@ -110,6 +110,11 @@ services:
       - MEDIA_NODE_NAME=${MEDIA_NODE_NAME:-Node Principal}
       - MEDIA_NODE_PUBLIC_URL=${MEDIA_NODE_PUBLIC_URL-http://127.0.0.1:4101}
       - MEDIA_NODE_DATA_DIR=/data
+      - MEDIA_PREPARATION_CACHE_DIR=/data/preparation-cache
+      - MEDIA_PREPARATION_CACHE_GIB=${MEDIA_PREPARATION_CACHE_GIB:-96}
+      - MEDIA_PREPARATION_VIDEO_GIB=${MEDIA_PREPARATION_VIDEO_GIB:-64}
+      - MEDIA_PREPARATION_AUDIO_MIB=${MEDIA_PREPARATION_AUDIO_MIB:-4096}
+      - MEDIA_PREPARATION_SECONDS=${MEDIA_PREPARATION_SECONDS:-900}
       # Polyvalent Node: multiple media roots separated by semicolon (;).
       # The admin can configure both Films and Series libraries on this same Node from the UI.
       - MEDIA_NODE_ROOTS=/media/films;/media/series

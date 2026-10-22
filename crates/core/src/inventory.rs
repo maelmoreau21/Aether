@@ -1754,7 +1754,7 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
     let node_available = node_status.as_deref().unwrap_or("connected") == "connected";
     let mut val = json!({
         "id": row.get::<String,_>("id"),
-        "libraryId": row.get::<String,_>("library_id"),
+        "libraryId": row.try_get::<String,_>("display_library_id").unwrap_or_else(|_|row.get("library_id")),
         "kind": kind,
         "title": metadata["title"].as_str().map(str::to_owned).unwrap_or_else(||row.get::<String,_>("title")),
         "year": metadata["year"].as_i64().or_else(||row.get::<Option<i64>,_>("year")),
@@ -2056,7 +2056,7 @@ pub async fn catalogue_filtered(
     }
 
     let mut data_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
-        "SELECT w.*, wl.node_id AS node_id, wn.status AS node_status, \
+        "SELECT w.*, COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=w.library_id AND f.active=1),w.library_id) AS display_library_id, wl.node_id AS node_id, wn.status AS node_status, \
            CASE WHEN w.kind = 'series' THEN ( \
              SELECT COUNT(DISTINCT s.id) FROM inventory_seasons s \
              JOIN inventory_episodes ep ON ep.season_id=s.id \
@@ -2413,7 +2413,7 @@ async fn load_series_editions(
 
 pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value>, sqlx::Error> {
     let Some(row) = query(
-        "SELECT w.*, wl.node_id AS node_id, wn.status AS node_status, \
+        "SELECT w.*, COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=w.library_id AND f.active=1),w.library_id) AS display_library_id, wl.node_id AS node_id, wn.status AS node_status, \
          (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
           FROM inventory_images i JOIN libraries il ON il.id=i.library_id JOIN media_nodes in_node ON in_node.id=il.node_id \
           WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND in_node.status='connected' \
@@ -2570,10 +2570,15 @@ pub async fn descriptor(
             session_hash,
         )
     });
-    let language = probe
+    let mut original_audios = probe
         .streams
         .iter()
-        .find(|s| s.codec_type.as_deref() == Some("audio"))
+        .filter(|s| s.codec_type.as_deref() == Some("audio"));
+    let first_audio = original_audios.next();
+    // A browser may select a different default track in a multi-audio container.
+    // Only a mono-audio original has an unambiguous language; explicit tracks follow below.
+    let language = first_audio
+        .filter(|_| original_audios.next().is_none())
         .and_then(|s| s.tags.get("language"))
         .and_then(Value::as_str)
         .unwrap_or("und");
@@ -2636,6 +2641,24 @@ pub async fn descriptor(
                 "externalAudioUrl": format!("/api/v1/assets/{asset_id}/prepared/audio-{}", track.index),
                 "prepare": true, "label": "interne", "mime": "video/mp4", "tracks": [track]
             }));
+            if matches!(
+                row.get::<String, _>("mime").as_str(),
+                "video/mp4" | "video/webm"
+            ) {
+                // Native MP4/WebM can supply the video timeline. Never copy the entire video
+                // just to select a different internal audio track.
+                if let Some(source) = sources.last_mut() {
+                    source["url"] = json!(relay_url);
+                    source["mime"] = source_obj["mime"].clone();
+                    source["prepareVideo"] = json!(false);
+                    source["audioSegmentUrl"] = json!(format!(
+                        "/api/v1/assets/{asset_id}/prepared/audio-{}-chunk-",
+                        track.index
+                    ));
+                    source["directUrl"] = source_obj["directUrl"].clone();
+                    source["tokenExpiresAt"] = source_obj["tokenExpiresAt"].clone();
+                }
+            }
         }
         for track in probe.streams.iter().filter(|t| {
             t.codec_type.as_deref() == Some("subtitle")
@@ -2716,64 +2739,105 @@ pub async fn prepared(
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
     };
     let remote_id = row.get::<String, _>("node_id");
+    let request_started = std::time::Instant::now();
+    eprintln!(
+        "{}",
+        json!({"event":"prepared_http_start","asset":asset_id,"node":remote_id,"component":component,"method":request.method().as_str(),"range":request.headers().contains_key("range")})
+    );
+    let probe = match decode(row.get("probe_json")) {
+        Ok(probe) => probe,
+        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
+    };
+    let selected =
+        if let Some(Component::AudioChunk(index, chunk)) = Component::audio_chunk(component) {
+            let duration = probe
+                .format
+                .get("duration")
+                .and_then(Value::as_str)
+                .and_then(|v| v.parse::<f64>().ok());
+            probe
+                .streams
+                .iter()
+                .find(|t| {
+                    t.index == index
+                        && t.codec_type.as_deref() == Some("audio")
+                        && t.codec_name.as_deref() == Some("opus")
+                })
+                .filter(|_| {
+                    duration.is_some_and(|d| {
+                        d.is_finite()
+                            && f64::from(chunk * media_node::packaging::AUDIO_CHUNK_SECONDS) < d
+                    })
+                })
+                .map(|_| Component::AudioChunk(index, chunk))
+        } else if component == "video"
+            && probe.streams.iter().any(|t| {
+                t.codec_type.as_deref() == Some("video") && t.codec_name.as_deref() == Some("av1")
+            })
+        {
+            Some(Component::Video)
+        } else if let Some(index) = component
+            .strip_prefix("audio-")
+            .and_then(|s| s.parse::<u32>().ok())
+        {
+            probe
+                .streams
+                .iter()
+                .find(|t| {
+                    t.index == index
+                        && t.codec_type.as_deref() == Some("audio")
+                        && t.codec_name.as_deref() == Some("opus")
+                })
+                .map(|_| Component::Audio(index))
+        } else if let Some(index) = component
+            .strip_prefix("subtitle-")
+            .and_then(|s| s.parse::<u32>().ok())
+        {
+            probe
+                .streams
+                .iter()
+                .find(|t| {
+                    t.index == index
+                        && t.codec_type.as_deref() == Some("subtitle")
+                        && matches!(
+                            t.codec_name.as_deref(),
+                            Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text")
+                        )
+                })
+                .map(|_| Component::Subtitle(index))
+        } else {
+            None
+        };
+    let Some(selected) = selected else {
+        return crate::error(StatusCode::UNPROCESSABLE_ENTITY, "unsupported_track");
+    };
     if remote_id != "local" {
         return match crate::nodes::load_node(store, &remote_id).await {
             Ok(Some(node)) => {
-                crate::nodes::relay_from_remote_node(
+                let response = crate::nodes::relay_from_remote_node(
                     store,
                     &node,
                     &format!("/internal/v1/node/assets/{asset_id}/prepared/{component}"),
                     request,
                 )
-                .await
+                .await;
+                eprintln!(
+                    "{}",
+                    json!({"event":"prepared_remote_response","asset":asset_id,"node":remote_id,"component":component,"status":response.status().as_u16(),"elapsed_ms":request_started.elapsed().as_millis()})
+                );
+                response
             }
             _ => crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable"),
         };
     }
-    let probe = match decode(row.get("probe_json")) {
-        Ok(probe) => probe,
-        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
-    };
-    let selected = if component == "video"
-        && probe.streams.iter().any(|t| {
-            t.codec_type.as_deref() == Some("video") && t.codec_name.as_deref() == Some("av1")
-        }) {
-        Some(Component::Video)
-    } else if let Some(index) = component
-        .strip_prefix("audio-")
-        .and_then(|s| s.parse::<u32>().ok())
+    if let Component::Audio(index) | Component::AudioChunk(index, _) = selected
+        && let Some(track) = probe.streams.iter().find(|track| track.index == index)
     {
-        probe
-            .streams
-            .iter()
-            .find(|t| {
-                t.index == index
-                    && t.codec_type.as_deref() == Some("audio")
-                    && t.codec_name.as_deref() == Some("opus")
-            })
-            .map(|_| Component::Audio(index))
-    } else if let Some(index) = component
-        .strip_prefix("subtitle-")
-        .and_then(|s| s.parse::<u32>().ok())
-    {
-        probe
-            .streams
-            .iter()
-            .find(|t| {
-                t.index == index
-                    && t.codec_type.as_deref() == Some("subtitle")
-                    && matches!(
-                        t.codec_name.as_deref(),
-                        Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text")
-                    )
-            })
-            .map(|_| Component::Subtitle(index))
-    } else {
-        None
-    };
-    let Some(selected) = selected else {
-        return crate::error(StatusCode::UNPROCESSABLE_ENTITY, "unsupported_track");
-    };
+        eprintln!(
+            "{}",
+            json!({"event":"prepared_audio_track","asset":asset_id,"index":index,"language":track.tags.get("language"),"channels":track.details.get("channels"),"codec":track.codec_name})
+        );
+    }
     let opened = preparations
         .prepare(
             std::path::Path::new(&row.get::<String, _>("root")),
@@ -2785,13 +2849,24 @@ pub async fn prepared(
         .await;
     let opened = match opened {
         Ok(file) => file,
-        Err(_) => {
-            return crate::error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "preparation_failed_ffmpeg_required_or_cache_busy",
+        Err(error) => {
+            let code = media_node::packaging::preparation_error_code(&error);
+            eprintln!(
+                "{}",
+                json!({"event":"prepared_http_error","asset":asset_id,"component":component,"code":code,"elapsed_ms":request_started.elapsed().as_millis()})
             );
+            let mut response = crate::error(StatusCode::SERVICE_UNAVAILABLE, code);
+            response.headers_mut().insert(
+                "x-media-preparation-error",
+                axum::http::HeaderValue::from_static(code),
+            );
+            return response;
         }
     };
+    eprintln!(
+        "{}",
+        json!({"event":"prepared_http_ready","asset":asset_id,"component":component,"elapsed_ms":request_started.elapsed().as_millis(),"bytes":opened.size()})
+    );
     match media_node::serve_opened(opened, &request, selected.mime()).await {
         Ok(response) => {
             let (parts, body) = response.into_parts();
@@ -2998,6 +3073,22 @@ pub async fn content(
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_error"),
     };
     let node_id_str: String = row.get("node_id");
+    let started = std::time::Instant::now();
+    let method = request.method().as_str().to_owned();
+    let has_range = request.headers().contains_key("range");
+    eprintln!(
+        "{}",
+        json!({"event":"media_http_start","asset":asset_id,"node":node_id_str,"method":method,"range":has_range})
+    );
+    // Headers only: never log signed URLs, query strings, cookies or disk paths.
+    // elapsed_ms measures response-header readiness, not complete body delivery.
+    let logged_response = |response: axum::response::Response| {
+        eprintln!(
+            "{}",
+            json!({"event":"media_http_response","asset":asset_id,"node":node_id_str,"method":method,"range":has_range,"status":response.status().as_u16(),"content_length":response.headers().get("content-length").and_then(|v|v.to_str().ok()).and_then(|v|v.parse::<u64>().ok()),"content_range_present":response.headers().contains_key("content-range"),"elapsed_ms":started.elapsed().as_millis()})
+        );
+        response
+    };
     if node_id_str != "local" {
         drop(row);
         let Some(rec) = crate::nodes::load_node(store, &node_id_str)
@@ -3008,27 +3099,31 @@ pub async fn content(
             return crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
         };
         let pq = format!("/internal/v1/node/assets/{asset_id}/content");
-        return crate::nodes::relay_from_remote_node(store, &rec, &pq, request).await;
+        return logged_response(
+            crate::nodes::relay_from_remote_node(store, &rec, &pq, request).await,
+        );
     }
     let grant = ReadGrant {
         target: ReadTarget::Asset(AssetId::from(asset_id)),
         library_id: LibraryId::from(row.get::<String, _>("library_id")),
-        node_id: NodeId::from(node_id_str),
+        node_id: NodeId::from(node_id_str.clone()),
         root_snapshot: row.get("root"),
         relative_path: row.get("relative_path"),
         mime: row.get("mime"),
     };
     drop(row);
-    match crate::node::LocalNode.serve_grant(&grant, &request).await {
-        Ok(res) => {
-            let (parts, body) = res.into_parts();
-            Response::from_parts(parts, Body::new(body))
-        }
-        Err(code @ NodeErrorCode::StreamError) => {
-            crate::error(StatusCode::INTERNAL_SERVER_ERROR, code.as_str())
-        }
-        Err(code) => crate::error(StatusCode::NOT_FOUND, code.as_str()),
-    }
+    logged_response(
+        match crate::node::LocalNode.serve_grant(&grant, &request).await {
+            Ok(res) => {
+                let (parts, body) = res.into_parts();
+                Response::from_parts(parts, Body::new(body))
+            }
+            Err(code @ NodeErrorCode::StreamError) => {
+                crate::error(StatusCode::INTERNAL_SERVER_ERROR, code.as_str())
+            }
+            Err(code) => crate::error(StatusCode::NOT_FOUND, code.as_str()),
+        },
+    )
 }
 
 /// Session/library checks run before this handler, including HEAD and conditionals.

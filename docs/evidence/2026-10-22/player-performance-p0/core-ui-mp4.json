@@ -1,0 +1,87 @@
+{
+  "browser": "155.0.8059.85",
+  "os": "10.0.26300",
+  "headless": true,
+  "restart": false,
+  "results": {
+    "scan": true,
+    "incremental": true,
+    "defaultFrench": true,
+    "internalSwitches": [
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.57527160644531,
+        "url": "http://127.0.0.1:9700/api/v1/assets/8351c0fb-6e0c-4e74-8bc5-ae8a48cf2d1a/content",
+        "time": 0.980428,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.0483627319336,
+        "url": "http://127.0.0.1:9700/api/v1/assets/8351c0fb-6e0c-4e74-8bc5-ae8a48cf2d1a/content",
+        "time": 1.726658,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -44.59016418457031,
+        "url": "http://127.0.0.1:9700/api/v1/assets/8351c0fb-6e0c-4e74-8bc5-ae8a48cf2d1a/content",
+        "time": 2.48282,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.03492736816406,
+        "url": "http://127.0.0.1:9700/api/v1/assets/8351c0fb-6e0c-4e74-8bc5-ae8a48cf2d1a/content",
+        "time": 3.476038,
+        "fullscreen": true
+      }
+    ],
+    "failedLanguageRetainedWithoutPause": true,
+    "reopenedAudio": [
+      {
+        "id": "internal-2",
+        "language": "en",
+        "passed": true
+      },
+      {
+        "id": "internal-1",
+        "language": "fr",
+        "passed": true
+      }
+    ],
+    "assTextFallback": true,
+    "integratedSubtitleAndNegativeOffset": true,
+    "signedOffsets": true,
+    "externalTracks": {
+      "container": "MP4",
+      "srtRendered": true,
+      "webvttRendered": true,
+      "externalOpusPcm": 0.048405617475509644,
+      "audioVideoSync": true,
+      "pausedSeek": true,
+      "subtitlesOff": true
+    },
+    "progress": {
+      "saved": true,
+      "resumed": true,
+      "manualWatched": true,
+      "manualUnwatched": true
+    },
+    "catalogue": true,
+    "singleWorkTwoVersions": true,
+    "playback": true,
+    "seek": true,
+    "pause": true,
+    "cspErrors": []
+  },
+  "captionLayout": {
+    "line": 70,
+    "snapToLines": false
+  },
+  "passed": true
+}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { adminRequest } from './request';
   import { serverPresentation } from '../config/presentation';
+  import PlaylistPolicy from './PlaylistPolicy.svelte';
   let { section }: { section: string } = $props();
   let name = $state(''), welcome = $state(''), ssoLabel = $state('Se connecter avec SSO'), error = $state(''), notice = $state('');
   let loading = $state(true), saving = $state(false);
@@ -32,6 +33,7 @@
     <label>Texte du bouton de connexion SSO<input bind:value={ssoLabel} required maxlength="80" placeholder="Se connecter avec Authentik" /></label><p>Libellé affiché sur la page de connexion. Enregistré immédiatement, sans redémarrage du Core.</p>
     <button type="submit">{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
   </fieldset></form>
+  <PlaylistPolicy />
 </section>
 {:else if section === '#network-section'}
 <section id="network-section" aria-labelledby="network-heading"><h2 id="network-heading">Réseau</h2><p>Configuration effective du Core.</p>

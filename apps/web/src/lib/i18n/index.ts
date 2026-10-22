@@ -49,7 +49,7 @@ const translations = {
     admin_category_media: 'MÉDIATHÈQUE',
     admin_category_access: 'ACCÈS & SÉCURITÉ',
     admin_nav_overview: 'Vue d’ensemble',
-    admin_nav_libraries: 'Médiathèques & Scans',
+    admin_nav_libraries: 'Bibliothèques',
     admin_nav_nodes: 'Nœuds de stockage',
     admin_nav_users: 'Utilisateurs',
     admin_nav_tasks: 'Planificateur de tâches',
@@ -67,7 +67,7 @@ const translations = {
     col_allowed_libs: 'Bibliothèques autorisées',
     all_libs_granted: '✓ Toutes les bibliothèques (administrateur)',
     no_libs_granted: 'Aucune bibliothèque autorisée',
-    users_footer_hint: 'Pour modifier les bibliothèques accessibles par un compte utilisateur ordinaire, éditez directement les bibliothèques concernées dans la section Médiathèques & Scans ci-dessus.',
+    users_footer_hint: 'Les accès aux bibliothèques se règlent dans Utilisateurs et Groupes.',
 
     // Settings
     settings_title: 'Profil & Paramètres',

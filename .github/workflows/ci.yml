@@ -25,9 +25,14 @@ jobs:
   # =========================================================================
   # 1. Vérifications et tests Rust (Core & Node)
   # =========================================================================
-  rust:
-    name: Rust (Format, Clippy, Tests)
+  rust-tests:
+    name: Rust (partition ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     services:
       postgres:
         image: postgres:18-alpine
@@ -59,16 +64,19 @@ jobs:
 
       - name: Cache des dépendances Cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust
+          save-if: ${{ matrix.shard == 0 }}
 
       - name: Cache des fixtures synthétiques
         id: cache-fixtures
         uses: actions/cache@v4
         with:
           path: tests/fixtures/generated
-          key: fixtures-p0-p1-${{ hashFiles('scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
+          key: fixtures-p0-full-v2-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py', 'scripts/validate-prepared-fixtures.py') }}
 
       - name: Installer FFmpeg (requis par les tests unitaires et intégration media-node)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        uses: ./.github/actions/setup-ffmpeg
 
       - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
@@ -96,41 +104,71 @@ jobs:
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
         run: python3 scripts/prepare-p1.py
 
+      - name: Vérifier les fixtures MSE/DASH préparées, y compris après restauration du cache
+        # The browser job intentionally prepares a smaller, separate fixture set.
+        # Check restored caches too, before opaque HTTP 404 failures in Cargo.
+        run: python3 scripts/validate-prepared-fixtures.py
+
       - name: Valider les métriques de comparaison des lecteurs
+        if: matrix.shard == 0
         run: node scripts/player-comparison-stats.test.cjs
 
       - name: Valider les statistiques de marge de sécurité
+        if: matrix.shard == 0
         run: node scripts/safe-margin-stats.test.cjs
 
       - name: Valider la récupération audio bornée
+        if: matrix.shard == 0
         run: node --test scripts/audio-seek-policy.test.cjs
 
       - name: Vérifier le formatage (cargo fmt)
+        if: matrix.shard == 0
         run: cargo fmt --check
 
       - name: Analyse statique stricte (cargo clippy)
+        if: matrix.shard == 0
         run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
 
       - name: Exécuter les tests unitaires (cargo test --lib --bins)
+        if: matrix.shard == 0
         run: cargo test --locked --workspace --all-features --lib --bins
 
       - name: Vérifier l'ABI du SDK avec un module Rust de test
+        if: matrix.shard == 0
         run: |
           cargo build --locked -p media-extension-sdk-fixture --target wasm32-unknown-unknown --release
           cargo test --locked -p media-poc --test extensions real_rust_sdk_module_executes -- --ignored
 
       - name: Exécuter les tests d'intégration (cargo test --test '*')
-        # Les fixtures 1k/10k partagent CPU et disque du runner ; chaque test de
-        # concurrence conserve ses propres tâches concurrentes et ses assertions.
-        run: cargo test --locked --workspace --all-features --test '*' -- --test-threads=1
+        # Disques/CPU séparés entre partitions. Aucun test retiré ; les tests
+        # restent séquentiels au sein de chaque runner, y compris les benchmarks.
+        run: python3 scripts/ci-integration-shard.py --index ${{ matrix.shard }} --count 3
+
+      - name: Vérifier la couverture des partitions de tests
+        if: matrix.shard == 0
+        run: python3 scripts/test-ci-integration-shard.py
 
       - name: Contrats PostgreSQL 18 (HTTP, OIDC, deux Nodes)
+        if: matrix.shard == 0
         env:
           MEDIA_TEST_POSTGRES_URL: postgres://media_test:ci-only-disposable-password@127.0.0.1:5432/media_test?sslmode=disable
         run: |
           cargo test --locked -p media-poc --test postgres -- --ignored --test-threads=1
           cargo test --locked -p media-poc --lib oidc::tests -- --test-threads=1
           cargo test --locked -p media-poc --test distributed_multi_node -- --test-threads=1
+
+  # Keep the existing required-check name and gate publication on all partitions.
+  rust:
+    name: Rust (Format, Clippy, Tests)
+    needs: [rust-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Exiger la réussite de toutes les partitions Rust
+        env:
+          RESULT: ${{ needs.rust-tests.result }}
+        run: test "$RESULT" = success
 
   # =========================================================================
   # 2. Audit de sécurité des dépendances Rust
@@ -192,9 +230,18 @@ jobs:
   browser:
     name: Navigateur Chrome (Films & Séries)
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - name: Récupérer le code source
         uses: actions/checkout@v4
+
+      - name: Purger les preuves navigateur préexistantes
+        run: |
+          rm -rf docs/evidence/2026-10-16/scanner
+          rm -rf docs/evidence/2026-10-17/series
+          rm -rf docs/evidence/2026-10-22/nas-preparation/ci
+          rm -rf docs/evidence/2026-10-22/separated-media/ci
+          rm -rf docs/evidence/2026-10-22/playlists/ci
 
       - name: Installer la toolchain Rust
         uses: dtolnay/rust-toolchain@stable
@@ -210,15 +257,14 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
 
       - name: Installer FFmpeg (génération des fixtures et ffprobe)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        uses: ./.github/actions/setup-ffmpeg
 
       - name: Installer les dépendances npm du frontend
         working-directory: apps/web
         run: npm ci
 
-      - name: Installer Google Chrome (channel 'chrome') et ses dépendances système via Playwright
-        working-directory: apps/web
-        run: npx playwright install --with-deps chrome
+      - name: Vérifier Chrome préinstallé, installer seulement si nécessaire
+        run: node scripts/ci-ensure-chrome.cjs
 
       - name: Construire le frontend SvelteKit statique
         working-directory: apps/web
@@ -227,17 +273,12 @@ jobs:
           npm run build
           test -f build/index.html
 
-      - name: Purger les preuves navigateur préexistantes
-        run: |
-          rm -rf docs/evidence/2026-10-16/scanner
-          rm -rf docs/evidence/2026-10-17/series
-
       - name: Cache des fixtures synthétiques
         id: cache-fixtures
         uses: actions/cache@v4
         with:
           path: tests/fixtures/generated
-          key: fixtures-p0-p1-${{ hashFiles('scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py') }}
+          key: fixtures-p1-browser-v2-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/generate-dual-opus-fixture.py', 'scripts/prepare-p1.py') }}
 
       - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
@@ -258,10 +299,37 @@ jobs:
         run: python3 scripts/prepare-p1.py
 
       - name: Exécuter le parcours navigateur Films (scan, incrémental, lecture, seek, redémarrage Core)
+        env:
+          # Keep generation aligned with report validation and artifact upload,
+          # independently of the script's local default under target/.
+          MEDIA_REPORT_DIR: docs/evidence/2026-10-16/scanner
         run: cargo test --locked --test browser_scanner -- --ignored --nocapture
 
       - name: Exécuter le parcours navigateur Séries (scan, saisons, lecture, 403, transition cookies HttpOnly)
         run: cargo test --locked --test browser_series -- --ignored --nocapture
+
+      - name: Vérifier playlists, partage connecté, musique persistante et paroles
+        env:
+          MEDIA_TEST_PLAYLIST_BROWSER: '1'
+          MEDIA_WEB_DIST: ${{ github.workspace }}/apps/web/build
+          MEDIA_REPORT_DIR: docs/evidence/2026-10-22/playlists/ci
+        run: cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1
+
+      - name: Vérifier le MP4 AV1 10 bits et deux Opus 5.1 en audio segmenté
+        env:
+          MEDIA_TEST_SEGMENTED: '1'
+          MEDIA_REPORT_DIR: docs/evidence/2026-10-22/nas-preparation/ci
+        run: |
+          python3 scripts/generate-dual-opus-fixture.py
+          node scripts/browser-dual-opus.cjs
+
+      - name: Validate separate MP4/WebM video and independent Opus 2.0/5.1/7.1
+        run: |
+          python3 scripts/generate-separated-fixtures.py
+          MEDIA_TEST_FIXTURE=tests/fixtures/generated/separated-media/dual-2.mp4 MEDIA_REPORT_DIR=docs/evidence/2026-10-22/separated-media/ci/stereo node scripts/browser-dual-opus.cjs
+          MEDIA_TEST_VIDEO_CONTAINER=webm MEDIA_REPORT_DIR=docs/evidence/2026-10-22/separated-media/ci/51 node scripts/browser-dual-opus.cjs
+          MEDIA_TEST_SEGMENTED=1 MEDIA_TEST_VIDEO_CONTAINER=webm MEDIA_TEST_FIXTURE=tests/fixtures/generated/separated-media/dual-6.webm MEDIA_REPORT_DIR=docs/evidence/2026-10-22/separated-media/ci/webm-segmented node scripts/browser-dual-opus.cjs
+          MEDIA_TEST_FIXTURE=tests/fixtures/generated/separated-media/dual-8.mp4 MEDIA_TEST_VIDEO_CONTAINER=webm MEDIA_REPORT_DIR=docs/evidence/2026-10-22/separated-media/ci/71 node scripts/browser-dual-opus.cjs
 
       - name: Vérifier la génération fraîche des rapports et captures navigateur
         shell: python
@@ -271,13 +339,23 @@ jobs:
           for file in [
               "docs/evidence/2026-10-16/scanner/report.json",
               "docs/evidence/2026-10-16/scanner/report-restart.json",
-              "docs/evidence/2026-10-17/series/report.json"
+              "docs/evidence/2026-10-17/series/report.json",
+              "docs/evidence/2026-10-22/nas-preparation/ci/report.json",
+              "docs/evidence/2026-10-22/separated-media/ci/stereo/report.json",
+              "docs/evidence/2026-10-22/separated-media/ci/51/report.json",
+              "docs/evidence/2026-10-22/separated-media/ci/webm-segmented/report.json",
+              "docs/evidence/2026-10-22/separated-media/ci/71/report.json",
+              "docs/evidence/2026-10-22/playlists/ci/report.json"
           ]:
               assert json.loads(Path(file).read_text())["passed"] is True, file
           for img in [
               "docs/evidence/2026-10-16/scanner/scan.png",
               "docs/evidence/2026-10-16/scanner/playback.png",
               "docs/evidence/2026-10-16/scanner/playback-restart.png",
+              "docs/evidence/2026-10-22/playlists/ci/music-lyrics.png",
+              "docs/evidence/2026-10-22/playlists/ci/playlist-desktop.png",
+              "docs/evidence/2026-10-22/playlists/ci/playlist-mobile.png",
+              "docs/evidence/2026-10-22/playlists/ci/extensions-repositories.png",
               "docs/evidence/2026-10-17/series/admin-scan.png",
               "docs/evidence/2026-10-17/series/series-detail.png",
               "docs/evidence/2026-10-17/series/immersive-playback.png"
@@ -285,7 +363,9 @@ jobs:
               assert Path(img).is_file(), img
 
       - name: Archiver les rapports et captures navigateur
-        if: always()
+        # Keep partial failure reports, but do not mask a fixture/setup failure
+        # with a second error when no browser scenario could run.
+        if: ${{ always() && hashFiles('docs/evidence/2026-10-16/scanner/**', 'docs/evidence/2026-10-17/series/**', 'docs/evidence/2026-10-22/nas-preparation/ci/**', 'docs/evidence/2026-10-22/separated-media/ci/**', 'docs/evidence/2026-10-22/playlists/ci/**') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: browser-evidence-films-series
@@ -293,6 +373,9 @@ jobs:
           path: |
             docs/evidence/2026-10-16/scanner/
             docs/evidence/2026-10-17/series/
+            docs/evidence/2026-10-22/nas-preparation/ci/
+            docs/evidence/2026-10-22/separated-media/ci/
+            docs/evidence/2026-10-22/playlists/ci/
 
   images:
     name: Image Docker (${{ matrix.target }})
@@ -321,8 +404,8 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm --entrypoint sh media-ci:runtime-node -ec '
-            ffprobe -version >/dev/null
-            ! command -v ffmpeg
+            ffprobe -version | head -n 1 | grep -F "ffprobe version 9.0.2"
+            ffmpeg -version | head -n 1 | grep -F "ffmpeg version 9.0.2"
             test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
           '
           test "$(docker inspect --format '{{.Size}}' media-ci:runtime-node)" -lt 200000000

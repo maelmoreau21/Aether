@@ -108,3 +108,5 @@ version et l’approbation explicite, installe puis actualise/retire le dépôt 
 perdre le module installé. Le transport des documents est injecté uniquement
 dans le binaire de test ; le navigateur appelle réellement l’API. Captures et
 rapport sont écrits sous `docs/evidence/2026-10-21/repositories/` par défaut.
+
+Le nom du dépôt est désormais facultatif. Installation manuelle hors interface : [import signé depuis les fichiers](PLAYLISTS_AND_MUSIC.md#extensions).

@@ -1,0 +1,50 @@
+name: FFmpeg stable
+description: Build the pinned stable FFmpeg release used by Docker and fixtures
+runs:
+  using: composite
+  steps:
+    - name: Identify distribution
+      id: platform
+      shell: bash
+      run: |
+        . /etc/os-release
+        echo "distribution=$ID-$VERSION_ID" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      id: ffmpeg
+      with:
+        path: ${{ runner.temp }}/media-ffmpeg
+        key: ffmpeg-9.0.2-${{ runner.os }}-${{ runner.arch }}-${{ steps.platform.outputs.distribution }}-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+    - name: Install source build dependencies
+      if: steps.ffmpeg.outputs.cache-hit != 'true'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils nasm pkg-config libaom-dev libopus-dev libx264-dev libx265-dev
+    - name: Verify cached FFmpeg runtime dependencies
+      if: steps.ffmpeg.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        if "$RUNNER_TEMP/media-ffmpeg/bin/ffmpeg" -version >/dev/null 2>&1 && \
+           "$RUNNER_TEMP/media-ffmpeg/bin/ffprobe" -version >/dev/null 2>&1; then
+          echo 'Cached FFmpeg is executable; no apt installation needed.'
+        else
+          # Shared codec libraries are not part of the binary cache. Restore
+          # only their runtime packages if this runner does not provide them.
+          sudo apt-get update
+          mapfile -t codecs < <(apt-cache pkgnames | grep -E '^lib(aom[0-9]+|opus0|x264-[0-9]+|x265-[0-9]+)$' | sort -u)
+          test "${#codecs[@]}" -ge 4
+          sudo apt-get install -y --no-install-recommends "${codecs[@]}"
+        fi
+    - name: Build FFmpeg 9.0.2
+      if: steps.ffmpeg.outputs.cache-hit != 'true'
+      shell: bash
+      run: bash scripts/build-ffmpeg.sh "$RUNNER_TEMP/media-ffmpeg" fixtures
+    - name: Activate and verify FFmpeg
+      shell: bash
+      run: |
+        echo "$RUNNER_TEMP/media-ffmpeg/bin" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/media-ffmpeg/bin/ffmpeg" -version | head -n 1 | grep -F 'ffmpeg version 9.0.2'
+        "$RUNNER_TEMP/media-ffmpeg/bin/ffprobe" -version | head -n 1 | grep -F 'ffprobe version 9.0.2'
+        # Check the fixture profile on both fresh builds and restored binary caches.
+        "$RUNNER_TEMP/media-ffmpeg/bin/ffmpeg" -hide_banner -v error \
+          -f lavfi -i 'testsrc2=size=16x16:rate=1' \
+          -f lavfi -i 'sine=frequency=440:sample_rate=48000' \
+          -map 0:v:0 -map 1:a:0 -t 0.1 -f null -

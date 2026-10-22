@@ -10,6 +10,7 @@ export function languageLabel(language: string) {
 }
 
 export function audioLabel(source: Source) {
+  if (source.audioTrackId === 'internal-default' && (source.tracks?.filter(track => track.codec_type === 'audio').length ?? 0) > 1) return 'Original · piste choisie par le navigateur';
   const track = source.tracks?.find(track => track.codec_type === 'audio');
   const channels = track?.channel_layout ?? (track?.channels === 2 ? 'stéréo' : track?.channels === 1 ? 'mono' : track?.channels ? `${track.channels} canaux` : '');
   return [languageLabel(source.language), track?.tags?.title, track?.codec_name?.toUpperCase(), channels, source.externalAudioUrl && !source.prepare ? 'externe' : source.label].filter(Boolean).join(' · ');

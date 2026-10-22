@@ -62,19 +62,22 @@ impl FolderVideos {
                 continue;
             }
             if p.extension().and_then(|s| s.to_str()).is_some_and(|s| {
-                ["mkv", "mp4", "opus", "ogg", "srt", "vtt", "ass", "ssa"]
-                    .iter()
-                    .any(|e| s.eq_ignore_ascii_case(e))
+                [
+                    "mkv", "mp4", "webm", "opus", "ogg", "srt", "vtt", "ass", "ssa",
+                ]
+                .iter()
+                .any(|e| s.eq_ignore_ascii_case(e))
             }) {
                 if sidecar_paths.len() >= 10000 {
                     return Err(io::Error::other("directory sidecar limit exceeded"));
                 }
                 sidecar_paths.push(p.clone());
             }
-            if p.extension()
-                .and_then(|s| s.to_str())
-                .is_some_and(|s| s.eq_ignore_ascii_case("mkv") || s.eq_ignore_ascii_case("mp4"))
-            {
+            if p.extension().and_then(|s| s.to_str()).is_some_and(|s| {
+                s.eq_ignore_ascii_case("mkv")
+                    || s.eq_ignore_ascii_case("mp4")
+                    || s.eq_ignore_ascii_case("webm")
+            }) {
                 let relative = p
                     .strip_prefix(root)
                     .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "outside root"))?;
@@ -755,7 +758,15 @@ where
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        if !metadata.is_file() || !matches!(extension.as_str(), "mkv" | "mp4") {
+        if metadata.is_file() && extension == "obu" {
+            report.discovered += 1;
+            record_error(&mut report, &mut current_batch_errors, ScanIssue {
+                relative_path,
+                message: "raw AV1 OBU playback unavailable: a validated temporal index, timestamps and Web packaging are required; no frame rate is inferred".into(),
+            });
+            continue;
+        }
+        if !metadata.is_file() || !matches!(extension.as_str(), "mkv" | "mp4" | "webm") {
             continue;
         }
         report.discovered += 1;
@@ -949,10 +960,10 @@ where
                 identity_key: episode_identity_key,
                 external_ids: BTreeMap::new(),
                 probe,
-                mime: if extension == "mp4" {
-                    "video/mp4"
-                } else {
-                    "video/x-matroska"
+                mime: match extension.as_str() {
+                    "mp4" => "video/mp4",
+                    "webm" => "video/webm",
+                    _ => "video/x-matroska",
                 }
                 .into(),
                 reused,
@@ -1003,10 +1014,10 @@ where
                 identity_key,
                 external_ids,
                 probe,
-                mime: if extension == "mp4" {
-                    "video/mp4"
-                } else {
-                    "video/x-matroska"
+                mime: match extension.as_str() {
+                    "mp4" => "video/mp4",
+                    "webm" => "video/webm",
+                    _ => "video/x-matroska",
                 }
                 .into(),
                 reused,

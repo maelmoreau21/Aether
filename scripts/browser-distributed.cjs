@@ -99,25 +99,27 @@ fs.mkdirSync(out, { recursive: true });
     const nodeSelect = page.locator('#library-node');
 
     if (await libListSection.getByText('Films NAS Node 1').count() === 0) {
-      await page.getByRole('button',{name:'Ajouter une médiathèque',exact:true}).click();
+      await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();
       const node1OptionValue = await nodeSelect.locator('option', { hasText: 'Node Films Docker' }).getAttribute('value');
       assert.ok(node1OptionValue, 'Node 1 option must exist in #library-node select');
       await page.locator('#library-name').fill('Films NAS Node 1');
       await page.locator('#library-kind').selectOption('films');
       await nodeSelect.selectOption(node1OptionValue);
       await page.locator('#library-root').selectOption('/media/films');
+      await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
       await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
       await page.getByRole('heading', { name: 'Films NAS Node 1', exact: true }).waitFor({ timeout: 15000 });
     }
 
     if (await libListSection.getByText('Séries NAS Node 2').count() === 0) {
-      await page.getByRole('button',{name:'Ajouter une médiathèque',exact:true}).click();
+      await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();
       const node2OptionValue = await nodeSelect.locator('option', { hasText: 'Node Séries Docker' }).getAttribute('value');
       assert.ok(node2OptionValue, 'Node 2 option must exist in #library-node select');
       await page.locator('#library-name').fill('Séries NAS Node 2');
       await page.locator('#library-kind').selectOption('series');
       await nodeSelect.selectOption(node2OptionValue);
       await page.locator('#library-root').selectOption('/media/series');
+      await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
       await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
       await page.getByRole('heading', { name: 'Séries NAS Node 2', exact: true }).waitFor({ timeout: 15000 });
     }
@@ -125,13 +127,13 @@ fs.mkdirSync(out, { recursive: true });
 
     // 4. Trigger scans on both remote Nodes from UI and wait for completion
     await page.getByLabel('Actions Films NAS Node 1',{exact:true}).click();
-    await page.getByRole('button',{name:'Actualiser la médiathèque',exact:true}).click();
+    await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
     await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
     const filmLibArticle = page.locator('article').filter({ has: page.getByRole('heading', { name: 'Films NAS Node 1', exact: true }) });
     await filmLibArticle.getByText(/Terminé/).waitFor({ timeout: 60000 });
 
     await page.getByLabel('Actions Séries NAS Node 2',{exact:true}).click();
-    await page.getByRole('button',{name:'Actualiser la médiathèque',exact:true}).click();
+    await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
     await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
     const seriesLibArticle = page.locator('article').filter({ has: page.getByRole('heading', { name: 'Séries NAS Node 2', exact: true }) });
     await seriesLibArticle.getByText(/Terminé/).waitFor({ timeout: 60000 });

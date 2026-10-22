@@ -1,5 +1,25 @@
 # Compatibilité observée — P0 natif et limite de sélection audio
 
+## MP4 original et audio segmenté — 22 octobre 2026
+
+MP4 AV1 10 bits + deux Opus 5.1 : Chrome et Edge décodent les fenêtres audio
+MSE copiées en fMP4, pendant que la vidéo originale utilise son index Range.
+Docker FFmpeg runtime (sans encodeur audio/vidéo) + Nginx réel, fichier synthétique
+336 Mio et seeks éloignés vérifiés. Première image et audio prêt mesurés séparément.
+L'incident Avatar sur le NAS reste à confirmer avec ses diagnostics réels :
+[preuves, commandes et limites](NAS_PLAYBACK_DIAGNOSTICS.md).
+
+## AV1 10 bits et deux Opus 5.1 — 22 octobre 2026
+
+Chrome 155.0.8059.85 et Edge 155.0.4283.62 sous Windows, headless : MP4
+synthétique 1080p AV1 Main 10 bits, deux Opus 5.1 FR/EN, lecture décodée et
+FR/EN/FR répété sans rechargement vidéo. Plein écran, position, pause/seek/reprise,
+échec audio et réouverture vérifiés. La sonde `codecs="av01"` incomplète rejetait
+à tort les sources préparées ; correction et commandes dans
+[AV1_OPUS_AUDIO_FIX.md](AV1_OPUS_AUDIO_FIX.md).
+Le parcours Core/SQLite/Chrome MP4/MKV et les préférences serveur passent aussi.
+Pas de preuve sur le fichier Avatar ni la sortie physique 5.1 ou le NAS.
+
 ## Scanner Films P1 — 16 octobre 2026
 
 Chrome155.0.8059.40 / Windows10.0.26300 headless : MP4 AV1 10bits + Opus FR

@@ -1,0 +1,83 @@
+{
+  "browser": "155.0.8059.85",
+  "os": "10.0.26300",
+  "headless": true,
+  "restart": true,
+  "results": {
+    "internalSwitches": [
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.5809097290039,
+        "url": "http://127.0.0.1:5552/api/v1/assets/a7f9164e-17e2-4b4d-b3b4-492dad99f882/prepared/video",
+        "time": 0.668394,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.03827667236328,
+        "url": "http://127.0.0.1:5552/api/v1/assets/a7f9164e-17e2-4b4d-b3b4-492dad99f882/prepared/video",
+        "time": 1.060159,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.57583618164062,
+        "url": "http://127.0.0.1:5552/api/v1/assets/a7f9164e-17e2-4b4d-b3b4-492dad99f882/prepared/video",
+        "time": 1.471409,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.05049133300781,
+        "url": "http://127.0.0.1:5552/api/v1/assets/a7f9164e-17e2-4b4d-b3b4-492dad99f882/prepared/video",
+        "time": 1.85977,
+        "fullscreen": true
+      }
+    ],
+    "reopenedAudio": [
+      {
+        "id": "internal-2",
+        "language": "en",
+        "passed": true
+      },
+      {
+        "id": "internal-1",
+        "language": "fr",
+        "passed": true
+      }
+    ],
+    "assTextFallback": true,
+    "integratedSubtitleAndNegativeOffset": true,
+    "signedOffsets": true,
+    "externalTracks": {
+      "container": "MKV",
+      "srtRendered": true,
+      "webvttRendered": true,
+      "externalOpusPcm": 0.04840671271085739,
+      "audioVideoSync": true,
+      "pausedSeek": true,
+      "subtitlesOff": true
+    },
+    "progress": {
+      "saved": true,
+      "resumed": true,
+      "manualWatched": true,
+      "manualUnwatched": true
+    },
+    "catalogue": true,
+    "singleWorkTwoVersions": true,
+    "playback": true,
+    "seek": true,
+    "pause": true,
+    "cspErrors": []
+  },
+  "captionLayout": {
+    "line": 70,
+    "snapToLines": false
+  },
+  "passed": true
+}

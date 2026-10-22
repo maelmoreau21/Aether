@@ -5,6 +5,7 @@ use std::{
     path::Path,
 };
 
+#[derive(Debug)]
 pub struct CacheDirectory {
     directory: Option<tempfile::TempDir>,
     lease: Option<File>,
@@ -17,7 +18,20 @@ impl CacheDirectory {
             .unwrap_or(Path::new(""))
     }
     pub fn new() -> io::Result<Self> {
-        Self::in_root(&std::env::temp_dir().join("media-preparation-v2"))
+        let root = match std::env::var_os("MEDIA_PREPARATION_CACHE_DIR") {
+            Some(path) => {
+                let path = std::path::PathBuf::from(path);
+                if !path.is_absolute() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "MEDIA_PREPARATION_CACHE_DIR must be absolute",
+                    ));
+                }
+                path
+            }
+            None => std::env::temp_dir().join("media-preparation-v2"),
+        };
+        Self::in_root(&root)
     }
     fn in_root(root: &Path) -> io::Result<Self> {
         match fs::create_dir(root) {

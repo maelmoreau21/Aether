@@ -144,13 +144,18 @@ async fn avatar(
             .fetch_optional(&auth.store.pool)
             .await
             .map_err(db)?;
+    let bytes = bytes.ok_or_else(|| error(StatusCode::NOT_FOUND, "avatar_not_found"))?;
     Ok((
         [
-            (header::CONTENT_TYPE, "image/png"),
+            (header::CONTENT_TYPE, crate::avatars::content_type(&bytes)),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; sandbox",
+            ),
             (header::CACHE_CONTROL, "private, no-store"),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         ],
-        bytes.ok_or_else(|| error(StatusCode::NOT_FOUND, "avatar_not_found"))?,
+        bytes,
     )
         .into_response())
 }

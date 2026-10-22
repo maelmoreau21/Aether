@@ -26,7 +26,6 @@
     banner?: string;
     configSchema?: ConfigField[];
   };
-  type Package = { manifest: Manifest; publisherId: string; sha256: string; signature: string; wasm: string };
   type SettingValue = string | number | boolean;
   type ExtensionSettings = Record<string, SettingValue>;
   type Installed = { manifest: Manifest; publisherId: string; sha256: string; enabled: boolean; libraryIds: string[]; settings?: ExtensionSettings };
@@ -87,7 +86,6 @@
   let runs = $state<Run[]>([]);
   let publishers = $state<{ id: string; publicKey: string; active: boolean }[]>([]);
   let audit = $state<{ actorId: string; extensionId: string; action: string; createdAt: number }[]>([]);
-  let candidate = $state<Package | null>(null);
   let publisherId = $state('');
   let publicKey = $state('');
   let selected = $state<Record<string, string[]>>({});
@@ -156,20 +154,6 @@
     finally { busy = false; }
   }
   $effect(() => { void perform(refresh, ''); });
-  async function readPackage(event: Event) {
-    candidate = null; error = '';
-    const file = (event.currentTarget as HTMLInputElement).files?.[0];
-    if (!file) return;
-    if (file.size > 400000) { error = 'Paquet limité à 400 Ko.'; return; }
-    try {
-      const parsed = JSON.parse(await file.text()) as Package;
-      if (!parsed?.manifest || typeof parsed.manifest.id !== 'string' || typeof parsed.manifest.name !== 'string' ||
-          !Array.isArray(parsed.manifest.permissions) || !parsed.manifest.permissions.every(p => typeof p === 'string') ||
-          (parsed.manifest.httpHosts !== undefined && (!Array.isArray(parsed.manifest.httpHosts) || !parsed.manifest.httpHosts.every(host => typeof host === 'string'))) ||
-          typeof parsed.publisherId !== 'string' || typeof parsed.sha256 !== 'string') throw new Error('Paquet invalide.');
-      candidate = parsed;
-    } catch { error = 'Paquet JSON invalide.'; }
-  }
   function configure(extension: Installed, enabled: boolean) {
     return perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`, {
       method: 'PUT', body: JSON.stringify({ enabled, libraryIds: selected[extension.manifest.id] ?? [] })
@@ -196,7 +180,7 @@
   async function addRepository(event: SubmitEvent) {
     event.preventDefault();
     await perform(async () => {
-      await adminRequest('/api/v1/admin/extensions/repositories',{method:'POST',body:JSON.stringify({name:repositoryName,url:repositoryUrl})});
+      await adminRequest('/api/v1/admin/extensions/repositories',{method:'POST',body:JSON.stringify({name:repositoryName.trim() || new URL(repositoryUrl).hostname.slice(0,80),url:repositoryUrl})});
       repositoryName=''; repositoryUrl=''; tab='catalogue';
     },'Dépôt enregistré. Ses extensions sont disponibles dans le catalogue.');
   }
@@ -209,20 +193,20 @@
 </script>
 
 <section id="extensions-section" aria-labelledby="extensions-heading">
-  <div class="heading"><h2 id="extensions-heading">Extensions</h2><button disabled={busy} onclick={() => perform(refresh, '')}>Actualiser</button></div>
+  <div class="heading"><div><p class="eyebrow">PERSONNALISER VOTRE SERVEUR</p><h2 id="extensions-heading">Extensions</h2><p>Un dépôt, un catalogue et vos extensions installées.</p></div><button disabled={busy} onclick={() => perform(refresh, '')}>Actualiser</button></div>
   <nav class="extension-tabs" aria-label="Gestion des extensions">
-    <button aria-current={tab==='installed' ? 'page' : undefined} onclick={() => tab='installed'}>Installées</button>
-    <button aria-current={tab==='catalogue' ? 'page' : undefined} onclick={() => tab='catalogue'}>Catalogue</button>
-    <button aria-current={tab==='repositories' ? 'page' : undefined} onclick={() => tab='repositories'}>Dépôts</button>
+    <button class:active={tab==='installed'} aria-current={tab==='installed' ? 'page' : undefined} onclick={() => tab='installed'}>Installées ({installed.length})</button>
+    <button class:active={tab==='catalogue'} aria-current={tab==='catalogue' ? 'page' : undefined} onclick={() => tab='catalogue'}>Catalogue</button>
+    <button class:active={tab==='repositories'} aria-current={tab==='repositories' ? 'page' : undefined} onclick={() => tab='repositories'}>Dépôts ({repositories.length})</button>
   </nav>
   {#if error}<p role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if tab==='repositories'}
-    <h3>Dépôts d’extensions</h3>
-    <p>Ajoutez l’adresse HTTPS du manifeste fourni par l’auteur. Les dépôts et modules Jellyfin ne sont pas compatibles.</p>
+    <h3>Ajouter un dépôt</h3>
+    <p>Collez l’adresse HTTPS fournie par l’auteur. Vous pourrez ensuite choisir ses extensions dans le catalogue.</p>
     <form class="repository-form" onsubmit={addRepository}>
-      <label>Nom du dépôt<input required maxlength="80" bind:value={repositoryName} disabled={busy} /></label>
-      <label>URL du manifeste<input type="url" required maxlength="2048" placeholder="https://exemple.fr/manifest.json" bind:value={repositoryUrl} disabled={busy} /></label>
+      <label>Nom du dépôt (facultatif)<input maxlength="80" bind:value={repositoryName} disabled={busy} /></label>
+      <label>Adresse du dépôt<input type="url" required maxlength="2048" placeholder="https://exemple.fr/manifest.json" bind:value={repositoryUrl} disabled={busy} /></label>
       <button disabled={busy}>Ajouter le dépôt</button>
     </form>
     {#each repositories as repository (repository.id)}
@@ -233,9 +217,10 @@
     {:else}<p>Aucun dépôt enregistré.</p>{/each}
   {:else if tab==='catalogue'}
     <div class="heading"><h3>Catalogue</h3><button onclick={() => tab='repositories'}>+ Ajouter un dépôt</button></div>
+    <label class="catalogue-search">Rechercher dans le catalogue<input type="search" bind:value={search} placeholder="Nom ou description" /></label>
     <p>Choisissez une version puis installez-la. L’activation se fait dans Installées après configuration des accès.</p>
     <div class="plugins-grid">
-    {#each catalogueGroups as group (group.key)}
+    {#each catalogueGroups.filter(group=>`${group.entries[0].manifest.name} ${group.entries[0].manifest.description}`.toLowerCase().includes(search.toLowerCase())) as group (group.key)}
       {@const entry=group.entries.find(item => item.manifest.version===catalogueVersions[group.key]) ?? group.entries[0]}
       {@const publisher=publishers.find(item => item.id===entry.publisherId)}
       {@const trusted=publisher?.active && publisher.publicKey===entry.publicKey}
@@ -254,21 +239,10 @@
         {/if}
         <button disabled={busy || !trusted || !entry.compatible || !!existing} onclick={() => installFromCatalogue(entry)}>Installer {entry.manifest.name}</button>
       </article>
-    {:else}<p>Aucune extension disponible. Ajoutez un dépôt pour remplir le catalogue. Aucun dépôt officiel distant n’est configuré sur ce serveur.</p>{/each}
+    {:else}<p>Aucune extension ne correspond. Ajoutez un dépôt ou modifiez votre recherche.</p>{/each}
     </div>
   {:else}
-  <p>Installez un paquet signé, configurez ses paramètres, choisissez ses bibliothèques puis activez-le. Les originaux restent en lecture seule.</p>
-  <details class="availability">
-    <summary>Comment installer une extension en local ?</summary>
-    <ol>
-      <li>Préparez le fichier <code>*.package.json</code> signé avec le script <code>Aether-Plugins/scripts/Build-LocalPackage.ps1</code>.</li>
-      <li>Dans « Éditeurs approuvés », ajoutez l’identifiant et la clé publique affichée lors de la création de votre clé de signature.</li>
-      <li>Importez le paquet ci-dessous. Le serveur vérifie sa signature.</li>
-      <li>Ouvrez « Gérer cette extension », renseignez les paramètres du fournisseur, choisissez ses bibliothèques et activez-la.</li>
-    </ol>
-    <p>Une clé API Aether sert à lire le catalogue depuis une autre application. Une clé TMDb ou fanart.tv se renseigne dans les paramètres de l’extension. La clé privée de signature reste sur votre ordinateur.</p>
-    <p>L’onglet Dépôts permet aussi d’ajouter un manifeste HTTPS et de choisir une extension dans Catalogue. Les paquets Jellyfin et leurs fichiers DLL ne sont pas compatibles.</p>
-  </details>
+  <div class="install-intro"><div><h3>Vos extensions</h3><p>Installez depuis un dépôt, puis choisissez les bibliothèques et les options de chaque extension.</p></div><button onclick={() => tab='catalogue'}>Parcourir le catalogue</button></div>
   <details>
     <summary>Éditeurs approuvés</summary>
     <p>Vérifiez la clé publique auprès de l’éditeur par un canal de confiance avant de l’approuver.</p>
@@ -282,37 +256,6 @@
         <button disabled={busy || !publisher.active} onclick={() => perform(() => adminRequest(`/api/v1/admin/extensions/publishers/${encodeURIComponent(publisher.id)}`, { method: 'DELETE' }), 'Éditeur révoqué.')}>Révoquer</button></div>
     {/each}
   </details>
-  <div class="card">
-    <h3>Installer un paquet local</h3>
-    <label>Paquet JSON signé<input type="file" accept="application/json,.json" onchange={readPackage} disabled={busy} /></label>
-    {#if candidate}
-      <div class="candidate-preview">
-        {#if candidate.manifest.banner}
-          {@const bannerSrc = toBannerSrc(candidate.manifest.banner)}
-          {#if bannerSrc}
-            <div class="plugin-banner">
-              <img src={bannerSrc} alt="" />
-            </div>
-          {/if}
-        {/if}
-        <p><strong>{candidate.manifest.name}</strong> · v{candidate.manifest.version} · {candidate.publisherId}</p>
-        <p>{candidate.manifest.description}</p>
-        <div class="plugin-badges">
-          {#if candidate.manifest.category}<span class="badge category">{candidate.manifest.category}</span>{/if}
-          {#if candidate.manifest.targetAbi}<span class="badge abi">ABI {candidate.manifest.targetAbi}</span>{/if}
-          {#if candidate.manifest.minServerVersion}<span class="badge server">Aether &ge; {candidate.manifest.minServerVersion}</span>{/if}
-        </div>
-        <p>Droits demandés : {candidate.manifest.permissions.join(', ')}</p>
-        <p>Hôtes HTTPS demandés : {candidate.manifest.httpHosts?.join(', ') || 'aucun'}</p>
-        <code>SHA-256 : {candidate.sha256}</code>
-        <p>L’installation vérifie la signature et conserve l’extension désactivée.</p>
-        {#if !publishers.some(publisher => publisher.id === candidate?.publisherId && publisher.active)}
-          <p>Approuvez d’abord l’éditeur « {candidate.publisherId} » avec sa clé publique dans « Éditeurs approuvés ».</p>
-        {/if}
-        <button disabled={busy || !publishers.some(publisher => publisher.id === candidate?.publisherId && publisher.active)} onclick={() => perform(async () => { await adminRequest('/api/v1/admin/extensions', { method: 'POST', body: JSON.stringify(candidate) }); candidate = null; }, 'Paquet installé, encore désactivé.')}>Vérifier et installer</button>
-      </div>
-    {/if}
-  </div>
   <div class="heading"><h3>Installées ({installed.length})</h3>
     <div class="row">
       <label>Rechercher une extension<input type="search" bind:value={search} /></label>
@@ -494,9 +437,11 @@
 </section>
 
 <style>
+  .eyebrow{font-size:11px;letter-spacing:.14em;color:var(--color-accent);margin:0 0 8px}.install-intro{display:flex;justify-content:space-between;gap:20px;align-items:center;margin:24px 0;padding:22px;background:var(--color-surface);border:1px solid var(--color-line);border-radius:14px}.install-intro h3{margin:0}.install-intro p{color:var(--color-muted);max-width:650px}.catalogue-search{display:grid;gap:8px;max-width:520px;margin-block:20px}.extension-tabs{margin-block:24px!important}.repository-form{padding:20px;background:var(--color-surface);border:1px solid var(--color-line);border-radius:14px}
+
   pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:24rem; overflow:auto; }
   .extension-tabs { display:flex;gap:.5rem;flex-wrap:wrap;margin-block:1rem; }
-  .extension-tabs button[aria-current="page"] { border-color:var(--color-accent);color:var(--color-accent); }
+  .extension-tabs button.active { border-color:var(--color-accent);color:var(--color-accent); }
   .repository-form { display:grid;gap:.8rem;max-width:800px; }
   .repository-url { overflow-wrap:anywhere;white-space:normal; }
   section { padding: 1.5rem; border: 1px solid var(--border-subtle); background: var(--bg-surface); border-radius: 16px; }
@@ -505,8 +450,7 @@
   p,label { color: var(--text-secondary); line-height: 1.6; }
   .heading,.row,.actions,.settings-actions { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
   .heading { justify-content: space-between; }
-  .card,.availability,details { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border-subtle); border-radius: 10px; }
-  .availability { background: var(--bg-elevated); }
+  .card,details { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border-subtle); border-radius: 10px; }
   form { display: grid; gap: .7rem; margin-block: 1rem; }
   label { display: grid; gap: .3rem; } .check { display: flex; align-items: center; gap: .5rem; }
   input:not([type=checkbox]),select { min-width: 0; width: 100%; padding: .6rem; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); box-sizing: border-box; }

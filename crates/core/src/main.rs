@@ -49,6 +49,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .parse()?;
     let bind_addr = parse_bind_addr()?;
     let database = media_poc::identity::IdentityStore::open_configured(&root).await?;
+    if let Some(directory) = std::env::var_os("MEDIA_EXTENSION_IMPORT_DIR") {
+        let imported =
+            media_poc::extension_files::import(&database, std::path::Path::new(&directory)).await?;
+        eprintln!("{{\"event\":\"local_extensions_imported\",\"count\":{imported}}}");
+    }
     let inventory = if library_root.is_some() {
         Inventory::local(root).await?
     } else {

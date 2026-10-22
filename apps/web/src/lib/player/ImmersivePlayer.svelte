@@ -24,6 +24,9 @@
   let busy = $state(false);
   let error = $state('');
   let notice = $state('');
+  let statistics = $state(false);
+  let metrics = $state({ width: 0, height: 0, frames: 0, dropped: 0, buffered: 0, ready: 0, network: 0 });
+  const selectedSource = $derived(active?.sources.find(source => source.audioTrackId === audio));
   let loadStage = $state('Chargement de votre séance…');
   let audio = $state('');
   let preferredLanguage = 'fr';
@@ -52,7 +55,7 @@
   }
   function armIdle() {
     clearTimeout(idle);
-    if (!opened || paused || menu || busy || error || keyboardPinned) { visible = true; return; }
+    if (!opened || statistics || paused || menu || busy || error || keyboardPinned) { visible = true; return; }
     idle = setTimeout(() => visible = false, 3000);
   }
   function wake() { visible = true; armIdle(); }
@@ -68,7 +71,7 @@
     try { await operation(engine); }
     catch (e) {
       if (current === generation) {
-        if (e instanceof AudioSelectionRetainedError) notice = `${e.message} Piste précédente conservée.`;
+        if (e instanceof AudioSelectionRetainedError) { loadStage = e.message; notice = 'Cette piste est indisponible. La piste précédente a été conservée.'; }
         else fail(e instanceof Error ? e.message : String(e));
       }
     }
@@ -124,7 +127,7 @@
     generation++; const current = generation;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     scrollPosition = window.scrollY;
-    active = media; opened = true; busy = true; error = ''; notice = ''; menu = null;
+    statistics = false; loadStage = 'Chargement de votre séance…'; audio = ''; active = media; opened = true; busy = true; error = ''; notice = ''; menu = null;
     keyboardPinned = false; visible = true; document.body.classList.add('immersive-open');
     dialog.showModal();
     surface?.focus();
@@ -211,6 +214,7 @@
     keyboardPinned = true; wake();
     if (event.key === 'Escape') {
       event.preventDefault();
+      if (statistics) { statistics = false; return; }
       if (menu) controls?.closeMenu();
       else if (document.fullscreenElement === surface) void document.exitFullscreen().catch(() => {});
       else close();
@@ -236,6 +240,20 @@
   }
   function cancel(event: Event) { event.preventDefault(); if (menu) controls?.closeMenu(); else close(); }
   function ended() { sync(); if (engine) progressTracker?.save(engine.state(), true, true); if (autoplayNext && onNext) onNext(); }
+  $effect(() => {
+    if (!opened || !statistics) return;
+    const update = () => {
+      const quality = video.getVideoPlaybackQuality?.();
+      let buffered = 0;
+      for (let i = 0; i < video.buffered.length; i++) {
+        if (video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)) buffered = video.buffered.end(i) - video.currentTime;
+      }
+      metrics = { width: video.videoWidth, height: video.videoHeight, frames: quality?.totalVideoFrames ?? 0, dropped: quality?.droppedVideoFrames ?? 0, buffered, ready: video.readyState, network: video.networkState };
+    };
+    update();
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
+  });
   onMount(() => {
     const change = () => { fullscreen = document.fullscreenElement === surface; wake(); };
     document.addEventListener('fullscreenchange', change);
@@ -255,11 +273,33 @@
     <button class="video-interaction" tabindex="-1" aria-label="Afficher ou masquer les commandes" onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
       <button class="return" aria-label="Retour à l’accueil" onclick={close}><Icon name="back" size={24} /></button>
-      <div class="title"><span>{active?.title ?? 'Votre séance'}</span><small>LECTURE LOCALE{active?.synthetic ? ' · MIRE SYNTHÉTIQUE' : ''}</small></div>
+      <div class="title"><span>{active?.title ?? 'Votre séance'}</span></div>
+      <button class="stats-toggle" aria-expanded={statistics} aria-controls="stream-statistics" onclick={() => { statistics = !statistics; wake(); }}>Statistiques du flux</button>
       {#if nextTitle && onNext}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
     </div>
-    {#if busy}<div class="loading" role="status"><img src="{base}/images/logo-loading.svg" alt="" class="player-spinner" width="40" height="40" />{loadStage}<button onclick={close}>Annuler</button></div>{/if}
-    {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, playback); }}>Réessayer explicitement</button></div>{/if}
+    {#if busy}<div class="loading" role="status"><img src="{base}/images/logo-loading.svg" alt="" class="player-spinner" width="40" height="40" />Chargement de votre séance…<button onclick={close}>Annuler</button></div>{/if}
+    {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>La lecture a rencontré un problème. Réessayez ou choisissez une autre piste ou version.</p><button onclick={() => { if (active) void prepare(active, playback); }}>RÃ©essayer explicitement</button></div>{/if}
+    {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label="Statistiques du flux">
+      <header><strong>Statistiques du flux</strong><button onclick={() => { statistics = false; wake(); }}>Fermer</button></header>
+      <p>Mesures vidéo du navigateur · actualisation chaque seconde</p>
+      <dl>
+        <dt>État</dt><dd>{busy ? 'Chargement' : error ? 'Erreur' : paused ? 'En pause' : 'Lecture'}</dd>
+        <dt>Vidéo décodée</dt><dd>{metrics.width} × {metrics.height}</dd>
+        <dt>Images / perdues</dt><dd>{metrics.frames} / {metrics.dropped}</dd>
+        <dt>Vidéo en mémoire tampon</dt><dd>{metrics.buffered.toFixed(1)} s</dd>
+        <dt>Position / durée</dt><dd>{playback.position.toFixed(1)} / {playback.duration.toFixed(1)} s</dd>
+        <dt>Vitesse</dt><dd>{playback.speed}×</dd>
+        <dt>readyState / networkState</dt><dd>{metrics.ready} / {metrics.network}</dd>
+        <dt>Nœud déclaré</dt><dd>{selectedSource?.nodeId ?? active?.nodeId ?? 'Non renseigné'}</dd>
+        <dt>Source / piste audio</dt><dd>{selectedSource?.id ?? 'En attente'} / {audio || 'En attente'}</dd>
+        <dt>Conteneur / langue</dt><dd>{selectedSource?.mime ?? 'Non renseigné'} / {selectedSource?.language ?? 'Non renseignée'}</dd>
+        <dt>Mode audio déclaré</dt><dd>{selectedSource?.audioSegmentUrl ? 'Segments' : selectedSource?.externalAudioUrl ? 'Séparé' : 'Interne'}</dd>
+        <dt>Sous-titres</dt><dd>{subtitle ?? 'Désactivés'}</dd>
+      </dl>
+      {#each selectedSource?.tracks ?? [] as track, i (i)}<p>Piste {track.index ?? i} · {track.codec_type} · {track.codec_name} {track.profile ?? ''} {track.channels ? `· ${track.channels} canaux` : ''}</p>{/each}
+      <p>Diagnostic : {error || loadStage}</p>
+      <p>Les pistes déclarées ne prouvent pas la sortie audio physique. Débit réseau non mesuré.</p>
+    </section>{/if}
     <p class="fullscreen-notice" role="status">{notice}</p>
     {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
       onPlay={togglePlayback} onVolume={volume} onMute={mute} onSeek={seek} onAudio={selectAudio} onSubtitle={selectSubtitle} onSource={selectSource}
@@ -268,6 +308,12 @@
 </dialog>
 
 <style>
+  .stats-toggle, .stream-statistics button { color:#eee; background:#ffffff15; border:1px solid #ffffff30; border-radius:8px; padding:10px 14px; cursor:pointer; }
+  .stream-statistics { position:absolute; z-index:7; top:90px; right:24px; width:min(460px,calc(100% - 48px)); max-height:calc(100dvh - 230px); overflow:auto; padding:20px; box-sizing:border-box; background:rgba(16,17,25,.96); color:#eee; border:1px solid #ffffff25; border-radius:12px; font-size:12px; overflow-wrap:anywhere; }
+  .stream-statistics header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .stream-statistics dl { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; }
+  .stream-statistics dd { margin:0; } .stream-statistics dt, .stream-statistics p { color:#bbb8ca; }
+
   .chapters { position:absolute;top:90px;right:24px;z-index:4;display:grid;gap:6px;max-width:70%; } .chapters select { padding:10px;max-width:100%;color:var(--color-text);background:var(--color-surface);border:1px solid var(--color-line);border-radius:6px; }
   video::cue { color:#fff; background:rgba(0,0,0,.8); text-shadow:0 1px 2px #000; font-size:clamp(18px,2vw,30px); }
   .next-episode { margin-left:auto; max-width:50%; font-size:12px; } .next-episode label { display:flex; align-items:center; gap:8px; }
@@ -317,14 +363,7 @@
     letter-spacing: -0.02em;
     color: var(--color-text-bright);
   }
-  .title small {
-    display: block;
-    margin-top: 4px;
-    font-size: 10.5px;
-    letter-spacing: 0.14em;
-    color: var(--color-accent);
-    font-weight: 700;
-  }
+
   .loading {
     position: absolute;
     inset: 42% 10% auto;
@@ -413,10 +452,7 @@
     .title > span {
       font-size: 14px;
     }
-    .title small {
-      font-size: 9.5px;
-      margin-top: 2px;
-    }
+
     .fullscreen-notice {
       left: 18px;
       top: 80px;

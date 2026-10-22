@@ -241,6 +241,7 @@ jobs:
           rm -rf docs/evidence/2026-10-17/series
           rm -rf docs/evidence/2026-10-22/nas-preparation/ci
           rm -rf docs/evidence/2026-10-22/separated-media/ci
+          rm -rf docs/evidence/2026-10-22/playlists/ci
 
       - name: Installer la toolchain Rust
         uses: dtolnay/rust-toolchain@stable
@@ -307,6 +308,13 @@ jobs:
       - name: Exécuter le parcours navigateur Séries (scan, saisons, lecture, 403, transition cookies HttpOnly)
         run: cargo test --locked --test browser_series -- --ignored --nocapture
 
+      - name: Vérifier playlists, partage connecté, musique persistante et paroles
+        env:
+          MEDIA_TEST_PLAYLIST_BROWSER: '1'
+          MEDIA_WEB_DIST: ${{ github.workspace }}/apps/web/build
+          MEDIA_REPORT_DIR: docs/evidence/2026-10-22/playlists/ci
+        run: cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1
+
       - name: Vérifier le MP4 AV1 10 bits et deux Opus 5.1 en audio segmenté
         env:
           MEDIA_TEST_SEGMENTED: '1'
@@ -336,13 +344,18 @@ jobs:
               "docs/evidence/2026-10-22/separated-media/ci/stereo/report.json",
               "docs/evidence/2026-10-22/separated-media/ci/51/report.json",
               "docs/evidence/2026-10-22/separated-media/ci/webm-segmented/report.json",
-              "docs/evidence/2026-10-22/separated-media/ci/71/report.json"
+              "docs/evidence/2026-10-22/separated-media/ci/71/report.json",
+              "docs/evidence/2026-10-22/playlists/ci/report.json"
           ]:
               assert json.loads(Path(file).read_text())["passed"] is True, file
           for img in [
               "docs/evidence/2026-10-16/scanner/scan.png",
               "docs/evidence/2026-10-16/scanner/playback.png",
               "docs/evidence/2026-10-16/scanner/playback-restart.png",
+              "docs/evidence/2026-10-22/playlists/ci/music-lyrics.png",
+              "docs/evidence/2026-10-22/playlists/ci/playlist-desktop.png",
+              "docs/evidence/2026-10-22/playlists/ci/playlist-mobile.png",
+              "docs/evidence/2026-10-22/playlists/ci/extensions-repositories.png",
               "docs/evidence/2026-10-17/series/admin-scan.png",
               "docs/evidence/2026-10-17/series/series-detail.png",
               "docs/evidence/2026-10-17/series/immersive-playback.png"
@@ -352,7 +365,7 @@ jobs:
       - name: Archiver les rapports et captures navigateur
         # Keep partial failure reports, but do not mask a fixture/setup failure
         # with a second error when no browser scenario could run.
-        if: ${{ always() && hashFiles('docs/evidence/2026-10-16/scanner/**', 'docs/evidence/2026-10-17/series/**', 'docs/evidence/2026-10-22/nas-preparation/ci/**', 'docs/evidence/2026-10-22/separated-media/ci/**') != '' }}
+        if: ${{ always() && hashFiles('docs/evidence/2026-10-16/scanner/**', 'docs/evidence/2026-10-17/series/**', 'docs/evidence/2026-10-22/nas-preparation/ci/**', 'docs/evidence/2026-10-22/separated-media/ci/**', 'docs/evidence/2026-10-22/playlists/ci/**') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: browser-evidence-films-series
@@ -362,6 +375,7 @@ jobs:
             docs/evidence/2026-10-17/series/
             docs/evidence/2026-10-22/nas-preparation/ci/
             docs/evidence/2026-10-22/separated-media/ci/
+            docs/evidence/2026-10-22/playlists/ci/
 
   images:
     name: Image Docker (${{ matrix.target }})

@@ -1,0 +1,13 @@
+{
+  "browser": "155.0.8059.85",
+  "scope": "Synthetic music and disposable Core/SQLite accounts; no remote provider or physical audio output proof",
+  "automaticNextTitle": true,
+  "persistentPlayback": true,
+  "authenticatedPublicPlaylist": true,
+  "sharingPreservesLibraryPermissions": true,
+  "noAnonymousAccess": true,
+  "repositoryOnlyInterface": true,
+  "policyRevokesSharing": true,
+  "pcmPeak": 0.12542641162872314,
+  "passed": true
+}

@@ -783,7 +783,7 @@ impl Oidc {
         // End the cross-site redirect chain on a Core document. A same-origin
         // external script starts a new navigation so Strict session cookies and
         // the existing cross-site guards both remain effective on /app/.
-        let mut response = Html("<!doctype html><html lang=\"fr\"><meta charset=\"utf-8\"><title>Connexion</title><script src=\"/api/v1/auth/oidc/complete.js\" defer></script><p>Connexion en cours...</p><noscript><a href=\"/app/\">Continuer</a></noscript></html>").into_response();
+        let mut response = Html(include_str!("oidc_complete.html")).into_response();
         response.headers_mut().append(
             header::SET_COOKIE,
             HeaderValue::from_str(&self.auth.cookie(&raw, 43200)).map_err(|_| invalid())?,

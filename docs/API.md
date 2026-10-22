@@ -345,3 +345,5 @@ listes, copies multi-Node, chapitres et téléchargements :
 [PRODUCT_FEATURES.md](PRODUCT_FEATURES.md). Ces ajouts préservent les routes et
 les contrôles de session existants.
 
+
+Playlists et musique : [contrats, autorisations et limites](PLAYLISTS_AND_MUSIC.md#contrat-http).

@@ -3279,3 +3279,18 @@ Validation finale Node : 10 tests politique + 2 suites statistiques =12/12, exit
 
 Validation finale de ce lot : Clippy strict workspace/all-targets, cargo fmt,
 actionlint et git diff --check réussis. Suite Rust workspace complète non relancée.
+
+## 22 octobre 2026 — Playlists et lecteur musical
+
+- Playlists mixtes, partage nominatif et visibilité publique uniquement entre comptes connectés ; politiques administrateur désactivées par défaut et droits des bibliothèques conservés.
+- Lecteur musical global natif, file bornée, suivant/précédent, aléatoire, répétition, Media Session et paroles locales LRC/texte. Aucun transcodage ; pas d'enchaînement automatique vidéo/musique.
+- Extensions : Installées/Catalogue/Dépôts ; import manuel signé par fichiers avec MEDIA_EXTENSION_IMPORT_DIR, confiance explicite, sans activation ou permission automatique.
+- 96 tests Web, Svelte/lint/build, Clippy strict, scan musical, import signé et parcours Chrome/Core/SQLite ciblés passés. Ni Edge/NAS ni nouveau PostgreSQL réel validés pour ce jalon.
+- Contrats, commandes, limites et preuves : docs/PLAYLISTS_AND_MUSIC.md. Aucun push ou déploiement.
+
+## 22 octobre 2026 - Presentation connexion et lecteur
+
+- Retour SSO : document sombre centre, CSS externe, script de navigation conserve.
+- Lecteur : chargement simple, diagnostics dans Statistiques du flux optionnelles ;
+  mesures video navigateur chaque seconde pendant ouverture du panneau seulement.
+- Web : 96 tests reussis. Verification SSO reel et NAS non effectuee pour ce jalon.

@@ -1,5 +1,66 @@
 # CI et publication GHCR
 
+## Réduction de l'attente CI — 22 octobre 2026
+
+Le run `39827517263` a pris 22 min 25 s. Les logs montrent 13 min 27 s
+pour l'étape d'intégration Rust ; dans le job navigateur, 7 min 06 s pour
+FFmpeg et 10 min 08 s pour Chrome/dépendances. FFmpeg était pourtant restauré
+du cache : les installations apt ont téléchargé 15,5 Mio puis 22,8 Mio à
+environ 38 Kio/s. Ce sont des mesures du run précédent, pas un benchmark après.
+
+Changements :
+
+- Les cibles d'intégration Cargo sont découvertes via `cargo metadata` et
+  réparties de façon déterministe sur trois runners isolés. Les 44 cibles
+  actuelles sont réparties en 15/15/14 ; aucune liste manuelle à maintenir.
+  Chaque cible reste séquentielle (`--test-threads=1`) ; les scénarios de
+  concurrence conservent leurs tâches et assertions. Les cibles ignorées le
+  restent, comme auparavant, et les parcours navigateur gardent leur job dédié.
+- Format, Clippy strict, unitaires, ABI Wasm et contrats PostgreSQL restent
+  obligatoires, exécutés une fois dans la partition 0. Le cache Cargo est
+  partagé (`shared-key: rust`), avec sauvegarde par cette partition uniquement.
+- Le contrôle `Rust (Format, Clippy, Tests)` garde son nom et agrège la réussite
+  des trois partitions. Un échec, une annulation ou une partition ignorée le
+  fait échouer ; la publication dépend toujours de ce contrôle et des autres
+  validations. `fail-fast: false` laisse les autres partitions finir leurs tests.
+- Chrome préinstallé est lancé et vérifié avant toute installation. Seul un
+  échec déclenche l'installateur Playwright existant, puis une nouvelle
+  vérification obligatoire. Aucun remplacement par Chromium ou faux rapport.
+- FFmpeg mis en cache est exécuté avant d'installer quoi que ce soit. S'il est
+  fonctionnel, aucune opération apt. Si les bibliothèques partagées manquent,
+  seules les bibliothèques de codecs sont installées ; les outils de compilation
+  sont réservés à un cache manquant. Versions 9.0.2 et test lavfi toujours exigés.
+- Les jobs Rust/navigateur ont un plafond de 35 minutes, le contrôle agrégé de
+  5 minutes. Cela borne un vrai blocage ; cela ne répare pas un check GitHub
+  incohérent dont les logs et le workflow sont déjà terminés.
+
+Le gain dépend du cache, du téléchargement apt et du nombre de runners
+disponibles. Trois runners peuvent consommer davantage de minutes cumulées et
+compiler des dépendances communes en parallèle. Un démarrage sans cache peut
+donc rester long ; aucune durée après modification n'est garantie.
+
+Vérifications locales :
+
+```powershell
+python scripts/test-ci-integration-shard.py
+python scripts/ci-integration-shard.py --index 0 --count 3 --list
+python scripts/ci-integration-shard.py --index 1 --count 3 --list
+python scripts/ci-integration-shard.py --index 2 --count 3 --list
+node scripts/ci-ensure-chrome.cjs
+docker run --rm -v "${PWD}:/repo:ro" -w /repo rhysd/actionlint:1.7.12
+```
+
+Trois tests de répartition passent (couverture exhaustive sans doublon,
+découverte des seuls tests du workspace et rejet des paramètres invalides).
+Chrome Windows local réutilisé avec succès ; actionlint et ShellCheck des
+scripts FFmpeg passent. Invocation réelle multi-package `cargo test --locked
+--workspace --all-features --test contracts_test --test version_and_nodes -j 1
+-- --test-threads=1` : 5 tests réussis. Le script de partition a aussi exécuté
+réellement la cible `version_and_nodes` avec succès (2 tests), au-delà du plan.
+Les chemins apt Linux, les trois runners GitHub et le
+gain de temps distant nécessitent encore un nouveau run après push autorisé.
+Pas de tests fonctionnels supprimés, de publication déclenchée ou de média modifié.
+
 ## Non-régression audio segmenté — 22 octobre 2026
 
 Le job navigateur génère/valide désormais aussi `dual-opus.mp4` (AV1 10 bits

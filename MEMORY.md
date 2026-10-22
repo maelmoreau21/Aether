@@ -1,5 +1,19 @@
 # MEMORY.md — État et décisions Aether
 
+## 22 octobre 2026 — CI raccourcie localement, mesure distante en attente
+
+- Intégration Rust répartie automatiquement sur trois runners par cibles Cargo
+  (44 actuelles, 15/15/14), séquentielles dans chaque runner. Format/Clippy strict,
+  unitaires/ABI/PostgreSQL une fois ; contrôle Rust historique agrège les trois
+  partitions et reste obligatoire avant publication.
+- Chrome préinstallé testé avant repli Playwright ; FFmpeg cache fonctionnel
+  évite apt, outils de compilation seulement à froid, bibliothèques runtime
+  restaurées si nécessaires. Version 9.0.2 et smoke check préservés.
+- Tests de répartition 3/3, plans exhaustifs réels, Chrome local, actionlint et
+  ShellCheck vérifiés. Pas de nouvelle CI distante, gain non mesuré, push ou
+  publication. Trois runners réduisent l'attente visée mais peuvent augmenter
+  les minutes cumulées. Détails : docs/CI_GHCR.md.
+
 ## 22 octobre 2026 — Audit performance lecteur, jalon P0 local
 
 - `develop` : rejet immédiat DTS/DTS-HD MA quand le navigateur refuse la

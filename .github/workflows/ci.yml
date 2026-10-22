@@ -25,9 +25,14 @@ jobs:
   # =========================================================================
   # 1. Vérifications et tests Rust (Core & Node)
   # =========================================================================
-  rust:
-    name: Rust (Format, Clippy, Tests)
+  rust-tests:
+    name: Rust (partition ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     services:
       postgres:
         image: postgres:18-alpine
@@ -59,6 +64,9 @@ jobs:
 
       - name: Cache des dépendances Cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust
+          save-if: ${{ matrix.shard == 0 }}
 
       - name: Cache des fixtures synthétiques
         id: cache-fixtures
@@ -102,40 +110,65 @@ jobs:
         run: python3 scripts/validate-prepared-fixtures.py
 
       - name: Valider les métriques de comparaison des lecteurs
+        if: matrix.shard == 0
         run: node scripts/player-comparison-stats.test.cjs
 
       - name: Valider les statistiques de marge de sécurité
+        if: matrix.shard == 0
         run: node scripts/safe-margin-stats.test.cjs
 
       - name: Valider la récupération audio bornée
+        if: matrix.shard == 0
         run: node --test scripts/audio-seek-policy.test.cjs
 
       - name: Vérifier le formatage (cargo fmt)
+        if: matrix.shard == 0
         run: cargo fmt --check
 
       - name: Analyse statique stricte (cargo clippy)
+        if: matrix.shard == 0
         run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
 
       - name: Exécuter les tests unitaires (cargo test --lib --bins)
+        if: matrix.shard == 0
         run: cargo test --locked --workspace --all-features --lib --bins
 
       - name: Vérifier l'ABI du SDK avec un module Rust de test
+        if: matrix.shard == 0
         run: |
           cargo build --locked -p media-extension-sdk-fixture --target wasm32-unknown-unknown --release
           cargo test --locked -p media-poc --test extensions real_rust_sdk_module_executes -- --ignored
 
       - name: Exécuter les tests d'intégration (cargo test --test '*')
-        # Les fixtures 1k/10k partagent CPU et disque du runner ; chaque test de
-        # concurrence conserve ses propres tâches concurrentes et ses assertions.
-        run: cargo test --locked --workspace --all-features --test '*' -- --test-threads=1
+        # Disques/CPU séparés entre partitions. Aucun test retiré ; les tests
+        # restent séquentiels au sein de chaque runner, y compris les benchmarks.
+        run: python3 scripts/ci-integration-shard.py --index ${{ matrix.shard }} --count 3
+
+      - name: Vérifier la couverture des partitions de tests
+        if: matrix.shard == 0
+        run: python3 scripts/test-ci-integration-shard.py
 
       - name: Contrats PostgreSQL 18 (HTTP, OIDC, deux Nodes)
+        if: matrix.shard == 0
         env:
           MEDIA_TEST_POSTGRES_URL: postgres://media_test:ci-only-disposable-password@127.0.0.1:5432/media_test?sslmode=disable
         run: |
           cargo test --locked -p media-poc --test postgres -- --ignored --test-threads=1
           cargo test --locked -p media-poc --lib oidc::tests -- --test-threads=1
           cargo test --locked -p media-poc --test distributed_multi_node -- --test-threads=1
+
+  # Keep the existing required-check name and gate publication on all partitions.
+  rust:
+    name: Rust (Format, Clippy, Tests)
+    needs: [rust-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Exiger la réussite de toutes les partitions Rust
+        env:
+          RESULT: ${{ needs.rust-tests.result }}
+        run: test "$RESULT" = success
 
   # =========================================================================
   # 2. Audit de sécurité des dépendances Rust
@@ -197,6 +230,7 @@ jobs:
   browser:
     name: Navigateur Chrome (Films & Séries)
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - name: Récupérer le code source
         uses: actions/checkout@v4
@@ -228,9 +262,8 @@ jobs:
         working-directory: apps/web
         run: npm ci
 
-      - name: Installer Google Chrome (channel 'chrome') et ses dépendances système via Playwright
-        working-directory: apps/web
-        run: npx playwright install --with-deps chrome
+      - name: Vérifier Chrome préinstallé, installer seulement si nécessaire
+        run: node scripts/ci-ensure-chrome.cjs
 
       - name: Construire le frontend SvelteKit statique
         working-directory: apps/web

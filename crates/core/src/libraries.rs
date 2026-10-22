@@ -388,7 +388,7 @@ async fn validate_folder(
         let node_row: Option<(String, String)> = crate::database::query_as(
             "SELECT status, roots_json FROM media_nodes WHERE id=? AND kind='remote'",
         )
-        .bind(&node_id)
+        .bind(node_id)
         .fetch_optional(&state.auth.store.pool)
         .await
         .map_err(database)?;

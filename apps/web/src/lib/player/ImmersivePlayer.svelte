@@ -250,7 +250,7 @@
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
       <button class="return" aria-label="Retour à l’accueil" onclick={close}><Icon name="back" size={24} /></button>
       <div class="title"><span>{active?.title ?? 'Votre séance'}</span><small>LECTURE LOCALE{active?.synthetic ? ' · MIRE SYNTHÉTIQUE' : ''}</small></div>
-      {#if nextTitle && onNext}<div class="next-episode"><button disabled={busy} onclick={onNext}>Épisode suivant : {nextTitle}</button><label><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
+      {#if nextTitle && onNext}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
     </div>
     {#if busy}<div class="loading" role="status"><img src="{base}/images/logo-loading.svg" alt="" class="player-spinner" width="40" height="40" />{loadStage}<button onclick={close}>Annuler</button></div>{/if}
     {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, playback); }}>Réessayer explicitement</button></div>{/if}
@@ -264,7 +264,7 @@
 <style>
   .chapters { position:absolute;top:90px;right:24px;z-index:4;display:grid;gap:6px;max-width:70%; } .chapters select { padding:10px;max-width:100%;color:var(--color-text);background:var(--color-surface);border:1px solid var(--color-line);border-radius:6px; }
   video::cue { color:#fff; background:rgba(0,0,0,.8); text-shadow:0 1px 2px #000; font-size:clamp(18px,2vw,30px); }
-  .next-episode { margin-left:auto; max-width:50%; display:grid; gap:8px; font-size:12px; } .next-episode button { padding:10px; border:1px solid #ffffff40; border-radius:6px; color:inherit; background:#17121ee0; overflow-wrap:anywhere; } .next-episode label { display:flex; align-items:center; gap:8px; }
+  .next-episode { margin-left:auto; max-width:50%; font-size:12px; } .next-episode label { display:flex; align-items:center; gap:8px; }
   .title { min-width:0; flex:1; } .title>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   :global(body.immersive-open) { overflow: hidden; }
   .immersive-dialog { position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #000; color: var(--color-text); overflow: hidden; }.immersive-dialog::backdrop { background: #000; }

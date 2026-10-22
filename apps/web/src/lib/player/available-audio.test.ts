@@ -12,6 +12,12 @@ describe('operational audio choices', () => {
     expect(audioChoices(media(sources),'internal-default')).toHaveLength(3);
     expect(audioChoices(media(sources.slice(0,2)))).toHaveLength(2);
   });
+  it('does not offer a silent video as an audio track', () => {
+    const silent = {...source('video','internal-default'),tracks:[{codec_type:'video'}]};
+    const external = {...source('fr','external-0'),externalAudioUrl:'/fr.opus',tracks:[{codec_type:'audio'}]};
+    expect(audioChoices(media([silent,external]))).toEqual([external]);
+    expect(audioChoices(media([silent]))).toEqual([]);
+  });
   it('counts switchable sources rather than detected container tracks', () => {
     expect(audioChoices(media([{...source('one'),tracks:[{codec_type:'audio'},{codec_type:'audio'}]}]))).toHaveLength(1);
   });

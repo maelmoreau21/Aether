@@ -9,6 +9,7 @@
   import { getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences } from '../preferences';
   import { chooseSource, playbackMime, audioLanguage, audioSelectionNotice } from './source-selection';
+  import { AudioSelectionRetainedError } from './errors';
   const base = resolve('/').replace(/\/$/, '');
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
@@ -65,7 +66,12 @@
     if (!engine || busy) return;
     const current = generation; busy = true; error = ''; wake();
     try { await operation(engine); }
-    catch (e) { if (current === generation) fail(e instanceof Error ? e.message : String(e)); }
+    catch (e) {
+      if (current === generation) {
+        if (e instanceof AudioSelectionRetainedError) notice = `${e.message} Piste précédente conservée.`;
+        else fail(e instanceof Error ? e.message : String(e));
+      }
+    }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
   }
   async function prepare(media: Media, restore?: PlaybackState) {

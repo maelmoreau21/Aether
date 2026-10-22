@@ -2,6 +2,8 @@ import type { Media, Player, PlaybackState, Source } from './types';
 import { ExternalAudio } from './external-audio';
 import { SegmentedAudio } from './segmented-audio';
 import { chooseSource } from './source-selection';
+import { AudioSelectionRetainedError } from './errors';
+import { unsupportedAudio } from './compatibility';
 
 // One finite source replacement. No retries, silent fallback or player-specific API in the UI.
 export class NativePlayer implements Player {
@@ -83,6 +85,11 @@ export class NativePlayer implements Player {
   }
   private async replace(source: Source, position: number, paused: boolean) {
     if (this.busy || this.destroyed) throw new Error('Lecteur indisponible pendant le changement de source.');
+    const unsupported=unsupportedAudio(source,mime=>this.video.canPlayType(mime));
+    if (unsupported) {
+      console.info('[media playback]',{stage:'capability-rejected',reason:'unsupported-dts',track: /^internal-(default|\d+)$/.test(source.audioTrackId) ? source.audioTrackId : 'external'});
+      throw new Error(unsupported);
+    }
     this.busy = true;
     const previous = this.source;
     const segmented = Boolean(source.audioSegmentUrl && SegmentedAudio.supported());
@@ -113,7 +120,19 @@ export class NativePlayer implements Player {
         if (!paused) await this.play();
         return;
       }
-    } catch (error) { for(const controller of this.preparations)controller.abort();this.busy = false; throw error; }
+    } catch (error) {
+      for(const controller of this.preparations)controller.abort();
+      try {
+        // A rejected candidate must restore the presentation, not just retain its URL.
+        if (!this.destroyed && previous && this.source === previous && !paused) {
+          try { await this.play(); }
+          catch (resumeError) {
+            throw new Error(`${error instanceof Error ? error.message : String(error)} Ancienne piste conservée mais reprise impossible : ${resumeError instanceof Error ? resumeError.message : String(resumeError)}`);
+          }
+        }
+        throw error;
+      } finally { this.busy = false; }
+    }
     finally { if (this.source === source) this.busy = false; }
     this.source = undefined;
     const { volume, speed } = this.state();
@@ -140,11 +159,16 @@ export class NativePlayer implements Player {
           this.video.removeEventListener('seeked', seeked);
           this.video.removeEventListener('error', failed);
           this.cancel = undefined;
-          if (error) reject(error);
+          if (error) {
+            console.info('[media playback]',{stage:metadataReceived ? 'seek-failed' : 'metadata-failed',networkState:this.video.networkState,readyState:this.video.readyState,mediaError:this.video.error?.code ?? null});
+            reject(error);
+          }
           else resolve();
         };
         const seeked = () => finish();
+        let metadataReceived = false;
         const metadata = () => {
+          metadataReceived = true;
           this.video.volume = volume;
           this.video.playbackRate = speed;
           const target = Math.min(position, Math.max(0, this.video.duration - 0.05));
@@ -160,7 +184,7 @@ export class NativePlayer implements Player {
         const timer = setTimeout(
           () =>
             finish(
-              new Error('Délai de chargement ou de seek expiré. Réessayez explicitement.')
+              new Error(`Délai ${metadataReceived ? 'de seek' : 'de lecture des métadonnées'} expiré après ${timeoutMs / 1000} s (networkState=${this.video.networkState}, readyState=${this.video.readyState}, MediaError=${this.video.error?.code ?? 'aucune'}). ${metadataReceived ? 'Position demandée non atteinte.' : 'Index du conteneur ou données vidéo non reçus/lisibles.'} Cause codec, conteneur ou transport non déterminée ; consulter les diagnostics HTTP du navigateur et du Media Node.`)
             ),
           timeoutMs
         );
@@ -204,8 +228,13 @@ export class NativePlayer implements Player {
     if (!source) throw new Error('Piste audio absente : aucun remplacement automatique.');
     if (source.id === this.source?.id) return;
     const state = this.state();
+    const previous = this.source;
     try { await this.replace(source, state.position, state.paused); }
-    catch(error) { throw new Error(`Piste ${source.language.toUpperCase()} (${source.audioTrackId}) : ${error instanceof Error ? error.message : String(error)}`); }
+    catch(error) {
+      const message = `Piste ${source.language.toUpperCase()} (${source.audioTrackId}) : ${error instanceof Error ? error.message : String(error)}`;
+      if (!this.destroyed && !this.busy && previous && this.source === previous && this.video.paused === state.paused) throw new AudioSelectionRetainedError(message);
+      throw new Error(message);
+    }
   }
   async selectSubtitle(id: string | null) {
     this.subtitle = id;

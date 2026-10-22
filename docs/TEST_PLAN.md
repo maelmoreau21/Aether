@@ -1,5 +1,10 @@
 ## Audio AV1/Opus — 22 octobre 2026
 
+Audit et corrections de fiabilité P0 du lecteur :
+[PLAYER_PERFORMANCE_P0.md](PLAYER_PERFORMANCE_P0.md). Comprend refus DTS selon
+capacités réelles Chrome/Edge, restauration audio sans pause terminale de l'UI,
+races de seek MSE, diagnostics HTTP et rapports avant/après avec limites explicites.
+
 Le parcours MP4 original + audio MSE segmenté est décrit dans
 [NAS_PLAYBACK_DIAGNOSTICS.md](NAS_PLAYBACK_DIAGNOSTICS.md) : petite fixture et gros
 MP4, décodage FR/EN, limites Docker, vrai Nginx, pause/seek/annulation, première

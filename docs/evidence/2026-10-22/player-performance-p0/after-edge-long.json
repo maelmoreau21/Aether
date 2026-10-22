@@ -1,0 +1,552 @@
+{
+  "os": "10.0.26300",
+  "segmented": true,
+  "docker": false,
+  "videoContainer": "mp4",
+  "scope": "Synthetic AV1 10-bit + two Opus tracks; isolated HTTP, no physical surround proof",
+  "audioChannels": [
+    6,
+    6
+  ],
+  "probe": {
+    "streams": [
+      {
+        "index": 0,
+        "codec_name": "av1",
+        "codec_long_name": "Alliance for Open Media AV1",
+        "profile": "Main",
+        "codec_type": "video",
+        "codec_tag_string": "av01",
+        "codec_tag": "0x31307661",
+        "mime_codec_string": "av01.0.08M.10",
+        "width": 1920,
+        "height": 1080,
+        "coded_width": 1920,
+        "coded_height": 1080,
+        "has_b_frames": 0,
+        "sample_aspect_ratio": "1:1",
+        "display_aspect_ratio": "16:9",
+        "pix_fmt": "yuv420p10le",
+        "level": 8,
+        "color_range": "tv",
+        "field_order": "progressive",
+        "id": "0x1",
+        "r_frame_rate": "12/1",
+        "avg_frame_rate": "16121472/1344001",
+        "time_base": "1/12288",
+        "start_pts": 0,
+        "start_time": "0.000000",
+        "duration_ts": 43008032,
+        "duration": "3500.002604",
+        "bit_rate": "220505",
+        "nb_frames": "41983",
+        "extradata_size": 17,
+        "disposition": {
+          "default": 1,
+          "dub": 0,
+          "original": 0,
+          "comment": 0,
+          "lyrics": 0,
+          "karaoke": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "visual_impaired": 0,
+          "clean_effects": 0,
+          "attached_pic": 0,
+          "timed_thumbnails": 0,
+          "non_diegetic": 0,
+          "captions": 0,
+          "descriptions": 0,
+          "metadata": 0,
+          "dependent": 0,
+          "still_image": 0,
+          "multilayer": 0
+        },
+        "tags": {
+          "language": "und",
+          "handler_name": "VideoHandler",
+          "encoder": "Lavc63.1.102 libaom-av1"
+        }
+      },
+      {
+        "index": 1,
+        "codec_name": "opus",
+        "codec_long_name": "Opus (Opus Interactive Audio Codec)",
+        "codec_type": "audio",
+        "codec_tag_string": "Opus",
+        "codec_tag": "0x7375704f",
+        "mime_codec_string": "opus",
+        "sample_fmt": "fltp",
+        "sample_rate": "48000",
+        "channels": 6,
+        "channel_layout": "5.1",
+        "bits_per_sample": 0,
+        "initial_padding": 312,
+        "id": "0x2",
+        "r_frame_rate": "0/0",
+        "avg_frame_rate": "0/0",
+        "time_base": "1/48000",
+        "start_pts": 0,
+        "start_time": "0.000000",
+        "duration_ts": 168000613,
+        "duration": "3500.012771",
+        "bit_rate": "266475",
+        "nb_frames": "175148",
+        "extradata_size": 27,
+        "disposition": {
+          "default": 1,
+          "dub": 0,
+          "original": 0,
+          "comment": 0,
+          "lyrics": 0,
+          "karaoke": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "visual_impaired": 0,
+          "clean_effects": 0,
+          "attached_pic": 0,
+          "timed_thumbnails": 0,
+          "non_diegetic": 0,
+          "captions": 0,
+          "descriptions": 0,
+          "metadata": 0,
+          "dependent": 0,
+          "still_image": 0,
+          "multilayer": 0
+        },
+        "tags": {
+          "language": "fra",
+          "handler_name": "SoundHandler"
+        }
+      },
+      {
+        "index": 2,
+        "codec_name": "opus",
+        "codec_long_name": "Opus (Opus Interactive Audio Codec)",
+        "codec_type": "audio",
+        "codec_tag_string": "Opus",
+        "codec_tag": "0x7375704f",
+        "mime_codec_string": "opus",
+        "sample_fmt": "fltp",
+        "sample_rate": "48000",
+        "channels": 6,
+        "channel_layout": "5.1",
+        "bits_per_sample": 0,
+        "initial_padding": 312,
+        "id": "0x3",
+        "r_frame_rate": "0/0",
+        "avg_frame_rate": "0/0",
+        "time_base": "1/48000",
+        "start_pts": 0,
+        "start_time": "0.000000",
+        "duration_ts": 168000613,
+        "duration": "3500.012771",
+        "bit_rate": "310935",
+        "nb_frames": "175148",
+        "extradata_size": 27,
+        "disposition": {
+          "default": 0,
+          "dub": 0,
+          "original": 0,
+          "comment": 0,
+          "lyrics": 0,
+          "karaoke": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "visual_impaired": 0,
+          "clean_effects": 0,
+          "attached_pic": 0,
+          "timed_thumbnails": 0,
+          "non_diegetic": 0,
+          "captions": 0,
+          "descriptions": 0,
+          "metadata": 0,
+          "dependent": 0,
+          "still_image": 0,
+          "multilayer": 0
+        },
+        "tags": {
+          "language": "eng",
+          "handler_name": "SoundHandler"
+        }
+      }
+    ]
+  },
+  "switches": [
+    {
+      "id": "internal-1",
+      "switchReadyMs": 0.20000001788139343,
+      "hz": 439.453125,
+      "db": -42.918006896972656,
+      "drift": 0.021417999999999937,
+      "time": 0.938582,
+      "audioTime": 0.96,
+      "audioPaused": false,
+      "audioMuted": false,
+      "audioVolume": 1,
+      "audioReady": 4,
+      "buffered": [
+        [
+          0,
+          20
+        ]
+      ],
+      "url": "http://127.0.0.1:30780/original",
+      "frames": 16,
+      "fullscreen": true,
+      "loads": 1
+    },
+    {
+      "id": "internal-2",
+      "switchReadyMs": 182.69999998807907,
+      "hz": 990.234375,
+      "db": -42.95911407470703,
+      "drift": 0.00792499999999996,
+      "time": 1.580705,
+      "audioTime": 1.57278,
+      "audioPaused": false,
+      "audioMuted": false,
+      "audioVolume": 1,
+      "audioReady": 4,
+      "buffered": [
+        [
+          0,
+          20
+        ]
+      ],
+      "url": "http://127.0.0.1:30780/original",
+      "frames": 24,
+      "fullscreen": true,
+      "loads": 1
+    },
+    {
+      "id": "internal-1",
+      "switchReadyMs": 20.5,
+      "hz": 439.453125,
+      "db": -42.9134521484375,
+      "drift": 0.04995900000000031,
+      "time": 2.196801,
+      "audioTime": 2.24676,
+      "audioPaused": false,
+      "audioMuted": false,
+      "audioVolume": 1,
+      "audioReady": 4,
+      "buffered": [
+        [
+          0,
+          20
+        ]
+      ],
+      "url": "http://127.0.0.1:30780/original",
+      "frames": 32,
+      "fullscreen": true,
+      "loads": 1
+    },
+    {
+      "id": "internal-2",
+      "switchReadyMs": 27.399999976158142,
+      "hz": 990.234375,
+      "db": -42.96184158325195,
+      "drift": 0.014276999999999873,
+      "time": 2.862408,
+      "audioTime": 2.848131,
+      "audioPaused": false,
+      "audioMuted": false,
+      "audioVolume": 1,
+      "audioReady": 4,
+      "buffered": [
+        [
+          0,
+          20
+        ]
+      ],
+      "url": "http://127.0.0.1:30780/original",
+      "frames": 39,
+      "fullscreen": true,
+      "loads": 1
+    },
+    {
+      "id": "internal-1",
+      "switchReadyMs": 16.799999982118607,
+      "hz": 439.453125,
+      "db": -42.92207336425781,
+      "drift": 0.0049240000000003725,
+      "time": 3.491427,
+      "audioTime": 3.496351,
+      "audioPaused": false,
+      "audioMuted": false,
+      "audioVolume": 1,
+      "audioReady": 4,
+      "buffered": [
+        [
+          0,
+          20
+        ]
+      ],
+      "url": "http://127.0.0.1:30780/original",
+      "frames": 46,
+      "fullscreen": true,
+      "loads": 1
+    }
+  ],
+  "preparations": [
+    {
+      "index": 1,
+      "chunk": 0,
+      "elapsedMs": 196.34000000000015,
+      "bytes": 398047
+    },
+    {
+      "index": 1,
+      "chunk": 1,
+      "elapsedMs": 155.80349999999999,
+      "bytes": 401137
+    },
+    {
+      "index": 2,
+      "chunk": 0,
+      "elapsedMs": 151.85539999999946,
+      "bytes": 464063
+    },
+    {
+      "index": 2,
+      "chunk": 1,
+      "elapsedMs": 129.42720000000008,
+      "bytes": 465455
+    },
+    {
+      "index": 2,
+      "chunk": 2,
+      "elapsedMs": 70.48999999999978,
+      "bytes": 482632
+    },
+    {
+      "index": 2,
+      "chunk": 90,
+      "elapsedMs": 131.01760000000104,
+      "bytes": 480858
+    },
+    {
+      "index": 2,
+      "chunk": 91,
+      "elapsedMs": 130.12400000000162,
+      "bytes": 464292
+    },
+    {
+      "index": 2,
+      "chunk": 180,
+      "elapsedMs": 121.23109999999906,
+      "bytes": 476505
+    },
+    {
+      "index": 2,
+      "chunk": 181,
+      "elapsedMs": 115.99990000000071,
+      "bytes": 467087
+    },
+    {
+      "index": 2,
+      "chunk": 348,
+      "elapsedMs": 155.90119999999843,
+      "bytes": 479739
+    },
+    {
+      "index": 2,
+      "chunk": 349,
+      "elapsedMs": 125.66220000000067,
+      "bytes": 424272
+    }
+  ],
+  "delayedRequests": 1,
+  "cancelledHttpRequests": 1,
+  "browser": "155.0.4283.62",
+  "console": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "[media playback] {stage: capability-rejected, reason: unsupported-dts, track: internal-default}",
+    "[media audio] {stage: segment-ready, chunk: 0, bytes: 398047, elapsedMs: 212}",
+    "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "[media audio] {stage: segment-ready, chunk: 1, bytes: 401137, elapsedMs: 166}",
+    "[media audio] {stage: segment-ready, chunk: 0, bytes: 464063, elapsedMs: 164}",
+    "[media audio] {stage: segment-ready, chunk: 1, bytes: 465455, elapsedMs: 140}",
+    "[media audio] {stage: segment-ready, chunk: 0, bytes: 398047, elapsedMs: 5}",
+    "[media audio] {stage: segment-ready, chunk: 1, bytes: 401137, elapsedMs: 6}",
+    "[media audio] {stage: segment-ready, chunk: 0, bytes: 464063, elapsedMs: 7}",
+    "[media audio] {stage: segment-ready, chunk: 1, bytes: 465455, elapsedMs: 8}",
+    "[media audio] {stage: segment-ready, chunk: 0, bytes: 398047, elapsedMs: 6}",
+    "[media audio] {stage: segment-ready, chunk: 1, bytes: 401137, elapsedMs: 17}",
+    "[media audio] {stage: segment-ready, chunk: 0, bytes: 464063, elapsedMs: 10}",
+    "[media audio] {stage: segment-ready, chunk: 1, bytes: 465455, elapsedMs: 4}",
+    "[media audio] {stage: segment-ready, chunk: 2, bytes: 482632, elapsedMs: 78}",
+    "[media audio] {stage: segment-ready, chunk: 90, bytes: 480858, elapsedMs: 139}",
+    "[media audio] {stage: segment-ready, chunk: 91, bytes: 464292, elapsedMs: 136}",
+    "[media audio] {stage: segment-ready, chunk: 180, bytes: 476505, elapsedMs: 129}",
+    "[media audio] {stage: segment-ready, chunk: 181, bytes: 467087, elapsedMs: 125}",
+    "[media audio] {stage: segment-ready, chunk: 348, bytes: 479739, elapsedMs: 165}",
+    "[media audio] {stage: segment-ready, chunk: 349, bytes: 424272, elapsedMs: 133}",
+    "[media audio] {stage: segment-ready, chunk: 0, bytes: 464063, elapsedMs: 9}",
+    "[media audio] {stage: segment-ready, chunk: 1, bytes: 465455, elapsedMs: 11}",
+    "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "[media audio] {stage: segment-ready, chunk: 0, bytes: 464063, elapsedMs: 6}",
+    "[media audio] {stage: segment-ready, chunk: 1, bytes: 465455, elapsedMs: 7}",
+    "[media audio] {stage: segment-ready, chunk: 0, bytes: 398047, elapsedMs: 10}",
+    "[media audio] {stage: segment-ready, chunk: 1, bytes: 401137, elapsedMs: 7}"
+  ],
+  "capabilities": [
+    {
+      "type": "video/mp4; codecs=\"av01\"",
+      "result": ""
+    },
+    {
+      "type": "video/mp4",
+      "result": "maybe"
+    },
+    {
+      "type": "audio/ogg; codecs=\"opus\"",
+      "result": "probably"
+    },
+    {
+      "type": "video/x-matroska; codecs=\"avc1.640028\"",
+      "result": "probably"
+    },
+    {
+      "type": "video/x-matroska; codecs=\"dtsc\"",
+      "result": ""
+    },
+    {
+      "type": "audio/mp4; codecs=\"dtsc\"",
+      "result": ""
+    },
+    {
+      "type": "video/x-matroska; codecs=\"dtsh\"",
+      "result": ""
+    },
+    {
+      "type": "audio/mp4; codecs=\"dtsh\"",
+      "result": ""
+    },
+    {
+      "type": "video/x-matroska; codecs=\"dtsl\"",
+      "result": ""
+    },
+    {
+      "type": "audio/mp4; codecs=\"dtsl\"",
+      "result": ""
+    }
+  ],
+  "dtsRejection": {
+    "failure": "Piste DUT (internal-default) : Audio DTS-HD MA non pris en charge selon les capacités déclarées par ce navigateur dans ce conteneur MKV. Aucun transcodage serveur : choisissez une autre version ou une piste compatible.",
+    "elapsedMs": 2,
+    "loads": 0,
+    "scope": "Descriptor and live browser capability check; not a DTS-HD decoded fixture"
+  },
+  "initial": {
+    "id": "internal-1",
+    "firstImageMs": 263.5,
+    "playReadyMs": 354.5
+  },
+  "pausedSeeks": [
+    {
+      "target": 8,
+      "passed": true
+    },
+    {
+      "target": 900,
+      "passed": true
+    },
+    {
+      "target": 1800,
+      "passed": true
+    },
+    {
+      "target": 3480.002604,
+      "passed": true
+    },
+    {
+      "target": 2,
+      "passed": true
+    }
+  ],
+  "boundary": {
+    "hz": 990.234375,
+    "db": -42.94059371948242,
+    "drift": 0.01298599999999972,
+    "time": 11.811178,
+    "audioTime": 11.798192,
+    "audioPaused": false,
+    "audioMuted": false,
+    "audioVolume": 1,
+    "audioReady": 4,
+    "buffered": [
+      [
+        0,
+        30
+      ]
+    ],
+    "url": "http://127.0.0.1:30780/original",
+    "frames": 97,
+    "fullscreen": true,
+    "loads": 1
+  },
+  "failedCandidate": {
+    "failure": "Piste FRA (internal-1) : Préparation audio segment 0 : HTTP 404 (source indisponible).",
+    "resumed": true,
+    "url": "blob:http://127.0.0.1:30780/fa5b7075-e73c-4444-872a-2e01ec46b5ab",
+    "count": 1
+  },
+  "reopened": [
+    {
+      "id": "internal-2",
+      "playReadyMs": 106.69999998807907,
+      "hz": 990.234375,
+      "db": -42.936622619628906,
+      "drift": 0.076743,
+      "time": 0.813357,
+      "audioTime": 0.8901,
+      "audioPaused": false,
+      "audioMuted": false,
+      "audioVolume": 1,
+      "audioReady": 4,
+      "buffered": [
+        [
+          0,
+          20
+        ]
+      ],
+      "url": "http://127.0.0.1:30780/original",
+      "frames": 15,
+      "fullscreen": true,
+      "loads": 2
+    },
+    {
+      "id": "internal-1",
+      "playReadyMs": 217.19999998807907,
+      "hz": 439.453125,
+      "db": -42.91883087158203,
+      "drift": 0.03228799999999998,
+      "time": 0.8335,
+      "audioTime": 0.801212,
+      "audioPaused": false,
+      "audioMuted": false,
+      "audioVolume": 1,
+      "audioReady": 4,
+      "buffered": [
+        [
+          0,
+          20
+        ]
+      ],
+      "url": "http://127.0.0.1:30780/original",
+      "frames": 15,
+      "fullscreen": true,
+      "loads": 3
+    }
+  ],
+  "errors": [],
+  "cancellation": {
+    "rejected": true,
+    "loadBeforeCancelMs": 132.2999999821186,
+    "elapsedMs": 1.5999999940395355,
+    "audios": 0
+  },
+  "passed": true
+}

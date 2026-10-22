@@ -1,5 +1,29 @@
 # MEMORY.md — État et décisions Aether
 
+## 22 octobre 2026 — Audit performance lecteur, jalon P0 local
+
+- `develop` : rejet immédiat DTS/DTS-HD MA quand le navigateur refuse la
+  déclaration codec/conteneur. Cas utilisateur : MKV H.264/DTS-HD MA DUT,
+  fichier et transport NAS indisponibles ; cause réelle du timeout non clôturée.
+  Chrome/Edge Windows déclarent H.264/MKV mais pas DTS ; test de descripteur,
+  pas de décodage d'une fixture DTS-HD MA ou du fichier personnel.
+- Échec d'une langue : ancienne lecture reprise, erreur récupérable dans l'UI,
+  sélection/préférences conservées. Seeks obsolètes : garde de génération avant
+  append et reprise immédiate à la nouvelle position. Timeout métadonnées/seek
+  distingué ; logs numériques navigateur et HTTP original Core/Node sans jeton.
+- Sous-titres externes : labels UTF-8 réparés après un premier essai UI échoué.
+  Essai suivant Core/SQLite/Svelte/Chrome réussi en MP4 puis MKV après redémarrage.
+- Web 91 tests/check/lint/build ; stream 3, scanner_flow/distributed 3,
+  label UTF-8, packaging copie/cache/7.1 et dual-5.1 explicite réussis ;
+  fmt et Clippy workspace/all-targets strict vérifiés. Pas de suite Rust générale.
+- Chrome/Edge headless : PCM FR/EN, frames, pause/seeks, 404 avec reprise,
+  fermeture et refus DTS immédiat ; Edge gros MP4 3500 s, seeks jusqu'à 3480 s.
+  Derniers essais : première image Chrome 291 ms/Edge 264 ms, lecture prête
+  613/355 ms. Référence Chrome 186/188 ms : aucun gain de latence revendiqué.
+- P1–P4 restent ouverts : silence réel, ressources, NAS, 4K, endurance et
+  pipeline commun non validés. Aucun réencodage serveur, média personnel,
+  push ou déploiement. Méthode/preuves : docs/PLAYER_PERFORMANCE_P0.md.
+
 ## 22 octobre 2026 — MP4 original et fenêtres Opus, incident NAS non clôturé
 
 - Retour utilisateur : Node local Synology/Docker, MP4 AV1 10 bits 1080p,

@@ -409,9 +409,9 @@ pub async fn discover_with_folder(
                 metadata.clone().ok_or("ambiguous subtitle association")?;
             Ok(ExternalSubtitle {
                 label: format!(
-                    "{}{}{} Â· {}",
+                    "{}{}{} · {}",
                     language.to_uppercase(),
-                    if forced { " forcÃ©s" } else { "" },
+                    if forced { " forcés" } else { "" },
                     if sdh { " SDH" } else { "" },
                     if matches!(extension.as_str(), "ass" | "ssa") {
                         format!(
@@ -507,6 +507,7 @@ mod tests {
         assert_eq!(tracks.len(), 1);
         assert!(issues.is_empty());
         assert!(tracks[0].forced);
+        assert_eq!(tracks[0].label, "FR forcés · SRT");
         tokio::fs::write(temp.path().join("film.mkv"), b"other video").await?;
         let (tracks, issues) = discover(temp.path(), Path::new("film.mp4")).await;
         assert!(tracks.is_empty());

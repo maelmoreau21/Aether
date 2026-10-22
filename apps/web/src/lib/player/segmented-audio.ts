@@ -73,6 +73,7 @@ export class SegmentedAudio extends ExternalAudio {
       const current = Math.floor(target / SECONDS);
       // At most the current window and one ahead; never copy the full episode.
       for (const chunk of onlyCurrent ? [current] : [current, current + 1]) {
+        if (this.closed || epoch !== this.seekEpoch) return;
         const ranges=this.buffer.buffered;
         const retained=Array.from({length:ranges.length},(_,i)=>i).some(i=>ranges.start(i)<=chunk*SECONDS+.05 && ranges.end(i)>=Math.min(this.element.duration,(chunk+1)*SECONDS)-.05);
         if(!retained)this.loaded.delete(chunk);
@@ -101,8 +102,9 @@ export class SegmentedAudio extends ExternalAudio {
           if(controller.signal.aborted) throw new Error('Préparation du segment audio annulée ou expirée (20 s).');
           throw error;
         } finally {clearTimeout(timeout);if(this.controller===controller)this.controller=undefined;}
-        if (this.closed) return;
+        if (this.closed || epoch !== this.seekEpoch) return;
         await this.idle();
+        if (this.closed || epoch !== this.seekEpoch) return;
         const start = chunk * SECONDS;
         this.buffer.timestampOffset = Math.max(0, start - 1);
         this.buffer.appendWindowEnd = Infinity;
@@ -116,7 +118,12 @@ export class SegmentedAudio extends ExternalAudio {
           await this.idle();this.buffer.remove(chunk*SECONDS,(chunk+1)*SECONDS);await this.idle();this.loaded.delete(chunk);
         }
       }
-    } finally {this.filling=false;}
+    } finally {
+      this.filling=false;
+      // A seek may have arrived while fetch or SourceBuffer was finishing.
+      // Start the latest position immediately instead of waiting for the timer.
+      if (!this.closed && epoch !== this.seekEpoch) this.schedule();
+    }
   }
   override setOffset(seconds: number) {if(!Number.isFinite(seconds)||Math.abs(seconds)>30)return;this.offsetSeconds=seconds;super.setOffset(seconds);this.schedule();}
   override destroy() {

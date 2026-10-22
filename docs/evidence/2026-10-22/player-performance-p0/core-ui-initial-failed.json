@@ -1,0 +1,168 @@
+{
+  "browser": "155.0.8059.85",
+  "os": "10.0.26300",
+  "headless": true,
+  "restart": false,
+  "results": {
+    "scan": true,
+    "incremental": true,
+    "defaultFrench": true,
+    "internalSwitches": [
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.57505798339844,
+        "url": "http://127.0.0.1:48987/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/content",
+        "time": 0.992441,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.02655792236328,
+        "url": "http://127.0.0.1:48987/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/content",
+        "time": 1.679295,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -44.58503723144531,
+        "url": "http://127.0.0.1:48987/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/content",
+        "time": 2.380216,
+        "fullscreen": true
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.04715728759766,
+        "url": "http://127.0.0.1:48987/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/content",
+        "time": 3.088541,
+        "fullscreen": true
+      }
+    ],
+    "failedLanguageRetainedWithoutPause": true,
+    "reopenedAudio": [
+      {
+        "id": "internal-2",
+        "language": "en",
+        "passed": true
+      },
+      {
+        "id": "internal-1",
+        "language": "fr",
+        "passed": true
+      }
+    ]
+  },
+  "failure": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('[data-subtitle-id]').filter({ hasText: 'EN · ASS' })\u001b[22m\n\n    at C:\\Users\\Mael\\Documents\\GitHub\\Aether\\scripts\\browser-scanner.cjs:149:75",
+  "preparations": [
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-1-chunk-1",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-2-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-2-chunk-1",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-1-chunk-1",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-2-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-2-chunk-1",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-2-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-2-chunk-1",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d4c3d660-7207-4492-a4dd-310cb95234be/prepared/audio-1-chunk-1",
+      "method": "GET",
+      "status": 200
+    }
+  ],
+  "diagnostic": {
+    "url": "http://127.0.0.1:48987/app/films/?work=d0e31c8f-420c-49c8-b1e9-e386400b34c6",
+    "buttons": [
+      "Revenir aux métadonnées du scan",
+      "Associer les deux films",
+      "Dissocier cette copie",
+      "",
+      "Marquer non vu",
+      "Meilleure version disponible",
+      "MKV",
+      "MP4",
+      " Lancer le film",
+      "",
+      "",
+      "Réessayer explicitement",
+      "×",
+      "Désactivés ",
+      "EN Â· ASS (texte, styles non reproduits)WebVTT · EN ",
+      "EN Â· VTTWebVTT · EN ",
+      "FR forcÃ©s Â· SRTWebVTT · FR ",
+      "FR · intégrés (texte)WebVTT · FR ",
+      "FR forcés · intégrés (texte)WebVTT · FR ",
+      "EN · intégrés (texte)WebVTT · EN ",
+      "Régler le décalage des sous-titres",
+      "↺ 10",
+      "",
+      "↻ 10",
+      "",
+      " Audio",
+      " Sous-titres",
+      " Vidéo",
+      "1×",
+      ""
+    ],
+    "error": "Lecture interrompuePiste FR (internal-1) : Audio externe interrompu : source indisponible, incompatible ou bloquée pendant 10 secondes.Réessayer explicitement",
+    "notice": "",
+    "video": {
+      "time": 11.951059,
+      "paused": true
+    },
+    "audio": {}
+  }
+}

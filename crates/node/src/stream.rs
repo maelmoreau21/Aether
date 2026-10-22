@@ -109,7 +109,7 @@ pub fn serve_opened<B>(
 }
 
 pub fn serve_opened_parts(
-    opened: OpenedFile,
+    mut opened: OpenedFile,
     method: &Method,
     headers: &HeaderMap,
     mime: &str,
@@ -122,6 +122,7 @@ pub fn serve_opened_parts(
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
 
     async move {
+        let lease = opened.take_cache_lease();
         opened.verify_unchanged()?;
         let file_size = opened.size();
         let etag_str = format!("\"{}-{:x}\"", opened.modified_ns(), file_size);
@@ -147,7 +148,9 @@ pub fn serve_opened_parts(
                     } else {
                         let mut tokio_file = opened.into_tokio_file();
                         tokio_file.seek(SeekFrom::Start(range.start)).await?;
-                        BodyExt::boxed(ChunkedFileBody::new(tokio_file.take(length), length))
+                        BodyExt::boxed(
+                            ChunkedFileBody::new(tokio_file.take(length), length).with_lease(lease),
+                        )
                     };
                     Ok(builder.body(body).expect("valid 206 response"))
                 }
@@ -169,7 +172,9 @@ pub fn serve_opened_parts(
             } else {
                 let mut tokio_file = opened.into_tokio_file();
                 tokio_file.seek(SeekFrom::Start(0)).await?;
-                BodyExt::boxed(ChunkedFileBody::new(tokio_file.take(file_size), file_size))
+                BodyExt::boxed(
+                    ChunkedFileBody::new(tokio_file.take(file_size), file_size).with_lease(lease),
+                )
             };
             Ok(Response::builder()
                 .status(StatusCode::OK)
@@ -187,15 +192,24 @@ struct ChunkedFileBody {
     reader: tokio::io::Take<tokio::fs::File>,
     remaining: u64,
     buf: Vec<u8>,
+    _lease: Option<std::sync::Arc<crate::cache_dirs::CacheDirectory>>,
 }
 
 impl ChunkedFileBody {
+    fn with_lease(
+        mut self,
+        lease: Option<std::sync::Arc<crate::cache_dirs::CacheDirectory>>,
+    ) -> Self {
+        self._lease = lease;
+        self
+    }
     fn new(reader: tokio::io::Take<tokio::fs::File>, remaining: u64) -> Self {
         let cap = remaining.min(STREAM_CHUNK_BYTES as u64) as usize;
         Self {
             reader,
             remaining,
             buf: vec![0u8; cap],
+            _lease: None,
         }
     }
 }
@@ -248,6 +262,24 @@ impl http_body::Body for ChunkedFileBody {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[tokio::test]
+    async fn active_response_retains_preparation_cache_lease() {
+        let directory = std::sync::Arc::new(crate::cache_dirs::CacheDirectory::new().unwrap());
+        let path = directory.path().to_owned();
+        std::fs::write(path.join("content"), b"packet-copy").unwrap();
+        let opened = OpenedFile::open_in_root(&path, Path::new("content"))
+            .await
+            .unwrap()
+            .with_cache_lease(directory.clone());
+        let request = Request::builder().body(()).unwrap();
+        let response = serve_opened(opened, &request, "audio/mp4").await.unwrap();
+        drop(directory);
+        assert!(path.exists());
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&bytes[..], b"packet-copy");
+        assert!(!path.exists());
+    }
 
     #[test]
     fn range_parser_and_byte_range_resist_u64_max_overflow_and_boundary_cases() {

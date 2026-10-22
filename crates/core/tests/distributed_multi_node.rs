@@ -829,6 +829,17 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
             String::from_utf8_lossy(&bytes)
         );
         assert_eq!(&bytes[..], b"OggS");
+        let chunk = format!("{audio}-chunk-0");
+        let (status, _, bytes) = http_request(
+            &core_origin,
+            Method::GET,
+            &chunk,
+            &[("cookie", &alice_cookie), ("range", "bytes=0-31")],
+            vec![],
+        )
+        .await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT, "remote audio chunk");
+        assert_eq!(&bytes[4..8], b"ftyp");
         let video = prepared["url"].as_str().unwrap();
         let (status, _, bytes) = http_request(
             &core_origin,

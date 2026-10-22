@@ -205,6 +205,7 @@ jobs:
         run: |
           rm -rf docs/evidence/2026-10-16/scanner
           rm -rf docs/evidence/2026-10-17/series
+          rm -rf docs/evidence/2026-10-22/nas-preparation/ci
 
       - name: Installer la toolchain Rust
         uses: dtolnay/rust-toolchain@stable
@@ -242,7 +243,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: tests/fixtures/generated
-          key: fixtures-p1-browser-v2-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-p1.py') }}
+          key: fixtures-p1-browser-v2-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/generate-dual-opus-fixture.py', 'scripts/prepare-p1.py') }}
 
       - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
@@ -272,6 +273,14 @@ jobs:
       - name: Exécuter le parcours navigateur Séries (scan, saisons, lecture, 403, transition cookies HttpOnly)
         run: cargo test --locked --test browser_series -- --ignored --nocapture
 
+      - name: Vérifier le MP4 AV1 10 bits et deux Opus 5.1 en audio segmenté
+        env:
+          MEDIA_TEST_SEGMENTED: '1'
+          MEDIA_REPORT_DIR: docs/evidence/2026-10-22/nas-preparation/ci
+        run: |
+          python3 scripts/generate-dual-opus-fixture.py
+          node scripts/browser-dual-opus.cjs
+
       - name: Vérifier la génération fraîche des rapports et captures navigateur
         shell: python
         run: |
@@ -280,7 +289,8 @@ jobs:
           for file in [
               "docs/evidence/2026-10-16/scanner/report.json",
               "docs/evidence/2026-10-16/scanner/report-restart.json",
-              "docs/evidence/2026-10-17/series/report.json"
+              "docs/evidence/2026-10-17/series/report.json",
+              "docs/evidence/2026-10-22/nas-preparation/ci/report.json"
           ]:
               assert json.loads(Path(file).read_text())["passed"] is True, file
           for img in [
@@ -296,7 +306,7 @@ jobs:
       - name: Archiver les rapports et captures navigateur
         # Keep partial failure reports, but do not mask a fixture/setup failure
         # with a second error when no browser scenario could run.
-        if: ${{ always() && hashFiles('docs/evidence/2026-10-16/scanner/**', 'docs/evidence/2026-10-17/series/**') != '' }}
+        if: ${{ always() && hashFiles('docs/evidence/2026-10-16/scanner/**', 'docs/evidence/2026-10-17/series/**', 'docs/evidence/2026-10-22/nas-preparation/ci/**') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: browser-evidence-films-series
@@ -304,6 +314,7 @@ jobs:
           path: |
             docs/evidence/2026-10-16/scanner/
             docs/evidence/2026-10-17/series/
+            docs/evidence/2026-10-22/nas-preparation/ci/
 
   images:
     name: Image Docker (${{ matrix.target }})

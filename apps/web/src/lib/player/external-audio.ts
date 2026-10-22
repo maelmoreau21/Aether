@@ -1,7 +1,7 @@
 // Preserve encoded audio and channels; never route production audio through a stereo WebAudio graph.
 // Independent clocks remain client-dependent; seeks and buffering are coordinated explicitly.
 export class ExternalAudio {
-  private audio = new Audio();
+  protected audio = new Audio();
   private timer?: ReturnType<typeof setInterval>;
   private stallTimer?: ReturnType<typeof setTimeout>;
   private cancellations = new Set<() => void>();
@@ -103,15 +103,16 @@ export class ExternalAudio {
       check();
     });
   }
-  async load(url: string, activate = true) {
-    if (!this.audio.canPlayType('audio/ogg; codecs="opus"')) throw new Error('Ce navigateur ne déclare pas la lecture Ogg/Opus externe.');
+  async load(url: string, activate = true, mime = 'audio/ogg; codecs="opus"') {
+    const format = mime.startsWith('audio/mp4') ? 'MP4/Opus segmenté' : 'Ogg/Opus';
+    if (!this.audio.canPlayType(mime)) throw new Error(`Ce navigateur ne déclare pas la lecture audio ${mime}.`);
     await new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => {
         clearTimeout(timeout); this.audio.removeEventListener('loadedmetadata', ready); this.audio.removeEventListener('error', failed); this.cancellations.delete(cancel);
         if (error) reject(error); else resolve();
       };
       const ready = () => finish();
-      const failed = () => finish(new Error('Audio externe Ogg/Opus illisible.'));
+      const failed = () => finish(new Error(`Audio externe ${format} illisible (MediaError ${this.audio.error?.code ?? '?'}).`));
       const timeout = setTimeout(() => finish(new Error('Chargement audio externe expiré après 10 secondes.')), 10000);
       const cancel = () => finish(new Error('Lecteur fermé.')); this.cancellations.add(cancel);
       this.audio.addEventListener('loadedmetadata', ready); this.audio.addEventListener('error', failed);

@@ -2641,6 +2641,20 @@ pub async fn descriptor(
                 "externalAudioUrl": format!("/api/v1/assets/{asset_id}/prepared/audio-{}", track.index),
                 "prepare": true, "label": "interne", "mime": "video/mp4", "tracks": [track]
             }));
+            if row.get::<String, _>("mime") == "video/mp4" {
+                // Native MP4 already has a seek index. Never copy its entire video
+                // just to select a different internal audio track.
+                if let Some(source) = sources.last_mut() {
+                    source["url"] = json!(relay_url);
+                    source["prepareVideo"] = json!(false);
+                    source["audioSegmentUrl"] = json!(format!(
+                        "/api/v1/assets/{asset_id}/prepared/audio-{}-chunk-",
+                        track.index
+                    ));
+                    source["directUrl"] = source_obj["directUrl"].clone();
+                    source["tokenExpiresAt"] = source_obj["tokenExpiresAt"].clone();
+                }
+            }
         }
         for track in probe.streams.iter().filter(|t| {
             t.codec_type.as_deref() == Some("subtitle")
@@ -2721,64 +2735,105 @@ pub async fn prepared(
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
     };
     let remote_id = row.get::<String, _>("node_id");
+    let request_started = std::time::Instant::now();
+    eprintln!(
+        "{}",
+        json!({"event":"prepared_http_start","asset":asset_id,"node":remote_id,"component":component,"method":request.method().as_str(),"range":request.headers().contains_key("range")})
+    );
+    let probe = match decode(row.get("probe_json")) {
+        Ok(probe) => probe,
+        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
+    };
+    let selected =
+        if let Some(Component::AudioChunk(index, chunk)) = Component::audio_chunk(component) {
+            let duration = probe
+                .format
+                .get("duration")
+                .and_then(Value::as_str)
+                .and_then(|v| v.parse::<f64>().ok());
+            probe
+                .streams
+                .iter()
+                .find(|t| {
+                    t.index == index
+                        && t.codec_type.as_deref() == Some("audio")
+                        && t.codec_name.as_deref() == Some("opus")
+                })
+                .filter(|_| {
+                    duration.is_some_and(|d| {
+                        d.is_finite()
+                            && f64::from(chunk * media_node::packaging::AUDIO_CHUNK_SECONDS) < d
+                    })
+                })
+                .map(|_| Component::AudioChunk(index, chunk))
+        } else if component == "video"
+            && probe.streams.iter().any(|t| {
+                t.codec_type.as_deref() == Some("video") && t.codec_name.as_deref() == Some("av1")
+            })
+        {
+            Some(Component::Video)
+        } else if let Some(index) = component
+            .strip_prefix("audio-")
+            .and_then(|s| s.parse::<u32>().ok())
+        {
+            probe
+                .streams
+                .iter()
+                .find(|t| {
+                    t.index == index
+                        && t.codec_type.as_deref() == Some("audio")
+                        && t.codec_name.as_deref() == Some("opus")
+                })
+                .map(|_| Component::Audio(index))
+        } else if let Some(index) = component
+            .strip_prefix("subtitle-")
+            .and_then(|s| s.parse::<u32>().ok())
+        {
+            probe
+                .streams
+                .iter()
+                .find(|t| {
+                    t.index == index
+                        && t.codec_type.as_deref() == Some("subtitle")
+                        && matches!(
+                            t.codec_name.as_deref(),
+                            Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text")
+                        )
+                })
+                .map(|_| Component::Subtitle(index))
+        } else {
+            None
+        };
+    let Some(selected) = selected else {
+        return crate::error(StatusCode::UNPROCESSABLE_ENTITY, "unsupported_track");
+    };
     if remote_id != "local" {
         return match crate::nodes::load_node(store, &remote_id).await {
             Ok(Some(node)) => {
-                crate::nodes::relay_from_remote_node(
+                let response = crate::nodes::relay_from_remote_node(
                     store,
                     &node,
                     &format!("/internal/v1/node/assets/{asset_id}/prepared/{component}"),
                     request,
                 )
-                .await
+                .await;
+                eprintln!(
+                    "{}",
+                    json!({"event":"prepared_remote_response","asset":asset_id,"node":remote_id,"component":component,"status":response.status().as_u16(),"elapsed_ms":request_started.elapsed().as_millis()})
+                );
+                response
             }
             _ => crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable"),
         };
     }
-    let probe = match decode(row.get("probe_json")) {
-        Ok(probe) => probe,
-        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
-    };
-    let selected = if component == "video"
-        && probe.streams.iter().any(|t| {
-            t.codec_type.as_deref() == Some("video") && t.codec_name.as_deref() == Some("av1")
-        }) {
-        Some(Component::Video)
-    } else if let Some(index) = component
-        .strip_prefix("audio-")
-        .and_then(|s| s.parse::<u32>().ok())
+    if let Component::Audio(index) | Component::AudioChunk(index, _) = selected
+        && let Some(track) = probe.streams.iter().find(|track| track.index == index)
     {
-        probe
-            .streams
-            .iter()
-            .find(|t| {
-                t.index == index
-                    && t.codec_type.as_deref() == Some("audio")
-                    && t.codec_name.as_deref() == Some("opus")
-            })
-            .map(|_| Component::Audio(index))
-    } else if let Some(index) = component
-        .strip_prefix("subtitle-")
-        .and_then(|s| s.parse::<u32>().ok())
-    {
-        probe
-            .streams
-            .iter()
-            .find(|t| {
-                t.index == index
-                    && t.codec_type.as_deref() == Some("subtitle")
-                    && matches!(
-                        t.codec_name.as_deref(),
-                        Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text")
-                    )
-            })
-            .map(|_| Component::Subtitle(index))
-    } else {
-        None
-    };
-    let Some(selected) = selected else {
-        return crate::error(StatusCode::UNPROCESSABLE_ENTITY, "unsupported_track");
-    };
+        eprintln!(
+            "{}",
+            json!({"event":"prepared_audio_track","asset":asset_id,"index":index,"language":track.tags.get("language"),"channels":track.details.get("channels"),"codec":track.codec_name})
+        );
+    }
     let opened = preparations
         .prepare(
             std::path::Path::new(&row.get::<String, _>("root")),
@@ -2792,6 +2847,10 @@ pub async fn prepared(
         Ok(file) => file,
         Err(error) => {
             let code = media_node::packaging::preparation_error_code(&error);
+            eprintln!(
+                "{}",
+                json!({"event":"prepared_http_error","asset":asset_id,"component":component,"code":code,"elapsed_ms":request_started.elapsed().as_millis()})
+            );
             let mut response = crate::error(StatusCode::SERVICE_UNAVAILABLE, code);
             response.headers_mut().insert(
                 "x-media-preparation-error",
@@ -2800,6 +2859,10 @@ pub async fn prepared(
             return response;
         }
     };
+    eprintln!(
+        "{}",
+        json!({"event":"prepared_http_ready","asset":asset_id,"component":component,"elapsed_ms":request_started.elapsed().as_millis(),"bytes":opened.size()})
+    );
     match media_node::serve_opened(opened, &request, selected.mime()).await {
         Ok(response) => {
             let (parts, body) = response.into_parts();

@@ -227,7 +227,14 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(media["synthetic"], false);
-        for component in ["video", "audio-1", "audio-2", "subtitle-4"] {
+        for component in [
+            "video",
+            "audio-1",
+            "audio-2",
+            "audio-1-chunk-0",
+            "audio-2-chunk-0",
+            "subtitle-4",
+        ] {
             let tracks = media["sources"][0]["tracks"].as_array().unwrap();
             if component != "video" {
                 let index: u64 = component.split('-').nth(1).unwrap().parse().unwrap();

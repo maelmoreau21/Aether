@@ -60,7 +60,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('.hero-cta').click();
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>0.2);
     if (!restart) {
-      assert.match(await page.locator('audio[data-external-audio]').evaluate(a=>a.currentSrc), /\/prepared\/audio-1$/);
+      assert.equal(await page.locator('audio[data-external-audio]').evaluate(a=>a.dataset.internalAudioTrack==='internal-1'||a.currentSrc.endsWith('/prepared/audio-1')),true);
       assert.equal(await page.getByText('Votre langue précédente est indisponible.',{exact:false}).count(),0);
       report.results.defaultFrench=true;
     }
@@ -71,11 +71,11 @@ fs.mkdirSync(out, {recursive: true});
     for (const id of ['internal-1','internal-2','internal-1','internal-2']) {
       await openMenu('audio');
       await page.locator(`[data-audio-id="${id}"]`).click();
-      await page.waitForFunction(id=>{const a=document.querySelector('audio[data-external-audio]'); const v=document.querySelector('video'); return a && a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1]) && !a.paused && !v.paused && v.currentTime>.2 && Math.abs(a.currentTime-v.currentTime)<.3;},id,{timeout:30000});
+      await page.waitForFunction(id=>{const a=document.querySelector('audio[data-external-audio]'); const v=document.querySelector('video'); return a && (a.dataset.internalAudioTrack===id||a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1])) && !a.paused && !v.paused && v.currentTime>.2 && Math.abs(a.currentTime-v.currentTime)<.3;},id,{timeout:30000});
       const sample = await page.evaluate(async()=>{
         const v=document.querySelector('video'), a=document.querySelector('audio[data-external-audio]');
         const c=new AudioContext(); await c.resume(); const s=c.createMediaElementSource(a), n=c.createAnalyser(); n.fftSize=8192;s.connect(n);n.connect(c.destination);
-        await new Promise(r=>setTimeout(r,250));const bins=new Float32Array(n.frequencyBinCount);n.getFloatFrequencyData(bins);
+        await new Promise(r=>setTimeout(r,600));const bins=new Float32Array(n.frequencyBinCount);n.getFloatFrequencyData(bins);
         let peak=0;for(let i=1;i<bins.length;i++)if(bins[i]>bins[peak])peak=i;
         const result={frequency:peak*c.sampleRate/n.fftSize,db:bins[peak],url:v.currentSrc,time:v.currentTime,fullscreen:!!document.fullscreenElement};s.disconnect();await c.close();return result;
       });
@@ -92,7 +92,7 @@ fs.mkdirSync(out, {recursive: true});
       await page.waitForFunction(async language=>{const r=await fetch('/api/v1/preferences');return (await r.json()).audioLanguage===language;},language);
       await page.keyboard.press('Shift');await page.locator('button.return').click();
       await page.locator('.hero-cta').click();
-      await page.waitForFunction(id=>{const v=document.querySelector('video'),a=document.querySelector('audio');return a&&a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1])&&!a.paused&&!v.paused;},id);
+      await page.waitForFunction(id=>{const v=document.querySelector('video'),a=document.querySelector('audio');return a&&(a.dataset.internalAudioTrack===id||a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1]))&&!a.paused&&!v.paused;},id);
       assert.equal(await page.getByText('Votre langue précédente est indisponible.',{exact:false}).count(),0);
       report.results.reopenedAudio.push({id,language,passed:true});
     }
@@ -107,7 +107,7 @@ fs.mkdirSync(out, {recursive: true});
         await page.waitForFunction(t=>{const v=document.querySelector('video'),a=document.querySelector('audio');return v.paused && !v.seeking && Math.abs(v.currentTime-t)<.3 && a && a.paused && Math.abs(a.currentTime-t)<.3;},target);
         const beforeSwitch=await page.locator('video').evaluate(v=>({time:v.currentTime,url:v.currentSrc}));
         await openMenu('audio');await page.locator(`[data-audio-id="${switchId}"]`).click();
-        await page.waitForFunction(({t,id})=>{const v=document.querySelector('video'),a=document.querySelector('audio');return v.paused && a && a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1]) && a.paused && Math.abs(v.currentTime-t)<.3 && Math.abs(a.currentTime-t)<.3;},{t:target,id:switchId});
+        await page.waitForFunction(({t,id})=>{const v=document.querySelector('video'),a=document.querySelector('audio');return v.paused && a && (a.dataset.internalAudioTrack===id||a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1])) && a.paused && Math.abs(v.currentTime-t)<.3 && Math.abs(a.currentTime-t)<.3;},{t:target,id:switchId});
         assert.equal(await page.locator('video').evaluate(v=>v.currentSrc),beforeSwitch.url);
         await page.locator('video').evaluate(v=>v.play());
         await page.waitForFunction(t=>document.querySelector('video').currentTime>t+.3,target);

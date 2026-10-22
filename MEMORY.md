@@ -1,5 +1,18 @@
 # MEMORY.md — État et décisions Aether
 
+## 22 octobre 2026 — Assertion scanner_flow alignée sur les langues explicites
+
+- Le journal GitHub fourni confirme P0 Linux 12/12, puis scanner_flow échouait
+  sur une ancienne attente `source.language == fr` pour le MKV à deux audios.
+- Contrat déjà implémenté/documenté : original multiaudio = und ; seules les
+  sources internal-N garantissent la piste et sa langue. Test corrigé : original
+  internal-default/und, sources explicites fr/en et conservation index/canaux,
+  langue en de l’original MP4 mono-audio. Tags techniques fra/eng toujours vérifiés.
+- Aucun changement de production, des fixtures ou des médias. Test ciblé
+  cargo test --locked -p media-poc --all-features --test scanner_flow -j 1
+  -- --test-threads=1 : 1 réussi Windows ; fmt et diff checks réussis.
+- Pas de suite workspace rejouée, push ni déploiement. CI complète à relancer.
+
 ## 22 octobre 2026 — Correction CI P0 : caches et profil AV1
 
 - Cause des 404 MSE/DASH et VTT absents : cache partagé entre Rust (jeu complet)

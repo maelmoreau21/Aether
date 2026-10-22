@@ -111,6 +111,159 @@ async fn hash(path: &Path) -> Vec<u8> {
 }
 
 #[tokio::test]
+async fn grouped_folders_scan_filter_stream_and_remove() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("media");
+    let a = root.join("a");
+    let b = root.join("b");
+    tokio::fs::create_dir_all(&a).await.unwrap();
+    tokio::fs::create_dir_all(&b).await.unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/generated/p1/clip-mp4-en.mp4");
+    tokio::fs::copy(&fixture, a.join("First (2026).mp4"))
+        .await
+        .unwrap();
+    tokio::fs::copy(&fixture, b.join("Second (2026).mp4"))
+        .await
+        .unwrap();
+    let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "folder-admin",
+            Zeroizing::new("disposable folder test password".into()),
+        )
+        .await
+        .unwrap();
+    let app = router(&root, &store).await;
+    let (_, login, _, cookie) = request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        None,
+        json!({"login":"folder-admin","password":"disposable folder test password"}),
+        None,
+    )
+    .await;
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let mut configuration = json!({"name":"Films_UHD","kind":"films","nodeId":"local","root":a.to_string_lossy(),"folders":[{"nodeId":"local","root":a.to_string_lossy()},{"nodeId":"local","root":b.to_string_lossy()}],"userIds":[]});
+    let (status, library, _, _) = request(
+        &app,
+        "POST",
+        "/api/v1/admin/libraries",
+        &cookie,
+        Some(csrf),
+        configuration.clone(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{library}");
+    let id = library["id"].as_str().unwrap();
+    let scanned = scan(&app, id, &cookie, csrf).await;
+    assert_eq!(scanned["discovered"], 2, "{scanned}");
+    let (_, catalog, _, _) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/catalog?library={id}"),
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    assert_eq!(catalog["total"], 2, "{catalog}");
+    assert!(
+        catalog["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|w| w["libraryId"] == id)
+    );
+    let second = catalog["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["title"] == "Second")
+        .unwrap();
+    let (_, detail, _, _) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/catalog/{}", second["id"].as_str().unwrap()),
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    let asset = detail["editions"][0]["versions"][0]["sources"][0]["assetIds"][0]
+        .as_str()
+        .unwrap();
+    let uri = format!("/api/v1/assets/{asset}/content");
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &uri,
+            &cookie,
+            None,
+            Value::Null,
+            Some("bytes=0-15")
+        )
+        .await
+        .0,
+        StatusCode::PARTIAL_CONTENT
+    );
+    configuration["folders"] = json!([{"nodeId":"local","root":a.to_string_lossy()}]);
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            &format!("/api/v1/admin/libraries/{id}"),
+            &cookie,
+            Some(csrf),
+            configuration,
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        request(&app, "GET", &uri, &cookie, None, Value::Null, None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        request(
+            &app,
+            "HEAD",
+            &uri,
+            &cookie,
+            None,
+            Value::Null,
+            Some("bytes=0-15")
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (_, catalog, _, _) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/catalog?library={id}"),
+        &cookie,
+        None,
+        Value::Null,
+        None,
+    )
+    .await;
+    assert_eq!(catalog["total"], 1, "{catalog}");
+}
+
+#[tokio::test]
 async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permissions() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("media");

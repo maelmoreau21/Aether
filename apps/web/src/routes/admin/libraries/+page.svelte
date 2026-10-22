@@ -49,6 +49,7 @@
   let kind = $state<'films' | 'series' | 'music'>('films');
   let nodeId = $state('local');
   let root = $state('');
+  let folders = $state<{ nodeId: string; root: string }[]>([]);
   let enabled = $state(true);
   let excludedPatterns = $state('');
   let libraryOptions = $state(defaultLibraryOptions());
@@ -64,7 +65,7 @@
   const availableRootsForNode = $derived.by(() => {
     if (nodeId === 'local') {
       const localNode = nodes.find(n => n.id === 'local');
-      return localNode && localNode.roots.length > 0 ? localNode.roots : roots;
+      return [...new Set([...(localNode?.roots ?? []), ...roots])];
     }
     return selectedNode?.roots ?? [];
   });
@@ -94,6 +95,7 @@
     kind = 'films';
     nodeId = 'local';
     root = roots[0] ?? '';
+    folders = [];
     enabled = true;
     excludedPatterns = '';
     libraryOptions = defaultLibraryOptions();
@@ -113,6 +115,7 @@
     kind = library.kind;
     nodeId = library.nodeId;
     root = library.root;
+    folders = (library.folders ?? [{ nodeId: library.nodeId, root: library.root }]).map(folder => ({ ...folder }));
     enabled = library.enabled;
     excludedPatterns = library.excludedPatterns ?? '';
     libraryOptions = { ...defaultLibraryOptions(), ...library.options };
@@ -143,14 +146,14 @@
       const [data, accounts, configured, nodeList, health, oidc] = await Promise.all([
         request<{ libraries: Library[] }>('/api/v1/admin/libraries'),
         request<{ users: AuthUser[] }>('/api/v1/admin/users'),
-        request<{ roots: string[] }>('/api/v1/admin/roots'),
+        request<{ roots: string[]; localRoots?: string[] }>('/api/v1/admin/roots'),
         request<{ nodes: AdminNode[] }>('/api/v1/admin/nodes').catch(() => ({ nodes: [] as AdminNode[] })),
         request<CoreHealth>('/api/v1/health').catch(() => null),
         request<OidcAdminStatus>('/api/v1/admin/oidc').catch(() => null)
       ]);
       libraries = data.libraries;
       users = accounts.users;
-      roots = configured.roots;
+      roots = configured.localRoots ?? configured.roots;
       nodes = nodeList.nodes;
       coreHealth = health;
       oidcStatus = oidc;
@@ -174,7 +177,7 @@
       await request(editing ? `/api/v1/admin/libraries/${encodeURIComponent(editing)}` : '/api/v1/admin/libraries', {
         method: editing ? 'PUT' : 'POST',
         headers: { 'content-type': 'application/json', 'x-csrf-token': $session.csrfToken },
-        body: JSON.stringify({ name: name.trim(), kind, nodeId, root, enabled, excludedPatterns: excludedPatterns.trim(), userIds, options: libraryOptions })
+        body: JSON.stringify({ name: name.trim(), kind, nodeId: folders[0]?.nodeId ?? nodeId, root: folders[0]?.root ?? root, folders, enabled, excludedPatterns: excludedPatterns.trim(), userIds, options: libraryOptions })
       });
       const [data, nodeList] = await Promise.all([
         request<{ libraries: Library[] }>('/api/v1/admin/libraries'),
@@ -212,10 +215,10 @@
       });
       const [nodeList, configured] = await Promise.all([
         request<{ nodes: AdminNode[] }>('/api/v1/admin/nodes'),
-        request<{ roots: string[] }>('/api/v1/admin/roots')
+        request<{ roots: string[]; localRoots?: string[] }>('/api/v1/admin/roots')
       ]);
       nodes = nodeList.nodes;
-      roots = configured.roots;
+      roots = configured.localRoots ?? configured.roots;
       pairName = '';
       pairBaseUrl = '';
       pairPublicUrl = '';
@@ -564,6 +567,7 @@
             bind:kind
             bind:nodeId
             bind:root
+            bind:folders
             bind:enabled
             bind:excludedPatterns
             bind:options={libraryOptions}

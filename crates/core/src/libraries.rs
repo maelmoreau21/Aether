@@ -29,6 +29,8 @@ pub(crate) struct Library {
     pub kind: String,
     pub node_id: String,
     pub root: String,
+    #[sqlx(skip)]
+    pub folders: Vec<LibraryFolder>,
     #[sqlx(try_from = "crate::database::DbBool")]
     pub enabled: bool,
     #[sqlx(default)]
@@ -46,6 +48,12 @@ pub(crate) struct Library {
     #[sqlx(skip)]
     pub image_versions: std::collections::BTreeMap<String, String>,
 }
+#[derive(Clone, Deserialize, Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LibraryFolder {
+    node_id: String,
+    root: String,
+}
 fn default_enabled() -> bool {
     true
 }
@@ -54,7 +62,9 @@ fn default_enabled() -> bool {
 struct LibraryInput {
     name: String,
     kind: String,
+    #[serde(default)]
     node_id: String,
+    #[serde(default)]
     root: String,
     #[serde(default = "default_enabled")]
     enabled: bool,
@@ -64,6 +74,8 @@ struct LibraryInput {
     user_ids: Vec<String>,
     #[serde(default)]
     options: Option<crate::library_options::LibraryOptions>,
+    #[serde(default)]
+    folders: Option<Vec<LibraryFolder>>,
 }
 
 pub fn router(auth: AuthState, local_root: PathBuf) -> Router {
@@ -87,7 +99,7 @@ async fn accessible(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let actor = state.auth.authenticate(&headers).await?;
-    let rows:Vec<(String,String,String)> = crate::database::query_as("SELECT l.id,l.name,l.kind FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND n.status!='revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) ORDER BY l.name,l.id")
+    let rows:Vec<(String,String,String)> = crate::database::query_as("SELECT l.id,l.name,l.kind FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND l.enabled=1 AND (n.status!='revoked' OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries child ON child.id=f.library_id JOIN media_nodes cn ON cn.id=child.node_id WHERE f.parent_id=l.id AND f.active=1 AND cn.status!='revoked')) AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) ORDER BY l.name,l.id")
         .bind(actor.user.role.as_str()).bind(actor.user.id).fetch_all(&state.auth.store.pool).await.map_err(database)?;
     Ok(Json(
         serde_json::json!({"libraries":rows.into_iter().map(|(id,name,kind)|serde_json::json!({"id":id,"name":name,"kind":kind})).collect::<Vec<_>>()}),
@@ -153,12 +165,19 @@ async fn load(store: &IdentityStore) -> Result<Vec<Library>, StatusCode> {
     // Same transaction gives a coherent configuration/grants snapshot.
     let mut tx = store.pool.begin().await.map_err(database)?;
     let mut libraries: Vec<Library> = crate::database::query_as(
-        "SELECT id,name,kind,node_id,root,enabled,excluded_patterns,options_json FROM libraries ORDER BY name,id",
+        "SELECT id,name,kind,node_id,root,enabled,excluded_patterns,options_json FROM libraries WHERE NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=libraries.id) ORDER BY name,id",
     )
     .fetch_all(&mut *tx)
     .await
     .map_err(database)?;
     for library in &mut libraries {
+        library.folders = vec![LibraryFolder {
+            node_id: library.node_id.clone(),
+            root: library.root.clone(),
+        }];
+        let additional = crate::database::query_as::<_, LibraryFolder>("SELECT l.node_id,l.root FROM library_folders f JOIN libraries l ON l.id=f.library_id WHERE f.parent_id=? AND f.active=1 ORDER BY l.id")
+            .bind(&library.id).fetch_all(&mut *tx).await.map_err(database)?;
+        library.folders.extend(additional);
         library.options = serde_json::from_str(&library.options_json)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         library.image_kinds = crate::database::query_scalar(
@@ -176,8 +195,8 @@ async fn load(store: &IdentityStore) -> Result<Vec<Library>, StatusCode> {
         .await
         .map_err(database)?;
         library.image_versions = revisions.into_iter().collect();
-        library.cover_urls = crate::database::query_scalar("SELECT COALESCE((SELECT '/api/v1/works/' || w.id || '/images/' || wi.id || '?width=320' FROM work_image_entries wi WHERE wi.work_id=w.id AND wi.kind='poster' ORDER BY wi.position,wi.id LIMIT 1),(SELECT '/api/v1/works/' || w.id || '/poster' FROM work_posters wp WHERE wp.work_id=w.id),(SELECT '/api/v1/assets/' || i.id || '/image?width=320' FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root ORDER BY i.priority,i.id LIMIT 1)) AS url FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND n.status='connected' AND w.kind IN ('film','series') AND (w.kind='series' OR EXISTS(SELECT 1 FROM inventory_editions ce JOIN inventory_versions cv ON cv.edition_id=ce.id JOIN inventory_sources cs ON cs.version_id=cv.id JOIN inventory_assets ca ON ca.source_id=cs.id WHERE ce.work_id=w.id AND ca.available=1 AND cs.root_snapshot=l.root)) AND (EXISTS(SELECT 1 FROM work_image_entries wi WHERE wi.work_id=w.id AND wi.kind='poster') OR EXISTS(SELECT 1 FROM work_posters wp WHERE wp.work_id=w.id) OR EXISTS(SELECT 1 FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root)) ORDER BY w.title_sort,w.id LIMIT 4")
-            .bind(&library.id).fetch_all(&mut *tx).await.map_err(database)?;
+        library.cover_urls = crate::database::query_scalar("SELECT COALESCE((SELECT '/api/v1/works/' || w.id || '/images/' || wi.id || '?width=320' FROM work_image_entries wi WHERE wi.work_id=w.id AND wi.kind='poster' ORDER BY wi.position,wi.id LIMIT 1),(SELECT '/api/v1/works/' || w.id || '/poster' FROM work_posters wp WHERE wp.work_id=w.id),(SELECT '/api/v1/assets/' || i.id || '/image?width=320' FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root ORDER BY i.priority,i.id LIMIT 1)) AS url FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE (l.id=? OR l.id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND l.enabled=1 AND n.status='connected' AND w.kind IN ('film','series') AND (w.kind='series' OR EXISTS(SELECT 1 FROM inventory_editions ce JOIN inventory_versions cv ON cv.edition_id=ce.id JOIN inventory_sources cs ON cs.version_id=cv.id JOIN inventory_assets ca ON ca.source_id=cs.id WHERE ce.work_id=w.id AND ca.available=1 AND cs.root_snapshot=l.root)) AND (EXISTS(SELECT 1 FROM work_image_entries wi WHERE wi.work_id=w.id AND wi.kind='poster') OR EXISTS(SELECT 1 FROM work_posters wp WHERE wp.work_id=w.id) OR EXISTS(SELECT 1 FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root)) ORDER BY w.title_sort,w.id LIMIT 4")
+            .bind(&library.id).bind(&library.id).fetch_all(&mut *tx).await.map_err(database)?;
     }
     let grants = crate::database::query(
         "SELECT library_id,user_id FROM library_permissions ORDER BY user_id",
@@ -227,6 +246,7 @@ async fn roots(
             }
         }
     }
+    let local_roots = all_roots.clone();
     if let Ok(rows) = crate::database::query(
         "SELECT roots_json FROM media_nodes WHERE kind='remote' AND status != 'revoked' ORDER BY name, id",
     )
@@ -247,7 +267,9 @@ async fn roots(
     if all_roots.is_empty() {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
-    Ok(Json(serde_json::json!({"roots": all_roots})))
+    Ok(Json(
+        serde_json::json!({"roots": all_roots, "localRoots": local_roots}),
+    ))
 }
 async fn create(
     State(state): State<LibraryState>,
@@ -349,28 +371,13 @@ async fn update(
     administrator(&state, &headers, true).await?;
     Ok(Json(save(&state, id, input, true).await?))
 }
-async fn save(
+async fn validate_folder(
     state: &LibraryState,
-    id: String,
-    mut input: LibraryInput,
-    existing: bool,
-) -> Result<Library, StatusCode> {
-    input.name = input.name.trim().to_owned();
-    input.node_id = input.node_id.trim().to_owned();
-    if input.name.is_empty()
-        || input.name.chars().count() > 100
-        || input.name.chars().any(char::is_control)
-        || !matches!(input.kind.as_str(), "films" | "series" | "music")
-        || input.node_id.is_empty()
-        || input.user_ids.len() > 1000
-    {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    if input.options.as_ref().is_some_and(|v| !v.validate()) {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    let root = if input.node_id == "local" {
-        let validated = validate_library_root(DiskPath::new(&input.root), &state.root)
+    node_id: &str,
+    root: &str,
+) -> Result<String, StatusCode> {
+    Ok(if node_id == "local" {
+        let validated = validate_library_root(DiskPath::new(root), &state.root)
             .await
             .map_err(|_| StatusCode::BAD_REQUEST)?;
         validated
@@ -381,7 +388,7 @@ async fn save(
         let node_row: Option<(String, String)> = crate::database::query_as(
             "SELECT status, roots_json FROM media_nodes WHERE id=? AND kind='remote'",
         )
-        .bind(&input.node_id)
+        .bind(&node_id)
         .fetch_optional(&state.auth.store.pool)
         .await
         .map_err(database)?;
@@ -393,7 +400,7 @@ async fn save(
         }
         let allowed_roots: Vec<String> =
             serde_json::from_str(&roots_json).map_err(|_| StatusCode::BAD_REQUEST)?;
-        let requested_root = input.root.trim();
+        let requested_root = root.trim();
         if requested_root.is_empty()
             || requested_root.contains("..")
             || requested_root.chars().any(char::is_control)
@@ -411,17 +418,76 @@ async fn save(
             return Err(StatusCode::BAD_REQUEST);
         }
         requested_root.to_owned()
+    })
+}
+
+async fn save(
+    state: &LibraryState,
+    id: String,
+    mut input: LibraryInput,
+    existing: bool,
+) -> Result<Library, StatusCode> {
+    let mut folders = if let Some(folders) = input.folders.take() {
+        folders
+    } else {
+        let mut folders = vec![LibraryFolder {
+            node_id: input.node_id.clone(),
+            root: input.root.clone(),
+        }];
+        if existing {
+            folders.extend(crate::database::query_as::<_,LibraryFolder>("SELECT l.node_id,l.root FROM libraries l JOIN library_folders f ON f.library_id=l.id WHERE f.parent_id=? AND f.active=1 ORDER BY l.id").bind(&id).fetch_all(&state.auth.store.pool).await.map_err(database)?);
+        }
+        folders
     };
+    if folders.is_empty() || folders.len() > 32 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    for folder in &mut folders {
+        folder.node_id = folder.node_id.trim().to_owned();
+        folder.root = validate_folder(state, &folder.node_id, &folder.root).await?;
+    }
+    let unique: std::collections::BTreeSet<_> =
+        folders.iter().map(|f| (&f.node_id, &f.root)).collect();
+    if unique.len() != folders.len() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    input.node_id = folders[0].node_id.clone();
+    input.root = folders[0].root.clone();
+    input.name = input.name.trim().to_owned();
+    input.node_id = input.node_id.trim().to_owned();
+    if input.name.is_empty()
+        || input.name.chars().count() > 100
+        || input.name.chars().any(char::is_control)
+        || !matches!(input.kind.as_str(), "films" | "series" | "music")
+        || input.node_id.is_empty()
+        || input.user_ids.len() > 1000
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if input.options.as_ref().is_some_and(|v| !v.validate()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let root = input.root.clone();
     input.user_ids.sort();
     input.user_ids.dedup();
     let mut conn = state.auth.store.pool.acquire().await.map_err(database)?;
     let mut tx = crate::database::begin_write(&mut conn)
         .await
         .map_err(database)?;
+    let hidden: i64 =
+        crate::database::query_scalar("SELECT COUNT(*) FROM library_folders WHERE library_id=?")
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(database)?;
+    if hidden != 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
     if existing {
         let active: i64 = crate::database::query_scalar(
-            "SELECT COUNT(*) FROM scan_jobs WHERE library_id=? AND status IN ('queued','running')",
+            "SELECT COUNT(*) FROM scan_jobs WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN ('queued','running')",
         )
+        .bind(&id)
         .bind(&id)
         .fetch_one(&mut *tx)
         .await
@@ -519,6 +585,22 @@ async fn save(
         .await
         .map_err(database)?;
     }
+    // Child rows are physical scan scopes, never independently exposed or granted.
+    crate::database::query("UPDATE libraries SET enabled=0 WHERE id IN (SELECT library_id FROM library_folders WHERE parent_id=?)").bind(&id).execute(&mut *tx).await.map_err(database)?;
+    crate::database::query("UPDATE library_folders SET active=0 WHERE parent_id=?")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(database)?;
+    for folder in folders.iter().skip(1) {
+        let previous_id: Option<String> = crate::database::query_scalar("SELECT l.id FROM libraries l JOIN library_folders f ON f.library_id=l.id WHERE f.parent_id=? AND l.node_id=? AND l.root=?")
+            .bind(&id).bind(&folder.node_id).bind(&folder.root).fetch_optional(&mut *tx).await.map_err(database)?;
+        let folder_id = previous_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,excluded_patterns,options_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,kind=excluded.kind,enabled=excluded.enabled,excluded_patterns=excluded.excluded_patterns,options_json=excluded.options_json")
+            .bind(&folder_id).bind(&input.name).bind(&input.kind).bind(&folder.node_id).bind(&folder.root).bind(i64::from(input.enabled)).bind(input.excluded_patterns.trim()).bind(&options_json).execute(&mut *tx).await.map_err(database)?;
+        crate::database::query("INSERT INTO library_folders(library_id,parent_id,active) VALUES(?,?,1) ON CONFLICT(library_id) DO UPDATE SET active=1")
+            .bind(&folder_id).bind(&id).execute(&mut *tx).await.map_err(database)?;
+    }
     tx.commit().await.map_err(database)?;
     Ok(Library {
         id,
@@ -526,6 +608,7 @@ async fn save(
         kind: input.kind,
         node_id: input.node_id,
         root,
+        folders,
         enabled: input.enabled,
         excluded_patterns: input.excluded_patterns,
         user_ids: input.user_ids,
@@ -569,7 +652,112 @@ mod tests {
             excluded_patterns: String::new(),
             user_ids: users,
             options: None,
+            folders: None,
         }
+    }
+    #[tokio::test]
+    async fn multiple_nodes_folders_permissions_and_removal_are_persistent() {
+        let (temp, state, user) = setup().await;
+        crate::database::query("INSERT INTO media_nodes(id,name,kind,roots_json) VALUES('remote','NAS','remote','[\"/media\"]')").execute(&state.auth.store.pool).await.unwrap();
+        let local = LibraryFolder {
+            node_id: "local".into(),
+            root: state.root.to_string_lossy().into(),
+        };
+        let remote = LibraryFolder {
+            node_id: "remote".into(),
+            root: "/media/uhd".into(),
+        };
+        let mut configured = input(&state, vec![user.clone()]);
+        configured.folders = Some(vec![local.clone(), remote.clone()]);
+        save(&state, "uhd".into(), configured, false).await.unwrap();
+        let child: String = crate::database::query_scalar(
+            "SELECT library_id FROM library_folders WHERE parent_id='uhd' AND active=1",
+        )
+        .fetch_one(&state.auth.store.pool)
+        .await
+        .unwrap();
+        let grants: i64 = crate::database::query_scalar(
+            "SELECT COUNT(*) FROM effective_library_permissions WHERE library_id=? AND user_id=?",
+        )
+        .bind(&child)
+        .bind(&user)
+        .fetch_one(&state.auth.store.pool)
+        .await
+        .unwrap();
+        assert_eq!(grants, 1);
+        let mut invalid = input(&state, vec![]);
+        invalid.folders = Some(vec![
+            local.clone(),
+            LibraryFolder {
+                node_id: "remote".into(),
+                root: "/outside".into(),
+            },
+        ]);
+        assert_eq!(
+            save(&state, "uhd".into(), invalid, true).await.err(),
+            Some(StatusCode::BAD_REQUEST)
+        );
+        let mut duplicate = input(&state, vec![]);
+        duplicate.folders = Some(vec![local.clone(), local.clone()]);
+        assert_eq!(
+            save(&state, "uhd".into(), duplicate, true).await.err(),
+            Some(StatusCode::BAD_REQUEST)
+        );
+        // Legacy updates keep the configured additional folders.
+        save(
+            &state,
+            "uhd".into(),
+            input(&state, vec![user.clone()]),
+            true,
+        )
+        .await
+        .unwrap();
+        let listed = load(&state.auth.store).await.unwrap();
+        assert!(!listed.iter().any(|l| l.id == child));
+        assert_eq!(
+            listed.iter().find(|l| l.id == "uhd").unwrap().folders.len(),
+            2
+        );
+        // Child scan scopes cannot be modified as independent libraries.
+        assert_eq!(
+            save(&state, child.clone(), input(&state, vec![]), true)
+                .await
+                .err(),
+            Some(StatusCode::NOT_FOUND)
+        );
+        let mut removed = input(&state, vec![user.clone()]);
+        removed.folders = Some(vec![local]);
+        save(&state, "uhd".into(), removed, true).await.unwrap();
+        let enabled: i64 =
+            crate::database::query_scalar("SELECT enabled FROM libraries WHERE id=?")
+                .bind(&child)
+                .fetch_one(&state.auth.store.pool)
+                .await
+                .unwrap();
+        assert_eq!(enabled, 0);
+        let grants: i64 = crate::database::query_scalar(
+            "SELECT COUNT(*) FROM effective_library_permissions WHERE library_id=?",
+        )
+        .bind(&child)
+        .fetch_one(&state.auth.store.pool)
+        .await
+        .unwrap();
+        assert_eq!(grants, 0);
+        state.auth.store.close().await;
+        let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+            .await
+            .unwrap();
+        assert_eq!(
+            load(&store)
+                .await
+                .unwrap()
+                .iter()
+                .find(|l| l.id == "uhd")
+                .unwrap()
+                .folders
+                .len(),
+            1
+        );
     }
     #[tokio::test]
     async fn options_validation_legacy_update_and_restart() {

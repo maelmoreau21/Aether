@@ -39,7 +39,9 @@ export function defaultLibraryOptions(): LibraryOptions {
     fetchPoster: true, fetchBackdrop: true, fetchLogo: true, fetchThumb: true, fetchBanner: true, fetchDisc: true,
     automaticRefreshIntervalDays: 0 };
 }
+export interface LibraryFolder { nodeId: string; root: string }
 export interface Library {
+  folders?: LibraryFolder[];
   id: string;
   name: string;
   kind: 'films' | 'series' | 'music';

@@ -43,6 +43,7 @@ struct RefreshOptions {
 }
 
 pub struct ScanJobs {
+    dispatch: tokio::sync::Mutex<()>,
     pub(crate) scheduler_tick: tokio::sync::Mutex<()>,
     cancel: Arc<AtomicBool>,
     slots: Arc<Semaphore>,
@@ -51,6 +52,7 @@ pub struct ScanJobs {
 impl Default for ScanJobs {
     fn default() -> Self {
         Self {
+            dispatch: tokio::sync::Mutex::new(()),
             scheduler_tick: tokio::sync::Mutex::new(()),
             cancel: Arc::new(AtomicBool::new(false)),
             slots: Arc::new(Semaphore::new(1)),
@@ -162,14 +164,15 @@ async fn status(
     if exists == 0 {
         return Err(StatusCode::NOT_FOUND);
     }
-    let mut status: Status = crate::database::query_as(
-        "SELECT status,discovered,probed,reused,errors_json,errors_count,warnings_count FROM scan_jobs WHERE library_id=?",
+    let statuses: Vec<Status> = crate::database::query_as(
+        "SELECT status,discovered,probed,reused,errors_json,errors_count,warnings_count FROM scan_jobs WHERE library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)",
     )
-    .bind(id)
-    .fetch_optional(&state.auth.store.pool)
+    .bind(&id)
+    .bind(&id)
+    .fetch_all(&state.auth.store.pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .unwrap_or(Status {
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut status = Status {
         status: "idle".into(),
         discovered: 0,
         probed: 0,
@@ -178,9 +181,28 @@ async fn status(
         errors_json: "[]".into(),
         errors_count: 0,
         warnings_count: 0,
-    });
-    status.errors = serde_json::from_str(&status.errors_json)
-        .unwrap_or_else(|_| vec!["État de scan illisible".into()]);
+    };
+    for item in statuses {
+        let rank = |s: &str| match s {
+            "running" => 5,
+            "queued" => 4,
+            "error" => 3,
+            "completed" => 2,
+            _ => 1,
+        };
+        if rank(&item.status) > rank(&status.status) {
+            status.status = item.status;
+        }
+        status.discovered += item.discovered;
+        status.probed += item.probed;
+        status.reused += item.reused;
+        status.errors_count += item.errors_count;
+        status.warnings_count += item.warnings_count;
+        status.errors.extend(
+            serde_json::from_str::<Vec<String>>(&item.errors_json)
+                .unwrap_or_else(|_| vec!["État de scan illisible".into()]),
+        );
+    }
     Ok(Json(status))
 }
 async fn start(
@@ -215,6 +237,32 @@ pub(crate) async fn enqueue(
 }
 
 pub(crate) async fn enqueue_with_mode(
+    auth: &AuthState,
+    root: PathBuf,
+    jobs: Arc<ScanJobs>,
+    id: String,
+    mode: RefreshMode,
+) -> Result<(), StatusCode> {
+    let _dispatch = jobs.dispatch.lock().await;
+    let folders: Vec<String> = crate::database::query_scalar(
+        "SELECT library_id FROM library_folders WHERE parent_id=? AND active=1 ORDER BY library_id",
+    )
+    .bind(&id)
+    .fetch_all(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let active: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM scan_jobs WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN ('queued','running')")
+        .bind(&id).bind(&id).fetch_one(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if active != 0 {
+        return Err(StatusCode::CONFLICT);
+    }
+    enqueue_one(auth, root.clone(), jobs.clone(), id, mode).await?;
+    for folder in folders {
+        enqueue_one(auth, root.clone(), jobs.clone(), folder, mode).await?;
+    }
+    Ok(())
+}
+async fn enqueue_one(
     auth: &AuthState,
     root: PathBuf,
     jobs: Arc<ScanJobs>,

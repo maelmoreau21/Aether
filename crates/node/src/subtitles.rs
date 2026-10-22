@@ -8,7 +8,7 @@ const MAX_BYTES: u64 = 1024 * 1024;
 const MAX_TOTAL_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TRACKS: usize = 64;
 
-fn language(token: &str) -> Option<&str> {
+pub(crate) fn language(token: &str) -> Option<&str> {
     match token {
         "fr" | "fra" | "fre" => Some("fr"),
         "en" | "eng" => Some("en"),
@@ -266,6 +266,18 @@ pub async fn discover_with_folder(
     let mut tracks = Vec::new();
     let mut issues = Vec::new();
     let parent = video.parent().unwrap_or(Path::new(""));
+    let manifest = match crate::sidecar_manifest::load(root, video).await {
+        Ok(manifest) => manifest,
+        Err(message) => {
+            return (
+                Vec::new(),
+                vec![ScanIssue {
+                    relative_path: video.to_string_lossy().into(),
+                    message,
+                }],
+            );
+        }
+    };
     let loaded;
     let folder = match folder {
         Some(folder) => folder,
@@ -300,7 +312,7 @@ pub async fn discover_with_folder(
             .unwrap_or("")
             .to_ascii_lowercase();
         match extension.as_str() {
-            "mp4" | "mkv" => videos.push((path.file_name().map(|s| s.to_owned()), stem)),
+            "mp4" | "mkv" | "webm" => videos.push((path.file_name().map(|s| s.to_owned()), stem)),
             "srt" | "vtt" | "ass" | "ssa" => candidates.push((path, stem, extension)),
             _ => {}
         }
@@ -314,25 +326,54 @@ pub async fn discover_with_folder(
             );
         }
     }
+    if let Some(manifest) = &manifest {
+        candidates = manifest
+            .subtitles
+            .iter()
+            .map(|track| {
+                let path = std::path::PathBuf::from(&track.file);
+                let extension = path
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                (path, String::new(), extension)
+            })
+            .collect();
+    }
     candidates.sort_by(|a, b| a.0.cmp(&b.0));
     let mut total = 0;
     for (path, stem, extension) in candidates {
-        let matches: Vec<_> = videos
-            .iter()
-            .filter_map(|(name, video_stem)| {
-                suffix(video_stem, &stem).map(|metadata| (name, metadata))
-            })
-            .collect();
-        if !matches
-            .iter()
-            .any(|(name, _)| name.as_deref() == video.file_name())
-        {
-            continue;
-        }
+        let explicit = manifest.as_ref().and_then(|m| {
+            m.subtitles
+                .iter()
+                .find(|track| path == Path::new(&track.file))
+        });
+        let metadata = if let Some(track) = explicit {
+            Some((track.language.clone(), track.forced, track.sdh))
+        } else {
+            let matches: Vec<_> = videos
+                .iter()
+                .filter_map(|(name, video_stem)| {
+                    suffix(video_stem, &stem).map(|metadata| (name, metadata))
+                })
+                .collect();
+            if !matches
+                .iter()
+                .any(|(name, _)| name.as_deref() == video.file_name())
+            {
+                continue;
+            }
+            if matches.len() == 1 {
+                Some(matches[0].1.clone())
+            } else {
+                None
+            }
+        };
         let relative = parent.join(path.file_name().unwrap_or_default());
         let relative_path = relative.to_string_lossy().replace('\\', "/");
         let result = async {
-            if matches.len() != 1 {
+            if metadata.is_none() {
                 return Err("ambiguous subtitle association; use a unique video stem".to_owned());
             }
             if tracks.len() >= MAX_TRACKS {
@@ -364,12 +405,13 @@ pub async fn discover_with_folder(
                     MAX_TOTAL_BYTES / 1024
                 ));
             }
-            let (language, forced, sdh) = matches[0].1.clone();
+            let (language, forced, sdh) =
+                metadata.clone().ok_or("ambiguous subtitle association")?;
             Ok(ExternalSubtitle {
                 label: format!(
-                    "{}{}{} · {}",
+                    "{}{}{} Â· {}",
                     language.to_uppercase(),
-                    if forced { " forcés" } else { "" },
+                    if forced { " forcÃ©s" } else { "" },
                     if sdh { " SDH" } else { "" },
                     if matches!(extension.as_str(), "ass" | "ssa") {
                         format!(

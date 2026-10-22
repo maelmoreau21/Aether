@@ -17,6 +17,7 @@ pub mod packaging;
 pub mod probe;
 pub mod scanner;
 pub mod server;
+mod sidecar_manifest;
 pub mod stream;
 pub mod subtitles;
 pub mod transport;

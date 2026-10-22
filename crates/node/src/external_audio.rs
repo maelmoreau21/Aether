@@ -9,6 +9,18 @@ pub async fn discover(
     folder: Option<&crate::scanner::FolderVideos>,
 ) -> (Vec<ExternalAudio>, Vec<ScanIssue>) {
     let parent = video.parent().unwrap_or(Path::new(""));
+    let manifest = match crate::sidecar_manifest::load(root, video).await {
+        Ok(manifest) => manifest,
+        Err(message) => {
+            return (
+                Vec::new(),
+                vec![ScanIssue {
+                    relative_path: video.to_string_lossy().into(),
+                    message,
+                }],
+            );
+        }
+    };
     let mut tracks = Vec::new();
     let mut issues = Vec::new();
     let loaded;
@@ -37,7 +49,7 @@ pub async fn discover(
             .unwrap_or("")
             .to_ascii_lowercase();
         match ext.as_str() {
-            "mkv" | "mp4" => videos.push((path.file_name().map(|s| s.to_owned()), stem)),
+            "mkv" | "mp4" | "webm" => videos.push((path.file_name().map(|s| s.to_owned()), stem)),
             "opus" | "ogg" => candidates.push((path, stem)),
             _ => {}
         }
@@ -45,22 +57,41 @@ pub async fn discover(
             return (tracks, issues);
         }
     }
+    if let Some(manifest) = &manifest {
+        candidates = manifest
+            .audio
+            .iter()
+            .map(|track| (std::path::PathBuf::from(&track.file), String::new()))
+            .collect();
+    }
     candidates.sort_by(|a, b| a.0.cmp(&b.0));
     for (path, stem) in candidates {
-        let matching: Vec<_> = videos
-            .iter()
-            .filter_map(|(name, stem_video)| suffix(stem_video, &stem).map(|meta| (name, meta)))
-            .collect();
-        if !matching
-            .iter()
-            .any(|(name, _)| name.as_deref() == video.file_name())
-        {
-            continue;
-        }
+        let explicit = manifest
+            .as_ref()
+            .and_then(|m| m.audio.iter().find(|track| path == Path::new(&track.file)));
+        let metadata = if let Some(track) = explicit {
+            Some((track.language.clone(), false, false))
+        } else {
+            let matching: Vec<_> = videos
+                .iter()
+                .filter_map(|(name, stem_video)| suffix(stem_video, &stem).map(|meta| (name, meta)))
+                .collect();
+            if !matching
+                .iter()
+                .any(|(name, _)| name.as_deref() == video.file_name())
+            {
+                continue;
+            }
+            if matching.len() == 1 {
+                Some(matching[0].1.clone())
+            } else {
+                None
+            }
+        };
         let relative = parent.join(path.file_name().unwrap_or_default());
         let relative_path = relative.to_string_lossy().replace('\\', "/");
         let result = async {
-            if matching.len() != 1 {
+            if metadata.is_none() {
                 return Err("ambiguous external audio association".to_owned());
             }
             if tracks.len() >= 8 {
@@ -93,7 +124,7 @@ pub async fn discover(
                 .tags
                 .get("language")
                 .and_then(|v| v.as_str());
-            let language = if matching[0].1.0 == "und" {
+            let language = if metadata.as_ref().is_some_and(|m| m.0 == "und") {
                 match tagged {
                     Some("fra" | "fre" | "fr") => "fr",
                     Some("eng" | "en") => "en",
@@ -101,7 +132,10 @@ pub async fn discover(
                 }
                 .to_owned()
             } else {
-                matching[0].1.0.clone()
+                metadata
+                    .as_ref()
+                    .map(|m| m.0.clone())
+                    .unwrap_or_else(|| "und".into())
             };
             Ok(ExternalAudio {
                 relative_path: relative_path.clone(),
@@ -109,7 +143,7 @@ pub async fn discover(
                 modified_ns: opened.modified_ns().to_owned(),
                 language,
                 probe,
-                offset_seconds: 0.0,
+                offset_seconds: explicit.map_or(0.0, |track| track.offset_seconds),
             })
         }
         .await;

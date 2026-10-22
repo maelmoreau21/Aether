@@ -198,18 +198,20 @@ fs.mkdirSync(out, {recursive: true});
     report.results.seekAndPause = true;
     await page.screenshot({path:`${out}/immersive-playback.png`});
 
-    // P4: explicit next episode and user-controlled continuous playback across seasons.
-    const nextButton=page.getByRole('button',{name:/^Épisode suivant :/});
-    const nextTitle=(await nextButton.textContent()).replace('Épisode suivant : ','');
+    // Continuous playback is opt-in; the manual next-episode button is removed.
+    assert.equal(await page.getByRole('button',{name:/^Épisode suivant :/}).count(),0);
+    const nextControl=page.getByLabel('Enchaîner automatiquement');
+    const nextTitle=await nextControl.locator('..').getAttribute('title');
     await page.setViewportSize({width:390,height:844});
-    const fits=await nextButton.evaluate(button=>{const r=button.getBoundingClientRect();return r.left>=0 && r.right<=innerWidth;});
+    const fits=await nextControl.locator('..').evaluate(button=>{const r=button.getBoundingClientRect();return r.left>=0 && r.right<=innerWidth;});
     assert.ok(fits,'Next episode controls must fit on mobile');
     await page.screenshot({path:`${out}/next-episode-mobile.png`});
     await page.setViewportSize({width:1440,height:900});
     assert.equal(await page.getByLabel('Enchaîner automatiquement').isChecked(),false);
     const initialFullscreen=await page.evaluate(()=>Boolean(document.fullscreenElement));
     const nextDescriptor = page.waitForResponse(response => response.url().includes('/api/v1/media/') && response.request().method()==='GET');
-    await nextButton.click();
+    await nextControl.check();
+    await page.evaluate(async()=>{const v=document.querySelector('video');v.currentTime=v.duration-.3;await v.play();});
     await page.waitForFunction(title=>document.querySelector('.top-bar .title>span')?.textContent===title,nextTitle);
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>.1);
     const monoDescriptor = await (await nextDescriptor).json();
@@ -223,7 +225,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.evaluate(async()=>{const v=document.querySelector('video');v.currentTime=v.duration-.3;await v.play();});
     await page.waitForFunction(()=>document.querySelector('.top-bar .title>span')?.textContent==='Season Two Episode');
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>.1);
-    report.results.nextEpisode={manual:true,automaticOptIn:true,crossSeason:true};
+    report.results.nextEpisode={manualButtonRemoved:true,automaticOptIn:true,crossSeason:true};
 
     // Close immersive player
     const closeBtn = page.getByRole('button', {name: 'Retour à l’accueil'});

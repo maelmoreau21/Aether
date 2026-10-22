@@ -593,3 +593,7 @@ Contrats et limites : [PRODUCT_FEATURES.md](PRODUCT_FEATURES.md).
   installation désactivée, actualisation, persistance et retrait. Les documents
   HTTPS sont substitués uniquement sous `cfg(test)` ; ce n'est pas un essai d'hébergement public.
 
+
+
+État des médias indépendants, manifeste d’association versionné et limites raw :
+[SEPARATED_MEDIA.md](SEPARATED_MEDIA.md).

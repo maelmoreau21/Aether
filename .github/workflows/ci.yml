@@ -206,6 +206,7 @@ jobs:
           rm -rf docs/evidence/2026-10-16/scanner
           rm -rf docs/evidence/2026-10-17/series
           rm -rf docs/evidence/2026-10-22/nas-preparation/ci
+          rm -rf docs/evidence/2026-10-22/separated-media/ci
 
       - name: Installer la toolchain Rust
         uses: dtolnay/rust-toolchain@stable
@@ -281,6 +282,14 @@ jobs:
           python3 scripts/generate-dual-opus-fixture.py
           node scripts/browser-dual-opus.cjs
 
+      - name: Validate separate MP4/WebM video and independent Opus 2.0/5.1/7.1
+        run: |
+          python3 scripts/generate-separated-fixtures.py
+          MEDIA_TEST_FIXTURE=tests/fixtures/generated/separated-media/dual-2.mp4 MEDIA_REPORT_DIR=docs/evidence/2026-10-22/separated-media/ci/stereo node scripts/browser-dual-opus.cjs
+          MEDIA_TEST_VIDEO_CONTAINER=webm MEDIA_REPORT_DIR=docs/evidence/2026-10-22/separated-media/ci/51 node scripts/browser-dual-opus.cjs
+          MEDIA_TEST_SEGMENTED=1 MEDIA_TEST_VIDEO_CONTAINER=webm MEDIA_TEST_FIXTURE=tests/fixtures/generated/separated-media/dual-6.webm MEDIA_REPORT_DIR=docs/evidence/2026-10-22/separated-media/ci/webm-segmented node scripts/browser-dual-opus.cjs
+          MEDIA_TEST_FIXTURE=tests/fixtures/generated/separated-media/dual-8.mp4 MEDIA_TEST_VIDEO_CONTAINER=webm MEDIA_REPORT_DIR=docs/evidence/2026-10-22/separated-media/ci/71 node scripts/browser-dual-opus.cjs
+
       - name: Vérifier la génération fraîche des rapports et captures navigateur
         shell: python
         run: |
@@ -290,7 +299,11 @@ jobs:
               "docs/evidence/2026-10-16/scanner/report.json",
               "docs/evidence/2026-10-16/scanner/report-restart.json",
               "docs/evidence/2026-10-17/series/report.json",
-              "docs/evidence/2026-10-22/nas-preparation/ci/report.json"
+              "docs/evidence/2026-10-22/nas-preparation/ci/report.json",
+              "docs/evidence/2026-10-22/separated-media/ci/stereo/report.json",
+              "docs/evidence/2026-10-22/separated-media/ci/51/report.json",
+              "docs/evidence/2026-10-22/separated-media/ci/webm-segmented/report.json",
+              "docs/evidence/2026-10-22/separated-media/ci/71/report.json"
           ]:
               assert json.loads(Path(file).read_text())["passed"] is True, file
           for img in [
@@ -306,7 +319,7 @@ jobs:
       - name: Archiver les rapports et captures navigateur
         # Keep partial failure reports, but do not mask a fixture/setup failure
         # with a second error when no browser scenario could run.
-        if: ${{ always() && hashFiles('docs/evidence/2026-10-16/scanner/**', 'docs/evidence/2026-10-17/series/**', 'docs/evidence/2026-10-22/nas-preparation/ci/**') != '' }}
+        if: ${{ always() && hashFiles('docs/evidence/2026-10-16/scanner/**', 'docs/evidence/2026-10-17/series/**', 'docs/evidence/2026-10-22/nas-preparation/ci/**', 'docs/evidence/2026-10-22/separated-media/ci/**') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: browser-evidence-films-series
@@ -315,6 +328,7 @@ jobs:
             docs/evidence/2026-10-16/scanner/
             docs/evidence/2026-10-17/series/
             docs/evidence/2026-10-22/nas-preparation/ci/
+            docs/evidence/2026-10-22/separated-media/ci/
 
   images:
     name: Image Docker (${{ matrix.target }})

@@ -2641,11 +2641,15 @@ pub async fn descriptor(
                 "externalAudioUrl": format!("/api/v1/assets/{asset_id}/prepared/audio-{}", track.index),
                 "prepare": true, "label": "interne", "mime": "video/mp4", "tracks": [track]
             }));
-            if row.get::<String, _>("mime") == "video/mp4" {
-                // Native MP4 already has a seek index. Never copy its entire video
+            if matches!(
+                row.get::<String, _>("mime").as_str(),
+                "video/mp4" | "video/webm"
+            ) {
+                // Native MP4/WebM can supply the video timeline. Never copy the entire video
                 // just to select a different internal audio track.
                 if let Some(source) = sources.last_mut() {
                     source["url"] = json!(relay_url);
+                    source["mime"] = source_obj["mime"].clone();
                     source["prepareVideo"] = json!(false);
                     source["audioSegmentUrl"] = json!(format!(
                         "/api/v1/assets/{asset_id}/prepared/audio-{}-chunk-",

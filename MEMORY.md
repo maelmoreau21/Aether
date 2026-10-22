@@ -3209,3 +3209,35 @@ Validation finale Node : 10 tests politique + 2 suites statistiques =12/12, exit
 - Preuves après correction : docs/evidence/2026-10-21/player-audit/browser-fixed.json
   et browser-fixed/. Sortie physique 5.1/7.1, Safari/Firefox/Edge, NAS/4K réel et
   endurance non validés. Deux éléments ne garantissent pas une horloge commune.
+
+
+## 2026-10-22 — Médias indépendants, premier lot vérifié
+
+- Bouton manuel Épisode suivant retiré en haut du lecteur ; option d’enchaînement
+  automatique volontaire conservée. Parcours Chrome/Core/SQLite Séries réussi,
+  y compris transitions inter-saisons et permissions ; preuve dans
+  docs/evidence/2026-10-22/separated-media/series/report.json.
+- WebM ajouté à la découverte et aux associations Opus/sous-titres existantes.
+  Vidéo détectée sans audio exclue des choix audio fictifs. WebM AV1 avec Opus
+  internes conserve la vidéo originale et les fenêtres MSE audio, comme MP4.
+- Association explicite facultative `<video filename>.media.json` v1, 64 Kio,
+  8 audios/64 sous-titres : noms locaux seulement, langues normalisées,
+  offset audio borné ±30 s, forced/SDH. Document invalide refusé sans association
+  implicite ; mêmes sondes/confinement/autorisations. Relecture à chaque scan.
+- Tests : Node 46 réussis/2 ignorés ; scanner_flow 2 réussis (dont WebM,
+  manifeste et accès audio HEAD/GET/Range 401/200/206/416) ; Web 82 tests,
+  check sans erreur/avertissement, lint/build réussis. Mires légales : images
+  et PCM Chrome/Edge, vidéo seule MP4/WebM + Opus 2/6/8 canaux, FR/EN/FR,
+  pause/seeks/plein écran/404/réouverture ; empreintes paquets préservées.
+  WebM interne segmenté Chrome : changements/frontière/annulation réussis.
+- CI étendue aux mêmes scénarios, purge/validation/archivage alignés sur les
+  rapports générés ; exécution GitHub non observée. Voir docs/SEPARATED_MEDIA.md.
+- Limites : P0 Avatar/NAS encore ouvert, fichier/NAS non disponibles. Aucun
+  nouveau test physique NAS, Docker, Node distant, Firefox, H264/HEVC navigateur,
+  séance longue ou sortie physique multicanal dans ce lot. `.obu` désormais
+  signalé par erreur explicite de scan ; index/packager raw AV1 non implémenté.
+  Véritable Opus brut étudié et refusé, distinct d’Ogg Opus. Le support complet
+  des flux bruts n’est pas livré et ne doit pas être annoncé comme terminé.
+
+Validation finale de ce lot : Clippy strict workspace/all-targets, cargo fmt,
+actionlint et git diff --check réussis. Suite Rust workspace complète non relancée.

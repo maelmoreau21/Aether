@@ -8,13 +8,17 @@ const assert = require('node:assert/strict');
 const {execFileSync, execFile, spawnSync} = require('node:child_process');
 const segmented = process.env.MEDIA_TEST_SEGMENTED === '1';
 const docker = process.env.MEDIA_TEST_DOCKER === '1';
+const videoContainer = process.env.MEDIA_TEST_VIDEO_CONTAINER || 'mp4';
+assert.ok(['mp4','webm'].includes(videoContainer));
+
 const root = path.resolve(__dirname, '..');
 const {chromium} = require('../apps/web/node_modules/playwright');
 const ts = require('../apps/web/node_modules/typescript');
 const fixture = process.env.MEDIA_TEST_FIXTURE || path.join(root, 'tests/fixtures/generated/dual-opus/dual-opus.mp4');
+const originalContainer = path.extname(fixture).toLowerCase()==='.webm'?'webm':'mp4';
 const probe = JSON.parse(execFileSync('ffprobe', ['-v','error','-show_streams','-of','json',fixture]));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'media-dual-opus-'));
-const report = {os:os.release(), segmented, docker, scope:'Synthetic 1080p AV1 10-bit + two Opus 5.1; isolated HTTP, no physical surround proof', probe, switches:[], preparations:[], delayedRequests:0, cancelledHttpRequests:0};
+const report = {os:os.release(), segmented, docker, videoContainer, scope:'Synthetic AV1 10-bit + two Opus tracks; isolated HTTP, no physical surround proof', audioChannels:probe.streams.filter(t=>t.codec_type==='audio').map(t=>t.channels), probe, switches:[], preparations:[], delayedRequests:0, cancelledHttpRequests:0};
 const files = {'/original':fixture};
 let browser;
 let proxyId;
@@ -44,7 +48,7 @@ const server = http.createServer(async (req,res) => {
   const size = fs.statSync(file).size, range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || '');
   const start = range ? Number(range[1]) : 0, end = range?.[2] ? Math.min(size-1,Number(range[2])) : size-1;
   if (start >= size || end < start) { res.writeHead(416,{'Content-Range':`bytes */${size}`}); res.end(); return; }
-  res.writeHead(range ? 206 : 200, {'Content-Type':chunkMatch?'audio/mp4':name.startsWith('/audio-')?'audio/ogg':'video/mp4',
+  res.writeHead(range ? 206 : 200, {'Content-Type':chunkMatch?'audio/mp4':name.startsWith('/audio-')?'audio/ogg':name==='/video'?`video/${videoContainer}`:`video/${originalContainer}`,
     'Content-Length':end-start+1,'Accept-Ranges':'bytes',...(range?{'Content-Range':`bytes ${start}-${end}/${size}`}:{})});
   if(req.method === 'HEAD') res.end();
   else {const stream=fs.createReadStream(file,{start,end}); res.on('close',()=>stream.destroy()); stream.pipe(res);}
@@ -55,10 +59,16 @@ function compile(name) {
 }
 (async()=>{
   try {
-    for (const [name,args] of segmented ? [] : [['video',['-map','0:v:0','-an','-c:v','copy','-movflags','frag_keyframe+empty_moov+default_base_moof','-f','mp4']],
+    for (const [name,args] of segmented ? [] : [['video',['-map','0:v:0','-an','-c:v','copy',...(videoContainer==='mp4'?['-movflags','frag_keyframe+empty_moov+default_base_moof']:[]),'-f',videoContainer]],
       ...[1,2].map(index=>['audio-'+index,['-map',`0:${index}`,'-vn','-c:a','copy','-f','ogg']])]) {
       files['/'+name] = path.join(temp,name);
       execFileSync('ffmpeg',['-v','error','-nostdin','-i',fixture,...args,files['/'+name]]);
+    }
+    if(!segmented){
+      const hashes=(file,selector)=>JSON.parse(execFileSync('ffprobe',['-v','error','-select_streams',selector,'-show_packets','-show_data_hash','sha256','-show_entries','packet=data_hash','-of','json',file])).packets.map(packet=>packet.data_hash);
+      assert.deepEqual(hashes(files['/video'],'v:0'),hashes(fixture,'v:0'));
+      for(const index of [1,2])assert.deepEqual(hashes(files['/audio-'+index],'a:0'),hashes(fixture,`a:${index-1}`));
+      report.packetCopyVerified=true;
     }
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
     let origin=`http://127.0.0.1:${server.address().port}`;
@@ -77,14 +87,14 @@ function compile(name) {
     for(const name of ['source-selection','external-audio','segmented-audio','native']) {
       await page.addScriptTag({content:`window[${JSON.stringify(name)}]={};(function(exports,require){${compile(name)}\n})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`});
     }
-    await page.evaluate(probe=>{
+    await page.evaluate(({probe,videoContainer,originalContainer})=>{
       window.errors=[];window.videoLoads=0;
       const video=document.querySelector('video');video.addEventListener('loadstart',()=>window.videoLoads++);
       document.querySelector('button').onclick=()=>video.parentElement.requestFullscreen();
       window.media={id:'dual',title:'Synthetic',subtitles:[],sources:[
-        {id:'original',audioTrackId:'internal-default',language:'und',url:'/original',mime:'video/mp4',tracks:probe.streams},
+        {id:'original',audioTrackId:'internal-default',language:'und',url:'/original',mime:`video/${originalContainer}`,tracks:probe.streams},
         ...probe.streams.filter(t=>t.codec_type==='audio').map(t=>({id:'track-'+t.index,audioTrackId:'internal-'+t.index,
-          language:t.tags.language,url:'/video',externalAudioUrl:'/audio-'+t.index,mime:'video/mp4',prepare:true,tracks:[t]}))]};
+          language:t.tags.language,url:'/video',externalAudioUrl:'/audio-'+t.index,mime:`video/${videoContainer}`,prepare:false,tracks:[t]}))]};
       window.openPlayer=async(id,language='fr')=>{
         window.player=new window.native.NativePlayer(video,message=>window.errors.push(message));
         const selected=window['source-selection'].chooseSource(window.media,id,language,s=>Boolean(video.canPlayType(window['source-selection'].playbackMime(window.media,s))));
@@ -99,17 +109,17 @@ function compile(name) {
           time:video.currentTime,audioTime:audio.currentTime,audioPaused:audio.paused,audioMuted:audio.muted,audioVolume:audio.volume,audioReady:audio.readyState,audioError:audio.error?.message,buffered:Array.from({length:audio.buffered.length},(_,i)=>[audio.buffered.start(i),audio.buffered.end(i)]),url:video.currentSrc,frames:video.getVideoPlaybackQuality().totalVideoFrames,fullscreen:!!document.fullscreenElement,loads:window.videoLoads};
         source.disconnect();await c.close();return result;
       };
-    },probe);
+    },{probe,videoContainer,originalContainer});
     if(segmented)await page.evaluate(()=>{
       for(const source of window.media.sources.slice(1)){
-        source.url='/original';source.prepareVideo=false;source.audioSegmentUrl='/audio-'+source.audioTrackId.split('-')[1]+'-chunk-';
+        source.url='/original';source.mime=window.media.sources[0].mime;source.prepareVideo=false;source.audioSegmentUrl='/audio-'+source.audioTrackId.split('-')[1]+'-chunk-';
       }
     });
     await page.getByRole('button').click();
     report.capabilities=await page.evaluate(()=>['video/mp4; codecs="av01"','video/mp4','audio/ogg; codecs="opus"'].map(type=>({type,result:document.createElement('video').canPlayType(type)})));
     report.initial=await page.evaluate(async()=>{
       const started=performance.now(),video=document.querySelector('video');
-      const frame=new Promise(resolve=>video.requestVideoFrameCallback(()=>resolve(performance.now()-started)));
+      const frame=new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('No decoded video frame within 10 seconds')),10000);video.requestVideoFrameCallback(()=>{clearTimeout(timeout);resolve(performance.now()-started);});});
       const id=await window.openPlayer();return {id,firstImageMs:await frame,playReadyMs:performance.now()-started};
     });
     assert.equal(report.initial.id,'internal-1');

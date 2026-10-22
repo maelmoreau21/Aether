@@ -1,7 +1,14 @@
 //! Optional, bounded packet-copy preparation. Sources are inherited read-only handles.
 //! No network/file input protocols, video encoding, or writes beside original media.
 use crate::files::OpenedFile;
-use std::{collections::HashMap, io, path::Path, process::Stdio, time::Duration};
+use std::{
+    collections::HashMap,
+    io,
+    path::Path,
+    process::Stdio,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     io::AsyncReadExt,
     process::Command,
@@ -62,7 +69,10 @@ pub fn preparation_error_code(error: &io::Error) -> &'static str {
     }
 }
 struct Entry {
-    directory: crate::cache_dirs::CacheDirectory,
+    directory: Arc<crate::cache_dirs::CacheDirectory>,
+    size: u64,
+    used: Instant,
+    chunk: bool,
 }
 #[derive(Default)]
 struct Cache {
@@ -72,6 +82,7 @@ struct Cache {
 pub struct Preparations {
     cache: Mutex<Cache>,
     worker: Semaphore,
+    waiters: Semaphore,
     limits: io::Result<Limits>,
 }
 impl Default for Preparations {
@@ -83,6 +94,7 @@ impl Default for Preparations {
         Self {
             cache: Mutex::new(Cache::default()),
             worker: Semaphore::new(1),
+            waiters: Semaphore::new(2),
             limits: Limits::from_env(),
         }
     }
@@ -92,6 +104,7 @@ impl Default for Preparations {
 pub enum Component {
     Video,
     Audio(u32),
+    AudioChunk(u32, u32),
     Subtitle(u32),
 }
 impl Component {
@@ -99,7 +112,36 @@ impl Component {
         match self {
             Self::Video => "video/mp4",
             Self::Audio(_) => "audio/ogg",
+            Self::AudioChunk(_, _) => "audio/mp4",
             Self::Subtitle(_) => "text/vtt; charset=utf-8",
+        }
+    }
+}
+
+pub const AUDIO_CHUNK_SECONDS: u32 = 10;
+impl Component {
+    pub fn audio_chunk(raw: &str) -> Option<Self> {
+        let (index, chunk) = raw.strip_prefix("audio-")?.split_once("-chunk-")?;
+        let index = index.parse::<u32>().ok()?;
+        let chunk = chunk.parse::<u32>().ok()?;
+        (chunk < 8640).then_some(Self::AudioChunk(index, chunk))
+    }
+}
+
+// Dropping a request/timeout records cancellation too. No paths, URLs or tokens.
+struct PreparationLog {
+    id: String,
+    component: Component,
+    started: Instant,
+    complete: bool,
+}
+impl Drop for PreparationLog {
+    fn drop(&mut self) {
+        if !self.complete {
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"preparation_cancelled_or_failed","attempt":self.id,"component":format!("{:?}",self.component),"elapsed_ms":self.started.elapsed().as_millis()})
+            );
         }
     }
 }
@@ -116,6 +158,16 @@ impl Preparations {
         expected_mtime: &str,
         component: Component,
     ) -> io::Result<OpenedFile> {
+        let mut log = PreparationLog {
+            id: uuid::Uuid::new_v4().to_string(),
+            component,
+            started: Instant::now(),
+            complete: false,
+        };
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"preparation_requested","attempt":log.id,"component":format!("{component:?}"),"source_bytes":expected_size})
+        );
         let limits = self
             .limits
             .as_ref()
@@ -128,9 +180,65 @@ impl Preparations {
             "{:?}:{relative:?}:{expected_size}:{expected_mtime}:{component:?}",
             input.canonical_path()
         );
-        let cache = self.cache.lock().await;
-        if let Some(entry) = cache.entries.get(&key) {
-            return OpenedFile::open_in_root(entry.directory.path(), Path::new("content")).await;
+        let mut cache = self.cache.lock().await;
+        if let Some(entry) = cache.entries.get_mut(&key) {
+            entry.used = Instant::now();
+            let opened =
+                OpenedFile::open_in_root(entry.directory.path(), Path::new("content")).await?;
+            log.complete = true;
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"preparation_cache_hit","attempt":log.id,"component":format!("{component:?}"),"elapsed_ms":log.started.elapsed().as_millis()})
+            );
+            return Ok(opened.with_cache_lease(entry.directory.clone()));
+        }
+        let busy = || {
+            io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "preparation busy; retry explicitly",
+            )
+        };
+        let _worker = match self.worker.try_acquire() {
+            Ok(permit) => permit,
+            Err(_) if matches!(component, Component::AudioChunk(..)) => {
+                // Two bounded waiters absorb cancelled seeks/prefetch and coalesce
+                // identical windows. Never hold the cache lock while waiting.
+                drop(cache);
+                let _waiting = self.waiters.try_acquire().map_err(|_| busy())?;
+                eprintln!(
+                    "{}",
+                    serde_json::json!({"event":"preparation_waiting","attempt":log.id,"component":format!("{component:?}")})
+                );
+                let permit = tokio::time::timeout(Duration::from_secs(5), self.worker.acquire())
+                    .await
+                    .map_err(|_| busy())?
+                    .map_err(|_| busy())?;
+                cache = self.cache.lock().await;
+                if let Some(entry) = cache.entries.get_mut(&key) {
+                    entry.used = Instant::now();
+                    let opened =
+                        OpenedFile::open_in_root(entry.directory.path(), Path::new("content"))
+                            .await?;
+                    log.complete = true;
+                    return Ok(opened.with_cache_lease(entry.directory.clone()));
+                }
+                permit
+            }
+            Err(_) => return Err(busy()),
+        };
+        while cache.entries.len() >= 64 || cache.bytes >= limits.cache {
+            let victim = cache
+                .entries
+                .iter()
+                .filter(|(_, entry)| entry.chunk && Arc::strong_count(&entry.directory) == 1)
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(key, _)| key.clone());
+            let Some(victim) = victim else {
+                break;
+            };
+            if let Some(entry) = cache.entries.remove(&victim) {
+                cache.bytes -= entry.size;
+            }
         }
         if cache.entries.len() >= 64 || cache.bytes >= limits.cache {
             return Err(io::Error::new(
@@ -138,24 +246,24 @@ impl Preparations {
                 "preparation cache full; restart to clear",
             ));
         }
-        let _worker = self.worker.try_acquire().map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "preparation busy; retry explicitly",
-            )
-        })?;
         let remaining = limits.cache - cache.bytes;
         drop(cache);
-        let directory = crate::cache_dirs::CacheDirectory::new()?;
+        let directory = Arc::new(crate::cache_dirs::CacheDirectory::new()?);
         let output = std::fs::File::create(directory.path().join("content"))?;
         let limit = remaining.min(match component {
             Component::Video => limits.video,
             Component::Audio(_) => limits.audio,
+            Component::AudioChunk(_, _) => limits.audio.min(16 * 1024 * 1024),
             Component::Subtitle(_) => 4 * 1024 * 1024,
         });
         let mut file = input.try_clone_std()?;
         std::io::Seek::rewind(&mut file)?;
         let mut command = Command::new("ffmpeg");
+        if let Component::AudioChunk(_, chunk) = component {
+            // Seek in the original index, keeping one second of codec preroll.
+            let start = (chunk * AUDIO_CHUNK_SECONDS).saturating_sub(1);
+            command.args(["-ss", &start.to_string()]);
+        }
         command.args([
             "-v",
             "error",
@@ -198,6 +306,30 @@ impl Preparations {
                     "ogg",
                 ]);
             }
+            Component::AudioChunk(index, _) => {
+                command.args([
+                    // Input seeking lands at a preceding video keyframe. Drop
+                    // its negative audio preroll before rebasing this window.
+                    "-ss",
+                    "0",
+                    "-map",
+                    &format!("0:{index}"),
+                    "-vn",
+                    "-sn",
+                    "-c:a",
+                    "copy",
+                    "-t",
+                    "12",
+                    "-avoid_negative_ts",
+                    "make_zero",
+                    "-movflags",
+                    "frag_keyframe+empty_moov+default_base_moof",
+                    "-frag_duration",
+                    "1000000",
+                    "-f",
+                    "mp4",
+                ]);
+            }
             Component::Subtitle(index) => {
                 command.args([
                     "-map",
@@ -215,7 +347,7 @@ impl Preparations {
             .arg("pipe:1")
             .stdin(Stdio::from(file))
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()?;
         let stdout = child
@@ -224,9 +356,35 @@ impl Preparations {
             .ok_or_else(|| io::Error::other("preparation output missing"))?;
         let mut bounded = stdout.take(limit + 1);
         let mut output = tokio::fs::File::from_std(output);
-        let size = tokio::time::timeout(Duration::from_secs(limits.seconds), async {
-            let size = tokio::io::copy(&mut bounded, &mut output).await?;
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| io::Error::other("preparation diagnostics missing"))?;
+        let diagnostics = async {
+            let mut retained = Vec::new();
+            let mut buffer = [0; 4096];
+            loop {
+                let n = stderr.read(&mut buffer).await?;
+                if n == 0 {
+                    break;
+                }
+                retained.extend_from_slice(&buffer[..n]);
+                if retained.len() > 16384 {
+                    retained.drain(..retained.len() - 16384);
+                }
+            }
+            Ok::<_, io::Error>(String::from_utf8_lossy(&retained).into_owned())
+        };
+        let job = async {
+            let size = match tokio::io::copy(&mut bounded, &mut output).await {
+                Ok(size) => size,
+                Err(error) => {
+                    let _ = child.kill().await;
+                    return Err(error);
+                }
+            };
             if size > limit {
+                let _ = child.kill().await;
                 return Err(io::Error::new(
                     io::ErrorKind::StorageFull,
                     "preparation exceeds cache limit",
@@ -240,15 +398,46 @@ impl Preparations {
             }
             input.verify_unchanged_sync()?;
             Ok::<_, io::Error>(size)
-        })
+        };
+        let (result, diagnostics) = tokio::time::timeout(
+            Duration::from_secs(if matches!(component, Component::AudioChunk(..)) {
+                limits.seconds.min(20)
+            } else {
+                limits.seconds
+            }),
+            async { tokio::join!(job, diagnostics) },
+        )
         .await
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "preparation timeout"))??;
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "preparation timeout"))?;
+        let size = match result {
+            Ok(size) => size,
+            Err(error) => {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({"event":"preparation_ffmpeg_error","attempt":log.id,"component":format!("{component:?}"),"code":preparation_error_code(&error),"elapsed_ms":log.started.elapsed().as_millis(),"stderr":diagnostics.unwrap_or_default()})
+                );
+                return Err(error);
+            }
+        };
         drop(output);
         let opened = OpenedFile::open_in_root(directory.path(), Path::new("content")).await?;
         let mut cache = self.cache.lock().await;
         cache.bytes += size;
-        cache.entries.insert(key, Entry { directory });
-        Ok(opened)
+        cache.entries.insert(
+            key,
+            Entry {
+                directory: directory.clone(),
+                size,
+                used: Instant::now(),
+                chunk: matches!(component, Component::AudioChunk(..)),
+            },
+        );
+        log.complete = true;
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"preparation_ready","attempt":log.id,"component":format!("{component:?}"),"bytes":size,"elapsed_ms":log.started.elapsed().as_millis()})
+        );
+        Ok(opened.with_cache_lease(directory))
     }
 }
 
@@ -309,6 +498,23 @@ mod tests {
                 serde_json::json!("7.1")
             );
             assert_eq!(hashes(&original, 1).await, hashes(&prepared, 0).await);
+            let chunk = preparations
+                .prepare(
+                    temp.path(),
+                    Path::new(&name),
+                    original.size(),
+                    original.modified_ns(),
+                    Component::AudioChunk(1, 0),
+                )
+                .await
+                .unwrap();
+            let probe = crate::probe::probe_opened(&chunk).await.unwrap();
+            assert_eq!(probe.streams[0].details["channels"], 8);
+            assert_eq!(probe.streams[0].details["channel_layout"], "7.1");
+            let all = hashes(&original, 1).await;
+            let copied = hashes(&chunk, 0).await;
+            assert!(!copied.is_empty());
+            assert!(copied.iter().all(|packet| all.contains(packet)));
         }
     }
     async fn hashes(file: &OpenedFile, index: u32) -> Vec<String> {
@@ -383,7 +589,86 @@ mod tests {
             }
             assert_eq!(hashes(&original, index).await, hashes(&file, 0).await);
         }
+        let (first, second) = tokio::join!(
+            preparations.prepare(
+                &root,
+                name,
+                original.size(),
+                original.modified_ns(),
+                Component::AudioChunk(2, 0)
+            ),
+            preparations.prepare(
+                &root,
+                name,
+                original.size(),
+                original.modified_ns(),
+                Component::AudioChunk(2, 0)
+            )
+        );
+        assert_eq!(first.unwrap().size(), second.unwrap().size());
         assert_ne!(hashes(&original, 1).await, hashes(&original, 2).await);
+        for index in [1, 2] {
+            let all = hashes(&original, index).await;
+            for chunk in [0, 1] {
+                let file = preparations
+                    .prepare(
+                        &root,
+                        name,
+                        original.size(),
+                        original.modified_ns(),
+                        Component::AudioChunk(index, chunk),
+                    )
+                    .await
+                    .unwrap();
+                let probe = crate::probe::probe_opened(&file).await.unwrap();
+                assert_eq!(probe.streams[0].codec_name.as_deref(), Some("opus"));
+                assert_eq!(probe.streams[0].details["channels"], 6);
+                assert_eq!(probe.streams[0].details["channel_layout"], "5.1");
+                let copied = hashes(&file, 0).await;
+                assert!(!copied.is_empty());
+                assert!(copied.len() < all.len());
+                assert!(
+                    copied.iter().all(|packet| all.contains(packet)),
+                    "chunk packets must be unchanged"
+                );
+                // Synthetic Opus uses 20 ms packets with a 6.5 ms pre-skip.
+                // A preceding AV1 keyframe must never shift a chunk's content
+                // back by a second while its MSE clock still appears aligned.
+                let wanted = f64::from((chunk * AUDIO_CHUNK_SECONDS).saturating_sub(1));
+                // A steady test tone can produce identical packets at multiple
+                // positions. Require a match at the intended timestamp, and
+                // independently check the remaining duration near EOF.
+                assert!(
+                    all.iter()
+                        .enumerate()
+                        .any(|(position, packet)| packet == &copied[0]
+                            && (position as f64 * 0.02 - 0.0065 - wanted).abs() < 0.021),
+                    "chunk must start within one Opus packet of {wanted}"
+                );
+                if chunk == 1 {
+                    let duration = probe.format["duration"]
+                        .as_str()
+                        .unwrap()
+                        .parse::<f64>()
+                        .unwrap();
+                    assert!(
+                        (duration - 7.0).abs() < 0.04,
+                        "preceding keyframe must not leak into window: {duration}"
+                    );
+                }
+            }
+        }
+        let failed = preparations
+            .prepare(
+                &root,
+                name,
+                original.size(),
+                original.modified_ns(),
+                Component::AudioChunk(999, 0),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(preparation_error_code(&failed), "unsupported_preparation");
     }
 
     #[tokio::test]

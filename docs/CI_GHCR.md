@@ -1,5 +1,15 @@
 # CI et publication GHCR
 
+## Non-régression audio segmenté — 22 octobre 2026
+
+Le job navigateur génère/valide désormais aussi `dual-opus.mp4` (AV1 10 bits
+1080p, deux Opus 5.1) puis exécute `browser-dual-opus.cjs` avec
+`MEDIA_TEST_SEGMENTED=1`. Son rapport `passed` est obligatoire, purgé avant test,
+vérifié au même titre que Films/Séries et archivé dans le même artefact. La clé
+du cache navigateur inclut le générateur ; la CI Rust garde son cache distinct.
+Le benchmark Docker/Nginx de 336 Mio reste une commande locale documentée,
+pas un benchmark NAS ni un nouveau service permanent de CI.
+
 ## Dossier des rapports navigateur Films — 22 octobre 2026
 
 Le script local écrit désormais dans `target/browser-scanner` par défaut, alors

@@ -1,5 +1,6 @@
 import type { Media, Player, PlaybackState, Source } from './types';
 import { ExternalAudio } from './external-audio';
+import { SegmentedAudio } from './segmented-audio';
 import { chooseSource } from './source-selection';
 
 // One finite source replacement. No retries, silent fallback or player-specific API in the UI.
@@ -43,6 +44,7 @@ export class NativePlayer implements Player {
     this.onError(`Lecture interrompue : ${this.video.error?.message || 'source indisponible ou codecs/conteneur incompatibles'} (MediaError ${this.video.error?.code ?? '?'})`);
   };
   private audioError = (message: string) => {
+    if(this.source)message=`Piste ${this.source.language.toUpperCase()} (${this.source.audioTrackId}) : ${message}`;
     this.pause();
     this.externalAudio?.destroy(); this.externalAudio = undefined;
     this.source = undefined;
@@ -56,7 +58,8 @@ export class NativePlayer implements Player {
     this.subtitle = null;
     const source = chooseSource(media, initialAudioTrackId);
     if (!source) throw new Error('Aucune source disponible pour ce média.');
-    await this.replace(source, 0, true);
+    try { await this.replace(source, 0, true); }
+    catch(error) { throw new Error(`Piste ${source.language.toUpperCase()} (${source.audioTrackId}) : ${error instanceof Error ? error.message : String(error)}`); }
   }
   private async prepareUrl(url: string) {
     const controller = new AbortController(); this.preparations.add(controller);
@@ -82,18 +85,24 @@ export class NativePlayer implements Player {
     if (this.busy || this.destroyed) throw new Error('Lecteur indisponible pendant le changement de source.');
     this.busy = true;
     const previous = this.source;
+    const segmented = Boolean(source.audioSegmentUrl && SegmentedAudio.supported());
+    const audioUrl = segmented ? source.audioSegmentUrl! : source.externalAudioUrl;
+    const createAudio = () => segmented
+      ? new SegmentedAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError)
+      : new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError);
     this.pause();
     try {
       if (source.prepare) {
-        if (previous?.url !== source.url) await this.prepareUrl(source.url);
-        if (source.externalAudioUrl) await this.prepareUrl(source.externalAudioUrl);
+        if (source.prepareVideo !== false && previous?.url !== source.url) await this.prepareUrl(source.url);
+        if (!segmented && source.externalAudioUrl) await this.prepareUrl(source.externalAudioUrl);
       }
       // Independent Opus track switch: keep the same video element, URL and timeline.
       if (previous?.url === source.url && source.externalAudioUrl) {
-        const candidate = new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError);
+        const candidate = createAudio();
         this.pendingAudio = candidate;
         try {
-          await candidate.load(source.externalAudioUrl, false);
+          this.status(`Chargement audio ${source.language.toUpperCase()} (${source.audioTrackId})${segmented ? ' par segments' : ''}…`);
+          await candidate.load(audioUrl!, false);
           if (this.destroyed) throw new Error('Lecteur fermé.');
           this.externalAudio?.destroy();
           this.externalAudio = candidate;
@@ -177,8 +186,9 @@ export class NativePlayer implements Player {
       }
       this.source = source;
       if (source.externalAudioUrl) {
-        this.externalAudio = new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError);
-        await this.externalAudio.load(source.externalAudioUrl);
+        this.status(`Chargement audio ${source.language.toUpperCase()} (${source.audioTrackId})${segmented ? ' par segments' : ''}…`);
+        this.externalAudio = createAudio();
+        await this.externalAudio.load(audioUrl!);
       }
       await this.selectSubtitle(this.subtitle);
       if (!paused) await this.play();
@@ -194,7 +204,8 @@ export class NativePlayer implements Player {
     if (!source) throw new Error('Piste audio absente : aucun remplacement automatique.');
     if (source.id === this.source?.id) return;
     const state = this.state();
-    await this.replace(source, state.position, state.paused);
+    try { await this.replace(source, state.position, state.paused); }
+    catch(error) { throw new Error(`Piste ${source.language.toUpperCase()} (${source.audioTrackId}) : ${error instanceof Error ? error.message : String(error)}`); }
   }
   async selectSubtitle(id: string | null) {
     this.subtitle = id;

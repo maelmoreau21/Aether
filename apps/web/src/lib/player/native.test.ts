@@ -20,6 +20,15 @@ const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr',
 function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
+  it('reads indexed MP4 video directly and prepares only audio on the legacy fallback',async()=>{
+    const fetcher=vi.fn().mockResolvedValue({ok:true});vi.stubGlobal('fetch',fetcher);
+    const {video,player}=setup();
+    const direct={...media,sources:media.sources.map(s=>({...s,url:'/original.mp4',prepare:true,prepareVideo:false,externalAudioUrl:`/audio-${s.language}`}))};
+    await player.load(direct);await player.selectAudio('en');await player.selectAudio('fr');
+    expect(video.loads).toBe(1);expect(video.src).toBe('/original.mp4');
+    expect(fetcher.mock.calls.every(call=>call[0]!=='/original.mp4')).toBe(true);
+    player.destroy();
+  });
   it('loads the preferred track directly without loading French first', async () => {
     const { video, player } = setup();
     await player.load(media, 'en');

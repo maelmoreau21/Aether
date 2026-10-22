@@ -5,6 +5,7 @@ use std::{
     path::Path,
 };
 
+#[derive(Debug)]
 pub struct CacheDirectory {
     directory: Option<tempfile::TempDir>,
     lease: Option<File>,

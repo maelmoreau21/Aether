@@ -1,5 +1,33 @@
 # MEMORY.md — État et décisions Aether
 
+## 22 octobre 2026 — MP4 original et fenêtres Opus, incident NAS non clôturé
+
+- Retour utilisateur : Node local Synology/Docker, MP4 AV1 10 bits 1080p,
+  FR et EN Opus 5.1 ; un échec immédiat et une attente longue, indices absolus
+  et stderr indisponibles. Avatar et NAS non accessibles ici : piste fautive
+  et cause spécifique non identifiées ; ne pas annoncer l'incident résolu.
+- MP4 : vidéo originale avec Range, plus de copie vidéo complète préalable.
+  MSE Opus : fenêtres fMP4 de 10 s avec preroll, copie bornée 12 s, seek fd
+  puis output -ss 0 pour exclure l'audio de la précédente image clé. Pas de
+  transcodage/downmix ; paquet/canaux/placement temporel testés. Repli Ogg et
+  MKV historiques conservés, avec leurs limites de préparation complète.
+- Cache : LRU des fenêtres inactives, leases jusqu'à fin HTTP, worker unique,
+  deux attentes 5 s, coalescence ; job fenêtre 20 s/16 Mio max. Logs JSON
+  asset/composant/indice/langue/canaux/méthode/erreur/durée et stderr drainé 16 Kio.
+- Chrome/Edge headless, vrai FFmpeg runtime Docker sans encodeur sous 2 CPU/
+  256 Mio et Nginx buffering actif/timeout10 s : décodage FR/EN/FR et seeks
+  8/900/1800/3480/2 s sur MP4 synthétique 336 Mio, 12 fps/3500 s. Dernière
+  mesure proxy : première image 529 ms, audio prêt 1470 ms, environ 5 Mo de
+  fenêtres préparées. Réouvertures EN/FR 430/410 ms ; annulation après réception
+  HTTP nettoyée en 2,1 ms, socket amont fermé dans cet essai. Pas de preuve NAS.
+- Web 81 tests/check/lint/build, Node 44 tests puis packaging dual-5.1/7.1
+  et streaming/leases, Core scanner_flow/distributed_multi_node/browser_scanner,
+  fmt/Clippy strict/actionlint vérifiés. CI inclut la petite fixture segmentée,
+  contrôle son rapport et l'archive ; nouvelle CI distante pas exécutée.
+- Docs/commandes/preuves : docs/NAS_PLAYBACK_DIAGNOSTICS.md. Core complet en
+  conteneur, appareil physique/sortie surround, média personnel et séance entière
+  non validés. Aucun média original modifié, push ni déploiement applicatif.
+
 ## 22 octobre 2026 — Chemin des rapports Films fixé dans la CI
 
 - Régression de la correction lecteur : défaut local déplacé vers

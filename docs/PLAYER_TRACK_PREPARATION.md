@@ -1,5 +1,18 @@
 # P3/P4 — préparation des pistes (18 octobre 2026)
 
+## MP4 sans copie vidéo complète — 22 octobre 2026
+
+Pour les MP4 AV1, la vidéo est maintenant l'original servi avec Range. Chrome/Edge
+acceptant MSE Opus chargent seulement l'audio sélectionné en fenêtres de 10 s,
+copiées vers fMP4. La préparation vidéo complète n'est plus un préalable. La
+fenêtre courante et la suivante sont seules préchargées ; les seeks demandent
+les fenêtres visées. Les anciens parcours MKV/Ogg restent disponibles.
+
+Preroll, alignement temporel, cache avec leases, logs FFmpeg bornés, mesures et
+limites de la validation NAS : [NAS_PLAYBACK_DIAGNOSTICS.md](NAS_PLAYBACK_DIAGNOSTICS.md).
+Cette section remplace, pour ce parcours MP4, les mentions de copie complète
+et de préparation uniquement locale dans l'historique ci-dessous.
+
 ## Corrections du 21 octobre 2026
 
 Le lecteur prépare vidéo et audio en série, conformément au worker unique du

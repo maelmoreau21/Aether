@@ -17,6 +17,8 @@ export interface Source {
   tracks?: CodecTrack[];
   externalAudioUrl?: string;
   prepare?: boolean;
+  prepareVideo?: boolean;
+  audioSegmentUrl?: string;
   label?: string;
   audioOffsetSeconds?: number;
 }

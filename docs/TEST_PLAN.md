@@ -1,5 +1,11 @@
 ## Audio AV1/Opus — 22 octobre 2026
 
+Le parcours MP4 original + audio MSE segmenté est décrit dans
+[NAS_PLAYBACK_DIAGNOSTICS.md](NAS_PLAYBACK_DIAGNOSTICS.md) : petite fixture et gros
+MP4, décodage FR/EN, limites Docker, vrai Nginx, pause/seek/annulation, première
+image et audio prêt. Le job navigateur CI exécute aussi ce scénario sur la
+fixture dual-5.1, avec rapport obligatoire et artefact archivé.
+
 Voir [AV1_OPUS_AUDIO_FIX.md](AV1_OPUS_AUDIO_FIX.md) pour génération légale du vrai
 MP4 1080p AV1 10 bits avec deux Opus 5.1, tests de copie sans perte, scripts
 Chrome/Edge et parcours Core avec préférences restaurées. Les tests unitaires

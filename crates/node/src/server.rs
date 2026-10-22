@@ -1303,7 +1303,9 @@ async fn prepare_asset(
     {
         return cors_error_response(StatusCode::FORBIDDEN, "root_denied");
     }
-    let selected = if component == "video" {
+    let selected = if let Some(chunk) = Component::audio_chunk(component) {
+        Some(chunk)
+    } else if component == "video" {
         Some(Component::Video)
     } else if let Some(index) = component
         .strip_prefix("audio-")
@@ -1319,7 +1321,12 @@ async fn prepare_asset(
     let Some(selected) = selected else {
         return cors_error_response(StatusCode::UNPROCESSABLE_ENTITY, "unsupported_component");
     };
-    match state
+    let started = std::time::Instant::now();
+    eprintln!(
+        "{}",
+        serde_json::json!({"event":"node_prepared_start","asset":id,"component":component,"method":req.method().as_str(),"range":req.headers().contains_key("range")})
+    );
+    let response = match state
         .preparations
         .prepare(
             Path::new(&entry.root_snapshot),
@@ -1344,7 +1351,12 @@ async fn prepare_asset(
                 .insert("x-media-preparation-error", HeaderValue::from_static(code));
             response
         }
-    }
+    };
+    eprintln!(
+        "{}",
+        serde_json::json!({"event":"node_prepared_response","asset":id,"component":component,"status":response.status().as_u16(),"elapsed_ms":started.elapsed().as_millis()})
+    );
+    response
 }
 async fn internal_prepared(
     State(state): State<NodeServerState>,

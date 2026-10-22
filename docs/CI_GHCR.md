@@ -1,5 +1,19 @@
 # CI et publication GHCR
 
+## Assertion de langue du scanner — 22 octobre 2026
+
+Le journal GitHub fourni confirme les 12 tests P0 réussis. L’échec suivant était
+une ancienne assertion de `scanner_flow` attribuant `fr` à l’original MKV bilingue.
+Le contrat documenté depuis le 21 octobre expose `und` pour cet original : sa
+première piste n’est pas une garantie de sélection par le navigateur.
+
+Le test vérifie désormais `internal-default`/`und`, les sources explicites FR/EN
+avec leurs index et canaux, et `en` pour l’original MP4 mono-audio. Les tags bruts
+`fra`/`eng` restent vérifiés. Aucun code de scan ou de lecture n’a été modifié.
+Commande ciblée : `cargo test --locked -p media-poc --all-features --test scanner_flow
+-j 1 -- --test-threads=1` : 1 réussi Windows, ainsi que fmt/diff checks.
+La suite GitHub complète reste à relancer ; aucun push effectué.
+
 ## Cache des fixtures P0 et profil AV1 — 22 octobre 2026
 
 Les jobs Rust et navigateur utilisaient la même clé alors que seul Rust préparait

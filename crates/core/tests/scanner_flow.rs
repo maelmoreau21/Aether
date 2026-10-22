@@ -292,7 +292,21 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
             assert_eq!(audio[1]["tags"]["language"], "eng");
             assert_ne!(audio[0]["index"], audio[1]["index"]);
             assert_eq!(audio[0]["channels"], 6);
-            assert_eq!(source["language"], "fr");
+            // The original container cannot guarantee the browser's default audio.
+            assert_eq!(source["audioTrackId"], "internal-default");
+            assert_eq!(source["language"], "und");
+            for (track, language) in audio.iter().zip(["fr", "en"]) {
+                let track_id = format!("internal-{}", track["index"].as_u64().unwrap());
+                let explicit = media["sources"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|candidate| candidate["audioTrackId"] == track_id)
+                    .expect("each internal audio track must have an explicit source");
+                assert_eq!(explicit["language"], language);
+                assert_eq!(explicit["tracks"][0]["index"], track["index"]);
+                assert_eq!(explicit["tracks"][0]["channels"], track["channels"]);
+            }
             assert_eq!(
                 tracks
                     .iter()
@@ -301,6 +315,7 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
                 3
             );
         } else {
+            assert_eq!(source["language"], "en");
             assert_eq!(media["subtitles"][0]["language"], "fr");
             assert_eq!(media["subtitles"][0]["forced"], true);
             let url = media["subtitles"][0]["url"].as_str().unwrap();

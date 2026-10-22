@@ -5,6 +5,13 @@ import type { Media, Source } from './types';
 const source = (id: string, audioTrackId = id): Source => ({id,audioTrackId,language:'fr',url:`/${id}`,mime:'video/mp4'});
 const media = (sources: Source[]): Media => ({id:'film',title:'Film',sources,subtitles:[]});
 describe('operational audio choices', () => {
+  it('hides the ambiguous browser default when every internal track is explicitly selectable', () => {
+    const original = {...source('original', 'internal-default'), language:'und', tracks:[{index:1,codec_type:'audio'},{index:2,codec_type:'audio'}]};
+    const sources = [original, source('fr','internal-1'), source('en','internal-2')];
+    expect(audioChoices(media(sources)).map(s => s.audioTrackId)).toEqual(['internal-1','internal-2']);
+    expect(audioChoices(media(sources),'internal-default')).toHaveLength(3);
+    expect(audioChoices(media(sources.slice(0,2)))).toHaveLength(2);
+  });
   it('counts switchable sources rather than detected container tracks', () => {
     expect(audioChoices(media([{...source('one'),tracks:[{codec_type:'audio'},{codec_type:'audio'}]}]))).toHaveLength(1);
   });

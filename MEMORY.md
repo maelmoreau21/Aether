@@ -1,5 +1,18 @@
 # MEMORY.md — État et décisions Aether
 
+## 22 octobre 2026 — Correction CI P0 : caches et profil AV1
+
+- Cause des 404 MSE/DASH et VTT absents : cache partagé entre Rust (jeu complet)
+  et navigateur (jeu sans MSE/DASH). Clés distinctes versionnées, anciennes entrées
+  écartées ; vérification des fichiers/rapports préparés avant Cargo, cache inclus.
+- Profil AV1 : accepter Main ou sa représentation numérique chaîne 0 observée
+  en CI, sans relâcher les vérifications codec, pixels 10 bits, couleurs et audio.
+- Validation : garde-fou positif + cache incomplet rejeté, YAML/ordre/clé valides,
+  fmt et diff checks ; cargo test --locked -p media-poc --all-features --test p0
+  -j 1 -- --test-threads=1 : 11 réussis Windows. Test symlink Linux non compilé
+  sur cet OS ; pas de suite workspace générale ni nouvelle CI Linux exécutée.
+- Aucun média modifié, push, déploiement ni publication. Voir docs/CI_GHCR.md.
+
 ## 21 octobre 2026 — Raccordement des opérations des extensions
 
 - Core générique : `/run` accepte search/details/images avec permissions signées,

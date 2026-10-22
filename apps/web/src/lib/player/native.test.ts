@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { NativePlayer } from './native';
+import { ExternalAudio } from './external-audio';
+import { AudioSelectionRetainedError } from './errors';
 import type { Media } from './types';
 vi.mock('./external-audio', () => ({ ExternalAudio: class {
   async load() {} async play() {} destroy() {} setOffset() {} activate() {} pause() {} isBuffering() { return false; }
@@ -20,6 +22,34 @@ const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr',
 function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
+  it('rejects declared unsupported DTS-HD MA before HTTP preparation or video loading',async()=>{
+    const {video,player}=setup();const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);
+    Object.assign(video,{canPlayType:()=>''});
+    const source={...media.sources[0],language:'dut',audioTrackId:'internal-default',prepare:true,mime:'video/x-matroska',tracks:[{index:1,codec_type:'audio',codec_name:'dts',profile:'DTS-HD MA',channels:6}]};
+    await expect(player.load({...media,sources:[source]})).rejects.toThrow('DTS-HD MA');
+    expect(fetcher).not.toHaveBeenCalled();expect(video.loads).toBe(0);player.destroy();
+  });
+  it('resumes the retained audio after a rejected candidate without reloading video', async () => {
+    const {video,player}=setup();
+    const prepared={...media,sources:media.sources.map(s=>({...s,url:'/same-video',externalAudioUrl:`/audio-${s.language}`}))};
+    await player.load(prepared); await player.play(); video.currentTime=6;
+    const destroy=vi.spyOn(ExternalAudio.prototype,'destroy');
+    const load=vi.spyOn(ExternalAudio.prototype,'load').mockRejectedValueOnce(new Error('HTTP 404'));
+    await expect(player.selectAudio('en')).rejects.toBeInstanceOf(AudioSelectionRetainedError);
+    expect(video.paused).toBe(false);expect(video.currentTime).toBe(6);expect(video.loads).toBe(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    await player.selectAudio('fr');expect(load).toHaveBeenCalledTimes(1);
+    load.mockRestore();destroy.mockRestore();player.destroy();
+  });
+  it('distinguishes metadata timeout from seek timeout without inventing a codec diagnosis', async () => {
+    vi.useFakeTimers();const {video,player}=setup();video.auto=false;
+    const metadata=expect(player.load(media)).rejects.toThrow('métadonnées');
+    await vi.advanceTimersByTimeAsync(10000);await metadata;
+    video.auto=true;await player.load(media);video.auto=false;video.currentTime=5;
+    const seek=expect(player.selectAudio('en')).rejects.toThrow('de seek');
+    video.dispatchEvent(new Event('loadedmetadata'));
+    await vi.advanceTimersByTimeAsync(10000);await seek;player.destroy();
+  });
   it('reads indexed MP4 video directly and prepares only audio on the legacy fallback',async()=>{
     const fetcher=vi.fn().mockResolvedValue({ok:true});vi.stubGlobal('fetch',fetcher);
     const {video,player}=setup();

@@ -84,7 +84,7 @@ function compile(name) {
     const page=await browser.newPage(); page.setDefaultTimeout(15000);
     report.console=[];page.on('console',message=>report.console.push(message.text()));
     await page.goto(origin);
-    for(const name of ['source-selection','external-audio','segmented-audio','native']) {
+    for(const name of ['errors','compatibility','source-selection','external-audio','segmented-audio','native']) {
       await page.addScriptTag({content:`window[${JSON.stringify(name)}]={};(function(exports,require){${compile(name)}\n})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`});
     }
     await page.evaluate(({probe,videoContainer,originalContainer})=>{
@@ -116,7 +116,15 @@ function compile(name) {
       }
     });
     await page.getByRole('button').click();
-    report.capabilities=await page.evaluate(()=>['video/mp4; codecs="av01"','video/mp4','audio/ogg; codecs="opus"'].map(type=>({type,result:document.createElement('video').canPlayType(type)})));
+    report.capabilities=await page.evaluate(()=>['video/mp4; codecs="av01"','video/mp4','audio/ogg; codecs="opus"','video/x-matroska; codecs="avc1.640028"',...['dtsc','dtsh','dtsl'].flatMap(codec=>['video/x-matroska','audio/mp4'].map(mime=>`${mime}; codecs="${codec}"`))].map(type=>({type,result:document.createElement('video').canPlayType(type)})));
+    report.dtsRejection=await page.evaluate(async()=>{
+      const video=document.createElement('video'),player=new window.native.NativePlayer(video,()=>{}),started=performance.now();
+      let loads=0;video.addEventListener('loadstart',()=>loads++);
+      const media={id:'synthetic-dts-descriptor',title:'Capability check only',subtitles:[],sources:[{id:'original',audioTrackId:'internal-default',language:'dut',url:'/must-not-be-requested',mime:'video/x-matroska',tracks:[{index:0,codec_type:'video',codec_name:'h264'},{index:1,codec_type:'audio',codec_name:'dts',profile:'DTS-HD MA',channels:6}]}]};
+      let failure;try{await player.load(media);}catch(error){failure=error.message;}player.destroy();
+      return {failure,elapsedMs:performance.now()-started,loads,scope:'Descriptor and live browser capability check; not a DTS-HD decoded fixture'};
+    });
+    assert.match(report.dtsRejection.failure,/DTS-HD MA/);assert.equal(report.dtsRejection.loads,0);assert.ok(report.dtsRejection.elapsedMs<1000);
     report.initial=await page.evaluate(async()=>{
       const started=performance.now(),video=document.querySelector('video');
       const frame=new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('No decoded video frame within 10 seconds')),10000);video.requestVideoFrameCallback(()=>{clearTimeout(timeout);resolve(performance.now()-started);});});
@@ -126,13 +134,13 @@ function compile(name) {
     await page.waitForFunction(()=>document.querySelector('video').currentTime>.3);
     let lastTime=0,videoUrl;
     for(const id of ['internal-1','internal-2','internal-1','internal-2','internal-1']) {
-      await page.evaluate(id=>window.player.selectAudio(id),id);
+      const switchReadyMs=await page.evaluate(async id=>{const started=performance.now();await window.player.selectAudio(id);return performance.now()-started;},id);
       const sample=await page.evaluate(()=>window.sample());
       assert.ok(sample.db>-80,JSON.stringify(sample));assert.ok(Math.abs(sample.hz-(id==='internal-1'?440:990))<25,JSON.stringify(sample));
       assert.ok(sample.drift<.2,JSON.stringify(sample));assert.ok(sample.frames>0);assert.equal(sample.fullscreen,true);
       assert.ok(sample.time>=lastTime-.05);lastTime=sample.time;
       if(videoUrl)assert.equal(sample.url,videoUrl);videoUrl=sample.url;assert.equal(sample.loads,1);
-      report.switches.push({id,...sample});
+      report.switches.push({id,switchReadyMs,...sample});
     }
     report.pausedSeeks=[];
     if(segmented){
@@ -156,10 +164,12 @@ function compile(name) {
       let failure;try{await window.player.selectAudio('internal-1');}catch(e){failure=e.message;}
       window.media.sources[1].externalAudioUrl=saved;window.media.sources[1].prepare=true;
       window.media.sources[1].audioSegmentUrl=savedSegment;
-      await window.player.selectAudio('internal-2');await window.player.play();
-      return {failure,url:document.querySelector('audio').currentSrc,count:document.querySelectorAll('audio').length};
+      const resumed=!document.querySelector('video').paused&&!document.querySelector('audio').paused;
+      await window.player.selectAudio('internal-2');
+      return {failure,resumed,url:document.querySelector('audio').currentSrc,count:document.querySelectorAll('audio').length};
     },segmented);
     assert.ok(report.failedCandidate.failure);assert.match(report.failedCandidate.url,segmented?/^blob:/:/audio-2$/);assert.equal(report.failedCandidate.count,1);
+    assert.equal(report.failedCandidate.resumed,true,'Retained audio must resume without another Play command');
     report.reopened=[];
     for(const id of ['internal-2','internal-1']) {
       await page.evaluate(()=>window.player.destroy());

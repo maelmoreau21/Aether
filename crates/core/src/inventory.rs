@@ -3073,6 +3073,22 @@ pub async fn content(
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_error"),
     };
     let node_id_str: String = row.get("node_id");
+    let started = std::time::Instant::now();
+    let method = request.method().as_str().to_owned();
+    let has_range = request.headers().contains_key("range");
+    eprintln!(
+        "{}",
+        json!({"event":"media_http_start","asset":asset_id,"node":node_id_str,"method":method,"range":has_range})
+    );
+    // Headers only: never log signed URLs, query strings, cookies or disk paths.
+    // elapsed_ms measures response-header readiness, not complete body delivery.
+    let logged_response = |response: axum::response::Response| {
+        eprintln!(
+            "{}",
+            json!({"event":"media_http_response","asset":asset_id,"node":node_id_str,"method":method,"range":has_range,"status":response.status().as_u16(),"content_length":response.headers().get("content-length").and_then(|v|v.to_str().ok()).and_then(|v|v.parse::<u64>().ok()),"content_range_present":response.headers().contains_key("content-range"),"elapsed_ms":started.elapsed().as_millis()})
+        );
+        response
+    };
     if node_id_str != "local" {
         drop(row);
         let Some(rec) = crate::nodes::load_node(store, &node_id_str)
@@ -3083,27 +3099,31 @@ pub async fn content(
             return crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
         };
         let pq = format!("/internal/v1/node/assets/{asset_id}/content");
-        return crate::nodes::relay_from_remote_node(store, &rec, &pq, request).await;
+        return logged_response(
+            crate::nodes::relay_from_remote_node(store, &rec, &pq, request).await,
+        );
     }
     let grant = ReadGrant {
         target: ReadTarget::Asset(AssetId::from(asset_id)),
         library_id: LibraryId::from(row.get::<String, _>("library_id")),
-        node_id: NodeId::from(node_id_str),
+        node_id: NodeId::from(node_id_str.clone()),
         root_snapshot: row.get("root"),
         relative_path: row.get("relative_path"),
         mime: row.get("mime"),
     };
     drop(row);
-    match crate::node::LocalNode.serve_grant(&grant, &request).await {
-        Ok(res) => {
-            let (parts, body) = res.into_parts();
-            Response::from_parts(parts, Body::new(body))
-        }
-        Err(code @ NodeErrorCode::StreamError) => {
-            crate::error(StatusCode::INTERNAL_SERVER_ERROR, code.as_str())
-        }
-        Err(code) => crate::error(StatusCode::NOT_FOUND, code.as_str()),
-    }
+    logged_response(
+        match crate::node::LocalNode.serve_grant(&grant, &request).await {
+            Ok(res) => {
+                let (parts, body) = res.into_parts();
+                Response::from_parts(parts, Body::new(body))
+            }
+            Err(code @ NodeErrorCode::StreamError) => {
+                crate::error(StatusCode::INTERNAL_SERVER_ERROR, code.as_str())
+            }
+            Err(code) => crate::error(StatusCode::NOT_FOUND, code.as_str()),
+        },
+    )
 }
 
 /// Session/library checks run before this handler, including HEAD and conditionals.

@@ -1538,14 +1538,24 @@ async fn direct_stream_asset(
     {
         return cors_error_response(StatusCode::FORBIDDEN, "playback_authorization_denied");
     }
-    match state
+    let started = std::time::Instant::now();
+    eprintln!(
+        "{}",
+        serde_json::json!({"event":"node_media_start","asset":id,"method":req.method().as_str(),"range":req.headers().contains_key("range")})
+    );
+    let response = match state
         .local_node
         .serve_grant_for_node(identity.node_id.clone(), &grant, &req)
         .await
     {
         Ok(res) => convert_stream_response(res, true),
         Err(code) => node_error_response(code, true),
-    }
+    };
+    eprintln!(
+        "{}",
+        serde_json::json!({"event":"node_media_response","asset":id,"status":response.status().as_u16(),"content_length":response.headers().get("content-length").and_then(|v|v.to_str().ok()).and_then(|v|v.parse::<u64>().ok()),"content_range_present":response.headers().contains_key("content-range"),"elapsed_ms":started.elapsed().as_millis()})
+    );
+    response
 }
 
 async fn direct_stream_image(

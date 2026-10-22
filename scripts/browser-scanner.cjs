@@ -85,6 +85,18 @@ fs.mkdirSync(out, {recursive: true});
       assert.equal(sample.fullscreen,true);
       report.results.internalSwitches.push({id,...sample});
     }
+    // The real Svelte UI must report a rejected language without pausing the
+    // retained presentation or overwriting its persisted preference.
+    const retained=await page.locator('video').evaluate(v=>({time:v.currentTime,url:v.currentSrc}));
+    await page.route('**/prepared/audio-1*',route=>route.abort('internetdisconnected'));
+    await openMenu('audio');await page.locator('[data-audio-id="internal-1"]').click();
+    await page.locator('.fullscreen-notice').filter({hasText:'Piste précédente conservée'}).waitFor();
+    assert.equal(await page.locator('.player-error').count(),0);
+    await page.waitForFunction(t=>{const v=document.querySelector('video'),a=document.querySelector('audio');return !v.paused&&a&&!a.paused&&v.currentTime>t;},retained.time);
+    assert.equal(await page.locator('video').evaluate(v=>v.currentSrc),retained.url);
+    assert.equal(await page.evaluate(async()=>(await(await fetch('/api/v1/preferences')).json()).audioLanguage),'en');
+    await page.unroute('**/prepared/audio-1*');
+    report.results.failedLanguageRetainedWithoutPause=true;
     // Reopen with server-persisted indexed language preferences, in both directions.
     report.results.reopenedAudio=[];
     for (const [id,language] of [['internal-2','en'],['internal-1','fr']]) {
@@ -125,10 +137,10 @@ fs.mkdirSync(out, {recursive: true});
       const interruptedAt=await page.locator('video').evaluate(v=>v.currentTime);
       await page.route('**/prepared/audio-*',route=>route.abort('internetdisconnected'));
       await openMenu('audio');await page.locator('[data-audio-id="internal-2"]').click();
-      await page.locator('.player-error').waitFor();
+      await page.locator('.fullscreen-notice').filter({hasText:'Piste précédente conservée'}).waitFor();
       await page.unroute('**/prepared/audio-*');
-      await page.getByRole('button',{name:'Réessayer explicitement',exact:true}).click();
-      await page.locator('.loading').waitFor({state:'detached'});await page.locator('.player-error').waitFor({state:'detached'});
+      assert.equal(await page.locator('.player-error').count(),0);
+      await page.waitForFunction(()=>{const v=document.querySelector('video'),a=document.querySelector('audio');return !v.paused&&a&&!a.paused;});
       assert.ok(Math.abs(await page.locator('video').evaluate(v=>v.currentTime)-interruptedAt)<1);
       report.results.long.interruptedAudioRequestRecovered=true;
       await page.locator('video').evaluate(v=>{v.pause();v.currentTime=2;});await page.waitForFunction(()=>!document.querySelector('video').seeking);await page.locator('video').evaluate(v=>v.play());

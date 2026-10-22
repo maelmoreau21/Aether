@@ -180,3 +180,13 @@ Un refus DTS avant toute requête média ne produit normalement aucun événemen
 404 vers l'asset/source, 416 vers la plage, 5xx vers Core/Node ; 206 et la présence
 de Content-Range ne prouvent pas à eux seuls que le corps est complet ni décodable.
 La vérification d'un proxy/NAS particulier exige encore ses traces réelles.
+
+## Interface utilisateur du 22 octobre 2026
+
+Chargements et erreurs du lecteur : messages simples, diagnostic technique dans
+le panneau optionnel Statistiques du flux, ferme par defaut. Mesures video
+navigateur actualisees chaque seconde uniquement quand le panneau est ouvert :
+resolution decodee, frames/pertes, tampon, etats media, position et vitesse.
+Identites de source/noeud et pistes declarees sans URL ni jeton. Aucun debit
+reseau ou sortie audio physique deduit de ces mesures. Transition SSO sombre
+avec feuille CSS externe compatible CSP ; navigation et cookies inchanges.

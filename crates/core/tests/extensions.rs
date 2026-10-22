@@ -1336,3 +1336,88 @@ async fn rich_operations_and_account_avatars_use_signed_permissions() {
         }
     }
 }
+
+#[tokio::test]
+async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwrites() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("inbox");
+    std::fs::create_dir(&root).unwrap();
+    let store = IdentityStore::open(&temp.path().join("extensions.db"))
+        .await
+        .unwrap();
+    let key = key();
+    let package = package(&key, good_module());
+    let file = root.join("fixture.package.json");
+    std::fs::write(&file, serde_json::to_vec(&package).unwrap()).unwrap();
+    assert!(
+        media_poc::extension_files::import(&store, &root)
+            .await
+            .is_err()
+    );
+    std::fs::write(
+        root.join("trusted-publishers.json"),
+        serde_json::to_vec(
+            &json!([{"id":"test","publicKey":STANDARD.encode(key.public_key().as_ref())}]),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        media_poc::extension_files::import(&store, &root)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>("SELECT enabled FROM extensions")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM extension_grants")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        0
+    );
+    media_poc::database::query("UPDATE extensions SET enabled=1")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        media_poc::extension_files::import(&store, &root)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>("SELECT enabled FROM extensions")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        1
+    );
+    media_poc::database::query("UPDATE extension_publishers SET active=0")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert!(
+        media_poc::extension_files::import(&store, &root)
+            .await
+            .is_err()
+    );
+    media_poc::database::query("UPDATE extension_publishers SET active=1")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let mut tampered = serde_json::to_value(&package).unwrap();
+    tampered["sha256"] = json!("0".repeat(64));
+    std::fs::write(file, serde_json::to_vec(&tampered).unwrap()).unwrap();
+    assert!(
+        media_poc::extension_files::import(&store, &root)
+            .await
+            .is_err()
+    );
+}

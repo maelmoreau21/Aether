@@ -216,3 +216,5 @@ parcours dédiés aux images fanart.tv/avatars et statistiques. TMDb et IMDb ont
 un premier parcours manuel de proposition ; leur fonctionnement sur un compte
 fournisseur réel reste à vérifier avec ses clés et conditions. Leur absence
 est signalée dans l'administration; le fonctionnement du serveur n'en dépend pas.
+
+Interface actuelle : installation par Catalogue/Dépôts. L'import manuel signé passe par les fichiers du serveur, sans envoi dans l'interface : [procédure](PLAYLISTS_AND_MUSIC.md#extensions). Les descriptions historiques d'envoi JSON concernent le contrat API.

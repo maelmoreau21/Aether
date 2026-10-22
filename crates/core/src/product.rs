@@ -81,14 +81,14 @@ async fn owner(
 }
 async fn lists(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<Value>, Error> {
     let actor = auth.authenticate(&headers).await?;
-    let rows: Vec<(String, String)> =
-        query_as("SELECT id,name FROM personal_lists WHERE user_id=? ORDER BY name,id")
-            .bind(actor.user.id)
+    let rows: Vec<(String, String,String,String)> =
+        query_as("SELECT p.id,p.name,p.visibility,p.user_id FROM personal_lists p WHERE p.user_id=? OR (p.visibility='public' AND EXISTS(SELECT 1 FROM playlist_policy WHERE allow_public=1)) OR (p.visibility='shared' AND EXISTS(SELECT 1 FROM playlist_policy WHERE allow_sharing=1) AND EXISTS(SELECT 1 FROM playlist_shares s WHERE s.list_id=p.id AND s.user_id=?)) ORDER BY p.name,p.id LIMIT 500")
+            .bind(&actor.user.id).bind(&actor.user.id)
             .fetch_all(&auth.store.pool)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(
-        json!({"lists":rows.into_iter().map(|(id,name)|json!({"id":id,"name":name})).collect::<Vec<_>>()}),
+        json!({"lists":rows.into_iter().map(|(id,name,visibility,user)|json!({"id":id,"name":name,"visibility":visibility,"owned":user==actor.user.id})).collect::<Vec<_>>()}),
     ))
 }
 #[derive(Deserialize)]
@@ -130,10 +130,17 @@ async fn list(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, Error> {
-    owner(&auth, &headers, &id, false).await?;
-    let works:Vec<String>=query_scalar("SELECT work_id FROM personal_list_items WHERE list_id=? ORDER BY added_at DESC,work_id LIMIT 1000").bind(id).fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let actor = crate::playlists::access(&auth, &headers, &id, false).await?;
+    let (name, visibility, user): (String, String, String) =
+        query_as("SELECT name,visibility,user_id FROM personal_lists WHERE id=?")
+            .bind(&id)
+            .fetch_one(&auth.store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let works:Vec<(String,i64)>=query_as("SELECT work_id,position FROM personal_list_items WHERE list_id=? ORDER BY position,work_id LIMIT 1000").bind(&id).fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut items = Vec::new();
-    for work in works {
+    let mut entries = Vec::new();
+    for (work, position) in works {
         if crate::feedback::authorized(&auth, &headers, &work, false)
             .await
             .is_ok()
@@ -147,10 +154,29 @@ async fn list(
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         {
+            entries.push(json!({"kind":"work","id":work,"position":position,"media":detail}));
             items.push(detail);
         }
     }
-    Ok(Json(json!({"items":items})))
+    let tracks:Vec<(String,i64)>=query_as("SELECT track_id,position FROM playlist_music_items WHERE list_id=? ORDER BY position,track_id LIMIT 1000").bind(&id).fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    for (track, position) in tracks {
+        match crate::music::detail(&auth, &headers, &track).await {
+            Ok(media) => {
+                entries.push(json!({"kind":"music","id":track,"position":position,"media":media}))
+            }
+            Err(StatusCode::FORBIDDEN | StatusCode::NOT_FOUND) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    entries.sort_by_key(|entry| entry["position"].as_i64().unwrap_or(0));
+    let shares: Vec<(String, String)> = if user == actor.user.id {
+        query_as("SELECT s.user_id,COALESCE(u.display_name,c.login,u.id) FROM playlist_shares s JOIN users u ON u.id=s.user_id LEFT JOIN local_credentials c ON c.user_id=u.id WHERE s.list_id=? ORDER BY s.user_id").bind(&id).fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?
+    } else {
+        vec![]
+    };
+    Ok(Json(
+        json!({"id":id,"name":name,"visibility":visibility,"owned":user==actor.user.id,"items":items,"entries":entries,"shares":shares.into_iter().map(|(id,name)|json!({"id":id,"name":name})).collect::<Vec<_>>()}),
+    ))
 }
 async fn delete_list(
     State(auth): State<AuthState>,
@@ -173,7 +199,16 @@ async fn add_item(
 ) -> Result<StatusCode, Error> {
     owner(&auth, &headers, &id, true).await?;
     crate::feedback::authorized(&auth, &headers, &work, true).await?;
-    query("INSERT INTO personal_list_items(list_id,work_id) VALUES(?,?) ON CONFLICT(list_id,work_id) DO NOTHING").bind(id).bind(work).execute(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !parental_allowed(
+        &auth.store,
+        &auth.authenticate(&headers).await?.user.id,
+        &work,
+    )
+    .await?
+    {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    crate::playlists::insert_item(&auth, &id, &work, false).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn remove_item(

@@ -4,9 +4,9 @@
   import { session } from '../auth/session';
   import type { Work } from './api';
   let { work }: { work:Work }=$props();
-  let lists=$state<{id:string;name:string}[]>([]);let listName=$state('');let error=$state('');let message=$state('');let busy=$state(false);let title=$state('');let plot=$state('');let year=$state<number|undefined>();let genres=$state('');let tags=$state('');let ids=$state('{}');let age=$state<number|undefined>();let copyId=$state('');
+  let lists=$state<{id:string;name:string;owned?:boolean}[]>([]);let listName=$state('');let error=$state('');let message=$state('');let busy=$state(false);let title=$state('');let plot=$state('');let year=$state<number|undefined>();let genres=$state('');let tags=$state('');let ids=$state('{}');let age=$state<number|undefined>();let copyId=$state('');
   $effect(()=>{title=work.title;plot=work.plot??work.description;year=work.year??undefined;genres=(work.genres??[]).join(', ');tags=(work.tags??[]).join(', ');ids=JSON.stringify(work.externalIds??{},null,2);age=work.minimumAge??undefined;});
-  async function loadLists(){try{const response=await fetch('/api/v1/lists');if(!response.ok)throw new Error('Listes indisponibles.');lists=(await response.json()).lists;}catch(cause){error=cause instanceof Error?cause.message:'Listes indisponibles.';}}
+  async function loadLists(){try{const response=await fetch('/api/v1/lists');if(!response.ok)throw new Error('Listes indisponibles.');lists=(await response.json()).lists.filter((list:{owned?:boolean})=>list.owned!==false);}catch(cause){error=cause instanceof Error?cause.message:'Listes indisponibles.';}}
   async function mutate(path:string,method:string,body?:unknown,contentType='application/json'){
     busy=true;error='';message='';try{const response=await fetch(path,{method,headers:{'content-type':contentType,'x-csrf-token':$session?.csrfToken??''},body:body instanceof File?body:body===undefined?undefined:JSON.stringify(body)});if(!response.ok)throw new Error(`Enregistrement impossible (HTTP ${response.status}).`);message='Enregistré.';return response.status===204?true:await response.json();}catch(cause){error=cause instanceof Error?cause.message:'Enregistrement impossible.';return false;}finally{busy=false;}}
   async function save(event:SubmitEvent){event.preventDefault();let externalIds;try{externalIds=JSON.parse(ids);}catch{error='Les identifiants doivent être un objet JSON.';return;}if(await mutate(`/api/v1/admin/works/${work.id}/metadata`,'PUT',{title,plot,year:year??null,genres:genres.split(',').map(s=>s.trim()).filter(Boolean),tags:tags.split(',').map(s=>s.trim()).filter(Boolean),externalIds,minimumAge:age??null}))window.location.reload();}
@@ -16,8 +16,8 @@
 {#if imagesOpen}<ImageManager title={work.title} workId={work.id} onclose={()=>imagesOpen=false} onchanged={async()=>{window.dispatchEvent(new CustomEvent('media-artwork-updated',{detail:{id:work.id}}));}} />{/if}
 <div class="work-actions">
 {#if $session?.user.role==='administrator'}<button type="button" class="image-action" aria-label="Modifier les images" title="Modifier les images" onclick={()=>imagesOpen=true}>▧</button>{/if}
-<details class="list-picker" ontoggle={event=>{if(event.currentTarget.open)void loadLists();}}><summary aria-label="Ajouter à une liste" title="Ajouter à une liste"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg></summary>
-<div class="list-menu"><strong>Ajouter à une liste</strong>
+<details class="list-picker" ontoggle={event=>{if(event.currentTarget.open)void loadLists();}}><summary aria-label="Ajouter à une playlist" title="Ajouter à une playlist"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg></summary>
+<div class="list-menu"><strong>Ajouter à une playlist</strong>
 {#each lists as list(list.id)}<button type="button" disabled={busy} onclick={()=>mutate(`/api/v1/lists/${encodeURIComponent(list.id)}/items/${encodeURIComponent(work.id)}`,'PUT')}>{list.name}</button>{:else}<p>Aucune liste pour le moment.</p>{/each}
 <form onsubmit={event=>{event.preventDefault();void create();}}><label>Nouvelle liste<input required bind:value={listName} maxlength="100" placeholder="Nom de la liste" /></label><button disabled={busy||!listName.trim()}>Créer et ajouter</button></form></div>
 </details>

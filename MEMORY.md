@@ -1,5 +1,18 @@
 # MEMORY.md — État et décisions Aether
 
+## 23 octobre 2026 — Correction du test E2E browser_scanner (reopenedAudio)
+
+- **Diagnostic de l'échec ligne 113 de scripts/browser-scanner.cjs** :
+  - La fixture synthétique representative (MKV/MP4) a une durée totale de 12 secondes.
+  - Durant les étapes de test précédentes (switches audio 1 & 2, simulation de panne réseau), la vidéo avançait en continu.
+  - Lors de la boucle reopenedAudio (fermeture puis réouverture avec internal-2 puis internal-1), le deuxième tour atteignait 11.95s / 12.0s (fin de média), déclenchant l'état ended (paused=true) et marquant automatiquement le média comme vu (watched=true, ratio >= 0.95), provoquant une interruption de lecture.
+  - De plus, le clic sur .hero-cta s'exécutait immédiatement après button.return sans attendre la fermeture effective du dialogue modal dialog#player.
+- **Correction appliquée dans scripts/browser-scanner.cjs** :
+  - Réinitialisation de la position de lecture (v.currentTime = 1) dans la boucle reopenedAudio si la vidéo dépasse 3 secondes pour ne jamais heurter la limite des 12 secondes.
+  - Attente explicite de la fermeture du dialogue (!document.querySelector('dialog#player')?.hasAttribute('open')) avant de cliquer sur .hero-cta pour rouvrir le lecteur.
+- **Validation** :
+  - Exécution complète réussie de cargo test --locked --test browser_scanner -- --ignored --nocapture (1 passed en 29.70s, switch internal-2 & internal-1 validés, 0 warning/erreur).
+
 ## 23 octobre 2026 — Correction du lint Clippy items_after_test_module (local_mounts)
 
 - Correction de l'erreur clippy::items-after-test-module dans crates/core/src/local_mounts.rs : la fonction validate etait declaree apres le module de test mod tests.

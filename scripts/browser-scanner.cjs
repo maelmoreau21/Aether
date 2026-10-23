@@ -106,9 +106,11 @@ fs.mkdirSync(out, {recursive: true});
     // Reopen with server-persisted indexed language preferences, in both directions.
     report.results.reopenedAudio=[];
     for (const [id,language] of [['internal-2','en'],['internal-1','fr']]) {
+      await page.locator('video').evaluate(v=>{if(v.currentTime>3)v.currentTime=1;});
       await openMenu('audio');await page.locator(`[data-audio-id="${id}"]`).click();
       await page.waitForFunction(async language=>{const r=await fetch('/api/v1/preferences');return (await r.json()).audioLanguage===language;},language);
       await page.keyboard.press('Shift');await page.locator('button.return').click();
+      await page.waitForFunction(()=>!document.querySelector('dialog#player')?.hasAttribute('open'));
       await page.locator('.hero-cta').click();
       await page.waitForFunction(id=>{const v=document.querySelector('video'),a=document.querySelector('audio');return a&&(a.dataset.internalAudioTrack===id||a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1]))&&!a.paused&&!v.paused;},id);
       assert.equal(await page.getByText('Votre langue précédente est indisponible.',{exact:false}).count(),0);

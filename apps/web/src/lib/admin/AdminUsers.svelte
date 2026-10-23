@@ -130,7 +130,7 @@
 
 <section id="users-section" class="dashboard-section" aria-labelledby="users-heading">
   <div class="section-header">
-    <div><h2 id="users-heading">{$t('users_heading')}</h2><p>{$t('users_subtitle')}</p></div>
+    <div><h2 id="users-heading">{$t('users_heading')}</h2></div>
     <button type="button" class="btn btn-primary" disabled={busy} onclick={() => edit(null)}>+ Créer un compte local</button>
   </div>
 
@@ -239,8 +239,7 @@
   .section-header { margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--color-line); }
   h2,h3,h4,p { margin:0; }
   h2 { font-size:22px; } h3 { font-size:20px; } h4 { font-size:16px; }
-  .section-header p,.muted-note,.directory-toolbar,.directory-summary { color:var(--color-muted);font-size:13px; }
-  .section-header p { margin-top:6px; }
+  .muted-note,.directory-toolbar,.directory-summary { color:var(--color-muted);font-size:13px; }
   .account-detail { padding:24px;background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-md); }
   .account-tabs { display:flex;gap:8px;overflow-x:auto;border-bottom:1px solid var(--color-line);margin:20px 0; }
   .account-tabs button { border:0;border-bottom:3px solid transparent;background:transparent;color:var(--color-muted);padding:12px;white-space:nowrap;font:inherit;cursor:pointer; }

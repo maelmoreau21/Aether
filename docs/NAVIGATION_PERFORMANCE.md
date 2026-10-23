@@ -271,3 +271,10 @@ Zéro erreur JS ou image HTTP ; dix retours catalogue 72–104 ms, bibliothèque
 préchargée 122 ms après clic sans nouvelle requête. Dialogue 15/3 ms ; première
 image 644/384 ms avec le descripteur artificiellement retardé de 300 ms. Ces
 mesures finales ne changent pas les limites des essais média isolés ci-dessus.
+
+
+## Suite — réserve et fluidité de lecture
+
+Le complément [démarrage et plugins](STARTUP_AND_PLUGIN_CATALOGUE.md) documente
+la réserve de démarrage, le report de préparation audio et la correction douce
+des dérives d’horloges. La cible de 200 ms n’est toujours pas une garantie à froid.

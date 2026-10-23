@@ -16,9 +16,21 @@ Dans Administration → Extensions :
    activer. Le runtime Wasm ne nécessite pas de redémarrage du serveur.
 
 Le principe est celui d’un catalogue de paquets ; les manifestes et DLL Jellyfin
-ne sont pas compatibles. Aucun dépôt officiel distant n’est inventé ni ajouté
-par défaut : il faut une URL réellement hébergée par l’auteur. Le dépôt voisin
-`Aether-Plugins` fournit un générateur, sans publier ni exposer de serveur.
+ne sont pas compatibles. Depuis la migration additive 0041 (SQLite/PostgreSQL),
+le dépôt `Aether Plugins` est préconfiguré une seule fois avec :
+
+```text
+https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/main/repository/manifest.json
+```
+
+La migration ne télécharge rien : le catalogue initial est vide jusqu’à
+**Actualiser les dépôts**. Elle n’approuve aucun éditeur et n’installe aucun module.
+La suppression de ce dépôt est durable, y compris après réouverture de la base.
+Si cette URL avait déjà été ajoutée par l’administrateur, sa configuration est
+conservée. Le lien ne sera publiquement utilisable qu’après publication des
+fichiers `repository/` préparés dans le dépôt voisin `Aether-Plugins` sur `main`.
+Les quatre paquets signés sont préparés et vérifiés localement ; aucun push ou
+hébergement public n’est effectué par cette intervention.
 
 **Actualiser ce dépôt** récupère explicitement un nouveau catalogue. L’accueil
 ne télécharge aucun manifeste. Une erreur d’actualisation conserve le dernier
@@ -110,3 +122,25 @@ dans le binaire de test ; le navigateur appelle réellement l’API. Captures et
 rapport sont écrits sous `docs/evidence/2026-10-21/repositories/` par défaut.
 
 Le nom du dépôt est désormais facultatif. Installation manuelle hors interface : [import signé depuis les fichiers](PLAYLISTS_AND_MUSIC.md#extensions).
+
+
+## Interface du 23 octobre 2026
+
+Catalogue en cartes compactes, recherche, choix de version, accès demandés et
+éditeur dépliables. L’installation exige toujours la confiance explicite ; elle
+n’active pas le module. Installées présente le statut et ouvre une seule
+configuration complète à la fois. Paramètres, bibliothèques, activation,
+désactivation et désinstallation restent indépendants. Les exécutions et le
+journal sont regroupés dans des volets fermés. Les clés techniques et empreintes
+restent consultables dans les détails. La navigation initiale ne double plus
+les sept lectures d’administration.
+
+Les tests Core/SQLite/Chrome réels couvrent l’ajout, le choix d’une ancienne
+version, la confiance, la signature, l’installation désactivée, la suppression
+du dépôt préconfiguré, sa persistance et la conservation du module. Les captures
+avec les quatre manifestes réels utilisent une UI de production et des API
+simulées ; elles ne prouvent pas le téléchargement GitHub. Le contrôle PostgreSQL
+est limité à la migration fournie, sans exécution PostgreSQL dans cette demande.
+
+Les preuves et les commandes du complément sont regroupées dans
+[STARTUP_AND_PLUGIN_CATALOGUE.md](STARTUP_AND_PLUGIN_CATALOGUE.md).

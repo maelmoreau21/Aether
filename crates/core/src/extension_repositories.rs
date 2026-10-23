@@ -598,6 +598,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn default_repository_is_registered_once_and_deletion_survives_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("default-repository.sqlite");
+        let store = crate::identity::IdentityStore::open(&path).await.unwrap();
+        let (url, snapshot): (String, String) = query_as(
+            "SELECT url,manifest_json FROM extension_repositories WHERE id='community-default'",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            url,
+            "https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/main/repository/manifest.json"
+        );
+        assert!(
+            parse_manifest(snapshot.as_bytes())
+                .unwrap()
+                .extensions
+                .is_empty()
+        );
+        let installed: i64 = query_scalar("SELECT COUNT(*) FROM extensions")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(installed, 0);
+        query("DELETE FROM extension_repositories WHERE id='community-default'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        store.pool().close().await;
+        let reopened = crate::identity::IdentityStore::open(&path).await.unwrap();
+        let count: i64 = query_scalar(
+            "SELECT COUNT(*) FROM extension_repositories WHERE id='community-default'",
+        )
+        .fetch_one(reopened.pool())
+        .await
+        .unwrap();
+        assert_eq!(count, 0);
+    }
+    #[tokio::test]
     async fn repository_catalogue_install_preserves_trust_signature_and_persistence() {
         let temp = tempfile::tempdir().unwrap();
         let store = crate::identity::IdentityStore::open(&temp.path().join("core.sqlite3"))
@@ -721,7 +761,12 @@ mod tests {
                 )
                 .await
             )
-            .await["repositories"][0]["name"],
+            .await["repositories"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["name"] == "Repository test")
+                .unwrap()["name"],
             "Repository test"
         );
         let available = body(
@@ -805,7 +850,8 @@ mod tests {
             .status(),
             StatusCode::NO_CONTENT
         );
-        let count: i64 = query_scalar("SELECT COUNT(*) FROM extension_repositories")
+        let count: i64 = query_scalar("SELECT COUNT(*) FROM extension_repositories WHERE id=?")
+            .bind(&id)
             .fetch_one(store.pool())
             .await
             .unwrap();

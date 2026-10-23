@@ -1,3 +1,4 @@
+import { waitForStartupBuffer } from './startup-buffer';
 import type { Media, Player, PlaybackState, Source } from './types';
 import { ExternalAudio } from './external-audio';
 import { SegmentedAudio } from './segmented-audio';
@@ -20,6 +21,7 @@ export class NativePlayer implements Player {
   setStatusListener(listener:(message:string)=>void) { this.status=listener; }
   private busy = false;
   private destroyed = false;
+  private startup?: AbortController;
   private cancel?: () => void;
   private stallTimer?: ReturnType<typeof setTimeout>;
   private clearStall = () => { clearTimeout(this.stallTimer); this.stallTimer = undefined; };
@@ -276,9 +278,14 @@ export class NativePlayer implements Player {
   }
   async play() {
     if (!this.source || this.destroyed) throw new Error('Source interrompue ou indisponible. Rechargez explicitement la source.');
+    this.startup?.abort();
+    const startup = new AbortController(); this.startup = startup;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([(async () => {
+        this.status('Mise en mémoire tampon…');
+        await Promise.all([waitForStartupBuffer(this.video, startup.signal), this.externalAudio?.bufferForPlayback()]);
+        if (startup.signal.aborted || this.destroyed) throw new Error('Démarrage annulé.');
         // Wait until video leaves seeking/buffering before starting independent audio.
         // Otherwise its waiting event can cancel the pending audio play promise.
         await this.video.play();
@@ -286,10 +293,10 @@ export class NativePlayer implements Player {
       })(), new Promise<never>((_, reject) => {
         timer = setTimeout(() => { this.video.pause(); reject(new Error('Démarrage de lecture expiré après 10 secondes.')); }, 10000);
       })]);
-    } catch (error) { this.pause(); throw error; }
-    finally { clearTimeout(timer); }
+    } catch (error) { if (this.startup === startup) this.pause(); throw error; }
+    finally { clearTimeout(timer); if (this.startup === startup) this.startup = undefined; }
   }
-  pause() { this.externalAudio?.pause(); this.video.pause(); }
+  pause() { this.startup?.abort(); this.externalAudio?.pause(); this.video.pause(); }
   seek(position: number) { if (Number.isFinite(position)) this.video.currentTime = Math.max(0, Math.min(position, this.video.duration || 0)); }
   setVolume(volume: number) { this.video.volume = Math.max(0, Math.min(1, volume)); }
   setAudioOffset(seconds: number) {
@@ -311,6 +318,7 @@ export class NativePlayer implements Player {
   setSpeed(speed: number) { if ([0.5, 1, 1.5, 2].includes(speed)) this.video.playbackRate = speed; }
   destroy() {
     this.destroyed = true;
+    this.startup?.abort();
     for(const controller of this.preparations)controller.abort();this.preparations.clear();
     this.cancel?.();
     this.pendingAudio?.destroy(); this.pendingAudio = undefined;

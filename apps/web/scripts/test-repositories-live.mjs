@@ -5,7 +5,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 const origin = process.env.MEDIA_TEST_ORIGIN;
 const repositoryUrl = process.env.MEDIA_TEST_REPOSITORY_URL;
 if (!origin || !repositoryUrl) throw new Error('Use the ignored Rust repository browser harness.');
-const output = process.env.MEDIA_REPORT_DIR || '../../docs/evidence/2026-10-21/repositories';
+const output = process.env.MEDIA_REPORT_DIR || '../../target/extensions-repository-browser';
 await mkdir(output,{recursive:true});
 const browser = await chromium.launch({channel:'chrome',headless:true});
 const page = await browser.newPage({viewport:{width:1440,height:1000}});
@@ -17,13 +17,22 @@ try {
   await page.goto(`${origin}/app/admin/libraries/#extensions-section`);
   const panel=page.locator('#extensions-section');
   await panel.getByRole('button',{name:'Dépôts',exact:true}).click();
-  await panel.getByLabel('Nom du dépôt',{exact:true}).fill('Repository browser test');
-  await panel.getByLabel('URL du manifeste',{exact:true}).fill('https://127.0.0.1/manifest.json');
+  const initialDefault = panel.locator('.repository-card').filter({hasText:'Aether Plugins'});
+  if (await initialDefault.count()) {
+    await initialDefault.getByRole('button',{name:'Retirer le dépôt',exact:true}).click();
+    await panel.getByText('Aucun dépôt enregistré.',{exact:true}).waitFor();
+    await page.reload();
+    await panel.getByRole('button',{name:'Dépôts',exact:true}).click();
+    await panel.getByText('Aucun dépôt enregistré.',{exact:true}).waitFor();
+  }
+
+  await panel.getByLabel('Nom du dépôt (facultatif)',{exact:true}).fill('Repository browser test');
+  await panel.getByLabel('Adresse du dépôt',{exact:true}).fill('https://127.0.0.1/manifest.json');
   const rejected=page.waitForResponse(response=>response.url().endsWith('/extensions/repositories')&&response.request().method()==='POST');
   await panel.getByRole('button',{name:'Ajouter le dépôt',exact:true}).click();
   assert.equal((await rejected).status(),400);
   await panel.getByRole('alert').waitFor();
-  await panel.getByLabel('URL du manifeste',{exact:true}).fill(repositoryUrl);
+  await panel.getByLabel('Adresse du dépôt',{exact:true}).fill(repositoryUrl);
   await panel.getByRole('button',{name:'Ajouter le dépôt',exact:true}).click();
   await panel.getByRole('heading',{name:'Repository browser fixture',exact:true}).waitFor();
   const versions=panel.getByLabel('Version de Repository browser fixture',{exact:true});
@@ -41,6 +50,7 @@ try {
   assert.equal(installed.extensions[0].enabled,false);
   assert.deepEqual(installed.extensions[0].libraryIds,[]);
   await page.reload();
+  await panel.getByRole('button',{name:'Installées',exact:true}).click();
   await panel.getByRole('heading',{name:'Repository browser fixture',exact:true}).waitFor();
   await panel.getByRole('button',{name:'Dépôts',exact:true}).click();
   await panel.getByRole('heading',{name:'Repository browser test',exact:true}).waitFor();

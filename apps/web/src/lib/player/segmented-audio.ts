@@ -72,7 +72,10 @@ export class SegmentedAudio extends ExternalAudio {
       const target = Math.max(0, this.element.currentTime - this.offsetSeconds);
       const current = Math.floor(target / SECONDS);
       // At most the current window and one ahead; never copy the full episode.
-      for (const chunk of onlyCurrent ? [current] : [current, current + 1]) {
+      // Do not launch the next packet-copy job while the first frames decode.
+      // Request it with four seconds of lead instead of immediately on startup.
+      const nearingBoundary = (current + 1) * SECONDS - target <= 4;
+      for (const chunk of onlyCurrent || !nearingBoundary ? [current] : [current, current + 1]) {
         if (this.closed || epoch !== this.seekEpoch) return;
         const ranges=this.buffer.buffered;
         const retained=Array.from({length:ranges.length},(_,i)=>i).some(i=>ranges.start(i)<=chunk*SECONDS+.05 && ranges.end(i)>=Math.min(this.element.duration,(chunk+1)*SECONDS)-.05);

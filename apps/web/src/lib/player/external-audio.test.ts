@@ -17,6 +17,18 @@ function setup() {
   return { video, audio, error, bridge };
 }
 describe('independent audio timeline',()=>{
+  it('corrects small clock drift smoothly without pausing or seeking the video',async()=>{
+    vi.useFakeTimers();const {video,audio,bridge}=setup();await bridge.load('/audio');await video.play();await bridge.play();
+    video.currentTime=1;audio.currentTime=1.1;
+    const paused=vi.spyOn(video,'pause');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(paused).not.toHaveBeenCalled();expect(video.paused).toBe(false);expect(audio.currentTime).toBe(1.1);expect(audio.playbackRate).toBe(.98);
+    audio.currentTime=.9;await vi.advanceTimersByTimeAsync(100);expect(audio.playbackRate).toBe(1.02);
+    audio.currentTime=1.01;await vi.advanceTimersByTimeAsync(100);expect(audio.playbackRate).toBe(1);
+    video.playbackRate=1.5;audio.currentTime=1.1;await vi.advanceTimersByTimeAsync(100);expect(audio.playbackRate).toBeCloseTo(1.47);
+    audio.currentTime=0;await vi.advanceTimersByTimeAsync(100);expect(paused).toHaveBeenCalled();expect(audio.currentTime).toBe(1);
+    bridge.destroy();
+  });
   it('applies signed offsets without playing delayed audio before its start',async()=>{
     vi.useFakeTimers(); const {video,audio,bridge}=setup(); await bridge.load('/audio');
     bridge.setOffset(2); await video.play(); await bridge.play(); expect(audio.paused).toBe(true);

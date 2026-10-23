@@ -1,3 +1,5 @@
+import { waitForStartupBuffer } from './startup-buffer';
+
 // Preserve encoded audio and channels; never route production audio through a stereo WebAudio graph.
 // Independent clocks remain client-dependent; seeks and buffering are coordinated explicitly.
 export class ExternalAudio {
@@ -6,6 +8,7 @@ export class ExternalAudio {
   private stallTimer?: ReturnType<typeof setTimeout>;
   private cancellations = new Set<() => void>();
   private stopped = false;
+  private startup?: AbortController;
   private active = false;
   private waiting = false;
   private failed = false;
@@ -16,6 +19,7 @@ export class ExternalAudio {
 
   constructor(private video: HTMLVideoElement, private offset: number, private onError: (message: string) => void) {
     this.audio.preload = 'auto';
+    this.audio.preservesPitch = true;
     this.audio.hidden = true; this.audio.dataset.externalAudio = 'true';
     video.insertAdjacentElement('afterend', this.audio);
     this.audio.addEventListener('error', this.error);
@@ -33,7 +37,7 @@ export class ExternalAudio {
     this.onError('Audio externe interrompu : source indisponible, incompatible ou bloquée pendant 10 secondes.');
   };
   private videoPause = () => { this.audio.pause(); if (!this.holdingVideo) this.clearStall(); };
-  pause() { this.resumeEpoch++; this.holdingVideo = false; this.clearStall(); this.audio.pause(); }
+  pause() { this.startup?.abort(); this.resumeEpoch++; this.holdingVideo = false; this.clearStall(); this.audio.pause(); }
   isBuffering() { return this.holdingVideo; }
   private ended = () => { if (this.video.duration - this.audio.duration > .5) this.error(); };
   private wait = () => { this.waiting = true; this.audio.pause(); };
@@ -76,8 +80,15 @@ export class ExternalAudio {
   private resync = () => {
     if (!this.active || this.stopped || this.failed || this.audio.readyState < 1 || this.waiting || this.holdingVideo) return;
     const target = this.video.currentTime - this.offset;
-    if (!this.video.paused && !this.audio.seeking && Math.abs(this.audio.currentTime - target) > .08 && target >= 0 && target < this.audio.duration) {
+    const drift = this.audio.currentTime - target;
+    if (!this.video.paused && !this.audio.seeking && Math.abs(drift) > .25 && target >= 0 && target < this.audio.duration) {
       this.holdVideo(); this.align(true); this.recover(); return;
+    }
+    if (!this.video.paused && !this.video.seeking && !this.audio.seeking && !this.audio.paused && target >= 0 && target < this.audio.duration) {
+      // Small independent-clock drift must not pause the video every 100 ms.
+      // A bounded, pitch-preserving correction converges without extra seeks.
+      this.audio.playbackRate = this.video.playbackRate * (Math.abs(drift) > .04 ? (drift > 0 ? .98 : 1.02) : 1);
+      return;
     }
     if (!this.align() || this.video.paused || this.video.seeking || this.audio.seeking || !this.audio.paused || this.starting) return;
     this.starting = true;
@@ -133,6 +144,14 @@ export class ExternalAudio {
     this.video.addEventListener('ratechange', this.settings);
     this.timer = setInterval(this.resync, 100);
   }
+  async bufferForPlayback() {
+    if (!this.align(true)) return;
+    await this.ready();
+    if (this.stopped || this.failed) throw new Error('Piste audio interrompue.');
+    const startup = new AbortController(); this.startup = startup;
+    try { await waitForStartupBuffer(this.audio, startup.signal); }
+    finally { if (this.startup === startup) this.startup = undefined; }
+  }
   async play() {
     if (this.failed || this.stopped) throw new Error('Piste audio interrompue. Rechargez explicitement la source.');
     this.settings();
@@ -145,7 +164,7 @@ export class ExternalAudio {
   }
   destroy() {
     if (this.stopped) return;
-    this.stopped = true; for (const cancel of this.cancellations) cancel(); this.cancellations.clear();
+    this.stopped = true; this.startup?.abort(); for (const cancel of this.cancellations) cancel(); this.cancellations.clear();
     clearInterval(this.timer); this.clearStall();
     this.video.removeEventListener('pause', this.videoPause); this.video.removeEventListener('waiting', this.wait); this.video.removeEventListener('seeking', this.wait);
     this.video.removeEventListener('playing', this.resume); this.video.removeEventListener('seeked', this.afterSeek);

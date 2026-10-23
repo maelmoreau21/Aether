@@ -4,11 +4,12 @@ import { ExternalAudio } from './external-audio';
 import { AudioSelectionRetainedError } from './errors';
 import type { Media } from './types';
 vi.mock('./external-audio', () => ({ ExternalAudio: class {
-  async load() {} async play() {} destroy() {} setOffset() {} activate() {} pause() {} isBuffering() { return false; }
+  async load() {} async bufferForPlayback() {} async play() {} destroy() {} setOffset() {} activate() {} pause() {} isBuffering() { return false; }
 } }));
 class Video extends EventTarget {
   currentTime = 0; duration = 12; paused = true; volume = 0.4; playbackRate = 1.5;
-  src = ''; loads = 0; auto = true;
+  src = ''; loads = 0; auto = true; readyState = 4; seeking = false;
+  buffered = {length:1,start:()=>0,end:()=>12};
   pause() { this.paused = true; }
   play() { this.paused = false; return Promise.resolve(); }
   querySelectorAll() { return []; }
@@ -22,6 +23,14 @@ const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr',
 function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
+  it('cancels a startup reserve on pause without starting playback after late data', async () => {
+    const {video,player}=setup();await player.load(media);
+    video.buffered={length:1,start:()=>0,end:()=>.1};
+    const starting=expect(player.play()).rejects.toThrow('annulé');
+    player.pause();await starting;
+    video.buffered={length:1,start:()=>0,end:()=>12};video.dispatchEvent(new Event('progress'));
+    await Promise.resolve();expect(video.paused).toBe(true);player.destroy();
+  });
   it('overlaps independent audio and video loading without activating audio early', async () => {
     const {video,player}=setup();video.auto=false;
     let ready!:()=>void;

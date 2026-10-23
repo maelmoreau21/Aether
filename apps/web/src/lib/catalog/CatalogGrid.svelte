@@ -11,6 +11,8 @@
     series = [],
     totalFilms = 0,
     totalSeries = 0,
+    moreFilms = false,
+    moreSeries = false,
     search = $bindable(''),
     sort = $bindable('title-asc'),
     selectedKindFilter = $bindable('all'),
@@ -22,8 +24,10 @@
     section: 'films' | 'series' | 'search';
     films: Work[];
     series: Work[];
-    totalFilms: number;
-    totalSeries: number;
+    totalFilms: number | null;
+    totalSeries: number | null;
+    moreFilms?: boolean;
+    moreSeries?: boolean;
     search: string;
     sort: string;
     selectedKindFilter: 'all' | 'film' | 'series';
@@ -33,7 +37,10 @@
     detailUrl: (work: Work) => string;
   } = $props();
 
-  const paginationTotal = $derived(section === 'films' || selectedKindFilter === 'film' ? totalFilms : section === 'series' || selectedKindFilter === 'series' ? totalSeries : Math.max(totalFilms,totalSeries));
+  const paginationTotal = $derived(section === 'films' || selectedKindFilter === 'film' ? totalFilms : section === 'series' || selectedKindFilter === 'series' ? totalSeries : totalFilms === null || totalSeries === null ? null : Math.max(totalFilms,totalSeries));
+  const hasNext = $derived(section === 'films' || selectedKindFilter === 'film' ? moreFilms : section === 'series' || selectedKindFilter === 'series' ? moreSeries : moreFilms || moreSeries);
+  const filmCount = $derived(totalFilms ?? films.length);
+  const seriesCount = $derived(totalSeries ?? series.length);
   const base = $derived(resolve('/').replace(/\/$/, ''));
 
   // Local genre quick filter
@@ -68,11 +75,11 @@
     <div class="heading-badge-row">
       <span class="eyebrow">CATALOGUE AETHER</span>
       {#if section === 'films'}
-        <span class="count-pill">{totalFilms} film{totalFilms > 1 ? 's' : ''}</span>
+        <span class="count-pill">{filmCount} film{filmCount > 1 ? 's' : ''}{totalFilms === null ? ' affichés' : ''}</span>
       {:else if section === 'series'}
-        <span class="count-pill">{totalSeries} série{totalSeries > 1 ? 's' : ''}</span>
+        <span class="count-pill">{seriesCount} série{seriesCount > 1 ? 's' : ''}{totalSeries === null ? ' affichées' : ''}</span>
       {:else}
-        <span class="count-pill">{totalFilms + totalSeries} résultat{(totalFilms + totalSeries) > 1 ? 's' : ''}</span>
+        <span class="count-pill">{filmCount + seriesCount} résultat{(filmCount + seriesCount) > 1 ? 's' : ''}{paginationTotal === null ? ' affichés' : ''}</span>
       {/if}
     </div>
 
@@ -179,7 +186,7 @@
             Tous les films
           {/if}
         </h2>
-        <span class="count-badge">{totalFilms} film{totalFilms > 1 ? 's' : ''}</span>
+        <span class="count-badge">{filmCount} film{filmCount > 1 ? 's' : ''}{totalFilms === null ? ' affichés' : ''}</span>
       </div>
 
       <div class="media-grid">
@@ -208,7 +215,7 @@
             Toutes les séries
           {/if}
         </h2>
-        <span class="count-badge">{totalSeries} série{totalSeries > 1 ? 's' : ''}</span>
+        <span class="count-badge">{seriesCount} série{seriesCount > 1 ? 's' : ''}{totalSeries === null ? ' affichées' : ''}</span>
       </div>
 
       <div class="media-grid">
@@ -227,7 +234,7 @@
   {/if}
 
   <!-- Pagination -->
-  {#if offset > 0 || paginationTotal > 0}
+  {#if offset > 0 || films.length || series.length}
     <nav class="pagination" aria-label="Pages du catalogue">
       {#if offset > 0}
         <a
@@ -244,8 +251,8 @@
           ← Page précédente
         </a>
       {/if}
-      <span class="page-indicator">Page {Math.floor(offset / 24) + 1} sur {Math.max(1, Math.ceil(paginationTotal / 24))}</span>
-      {#if paginationTotal > offset + 24}
+      <span class="page-indicator">Page {Math.floor(offset / 24) + 1}{#if paginationTotal !== null} sur {Math.max(1, Math.ceil(paginationTotal / 24))}{/if}</span>
+      {#if hasNext || (paginationTotal !== null && paginationTotal > offset + 24)}
         <a
           class="page-nav-btn"
           href={resolve(

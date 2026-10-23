@@ -1,4 +1,5 @@
-// A small contiguous reserve, not an arbitrary startup delay or a whole-file cache.
+// Let canplay start with the first decoded frames. A large reserve while paused
+// can delay startup or time out even though the browser already has playable data.
 export function bufferedAhead(media: HTMLMediaElement): number {
   const position = media.currentTime;
   for (let i = 0; i < media.buffered.length; i++) {
@@ -13,7 +14,7 @@ export function waitForStartupBuffer(media: HTMLMediaElement, signal: AbortSigna
   const enough = () => {
     if (media.seeking || media.readyState < 3) return false;
     const remaining = Number.isFinite(media.duration) ? Math.max(0, media.duration - media.currentTime) : Infinity;
-    return bufferedAhead(media) >= Math.min(.75, Math.max(0, remaining - .05));
+    return bufferedAhead(media) >= Math.min(.05, Math.max(0, remaining - .05));
   };
   if (signal.aborted) return Promise.reject(new Error('Démarrage annulé.'));
   if (enough()) return Promise.resolve();

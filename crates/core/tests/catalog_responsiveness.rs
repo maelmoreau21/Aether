@@ -1,7 +1,7 @@
 use media_poc::{
     database::query,
     identity::IdentityStore,
-    inventory::{CatalogueFilter, catalogue_filtered},
+    inventory::{CatalogueFilter, catalogue_filtered, catalogue_page},
 };
 #[tokio::test]
 async fn authenticated_catalogue_10000_entries() {
@@ -52,4 +52,52 @@ async fn authenticated_catalogue_10000_entries() {
         }
         println!("authenticated catalogue query={term:?} milliseconds={times:?}");
     }
+    for (offset, expected_len, has_more) in [(0, 24, true), (9990, 10, false), (10000, 0, false)] {
+        let start = std::time::Instant::now();
+        let page = catalogue_page(
+            &store,
+            &["bench".into()],
+            Some("film"),
+            "",
+            "title-asc",
+            offset,
+            24,
+            &filter,
+            false,
+        )
+        .await
+        .unwrap();
+        println!(
+            "progressive catalogue offset={offset} milliseconds={}",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+        assert!(page["total"].is_null());
+        assert_eq!(page["items"].as_array().unwrap().len(), expected_len);
+        assert_eq!(page["hasMore"], has_more);
+        assert!(serde_json::to_vec(&page).unwrap().len() < 64 * 1024);
+    }
+    query("UPDATE inventory_assets SET available=0 WHERE id='w1'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let page = catalogue_page(
+        &store,
+        &["bench".into()],
+        Some("film"),
+        "Film 1",
+        "title-asc",
+        0,
+        24,
+        &filter,
+        false,
+    )
+    .await
+    .unwrap();
+    assert!(
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["id"] != "w1")
+    );
 }

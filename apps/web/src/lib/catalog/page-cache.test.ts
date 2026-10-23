@@ -8,7 +8,7 @@ describe('session catalogue SWR cache', () => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(Response.json(page())));
     vi.stubGlobal('fetch', fetcher);
     preloadCatalog('films', 'lib & privé');
-    const url = `/api/v1/catalog?${new URLSearchParams({library:'lib & privé',kind:'film',q:'',sort:'title-asc',offset:'0',limit:'24'})}`;
+    const url = `/api/v1/catalog?${new URLSearchParams({library:'lib & privé',kind:'film',q:'',sort:'title-asc',offset:'0',limit:'24',count:'false'})}`;
     await loadCatalog(url, url);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(cachedCatalog(url)?.items[0].id).toBe('a');

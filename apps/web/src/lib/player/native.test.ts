@@ -23,13 +23,49 @@ const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr',
 function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
+  it('uses decoded original Matroska video without preparing the whole file', async () => {
+    const {video,player}=setup();const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);
+    await player.load({...media,sources:[{...media.sources[0],url:'/original.mkv',prepare:true,prepareVideo:false,preparedVideoUrl:'/prepared/video'}]});
+    expect(video.src).toBe('/original.mkv');expect(fetcher).not.toHaveBeenCalled();player.destroy();
+  });
+  it('requires actual original video data and falls back to packet-copy preparation after decoding fails', async () => {
+    const {video,player,error}=setup();video.auto=false;video.readyState=1;
+    const fetcher=vi.fn().mockResolvedValue({ok:true});vi.stubGlobal('fetch',fetcher);
+    const loading=player.load({...media,sources:[{...media.sources[0],url:'/original.mkv',prepare:true,prepareVideo:false,preparedVideoUrl:'/prepared/video'}]});
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();await Promise.resolve();
+    expect(fetcher).not.toHaveBeenCalled();
+    video.dispatchEvent(new Event('error'));
+    await vi.waitFor(()=>expect(video.src).toBe('/prepared/video'));
+    video.dispatchEvent(new Event('loadedmetadata'));await loading;
+    expect(fetcher).toHaveBeenCalledWith('/prepared/video',expect.objectContaining({method:'HEAD'}));
+    expect(error).not.toHaveBeenCalled();player.destroy();
+  });
   it('cancels a startup reserve on pause without starting playback after late data', async () => {
     const {video,player}=setup();await player.load(media);
-    video.buffered={length:1,start:()=>0,end:()=>.1};
+    video.buffered={length:1,start:()=>0,end:()=>.01};
     const starting=expect(player.play()).rejects.toThrow('annulé');
     player.pause();await starting;
     video.buffered={length:1,start:()=>0,end:()=>12};video.dispatchEvent(new Event('progress'));
     await Promise.resolve();expect(video.paused).toBe(true);player.destroy();
+  });
+  it('resolves saved progress alongside metadata and seeks before loading independent audio', async () => {
+    const {video,player}=setup();video.auto=false;
+    let resume!:(position:number)=>void;
+    const position=new Promise<number>(resolve=>{resume=resolve;});
+    const loading=player.load(media,'fr',position);
+    expect(video.loads).toBe(1);
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    expect(video.currentTime).toBe(0);
+    resume(6);await Promise.resolve();expect(video.currentTime).toBe(6);
+    video.dispatchEvent(new Event('seeked'));await loading;
+    expect(video.loads).toBe(1);player.destroy();
+  });
+  it('does not apply late saved progress after a closed player', async () => {
+    const {video,player}=setup();video.auto=false;
+    let resume!:(position:number)=>void;
+    const loading=expect(player.load(media,'fr',new Promise<number>(resolve=>{resume=resolve;}))).rejects.toThrow('Lecteur');
+    video.dispatchEvent(new Event('loadedmetadata'));player.destroy();await loading;
+    resume(6);await Promise.resolve();expect(video.currentTime).toBe(0);
   });
   it('overlaps independent audio and video loading without activating audio early', async () => {
     const {video,player}=setup();video.auto=false;
@@ -69,6 +105,7 @@ describe('native source replacement', () => {
     await vi.advanceTimersByTimeAsync(10000);await metadata;
     video.auto=true;await player.load(media);video.auto=false;video.currentTime=5;
     const seek=expect(player.selectAudio('en')).rejects.toThrow('de seek');
+    video.currentTime=0; // A new browser resource resets its timeline before metadata.
     video.dispatchEvent(new Event('loadedmetadata'));
     await vi.advanceTimersByTimeAsync(10000);await seek;player.destroy();
   });

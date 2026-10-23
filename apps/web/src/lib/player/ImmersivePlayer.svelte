@@ -7,7 +7,7 @@
   import { preferredSubtitle, type SubtitlePreference } from './subtitle-preference';
   import { ProgressTracker } from './progress';
   import { getSessionGeneration } from '../auth/session';
-  import { preferences, savePreferences } from '../preferences';
+  import { preferences, savePreferences, ensurePreferences } from '../preferences';
   import { chooseSource, playbackMime, audioLanguage, audioSelectionNotice } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
@@ -81,33 +81,34 @@
     if (!engine) return;
     busy = true; error = ''; notice = ''; wake();
     try {
+      // Preferences are optional: an outage must not prevent authorized playback.
+      // preferences() is cleared by session generation changes.
+      let preferenceNotice = '';
+      try { await ensurePreferences(); }
+      catch { preferenceNotice = 'Préférences indisponibles : réglages locaux à cette séance.'; }
+      if (current !== generation) return;
+      readPlaybackPreferences();
       const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))));
       if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
       const tracker = !restore && media.workId && !media.synthetic
         ? new ProgressTracker(media.workId, message => { if (current === generation) notice = message; }) : undefined;
       if (tracker) progressTracker = tracker;
       const resume = tracker?.load();
-      await engine.load(media, source.audioTrackId);
+      await engine.load(media, source.audioTrackId, restore?.position ?? resume ?? 0);
       if (current !== generation) return;
-      notice = audioSelectionNotice(media, source, preferredLanguage);
+      notice = preferenceNotice || audioSelectionNotice(media, source, preferredLanguage);
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
       await engine.selectSubtitle(usableSubtitle); subtitle = usableSubtitle;
-      if (resume) {
-        const position = await resume;
-        if (current !== generation) return;
-        if (position > 0) engine.seek(position);
-      }
-      if (restore) { engine.setVolume(restore.volume); engine.setSpeed(restore.speed); engine.seek(Math.min(restore.position, Math.max(0, engine.state().duration - .05))); }
+      if (restore) { engine.setVolume(restore.volume); engine.setSpeed(restore.speed); }
       if (current !== generation) return;
       active = media;
       if (!restore || !restore.paused) await engine.play();
     } catch (e) { if (current === generation) fail(e instanceof Error ? e.message : String(e)); }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
   }
-  export function open(media: Media | Promise<Media>) {
-    if (opened) return false;
+  function readPlaybackPreferences() {
     preferredLanguage = 'fr'; subtitlePreference = undefined; preferredAudio = undefined; audioOffset = 0; subtitleOffset = 0;
     try {
       const account = preferences();
@@ -123,6 +124,9 @@
       else if (initialSubtitles === 'always') subtitlePreference = { enabled: true, language: 'fr', forced: false };
       else subtitlePreference = undefined;
     } catch { /* Preferences are optional when browser storage is unavailable. */ }
+  }
+  export function open(media: Media | Promise<Media>) {
+    if (opened) return false;
     generation++; const current = generation;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     scrollPosition = window.scrollY;
@@ -281,7 +285,7 @@
       {#if nextTitle && onNext}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
     </div>
     {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" />{loadStage}<button onclick={close}>Annuler</button></div>{/if}
-    {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>La lecture a rencontré un problème. Réessayez ou choisissez une autre piste ou version.</p><button onclick={() => { if (active) void prepare(active, playback); }}>Réessayer</button></div>{/if}
+    {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, { ...playback, paused: false }); }}>Réessayer</button></div>{/if}
     {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label="Statistiques du flux">
       <header><strong>Statistiques du flux</strong><button onclick={() => { statistics = false; wake(); }}>Fermer</button></header>
       <p>Mesures vidéo du navigateur · actualisation chaque seconde</p>

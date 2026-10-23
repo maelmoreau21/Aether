@@ -147,23 +147,24 @@
     loading = true;
     error = '';
     try {
-      const [data, accounts, configured, nodeList, health, oidc] = await Promise.all([
+      // Independent diagnostics must not delay the library administration screen.
+      void request<CoreHealth>('/api/v1/health').then(value => coreHealth = value).catch(() => {});
+      void request<OidcAdminStatus>('/api/v1/admin/oidc').then(value => oidcStatus = value).catch(() => {});
+      const [data, accounts, configured, nodeList, memberships] = await Promise.all([
         request<{ libraries: Library[] }>('/api/v1/admin/libraries'),
         request<{ users: AuthUser[] }>('/api/v1/admin/users'),
         request<{ roots: string[]; localRoots?: string[] }>('/api/v1/admin/roots'),
         request<{ nodes: AdminNode[] }>('/api/v1/admin/nodes').catch(() => ({ nodes: [] as AdminNode[] })),
-        request<CoreHealth>('/api/v1/health').catch(() => null),
-        request<OidcAdminStatus>('/api/v1/admin/oidc').catch(() => null)
+        request<{ groups: UserGroup[] }>('/api/v1/admin/groups')
       ]);
       libraries = data.libraries;
       users = accounts.users;
+      groups = memberships.groups;
       roots = configured.localRoots ?? configured.roots;
       nodes = nodeList.nodes;
-      coreHealth = health;
-      oidcStatus = oidc;
       reset();
-      await refreshAccess();
-      await refreshScans();
+      // Scan status fills in after the forms are usable, without repeating access queries.
+      void refreshScans();
     } catch (failure) {
       error = failure instanceof Error ? failure.message : 'Chargement impossible.';
     } finally {

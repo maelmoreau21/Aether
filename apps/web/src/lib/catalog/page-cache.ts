@@ -77,7 +77,7 @@ export function loadCatalog(key: string, url: string): Promise<CatalogPage> {
 export function preloadCatalog(section: 'home' | 'films' | 'series', library?: string): void {
   const kinds = section === 'home' ? ['film', 'series'] : [section === 'films' ? 'film' : 'series'];
   for (const kind of kinds) {
-    const url = `/api/v1/catalog?${new URLSearchParams({ ...(library ? {library} : {}), kind, q: '', sort: section === 'home' ? 'added-desc' : 'title-asc', offset: '0', limit: '24' })}`;
+    const url = `/api/v1/catalog?${new URLSearchParams({ ...(library ? {library} : {}), kind, q: '', sort: section === 'home' ? 'added-desc' : 'title-asc', offset: '0', limit: '24', count: 'false' })}`;
     void loadCatalog(url, url).catch(() => {});
   }
 }

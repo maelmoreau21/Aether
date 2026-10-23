@@ -1,7 +1,7 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {bufferedAhead,waitForStartupBuffer} from './startup-buffer';
 class Media extends EventTarget {
-  currentTime=0;duration=30;readyState=3;seeking=false;ranges=[[0,.1]];
+  currentTime=0;duration=30;readyState=3;seeking=false;ranges=[[0,.01]];
   buffered: {readonly length:number;start:(i:number)=>number;end:(i:number)=>number};
   constructor(){super();this.buffered={length:1,start:i=>this.ranges[i][0],end:i=>this.ranges[i][1]};}
 }
@@ -12,9 +12,13 @@ describe('startup buffer',()=>{
     const media=new Media();let ready=false;
     const pending=waitForStartupBuffer(element(media),new AbortController().signal).then(()=>{ready=true;});
     await Promise.resolve();expect(ready).toBe(false);
-    media.ranges=[[0,.1],[2,20]];media.buffered={length:2,start:i=>media.ranges[i][0],end:i=>media.ranges[i][1]};media.dispatchEvent(new Event('progress'));await Promise.resolve();expect(ready).toBe(false);
+    media.ranges=[[0,.01],[2,20]];media.buffered={length:2,start:i=>media.ranges[i][0],end:i=>media.ranges[i][1]};media.dispatchEvent(new Event('progress'));await Promise.resolve();expect(ready).toBe(false);
     media.ranges=[[0,1]];media.buffered={length:1,start:i=>media.ranges[i][0],end:i=>media.ranges[i][1]};media.dispatchEvent(new Event('progress'));await pending;expect(ready).toBe(true);
     expect(bufferedAhead(element(media))).toBe(1);
+    await waitForStartupBuffer(element(media),new AbortController().signal);
+  });
+  it('starts immediately on a short decoded reserve instead of waiting for 750 ms',async()=>{
+    const media=new Media();media.ranges=[[0,.06]];
     await waitForStartupBuffer(element(media),new AbortController().signal);
   });
   it('accepts the remaining tail, but never treats seeking or metadata as playable',async()=>{

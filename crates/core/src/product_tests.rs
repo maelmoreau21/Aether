@@ -1244,6 +1244,14 @@ async fn mixed_playlists_share_only_with_authenticated_accounts_and_keep_library
     let mine = value(request(&app, &list_path, "GET", &owner_cookie, "", Value::Null).await).await;
     assert_eq!(mine["entries"].as_array().unwrap().len(), 2);
     assert_eq!(mine["items"].as_array().unwrap().len(), 1);
+    let compact_path = format!("{list_path}?compact=true");
+    let compact =
+        value(request(&app, &compact_path, "GET", &owner_cookie, "", Value::Null).await).await;
+    assert_eq!(compact["entries"].as_array().unwrap().len(), 2);
+    assert_eq!(compact["items"][0]["id"], mine["items"][0]["id"]);
+    assert_eq!(compact["items"][0]["title"], mine["items"][0]["title"]);
+    assert!(compact["items"][0].get("seasons").is_none());
+    assert!(compact["items"][0].get("editions").is_none());
     assert_eq!(
         request(
             &app,
@@ -1272,6 +1280,9 @@ async fn mixed_playlists_share_only_with_authenticated_accounts_and_keep_library
     );
     let shared = value(request(&app, &list_path, "GET", &peer_cookie, "", Value::Null).await).await;
     assert_eq!(shared["entries"].as_array().unwrap().len(), 0);
+    let compact_shared =
+        value(request(&app, &compact_path, "GET", &peer_cookie, "", Value::Null).await).await;
+    assert_eq!(compact_shared["entries"].as_array().unwrap().len(), 0);
     assert_eq!(shared["owned"], false);
     assert_eq!(shared["shares"], json!([]));
     assert_eq!(

@@ -63,8 +63,10 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByRole('heading',{name:'Scanner Film',exact:true}).waitFor();
     const container=restart?'MKV':'MP4';
     await page.getByRole('button',{name:`Sélectionner la version ${container}`,exact:true}).click();
+    const playbackStarted = performance.now();
     await page.locator('.hero-cta').click();
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>0.2);
+    report.results.startupMs = performance.now() - playbackStarted;
     if (!restart) {
       assert.equal(await page.locator('audio[data-external-audio]').evaluate(a=>a.dataset.internalAudioTrack==='internal-1'||a.currentSrc.endsWith('/prepared/audio-1')),true);
       assert.equal(await page.getByText('Votre langue précédente est indisponible.',{exact:false}).count(),0);
@@ -83,9 +85,18 @@ fs.mkdirSync(out, {recursive: true});
         const c=new AudioContext(); await c.resume(); const s=c.createMediaElementSource(a), n=c.createAnalyser(); n.fftSize=8192;s.connect(n);n.connect(c.destination);
         await new Promise(r=>setTimeout(r,600));const bins=new Float32Array(n.frequencyBinCount);n.getFloatFrequencyData(bins);
         let peak=0;for(let i=1;i<bins.length;i++)if(bins[i]>bins[peak])peak=i;
-        const result={frequency:peak*c.sampleRate/n.fftSize,db:bins[peak],url:v.currentSrc,time:v.currentTime,fullscreen:!!document.fullscreenElement};s.disconnect();await c.close();return result;
+        // Observe actual decoded pixels across the fixture's deliberate white flashes.
+        const canvas=document.createElement('canvas');canvas.width=64;canvas.height=36;const drawing=canvas.getContext('2d');let colors=new Set();
+        for(let attempt=0;attempt<20;attempt++) {
+          drawing.drawImage(v,0,0,64,36);const pixels=drawing.getImageData(0,0,64,36).data;colors=new Set();for(let i=0;i<pixels.length;i+=4)colors.add(`${pixels[i]},${pixels[i+1]},${pixels[i+2]}`);
+          if(colors.size>16)break;
+          await new Promise(r=>setTimeout(r,50));
+        }
+        const result={frequency:peak*c.sampleRate/n.fftSize,db:bins[peak],url:v.currentSrc,time:v.currentTime,fullscreen:!!document.fullscreenElement,decodedColors:colors.size,decodedFrames:v.getVideoPlaybackQuality?.().totalVideoFrames};s.disconnect();await c.close();return result;
       });
       assert.ok(sample.db>-80,`decoded PCM ${JSON.stringify(sample)}`);
+      assert.ok(sample.decodedColors>16,`decoded image ${JSON.stringify(sample)}`);
+      if(restart) assert.ok(sample.url.endsWith('/content'),`MKV original video should decode without full preparation: ${sample.url}`);
       assert.ok(id==='internal-2' ? sample.frequency>950 && sample.frequency<1150 : sample.frequency>400 && sample.frequency<900, `language signal ${JSON.stringify(sample)}`);
       if(preparedVideoUrl) assert.equal(sample.url,preparedVideoUrl); preparedVideoUrl=sample.url;
       assert.equal(sample.fullscreen,true);
@@ -231,6 +242,20 @@ fs.mkdirSync(out, {recursive: true});
     report.results.progress={saved:true,resumed:true,manualWatched:true,manualUnwatched:true};
     assert.deepEqual(errors, []);
     report.results = {...report.results,catalogue:true,singleWorkTwoVersions:true,playback:true,seek:true,pause:true,cspErrors:errors};
+    if (restart) {
+      assert.ok(!preparations.some(request=>request.path.endsWith('/prepared/video')), 'successful native MKV must avoid full-video preparation');
+      await page.locator('.hero-cta').click();
+      await openMenu('audio');await page.locator('[data-audio-id="internal-1"]').click();
+      await page.waitForFunction(()=>document.querySelector('audio')?.dataset.internalAudioTrack==='internal-1');
+      await page.keyboard.press('Shift');await page.locator('button.return').click();
+      await page.waitForFunction(()=>!document.querySelector('dialog#player')?.hasAttribute('open'));
+      await page.route('**/assets/*/content',route=>route.abort('failed'));
+      await page.locator('.hero-cta').click();
+      await page.waitForFunction(()=>{const v=document.querySelector('video'),a=document.querySelector('audio');return v?.currentSrc.endsWith('/prepared/video')&&!v.paused&&v.currentTime>.2&&a&&!a.paused;});
+      assert.equal(await page.locator('.player-error').count(),0);
+      report.results.nativeFailurePreparedFallback=true;
+      await page.unroute('**/assets/*/content');
+    }
     report.passed=true;
     await context.close();
   } catch(error) {report.failure=String(error.stack);report.preparations=preparations;const p=browser.contexts()[0]?.pages()[0];if(p) report.diagnostic=await p.evaluate(()=>({url:location.href,buttons:[...document.querySelectorAll('button')].map(b=>b.textContent).slice(-30),error:document.querySelector('.player-error')?.textContent,notice:document.querySelector('.fullscreen-notice')?.textContent,video:{time:document.querySelector('video')?.currentTime,paused:document.querySelector('video')?.paused},audio:{time:document.querySelector('audio')?.currentTime,paused:document.querySelector('audio')?.paused}})).catch(()=>null);process.exitCode=1;}

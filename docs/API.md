@@ -348,3 +348,41 @@ les contrôles de session existants.
 
 
 Playlists et musique : [contrats, autorisations et limites](PLAYLISTS_AND_MUSIC.md#contrat-http).
+
+
+### Catalogue progressif (23 octobre 2026)
+
+`GET /api/v1/catalog?count=false` conserve les filtres et permissions habituels,
+mais omet le comptage exact : `total=null`, `hasMore=true|false`. Le Core lit au
+maximum `limit+1` résultats et décore seulement les `limit` cartes retournées.
+L'interface utilise ce mode pour l'accueil, les grilles et la recherche ;
+l'API garde le comptage exact par défaut (`count=true`). Le coût d'une page
+profonde avec `offset` et les filtres complexes peut encore croître avec la
+bibliothèque. Aucun délai navigateur de 50 ms n'est garanti par ce contrat.
+
+Les sources AV1/Opus internes MKV proposent désormais la vidéo originale avec
+l'audio Opus segmenté, et `preparedVideoUrl` pour un repli explicite si le client
+échoue à décoder cette vidéo. Le repli reste une copie vidéo complète validée
+avant publication : aucun fichier de cache partiel n'est exposé. Les fenêtres
+audio évitent aussi une copie audio complète sur ce parcours MKV.
+
+
+## Détail de série paginé — 23 octobre 2026
+
+`GET /api/v1/catalog/{id}?episodeLimit=24&episodeOffset=0&season=1`
+active une réponse progressive. `episodeLimit` vaut de 1 à 100 ; `episodeOffset`
+est borné à 1 000 000. Sans `season`, la première saison autorisée est choisie.
+La réponse conserve les descripteurs `seasons` avec `episodeCount` mais seuls
+les épisodes de la page sont hydratés dans `seasons[].episodes`. Les épisodes
+comportent `seasonNumber`. La clé `episodesPage` contient
+`{season,offset,limit,nextOffset,hasMore}` ; `season` peut être null lorsqu'aucun
+épisode suivant n'existe.
+
+Pour l'enchaînement, `?episodeAfter={episodeId}&episodeLimit=1` retourne le prochain
+épisode autorisé dans l'ordre saison, numéro d'épisode, identifiant. Une ancre
+inconnue retourne une page vide. Les permissions de bibliothèque, le contrôle
+parental et la présence d'une source disponible s'appliquent **avant** la pagination.
+Les comptes et offsets concernent donc les épisodes admissibles, sans sauter des
+éléments autorisés après un épisode interdit. Le compte exact par saison nécessite
+encore une requête agrégée ; seule l'hydratation des détails est bornée à la page.
+Sans `episodeLimit`, le contrat historique complet est conservé.

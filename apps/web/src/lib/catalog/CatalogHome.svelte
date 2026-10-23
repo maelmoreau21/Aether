@@ -17,8 +17,8 @@
   }: {
     films: Work[];
     series: Work[];
-    totalFilms: number;
-    totalSeries: number;
+    totalFilms: number | null;
+    totalSeries: number | null;
     featured?: Work | null;
     onPlay: (work: Work) => void;
     detailUrl: (work: Work) => string;
@@ -57,7 +57,7 @@
   {#if films.length > 0}
     <MediaShelf
       title="Films récemment ajoutés"
-      count={totalFilms}
+      count={totalFilms || undefined}
       viewAllHref={resolve('films/')}
       viewAllLabel="Tout voir →"
     >
@@ -71,7 +71,7 @@
   {#if series.length > 0}
     <MediaShelf
       title="Séries récemment ajoutées"
-      count={totalSeries}
+      count={totalSeries || undefined}
       viewAllHref={resolve('series/')}
       viewAllLabel="Tout voir →"
     >

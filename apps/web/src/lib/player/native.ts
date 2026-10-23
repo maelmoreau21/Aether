@@ -57,12 +57,12 @@ export class NativePlayer implements Player {
   state(): PlaybackState {
     return { position: this.video.currentTime, duration: this.video.duration, paused: this.video.paused && !this.externalAudio?.isBuffering(), volume: this.video.volume, speed: this.video.playbackRate };
   }
-  async load(media: Media, initialAudioTrackId?: string) {
+  async load(media: Media, initialAudioTrackId?: string, initialPosition: number | Promise<number> = 0) {
     this.media = media;
     this.subtitle = null;
     const source = chooseSource(media, initialAudioTrackId);
     if (!source) throw new Error('Aucune source disponible pour ce média.');
-    try { await this.replace(source, 0, true); }
+    try { await this.replace(source, initialPosition, true); }
     catch(error) { throw new Error(`Piste ${source.language.toUpperCase()} (${source.audioTrackId}) : ${error instanceof Error ? error.message : String(error)}`); }
   }
   private async prepareUrl(url: string) {
@@ -85,7 +85,7 @@ export class NativePlayer implements Player {
     } finally { clearTimeout(timeout); this.preparations.delete(controller); }
     if (this.destroyed) throw new Error('Lecteur fermé.');
   }
-  private async replace(source: Source, position: number, paused: boolean) {
+  private async replace(source: Source, position: number | Promise<number>, paused: boolean) {
     if (this.busy || this.destroyed) throw new Error('Lecteur indisponible pendant le changement de source.');
     const unsupported=unsupportedAudio(source,mime=>this.video.canPlayType(mime));
     if (unsupported) {
@@ -155,7 +155,10 @@ export class NativePlayer implements Player {
 
     const loadCandidate = (candidateUrl: string, timeoutMs=10000) =>
       new Promise<void>((resolve, reject) => {
+        let settled = false;
         const finish = (error?: Error) => {
+          if (settled) return;
+          settled = true;
           clearTimeout(timer);
           this.video.removeEventListener('loadedmetadata', metadata);
           this.video.removeEventListener('seeked', seeked);
@@ -173,9 +176,15 @@ export class NativePlayer implements Player {
           metadataReceived = true;
           this.video.volume = volume;
           this.video.playbackRate = speed;
-          const target = Math.min(position, Math.max(0, this.video.duration - 0.05));
-          if (target > 0) this.video.currentTime = target;
-          else finish();
+          // Resolve saved progress alongside metadata, before audio windows load.
+          // Starting segmented audio at zero then seeking copied two windows and
+          // raced the startup buffer against the newly requested window.
+          void Promise.resolve(position).then(position => {
+            if (settled || this.destroyed) return;
+            const target = Number.isFinite(position) ? Math.max(0, Math.min(position, Math.max(0, this.video.duration - 0.05))) : 0;
+            if (target > 0 && Math.abs(this.video.currentTime - target) > .001) this.video.currentTime = target;
+            else finish();
+          }, error => finish(error instanceof Error ? error : new Error(String(error))));
         };
         const failed = () =>
           finish(
@@ -198,6 +207,16 @@ export class NativePlayer implements Player {
         this.video.load();
       });
 
+    const loadVideo = async (url: string, timeoutMs: number) => {
+      await loadCandidate(url, timeoutMs);
+      if (!source.preparedVideoUrl) return;
+      // Matroska acceptance must include decoded data at the requested position,
+      // not just a MIME hint or a successful container metadata parse.
+      const probe = new AbortController(); this.preparations.add(probe);
+      try { await waitForStartupBuffer(this.video, probe.signal); }
+      finally { this.preparations.delete(probe); }
+    };
+
     try {
       // Load independent, already-prepared Ogg audio while video metadata arrives.
       // Keep it inactive until both resources are ready; segmented Opus needs the
@@ -210,14 +229,21 @@ export class NativePlayer implements Player {
       }
       try {
         this.status(hasFreshDirect ? 'Connexion directe au Media Node…' : 'Chargement de la vidéo…');
-        await loadCandidate(primaryUrl, fallbackUrl ? 2500 : 10000);
-      } catch (primaryErr) {
-        if (fallbackUrl && !this.destroyed) {
-          this.status('Node direct indisponible. Connexion au relais…');
-          await loadCandidate(fallbackUrl,7500);
-        } else {
-          throw primaryErr;
+        try {
+          await loadVideo(primaryUrl, fallbackUrl ? 2500 : 10000);
+        } catch (primaryErr) {
+          if (fallbackUrl && !this.destroyed) {
+            this.status('Node direct indisponible. Connexion au relais…');
+            await loadVideo(fallbackUrl,7500);
+          } else {
+            throw primaryErr;
+          }
         }
+      } catch (originalError) {
+        if (!source.preparedVideoUrl || this.destroyed) throw originalError;
+        this.status('Vidéo originale non lisible sur ce navigateur. Préparation sans réencodage…');
+        await this.prepareUrl(source.preparedVideoUrl);
+        await loadCandidate(source.preparedVideoUrl);
       }
       this.source = source;
       if (source.externalAudioUrl) {

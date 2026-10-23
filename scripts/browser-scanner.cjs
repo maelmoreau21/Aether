@@ -117,7 +117,13 @@ fs.mkdirSync(out, {recursive: true});
     // Reopen with server-persisted indexed language preferences, in both directions.
     report.results.reopenedAudio=[];
     for (const [id,language] of [['internal-2','en'],['internal-1','fr']]) {
-      await page.locator('video').evaluate(v=>{if(v.currentTime>3)v.currentTime=1;});
+      // Preference persistence is independent from the terminal-window case
+      // below. Keep the short fixture paused until its seek has actually settled.
+      await page.locator('video').evaluate(v=>{v.pause();v.currentTime=1;});
+      await page.waitForFunction(()=>{
+        const v=document.querySelector('video'),a=document.querySelector('audio[data-external-audio]');
+        return v.paused&&!v.seeking&&Math.abs(v.currentTime-1)<.1&&a&&!a.seeking&&Math.abs(a.currentTime-v.currentTime)<.3;
+      });
       await openMenu('audio');await page.locator(`[data-audio-id="${id}"]`).click();
       await page.waitForFunction(async language=>{const r=await fetch('/api/v1/preferences');return (await r.json()).audioLanguage===language;},language);
       await page.keyboard.press('Shift');await page.locator('button.return').click();
@@ -126,6 +132,26 @@ fs.mkdirSync(out, {recursive: true});
       await page.waitForFunction(id=>{const v=document.querySelector('video'),a=document.querySelector('audio');return a&&(a.dataset.internalAudioTrack===id||a.currentSrc.endsWith('/prepared/audio-'+id.split('-')[1]))&&!a.paused&&!v.paused;},id);
       assert.equal(await page.getByText('Votre langue précédente est indisponible.',{exact:false}).count(),0);
       report.results.reopenedAudio.push({id,language,passed:true});
+    }
+    if (!long) {
+      // Start a fresh MSE audio timeline in the final packet window. The old
+      // implementation waited forever for bytes after the last Opus packet.
+      await page.locator('video').evaluate(v=>{v.pause();v.currentTime=v.duration-.04;});
+      await page.waitForFunction(()=>{const v=document.querySelector('video');return v.paused&&!v.seeking;});
+      await openMenu('audio');await page.locator('[data-audio-id="internal-2"]').click();
+      await page.waitForFunction(()=>{
+        const v=document.querySelector('video'),a=document.querySelector('audio[data-external-audio]');
+        return a?.dataset.internalAudioTrack==='internal-2'&&v.paused&&
+          !document.querySelector('dialog#player .loading')&&!document.querySelector('.player-error');
+      });
+      const tail=await page.locator('audio[data-external-audio]').evaluate(a=>({duration:a.duration,end:a.buffered.length?a.buffered.end(a.buffered.length-1):0}));
+      assert.ok(Math.abs(await page.locator('video').evaluate(v=>v.duration)-tail.duration)<.15,`Opus tail ${JSON.stringify(tail)}`);
+      await page.locator('video').evaluate(v=>{v.currentTime=1;});
+      await page.waitForFunction(()=>{const v=document.querySelector('video'),a=document.querySelector('audio');return !v.seeking&&a&&!a.seeking&&Math.abs(a.currentTime-v.currentTime)<.3;});
+      await page.locator('video').evaluate(v=>v.play());
+      await page.waitForFunction(()=>{const v=document.querySelector('video'),a=document.querySelector('audio');return !v.paused&&a&&!a.paused&&v.currentTime>1.2;});
+      assert.equal(await page.locator('.player-error').count(),0);
+      report.results.finalAudioWindowAndBackwardSeek=true;
     }
     if (long) {
       const cdp = await context.newCDPSession(page); await cdp.send('Performance.enable');
@@ -233,8 +259,9 @@ fs.mkdirSync(out, {recursive: true});
     await page.keyboard.press('Shift'); await page.locator('button.return').click();
     await page.waitForFunction(()=>!document.querySelector('dialog#player')?.hasAttribute('open'));
     await page.waitForFunction(async()=>{ const r=await fetch('/api/v1/progress'); const data=await r.json(); return data.items.some(item=>item.position>3.8); });
-    // Seeking near the end of a long media can legitimately set watched automatically.
-    if (long && await page.getByRole('button',{name:'Marquer non vu',exact:true}).isVisible()) await page.getByRole('button',{name:'Marquer non vu',exact:true}).click();
+    // The final-window and long-seek regressions can legitimately mark watched.
+    // Establish the unwatched precondition before testing the manual toggle.
+    if (await page.getByRole('button',{name:'Marquer non vu',exact:true}).isVisible()) await page.getByRole('button',{name:'Marquer non vu',exact:true}).click();
     await page.getByRole('button',{name:'Marquer comme vu',exact:true}).click();
     await page.getByRole('button',{name:'Marquer non vu',exact:true}).waitFor();
     await page.getByRole('button',{name:'Marquer non vu',exact:true}).click();

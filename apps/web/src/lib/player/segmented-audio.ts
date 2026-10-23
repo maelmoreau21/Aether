@@ -65,7 +65,7 @@ export class SegmentedAudio extends ExternalAudio {
     });
   }
   private async fill(onlyCurrent = false) {
-    if (this.closed || this.filling || !this.buffer || this.mediaSource.readyState !== 'open') return;
+    if (this.closed || this.filling || !this.buffer || this.mediaSource.readyState === 'closed') return;
     this.filling = true;
     const epoch = this.seekEpoch;
     try {
@@ -120,6 +120,14 @@ export class SegmentedAudio extends ExternalAudio {
         if (Math.abs(chunk-current)>3 && !this.closed) {
           await this.idle();this.buffer.remove(chunk*SECONDS,(chunk+1)*SECONDS);await this.idle();this.loaded.delete(chunk);
         }
+      }
+      // Without EOS an Opus packet ending just before the video's final frame
+      // looks like an infinite network stall. Appending after a backwards seek
+      // reopens an ended MediaSource; do not reject that state above.
+      const last = Math.ceil(this.element.duration / SECONDS) - 1;
+      if (!this.closed && epoch === this.seekEpoch && this.loaded.has(last) && this.mediaSource.readyState === 'open') {
+        await this.idle();
+        if (!this.closed && epoch === this.seekEpoch && this.mediaSource.readyState === 'open') this.mediaSource.endOfStream();
       }
     } finally {
       this.filling=false;

@@ -3,6 +3,8 @@ import { waitForStartupBuffer } from './startup-buffer';
 // Preserve encoded audio and channels; never route production audio through a stereo WebAudio graph.
 // Independent clocks remain client-dependent; seeks and buffering are coordinated explicitly.
 export class ExternalAudio {
+  // One maximum-duration Opus packet (120 ms) plus container rounding.
+  private static readonly END_TOLERANCE = .15;
   protected audio = new Audio();
   private timer?: ReturnType<typeof setInterval>;
   private stallTimer?: ReturnType<typeof setTimeout>;
@@ -39,7 +41,21 @@ export class ExternalAudio {
   private videoPause = () => { this.audio.pause(); if (!this.holdingVideo) this.clearStall(); };
   pause() { this.startup?.abort(); this.resumeEpoch++; this.holdingVideo = false; this.clearStall(); this.audio.pause(); }
   isBuffering() { return this.holdingVideo; }
-  private ended = () => { if (this.video.duration - this.audio.duration > .5) this.error(); };
+  private naturalTail() {
+    const target = this.video.currentTime - this.offset;
+    // Compare encoded durations; an explicit offset may intentionally make
+    // audio finish earlier than video and must not become a truncation error.
+    const gap = this.video.duration - this.audio.duration;
+    return Number.isFinite(gap) && this.audio.duration > 0 &&
+      this.audio.duration + this.offset > 0 &&
+      Math.abs(gap) <= ExternalAudio.END_TOLERANCE &&
+      this.video.duration - target <= ExternalAudio.END_TOLERANCE &&
+      target >= this.audio.duration - .03;
+  }
+  private ended = () => {
+    if (this.naturalTail()) { this.recover(); return; }
+    if (this.video.duration - this.audio.duration > ExternalAudio.END_TOLERANCE) this.error();
+  };
   private wait = () => { this.waiting = true; this.audio.pause(); };
   private resume = () => { this.waiting = false; this.resync(); };
   private afterSeek = () => {
@@ -56,11 +72,12 @@ export class ExternalAudio {
     this.stallTimer = setTimeout(this.error, 10000);
   }
   private audioWaiting = () => {
+    if (this.naturalTail()) { this.audio.pause(); this.recover(); return; }
     if (this.active && !this.audio.seeking && !this.video.seeking && !this.video.paused && !this.waiting) this.holdVideo();
   };
   private audioStalled = () => { if (this.audio.readyState < 3) this.audioWaiting(); };
   private recover = () => {
-    if (!this.active || this.stopped || this.failed || this.audio.seeking || this.audio.readyState < 2) return;
+    if (!this.active || this.stopped || this.failed || this.audio.seeking || (this.audio.readyState < 2 && !this.naturalTail())) return;
     if (this.holdingVideo) {
       const epoch = this.resumeEpoch;
       this.holdingVideo = false; this.clearStall();
@@ -79,6 +96,7 @@ export class ExternalAudio {
   }
   private resync = () => {
     if (!this.active || this.stopped || this.failed || this.audio.readyState < 1 || this.waiting || this.holdingVideo) return;
+    if (this.naturalTail()) { this.audio.pause(); return; }
     const target = this.video.currentTime - this.offset;
     const drift = this.audio.currentTime - target;
     if (!this.video.paused && !this.audio.seeking && Math.abs(drift) > .25 && target >= 0 && target < this.audio.duration) {
@@ -130,8 +148,8 @@ export class ExternalAudio {
       this.audio.src = url; this.audio.load();
     });
     this.settings();
-    if (this.video.currentTime >= this.offset && Number.isFinite(this.audio.duration) && this.video.currentTime - this.offset >= this.audio.duration) throw new Error('La piste audio externe se termine avant cette position.');
-    this.align(true); await this.ready();
+    if (this.video.currentTime >= this.offset && Number.isFinite(this.audio.duration) && this.video.currentTime - this.offset >= this.audio.duration && !this.naturalTail()) throw new Error('La piste audio externe se termine avant cette position.');
+    this.align(true); if (!this.naturalTail()) await this.ready();
     if (this.stopped) throw new Error('Lecteur fermé.');
     if (activate) this.activate();
   }
@@ -145,6 +163,7 @@ export class ExternalAudio {
     this.timer = setInterval(this.resync, 100);
   }
   async bufferForPlayback() {
+    if (this.naturalTail()) return;
     if (!this.align(true)) return;
     await this.ready();
     if (this.stopped || this.failed) throw new Error('Piste audio interrompue.');
@@ -155,6 +174,7 @@ export class ExternalAudio {
   async play() {
     if (this.failed || this.stopped) throw new Error('Piste audio interrompue. Rechargez explicitement la source.');
     this.settings();
+    if (this.naturalTail()) { this.audio.pause(); return; }
     if (this.video.currentTime < this.offset) { this.audio.pause(); return; }
     const target = this.video.currentTime - this.offset;
     if (Number.isFinite(this.audio.duration) && target >= this.audio.duration) throw new Error('La piste audio externe se termine avant cette position.');

@@ -3531,3 +3531,26 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
   réussit en 31,19 s : huit images décodées, lecture/seek/pause, enchaînement
   inter-saisons, révocation/restauration et isolation des comptes. Lancement
   d'épisode mesuré à 1 001 ms sur cette fixture, sans extrapolation NAS.
+
+## 23 octobre 2026 — corrections CI lecteur et multi-Node
+
+- Échec CI `browser_scanner` au retour MKV : vidéo bloquée à 11,95478 s malgré
+  des segments audio HTTP 200. Le MSE audio ne signalait pas sa fin ; le reliquat
+  entre le dernier paquet Opus et la fin vidéo devenait une erreur après 10 s.
+  `endOfStream()` clôt désormais le dernier segment ; un seek peut rouvrir le MSE.
+  La fin vidéo tolère seulement un reliquat de 150 ms (paquet Opus + arrondi),
+  sans supprimer les erreurs de troncature réelle ou de panne en cours de lecture.
+  Les décalages audio explicites restent pris en compte ; les tests de persistance
+  de langue attendent un seek stabilisé en pause, indépendamment du test de fin.
+- Régression Chrome dédiée : nouvelle piste dans les 40 dernières ms, retour à
+  une fenêtre antérieure après EOS, reprise audio/vidéo. Le test remet l'état
+  « non vu » avant le contrôle manuel, car ce seek peut légitimement marquer vu.
+- `distributed_multi_node` attendait à tort la signature MP4 pour l'URL originale
+  MKV. Il vérifie les octets/MIME originaux et, séparément, le repli MP4 préparé,
+  Range GET/HEAD 206, Range invalide 416 et refus utilisateur 403.
+- Validation locale : `cargo test --locked --test distributed_multi_node -j 1 --
+  --nocapture --test-threads=1` réussi (9,47 s) ; `cargo test --locked --test
+  browser_scanner -j 1 -- --ignored --nocapture` réussi (35,70 s), Core/Chrome
+  155.0.8059.86 Windows, MP4/MKV, pixels/PCM et régression fin/seek. Rapports
+  `target/ci-scanner-tail-regression/`. 124 tests Web, check 0/0, lint/build,
+  formatage et Clippy ciblé strict réussis. Linux CI reste à relancer ; aucun push.

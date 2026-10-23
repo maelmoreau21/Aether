@@ -107,7 +107,8 @@
       if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
         media = media.filter(m => m.id !== versionId && getCachedMedia(m.id) !== undefined);
         mediaError = err instanceof Error ? err.message : 'Chargement de l’épisode impossible.';
-        immersive?.reportError(mediaError);
+        // Revalidation failed (e.g. HTTP 403): do not leave the player open on an unusable source.
+        immersive?.close();
       }
     } finally {
       if (episodeLaunchController === controller) {

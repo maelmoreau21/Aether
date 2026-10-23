@@ -7,6 +7,8 @@
     count,
     viewAllHref,
     viewAllLabel = 'Tout voir →',
+    onAction,
+    actionLabel,
     layout = 'row',
     children
   }: {
@@ -14,6 +16,8 @@
     count?: number;
     viewAllHref?: string;
     viewAllLabel?: string;
+    onAction?: () => void;
+    actionLabel?: string;
     layout?: 'row' | 'grid';
     children: Snippet;
   } = $props();
@@ -58,6 +62,13 @@
     </div>
 
     <div class="actions-group">
+      {#if onAction && actionLabel}
+        <button type="button" class="shelf-action-btn" onclick={onAction}>
+          <Icon name="refresh" size={13} />
+          <span>{actionLabel}</span>
+        </button>
+      {/if}
+
       {#if viewAllHref}
         <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- viewAllHref already resolved by caller -->
         <a class="view-all-link" href={viewAllHref}>{viewAllLabel}</a>
@@ -140,6 +151,28 @@
     display: flex;
     align-items: center;
     gap: 16px;
+  }
+
+  .shelf-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    color: var(--color-accent);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .shelf-action-btn:hover {
+    background: var(--color-accent-soft);
+    border-color: var(--color-accent);
+    color: var(--color-accent-hover);
+    transform: translateY(-1px);
   }
 
   .view-all-link {

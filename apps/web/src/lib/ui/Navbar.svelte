@@ -10,6 +10,7 @@
   import { preloadCatalog } from '../catalog/page-cache';
   import { onMount } from 'svelte';
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
   import { session } from '../auth/session';
   import { accessibleLibraries, loadLibraries } from '../catalog/libraries';
   import { asset, resolve } from '$app/paths';
@@ -33,6 +34,12 @@
   function handleScroll() {
     scrolled = window.scrollY > 20;
   }
+
+  function navigateHome(event: MouseEvent) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    void goto(resolve('/'));
+  }
 </script>
 
 <svelte:window onscroll={handleScroll} />
@@ -40,7 +47,7 @@
 <header class="site-header" class:scrolled>
   <div class="header-inner">
     <div class="header-brand-group">
-      <a class="brand" onpointerenter={() => preloadCatalog('home')} onfocus={() => preloadCatalog('home')} href={resolve('/')} aria-label={`${$serverPresentation.serverName || name}, accueil`}>
+      <a class="brand" onpointerenter={() => preloadCatalog('home')} onfocus={() => preloadCatalog('home')} href={resolve('/')} onclick={navigateHome} title="Retour à l’accueil" aria-label={`${$serverPresentation.serverName || name}, accueil`}>
         <div class="brand-logo-wrapper">
           <img src={asset('images/brand-mark.svg')} width="32" height="32" alt="" />
         </div>
@@ -53,6 +60,7 @@
             onpointerenter={() => preloadCatalog('home')}
             onfocus={() => preloadCatalog('home')}
             href={resolve(link.path)}
+            onclick={navigateHome}
             class="nav-link"
             aria-label={link.label}
             class:active={section === link.key}
@@ -125,6 +133,7 @@
 
   .brand {
     display: flex;
+    cursor: pointer;
     align-items: center;
     gap: 10px;
     text-decoration: none;

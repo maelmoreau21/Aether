@@ -5,6 +5,27 @@
 > Toutes les bibliothèques et import d’avatars : [contrat actuel](PLUGIN_SETTINGS_AND_COLLECTIONS.md).
 > Les étapes de confiance explicite historiques ci-dessous sont remplacées par ce contrat.
 
+## Interface des extensions — 23 octobre 2026
+
+Le catalogue et les extensions installées utilisent des cartes avec un visuel
+local déterministe, un nom, une description courte et un état. Les visuels sont
+composés en CSS/SVG, sans téléchargement d’image tiers. Les catégories viennent
+du manifeste, avec un repli basé sur les permissions ; recherche et filtres
+s’appliquent ensemble. Le bouton **Voir les détails** ouvre la fiche avec la
+version sélectionnable, la compatibilité, le développeur, le dépôt et les accès
+demandés. Les paramètres des extensions installées restent séparés de leur
+installation ; activation, bibliothèques, réglages et désinstallation conservent
+les contrats existants. Aucun historique de versions installées n’est inventé.
+
+**Dépôts** présente une liste compacte ; **+ Nouveau dépôt** ouvre le formulaire.
+Les thèmes clair/sombre, le clavier et les petits écrans utilisent les tokens
+existants. Le test navigateur `test-extensions-live.mjs` couvre la découverte sur
+catalogue synthétique (catégorie, recherche vide, fiche et formulaire), puis le
+cycle réel sur SQLite et Wasm signé (paramètres, activation, exécution,
+désactivation, désinstallation). Les captures du catalogue contiennent des
+entrées de démonstration injectées uniquement dans le test, pas dans le produit.
+Aucun dépôt distant ni déploiement NAS n’est validé par ce test.
+
 Dans Administration → Extensions :
 
 1. Ouvrir **Dépôts**, renseigner un nom et l’URL HTTPS du `manifest.json` fourni

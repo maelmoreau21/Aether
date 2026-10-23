@@ -8,10 +8,12 @@
 
   let {
     featured = null,
-    onPlay
+    onPlay,
+    onRandomize
   }: {
     featured?: Work | null;
     onPlay?: (work: Work) => void;
+    onRandomize?: () => void;
   } = $props();
 
   const detailUrl = $derived(
@@ -124,6 +126,19 @@
           <Icon name="info" size={20} />
           <span>Plus d'infos</span>
         </a>
+
+        {#if onRandomize}
+          <button
+            type="button"
+            class="btn-tertiary"
+            onclick={onRandomize}
+            title="Découvrir un autre titre au hasard"
+            aria-label="Découvrir un autre titre au hasard"
+          >
+            <Icon name="sparkles" size={18} />
+            <span>Surprenez-moi</span>
+          </button>
+        {/if}
       {:else}
         <a class="btn-primary" href={resolve('films/')}>
           <Icon name="film" size={18} />
@@ -247,6 +262,7 @@
     color: var(--accent-secondary);
     background: rgba(251, 191, 36, 0.15);
     border: 1px solid rgba(251, 191, 36, 0.25);
+    backdrop-filter: blur(8px);
   }
 
   .mpaa-pill {
@@ -351,6 +367,32 @@
     transform: translateY(-2px);
   }
 
+  .btn-tertiary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 0 20px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    color: var(--color-accent);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .btn-tertiary:hover {
+    background: var(--color-accent-soft);
+    border-color: var(--color-accent);
+    color: var(--color-accent-hover);
+    transform: translateY(-2px);
+  }
+
   @media (max-width: 768px) {
     .hero-banner {
       min-height: 360px;
@@ -362,10 +404,10 @@
       width: 100%;
     }
 
-    .btn-primary, .btn-secondary {
+    .btn-primary, .btn-secondary, .btn-tertiary {
       flex: 1;
       min-height: 44px;
-      padding: 0 16px;
+      padding: 0 14px;
       font-size: 13px;
     }
   }

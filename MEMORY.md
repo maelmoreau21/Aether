@@ -1,5 +1,44 @@
 # MEMORY.md — État et décisions Aether
 
+## 23 octobre 2026 — Navigation retour accueil sur le logo Aether (Paramètres et Administration)
+
+- **Gestion du retour à l'accueil via le logo Aether** :
+  - Dans `apps/web/src/lib/ui/Navbar.svelte` (utilisé dans les Paramètres personnels `/settings`) :
+    - Ajout du gestionnaire `navigateHome` avec appel direct à `goto(resolve('/'))` lors du clic sur le logo (`a.brand`) et le lien Accueil, avec support des touches modificatrices (Ctrl/Cmd).
+    - Ajout de l'infobulle accessible `title="Retour à l’accueil"` et du style `cursor: pointer`.
+  - Dans `apps/web/src/routes/admin/libraries/+page.svelte` (Administration du serveur / Paramètres système) :
+    - Ajout du logo Aether (`a.brand.admin-brand`) dans l'en-tête d'administration (`admin-header`), permettant également de revenir directement à l'accueil via un clic ou le lien de retour.
+- **Validations réelles exécutées** :
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web test` : 124 tests unitaires passés avec succès.
+  - `npm --prefix apps/web run lint` : 0 erreur.
+  - `npm --prefix apps/web run build` : build statique de production SvelteKit réussi.
+  - Test E2E Playwright de navigation validé (clic sur logo dans `/settings/` et dans `/admin/libraries/` redirigeant vers `/app/`).
+
+## 23 octobre 2026 — Page d'accueil orientée découverte et retrait des filtres
+
+- **Retrait du menu « Filtrer le catalogue » sur la page d'accueil** :
+  - Conditionnement de `<CatalogFilters />` dans `apps/web/src/lib/catalog/Catalog.svelte` pour n'apparaître que dans les sections de catalogue dédiées (`films`, `series`, `search`), et plus sur l'accueil (`home`) ni les paramètres.
+- **Dynamisation et enrichissement de la découverte sur la page d'accueil** :
+  - **HeroBanner interactif et tournant** : rotation dynamique parmi les œuvres avec visuel de fond (`artwork.backdrop`), évitant l'affichage statique permanent du tout premier média, et ajout du bouton « Surprenez-moi » permettant de changer de recommandation en vedette à la volée.
+  - **Rayon « Pépites au hasard · À découvrir »** : sélection aléatoire renouvelée à chaque session ou via le bouton d'action « Mélanger », invitant à redécouvrir des œuvres inattendues de la médiathèque.
+  - **Rayons thématiques et qualitatifs conditionnels** : ajout des étagères « Les mieux notés · Coups de cœur », « Grands classiques & Cinéma d'époque » (œuvres antérieures à 2010), « Séries à dévorer · Formats courts » (saisons $\le 2$), et rotation aléatoire des genres découverts à chaque visite.
+  - **Composant `MediaShelf` enrichi** : prise en charge d'un bouton d'action dédié (`onAction` / `actionLabel`) intégré à la barre d'en-tête de l'étagère.
+- **Validations réelles exécutées** :
+  - `pnpm --filter media-web check` : 0 erreur, 0 avertissement.
+  - `pnpm --filter media-web test` : 124 tests unitaires passés avec succès.
+  - `pnpm --filter media-web lint` : validé sans erreur.
+  - `pnpm --filter media-web build` : build statique de production SvelteKit réussi.
+  - `cargo fmt --check` et tests Rust `product_tests` (6/6 passés).
+
+## 23 octobre 2026 — Refonte de l’interface des extensions
+
+- Catalogue et installées en cartes à visuels CSS/SVG locaux ; catégories issues des manifestes/permissions, recherche combinée, fiche catalogue dédiée avec choix de version, compatibilité, provenance et accès. Aucune image distante ni extension produit ajoutée.
+- Dépôts en liste compacte avec formulaire « Nouveau dépôt » repliable ; fiche installée enrichie avec visuel, état, version et auteur. Contrats Core, réglages, activation et permissions conservés.
+- Validation : `npm run check` (0 erreur/0 avertissement), `npm run lint`, `npm run build`, `git diff --check` réussis. `cargo test --locked -p media-poc --test extensions browser_extension_installs_and_executes_real_rust_module -j 1 -- --ignored --nocapture --test-threads=1` : 1 passé (13,90 s).
+- Chrome desktop/mobile : catégories, recherche sans résultat, fiche catalogue, formulaire dépôt et absence de débordement ; cycle réel SQLite/Wasm signé activation/exécution/désactivation/désinstallation réussi. Captures sous `target/extensions-lifecycle-browser/`. Les entrées de démonstration du catalogue sont injectées par Playwright uniquement. Aucun dépôt distant, NAS ou déploiement vérifié.
+
+
 ## 23 octobre 2026 — Correction du test E2E browser_scanner (reopenedAudio)
 
 - **Diagnostic de l'échec ligne 113 de scripts/browser-scanner.cjs** :

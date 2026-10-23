@@ -39,6 +39,11 @@
   type Repository = { id: string; name: string; url: string; refreshedAt: number };
   type CatalogueEntry = { repositoryId: string; repositoryName: string; compatible: boolean; manifest: Manifest; publisherId: string; publicKey: string };
   let tab = $state<'installed' | 'catalogue' | 'repositories'>('catalogue');
+  let category = $state('all');
+  let catalogueId = $state<string | null>(null);
+  let addingRepository = $state(false);
+  const categoryOf = (manifest: Manifest) => manifest.category || (manifest.permissions.includes('avatars') ? 'Avatars' : manifest.permissions.includes('metadata.read') ? 'Métadonnées' : 'Général');
+  const hueOf = (id: string) => ([...id].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) % 360, 0) * 137.508) % 360;
   let managedId = $state<string | null>(null);
   let repositories = $state<Repository[]>([]);
   let catalogue = $state<CatalogueEntry[]>([]);
@@ -90,6 +95,7 @@
     return ({ poster: 'poster', backdrop: 'backdrop', logo: 'logo', banner: 'banner', thumb: 'thumb', clear_art: 'illustration', disc_art: 'disc' } as Record<string,string>)[type];
   }
   let installed = $state<Installed[]>([]);
+  const categories = $derived([...new Set([...catalogue.map(entry => categoryOf(entry.manifest)), ...installed.map(entry => categoryOf(entry.manifest))])].sort());
   let libraries = $state<Library[]>([]);
   let runs = $state<Run[]>([]);
   let audit = $state<{ actorId: string; extensionId: string; action: string; createdAt: number }[]>([]);
@@ -107,6 +113,7 @@
   let filter = $state('all');
   let search = $state('');
   const visibleExtensions = $derived(installed.filter(extension =>
+    (category === 'all' || categoryOf(extension.manifest) === category) &&
     (filter === 'all' || extension.enabled === (filter === 'enabled')) &&
     `${extension.manifest.name} ${extension.manifest.description}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())
   ));
@@ -200,35 +207,51 @@
     event.preventDefault();
     await perform(async () => {
       await adminRequest('/api/v1/admin/extensions/repositories',{method:'POST',body:JSON.stringify({name:repositoryName.trim() || new URL(repositoryUrl).hostname.slice(0,80),url:repositoryUrl})});
-      repositoryName=''; repositoryUrl=''; tab='catalogue';
+      repositoryName=''; repositoryUrl=''; addingRepository=false; tab='catalogue';
     },'Dépôt enregistré. Ses extensions sont disponibles dans le catalogue.');
   }
   async function installFromCatalogue(entry: CatalogueEntry) {
     await perform(async () => {
       await adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(entry.repositoryId)}/install`,{method:'POST',body:JSON.stringify({extensionId:entry.manifest.id,version:entry.manifest.version})});
-      tab='installed'; managedId=entry.manifest.id; allLibraries[entry.manifest.id]=true;
+      tab='installed'; catalogueId=null; managedId=entry.manifest.id; allLibraries[entry.manifest.id]=true;
     },'Extension installée. Configurez-la puis activez-la.');
   }
 </script>
 
+{#snippet artwork(manifest: Manifest)}
+  <div class="extension-artwork" style={`--art-hue:${hueOf(manifest.id)}`}>
+    <span class="art-symbol"><Icon name={manifest.permissions.includes('avatars') ? 'profile' : manifest.permissions.includes('metadata.read') ? 'film' : 'globe'} size={48} /></span>
+    <strong>{displayName(manifest.name)}</strong><span class="art-category">{categoryOf(manifest)}</span>
+  </div>
+{/snippet}
+
 <section id="extensions-section" aria-labelledby="extensions-heading">
   <div class="heading page-heading"><h2 id="extensions-heading">Extensions</h2>{#if tab==='catalogue'}<button aria-label="Actualiser les dépôts" disabled={busy || repositories.length===0} onclick={refreshRepositories}><Icon name="refresh" size={16} /> Actualiser</button>{:else}<button disabled={busy} onclick={reload}><Icon name="refresh" size={16} /> Actualiser</button>{/if}</div>
+  <p class="page-intro">Personnalisez votre médiathèque. Découvrez, installez et gérez vos extensions.</p>
   <nav class="extension-tabs" aria-label="Gestion des extensions">
     <button aria-label="Installées" class:active={tab==='installed'} aria-current={tab==='installed' ? 'page' : undefined} onclick={() => tab='installed'}>Installées ({installed.length})</button>
     <button aria-label="Catalogue" class:active={tab==='catalogue'} aria-current={tab==='catalogue' ? 'page' : undefined} onclick={() => tab='catalogue'}>Catalogue <span>{catalogueGroups.length}</span></button>
     <button aria-label="Dépôts" class:active={tab==='repositories'} aria-current={tab==='repositories' ? 'page' : undefined} onclick={() => tab='repositories'}>Dépôts ({repositories.length})</button>
   </nav>
+  {#if (tab === 'installed' && !managed) || (tab === 'catalogue' && !catalogueId)}
+    <div class="category-filters" aria-label="Catégories">
+      <button class:chosen={category === 'all'} aria-pressed={category === 'all'} onclick={() => category='all'}>Tout</button>
+      {#each categories as item (item)}<button class:chosen={category === item} aria-pressed={category === item} onclick={() => category=item}>{item}</button>{/each}
+    </div>
+  {/if}
   {#if busy}<p class="loading-notice" role="status">Chargement…</p>{/if}
   {#if error}<p role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if tab==='repositories'}
     <p class="repository-warning">Les plugins tiers peuvent présenter un danger. Ajoutez uniquement des dépôts dont vous connaissez la source.</p>
-    <div class="section-title"><Icon name="server" size={20} /><h3>Vos sources d’extensions</h3></div>
+    <div class="section-title"><h3>Vos dépôts</h3><button class="primary" aria-expanded={addingRepository} onclick={() => addingRepository=!addingRepository}>{addingRepository ? "Fermer" : "+ Nouveau dépôt"}</button></div>
+    {#if addingRepository}
     <form class="repository-form" onsubmit={addRepository}>
       <label>Nom du dépôt (facultatif)<input maxlength="80" bind:value={repositoryName} disabled={busy} /></label>
       <label>Adresse du dépôt<input type="url" required maxlength="2048" placeholder="https://exemple.fr/manifest.json" bind:value={repositoryUrl} disabled={busy} /></label>
       <button disabled={busy}>Ajouter le dépôt</button>
     </form>
+    {/if}
     {#each repositories as repository (repository.id)}
       <article class="card repository-card"><div class="repository-heading"><span class="extension-icon"><Icon name="server" size={22} /></span><div><h4>{repository.name}</h4><p>{repository.refreshedAt ? `Actualisé le ${new Date(repository.refreshedAt*1000).toLocaleString()}` : 'Catalogue à récupérer'}</p></div>{#if repository.id==='community-default'}<span class="badge">Préconfiguré</span>{/if}</div><code class="repository-url">{repository.url}</code>
         <div class="actions"><button disabled={busy} onclick={() => perform(() => adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(repository.id)}/refresh`,{method:'POST'}),'Catalogue actualisé.')}>Actualiser ce dépôt</button>
@@ -236,24 +259,43 @@
       </article>
     {:else}<p>Aucun dépôt enregistré.</p>{/each}
   {:else if tab==='catalogue'}
-    {#if repositories.some(repository => !repository.refreshedAt)}<div class="catalogue-pending"><Icon name="info" size={20} /><div><strong>Catalogue à charger</strong><p>Actualisez pour afficher les extensions.</p></div></div>{/if}
-    <label class="catalogue-search">Rechercher dans le catalogue<input type="search" bind:value={search} placeholder="Nom ou description" /></label>
-    <p class="section-help">Après installation, activez vos choix dans Installées.</p>
+    {#if !catalogueId && repositories.some(repository => !repository.refreshedAt)}<div class="catalogue-pending"><Icon name="info" size={20} /><div><strong>Un dépôt attend sa première actualisation</strong><p>Actualisez les dépôts pour récupérer leurs extensions.</p></div></div>{/if}
+    {#if !catalogueId}<label class="catalogue-search">Rechercher dans le catalogue<input type="search" bind:value={search} placeholder="Nom ou description" /></label>
+    <p class="section-help">Après installation, activez vos choix dans Installées.</p>{/if}
+    {#if catalogueId}
+      {@const group = catalogueGroups.find(item => item.key === catalogueId)}
+      {#if group}
+        {@const entry = group.entries.find(item => item.manifest.version === catalogueVersions[group.key]) ?? group.entries[0]}
+        {@const existing = installed.find(item => item.manifest.id === entry.manifest.id)}
+        <button class="back-installed" onclick={() => catalogueId=null}><Icon name="chevron-left" size={16} /> Retour au catalogue</button>
+        <div class="catalogue-detail">
+          <div><h3>{displayName(entry.manifest.name)}</h3><p>{entry.manifest.description}</p>
+            <h4>Versions disponibles</h4>
+            <label>Version à installer<select bind:value={catalogueVersions[group.key]} disabled={busy}>{#each group.entries as version (version.manifest.version)}<option value={version.manifest.version}>{version.manifest.version}{version.compatible ? '' : ' · incompatible'}</option>{/each}</select></label>
+            <h4>Accès demandés</h4><p>{accessLabels(entry.manifest.permissions) || 'Aucun accès supplémentaire'}</p><p>Services contactés : {entry.manifest.httpHosts?.join(', ') || 'aucun'}</p>
+          </div>
+          <aside>{@render artwork(entry.manifest)}<dl><div><dt>Développeur</dt><dd>{entry.manifest.author}</dd></div><div><dt>Dépôt</dt><dd>{entry.repositoryName}</dd></div><div><dt>Compatibilité</dt><dd>{entry.compatible ? 'Compatible' : 'Incompatible'}</dd></div></dl>
+            {#if existing}<button class="primary" onclick={() => {tab='installed';managedId=existing.manifest.id;catalogueId=null;}}>Paramètres de {displayName(existing.manifest.name)}</button>{:else}<button class="primary" disabled={busy || !entry.compatible} onclick={() => installFromCatalogue(entry)}>Installer {displayName(entry.manifest.name)}</button>{/if}
+            <p class="section-help">{existing ? 'Cette extension est déjà installée. Retrouvez sa configuration dans les paramètres.' : 'L’installation conserve l’extension désactivée. Vous pourrez ensuite la configurer et l’activer.'}</p>
+          </aside>
+        </div>
+      {/if}
+    {:else}
     <div class="plugins-grid">
-    {#each catalogueGroups.filter(group=>`${group.entries[0].manifest.name} ${group.entries[0].manifest.description}`.toLowerCase().includes(search.toLowerCase())) as group (group.key)}
+    {#each catalogueGroups.filter(group=>(category === 'all' || categoryOf(group.entries[0].manifest) === category) && `${group.entries[0].manifest.name} ${group.entries[0].manifest.description}`.toLowerCase().includes(search.toLowerCase())) as group (group.key)}
       {@const entry=group.entries.find(item => item.manifest.version===catalogueVersions[group.key]) ?? group.entries[0]}
       {@const existing=installed.find(item => item.manifest.id===entry.manifest.id)}
       <article class="card plugin-card catalogue-card">
+        <button class="artwork-button" aria-label={`Détails de ${displayName(entry.manifest.name)}`} onclick={() => catalogueId=group.key}>{@render artwork(entry.manifest)}</button>
         <div class="catalogue-identity"><span class="extension-icon"><Icon name={entry.manifest.permissions.includes('avatars') ? 'profile' : 'globe'} size={28} /></span>{#if existing || !entry.compatible}<span class="badge" class:success={!!existing}>{existing ? 'Installée' : 'Incompatible'}</span>{/if}</div>
         <div class="catalogue-content"><h4>{displayName(entry.manifest.name)}</h4><p class="plugin-desc">{shortDescription(entry.manifest.description)}</p>
-        {#if !entry.compatible}<p>Cette version n’est pas compatible avec votre serveur.</p>{/if}
-        {#if existing}<p>Version {existing.manifest.version} installée.</p>{/if}
-        <details class="access-details"><summary>Détails et accès</summary><p>{entry.manifest.description}</p><p>{entry.manifest.author} · {entry.repositoryName}</p><p>{accessLabels(entry.manifest.permissions)}</p><p>Services contactés : {entry.manifest.httpHosts?.join(', ') || 'aucun'}</p></details>
+        <button class="details-link" onclick={() => catalogueId=group.key}>Voir les détails <Icon name="chevron-right" size={14} /></button>
         </div><div class="catalogue-actions">{#if group.entries.length>1}<label for={`extension-version-${group.key}`}>Version<select aria-label={`Version de ${entry.manifest.name}`} id={`extension-version-${group.key}`} bind:value={catalogueVersions[group.key]} disabled={busy}>{#each group.entries as option (option.manifest.version)}<option value={option.manifest.version}>{option.manifest.version}{option.compatible ? '' : ' · incompatible'}</option>{/each}</select></label>{:else}<span class="version-label">v{entry.manifest.version}</span>{/if}
         <button class="primary" aria-label={existing ? `${entry.manifest.name} déjà installée` : `Installer ${entry.manifest.name}`} disabled={busy || !entry.compatible || !!existing} onclick={() => installFromCatalogue(entry)}>{existing ? 'Déjà installée' : 'Installer'}</button></div>
       </article>
     {:else}<p>Aucune extension ne correspond. Ajoutez un dépôt ou modifiez votre recherche.</p>{/each}
     </div>
+    {/if}
   {:else}
   {#if managed}
     {@const extension=managed}
@@ -265,6 +307,8 @@
       {#if extension.manifest.configSchema?.length}<ExtensionSettings fields={extension.manifest.configSchema} bind:values={editingSettings[extension.manifest.id]} {busy} onsave={()=>void saveSettings(extension.manifest.id)} />{:else}<p>Aucun paramètre supplémentaire.</p>{/if}
       {#if extension.manifest.permissions.includes('avatars')}<AvatarCollections extensionId={extension.manifest.id} />{/if}
       </div><aside class="detail-sidebar">
+      {@render artwork(extension.manifest)}
+      <dl><div><dt>État</dt><dd>{extension.enabled ? "Activée" : "Désactivée"}</dd></div><div><dt>Version</dt><dd>{extension.manifest.version}</dd></div><div><dt>Développeur</dt><dd>{extension.manifest.author}</dd></div></dl>
       {#if extension.manifest.permissions.includes('metadata.read')}
         <h4>Métadonnées</h4><p>Le Core interroge ce fournisseur pour les œuvres concernées.</p>
         <label>Utilisation<select aria-label="Utilisation" disabled={busy} bind:value={allLibraries[extension.manifest.id]}><option value={true}>Toutes les bibliothèques</option><option value={false}>Certaines bibliothèques</option></select></label>
@@ -316,7 +360,7 @@
     </div>
   {:else}
   <div class="installed-filters"><label>Rechercher<input type="search" bind:value={search} /></label><label>État<select bind:value={filter}><option value="all">Toutes</option><option value="enabled">Activées</option><option value="disabled">Désactivées</option></select></label></div>
-  <div class="plugins-grid">{#each visibleExtensions as extension (extension.manifest.id)}<article class="card plugin-card installed-card"><div class="plugin-header"><div class="plugin-title-row"><div class="installed-identity"><span class="extension-icon"><Icon name={extension.manifest.permissions.includes('avatars')?'profile':'globe'} size={22} /></span><div><h3>{displayName(extension.manifest.name)}</h3><small>v{extension.manifest.version}</small></div></div><span class="badge" class:success={extension.enabled}>{extension.enabled?'Activée':'Désactivée'}</span></div><p class="plugin-desc">{shortDescription(extension.manifest.description)}</p><button disabled={busy} onclick={()=>managedId=extension.manifest.id}>Paramètres de {displayName(extension.manifest.name)}</button></div></article>{:else}<p>Aucune extension installée.</p>{/each}</div>
+  <div class="plugins-grid">{#each visibleExtensions as extension (extension.manifest.id)}<article class="card plugin-card installed-card"><button class="artwork-button" aria-label={`Ouvrir ${displayName(extension.manifest.name)}`} onclick={()=>managedId=extension.manifest.id}>{@render artwork(extension.manifest)}</button><div class="plugin-header"><div class="plugin-title-row"><div class="installed-identity"><span class="extension-icon"><Icon name={extension.manifest.permissions.includes('avatars')?'profile':'globe'} size={22} /></span><div><h3>{displayName(extension.manifest.name)}</h3><small>v{extension.manifest.version}</small></div></div><span class="badge" class:success={extension.enabled}>{extension.enabled?'Activée':'Désactivée'}</span></div><p class="plugin-desc">{shortDescription(extension.manifest.description)}</p><button disabled={busy} onclick={()=>managedId=extension.manifest.id}>Paramètres de {displayName(extension.manifest.name)}</button></div></article>{:else}<p>Aucune extension installée.</p>{/each}</div>
   {/if}
   <details class="execution-history"><summary>Dernières exécutions ({runs.length})</summary>
   {#each runs as run (run.id)}
@@ -349,7 +393,7 @@
   button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 13px;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);cursor:pointer;font:inherit;font-size:13px;min-height:38px;}button:hover:not(:disabled){border-color:var(--accent-primary);}button:focus-visible,summary:focus-visible{outline:2px solid var(--accent-primary);outline-offset:3px;}button:disabled{opacity:.45;cursor:default;}button.primary{background:var(--color-accent-solid);color:white;border-color:transparent;}
   form{display:grid;gap:14px;margin:16px 0;}label{display:grid;gap:6px;color:var(--text-secondary);font-size:13px;}input:not([type=checkbox]),select{width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);font:inherit;}input[type=checkbox]{accent-color:var(--accent-primary);}.check{display:flex;align-items:center;gap:9px;}
   .catalogue-search{max-width:420px;margin:20px 0 8px;}.section-help{font-size:13px;margin:12px 0 22px;}.plugins-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr));gap:16px;align-items:start;}.card{border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-surface);min-width:0;}.plugin-card{overflow:hidden;}.catalogue-identity{display:flex;align-items:center;justify-content:space-between;padding:20px 20px 0;}.extension-icon{width:46px;height:46px;display:inline-flex;align-items:center;justify-content:center;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-md);color:var(--accent-primary);flex-shrink:0;}.badge{font-size:11px;background:var(--bg-elevated);padding:4px 8px;border-radius:var(--radius-sm);color:var(--text-secondary);white-space:nowrap;}.badge.success{color:var(--status-success);}.catalogue-content{padding:18px 20px 0;flex:1;}.catalogue-card{display:flex;flex-direction:column;height:100%;box-sizing:border-box;}.plugin-desc{font-size:13px;margin:10px 0;}.catalogue-card .plugin-desc{min-height:4.6em;}.catalogue-actions{display:flex;align-items:end;gap:12px;padding:16px 20px 20px;justify-content:space-between;border-top:1px solid var(--border-subtle);margin-top:16px;}.catalogue-actions label{min-width:75px;max-width:110px;}.catalogue-actions button{flex:1;}
-  details{border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:12px;margin:14px 0;min-width:0;}summary{cursor:pointer;font-size:13px;font-weight:600;}.access-details{border:0;padding:0;margin:12px 0;font-size:12px;}.access-details p{font-size:12px;}.catalogue-pending{display:flex;gap:12px;padding:18px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-md);margin:20px 0;}.catalogue-pending p{font-size:13px;margin:5px 0 0;}
+  details{border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:12px;margin:14px 0;min-width:0;}summary{cursor:pointer;font-size:13px;font-weight:600;}.catalogue-pending{display:flex;gap:12px;padding:18px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-md);margin:20px 0;}.catalogue-pending p{font-size:13px;margin:5px 0 0;}
   .repository-form{max-width:760px;grid-template-columns:1fr 2fr auto;align-items:end;padding:20px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md);}.repository-card{padding:20px;margin:16px 0;}.repository-heading{display:flex;align-items:center;gap:12px;margin-bottom:14px;}.repository-heading p{font-size:12px;margin:4px 0;}.repository-heading .badge{margin-left:auto;}.repository-url{display:block;overflow-wrap:anywhere;white-space:normal;font-size:12px;color:var(--text-secondary);}.repository-card .actions{margin:16px 0;}
   .installed-identity{display:flex;align-items:center;gap:12px;min-width:0;}.plugin-header{padding:20px 20px 0;}.plugin-title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}fieldset{border:1px solid var(--border-subtle);border-radius:var(--radius-sm);display:grid;gap:10px;margin:18px 0;padding:16px;}legend{font-size:13px;}code{overflow-wrap:anywhere;white-space:normal;}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto;font-size:12px;}.execution-history{margin-top:24px;}.execution-history .card{padding:16px;margin-top:12px;}
   [role=alert],[role=status]{padding:12px 16px;border-radius:var(--radius-sm);background:var(--bg-elevated);font-size:13px;}[role=alert]{border-left:3px solid var(--status-error);} [role=status]{color:var(--text-secondary);}
@@ -358,4 +402,22 @@
 
 .extension-detail{margin-top:24px;}.back-installed{display:inline-flex;align-items:center;gap:8px;background:transparent;border:0;padding:8px 0;margin-bottom:24px;color:var(--text-secondary);}.detail-heading{display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap;}.detail-name{display:flex;gap:16px;align-items:center;}.detail-name h3{font-size:26px;margin:0 0 6px;}.detail-description{font-size:14px;margin:20px 0 32px;max-width:760px;}.detail-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:32px;align-items:start;}.detail-primary{min-width:0;padding:28px;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-surface);}.detail-sidebar{padding:24px;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-surface);min-width:0;}.detail-sidebar>details{padding:18px 0;border-top:1px solid var(--border-subtle);margin-top:20px;}.detail-sidebar h4{font-size:16px;}.detail-sidebar p{font-size:13px;}.activation{display:flex;align-items:center;gap:12px;font-size:14px;}.activation input{appearance:none;width:42px;height:24px;flex:0 0 42px;border-radius:20px;position:relative;background:var(--text-muted,#777);cursor:pointer;}.activation input::after{content:'';position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:white;}.activation input:checked{background:var(--color-accent);}.activation input:checked::after{transform:translateX(18px);}.provider-test{padding:20px;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);margin-top:24px;}.provider-test summary{font-size:14px;}.provider-test form{margin-top:20px;}.uninstall button{margin-top:12px;}.activation input:focus-visible{outline:2px solid var(--color-accent);outline-offset:3px;}@media(max-width:900px){.detail-layout{grid-template-columns:1fr;gap:20px;}.detail-primary,.detail-sidebar{padding:20px;}.detail-name h3{font-size:22px;}}
 .repository-warning{font-size:13px;color:var(--text-secondary);padding:14px 0;}
+
+  .details-link{background:transparent;border:0;padding:6px 0;color:var(--accent-primary);}.page-intro{margin:8px 0 26px;font-size:14px;}
+  .extension-tabs{gap:8px;align-items:center;flex-wrap:wrap;padding-bottom:18px;margin-bottom:18px;}
+  .extension-tabs button{border:1px solid transparent;border-radius:24px;background:var(--bg-elevated);padding:10px 20px;}
+  .extension-tabs button.active,.category-filters .chosen{background:var(--color-accent-solid);color:white;border-color:transparent;}
+  .category-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;}.category-filters button{border-radius:24px;padding:8px 16px;}
+  .plugins-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,270px),1fr));gap:24px;align-items:stretch;}
+  .plugin-card{border:1px solid var(--border-subtle);border-radius:8px;transition:transform .18s,border-color .18s;}.plugin-card:focus-within,.plugin-card:hover{border-color:var(--accent-primary);transform:translateY(-3px);}
+  .artwork-button{display:block;width:100%;padding:0;border:0;border-radius:0;background:transparent;text-align:center;height:auto;}
+  .extension-artwork{box-sizing:border-box;position:relative;isolation:isolate;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;width:100%;aspect-ratio:16/9;padding:24px;background:linear-gradient(135deg,hsl(var(--art-hue) 35% 23%),hsl(var(--art-hue) 42% 9%));color:#fff;}
+  .extension-artwork::before{content:'';position:absolute;z-index:-1;width:220px;height:220px;border:1px solid #ffffff15;border-radius:50%;right:-65px;top:-100px;box-shadow:0 0 0 35px #ffffff04,0 0 0 70px #ffffff03;}
+  .extension-artwork strong{color:white;font-size:22px;line-height:1.2;text-wrap:balance;}.art-symbol{color:hsl(var(--art-hue) 75% 78%);}.art-category{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#ffffffa8;}
+  .catalogue-identity{padding:14px 20px 0;min-height:22px;}.catalogue-identity>.extension-icon{display:none;}.catalogue-content{padding-top:10px;}.catalogue-actions{margin-top:auto;}.plugin-header{padding-bottom:20px;}.installed-identity>.extension-icon{display:none;}.installed-card .plugin-header button{width:100%;margin-top:10px;}.plugin-desc{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .repository-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 24px;border:0;border-radius:0;border-bottom:1px solid var(--border-subtle);margin:0;padding:24px;}.repository-heading{grid-column:1;margin:0;}.repository-url{grid-column:1;padding-left:58px;}.repository-card .actions{grid-column:2;grid-row:1 / 3;margin:0;}.repository-card>small{grid-column:1 / -1;padding-left:58px;}.section-title{justify-content:space-between;margin-bottom:20px;}.repository-form{max-width:none;}
+  .catalogue-detail{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,36%);gap:48px;margin-top:16px;}.catalogue-detail h3{font-size:30px;}.catalogue-detail h4{margin:32px 0 16px;}.catalogue-detail select{max-width:320px;}.catalogue-detail aside>button{width:100%;}.catalogue-detail aside{min-width:0;}.catalogue-detail .extension-artwork,.detail-sidebar .extension-artwork{border-radius:6px;}
+  dl{margin:20px 0;}dl>div{display:grid;grid-template-columns:100px minmax(0,1fr);gap:12px;padding:16px 0;border-bottom:1px solid var(--border-subtle);font-size:13px;}dt{color:var(--text-secondary);}dd{margin:0;overflow-wrap:anywhere;color:var(--text-primary);}.detail-layout{grid-template-columns:minmax(0,1fr) minmax(280px,34%);}.detail-sidebar{padding:20px;}.uninstall>button{color:var(--status-error);border-color:var(--status-error);}
+  @media(prefers-reduced-motion:reduce){.plugin-card{transition:none;}.plugin-card:hover,.plugin-card:focus-within{transform:none;}}
+  @media(max-width:700px){.plugins-grid{gap:16px;}.catalogue-detail,.detail-layout{grid-template-columns:1fr;gap:24px;}.catalogue-detail aside{grid-row:1;}.repository-card{grid-template-columns:1fr;padding:18px;}.repository-card .actions{grid-column:1;grid-row:auto;justify-content:flex-start;}.repository-url,.repository-card>small{padding-left:0;}.extension-tabs button{padding:10px 14px;}.catalogue-search{max-width:none;}}
 </style>

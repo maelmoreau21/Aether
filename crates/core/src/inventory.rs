@@ -2055,6 +2055,8 @@ pub async fn catalogue_filtered(
         }));
     }
 
+    // Artwork is resolved once per page by decorate_many below, including hidden
+    // images and manual ordering; correlated per-work image reads are redundant.
     let mut data_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
         "SELECT w.*, COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=w.library_id AND f.active=1),w.library_id) AS display_library_id, wl.node_id AS node_id, wn.status AS node_status, \
            CASE WHEN w.kind = 'series' THEN ( \
@@ -2079,14 +2081,7 @@ pub async fn catalogue_filtered(
              JOIN media_nodes n ON n.id=l.node_id \
              WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
            ) ELSE NULL END AS episode_count, \
-           (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
-            FROM inventory_images i \
-            JOIN libraries il ON il.id=i.library_id \
-            JOIN media_nodes in_node ON in_node.id=il.node_id \
-            WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND in_node.status='connected' \
-            ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url, \
-           (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i WHERE i.work_id=w.id AND i.role='backdrop' AND i.available=1 AND i.root_snapshot=wl.root AND wn.status='connected' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS backdrop_url, \
-           (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i WHERE i.work_id=w.id AND i.role='logo' AND i.available=1 AND i.root_snapshot=wl.root AND wn.status='connected' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS logo_url \
+           CAST(NULL AS TEXT) AS poster_url, CAST(NULL AS TEXT) AS backdrop_url, CAST(NULL AS TEXT) AS logo_url \
          FROM inventory_works w \
          JOIN libraries wl ON wl.id=w.library_id \
          JOIN media_nodes wn ON wn.id=wl.node_id \

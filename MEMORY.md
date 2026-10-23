@@ -1,5 +1,32 @@
 # MEMORY.md — État et décisions Aether
 
+## 23 octobre 2026 — Latence catalogue/lecture et alias d'images
+
+- Préchargement catalogue au survol/focus des liens accueil/bibliothèques, URL
+  commune au cache d'affichage, reprise anticipée dès clic et module lecteur
+  importé après catalogue. Suppression du fondu d'affiche de 300 ms.
+- Audio Ogg indépendant chargé pendant les métadonnées vidéo, activé après
+  réussite des deux ; Opus segmenté et préparations serveur gardent leur ordre.
+- Catalogue : suppression de trois lectures d'images corrélées redondantes ;
+  résolution groupée existante conserve ordre/masquage/permissions.
+- Scanner : alias cover/default/movie/show et fonds background/art ; fond
+  préfixé retrouvé même sans image générique dans un dossier partageable.
+  Identités ambiguës/symlinks refusés ; nouveau scan requis pour ces alias.
+- Web 106 tests/check/lint/build, catalogue 5, images 5 et scanner Node 7 réussis.
+  Chrome : retours catalogue 89–134 ms ; moteur/HTTP isolé Ogg image 88 ms/prêt
+  188 ms, segmenté 263/585 ms. UI/API lente : image 752/488 ms, cible 200 ms
+  non atteinte. SQLite 10k première page 269→345 ms : pas de gain général prouvé.
+- 404 logos/indicateurs sur routes imbriquées : utiliser asset('images/...'),
+  pas resolve('/') pour construire les chemins statiques ; paths.relative=false
+  conserve des URLs /app stables après navigation. posters_flow 1 réussi,
+  format et Clippy strict all-targets réussis.
+- Contrôle final build production : catalogue retour 72–104 ms, bibliothèque
+  préchargée 122 ms ; zéro erreur JS/image HTTP, image film 644/384 ms avec
+  API lente simulée. La cible globale de 200 ms reste ouverte.
+- Détails/preuves : docs/NAVIGATION_PERFORMANCE.md, docs/LOCAL_FILM_POSTERS.md.
+  NAS/PostgreSQL/son physique non mesurés ; aucun push ni déploiement.
+
+
 ## 23 octobre 2026 — Cinema Design System, contrôle Web local
 
 - Charte OLED/Pierre Douce consolidée : rayons 6/10/12/16/20/24, surfaces,

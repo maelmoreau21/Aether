@@ -9,7 +9,7 @@
   import { getSessionGeneration } from '../lib/auth/session';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import { resolve } from '$app/paths';
+  import { asset, resolve } from '$app/paths';
   import { readSession } from '../lib/auth/session';
   import MusicPlayer from '../lib/music/MusicPlayer.svelte';
 
@@ -53,6 +53,6 @@
 {:else if error}
   <main class="session-status"><p role="alert">{error}</p><button onclick={() => window.location.reload()}>Réessayer</button></main>
 {:else}
-  <main class="session-status session-loading" role="status"><img src={`${resolve('/').replace(/\/$/, '')}/images/logo-loading.svg`} alt="" width="56" height="56" /><span>Ouverture de votre médiathèque…</span></main>
+  <main class="session-status session-loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" width="56" height="56" /><span>Ouverture de votre médiathèque…</span></main>
 {/if}
 <style>.session-loading { min-height:100dvh; max-width:none !important; margin:0 !important; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:24px; box-sizing:border-box; background:var(--color-canvas); color:var(--color-muted) !important; } .session-status { max-width:600px; margin:15vh auto; padding:32px; color:var(--color-muted); line-height:1.8; }.session-status button { color:var(--color-accent); background:var(--color-surface); border:1px solid var(--color-line); padding:12px 20px; border-radius:var(--radius-md); }</style>

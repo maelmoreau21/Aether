@@ -1,9 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cachedCatalog, catalogCacheStats, invalidateCatalog, loadCatalog } from './page-cache';
+import { cachedCatalog, catalogCacheStats, invalidateCatalog, loadCatalog, preloadCatalog } from './page-cache';
 import { session } from '../auth/session';
 const page = (id = 'a', libraryId = 'lib') => ({items:[{id,libraryId,title:id}], total:1,offset:0,limit:24,notice:''});
 afterEach(() => { invalidateCatalog(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('session catalogue SWR cache', () => {
+  it('shares navigation prefetch with the display request including library and sorting', async () => {
+    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(Response.json(page())));
+    vi.stubGlobal('fetch', fetcher);
+    preloadCatalog('films', 'lib & privé');
+    const url = `/api/v1/catalog?${new URLSearchParams({library:'lib & privé',kind:'film',q:'',sort:'title-asc',offset:'0',limit:'24'})}`;
+    await loadCatalog(url, url);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(cachedCatalog(url)?.items[0].id).toBe('a');
+    preloadCatalog('home');
+    await Promise.resolve();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
   it('deduplicates and serves ten fresh returns with zero extra requests', async () => {
     const fetcher=vi.fn().mockResolvedValue(Response.json(page())); vi.stubGlobal('fetch',fetcher);
     await Promise.all([loadCatalog('home','/api/v1/catalog'),loadCatalog('home','/api/v1/catalog')]);

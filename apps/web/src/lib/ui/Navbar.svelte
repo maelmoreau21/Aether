@@ -7,11 +7,12 @@
 </script>
 
 <script lang="ts">
+  import { preloadCatalog } from '../catalog/page-cache';
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { session } from '../auth/session';
   import { accessibleLibraries, loadLibraries } from '../catalog/libraries';
-  import { resolve } from '$app/paths';
+  import { asset, resolve } from '$app/paths';
   import Icon from './Icon.svelte';
   import ProfileMenu from './ProfileMenu.svelte';
   import { serverPresentation } from '../config/presentation';
@@ -24,7 +25,6 @@
     name?: string;
   } = $props();
 
-  const base = $derived(resolve('/').replace(/\/$/, ''));
   let scrolled = $state(false);
   let libraryError = $state('');
   $effect(()=>{const id=$session?.user.id;if(id)void loadLibraries().then(()=>libraryError='').catch(()=>libraryError='Bibliothèques indisponibles');});
@@ -40,9 +40,9 @@
 <header class="site-header" class:scrolled>
   <div class="header-inner">
     <div class="header-brand-group">
-      <a class="brand" href={resolve('/')} aria-label={`${$serverPresentation.serverName || name}, accueil`}>
+      <a class="brand" onpointerenter={() => preloadCatalog('home')} onfocus={() => preloadCatalog('home')} href={resolve('/')} aria-label={`${$serverPresentation.serverName || name}, accueil`}>
         <div class="brand-logo-wrapper">
-          <img src={`${base}/images/brand-mark.svg`} width="32" height="32" alt="" />
+          <img src={asset('images/brand-mark.svg')} width="32" height="32" alt="" />
         </div>
         <span class="brand-text">{$serverPresentation.serverName || name}</span>
       </a>
@@ -50,6 +50,8 @@
       <nav class="main-nav" aria-label="Navigation principale">
         {#each navLinks.filter(link=>link.key==='home') as link (link.key)}
           <a
+            onpointerenter={() => preloadCatalog('home')}
+            onfocus={() => preloadCatalog('home')}
             href={resolve(link.path)}
             class="nav-link"
             aria-label={link.label}
@@ -60,7 +62,7 @@
           </a>
         {/each}
         {#each $accessibleLibraries as library (library.id)}
-          <a class="nav-link library-link" href={resolve(`${library.kind}/?library=${encodeURIComponent(library.id)}` as 'films/')} class:active={page.url.searchParams.get('library')===library.id} aria-current={page.url.searchParams.get('library')===library.id?'page':undefined}>
+          <a class="nav-link library-link" onpointerenter={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }} onfocus={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }} href={resolve(`${library.kind}/?library=${encodeURIComponent(library.id)}` as 'films/')} class:active={page.url.searchParams.get('library')===library.id} aria-current={page.url.searchParams.get('library')===library.id?'page':undefined}>
             {#if library.kind==='music'}<b aria-hidden="true">♫</b>{:else}<Icon name={library.kind==='films'?'film':'tv'} size={16} />{/if}<span>{library.name}</span>
           </a>
         {/each}

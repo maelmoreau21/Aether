@@ -197,6 +197,15 @@ export class NativePlayer implements Player {
       });
 
     try {
+      // Load independent, already-prepared Ogg audio while video metadata arrives.
+      // Keep it inactive until both resources are ready; segmented Opus needs the
+      // video's duration/index and retains its ordered initialization.
+      let audioLoading: Promise<void> | undefined;
+      if (source.externalAudioUrl && !segmented) {
+        this.externalAudio = createAudio();
+        audioLoading = this.externalAudio.load(audioUrl!, false);
+        void audioLoading.catch(() => {});
+      }
       try {
         this.status(hasFreshDirect ? 'Connexion directe au Media Node…' : 'Chargement de la vidéo…');
         await loadCandidate(primaryUrl, fallbackUrl ? 2500 : 10000);
@@ -211,8 +220,14 @@ export class NativePlayer implements Player {
       this.source = source;
       if (source.externalAudioUrl) {
         this.status(`Chargement audio ${source.language.toUpperCase()} (${source.audioTrackId})${segmented ? ' par segments' : ''}…`);
-        this.externalAudio = createAudio();
-        await this.externalAudio.load(audioUrl!);
+        if (audioLoading) {
+          await audioLoading;
+          if (this.destroyed) throw new Error('Lecteur fermé.');
+          this.externalAudio?.activate();
+        } else {
+          this.externalAudio = createAudio();
+          await this.externalAudio.load(audioUrl!);
+        }
       }
       await this.selectSubtitle(this.subtitle);
       if (!paused) await this.play();

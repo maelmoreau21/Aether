@@ -22,6 +22,19 @@ const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr',
 function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
+  it('overlaps independent audio and video loading without activating audio early', async () => {
+    const {video,player}=setup();video.auto=false;
+    let ready!:()=>void;
+    const load=vi.spyOn(ExternalAudio.prototype,'load').mockImplementationOnce(()=>new Promise<void>(resolve=>{ready=resolve;}));
+    const activate=vi.spyOn(ExternalAudio.prototype,'activate');
+    const loading=player.load({...media,sources:[{...media.sources[0],externalAudioUrl:'/audio'}]});
+    expect(load).toHaveBeenCalledWith('/audio',false);
+    expect(video.loads).toBe(1);expect(activate).not.toHaveBeenCalled();
+    video.dispatchEvent(new Event('loadedmetadata'));
+    await Promise.resolve();expect(activate).not.toHaveBeenCalled();
+    ready();await loading;expect(activate).toHaveBeenCalledTimes(1);
+    player.destroy();load.mockRestore();activate.mockRestore();
+  });
   it('rejects declared unsupported DTS-HD MA before HTTP preparation or video loading',async()=>{
     const {video,player}=setup();const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);
     Object.assign(video,{canPlayType:()=>''});

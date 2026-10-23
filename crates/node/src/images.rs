@@ -209,7 +209,9 @@ pub(crate) fn shared_allowed_from_folder(video: &Path, videos: &FolderVideos) ->
 }
 
 /// Name priority poster, folder, exact-video-poster, exact-video; within each:
-/// jpg, jpeg, png, webp. Names follow filesystem case rules. Invalid first candidate
+/// jpg, jpeg, png, webp. Additional Jellyfin cover/default/movie aliases follow
+/// the historical names, with the same identity confinement. Names follow
+/// filesystem case rules. Invalid first candidate
 /// produces a warning/placeholder, never a silent switch to a different poster.
 pub async fn discover(root: &Path, video: &Path) -> (Option<LocalImage>, Option<String>) {
     discover_cached(root, video, &std::collections::HashMap::new()).await
@@ -252,12 +254,21 @@ pub async fn discover_cached_with_folder(
         "poster".to_owned(),
         "folder".to_owned(),
         format!("{stem}-poster"),
-        stem.into_owned(),
+        stem.to_string(),
+        "cover".to_owned(),
+        "default".to_owned(),
+        "movie".to_owned(),
+        format!("{stem}-folder"),
+        format!("{stem}-cover"),
+        format!("{stem}-default"),
+        format!("{stem}-movie"),
     ]
     .iter()
     .enumerate()
     {
-        if (name_index < 2 && !shared) || (name_index >= 2 && !exact_allowed) {
+        if (matches!(name_index, 0 | 1 | 4 | 5 | 6) && !shared)
+            || (!matches!(name_index, 0 | 1 | 4 | 5 | 6) && !exact_allowed)
+        {
             continue;
         }
         for (format_index, extension) in ["jpg", "jpeg", "png", "webp"].iter().enumerate() {
@@ -331,7 +342,13 @@ pub async fn discover_series_poster(
     series_dir: &Path,
     cache: &std::collections::HashMap<String, LocalImage>,
 ) -> (Option<LocalImage>, Option<String>) {
-    discover_named(root, series_dir, cache, &["poster", "folder"]).await
+    discover_named(
+        root,
+        series_dir,
+        cache,
+        &["poster", "folder", "cover", "default", "show"],
+    )
+    .await
 }
 
 pub async fn discover_named(
@@ -453,6 +470,48 @@ mod tests {
             tokio::fs::read(folder.join("poster.jpg")).await.unwrap(),
             jpg
         );
+    }
+    #[tokio::test]
+    async fn jellyfin_cover_aliases_preserve_identity_and_priority() {
+        let root = setup().await;
+        let folder = root.path().join("Film (2024)");
+        let video = Path::new("Film (2024)/Film.mp4");
+        tokio::fs::write(folder.join("cover.jpg"), image_bytes(ImageFormat::Jpeg))
+            .await
+            .unwrap();
+        assert!(
+            discover(root.path(), video)
+                .await
+                .0
+                .unwrap()
+                .path
+                .ends_with("cover.jpg")
+        );
+        tokio::fs::write(folder.join("Other (2025).mp4"), b"synthetic")
+            .await
+            .unwrap();
+        assert!(discover(root.path(), video).await.0.is_none());
+        tokio::fs::write(folder.join("Film-cover.png"), image_bytes(ImageFormat::Png))
+            .await
+            .unwrap();
+        assert!(
+            discover(root.path(), video)
+                .await
+                .0
+                .unwrap()
+                .path
+                .ends_with("Film-cover.png")
+        );
+        assert!(
+            discover(root.path(), Path::new("Film (2024)/Other (2025).mp4"))
+                .await
+                .0
+                .is_none()
+        );
+        let (poster, warning) =
+            discover_series_poster(root.path(), Path::new("Film (2024)"), &HashMap::new()).await;
+        assert!(warning.is_none());
+        assert!(poster.unwrap().path.ends_with("cover.jpg"));
     }
     #[tokio::test]
     async fn rejects_corruption_misleading_extension_and_oversize() {

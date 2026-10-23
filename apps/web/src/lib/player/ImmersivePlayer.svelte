@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { resolve } from '$app/paths';
+  import { asset } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
   import PlayerControls, { type Menu } from './PlayerControls.svelte';
   import type { Media, Player, PlayerFactory, PlaybackState } from './types';
@@ -10,7 +10,6 @@
   import { preferences, savePreferences } from '../preferences';
   import { chooseSource, playbackMime, audioLanguage, audioSelectionNotice } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
-  const base = resolve('/').replace(/\/$/, '');
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
   let dialog: HTMLDialogElement;
@@ -281,7 +280,7 @@
       <button class="stats-toggle" aria-expanded={statistics} aria-controls="stream-statistics" onclick={() => { statistics = !statistics; wake(); }}>Statistiques du flux</button>
       {#if nextTitle && onNext}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
     </div>
-    {#if busy}<div class="loading" role="status"><img src="{base}/images/logo-loading.svg" alt="" class="player-spinner" width="40" height="40" />{loadStage}<button onclick={close}>Annuler</button></div>{/if}
+    {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" />{loadStage}<button onclick={close}>Annuler</button></div>{/if}
     {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>La lecture a rencontré un problème. Réessayez ou choisissez une autre piste ou version.</p><button onclick={() => { if (active) void prepare(active, playback); }}>Réessayer</button></div>{/if}
     {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label="Statistiques du flux">
       <header><strong>Statistiques du flux</strong><button onclick={() => { statistics = false; wake(); }}>Fermer</button></header>

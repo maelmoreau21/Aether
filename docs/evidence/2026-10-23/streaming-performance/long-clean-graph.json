@@ -1,0 +1,2255 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-23T21:23:06.699Z",
+  "baselineNativeFromHead": false,
+  "os": "win32 10.0.26300",
+  "scope": "Production NativePlayer in synthetic click harness; localhost Range server; no Svelte/Core/Node/NAS proof",
+  "cacheContract": "First trial: fresh browser context + empty preparation cache. OS disk cache is uncontrolled and not called cold. Warm trials reuse context and explicitly listed prepared chunks.",
+  "audioOracle": "WebAudio FFT decoded PCM, 8 ms polling; not physical speaker onset or proof of discrete surround output",
+  "originalAudioSelection": "Browser default multi-audio track; language cannot be asserted from metadata. Measured PCM signal is reported.",
+  "fixture": {
+    "path": "tests\\fixtures\\generated\\dual-opus\\dual-opus-long.mp4",
+    "bytes": 352256545,
+    "probe": {
+      "streams": [
+        {
+          "index": 0,
+          "codec_name": "av1",
+          "codec_long_name": "Alliance for Open Media AV1",
+          "profile": "Main",
+          "codec_type": "video",
+          "codec_tag_string": "av01",
+          "codec_tag": "0x31307661",
+          "mime_codec_string": "av01.0.08M.10",
+          "width": 1920,
+          "height": 1080,
+          "coded_width": 1920,
+          "coded_height": 1080,
+          "has_b_frames": 0,
+          "sample_aspect_ratio": "1:1",
+          "display_aspect_ratio": "16:9",
+          "pix_fmt": "yuv420p10le",
+          "level": 8,
+          "color_range": "tv",
+          "field_order": "progressive",
+          "id": "0x1",
+          "r_frame_rate": "12/1",
+          "avg_frame_rate": "16121472/1344001",
+          "time_base": "1/12288",
+          "start_pts": 0,
+          "start_time": "0.000000",
+          "duration_ts": 43008032,
+          "duration": "3500.002604",
+          "bit_rate": "220505",
+          "nb_frames": "41983",
+          "extradata_size": 17,
+          "disposition": {
+            "default": 1,
+            "dub": 0,
+            "original": 0,
+            "comment": 0,
+            "lyrics": 0,
+            "karaoke": 0,
+            "forced": 0,
+            "hearing_impaired": 0,
+            "visual_impaired": 0,
+            "clean_effects": 0,
+            "attached_pic": 0,
+            "timed_thumbnails": 0,
+            "non_diegetic": 0,
+            "captions": 0,
+            "descriptions": 0,
+            "metadata": 0,
+            "dependent": 0,
+            "still_image": 0,
+            "multilayer": 0
+          },
+          "tags": {
+            "language": "und",
+            "handler_name": "VideoHandler",
+            "encoder": "Lavc63.1.102 libaom-av1"
+          }
+        },
+        {
+          "index": 1,
+          "codec_name": "opus",
+          "codec_long_name": "Opus (Opus Interactive Audio Codec)",
+          "codec_type": "audio",
+          "codec_tag_string": "Opus",
+          "codec_tag": "0x7375704f",
+          "mime_codec_string": "opus",
+          "sample_fmt": "fltp",
+          "sample_rate": "48000",
+          "channels": 6,
+          "channel_layout": "5.1",
+          "bits_per_sample": 0,
+          "initial_padding": 312,
+          "id": "0x2",
+          "r_frame_rate": "0/0",
+          "avg_frame_rate": "0/0",
+          "time_base": "1/48000",
+          "start_pts": 0,
+          "start_time": "0.000000",
+          "duration_ts": 168000613,
+          "duration": "3500.012771",
+          "bit_rate": "266475",
+          "nb_frames": "175148",
+          "extradata_size": 27,
+          "disposition": {
+            "default": 1,
+            "dub": 0,
+            "original": 0,
+            "comment": 0,
+            "lyrics": 0,
+            "karaoke": 0,
+            "forced": 0,
+            "hearing_impaired": 0,
+            "visual_impaired": 0,
+            "clean_effects": 0,
+            "attached_pic": 0,
+            "timed_thumbnails": 0,
+            "non_diegetic": 0,
+            "captions": 0,
+            "descriptions": 0,
+            "metadata": 0,
+            "dependent": 0,
+            "still_image": 0,
+            "multilayer": 0
+          },
+          "tags": {
+            "language": "fra",
+            "handler_name": "SoundHandler"
+          }
+        },
+        {
+          "index": 2,
+          "codec_name": "opus",
+          "codec_long_name": "Opus (Opus Interactive Audio Codec)",
+          "codec_type": "audio",
+          "codec_tag_string": "Opus",
+          "codec_tag": "0x7375704f",
+          "mime_codec_string": "opus",
+          "sample_fmt": "fltp",
+          "sample_rate": "48000",
+          "channels": 6,
+          "channel_layout": "5.1",
+          "bits_per_sample": 0,
+          "initial_padding": 312,
+          "id": "0x3",
+          "r_frame_rate": "0/0",
+          "avg_frame_rate": "0/0",
+          "time_base": "1/48000",
+          "start_pts": 0,
+          "start_time": "0.000000",
+          "duration_ts": 168000613,
+          "duration": "3500.012771",
+          "bit_rate": "310935",
+          "nb_frames": "175148",
+          "extradata_size": 27,
+          "disposition": {
+            "default": 0,
+            "dub": 0,
+            "original": 0,
+            "comment": 0,
+            "lyrics": 0,
+            "karaoke": 0,
+            "forced": 0,
+            "hearing_impaired": 0,
+            "visual_impaired": 0,
+            "clean_effects": 0,
+            "attached_pic": 0,
+            "timed_thumbnails": 0,
+            "non_diegetic": 0,
+            "captions": 0,
+            "descriptions": 0,
+            "metadata": 0,
+            "dependent": 0,
+            "still_image": 0,
+            "multilayer": 0
+          },
+          "tags": {
+            "language": "eng",
+            "handler_name": "SoundHandler"
+          }
+        }
+      ],
+      "format": {
+        "filename": "C:\\Users\\Mael\\Documents\\GitHub\\Aether\\tests\\fixtures\\generated\\dual-opus\\dual-opus-long.mp4",
+        "nb_streams": 3,
+        "nb_programs": 0,
+        "nb_stream_groups": 0,
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "start_time": "0.000000",
+        "duration": "3500.012771",
+        "size": "352256545",
+        "bit_rate": "805154",
+        "probe_score": 100,
+        "tags": {
+          "major_brand": "isom",
+          "minor_version": "512",
+          "compatible_brands": "isomav01iso2mp41",
+          "encoder": "Lavf63.1.102"
+        }
+      }
+    },
+    "sha256": "bd559e90d168ef519d93268e38ee074048df462294b2b85ac987c9022722eece"
+  },
+  "simulatedAudioResponseDelayMs": 0,
+  "strategies": [
+    {
+      "strategy": "original",
+      "trials": [
+        {
+          "kind": "open",
+          "start": 486.5,
+          "videoSourceBefore": "",
+          "positionBefore": 0,
+          "videoLoadsBefore": 0,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -53.83158874511719
+          },
+          "loadReadyMs": 96.29999995231628,
+          "firstFrameMs": 145,
+          "frameMediaTime": 0,
+          "videoEvents": [
+            {
+              "name": "playing",
+              "atMs": 146,
+              "time": 0
+            }
+          ],
+          "playReadyMs": 146.19999998807907,
+          "firstAudioMs": 221.19999998807907,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -53.83158874511719
+          },
+          "driftSeconds": 0,
+          "cache": "fresh-browser-context"
+        },
+        {
+          "kind": "seek",
+          "start": 775,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 0.061333,
+          "videoLoadsBefore": 1,
+          "target": 900,
+          "videoEvents": [
+            {
+              "name": "seeking",
+              "atMs": 4,
+              "time": 900
+            },
+            {
+              "name": "waiting",
+              "atMs": 4,
+              "time": 900
+            },
+            {
+              "name": "seeked",
+              "atMs": 48.39999997615814,
+              "time": 900
+            },
+            {
+              "name": "playing",
+              "atMs": 48.5,
+              "time": 900
+            }
+          ],
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -61.11977005004883
+          },
+          "firstFrameMs": 59.09999996423721,
+          "frameMediaTime": 899.947917,
+          "firstAudioMs": 59.89999997615814,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -61.11977005004883
+          },
+          "driftSeconds": 0
+        },
+        {
+          "kind": "open",
+          "start": 886.6999999880791,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 900.058667,
+          "videoLoadsBefore": 1,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -62.319091796875
+          },
+          "loadReadyMs": 126.19999998807907,
+          "firstFrameMs": 158.69999998807907,
+          "frameMediaTime": 0,
+          "videoEvents": [
+            {
+              "name": "playing",
+              "atMs": 181.5,
+              "time": 0
+            }
+          ],
+          "playReadyMs": 181.5999999642372,
+          "firstAudioMs": 189.5,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -62.319091796875
+          },
+          "driftSeconds": 0,
+          "cache": "warm-browser-and-preparations"
+        },
+        {
+          "kind": "seek",
+          "start": 1171.5999999642372,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 0.10754,
+          "videoLoadsBefore": 2,
+          "target": 1800,
+          "videoEvents": [
+            {
+              "name": "seeking",
+              "atMs": 7.199999988079071,
+              "time": 1800
+            },
+            {
+              "name": "waiting",
+              "atMs": 7.199999988079071,
+              "time": 1800
+            },
+            {
+              "name": "seeked",
+              "atMs": 45.80000001192093,
+              "time": 1800
+            },
+            {
+              "name": "playing",
+              "atMs": 45.80000001192093,
+              "time": 1800
+            }
+          ],
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -52.81303405761719
+          },
+          "firstAudioMs": 55.90000003576279,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -52.81303405761719
+          },
+          "driftSeconds": 0,
+          "firstFrameMs": 56.80000001192093,
+          "frameMediaTime": 1799.979167
+        },
+        {
+          "kind": "open",
+          "start": 1266.7999999523163,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 1800.050667,
+          "videoLoadsBefore": 2,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -53.83158874511719
+          },
+          "loadReadyMs": 108.70000004768372,
+          "firstFrameMs": 145.60000002384186,
+          "frameMediaTime": 0,
+          "videoEvents": [
+            {
+              "name": "playing",
+              "atMs": 166.70000004768372,
+              "time": 0
+            }
+          ],
+          "playReadyMs": 166.80000001192093,
+          "firstAudioMs": 176.20000004768372,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -53.83158874511719
+          },
+          "driftSeconds": 0,
+          "cache": "warm-browser-and-preparations"
+        },
+        {
+          "kind": "seek",
+          "start": 1614.7999999523163,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 0.181333,
+          "videoLoadsBefore": 3,
+          "target": 3480.012771,
+          "videoEvents": [
+            {
+              "name": "seeking",
+              "atMs": 1.600000023841858,
+              "time": 3480.012771
+            },
+            {
+              "name": "waiting",
+              "atMs": 1.7000000476837158,
+              "time": 3480.012771
+            },
+            {
+              "name": "seeked",
+              "atMs": 24.30000001192093,
+              "time": 3480.012771
+            },
+            {
+              "name": "playing",
+              "atMs": 24.5,
+              "time": 3480.012771
+            }
+          ],
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -43.765377044677734
+          },
+          "firstAudioMs": 27.700000047683716,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -43.765377044677734
+          },
+          "driftSeconds": 0,
+          "firstFrameMs": 30.5,
+          "frameMediaTime": 3479.996094
+        },
+        {
+          "kind": "open",
+          "start": 1691.3999999761581,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 3480.072232,
+          "videoLoadsBefore": 3,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -53.83158874511719
+          },
+          "loadReadyMs": 102.10000002384186,
+          "videoEvents": [
+            {
+              "name": "playing",
+              "atMs": 128.69999998807907,
+              "time": 0
+            }
+          ],
+          "playReadyMs": 128.69999998807907,
+          "firstFrameMs": 134.60000002384186,
+          "frameMediaTime": 0,
+          "firstAudioMs": 135.19999998807907,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -53.83158874511719
+          },
+          "driftSeconds": 0,
+          "cache": "warm-browser-and-preparations"
+        },
+        {
+          "kind": "seek",
+          "start": 1884.8999999761581,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 0.069333,
+          "videoLoadsBefore": 4,
+          "target": 2,
+          "videoEvents": [
+            {
+              "name": "seeking",
+              "atMs": 10.800000011920929,
+              "time": 2
+            },
+            {
+              "name": "waiting",
+              "atMs": 10.899999976158142,
+              "time": 2
+            },
+            {
+              "name": "seeked",
+              "atMs": 29.69999998807907,
+              "time": 2
+            },
+            {
+              "name": "playing",
+              "atMs": 29.69999998807907,
+              "time": 2
+            }
+          ],
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -46.580841064453125
+          },
+          "firstAudioMs": 29.600000023841858,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -46.580841064453125
+          },
+          "driftSeconds": 0,
+          "firstFrameMs": 43.5,
+          "frameMediaTime": 2
+        },
+        {
+          "kind": "open",
+          "start": 1967.699999988079,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 2.050667,
+          "videoLoadsBefore": 4,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -53.83158874511719
+          },
+          "loadReadyMs": 91.19999998807907,
+          "videoEvents": [
+            {
+              "name": "playing",
+              "atMs": 119.09999996423721,
+              "time": 0
+            }
+          ],
+          "playReadyMs": 119.19999998807907,
+          "firstFrameMs": 125.59999996423721,
+          "frameMediaTime": 0,
+          "firstAudioMs": 130.5999999642372,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -53.83158874511719
+          },
+          "driftSeconds": 0,
+          "cache": "warm-browser-and-preparations"
+        },
+        {
+          "kind": "seek",
+          "start": 2152.099999964237,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 0.068237,
+          "videoLoadsBefore": 5,
+          "target": 900,
+          "videoEvents": [
+            {
+              "name": "seeking",
+              "atMs": 10.199999988079071,
+              "time": 900
+            },
+            {
+              "name": "waiting",
+              "atMs": 10.199999988079071,
+              "time": 900
+            },
+            {
+              "name": "seeked",
+              "atMs": 44.40000003576279,
+              "time": 900
+            },
+            {
+              "name": "playing",
+              "atMs": 44.40000003576279,
+              "time": 900
+            }
+          ],
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -52.911460876464844
+          },
+          "firstFrameMs": 42.90000003576279,
+          "frameMediaTime": 899.947917,
+          "firstAudioMs": 55.30000001192093,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -52.911460876464844
+          },
+          "driftSeconds": 0
+        },
+        {
+          "kind": "open",
+          "start": 2254.099999964237,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 900.061333,
+          "videoLoadsBefore": 5,
+          "lastSignal": {
+            "hz": 23.4375,
+            "db": null
+          },
+          "loadReadyMs": 88.10000002384186,
+          "firstFrameMs": 123.90000003576279,
+          "frameMediaTime": 0,
+          "error": "Error: Réserve de lecture insuffisante après 8 secondes. Vérifiez le débit du stockage ou du réseau.",
+          "mediaDiagnostic": [
+            {
+              "tag": "VIDEO",
+              "position": 0,
+              "duration": 3500.012771,
+              "paused": true,
+              "seeking": false,
+              "readyState": 4,
+              "networkState": 1,
+              "buffered": []
+            }
+          ],
+          "cache": "warm-browser-and-preparations"
+        }
+      ],
+      "errors": [],
+      "passed": false,
+      "summary": {
+        "open": {
+          "firstFrameMs": {
+            "n": 4,
+            "min": 125.59999996423721,
+            "median": 145.60000002384186,
+            "p95": 158.69999998807907,
+            "max": 158.69999998807907
+          },
+          "firstAudioMs": {
+            "n": 4,
+            "min": 130.5999999642372,
+            "median": 176.20000004768372,
+            "p95": 189.5,
+            "max": 189.5
+          },
+          "playReadyMs": {
+            "n": 4,
+            "min": 119.19999998807907,
+            "median": 166.80000001192093,
+            "p95": 181.5999999642372,
+            "max": 181.5999999642372
+          },
+          "readyMs": null,
+          "maxVideoFrameGapMs": null,
+          "observedSilenceMs": null,
+          "maxPollGapMs": null
+        },
+        "switch": {
+          "firstFrameMs": null,
+          "firstAudioMs": null,
+          "playReadyMs": null,
+          "readyMs": null,
+          "maxVideoFrameGapMs": null,
+          "observedSilenceMs": null,
+          "maxPollGapMs": null
+        },
+        "seek": {
+          "firstFrameMs": {
+            "n": 5,
+            "min": 30.5,
+            "median": 43.5,
+            "p95": 59.09999996423721,
+            "max": 59.09999996423721
+          },
+          "firstAudioMs": {
+            "n": 5,
+            "min": 27.700000047683716,
+            "median": 55.30000001192093,
+            "p95": 59.89999997615814,
+            "max": 59.89999997615814
+          },
+          "playReadyMs": null,
+          "readyMs": null,
+          "maxVideoFrameGapMs": null,
+          "observedSilenceMs": null,
+          "maxPollGapMs": null
+        }
+      }
+    },
+    {
+      "strategy": "segmented",
+      "trials": [
+        {
+          "kind": "open",
+          "start": 415,
+          "videoSourceBefore": "",
+          "positionBefore": 0,
+          "videoLoadsBefore": 0,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -64.23036193847656
+          },
+          "firstFrameMs": 130.29999995231628,
+          "frameMediaTime": 0,
+          "loadReadyMs": 288.2999999523163,
+          "videoEvents": [
+            {
+              "name": "playing",
+              "atMs": 289.2999999523163,
+              "time": 0.000388
+            }
+          ],
+          "playReadyMs": 290,
+          "firstAudioMs": 296.89999997615814,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -64.23036193847656
+          },
+          "driftSeconds": 0.0012969999999999995,
+          "cache": "fresh-browser-context"
+        },
+        {
+          "kind": "switch",
+          "start": 1354.199999988079,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 0.608,
+          "videoLoadsBefore": 1,
+          "track": "internal-2",
+          "pcmPolls": 47,
+          "maxPollGapMs": 14.699999988079071,
+          "lastSignal": {
+            "hz": 984.375,
+            "db": -38.21802520751953
+          },
+          "maxVideoFrameGapMs": 83.70000000000005,
+          "firstFrameMs": 44.30000001192093,
+          "frameMediaTime": 0.666667,
+          "videoEvents": [
+            {
+              "name": "pause",
+              "atMs": 170.69999998807907,
+              "time": 0.780689
+            },
+            {
+              "name": "playing",
+              "atMs": 173.5,
+              "time": 0.800197
+            }
+          ],
+          "readyMs": 174,
+          "videoSourceUnchanged": true,
+          "videoLoadsAfter": 1,
+          "silentPolls": 1,
+          "observedSilenceMs": 7.400000035762787,
+          "firstAudioMs": 188.89999997615814,
+          "audioSignal": {
+            "hz": 984.375,
+            "db": -38.21802520751953
+          },
+          "driftSeconds": 0.01661099999999993
+        },
+        {
+          "kind": "switch",
+          "start": 2403.199999988079,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 1.673563,
+          "videoLoadsBefore": 1,
+          "track": "internal-1",
+          "pcmPolls": 26,
+          "maxPollGapMs": 16.19999998807907,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -53.30489730834961
+          },
+          "videoEvents": [
+            {
+              "name": "pause",
+              "atMs": 23.899999976158142,
+              "time": 1.693124
+            },
+            {
+              "name": "playing",
+              "atMs": 26.69999998807907,
+              "time": 1.700079
+            }
+          ],
+          "readyMs": 26.899999976158142,
+          "videoSourceUnchanged": true,
+          "videoLoadsAfter": 1,
+          "firstAudioMs": 29.099999964237213,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -53.30489730834961
+          },
+          "driftSeconds": 0.0003349999999999742,
+          "maxVideoFrameGapMs": 83.40000000000009,
+          "firstFrameMs": 61.89999997615814,
+          "frameMediaTime": 1.833333
+        },
+        {
+          "kind": "seek",
+          "start": 2669.2999999523163,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 1.933285,
+          "videoLoadsBefore": 1,
+          "target": 900,
+          "videoEvents": [
+            {
+              "name": "seeking",
+              "atMs": 21.30000001192093,
+              "time": 900
+            },
+            {
+              "name": "waiting",
+              "atMs": 22,
+              "time": 900
+            },
+            {
+              "name": "seeked",
+              "atMs": 76.60000002384186,
+              "time": 900.000066
+            },
+            {
+              "name": "playing",
+              "atMs": 77.20000004768372,
+              "time": 900.000208
+            },
+            {
+              "name": "pause",
+              "atMs": 77.40000003576279,
+              "time": 900.000208
+            },
+            {
+              "name": "playing",
+              "atMs": 161,
+              "time": 900.020081
+            }
+          ],
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -53.19506072998047
+          },
+          "firstFrameMs": 78.90000003576279,
+          "frameMediaTime": 899.947917,
+          "firstAudioMs": 162.5,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -53.19506072998047
+          },
+          "driftSeconds": 0.012260000000082982
+        },
+        {
+          "kind": "open",
+          "start": 2886.5,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 900.032664,
+          "videoLoadsBefore": 1,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -64.23036193847656
+          },
+          "loadReadyMs": 94.39999997615814,
+          "videoEvents": [
+            {
+              "name": "playing",
+              "atMs": 100,
+              "time": 0.000548
+            }
+          ],
+          "playReadyMs": 100.89999997615814,
+          "firstAudioMs": 109.89999997615814,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -64.23036193847656
+          },
+          "driftSeconds": 0.00031799999999999884,
+          "firstFrameMs": 110.09999996423721,
+          "frameMediaTime": 0,
+          "cache": "warm-browser-and-preparations"
+        },
+        {
+          "kind": "switch",
+          "start": 3635.199999988079,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 0.608576,
+          "videoLoadsBefore": 2,
+          "track": "internal-2",
+          "pcmPolls": 27,
+          "maxPollGapMs": 18,
+          "lastSignal": {
+            "hz": 984.375,
+            "db": -53.63160705566406
+          },
+          "videoEvents": [
+            {
+              "name": "pause",
+              "atMs": 24.30000001192093,
+              "time": 0.629287
+            },
+            {
+              "name": "playing",
+              "atMs": 27.899999976158142,
+              "time": 0.64035
+            }
+          ],
+          "readyMs": 28.30000001192093,
+          "videoSourceUnchanged": true,
+          "videoLoadsAfter": 2,
+          "silentPolls": 1,
+          "observedSilenceMs": 7.800000011920929,
+          "maxVideoFrameGapMs": 83.5,
+          "firstFrameMs": 29.599999964237213,
+          "frameMediaTime": 0.75,
+          "firstAudioMs": 41.09999996423721,
+          "audioSignal": {
+            "hz": 984.375,
+            "db": -53.63160705566406
+          },
+          "driftSeconds": 0.013565999999999967
+        },
+        {
+          "kind": "switch",
+          "start": 4518.199999988079,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 1.473353,
+          "videoLoadsBefore": 2,
+          "track": "internal-1",
+          "pcmPolls": 29,
+          "maxPollGapMs": 20.400000035762787,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -52.911075592041016
+          },
+          "videoEvents": [
+            {
+              "name": "pause",
+              "atMs": 26.80000001192093,
+              "time": 1.50201
+            },
+            {
+              "name": "playing",
+              "atMs": 31.399999976158142,
+              "time": 1.502013
+            }
+          ],
+          "readyMs": 31.69999998807907,
+          "videoSourceUnchanged": true,
+          "videoLoadsAfter": 2,
+          "firstAudioMs": 34.80000001192093,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -52.911075592041016
+          },
+          "driftSeconds": 0.01055499999999987,
+          "maxVideoFrameGapMs": 83.5,
+          "firstFrameMs": 63.5,
+          "frameMediaTime": 1.583333
+        },
+        {
+          "kind": "seek",
+          "start": 4822.899999976158,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 1.792124,
+          "videoLoadsBefore": 2,
+          "target": 1800,
+          "videoEvents": [
+            {
+              "name": "seeking",
+              "atMs": 10.699999988079071,
+              "time": 1800
+            },
+            {
+              "name": "waiting",
+              "atMs": 11.399999976158142,
+              "time": 1800
+            },
+            {
+              "name": "seeked",
+              "atMs": 88.19999998807907,
+              "time": 1800.000101
+            },
+            {
+              "name": "playing",
+              "atMs": 88.30000001192093,
+              "time": 1800.000125
+            },
+            {
+              "name": "pause",
+              "atMs": 88.5,
+              "time": 1800.000125
+            },
+            {
+              "name": "playing",
+              "atMs": 399,
+              "time": 1800.020293
+            }
+          ],
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -53.19827651977539
+          },
+          "firstFrameMs": 96.69999998807907,
+          "frameMediaTime": 1799.979167,
+          "firstAudioMs": 409.39999997615814,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -53.19827651977539
+          },
+          "driftSeconds": 0.020837999999912427
+        },
+        {
+          "kind": "open",
+          "start": 5303.399999976158,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 1800.060627,
+          "videoLoadsBefore": 2,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -64.23036193847656
+          },
+          "loadReadyMs": 132.80000001192093,
+          "firstFrameMs": 145.60000002384186,
+          "frameMediaTime": 0,
+          "videoEvents": [
+            {
+              "name": "playing",
+              "atMs": 168,
+              "time": 0.000459
+            }
+          ],
+          "playReadyMs": 168.5,
+          "firstAudioMs": 178.80000001192093,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -64.23036193847656
+          },
+          "driftSeconds": 0.0016380000000000006,
+          "cache": "warm-browser-and-preparations"
+        },
+        {
+          "kind": "switch",
+          "start": 6144.599999964237,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 0.633484,
+          "videoLoadsBefore": 3,
+          "track": "internal-2",
+          "pcmPolls": 26,
+          "maxPollGapMs": 16.5,
+          "lastSignal": {
+            "hz": 984.375,
+            "db": -61.578006744384766
+          },
+          "maxVideoFrameGapMs": 83.69999999999982,
+          "firstFrameMs": 20.30000001192093,
+          "frameMediaTime": 0.666667,
+          "videoEvents": [
+            {
+              "name": "pause",
+              "atMs": 26.400000035762787,
+              "time": 0.659338
+            },
+            {
+              "name": "playing",
+              "atMs": 30,
+              "time": 0.662728
+            }
+          ],
+          "readyMs": 30.30000001192093,
+          "videoSourceUnchanged": true,
+          "videoLoadsAfter": 3,
+          "firstAudioMs": 37.19999998807907,
+          "audioSignal": {
+            "hz": 984.375,
+            "db": -61.578006744384766
+          },
+          "driftSeconds": 0.0023380000000000623
+        },
+        {
+          "kind": "switch",
+          "start": 7023.099999964237,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 1.503659,
+          "videoLoadsBefore": 3,
+          "track": "internal-1",
+          "pcmPolls": 30,
+          "maxPollGapMs": 18.19999998807907,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -61.489566802978516
+          },
+          "videoEvents": [
+            {
+              "name": "pause",
+              "atMs": 26.30000001192093,
+              "time": 1.533992
+            },
+            {
+              "name": "playing",
+              "atMs": 33,
+              "time": 1.540641
+            }
+          ],
+          "silentPolls": 1,
+          "observedSilenceMs": 7.699999988079071,
+          "readyMs": 33.69999998807907,
+          "videoSourceUnchanged": true,
+          "videoLoadsAfter": 3,
+          "firstAudioMs": 43,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -61.489566802978516
+          },
+          "driftSeconds": 0.008337000000000039,
+          "maxVideoFrameGapMs": 83.39999999999964,
+          "firstFrameMs": 58.69999998807907,
+          "frameMediaTime": 1.583333
+        },
+        {
+          "kind": "seek",
+          "start": 7328.699999988079,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 1.812138,
+          "videoLoadsBefore": 3,
+          "target": 3480.012771,
+          "videoEvents": [
+            {
+              "name": "seeking",
+              "atMs": 4.300000011920929,
+              "time": 3480.012771
+            },
+            {
+              "name": "waiting",
+              "atMs": 6.599999964237213,
+              "time": 3480.012771
+            },
+            {
+              "name": "seeked",
+              "atMs": 85.19999998807907,
+              "time": 3480.012771
+            },
+            {
+              "name": "playing",
+              "atMs": 85.69999998807907,
+              "time": 3480.012771
+            },
+            {
+              "name": "pause",
+              "atMs": 86,
+              "time": 3480.012771
+            },
+            {
+              "name": "playing",
+              "atMs": 225.5999999642372,
+              "time": 3480.032997
+            }
+          ],
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -53.67757797241211
+          },
+          "firstFrameMs": 86.5,
+          "frameMediaTime": 3479.996094,
+          "firstAudioMs": 233.39999997615814,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -53.67757797241211
+          },
+          "driftSeconds": 0.018518999999741936
+        },
+        {
+          "kind": "open",
+          "start": 7604.099999964237,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 3480.040791,
+          "videoLoadsBefore": 3,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -72.54222869873047
+          },
+          "loadReadyMs": 124,
+          "videoEvents": [
+            {
+              "name": "playing",
+              "atMs": 135.9000000357628,
+              "time": 0
+            }
+          ],
+          "playReadyMs": 136.60000002384186,
+          "firstAudioMs": 144,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -72.54222869873047
+          },
+          "driftSeconds": 0.000016999999999999654,
+          "firstFrameMs": 144.60000002384186,
+          "frameMediaTime": 0,
+          "cache": "warm-browser-and-preparations"
+        },
+        {
+          "kind": "switch",
+          "start": 8408.5,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 0.625162,
+          "videoLoadsBefore": 4,
+          "track": "internal-2",
+          "pcmPolls": 29,
+          "maxPollGapMs": 14.400000035762787,
+          "lastSignal": {
+            "hz": 984.375,
+            "db": -53.475563049316406
+          },
+          "videoEvents": [
+            {
+              "name": "pause",
+              "atMs": 21.19999998807907,
+              "time": 0.64893
+            },
+            {
+              "name": "playing",
+              "atMs": 25.299999952316284,
+              "time": 0.660418
+            }
+          ],
+          "maxVideoFrameGapMs": 83.5,
+          "firstFrameMs": 22.899999976158142,
+          "frameMediaTime": 0.666667,
+          "silentPolls": 1,
+          "observedSilenceMs": 7.5,
+          "readyMs": 25.599999964237213,
+          "videoSourceUnchanged": true,
+          "videoLoadsAfter": 4,
+          "firstAudioMs": 36.5,
+          "audioSignal": {
+            "hz": 984.375,
+            "db": -53.475563049316406
+          },
+          "driftSeconds": 0.011902999999999997
+        },
+        {
+          "kind": "switch",
+          "start": 9304.5,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 1.529398,
+          "videoLoadsBefore": 4,
+          "track": "internal-1",
+          "pcmPolls": 26,
+          "maxPollGapMs": 17,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -61.74178695678711
+          },
+          "videoEvents": [
+            {
+              "name": "pause",
+              "atMs": 26.599999964237213,
+              "time": 1.551106
+            },
+            {
+              "name": "playing",
+              "atMs": 33.299999952316284,
+              "time": 1.560911
+            }
+          ],
+          "silentPolls": 1,
+          "observedSilenceMs": 9.5,
+          "readyMs": 34,
+          "videoSourceUnchanged": true,
+          "videoLoadsAfter": 4,
+          "firstAudioMs": 40.69999998807907,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -61.74178695678711
+          },
+          "driftSeconds": 0.00924299999999989,
+          "maxVideoFrameGapMs": 83.29999999999927,
+          "firstFrameMs": 43.89999997615814,
+          "frameMediaTime": 1.583333
+        },
+        {
+          "kind": "seek",
+          "start": 9569.5,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 1.78855,
+          "videoLoadsBefore": 4,
+          "target": 2,
+          "videoEvents": [
+            {
+              "name": "seeking",
+              "atMs": 12.699999988079071,
+              "time": 2
+            },
+            {
+              "name": "waiting",
+              "atMs": 13.199999988079071,
+              "time": 2
+            },
+            {
+              "name": "seeked",
+              "atMs": 31.19999998807907,
+              "time": 2.000219
+            },
+            {
+              "name": "playing",
+              "atMs": 31.599999964237213,
+              "time": 2.000244
+            },
+            {
+              "name": "pause",
+              "atMs": 31.799999952316284,
+              "time": 2.000244
+            },
+            {
+              "name": "playing",
+              "atMs": 34.299999952316284,
+              "time": 2.003284
+            }
+          ],
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -47.31623840332031
+          },
+          "firstFrameMs": 28.799999952316284,
+          "frameMediaTime": 2,
+          "firstAudioMs": 42.39999997615814,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -47.31623840332031
+          },
+          "driftSeconds": 0.0013330000000002507
+        },
+        {
+          "kind": "open",
+          "start": 9655,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 2.030028,
+          "videoLoadsBefore": 4,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -72.54222869873047
+          },
+          "loadReadyMs": 105.09999996423721,
+          "videoEvents": [
+            {
+              "name": "playing",
+              "atMs": 117.79999995231628,
+              "time": 0.000359
+            }
+          ],
+          "playReadyMs": 118.19999998807907,
+          "firstFrameMs": 126.89999997615814,
+          "frameMediaTime": 0,
+          "firstAudioMs": 128.89999997615814,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -72.54222869873047
+          },
+          "driftSeconds": 0.003452,
+          "cache": "warm-browser-and-preparations"
+        },
+        {
+          "kind": "switch",
+          "start": 10439.299999952316,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 0.624806,
+          "videoLoadsBefore": 5,
+          "track": "internal-2",
+          "pcmPolls": 30,
+          "maxPollGapMs": 17.899999976158142,
+          "lastSignal": {
+            "hz": 984.375,
+            "db": -53.202880859375
+          },
+          "maxVideoFrameGapMs": 83.39999999999964,
+          "firstFrameMs": 25.5,
+          "frameMediaTime": 0.666667,
+          "videoEvents": [
+            {
+              "name": "pause",
+              "atMs": 33.30000001192093,
+              "time": 0.656434
+            },
+            {
+              "name": "playing",
+              "atMs": 38.40000003576279,
+              "time": 0.661374
+            }
+          ],
+          "readyMs": 38.90000003576279,
+          "videoSourceUnchanged": true,
+          "videoLoadsAfter": 5,
+          "silentPolls": 1,
+          "observedSilenceMs": 8.200000047683716,
+          "firstAudioMs": 48.90000003576279,
+          "audioSignal": {
+            "hz": 984.375,
+            "db": -53.202880859375
+          },
+          "driftSeconds": 0.003942999999999919
+        },
+        {
+          "kind": "switch",
+          "start": 11341.899999976158,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 1.501842,
+          "videoLoadsBefore": 5,
+          "track": "internal-1",
+          "pcmPolls": 31,
+          "maxPollGapMs": 14.199999988079071,
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -62.19642639160156
+          },
+          "videoEvents": [
+            {
+              "name": "pause",
+              "atMs": 32.39999997615814,
+              "time": 1.531979
+            },
+            {
+              "name": "playing",
+              "atMs": 38.10000002384186,
+              "time": 1.540484
+            }
+          ],
+          "silentPolls": 1,
+          "observedSilenceMs": 8.899999976158142,
+          "readyMs": 38.89999997615814,
+          "videoSourceUnchanged": true,
+          "videoLoadsAfter": 5,
+          "maxVideoFrameGapMs": 83.39999999999964,
+          "firstFrameMs": 40,
+          "frameMediaTime": 1.583333,
+          "firstAudioMs": 44.5,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -62.19642639160156
+          },
+          "driftSeconds": 0.006939999999999946
+        },
+        {
+          "kind": "seek",
+          "start": 11622.799999952316,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 1.781841,
+          "videoLoadsBefore": 5,
+          "target": 900,
+          "videoEvents": [
+            {
+              "name": "seeking",
+              "atMs": 10,
+              "time": 900
+            },
+            {
+              "name": "waiting",
+              "atMs": 11.400000035762787,
+              "time": 900
+            },
+            {
+              "name": "seeked",
+              "atMs": 94.40000003576279,
+              "time": 900
+            },
+            {
+              "name": "playing",
+              "atMs": 94.70000004768372,
+              "time": 900
+            },
+            {
+              "name": "pause",
+              "atMs": 94.80000001192093,
+              "time": 900
+            },
+            {
+              "name": "playing",
+              "atMs": 100.5,
+              "time": 900
+            }
+          ],
+          "lastSignal": {
+            "hz": 445.3125,
+            "db": -53.60824966430664
+          },
+          "firstFrameMs": 92.40000003576279,
+          "frameMediaTime": 899.947917,
+          "firstAudioMs": 114.10000002384186,
+          "audioSignal": {
+            "hz": 445.3125,
+            "db": -53.60824966430664
+          },
+          "driftSeconds": 0.0023189999999431166
+        },
+        {
+          "kind": "open",
+          "start": 11838.599999964237,
+          "videoSourceBefore": "http://127.0.0.1:26012/original",
+          "positionBefore": 900.092978,
+          "videoLoadsBefore": 5,
+          "lastSignal": {
+            "hz": 23.4375,
+            "db": null
+          },
+          "loadReadyMs": 96.60000002384186,
+          "firstFrameMs": 109.90000003576279,
+          "frameMediaTime": 0,
+          "error": "Error: Réserve de lecture insuffisante après 8 secondes. Vérifiez le débit du stockage ou du réseau.",
+          "mediaDiagnostic": [
+            {
+              "tag": "VIDEO",
+              "position": 0,
+              "duration": 3500.012771,
+              "paused": true,
+              "seeking": false,
+              "readyState": 4,
+              "networkState": 1,
+              "buffered": []
+            },
+            {
+              "tag": "AUDIO",
+              "position": 0,
+              "duration": 3500.012771,
+              "paused": true,
+              "seeking": false,
+              "readyState": 4,
+              "networkState": 2,
+              "buffered": [
+                [
+                  0,
+                  10
+                ]
+              ]
+            }
+          ],
+          "cache": "warm-browser-and-preparations"
+        }
+      ],
+      "errors": [],
+      "passed": false,
+      "summary": {
+        "open": {
+          "firstFrameMs": {
+            "n": 4,
+            "min": 110.09999996423721,
+            "median": 144.60000002384186,
+            "p95": 145.60000002384186,
+            "max": 145.60000002384186
+          },
+          "firstAudioMs": {
+            "n": 4,
+            "min": 109.89999997615814,
+            "median": 144,
+            "p95": 178.80000001192093,
+            "max": 178.80000001192093
+          },
+          "playReadyMs": {
+            "n": 4,
+            "min": 100.89999997615814,
+            "median": 136.60000002384186,
+            "p95": 168.5,
+            "max": 168.5
+          },
+          "readyMs": null,
+          "maxVideoFrameGapMs": null,
+          "observedSilenceMs": null,
+          "maxPollGapMs": null
+        },
+        "switch": {
+          "firstFrameMs": {
+            "n": 10,
+            "min": 20.30000001192093,
+            "median": 43.89999997615814,
+            "p95": 63.5,
+            "max": 63.5
+          },
+          "firstAudioMs": {
+            "n": 10,
+            "min": 29.099999964237213,
+            "median": 41.09999996423721,
+            "p95": 188.89999997615814,
+            "max": 188.89999997615814
+          },
+          "playReadyMs": null,
+          "readyMs": {
+            "n": 10,
+            "min": 25.599999964237213,
+            "median": 33.69999998807907,
+            "p95": 174,
+            "max": 174
+          },
+          "maxVideoFrameGapMs": {
+            "n": 10,
+            "min": 83.29999999999927,
+            "median": 83.5,
+            "p95": 83.70000000000005,
+            "max": 83.70000000000005
+          },
+          "observedSilenceMs": {
+            "n": 7,
+            "min": 7.400000035762787,
+            "median": 7.800000011920929,
+            "p95": 9.5,
+            "max": 9.5
+          },
+          "maxPollGapMs": {
+            "n": 10,
+            "min": 14.199999988079071,
+            "median": 17,
+            "p95": 20.400000035762787,
+            "max": 20.400000035762787
+          }
+        },
+        "seek": {
+          "firstFrameMs": {
+            "n": 5,
+            "min": 28.799999952316284,
+            "median": 86.5,
+            "p95": 96.69999998807907,
+            "max": 96.69999998807907
+          },
+          "firstAudioMs": {
+            "n": 5,
+            "min": 42.39999997615814,
+            "median": 162.5,
+            "p95": 409.39999997615814,
+            "max": 409.39999997615814
+          },
+          "playReadyMs": null,
+          "readyMs": null,
+          "maxVideoFrameGapMs": null,
+          "observedSilenceMs": null,
+          "maxPollGapMs": null
+        }
+      }
+    }
+  ],
+  "preparations": [
+    {
+      "path": "/audio-1-chunk-0",
+      "elapsedMs": 176.84829999999965,
+      "bytes": 398047
+    },
+    {
+      "path": "/audio-2-chunk-0",
+      "elapsedMs": 140.2499000000007,
+      "bytes": 464063
+    },
+    {
+      "path": "/audio-1-chunk-90",
+      "elapsedMs": 124.5622000000003,
+      "bytes": 409687
+    },
+    {
+      "path": "/audio-1-chunk-180",
+      "elapsedMs": 374.184699999998,
+      "bytes": 411559
+    },
+    {
+      "path": "/audio-1-chunk-348",
+      "elapsedMs": 207.32879999999932,
+      "bytes": 413530
+    }
+  ],
+  "requests": [
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 0,
+      "end": 352256544,
+      "headerMs": 0.24080000000003565,
+      "bytesSent": 655360,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 349077504,
+      "end": 352256544,
+      "headerMs": 0.14109999999982392,
+      "bytesSent": 3179041,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 0,
+      "end": 352256544,
+      "headerMs": 0.10539999999991778,
+      "bytesSent": 6094848,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 89554944,
+      "end": 352256544,
+      "headerMs": 0.21829999999999927,
+      "bytesSent": 6094848,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 0,
+      "end": 352256544,
+      "headerMs": 0.10269999999991342,
+      "bytesSent": 1245184,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 349077504,
+      "end": 352256544,
+      "headerMs": 0.18910000000005311,
+      "bytesSent": 3179041,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 425984,
+      "end": 352256544,
+      "headerMs": 0.191899999999805,
+      "bytesSent": 6291456,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 179339264,
+      "end": 352256544,
+      "headerMs": 0.3265000000001237,
+      "bytesSent": 6684672,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 0,
+      "end": 352256544,
+      "headerMs": 0.1291999999998552,
+      "bytesSent": 1048576,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 349077504,
+      "end": 352256544,
+      "headerMs": 0.14429999999993015,
+      "bytesSent": 3179041,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 655360,
+      "end": 352256544,
+      "headerMs": 0.18609999999989668,
+      "bytesSent": 6488064,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 346980352,
+      "end": 352256544,
+      "headerMs": 0.06989999999950669,
+      "bytesSent": 2490368,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 349110272,
+      "end": 352256544,
+      "headerMs": 0.14570000000003347,
+      "bytesSent": 3146273,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 0,
+      "end": 352256544,
+      "headerMs": 0.16460000000006403,
+      "bytesSent": 4259840,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 350846976,
+      "end": 352256544,
+      "headerMs": 0.16489999999976135,
+      "bytesSent": 1409569,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 3932160,
+      "end": 352256544,
+      "headerMs": 0.17860000000018772,
+      "bytesSent": 65536,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 349077504,
+      "end": 352256544,
+      "headerMs": 0.07049999999981083,
+      "bytesSent": 2031616,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 2785280,
+      "end": 352256544,
+      "headerMs": 0.14699999999993452,
+      "bytesSent": 5111808,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 89554944,
+      "end": 352256544,
+      "headerMs": 0.15929999999934807,
+      "bytesSent": 7864320,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 1835008,
+      "end": 352256544,
+      "headerMs": 0.1875,
+      "bytesSent": 589824,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 349077504,
+      "end": 352256544,
+      "headerMs": 0.15349999999943975,
+      "bytesSent": 3179041,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 0,
+      "end": 352256544,
+      "headerMs": 0.10560000000077707,
+      "bytesSent": 720896,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 349077504,
+      "end": 352256544,
+      "headerMs": 0.29540000000088185,
+      "bytesSent": 3179041,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 0,
+      "end": 352256544,
+      "headerMs": 0.09130000000004657,
+      "bytesSent": 6553600,
+      "cancelled": true
+    },
+    {
+      "path": "/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 398046,
+      "headerMs": 176.95960000000014,
+      "bytesSent": 398047,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-2-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 464062,
+      "headerMs": 140.38450000000012,
+      "bytesSent": 464063,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 398046,
+      "headerMs": 0.08230000000003201,
+      "bytesSent": 398047,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 89554944,
+      "end": 352256544,
+      "headerMs": 0.06279999999969732,
+      "bytesSent": 6160384,
+      "cancelled": true
+    },
+    {
+      "path": "/audio-1-chunk-90",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 409686,
+      "headerMs": 124.68940000000111,
+      "bytesSent": 409687,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 0,
+      "end": 352256544,
+      "headerMs": 0.09650000000146974,
+      "bytesSent": 1179648,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 349077504,
+      "end": 352256544,
+      "headerMs": 0.08129999999982829,
+      "bytesSent": 3179041,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 720896,
+      "end": 352256544,
+      "headerMs": 0.08379999999851862,
+      "bytesSent": 6029312,
+      "cancelled": true
+    },
+    {
+      "path": "/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 398046,
+      "headerMs": 0.07400000000052387,
+      "bytesSent": 398047,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-2-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 464062,
+      "headerMs": 0.10350000000107684,
+      "bytesSent": 464063,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 398046,
+      "headerMs": 0.10959999999977299,
+      "bytesSent": 398047,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 179339264,
+      "end": 352256544,
+      "headerMs": 0.11040000000139116,
+      "bytesSent": 6619136,
+      "cancelled": true
+    },
+    {
+      "path": "/audio-1-chunk-180",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 411558,
+      "headerMs": 374.28020000000106,
+      "bytesSent": 411559,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 0,
+      "end": 352256544,
+      "headerMs": 0.185300000001007,
+      "bytesSent": 655360,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 349077504,
+      "end": 352256544,
+      "headerMs": 0.09360000000015134,
+      "bytesSent": 3179041,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 398046,
+      "headerMs": 0.1198999999978696,
+      "bytesSent": 398047,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 458752,
+      "end": 352256544,
+      "headerMs": 0.10299999999915599,
+      "bytesSent": 6881280,
+      "cancelled": true
+    },
+    {
+      "path": "/audio-2-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 464062,
+      "headerMs": 0.13609999999971478,
+      "bytesSent": 464063,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 398046,
+      "headerMs": 0.14039999999658903,
+      "bytesSent": 398047,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 346980352,
+      "end": 352256544,
+      "headerMs": 0.20119999999951688,
+      "bytesSent": 2162688,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 349175808,
+      "end": 352256544,
+      "headerMs": 0.21819999999934225,
+      "bytesSent": 3080737,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-1-chunk-348",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 413529,
+      "headerMs": 207.42220000000088,
+      "bytesSent": 413530,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 131072,
+      "end": 352256544,
+      "headerMs": 0.07339999999749125,
+      "bytesSent": 4390912,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 350846976,
+      "end": 352256544,
+      "headerMs": 0.07729999999719439,
+      "bytesSent": 131072,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 350912512,
+      "end": 352256544,
+      "headerMs": 0.19169999999940046,
+      "bytesSent": 1344033,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 398046,
+      "headerMs": 0.1574000000000524,
+      "bytesSent": 398047,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-2-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 464062,
+      "headerMs": 0.08169999999881838,
+      "bytesSent": 464063,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 398046,
+      "headerMs": 0.09230000000025029,
+      "bytesSent": 398047,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 4390912,
+      "end": 352256544,
+      "headerMs": 0.13549999999668216,
+      "bytesSent": 196608,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 349077504,
+      "end": 352256544,
+      "headerMs": 0.10870000000068103,
+      "bytesSent": 1966080,
+      "cancelled": true
+    },
+    {
+      "path": "/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 398046,
+      "headerMs": 0.18279999999867869,
+      "bytesSent": 398047,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-2-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 464062,
+      "headerMs": 0.14930000000094878,
+      "bytesSent": 464063,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 3244032,
+      "end": 352256544,
+      "headerMs": 0.20879999999669963,
+      "bytesSent": 4915200,
+      "cancelled": true
+    },
+    {
+      "path": "/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 398046,
+      "headerMs": 0.3569999999999709,
+      "bytesSent": 398047,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-1-chunk-90",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 409686,
+      "headerMs": 0.3731999999981781,
+      "bytesSent": 409687,
+      "cancelled": false
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 89554944,
+      "end": 352256544,
+      "headerMs": 0.18110000000160653,
+      "bytesSent": 7995392,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 1900544,
+      "end": 352256544,
+      "headerMs": 0.23430000000007567,
+      "bytesSent": 131072,
+      "cancelled": true
+    },
+    {
+      "path": "/original",
+      "method": "GET",
+      "status": 206,
+      "start": 349077504,
+      "end": 352256544,
+      "headerMs": 0.11999999999898137,
+      "bytesSent": 3179041,
+      "cancelled": false
+    },
+    {
+      "path": "/audio-1-chunk-0",
+      "method": "GET",
+      "status": 200,
+      "start": 0,
+      "end": 398046,
+      "headerMs": 0.10289999999804422,
+      "bytesSent": 398047,
+      "cancelled": false
+    }
+  ],
+  "browser": "155.0.8059.86",
+  "ffmpeg": "ffmpeg version 9.0.2-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers\r"
+}

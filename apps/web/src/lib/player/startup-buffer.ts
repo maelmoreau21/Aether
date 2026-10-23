@@ -13,6 +13,11 @@ export function bufferedAhead(media: HTMLMediaElement): number {
 export function waitForStartupBuffer(media: HTMLMediaElement, signal: AbortSignal): Promise<void> {
   const enough = () => {
     if (media.seeking || media.readyState < 3) return false;
+    // Chrome can retain the previous buffered TimeRanges after reloading the
+    // same URL, even while decoding the new position. HAVE_ENOUGH_DATA is the
+    // browser's stronger playback readiness signal; do not deadlock a paused
+    // decoder by requiring its stale ranges to contain the current position.
+    if (media.readyState >= 4) return true;
     const remaining = Number.isFinite(media.duration) ? Math.max(0, media.duration - media.currentTime) : Infinity;
     return bufferedAhead(media) >= Math.min(.05, Math.max(0, remaining - .05));
   };

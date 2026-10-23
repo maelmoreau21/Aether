@@ -1,5 +1,32 @@
 # MEMORY.md — État et décisions Aether
 
+## 23 octobre 2026 — Recherche streaming Rust et continuité VF/VO
+
+- Cache de préparation Node : ouverture confinée hors verrou global, lease
+  conservée pendant ouverture/streaming, worker libéré au hit après attente.
+  Microbenchmark Windows debug, 8 sessions/512 premiers blocs de 64 Kio :
+  médiane 255,9 → 101,7 ms sur trois alternances ; pas une mesure de décodage.
+- Changement audio indépendant : ancienne vidéo/piste maintenue pendant la
+  préparation du candidat ; commit aligné à la position courante, pause manuelle
+  et erreurs préservées. Suivi des fenêtres actif pendant chargement du candidat.
+- Blocage long reproduit : Chrome peut déclarer readyState=4 après réouverture
+  avec buffered vide/ancien. Accepter HAVE_ENOUGH_DATA hors seek supprime notre
+  attente artificielle ; réserve conservée pour readyState=3, aucun retry ajouté.
+- Retard audio contrôlé 300 ms : trou vidéo médian 343,3 → 66,5 ms, silence PCM
+  346,1 → 9,2 ms ; délai de la nouvelle langue toujours environ 360 ms.
+- 50 ms observés sur fixtures chaudes 320×180 dans le moteur isolé : pas de
+  promesse NAS/1080p/application complète. Long 1080p/12 fps, 336 Mio : huit
+  ouvertures/seeks par stratégie et seize switches passent après correctif ;
+  reprise segmentée médiane 122,7 ms, PCM seek p95 234,4 ms, objectifs ouverts.
+- Méthode, preuves et limites : docs/STREAMING_PERFORMANCE.md. Aucun réencodage,
+  changement d'architecture, push, déploiement ou modification de médias privés.
+- Validation locale : 136 tests Web, check/lint/build, 49 tests Node, cinq
+  intégrations Core, microbenchmark cache, Clippy workspace/all-targets strict
+  et format réussis. Mesures Core/SQLite/Svelte : premier clic → frame
+  277–296 ms, réouvertures usuelles 57–85 ms sur petites fixtures (passage
+  précédent 144–194 / 44–67 ms, forte variabilité) ; repli
+  après erreur réseau vérifié. Son physique/CPU-RSS Rust par session non mesurés.
+
 ## 23 octobre 2026 — Optimisation du chargement instantané de l'accueil et des images (style Jellyfin)
 
 - **Chargement instantané du catalogue et affichage immédiat de l'accueil** :

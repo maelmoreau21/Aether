@@ -63,6 +63,25 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByRole('heading',{name:'Scanner Film',exact:true}).waitFor();
     const container=restart?'MKV':'MP4';
     await page.getByRole('button',{name:`Sélectionner la version ${container}`,exact:true}).click();
+    // Browser clock at the actual Svelte click handler boundary; excludes
+    // Playwright dispatch latency. rVFC means compositor submission, not photons.
+    await page.evaluate(()=>{
+      window.__streamingLaunches=[];
+      document.addEventListener('click',event=>{
+        if(!event.target.closest('.hero-cta'))return;
+        const entry={start:performance.now(),audioScope:'playing event only; not PCM or physical onset'};
+        window.__streamingLaunches.push(entry);
+        const observer=new MutationObserver(()=>{
+          const dialog=document.querySelector('dialog#player[open]'),video=dialog?.querySelector('video');
+          if(!video)return;
+          entry.dialogOpenMs=performance.now()-entry.start;observer.disconnect();
+          video.requestVideoFrameCallback((_now,meta)=>{entry.firstFrameMs=performance.now()-entry.start;entry.frameMediaTime=meta.mediaTime;});
+          video.addEventListener('playing',()=>{entry.videoPlayingMs=performance.now()-entry.start;},{once:true});
+        });
+        observer.observe(document.body,{subtree:true,childList:true,attributes:true});
+        setTimeout(()=>observer.disconnect(),20000);
+      },true);
+    });
     const playbackStarted = performance.now();
     await page.locator('.hero-cta').click();
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>0.2);
@@ -273,7 +292,20 @@ fs.mkdirSync(out, {recursive: true});
       assert.ok(!preparations.some(request=>request.path.endsWith('/prepared/video')), 'successful native MKV must avoid full-video preparation');
       await page.locator('.hero-cta').click();
       await openMenu('audio');await page.locator('[data-audio-id="internal-1"]').click();
-      await page.waitForFunction(()=>document.querySelector('audio')?.dataset.internalAudioTrack==='internal-1');
+      // A pending candidate already has its dataset. Wait for the committed,
+      // playing track and its persisted preference before closing the dialog.
+      await page.waitForFunction(async()=>{
+        const audios=[...document.querySelectorAll('audio')];
+        if(audios.length!==1||audios[0].dataset.internalAudioTrack!=='internal-1'||audios[0].paused)return false;
+        const response=await fetch('/api/v1/preferences');
+        return response.ok&&(await response.json()).audioTrack?.trackId==='internal-1';
+      });
+      // Playback can start before selectAudio's final await has returned to
+      // Svelte. Confirm the UI transaction finished, including its preference.
+      await openMenu('audio');
+      await page.locator('[data-audio-id="internal-1"][aria-checked="true"]:not(:disabled)').waitFor();
+      await page.locator('[aria-label="Fermer le menu"]').click();
+      report.results.fallbackPreferenceBeforeClose=await page.evaluate(async()=>(await(await fetch('/api/v1/preferences')).json()).audioTrack);
       await page.keyboard.press('Shift');await page.locator('button.return').click();
       await page.waitForFunction(()=>!document.querySelector('dialog#player')?.hasAttribute('open'));
       await page.route('**/assets/*/content',route=>route.abort('failed'));
@@ -283,6 +315,7 @@ fs.mkdirSync(out, {recursive: true});
       report.results.nativeFailurePreparedFallback=true;
       await page.unroute('**/assets/*/content');
     }
+    report.results.clickTimings=await page.evaluate(()=>window.__streamingLaunches);
     report.passed=true;
     await context.close();
   } catch(error) {report.failure=String(error.stack);report.preparations=preparations;const p=browser.contexts()[0]?.pages()[0];if(p) report.diagnostic=await p.evaluate(()=>({url:location.href,buttons:[...document.querySelectorAll('button')].map(b=>b.textContent).slice(-30),error:document.querySelector('.player-error')?.textContent,notice:document.querySelector('.fullscreen-notice')?.textContent,video:{time:document.querySelector('video')?.currentTime,paused:document.querySelector('video')?.paused},audio:{time:document.querySelector('audio')?.currentTime,paused:document.querySelector('audio')?.paused}})).catch(()=>null);process.exitCode=1;}

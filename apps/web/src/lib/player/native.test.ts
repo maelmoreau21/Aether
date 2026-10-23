@@ -4,7 +4,7 @@ import { ExternalAudio } from './external-audio';
 import { AudioSelectionRetainedError } from './errors';
 import type { Media } from './types';
 vi.mock('./external-audio', () => ({ ExternalAudio: class {
-  async load() {} async bufferForPlayback() {} async play() {} destroy() {} setOffset() {} activate() {} pause() {} isBuffering() { return false; }
+  async load() {} async bufferForPlayback() {} async play() {} destroy() {} setOffset() {} activate() {} assertReady() {} pause() {} isBuffering() { return false; }
 } }));
 class Video extends EventTarget {
   currentTime = 0; duration = 12; paused = true; volume = 0.4; playbackRate = 1.5;
@@ -23,6 +23,87 @@ const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr',
 function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
+  it('does not pause a reused video when the destroyed player times out on an unresolved play promise', async()=>{
+    vi.useFakeTimers();const {video,player}=setup();await player.load(media);
+    const play=vi.spyOn(video,'play').mockImplementationOnce(()=>new Promise<void>(()=>{}));
+    const starting=expect(player.play()).rejects.toThrow('expiré');
+    await vi.advanceTimersByTimeAsync(0);expect(play).toHaveBeenCalledOnce();
+    player.destroy();await video.play();
+    const pause=vi.spyOn(video,'pause');
+    await vi.advanceTimersByTimeAsync(10000);await starting;
+    expect(video.paused).toBe(false);expect(pause).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);pause.mockRestore();play.mockRestore();
+  });
+  it('rejects a delayed video play promise after destruction without pausing a reused video element', async()=>{
+    const {video,player}=setup();await player.load(media);
+    let played!:()=>void;
+    const play=vi.spyOn(video,'play').mockImplementationOnce(()=>new Promise<void>(resolve=>{played=resolve;}));
+    const starting=expect(player.play()).rejects.toThrow('Démarrage annulé');
+    await vi.waitFor(()=>expect(play).toHaveBeenCalled());
+    player.destroy();expect(video.paused).toBe(true);
+    await video.play(); // The next player can already be using the same element.
+    played();await starting;
+    expect(video.paused).toBe(false);play.mockRestore();
+  });
+  it('rejects a delayed external audio play promise resolved after a manual pause', async()=>{
+    const {video,player}=setup();
+    await player.load({...media,sources:[{...media.sources[0],externalAudioUrl:'/audio'}]});
+    let played!:()=>void;
+    const play=vi.spyOn(ExternalAudio.prototype,'play').mockImplementationOnce(()=>new Promise<void>(resolve=>{played=resolve;}));
+    const starting=expect(player.play()).rejects.toThrow('Démarrage annulé');
+    await vi.waitFor(()=>expect(play).toHaveBeenCalled());
+    player.pause();played();await starting;
+    expect(video.paused).toBe(true);play.mockRestore();player.destroy();
+  });
+  it('validates candidate failures at commit before destroying the retained audio', async () => {
+    const {video,player}=setup();
+    const prepared={...media,sources:media.sources.map(s=>({...s,url:'/same-video',externalAudioUrl:`/audio-${s.language}`}))};
+    await player.load(prepared);await player.play();
+    const destroy=vi.spyOn(ExternalAudio.prototype,'destroy');
+    let failed=false;
+    const buffer=vi.spyOn(ExternalAudio.prototype,'bufferForPlayback').mockImplementationOnce(async()=>{queueMicrotask(()=>{failed=true;});});
+    const ready=vi.spyOn(ExternalAudio.prototype,'assertReady').mockImplementationOnce(()=>{if(failed)throw new Error('candidate window HTTP 503');});
+    await expect(player.selectAudio('en')).rejects.toBeInstanceOf(AudioSelectionRetainedError);
+    expect(destroy).toHaveBeenCalledTimes(1);expect(video.paused).toBe(false);
+    await player.selectAudio('fr');expect(video.loads).toBe(1);
+    ready.mockRestore();buffer.mockRestore();destroy.mockRestore();player.destroy();
+  });
+  it('keeps the previous presentation playing while a replacement audio loads, then buffers the current position', async () => {
+    const {video,player}=setup();
+    const prepared={...media,sources:media.sources.map(s=>({...s,url:'/same-video',externalAudioUrl:`/audio-${s.language}`}))};
+    await player.load(prepared);await player.play();video.currentTime=3;
+    let ready!:()=>void;
+    const load=vi.spyOn(ExternalAudio.prototype,'load').mockImplementationOnce(()=>new Promise<void>(resolve=>{ready=resolve;}));
+    const buffer=vi.spyOn(ExternalAudio.prototype,'bufferForPlayback').mockImplementation(async()=>{expect(video.paused).toBe(true);expect(video.currentTime).toBe(4);});
+    const paused=vi.spyOn(video,'pause');
+    const switching=player.selectAudio('en');
+    expect(video.paused).toBe(false);expect(paused).not.toHaveBeenCalled();
+    video.currentTime=4;ready();await switching;
+    expect(buffer).toHaveBeenCalled();expect(video.paused).toBe(false);expect(video.loads).toBe(1);
+    load.mockRestore();buffer.mockRestore();player.destroy();
+  });
+  it('respects a manual pause while the replacement audio is loading', async () => {
+    const {video,player}=setup();
+    const prepared={...media,sources:media.sources.map(s=>({...s,url:'/same-video',externalAudioUrl:`/audio-${s.language}`}))};
+    await player.load(prepared);await player.play();
+    let ready!:()=>void;
+    const load=vi.spyOn(ExternalAudio.prototype,'load').mockImplementationOnce(()=>new Promise<void>(resolve=>{ready=resolve;}));
+    const switching=player.selectAudio('en');player.pause();ready();await switching;
+    expect(video.paused).toBe(true);expect(video.loads).toBe(1);
+    load.mockRestore();player.destroy();
+  });
+  it('keeps committed replacement audio retryable when its play promise rejects', async () => {
+    const {video,player}=setup();
+    const prepared={...media,sources:media.sources.map(s=>({...s,url:'/same-video',externalAudioUrl:`/audio-${s.language}`}))};
+    await player.load(prepared);await player.play();
+    const destroy=vi.spyOn(ExternalAudio.prototype,'destroy');
+    const play=vi.spyOn(ExternalAudio.prototype,'play').mockRejectedValueOnce(new Error('play rejected'));
+    await expect(player.selectAudio('en')).rejects.toThrow('play rejected');
+    expect(destroy).toHaveBeenCalledTimes(1); // Only the old, replaced track.
+    expect(video.paused).toBe(true);
+    await player.play();expect(video.paused).toBe(false);expect(video.loads).toBe(1);
+    play.mockRestore();destroy.mockRestore();player.destroy();
+  });
   it('uses decoded original Matroska video without preparing the whole file', async () => {
     const {video,player}=setup();const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);
     await player.load({...media,sources:[{...media.sources[0],url:'/original.mkv',prepare:true,prepareVideo:false,preparedVideoUrl:'/prepared/video'}]});

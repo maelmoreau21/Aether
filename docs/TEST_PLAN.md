@@ -1,3 +1,19 @@
+## Recherche de latence streaming — 23 octobre 2026
+
+Méthode, stratégies comparées, mesures brutes et limites :
+[STREAMING_PERFORMANCE.md](STREAMING_PERFORMANCE.md).
+Le banc `scripts/browser-streaming-performance.cjs` distingue clic navigateur,
+première image soumise au compositeur, PCM décodé, seek et changement audio.
+Le scénario `browser_scanner` mesure aussi clic → dialogue/image sur le vrai
+Core/SQLite/Node local. Un banc HTTP synthétique ne remplace pas ce parcours.
+
+Régressions ciblées : conservation de la vidéo pendant préparation VF/VO,
+pause manuelle et erreur du candidat, franchissement de fenêtre audio pendant
+son chargement, annulation et durée de vie des leases du cache Node.
+Le microbenchmark Node ignoré `benchmark_preparation_cache_open_concurrency`
+compare explicitement les deux durées de verrouillage sur le même fichier.
+Il ne mesure ni un décodeur ni une première image.
+
 ## Navigation et lancement — 23 octobre 2026
 
 Cache session/SWR borné, annulations, déduplication, parcours Chrome et mesures

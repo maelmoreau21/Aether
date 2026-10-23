@@ -46,7 +46,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByRole('heading', {name:'Séries Navigateur', exact:true}).waitFor();
 
     // Grant library access directly on series-user-b in Users section
-    await page.locator('a[href="#users-section"]').click();
+    if (await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
+    await page.locator('.admin-sidebar a[href$="#users-section"]').click();
     const accounts = page.locator('#users-section');
     await accounts.getByRole('button', {name: 'Modifier series-user-b', exact: true}).click();
     await accounts.getByRole('button', {name: 'Accès', exact: true}).click();
@@ -54,7 +55,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('#users-section').getByRole('button', {name: 'Enregistrer', exact: true}).click();
     await page.getByText('Compte enregistré').waitFor();
 
-    await page.locator('a[href="#libraries-section"]').click();
+    if (await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
+    await page.locator('.admin-sidebar a[href$="#libraries-section"]').click();
     await page.getByLabel('Actions Séries Navigateur', {exact:true}).click();
     await page.getByRole('button', {name:'Actualiser la bibliothèque', exact:true}).click();
     await page.getByRole('dialog').getByRole('button', {name:'Actualiser', exact:true}).click();

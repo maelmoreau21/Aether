@@ -180,3 +180,94 @@ Comparer TTFB catalogue/descripteur, temps Core/Node, préparation audio, nombre
 préparations et CPU/RSS. Les champs `elapsed_ms` HTTP décrivent la création de la
 réponse, pas la fin du transfert. Ne modifier SQL/index/packaging qu'après ce profilage.
 Voir aussi [diagnostics existants](NAS_PLAYBACK_DIAGNOSTICS.md).
+
+
+## Complément du 23 octobre — préchargement et images
+
+Les liens Accueil et bibliothèques Films/Séries anticipent la première page au
+survol/focus. Le cache utilise maintenant l'URL complète sans préfixe de section :
+une réponse identique est partagée entre navigation anticipée et affichage. Les
+filtres, le tri, la pagination et la bibliothèque restent séparés ; les purges de
+session/droits et les plafonds existants restent actifs. Le lecteur optionnel est
+importé après chargement du catalogue. Un clic Lecture anticipe la progression
+pendant la revalidation obligatoire du descripteur, y compris sans survol tactile.
+
+Le lecteur charge l'audio Ogg indépendant déjà préparé pendant les métadonnées
+vidéo ; il ne l'active qu'après réussite des deux. La préparation serveur reste
+séquentielle ; Opus segmenté garde son initialisation après l'index vidéo. Aucun
+transcodage ajouté. Les affiches deviennent visibles au chargement sans le fondu
+supplémentaire de 300 ms. La requête catalogue ne résout plus trois fois les images
+avant la résolution effective groupée (qui applique masquage/ordre/permissions).
+
+Mesures locales, Windows/Chrome 155, une exécution, charge machine variable :
+
+- UI réelle/API simulée avec catalogue 180 ms et descripteur 300 ms : dix retours
+  89–134 ms, zéro requête catalogue ; dialogue 12/7 ms. Première image 752/488 ms,
+  playing 663/491 ms. Le scénario ne satisfait pas 200 ms de bout en bout.
+- Moteur réel/HTTP isolé/fixture AV1 10 bits et deux Opus 5.1 : Ogg indépendant,
+  première image 88 ms, lecture prête 188 ms, réouvertures 53/67 ms ; Opus segmenté,
+  première image 263 ms, lecture prête 585 ms, réouvertures 78/53 ms. Décodage PCM,
+  langues, pause/seek, restauration après erreur et annulation segmentée réussis.
+  Pas de mesure du premier son physique, du NAS ou du parcours complet Core/Node.
+- SQLite debug, 10 000 œuvres : première page 269 → 345 ms, page profonde
+  599 → 486 ms, recherche 91 → 73 ms ; 1 000 œuvres : 63 → 29 ms, profonde
+  87 → 31 ms. Exécutions uniques non isolées : aucun gain général ni objectif
+  serveur sous 200 ms démontré. Le contrôle EXPLAIN historique utilise une requête
+  simplifiée ; il ne prouve pas le plan exact de catalogue_filtered.
+
+Preuves : [navigation](evidence/2026-10-23/catalog-startup/navigation.json),
+[décodage Ogg](evidence/2026-10-23/catalog-startup/decoding.json),
+[décodage segmenté](evidence/2026-10-23/catalog-startup/segmented.json).
+
+Validation : 106 tests Web, check/lint/build ; 5 tests catalogue, 5 images Node,
+7 scanner Node ; navigateur navigation et les deux modes audio ci-dessus.
+Les nouveaux tests couvrent le partage préchargement/affichage, le chargement
+audio concurrent sans activation prématurée, les alias d'affiches et les fonds
+préfixés sans image générique. Pas de déploiement ni modification de médias.
+La cible 200 ms reste ouverte pour le premier chargement et l'installation réelle.
+
+Le [contrôle ciblé de préchargement](evidence/2026-10-23/catalog-startup/navigation-prefetch.json)
+visite une bibliothèque encore absente du cache : après survol et réception de
+sa page, clic → cartes 111 ms, zéro requête supplémentaire et aucun loader.
+Ce temps exclut volontairement l'anticipation avant clic ; il ne mesure pas un
+premier chargement sans cache ni intention préalable. Les dix retours de cette
+exécution sont à 76–125 ms.
+
+Commandes exécutées pour ce complément :
+
+```powershell
+npm test --prefix apps/web
+npm run check --prefix apps/web
+npm run lint --prefix apps/web
+npm run build --prefix apps/web
+cargo test --locked -p media-poc --test catalog_performance -j 1 -- --nocapture --test-threads=1
+cargo test --locked -p media-node --lib images:: -j 1 -- --test-threads=1
+cargo test --locked -p media-node --lib scanner::tests:: -j 1 -- --test-threads=1
+cargo test --locked -p media-poc --test posters_flow -j 1 -- --test-threads=1
+cargo fmt --check
+cargo clippy --locked --all-targets -j 1 -- -D warnings
+node scripts/browser-navigation-performance.cjs
+$env:MEDIA_REPORT_DIR='target/catalog-startup/decoding'
+node scripts/browser-dual-opus.cjs
+$env:MEDIA_TEST_SEGMENTED='1'
+$env:MEDIA_REPORT_DIR='target/catalog-startup/segmented'
+node scripts/browser-dual-opus.cjs
+git diff --check
+```
+
+Les contrôles ont également révélé des 404 de logos/indicateurs sur les routes
+Films/Séries : construire un chemin d'image à partir de `resolve('/')` produisait
+une URL relative dépendant du document. Les six composants concernés utilisent
+désormais `asset('images/...')` de SvelteKit (y compris connexion/administration).
+La configuration paths.relative=false évite aussi de conserver un chemin relatif
+SSR après navigation cliente depuis l'accueil. Le préfixe /app reste configurable
+dans Vite. Le test navigateur signale toute réponse HTTP d'image en erreur.
+Le test HTTP posters_flow réussit : images catalogue, GET/HEAD/Range, miniatures,
+ETag et permissions/révocation. Format Rust et Clippy all-targets strict réussis.
+
+Contrôle final sur **build de production** servi par `vite preview`, après correction
+des chemins : [rapport](evidence/2026-10-23/catalog-startup/production-final.json).
+Zéro erreur JS ou image HTTP ; dix retours catalogue 72–104 ms, bibliothèque
+préchargée 122 ms après clic sans nouvelle requête. Dialogue 15/3 ms ; première
+image 644/384 ms avec le descripteur artificiellement retardé de 300 ms. Ces
+mesures finales ne changent pas les limites des essais média isolés ci-dessus.

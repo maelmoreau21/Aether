@@ -5,7 +5,7 @@
 <script lang="ts">
   import { invalidateCatalog } from '../../../lib/catalog/page-cache';
   import { onMount } from 'svelte';
-  import { resolve } from '$app/paths';
+  import { asset, resolve } from '$app/paths';
   import { session, type AuthUser } from '../../../lib/auth/session';
   import ProfileMenu from '../../../lib/ui/ProfileMenu.svelte';
   import Icon from '../../../lib/ui/Icon.svelte';
@@ -422,7 +422,7 @@
     {#if loading}
       <div class="loading-state" role="status">
         <img
-          src={`${resolve('/').replace(/\/$/, '')}/images/logo-loading.svg`}
+          src={asset('images/logo-loading.svg')}
           alt=""
           class="logo-spinner"
           width="48"
@@ -439,7 +439,7 @@
           </button>
           <div id="admin-navigation" class="sidebar-sections" class:expanded={menuOpen}>
           <div class="sidebar-header">
-            <img src={`${resolve('/').replace(/\/$/, '')}/images/brand-mark.svg`} alt="" width="46" height="46" />
+            <img src={asset('images/brand-mark.svg')} alt="" width="46" height="46" />
             <div><strong>{$serverPresentation.serverName || DEFAULT_NAME}</strong><span class="sidebar-brand-title">{coreHealth?.version ?? 'Serveur'}</span></div>
           </div>
 

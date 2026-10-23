@@ -19,6 +19,7 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));
   await delay(1500);
   const context=await browser.newContext(); const page=await context.newPage(); let catalogRequests=0, descriptorRequests=0;
   const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
+  page.on('response',response=>{if(response.status()>=400 && /\.(svg|png|jpe?g|webp)$/.test(new URL(response.url()).pathname))errors.push(`Image HTTP ${response.status()}: ${new URL(response.url()).pathname}`);});
   await page.route('**/api/v1/**',async route=>{
    const u=new URL(route.request().url()); let data={};
    if(u.pathname==='/api/v1/auth/me') data={user:{id:'perf-user',login:'perf',role:'user'},csrfToken:'fixture'};
@@ -90,6 +91,15 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));
    scenarios.push('cancel-episode-before-descriptor-no-late-reopen');
    await page.locator('a.brand').click();await page.locator('.catalog-home').waitFor();
    scenarios.push('home-series-episode-home');
+   // Cold library navigation: intent warms the same authorized page used on click.
+   const libraryLink=page.locator('a[href*="films/?library="]').first();
+   const prefetched=page.waitForResponse(r=>r.url().includes('/api/v1/catalog?')&&r.url().includes('library=lib-film'));
+   await libraryLink.hover();await prefetched;await delay(50);
+   const prefetchedRequests=catalogRequests, intentStart=performance.now();
+   await libraryLink.click();await page.locator('.catalog-grid-view .media-card').first().waitFor();
+   assert.equal(catalogRequests,prefetchedRequests);
+   assert.equal(await page.locator('.loading-empty').count(),0);
+   scenarios.push({name:'cold-library-prefetch-shared',clickToCardsMs:performance.now()-intentStart,requestsAfterClick:catalogRequests-prefetchedRequests});
    // Visit the library sections with real client navigation links.
    await page.locator('a[href*="films/?library="]').first().click();await page.locator('.catalog-grid-view').waitFor(); await page.waitForFunction(()=>!document.querySelector('.loading-empty')); await delay(250);
    await page.locator('a[href*="series/?library="]').first().click();await page.locator('.catalog-grid-view').waitFor(); await page.waitForFunction(()=>!document.querySelector('.loading-empty')); await delay(250);

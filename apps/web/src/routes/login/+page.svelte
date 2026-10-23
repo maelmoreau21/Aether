@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import { resolve } from '$app/paths';
+  import { asset, resolve } from '$app/paths';
   import { DEFAULT_NAME, fetchBrandName } from '../../lib/config/brand';
   import { login, bootstrapAdmin } from '../../lib/auth/session';
   import Icon from '../../lib/ui/Icon.svelte';
@@ -195,7 +195,7 @@
     <header class="brand-header">
       <div class="brand-badge">
         <img
-          src={`${resolve('/').replace(/\/$/, '')}/images/logo-animated.svg`}
+          src={asset('images/logo-animated.svg')}
           alt=""
           width="40"
           height="48"

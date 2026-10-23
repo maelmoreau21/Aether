@@ -5,7 +5,7 @@
   import { page } from '$app/state';
   import { goto, beforeNavigate, afterNavigate } from '$app/navigation';
   import { cachedCatalog, loadCatalog, invalidateCatalog, catalogRevision, saveCatalogScroll, catalogScroll } from './page-cache';
-  import { resolve } from '$app/paths';
+  import { asset, resolve } from '$app/paths';
   import { DEFAULT_NAME, fetchBrandName } from '../config/brand';
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
   import type { Media, PlayerFactory } from '../player/types';
@@ -27,6 +27,7 @@
     getCachedMedia,
     type Work
   } from './api';
+  import { preloadProgress } from '../player/progress';
   import { session, getSessionGeneration } from '../auth/session';
 
   let { section = 'home' }: { section?: 'home' | 'films' | 'series' | 'search' | 'settings' } = $props();
@@ -65,6 +66,7 @@
       episodeLaunchController.abort();
       episodeLaunchController = null;
     }
+    if (!episode.synthetic) preloadProgress(episode.id);
     const controller = new AbortController();
     episodeLaunchController = controller;
     const launchGen = getSessionGeneration();
@@ -210,6 +212,7 @@
     }
     const controller = new AbortController();
     episodeLaunchController = controller;
+    if (detail && !detail.synthetic) preloadProgress(detail.id);
     const launchGen = getSessionGeneration();
     launching = true;
     mediaError = '';
@@ -340,7 +343,7 @@
     const kinds = currentSection === 'films' ? ['film'] : currentSection === 'series' ? ['series'] : ['film', 'series'];
     const requests = kinds.map(kind => {
       const url = `/api/v1/catalog?${new URLSearchParams({ ...filters, ...(currentLibrary ? {library: currentLibrary} : {}), kind, q, sort: sorting, offset: String(start), limit: '24' })}`;
-      return { kind, url, key: `${currentSection}:${url}` };
+      return { kind, url, key: url };
     });
     let cachedKinds = 0;
     if (!id) for (const {kind, key} of requests) {
@@ -416,6 +419,7 @@
             })
           );
           if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
+          void loadPlayer().catch(() => {});
           const failure = results.find(result => result.status === 'rejected');
           if (failure?.status === 'rejected') {
             if (failure.reason instanceof Error && /accès|session/.test(failure.reason.message)) { films = []; series = []; throw failure.reason; }
@@ -474,7 +478,7 @@
     </div>
     <div class="empty loading-empty" role="status">
       <img
-        src={`${resolve('/').replace(/\/$/, '')}/images/logo-loading.svg`}
+        src={asset('images/logo-loading.svg')}
         alt=""
         class="logo-spinner"
         width="48"

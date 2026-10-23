@@ -162,6 +162,9 @@ export class ExternalAudio {
     this.video.addEventListener('ratechange', this.settings);
     this.timer = setInterval(this.resync, 100);
   }
+  assertReady() {
+    if (this.stopped || this.failed) throw new Error('Piste audio interrompue.');
+  }
   async bufferForPlayback() {
     if (this.naturalTail()) return;
     if (!this.align(true)) return;

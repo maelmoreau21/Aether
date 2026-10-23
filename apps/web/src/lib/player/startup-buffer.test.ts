@@ -21,6 +21,17 @@ describe('startup buffer',()=>{
     const media=new Media();media.ranges=[[0,.06]];
     await waitForStartupBuffer(element(media),new AbortController().signal);
   });
+  it('honors HAVE_ENOUGH_DATA after a same-URL reload exposes stale buffered ranges, while still waiting for seeks',async()=>{
+    const media=new Media();media.duration=3500;media.readyState=4;media.ranges=[[3447,3500]];media.seeking=true;
+    let ready=false;
+    const pending=waitForStartupBuffer(element(media),new AbortController().signal).then(()=>{ready=true;});
+    await Promise.resolve();expect(ready).toBe(false);
+    media.seeking=false;media.dispatchEvent(new Event('seeked'));await pending;
+    expect(ready).toBe(true);expect(bufferedAhead(element(media))).toBe(0);
+    await waitForStartupBuffer(element(media),new AbortController().signal);
+    media.buffered={length:0,start:()=>{throw new Error('no ranges');},end:()=>{throw new Error('no ranges');}};
+    await waitForStartupBuffer(element(media),new AbortController().signal);
+  });
   it('accepts the remaining tail, but never treats seeking or metadata as playable',async()=>{
     const media=new Media();media.currentTime=29.8;media.ranges=[[29,30]];media.seeking=true;
     let ready=false;const pending=waitForStartupBuffer(element(media),new AbortController().signal).then(()=>{ready=true;});

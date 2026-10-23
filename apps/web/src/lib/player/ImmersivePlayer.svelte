@@ -190,8 +190,11 @@
   function mute() { volume(playback.volume === 0 ? previousVolume || 1 : 0); }
   function seek(value: number) { if (!busy) { engine?.seek(value); sync(); wake(); } }
   function selectAudio(id: string) {
+    const current = generation;
     const accountGeneration = getSessionGeneration();
-    void action(async player => { await player.selectAudio(id); audio = id; notice = '';
+    void action(async player => { await player.selectAudio(id);
+      if (current !== generation || !opened) return;
+      audio = id; notice = '';
       const language = audioLanguage(active?.sources.find(source => source.audioTrackId === id)?.language ?? 'und');
       if (language && language !== 'und') preferredLanguage = language;
       if (accountGeneration !== getSessionGeneration()) return;

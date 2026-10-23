@@ -1,5 +1,6 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {SegmentedAudio} from './segmented-audio';
+import {ExternalAudio} from './external-audio';
 
 // Exercise races where abort cannot recall an already delivered response, or
 // where a seek arrives while a previous SourceBuffer update is still pending.
@@ -12,8 +13,59 @@ function harness() {
   }) as {fill(current?:boolean):Promise<void>;seekEpoch:number;idle:()=>Promise<void>};
   return {audio,appendBuffer,schedule};
 }
-afterEach(()=>vi.unstubAllGlobals());
+afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();vi.useRealTimers();});
 describe('segmented audio seek cancellation',()=>{
+  it('rejects pending commit buffering after an inactive candidate window fails without reporting a fatal presentation error', async()=>{
+    vi.useFakeTimers();
+    class AudioElement extends EventTarget {dataset={};pause=vi.fn();}
+    class Source extends EventTarget {readyState='open';duration=60;addSourceBuffer(){return {};}}
+    vi.stubGlobal('Audio',AudioElement);vi.stubGlobal('MediaSource',Source);
+    vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:test');vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
+    const video=Object.assign(new EventTarget(),{currentTime:9.9,duration:60,insertAdjacentElement:vi.fn(),pause:vi.fn()});
+    const report=vi.fn();
+    vi.spyOn(ExternalAudio.prototype,'load').mockResolvedValue(undefined);
+    vi.spyOn(ExternalAudio.prototype,'bufferForPlayback').mockImplementation(()=>new Promise<void>(()=>{}));
+    vi.spyOn(ExternalAudio.prototype,'destroy').mockImplementation(()=>{});
+    const audio=new SegmentedAudio(video as unknown as HTMLVideoElement,0,report);
+    const state=audio as unknown as {fill(current?:boolean):Promise<void>;mediaSource:Source};
+    const fill=vi.spyOn(state,'fill').mockResolvedValue(undefined);
+    const loading=audio.load('/audio-1-chunk-',false);
+    state.mediaSource.dispatchEvent(new Event('sourceopen'));await loading;
+    fill.mockRejectedValueOnce(new Error('candidate window HTTP 503'));
+    const buffering=expect(audio.bufferForPlayback()).rejects.toThrow('candidate window HTTP 503');
+    await vi.advanceTimersByTimeAsync(250);await buffering;
+    expect(video.pause).not.toHaveBeenCalled();expect(report).not.toHaveBeenCalled();
+    expect(()=>audio.assertReady()).toThrow('candidate window HTTP 503');
+    expect(()=>audio.activate()).toThrow('candidate window HTTP 503');
+    audio.destroy();expect(vi.getTimerCount()).toBe(0);
+  });
+  it('follows a window crossed during candidate loading before metadata/seek is ready and cancels the scheduler on destroy', async()=>{
+    vi.useFakeTimers();
+    class AudioElement extends EventTarget {dataset={};}
+    class Source extends EventTarget {
+      readyState='open';duration=60;
+      addSourceBuffer(){return {};}
+    }
+    vi.stubGlobal('Audio',AudioElement);vi.stubGlobal('MediaSource',Source);
+    vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:test');vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
+    const video=Object.assign(new EventTarget(),{currentTime:9.9,duration:60,insertAdjacentElement:vi.fn(),pause:vi.fn()});
+    let metadataReady!:()=>void;let firstFilled!:()=>void;
+    vi.spyOn(ExternalAudio.prototype,'load').mockImplementation(()=>new Promise<void>(resolve=>{metadataReady=resolve;}));
+    vi.spyOn(ExternalAudio.prototype,'destroy').mockImplementation(()=>{});
+    const audio=new SegmentedAudio(video as unknown as HTMLVideoElement,0,vi.fn());
+    const state=audio as unknown as {fill(current?:boolean):Promise<void>;mediaSource:Source};
+    const fill=vi.spyOn(state,'fill').mockImplementationOnce(()=>new Promise<void>(resolve=>{firstFilled=resolve;})).mockImplementation(async()=>{
+      expect(video.currentTime).toBe(10.4);metadataReady();
+    });
+    const loading=audio.load('/audio-1-chunk-',false);
+    state.mediaSource.dispatchEvent(new Event('sourceopen'));await Promise.resolve();
+    expect(fill).toHaveBeenCalledWith(true);
+    video.currentTime=10.4;firstFilled();await vi.advanceTimersByTimeAsync(250);await loading;
+    expect(fill).toHaveBeenCalledTimes(2);expect(fill).toHaveBeenLastCalledWith(true);
+    audio.destroy();expect(vi.getTimerCount()).toBe(0);
+    video.dispatchEvent(new Event('seeking'));await vi.advanceTimersByTimeAsync(1000);
+    expect(fill).toHaveBeenCalledTimes(2);
+  });
   it('ends a final short window and can refill an evicted window after a backwards seek',async()=>{
     const {audio,appendBuffer}=harness();
     const state=audio as unknown as {element:{currentTime:number;duration:number};mediaSource:{readyState:string;endOfStream:()=>void};loaded:Set<number>};
@@ -41,6 +93,16 @@ describe('segmented audio seek cancellation',()=>{
     const fetcher=vi.fn().mockResolvedValue(new Response(new Uint8Array([1,2,3])));vi.stubGlobal('fetch',fetcher);
     await audio.fill(true);
     expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/chunks/2']);
+  });
+  it('immediately schedules the latest window when preparation outlives a boundary',async()=>{
+    const {audio,schedule}=harness();
+    const state=audio as unknown as {element:{currentTime:number}};
+    state.element.currentTime=9.9;
+    vi.stubGlobal('fetch',vi.fn().mockImplementation(async()=>{
+      state.element.currentTime=10.4;
+      return new Response(new Uint8Array([1,2,3]));
+    }));
+    await audio.fill(true);expect(schedule).toHaveBeenCalledOnce();
   });
   it('discards an obsolete response even when fetch completes after cancellation',async()=>{
     const {audio,appendBuffer,schedule}=harness();

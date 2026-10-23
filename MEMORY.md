@@ -1,5 +1,32 @@
 # MEMORY.md — État et décisions Aether
 
+## 23 octobre 2026 — Fluidité initiale et dépôt de plugins préconfiguré
+
+- Réserve contiguë 0,75 s avant play, prête immédiatement si déjà en cache ;
+  attente bornée/annulable, aucun play tardif. Opus segmenté : seconde fenêtre
+  préparée avec quatre secondes d’avance, sans job immédiat au démarrage.
+- Petite dérive audio : correction de vitesse ±2 % avec hauteur conservée,
+  zone neutre 40 ms, resynchronisation forte >250 ms. Test Chrome segmenté :
+  cinq play initiaux → un, aucun waiting avant 2 s, zéro image perdue ; preuve
+  courte synthétique, pas NAS/4K/endurance/sortie physique. Préparation audio
+  froide 974 ms : cible globale 200 ms non tenue.
+- Migration 0041 SQLite/PostgreSQL : dépôt Aether Plugins ajouté une seule fois,
+  supprimable durablement, snapshot initial vide et actualisation explicite.
+  Confiance éditeur/installation désactivée/droits/activation restent séparés.
+- Aether-Plugins : quatre paquets signés versionnés, manifeste/public key dans
+  repository/, Build-Repository.ps1 détecte les plugins et vérifie les sorties.
+  Clé privée hors Git, aucun fournisseur/API secret dans les paquets.
+- URL préparée : https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/main/repository/manifest.json
+  Publication sur main encore nécessaire ; aucun push ou déploiement effectué.
+- Administration : cartes compactes, configuration dépliable, catalogue par
+  défaut, suppression du double chargement initial. Core/SQLite/Chrome réel :
+  dépôt, signature/confiance/version/install/retrait/persistance réussis (4 tests).
+- 112 tests Web/check/lint/build, format et Clippy strict réussis ; cycle de vie
+  navigateur Core/SQLite/Rust-Wasm réel également réussi. Catalogue de quatre
+  manifestes signé vérifié en UI production clair/sombre 1440/390 sans erreur.
+- Détails, mesures, limites et preuves : docs/STARTUP_AND_PLUGIN_CATALOGUE.md.
+
+
 ## 23 octobre 2026 — Latence catalogue/lecture et alias d'images
 
 - Préchargement catalogue au survol/focus des liens accueil/bibliothèques, URL
@@ -3362,3 +3389,17 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
 - Lecteur : chargement simple, diagnostics dans Statistiques du flux optionnelles ;
   mesures video navigateur chaque seconde pendant ouverture du panneau seulement.
 - Web : 96 tests reussis. Verification SSO reel et NAS non effectuee pour ce jalon.
+
+## 23 octobre 2026 — Administration sans colonne latérale permanente
+
+- Bouton Menu et tiroir modal fermé par défaut sur toute largeur ; aucune place
+  réservée. Navigation, Échap, clic extérieur et retour du focus vérifiés Chrome.
+- Vue d’ensemble réduite aux états utiles ; informations techniques repliées.
+  Introductions et badges redondants retirés, catalogue plus court, version
+  sélectionnable seulement si plusieurs choix. Droits/alertes restent explicites.
+- Check sans erreur/avertissement, lint, 112 tests et build réussis. UI production
+  clair/sombre 1440/390 et cycle catalogue : API simulée, aucune erreur navigateur.
+  Preuves : docs/evidence/2026-10-23/startup-plugins/catalogue-ui/.
+- Ancien scénario test-admin-ui interrompu sur le lien #account des préférences
+  personnelles ; ne pas le compter comme validé. Captures administration clair
+  partielles dans docs/evidence/2026-10-23/admin-compact/ ; scénario ciblé réussi.

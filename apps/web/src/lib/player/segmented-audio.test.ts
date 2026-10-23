@@ -14,6 +14,13 @@ function harness() {
 }
 afterEach(()=>vi.unstubAllGlobals());
 describe('segmented audio seek cancellation',()=>{
+  it('keeps packet-copy preparation away from startup and requests the next window with four seconds of lead',async()=>{
+    const {audio}=harness();
+    const fetcher=vi.fn().mockImplementation(()=>Promise.resolve(new Response(new Uint8Array([1,2,3]))));vi.stubGlobal('fetch',fetcher);
+    await audio.fill();expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/chunks/0']);
+    (audio as unknown as {element:{currentTime:number}}).element.currentTime=7;
+    await audio.fill();expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/chunks/0','/chunks/0','/chunks/1']);
+  });
   it('discards an obsolete response even when fetch completes after cancellation',async()=>{
     const {audio,appendBuffer,schedule}=harness();
     let respond!:(response:Response)=>void;

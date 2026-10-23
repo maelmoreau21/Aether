@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 
 const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !process.env.MEDIA_TEST_PACKAGE || !process.env.MEDIA_TEST_PUBLIC_KEY) throw new Error('Use the Rust extensions browser harness.');
@@ -17,17 +17,22 @@ try {
   const { csrfToken } = await response.json();
   await page.goto(`${origin}/app/admin/libraries/#extensions-section`);
   const panel = page.locator('#extensions-section');
+  await panel.getByRole('button', {name:'Installées',exact:true}).click();
   await panel.getByText('Aucune extension installée.', { exact: true }).waitFor();
   await panel.getByText('Éditeurs approuvés', { exact: true }).click();
   await panel.getByLabel('Identifiant de l’éditeur', { exact: true }).fill('test');
   await panel.getByLabel('Clé publique Ed25519 (Base64)', { exact: true }).fill(process.env.MEDIA_TEST_PUBLIC_KEY);
   await panel.getByRole('button', { name: 'Approuver cet éditeur', exact: true }).click();
   await panel.getByText('Éditeur approuvé.', { exact: true }).waitFor({ timeout: 10000 }).catch(async error => { console.log(await panel.innerText()); throw error; });
-  await panel.getByLabel('Paquet JSON signé', { exact: true }).setInputFiles(process.env.MEDIA_TEST_PACKAGE);
-  await panel.getByRole('button', { name: 'Vérifier et installer', exact: true }).click();
-  await panel.getByText('Paquet installé, encore désactivé.', { exact: true }).waitFor();
-  const extension = panel.getByRole('article');
-  await extension.getByText('Gérer cette extension', { exact: true }).click();
+  const imported = await page.request.post(`${origin}/api/v1/admin/extensions`, {
+    headers: {origin, 'x-csrf-token':csrfToken},
+    data: JSON.parse(await readFile(process.env.MEDIA_TEST_PACKAGE,'utf8'))
+  });
+  assert.equal(imported.status(),201);
+  await page.reload();
+  await panel.getByRole('button', {name:'Installées',exact:true}).click();
+  const extension = panel.locator('.installed-card');
+  await extension.getByText('Configurer et gérer', { exact: true }).click();
   await extension.getByLabel('Films synthétiques', { exact: true }).check();
   await extension.getByRole('button', { name: 'Enregistrer et activer', exact: true }).click();
   await panel.getByText('Permissions enregistrées et extension activée.', { exact: true }).waitFor();
@@ -38,9 +43,11 @@ try {
   await panel.locator('strong').filter({ hasText: /^Titre original$/ }).first().waitFor();
   await panel.getByText(/Proposition synthétique pour work-films/).first().waitFor();
   await page.reload();
+  await panel.getByRole('button', {name:'Installées',exact:true}).click();
+  await panel.getByText(/^Dernières exécutions/).click();
   await panel.locator('strong').filter({ hasText: /^Titre original$/ }).waitFor();
-  await extension.getByText('Gérer cette extension', { exact: true }).click();
-  const output = process.env.MEDIA_REPORT_DIR || '../../docs/evidence/2026-10-20/extensions';
+  await extension.getByText('Configurer et gérer', { exact: true }).click();
+  const output = process.env.MEDIA_REPORT_DIR || '../../target/extensions-lifecycle-browser';
   await mkdir(output, { recursive: true });
   await page.screenshot({ path: `${output}/desktop.png`, fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });

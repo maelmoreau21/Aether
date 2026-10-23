@@ -11,7 +11,6 @@
   import Icon from '../../../lib/ui/Icon.svelte';
   import type { Library, Scan, AdminNode, OidcAdminStatus, CoreHealth, EnrollmentToken, RefreshMode } from '../../../lib/admin/types';
   import AdminSettings from '../../../lib/admin/AdminSettings.svelte';
-  import { serverPresentation } from '../../../lib/config/presentation';
   import { DEFAULT_NAME } from '../../../lib/config/brand';
   import AdminOverview from '../../../lib/admin/AdminOverview.svelte';
   import { defaultLibraryOptions } from '../../../lib/admin/types';
@@ -330,6 +329,21 @@
   }
 
   let menuOpen = $state(false);
+  let navigationDialog = $state<HTMLDialogElement>();
+  let menuButton = $state<HTMLButtonElement>();
+  function openMenu() {
+    if (!navigationDialog || navigationDialog.open) return;
+    menuOpen = true;
+    navigationDialog.showModal();
+    navigationDialog.querySelector<HTMLAnchorElement>('[aria-current="page"]')?.focus();
+  }
+  function closeMenu() { navigationDialog?.close(); menuOpen = false; menuButton?.focus(); }
+  $effect(() => {
+    if (!menuOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  });
   let selectedTaskId = $state<string | null>(null);
   let currentHash = $state('#libraries-section');
   const sectionTitle = $derived(({
@@ -339,7 +353,7 @@
     '#tasks-section': $t('admin_nav_tasks'), '#backups-section': 'Sauvegardes',
     '#api-keys-section': 'Clés API', '#extensions-section': 'Extensions'
   } as Record<string, string>)[currentHash]);
-  function chooseSection(hash: string) { currentHash = hash; menuOpen = false; }
+  function chooseSection(hash: string) { currentHash = hash; closeMenu(); }
 
   const sections = new Set(['#overview', '#general-section', '#network-section', '#libraries-section', '#nodes-section', '#users-section', '#sso-section', '#tasks-section', '#backups-section', '#groups-section', '#api-keys-section', '#extensions-section']);
   function selectedSection() {
@@ -371,17 +385,13 @@
 </script>
 
 <svelte:head>
-  <title>Administration — {DEFAULT_NAME}</title>
+  <title>{sectionTitle} — Administration — {DEFAULT_NAME}</title>
 </svelte:head>
 
 <header class="admin-header">
   <div class="header-left">
-    <a class="back-link" href={resolve('/')}>
-      <Icon name="chevron-left" size={14} />
-      <span>Retour à l’application</span>
-    </a>
-    <span class="header-separator">/</span>
-    <span class="header-badge">Console Administrateur</span>
+    {#if administrator}<button class="mobile-menu-toggle" bind:this={menuButton} type="button" aria-expanded={menuOpen} aria-controls="admin-navigation" disabled={loading} onclick={openMenu}><Icon name="menu" size={18} /><span>Menu</span></button>{/if}
+    <a class="back-link" href={resolve('/')}><Icon name="chevron-left" size={14} /><span>Retour</span></a>
   </div>
   <div class="header-right">
     <ProfileMenu />
@@ -432,17 +442,9 @@
       </div>
     {:else}
       <div class="admin-dashboard-container">
-        <!-- Jellyfin-Style Navigation Sidebar -->
-        <aside class="admin-sidebar" aria-label="Menu d’administration">
-          <button class="mobile-menu-toggle" type="button" aria-expanded={menuOpen} aria-controls="admin-navigation" onclick={() => menuOpen = !menuOpen}>
-            <Icon name="settings" size={18} /><span>{sectionTitle}</span><Icon name={menuOpen ? 'chevron-left' : 'chevron'} size={16} />
-          </button>
-          <div id="admin-navigation" class="sidebar-sections" class:expanded={menuOpen}>
-          <div class="sidebar-header">
-            <img src={asset('images/brand-mark.svg')} alt="" width="46" height="46" />
-            <div><strong>{$serverPresentation.serverName || DEFAULT_NAME}</strong><span class="sidebar-brand-title">{coreHealth?.version ?? 'Serveur'}</span></div>
-          </div>
-
+        <dialog bind:this={navigationDialog} id="admin-navigation" class="admin-nav-dialog admin-sidebar" aria-label="Menu d’administration" onclose={() => { menuOpen=false;menuButton?.focus(); }} onpointerdown={event => { if(event.target===event.currentTarget) closeMenu(); }}>
+          <div class="drawer-heading"><strong>Administration</strong><button type="button" aria-label="Fermer le menu" onclick={closeMenu}><Icon name="close" size={20} /></button></div>
+          <nav class="sidebar-sections" aria-label="Sections d’administration">
           <div class="sidebar-group">
             <span class="group-label">{$t('admin_category_server')}</span>
             <a
@@ -454,9 +456,6 @@
             >
               <span class="nav-icon"><Icon name="sparkles" size={16} /></span>
               <span class="nav-text">{$t('admin_nav_overview')}</span>
-              {#if coreHealth?.status === 'ok'}
-                <span class="status-indicator online" title="Core opérationnel"></span>
-              {/if}
             </a>
           </div>
 
@@ -476,7 +475,6 @@
             >
               <span class="nav-icon"><Icon name="film" size={16} /></span>
               <span class="nav-text">{$t('admin_nav_libraries')}</span>
-              <span class="count-badge">{libraries.length}</span>
             </a>
             <a
               href="#nodes-section"
@@ -487,7 +485,6 @@
             >
               <span class="nav-icon"><Icon name="server" size={16} /></span>
               <span class="nav-text">{$t('admin_nav_nodes')}</span>
-              <span class="count-badge">{nodes.length}</span>
             </a>
           </div>
 
@@ -502,14 +499,12 @@
             >
               <span class="nav-icon"><Icon name="users" size={16} /></span>
               <span class="nav-text">{$t('admin_nav_users')}</span>
-              <span class="count-badge">{users.length}</span>
             </a>
             <a href="#groups-section" class="sidebar-nav-item" class:active={currentHash === '#groups-section'}
               aria-current={currentHash === '#groups-section' ? 'page' : undefined}
               onclick={() => chooseSection('#groups-section')}>
               <span class="nav-icon"><Icon name="users" size={16} /></span>
               <span class="nav-text">Groupes</span>
-              <span class="count-badge">{groups.length}</span>
             </a>
             <a
               href="#sso-section"
@@ -520,13 +515,10 @@
             >
               <span class="nav-icon"><Icon name="shield" size={16} /></span>
               <span class="nav-text">{$t('admin_nav_sso')}</span>
-              {#if oidcStatus?.enabled}
-                <span class="sso-badge">{$t('active')}</span>
-              {/if}
             </a>
           </div>
           <div class="sidebar-group">
-            <span class="group-label">Maintenance &amp; intégrations</span>
+            <span class="group-label">Maintenance</span>
             {#each [
               ['#tasks-section', $t('admin_nav_tasks'), 'clock'],
               ['#backups-section', 'Sauvegardes', 'server'],
@@ -541,8 +533,8 @@
               </a>
             {/each}
           </div>
-          </div>
-        </aside>
+          </nav>
+        </dialog>
 
         <!-- Main Admin Content Area -->
         <div class="admin-content-area">
@@ -556,7 +548,6 @@
             {nodes}
             {libraries}
             {scans}
-            adminLogin={$session?.user.login}
           />
           </div>
 
@@ -641,328 +632,11 @@
 </main>
 
 <style>
-  .admin-header {
-    margin-left: 264px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px var(--page-gutter);
-    border-bottom: 1px solid var(--color-line);
-    background: var(--color-surface);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .back-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--color-muted);
-    transition: color 0.15s ease;
-  }
-
-  .back-link:hover {
-    color: var(--color-text);
-  }
-
-  .header-separator {
-    color: var(--color-subtle);
-    font-size: 13px;
-  }
-
-  .header-badge {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    padding: 4px 10px;
-    background: var(--color-accent-soft);
-    border: 1px solid var(--color-line);
-    border-radius: 99px;
-    color: var(--color-accent);
-  }
-
-  main {
-    max-width: none;
-    margin-left: 264px;
-    padding: 28px var(--page-gutter) 80px;
-  }
-
-  .admin-dashboard-container {
-    display: block;
-    grid-template-columns: 248px minmax(0, 1fr);
-    gap: 32px;
-    align-items: start;
-  }
-
-  /* Jellyfin-style Navigation Sidebar */
-  .admin-sidebar {
-    position: fixed;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 264px;
-    z-index: 110;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    max-height: 100dvh;
-    overflow-y: auto;
-    padding: 24px 12px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: 0;
-  }
-
-  .sidebar-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 0 8px 10px;
-    border-bottom: 1px solid var(--color-line);
-  }
-
-  .sidebar-header > div { min-width: 0; }
-  .sidebar-header strong { display: block; overflow-wrap: anywhere; }
-  .sidebar-brand-title {
-    display: block;
-    margin-top: 6px;
-    font-size: 10.5px;
-    font-weight: 750;
-    letter-spacing: 0.12em;
-    color: var(--color-muted);
-  }
-
-  .sidebar-group {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .group-label {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    color: var(--color-muted);
-    padding: 4px 8px;
-    text-transform: uppercase;
-  }
-
-  .sidebar-nav-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 12px;
-    border-radius: var(--radius-sm);
-    color: var(--color-muted);
-    font-size: 13px;
-    font-weight: 500;
-    text-decoration: none;
-    transition: all 0.15s ease;
-    border-left: 3px solid transparent;
-  }
-
-  .sidebar-nav-item:hover {
-    color: var(--color-text-bright);
-    background: var(--color-raised);
-  }
-
-  .sidebar-nav-item.active {
-    color: var(--color-text-bright);
-    font-weight: 600;
-    background: var(--color-accent-soft);
-    border-left-color: var(--color-accent);
-
-  }
-
-  .nav-icon {
-    display: grid;
-    place-items: center;
-    color: inherit;
-    flex-shrink: 0;
-  }
-
-  .nav-text {
-    flex: 1;
-    min-width: 0;
-    overflow-wrap: anywhere;
-    line-height: 1.45;
-  }
-
-  .count-badge {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 7px;
-    border-radius: 99px;
-    background: var(--color-raised);
-    color: var(--color-muted);
-    border: 1px solid var(--color-line);
-  }
-
-  .sidebar-nav-item.active .count-badge {
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-    border-color: var(--color-line);
-  }
-
-  .sso-badge {
-    font-size: 10px;
-    font-weight: 700;
-    padding: 2px 7px;
-    border-radius: 99px;
-    background: var(--color-success-soft);
-    color: var(--color-success);
-    border: 1px solid var(--color-success);
-  }
-
-  .status-indicator {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #10b981;
-    box-shadow: 0 0 8px #10b981;
-    flex-shrink: 0;
-  }
-
-  .admin-content-area {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-    min-width: 0;
-  }
-
-  .error-banner, .notice-banner {
-    padding: 16px 20px;
-    border-radius: var(--radius-sm);
-    margin-bottom: 24px;
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-  }
-
-  .banner-content {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .banner-content p {
-    margin: 0;
-  }
-
-  .error-banner {
-    background: var(--color-danger-soft);
-    border: 1px solid var(--color-danger);
-    color: var(--color-danger);
-  }
-
-  .notice-banner {
-    background: var(--color-success-soft);
-    border: 1px solid var(--color-success);
-    color: var(--color-success);
-  }
-
-  .small-btn {
-    border: 1px solid currentColor;
-    background: transparent;
-    color: inherit;
-    border-radius: var(--radius-sm);
-    padding: 6px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .small-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.1);
-  }
-
-  .loading-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-    padding: 60px 0;
-    color: var(--color-muted);
-  }
-
-  .logo-spinner {
-    width: 48px;
-    height: 48px;
-    display: block;
-    margin: 0 auto;
-  }
-
-  .admin-content-area :global(:where(section, article, form, fieldset, header, label, details, .card)) { min-width: 0; }
-  .admin-content-area :global(:where(h2, h3, p, dd, code, label, button, summary)) { overflow-wrap: anywhere; }
-  .admin-content-area :global(:where(input, select, button)) { max-width: 100%; }
-  .header-left { min-width: 0; flex-wrap: wrap; }
-  .banner-content { min-width: 0; overflow-wrap: anywhere; }
-  @media (max-width: 480px) {
-    main { padding: 20px 16px 48px; }
-    .admin-header {
-    margin-left: 264px; padding: 12px 16px; }
-    .header-badge, .header-separator { display: none; }
-    .count-badge { padding: 2px 5px; }
-  }
-
-  .mobile-menu-toggle { display: none; }
-  .sidebar-sections { display: contents; }
-  @media (max-width: 960px) {
-    main, .admin-header { margin-left: 0; }
-    .admin-sidebar { width: auto; }
-    .admin-dashboard-container {
-      grid-template-columns: 1fr;
-      gap: 24px;
-    }
-
-    .admin-sidebar {
-      max-height: none;
-      position: static;
-      top: 72px;
-      z-index: 50;
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      padding: 10px 12px;
-    }
-
-    .mobile-menu-toggle { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 8px; border: 0; background: transparent; color: var(--color-text); text-align: left; }
-    .mobile-menu-toggle span { flex: 1; min-width: 0; }
-    .sidebar-sections { display: none; }
-    .sidebar-sections.expanded { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; border-top: 1px solid var(--color-line); padding-top: 8px; }
-    .admin-sidebar { display: flex; gap: 8px; }
-    .sidebar-header, .group-label {
-      display: none;
-    }
-
-    .sidebar-group {
-      display: contents;
-    }
-
-    .sidebar-nav-item {
-      border-left: none;
-      border-bottom: 2px solid transparent;
-      padding: 8px 12px;
-      font-size: 12px;
-    }
-
-    .sidebar-nav-item.active {
-      border-left: none;
-      border-bottom-color: var(--color-accent);
-    }
-  }
+  .admin-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px var(--page-gutter);border-bottom:1px solid var(--color-line);background:var(--color-surface);position:sticky;top:0;z-index:100;min-height:60px;box-sizing:border-box;}
+  .header-left{display:flex;align-items:center;gap:16px;min-width:0;}.back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--color-muted);text-decoration:none;}.back-link:hover{color:var(--color-text);}.mobile-menu-toggle{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--color-line);border-radius:var(--radius-sm);background:var(--color-raised);color:var(--color-text);padding:8px 12px;min-height:40px;font:inherit;font-size:13px;cursor:pointer;}.mobile-menu-toggle:disabled{opacity:.5;cursor:default;}
+  main{max-width:1600px;margin:0 auto;padding:24px var(--page-gutter) 64px;}.admin-dashboard-container{display:block;min-width:0;}.admin-content-area{display:flex;flex-direction:column;gap:20px;min-width:0;}
+  .admin-nav-dialog{position:fixed;inset:0 auto 0 0;width:min(280px,90vw);height:100dvh;max-height:100dvh;max-width:none;box-sizing:border-box;margin:0;padding:16px;border:0;border-right:1px solid var(--color-line);background:var(--color-surface);color:var(--color-text);overflow-y:auto;overscroll-behavior:contain;}.admin-nav-dialog::backdrop{background:rgb(0 0 0 / .4);}.drawer-heading{display:flex;align-items:center;justify-content:space-between;padding:0 8px 16px;border-bottom:1px solid var(--color-line);}.drawer-heading strong{font-size:15px;}.drawer-heading button{display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--color-text);cursor:pointer;}.drawer-heading button:hover{background:var(--color-raised);}.sidebar-sections{display:grid;gap:14px;padding-top:16px;}.sidebar-group{display:grid;gap:3px;}.server-settings-nav{margin-top:-12px;}.group-label{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--color-muted);padding:0 10px 4px;text-transform:uppercase;}.sidebar-nav-item{display:flex;align-items:center;gap:10px;min-height:40px;padding:8px 10px;border-radius:var(--radius-sm);color:var(--color-muted);text-decoration:none;font-size:13px;box-sizing:border-box;}.sidebar-nav-item:hover{background:var(--color-raised);color:var(--color-text);}.sidebar-nav-item.active{background:var(--color-accent-soft);color:var(--color-accent);font-weight:600;}.nav-icon{display:inline-flex;flex-shrink:0;}.nav-text{min-width:0;overflow-wrap:anywhere;}.sidebar-nav-item:focus-visible,.mobile-menu-toggle:focus-visible,.drawer-heading button:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;}
+  .error-banner,.notice-banner{padding:12px 16px;border-radius:var(--radius-sm);margin-bottom:20px;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:12px;}.banner-content{display:flex;align-items:center;gap:10px;min-width:0;overflow-wrap:anywhere;}.banner-content p{margin:0;}.error-banner{background:var(--color-danger-soft);border:1px solid var(--color-danger);color:var(--color-danger);}.notice-banner{background:var(--color-success-soft);border:1px solid var(--color-success);color:var(--color-success);}.small-btn{border:1px solid currentColor;background:transparent;color:inherit;border-radius:var(--radius-sm);padding:6px 12px;font:inherit;cursor:pointer;}.loading-state{display:flex;flex-direction:column;align-items:center;gap:16px;padding:60px 0;color:var(--color-muted);}.logo-spinner{width:48px;height:48px;display:block;margin:0 auto;}
+  .admin-content-area :global(:where(section,article,form,fieldset,header,label,details,.card)){min-width:0;}.admin-content-area :global(:where(h2,h3,p,dd,code,label,button,summary)){overflow-wrap:anywhere;}.admin-content-area :global(:where(input,select,button)){max-width:100%;}
+  @media(max-width:480px){main{padding:20px 16px 48px;}.admin-header{padding:8px 16px;}.header-left{gap:10px;}}
 </style>

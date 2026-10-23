@@ -176,7 +176,7 @@ Les tags `latest` et `develop` correspondent respectivement aux branches `main` 
 | `MEDIA_LIBRARY_DIR` | Dossier de médias monté en lecture seule en mode autonome |
 | `MEDIA_DB_ENGINE` | `sqlite` (défaut) ou `postgres` |
 | `MEDIA_DB_URL` | URL PostgreSQL, uniquement si ce moteur est activé |
-| `MEDIA_BACKUP_KEY` | Clé externe requise pour les archives chiffrées de l'administration |
+| `MEDIA_BACKUP_KEY` | Clé externe facultative pour les archives de l'administration (clé par défaut utilisée si omise) |
 | `MEDIA_OIDC_ENABLED` | Activation optionnelle de l'authentification OIDC |
 | `MEDIA_NODE_PAIRING_TOKEN` | Secret d'appairage pour le mode distribué |
 

@@ -1,19 +1,29 @@
 {
-  "browser": "155.0.8059.82",
+  "browser": "155.0.8059.86",
   "os": "10.0.26300",
   "headless": true,
   "results": {
     "scan": true,
     "deferredMediaLoading": true,
+    "quickFeedbackAndListMenu": true,
+    "localArtwork": true,
     "catalogueChanges": {
       "privateFeedbackPersisted": true,
       "seasonShortcuts": true,
       "responsiveThemes": true
     },
+    "decodedVideoFrames": 8,
     "episode1Playback": true,
+    "episodeLaunchMs": 831,
+    "realChapters": true,
     "seekAndPause": true,
+    "simplePlaybackControls": {
+      "monoVersionSelectorHidden": true,
+      "monoAudioHidden": true,
+      "multipleVersionSelectorVisible": true
+    },
     "nextEpisode": {
-      "manual": true,
+      "manualButtonRemoved": true,
       "automaticOptIn": true,
       "crossSeason": true
     },
@@ -25,6 +35,7 @@
     "accountSwitchCacheIsolation": true,
     "delayedLogoutDoesNotWipeNewLoginCookie": true,
     "concurrentLoginsSequencedCorrectly": true,
+    "personalPasswordAndDeviceRevocation": true,
     "cspErrors": []
   },
   "passed": true

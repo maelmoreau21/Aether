@@ -2,10 +2,9 @@
   import type { Work } from './api';
   import { history } from './watch-state';
   import Icon from '../ui/Icon.svelte';
-  import { imagePreviewUrl } from './image-url';
+  import { imagePreviewUrl, isImageLoaded, markImageLoaded } from './image-url';
 
   let failedUrls = $state<string[]>([]);
-  let loadedUrl = $state('');
   let {
     work,
     href = '',
@@ -20,6 +19,20 @@
 
   const previewUrl = $derived(imagePreviewUrl(work.posterUrl,showMetadata ? 320 : 640));
   const imageUrl = $derived([previewUrl,work.posterUrl ?? ''].find(url => url && !failedUrls.includes(url)) ?? '');
+  let loadedUrl = $state('');
+
+  $effect(() => {
+    if (imageUrl && isImageLoaded(imageUrl)) {
+      loadedUrl = imageUrl;
+    }
+  });
+
+  function checkLoaded(node: HTMLImageElement) {
+    if (node.complete && node.naturalWidth > 0 && imageUrl) {
+      loadedUrl = imageUrl;
+      markImageLoaded(imageUrl);
+    }
+  }
   const watchProgress = $derived($history.find(item => item.workId === work.id));
   const isWatched = $derived(watchProgress?.watched ?? false);
   const progressRatio = $derived(
@@ -43,7 +56,11 @@
         loading={eager ? 'eager' : 'lazy'}
         fetchpriority={eager ? 'high' : 'auto'}
         decoding="async"
-        onload={() => { loadedUrl = imageUrl; }}
+        use:checkLoaded
+        onload={() => {
+          loadedUrl = imageUrl;
+          markImageLoaded(imageUrl);
+        }}
         onerror={() => { failedUrls = [...failedUrls.slice(-3), imageUrl]; }}
       />
       <div class="poster-gradient" aria-hidden="true"></div>
@@ -168,7 +185,7 @@
   }
 
   .media-card:hover .poster {
-    transform: translateY(-6px) scale(1.02);
+    transform: translateY(-2px) scale(1.025);
     border-color: var(--accent-primary);
     box-shadow: var(--shadow-card-hover);
   }
@@ -185,7 +202,7 @@
     height: 100%;
     object-fit: cover;
     opacity: 0;
-    transition: opacity 0.3s ease, transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .poster-image.loaded {
@@ -193,7 +210,7 @@
   }
 
   .media-card:hover .poster-image {
-    transform: scale(1.05);
+    transform: scale(1.025);
   }
 
   .poster-gradient {
@@ -353,7 +370,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    color: #fbbf24;
+    color: var(--accent-secondary);
     font-weight: 600;
   }
 
@@ -371,7 +388,7 @@
   }
 
   .synopsis {
-    display: -webkit-box;
+    display: none; /* Synopsis belongs on the detail view. */
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     line-clamp: 2;

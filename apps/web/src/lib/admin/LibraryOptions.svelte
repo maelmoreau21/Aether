@@ -22,5 +22,5 @@
   <p>Multi-dossiers, écriture NFO/images dans les médias, surveillance temps réel, miniatures de chapitres, trickplay, détection d’intro, regroupements automatiques et téléchargement de sous-titres restent à implémenter.</p>
 </details>
 <style>
-  details { border-top:1px solid var(--border-subtle);margin-top:20px;padding-top:16px; } summary { cursor:pointer;font-weight:600; } label { display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;font-size:14px; } input:not([type=checkbox]),select { width:100%;padding:10px;background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:4px; } p { font-size:13px;color:var(--text-secondary);line-height:1.5; }
+  details { border-top:1px solid var(--border-subtle);margin-top:20px;padding-top:16px; } summary { cursor:pointer;font-weight:600; } label { display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;font-size:14px; } input:not([type=checkbox]),select { width:100%;padding:10px;background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius: var(--radius-md); } p { font-size:13px;color:var(--text-secondary);line-height:1.5; }
 </style>

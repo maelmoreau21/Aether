@@ -79,6 +79,15 @@ struct Cache {
     entries: HashMap<String, Entry>,
     bytes: u64,
 }
+impl Cache {
+    fn hit(&mut self, key: &str) -> Option<Arc<crate::cache_dirs::CacheDirectory>> {
+        let entry = self.entries.get_mut(key)?;
+        entry.used = Instant::now();
+        // Pin the directory before releasing the lock: eviction may run while
+        // the confined output handle is opening on the blocking I/O pool.
+        Some(entry.directory.clone())
+    }
+}
 pub struct Preparations {
     cache: Mutex<Cache>,
     worker: Semaphore,
@@ -181,16 +190,15 @@ impl Preparations {
             input.canonical_path()
         );
         let mut cache = self.cache.lock().await;
-        if let Some(entry) = cache.entries.get_mut(&key) {
-            entry.used = Instant::now();
-            let opened =
-                OpenedFile::open_in_root(entry.directory.path(), Path::new("content")).await?;
+        if let Some(directory) = cache.hit(&key) {
+            drop(cache);
+            let opened = OpenedFile::open_in_root(directory.path(), Path::new("content")).await?;
             log.complete = true;
             eprintln!(
                 "{}",
                 serde_json::json!({"event":"preparation_cache_hit","attempt":log.id,"component":format!("{component:?}"),"elapsed_ms":log.started.elapsed().as_millis()})
             );
-            return Ok(opened.with_cache_lease(entry.directory.clone()));
+            return Ok(opened.with_cache_lease(directory));
         }
         let busy = || {
             io::Error::new(
@@ -214,13 +222,13 @@ impl Preparations {
                     .map_err(|_| busy())?
                     .map_err(|_| busy())?;
                 cache = self.cache.lock().await;
-                if let Some(entry) = cache.entries.get_mut(&key) {
-                    entry.used = Instant::now();
+                if let Some(directory) = cache.hit(&key) {
+                    drop(cache);
+                    drop(permit);
                     let opened =
-                        OpenedFile::open_in_root(entry.directory.path(), Path::new("content"))
-                            .await?;
+                        OpenedFile::open_in_root(directory.path(), Path::new("content")).await?;
                     log.complete = true;
-                    return Ok(opened.with_cache_lease(entry.directory.clone()));
+                    return Ok(opened.with_cache_lease(directory));
                 }
                 permit
             }
@@ -444,6 +452,135 @@ impl Preparations {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn cached_output_is_pinned_without_holding_cache_lock_during_open() {
+        let directory = Arc::new(crate::cache_dirs::CacheDirectory::new().unwrap());
+        let path = directory.path().to_owned();
+        std::fs::write(path.join("content"), b"cached packets").unwrap();
+        let mut entries = HashMap::new();
+        entries.insert(
+            "cached".to_owned(),
+            Entry {
+                directory: directory.clone(),
+                size: 14,
+                used: Instant::now(),
+                chunk: true,
+            },
+        );
+        let cache = Mutex::new(Cache { entries, bytes: 14 });
+        drop(directory);
+
+        let pinned = cache.lock().await.hit("cached").unwrap();
+        // Another session can acquire the cache while this session opens its
+        // file. Its eviction predicate must see the in-flight lease.
+        let mut concurrent = cache.try_lock().expect("cache lock released before I/O");
+        assert_eq!(
+            Arc::strong_count(&concurrent.entries["cached"].directory),
+            2
+        );
+        concurrent.entries.remove("cached");
+        drop(concurrent);
+        assert!(path.exists());
+        let opened = OpenedFile::open_in_root(&path, Path::new("content"))
+            .await
+            .unwrap()
+            .with_cache_lease(pinned);
+        let request = http::Request::builder().body(()).unwrap();
+        let response = crate::stream::serve_opened(opened, &request, "audio/mp4")
+            .await
+            .unwrap();
+        assert!(path.exists());
+        // Cancellation releases the last lease even without reading the body.
+        drop(response);
+        assert!(!path.exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "local I/O microbenchmark; run explicitly with --ignored --nocapture"]
+    async fn benchmark_preparation_cache_open_concurrency() {
+        use http_body_util::BodyExt;
+
+        let directory = Arc::new(crate::cache_dirs::CacheDirectory::new().unwrap());
+        std::fs::write(directory.path().join("content"), vec![42; 256 * 1024]).unwrap();
+        let mut entries = HashMap::new();
+        entries.insert(
+            "cached".to_owned(),
+            Entry {
+                directory,
+                size: 256 * 1024,
+                used: Instant::now(),
+                chunk: true,
+            },
+        );
+        let cache = Arc::new(Mutex::new(Cache {
+            entries,
+            bytes: 256 * 1024,
+        }));
+        let mut measurements = Vec::new();
+        // Alternate order to reduce filesystem warming/order bias. Both paths
+        // use the same confined handle opening and bounded HTTP body; only
+        // the cache mutex lifetime differs. No decoder/first-frame claim.
+        for baseline in [true, false, false, true, true, false] {
+            let start = Instant::now();
+            let mut sessions = tokio::task::JoinSet::new();
+            for _ in 0..8 {
+                let cache = cache.clone();
+                sessions.spawn(async move {
+                    for _ in 0..64 {
+                        let mut locked = cache.lock().await;
+                        let directory = locked.hit("cached").unwrap();
+                        let opened = if baseline {
+                            let opened =
+                                OpenedFile::open_in_root(directory.path(), Path::new("content"))
+                                    .await
+                                    .unwrap();
+                            drop(locked);
+                            opened
+                        } else {
+                            drop(locked);
+                            OpenedFile::open_in_root(directory.path(), Path::new("content"))
+                                .await
+                                .unwrap()
+                        };
+                        let request = http::Request::builder().body(()).unwrap();
+                        let mut response = crate::stream::serve_opened(
+                            opened.with_cache_lease(directory),
+                            &request,
+                            "video/mp4",
+                        )
+                        .await
+                        .unwrap();
+                        let first = response
+                            .body_mut()
+                            .frame()
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .into_data()
+                            .unwrap();
+                        assert_eq!(first.len(), crate::stream::STREAM_CHUNK_BYTES);
+                        assert!(first.iter().all(|byte| *byte == 42));
+                        // Drop cancels the unread remainder, as a browser seek does.
+                    }
+                });
+            }
+            while let Some(result) = sessions.join_next().await {
+                result.unwrap();
+            }
+            measurements.push(serde_json::json!({
+                "strategy": if baseline { "mutex_during_open" } else { "lease_before_open" },
+                "sessions": 8,
+                "requests": 512,
+                "bytes_per_request": crate::stream::STREAM_CHUNK_BYTES,
+                "elapsed_ms": start.elapsed().as_secs_f64() * 1000.0,
+            }));
+        }
+        println!(
+            "{}",
+            serde_json::json!({ "cache_open_benchmark": measurements })
+        );
+    }
+
     #[tokio::test]
     async fn preserves_eight_opus_channels_and_packets_in_both_containers() {
         let temp = tempfile::tempdir().unwrap();

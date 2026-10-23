@@ -464,6 +464,25 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
                     .find(|candidate| candidate["audioTrackId"] == track_id)
                     .expect("each internal audio track must have an explicit source");
                 assert_eq!(explicit["language"], language);
+                assert_eq!(explicit["url"], source["url"]);
+                assert_eq!(explicit["prepareVideo"], false);
+                assert!(
+                    explicit["preparedVideoUrl"]
+                        .as_str()
+                        .unwrap()
+                        .ends_with("/prepared/video")
+                );
+
+                assert!(
+                    explicit["audioSegmentUrl"]
+                        .as_str()
+                        .unwrap()
+                        .ends_with(&format!(
+                            "/prepared/audio-{}-chunk-",
+                            track["index"].as_u64().unwrap()
+                        ))
+                );
+
                 assert_eq!(explicit["tracks"][0]["index"], track["index"]);
                 assert_eq!(explicit["tracks"][0]["channels"], track["channels"]);
             }

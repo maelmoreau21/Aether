@@ -1,0 +1,38 @@
+{
+  "passed": true,
+  "browser": "155.0.8059.86",
+  "scope": "Production Svelte UI with actual signed manifests; simulated APIs. Real Core persistence/trust/install verified separately.",
+  "cards": 4,
+  "checks": [
+    "collapsed desktop/mobile navigation, Escape/focus/outside click",
+    "refresh pending default repository",
+    "dark/light 1440/390 no overflow",
+    "publisher approval required",
+    "individual install disabled",
+    "explicit activation",
+    "remove repository preserves installation"
+  ],
+  "mutations": [
+    {
+      "path": "/api/v1/admin/extensions/repositories/community-default/refresh",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/admin/extensions/publishers",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/admin/extensions/repositories/community-default/install",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/admin/extensions/avatars",
+      "method": "PUT"
+    },
+    {
+      "path": "/api/v1/admin/extensions/repositories/community-default",
+      "method": "DELETE"
+    }
+  ],
+  "errors": []
+}

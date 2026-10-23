@@ -51,9 +51,9 @@
   h2,h3 { margin:0 0 .8rem; } p { color:var(--color-muted); line-height:1.6; } .groups { display:grid; gap:.8rem; margin:1.5rem 0; }
   article,form { padding:1.4rem; border:1px solid var(--color-line); border-radius:var(--radius-md); background:var(--color-surface); }
   article { display:flex; align-items:center; justify-content:space-between; gap:1rem; } article p { margin:0; } .actions { display:flex; gap:.6rem; flex-wrap:wrap; }
-  label { display:block; margin:.6rem 0; } input:not([type='checkbox']) { display:block; width:100%; max-width:400px; padding:.7rem; background:var(--color-raised); border:1px solid var(--color-line); border-radius:6px; color:var(--color-text); }
+  label { display:block; margin:.6rem 0; } input:not([type='checkbox']) { display:block; width:100%; max-width:400px; padding:.7rem; background:var(--color-raised); border:1px solid var(--color-line); border-radius: var(--radius-md); color:var(--color-text); }
   .choices { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin:1rem 0; } fieldset { min-width:0; border:1px solid var(--color-line); max-height:320px; overflow:auto; }
-  button { padding:.65rem .9rem; border:1px solid var(--color-line); border-radius:6px; color:var(--color-text); background:var(--color-raised); cursor:pointer; } button:disabled { opacity:.6; cursor:wait; }
+  button { padding:.65rem .9rem; border:1px solid var(--color-line); border-radius: var(--radius-md); color:var(--color-text); background:var(--color-raised); cursor:pointer; } button:disabled { opacity:.6; cursor:wait; }
   .default-badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; background:var(--color-primary, #6366f1); color:#fff; font-weight:600; vertical-align:middle; margin-left:8px; }
   .check-label { display:flex; align-items:flex-start; gap:8px; margin:10px 0; font-size:14px; cursor:pointer; }
   .check-label input { width:auto; margin-top:3px; }

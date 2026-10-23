@@ -1,11 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { session } from './auth/session';
-import { hydratePreferences, preferences, savePreferences } from './preferences';
+import { ensurePreferences, hydratePreferences, preferences, savePreferences } from './preferences';
 
 const account = (id: string) => ({ user: { id, login: id, role: 'user' as const }, csrfToken: `csrf-${id}` });
 afterEach(() => { session.set(null); vi.unstubAllGlobals(); });
 
 describe('account preferences', () => {
+  it('shares slow startup hydration with playback and reuses loaded settings', async () => {
+    session.set(account('a'));
+    let respond!: (response: Response) => void;
+    const fetch = vi.fn(() => new Promise<Response>(resolve => { respond = resolve; }));
+    vi.stubGlobal('fetch', fetch);
+    const loading = hydratePreferences();
+    expect(ensurePreferences()).toBe(loading);
+    expect(hydratePreferences()).toBe(loading);
+    respond(Response.json({ audioLanguage: 'en' }));
+    await loading;
+    expect(await ensurePreferences()).toEqual({ audioLanguage: 'en' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it('hydrates server settings without importing legacy browser preferences', async () => {
     const storage = { getItem: vi.fn((key: string) => key ? 'previous-account-value' : null), setItem: vi.fn(), removeItem: vi.fn() };
     vi.stubGlobal('localStorage', storage);

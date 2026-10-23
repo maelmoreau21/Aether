@@ -1,0 +1,88 @@
+{
+  "browser": "155.0.8059.86",
+  "scope": "Real UI, mocked API 180 ms catalogue / 300 ms descriptor, local synthetic MP4. No Core/Node/NAS proof.",
+  "runs": [
+    {
+      "mode": "after",
+      "returns": [
+        {
+          "ms": 81.23540000000003,
+          "requests": 0
+        },
+        {
+          "ms": 71.88679999999977,
+          "requests": 0
+        },
+        {
+          "ms": 78.1216000000004,
+          "requests": 0
+        },
+        {
+          "ms": 80.87199999999939,
+          "requests": 0
+        },
+        {
+          "ms": 75.46169999999984,
+          "requests": 0
+        },
+        {
+          "ms": 103.70780000000013,
+          "requests": 0
+        },
+        {
+          "ms": 93.71519999999964,
+          "requests": 0
+        },
+        {
+          "ms": 95.61189999999988,
+          "requests": 0
+        },
+        {
+          "ms": 75.4372000000003,
+          "requests": 0
+        },
+        {
+          "ms": 77.42149999999947,
+          "requests": 0
+        }
+      ],
+      "openings": [
+        {
+          "shellMs": 75.33230000000003,
+          "playingMs": 987.415,
+          "descriptorRequests": 1,
+          "ui": {
+            "start": 3557.400000035763,
+            "shellMs": 14.799999952316284,
+            "playingMs": 624.5,
+            "firstFrameMs": 644.3999999761581
+          }
+        },
+        {
+          "shellMs": 151.52480000000014,
+          "playingMs": 557.8276000000005,
+          "descriptorRequests": 1,
+          "ui": {
+            "start": 4693.699999988079,
+            "shellMs": 3,
+            "firstFrameMs": 383.7000000476837,
+            "playingMs": 389
+          }
+        }
+      ],
+      "scenarios": [
+        "catalogue-scroll-restored",
+        "cancel-episode-before-descriptor-no-late-reopen",
+        "home-series-episode-home",
+        {
+          "name": "cold-library-prefetch-shared",
+          "clickToCardsMs": 122.41239999999925,
+          "requestsAfterClick": 0
+        },
+        "films-series-films-no-blocking-loader"
+      ],
+      "heapBytes": 10870941,
+      "errors": []
+    }
+  ]
+}

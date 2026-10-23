@@ -94,6 +94,7 @@ fs.mkdirSync(out, { recursive: true });
     await page.screenshot({ path: `${out}/01-nodes-paired.png`, fullPage: true });
 
     // 3. Create Films library on Node 1 and Series library on Node 2 via UI if not present
+    if (await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
     await page.locator('.admin-sidebar a[href$="#libraries-section"]').click();
     const libListSection = page.locator('#libraries-section');
     const nodeSelect = page.locator('#library-node');

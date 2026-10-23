@@ -1,0 +1,88 @@
+{
+  "browser": "155.0.8059.86",
+  "scope": "Real UI, mocked API 180 ms catalogue / 300 ms descriptor, local synthetic MP4. No Core/Node/NAS proof.",
+  "runs": [
+    {
+      "mode": "after",
+      "returns": [
+        {
+          "ms": 113.03089999999975,
+          "requests": 0
+        },
+        {
+          "ms": 75.77070000000003,
+          "requests": 0
+        },
+        {
+          "ms": 124.97949999999946,
+          "requests": 0
+        },
+        {
+          "ms": 110.11790000000019,
+          "requests": 0
+        },
+        {
+          "ms": 109.00879999999961,
+          "requests": 0
+        },
+        {
+          "ms": 105.59149999999954,
+          "requests": 0
+        },
+        {
+          "ms": 108.58619999999974,
+          "requests": 0
+        },
+        {
+          "ms": 112.40679999999975,
+          "requests": 0
+        },
+        {
+          "ms": 105.79109999999946,
+          "requests": 0
+        },
+        {
+          "ms": 98.09050000000025,
+          "requests": 0
+        }
+      ],
+      "openings": [
+        {
+          "shellMs": 61.893700000000536,
+          "playingMs": 940.1942000000008,
+          "descriptorRequests": 1,
+          "ui": {
+            "start": 5044.800000011921,
+            "shellMs": 14.800000011920929,
+            "playingMs": 637.6999999880791,
+            "firstFrameMs": 729
+          }
+        },
+        {
+          "shellMs": 271.45390000000043,
+          "playingMs": 769.8219000000008,
+          "descriptorRequests": 1,
+          "ui": {
+            "start": 6260.600000023842,
+            "shellMs": 6.399999976158142,
+            "playingMs": 494.30000001192093,
+            "firstFrameMs": 504.69999998807907
+          }
+        }
+      ],
+      "scenarios": [
+        "catalogue-scroll-restored",
+        "cancel-episode-before-descriptor-no-late-reopen",
+        "home-series-episode-home",
+        {
+          "name": "cold-library-prefetch-shared",
+          "clickToCardsMs": 110.54639999999927,
+          "requestsAfterClick": 0
+        },
+        "films-series-films-no-blocking-loader"
+      ],
+      "heapBytes": 20287571,
+      "errors": []
+    }
+  ]
+}

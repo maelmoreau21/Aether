@@ -45,6 +45,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .parse()?;
     let bind_addr = parse_bind_addr()?;
     let database = media_poc::identity::IdentityStore::open_configured(&root).await?;
+    if media_poc::extension_storage::sync_installed(&database)
+        .await
+        .is_err()
+    {
+        eprintln!("plugin storage unavailable; affected plugins cannot execute");
+    }
     let inventory = Inventory::local(root).await?;
 
     let listener = tokio::net::TcpListener::bind(SocketAddrV4::new(bind_addr, port)).await?;

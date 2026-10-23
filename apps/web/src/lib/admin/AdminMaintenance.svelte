@@ -64,7 +64,7 @@
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if success}<p role="status">{success}</p>{/if}
   {#if loading}<p role="status">Chargement des archives…</p>{:else if listing}
-    {#if !listing.available}<div class="notice"><strong>Sauvegarde Web indisponible</strong><p>Configurez la clé de récupération MEDIA_BACKUP_KEY côté serveur (64 caractères hexadécimaux). Conservez cette clé séparément : elle est nécessaire pour déchiffrer vos archives. PostgreSQL nécessite aussi pg_dump 18 côté serveur.</p></div>{:else}
+    {#if !listing.available}<div class="notice"><strong>Sauvegarde indisponible</strong><p>{listing.reason ?? "Le service de sauvegarde n'est pas disponible actuellement."}</p></div>{:else}
       <article><h3>Planification automatique</h3>
         <form onsubmit={saveSchedule}>
           <label><input type="checkbox" bind:checked={scheduleEnabled} disabled={saving} /> Activer les sauvegardes automatiques</label>
@@ -76,12 +76,12 @@
         <p>Dernier résultat : {outcomeLabels[listing.schedule.lastOutcome] ?? listing.schedule.lastOutcome}</p>
         {#if listing.schedule.lastCompletedAt}<p>Dernière fin : {new Date(listing.schedule.lastCompletedAt * 1000).toLocaleString()}</p>{/if}
       </article>
-      <article><h3>Archives chiffrées</h3><p>Les archives sont conservées dans le dossier du serveur. Téléchargez une copie et conservez-la séparément.</p>
+      <article><h3>Archives</h3><p>Les archives sont conservées dans le dossier du serveur. Téléchargez une copie et conservez-la en lieu sûr.</p>
       {#if listing.archives.length === 0}<p>Aucune sauvegarde disponible.</p>{:else}<ul class="archives">{#each listing.archives as archive (archive.id)}<li><div><strong>{new Date(archive.createdAt * 1000).toLocaleString()}</strong><small>{(archive.size / 1024 / 1024).toFixed(2)} Mo · {archive.id}</small></div><!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- Core API archive endpoint, not a SvelteKit page -->
 <a href={`/api/v1/admin/backups/${archive.id}/download`} download>Télécharger</a></li>{/each}</ul>{/if}</article>
     {/if}
   {/if}
-  <aside><h3>Restaurer en sécurité</h3><p>Arrêtez le Core avant une restauration. Déchiffrez votre archive dans un nouvel emplacement vide avec votre clé de récupération, puis restaurez la base extraite avec media-restore. Pour PostgreSQL, choisissez une base cible vide. Rétablissez la configuration extraite, adaptez les chemins à la nouvelle machine et vérifiez le redémarrage.</p><p>La restauration Web, la suppression et la rétention automatique des sauvegardes ne sont pas disponibles.</p><p>Ces archives contiennent la base complète (comptes, groupes, accès, tâches et catalogue) et les variables de configuration MEDIA_* et OIDC_* du processus, avec leurs secrets. La clé de récupération reste exclue. Les certificats internes et PostgreSQL configurés sont inclus. Les médias et les données propres aux Media Nodes restent à conserver séparément.</p></aside>
+  <aside><h3>Restaurer en sécurité</h3><p>Arrêtez le Core avant une restauration. Déchiffrez votre archive dans un nouvel emplacement vide avec media-recover, puis restaurez la base extraite avec media-restore. Pour PostgreSQL, choisissez une base cible vide. Rétablissez la configuration extraite, adaptez les chemins à la nouvelle machine et vérifiez le redémarrage.</p><p>La restauration Web, la suppression et la rétention automatique des sauvegardes ne sont pas disponibles.</p><p>Ces archives contiennent la base complète (comptes, groupes, accès, tâches et catalogue) et les variables de configuration MEDIA_* et OIDC_* du processus, avec leurs secrets. Les certificats internes et PostgreSQL configurés sont inclus. Les médias et les données propres aux Media Nodes restent à conserver séparément.</p></aside>
 </section>
 
 <style>
@@ -95,9 +95,9 @@
   .notice p { color: var(--text-secondary); }
   form { display: grid; gap: 1rem; }
   form label { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; color: var(--text-primary); }
-  input[type="number"] { max-width: 10rem; padding: .6rem; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: 8px; }
+  input[type="number"] { max-width: 10rem; padding: .6rem; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius:var(--radius-md); }
   .actions { display: flex; flex-wrap: wrap; gap: .75rem; }
-  button, a { border: 1px solid var(--border-subtle); border-radius: 8px; padding: .7rem 1rem; background: var(--bg-elevated); color: var(--text-primary); font: inherit; }
+  button, a { border: 1px solid var(--border-subtle); border-radius:var(--radius-md); padding: .7rem 1rem; background: var(--bg-elevated); color: var(--text-primary); font: inherit; }
   button { cursor: pointer; } button:disabled { cursor: default; opacity: .5; }
   .archives { padding: 0; margin: 0; list-style: none; }
   li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--border-subtle); }

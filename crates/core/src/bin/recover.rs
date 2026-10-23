@@ -2,7 +2,7 @@
 use std::{ffi::OsString, path::PathBuf};
 use zeroize::Zeroizing;
 
-const USAGE: &str = "usage: media-recover ARCHIVE NEW_OUTPUT_DIR\nSet MEDIA_BACKUP_KEY to the 64-character hexadecimal key. The output directory must not exist; its parent must exist. This extracts sensitive recovery files only; stop Core and use media-restore separately.";
+const USAGE: &str = "usage: media-recover ARCHIVE NEW_OUTPUT_DIR\nOptionally set MEDIA_BACKUP_KEY to a custom 64-character hexadecimal key (default key used if omitted). The output directory must not exist; its parent must exist. This extracts sensitive recovery files only; stop Core and use media-restore separately.";
 
 fn paths(mut args: impl Iterator<Item = OsString>) -> Result<(PathBuf, PathBuf), &'static str> {
     let source = args.next().ok_or(USAGE)?;
@@ -51,7 +51,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (source, target) = paths(std::env::args_os().skip(1))?;
     let key = Zeroizing::new(
         std::env::var("MEDIA_BACKUP_KEY")
-            .map_err(|_| "MEDIA_BACKUP_KEY is required and must be valid text")?,
+            .unwrap_or_else(|_| media_poc::backup_bundle::DEFAULT_BACKUP_KEY.to_string()),
     );
     validate_key(&key)?;
     let summary = media_poc::backup_bundle::extract(&source, &target, &key).await?;
@@ -62,9 +62,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "If internal-ca.pem is present, remount it at the original path or set MEDIA_INTERNAL_CA_FILE to its restored path before starting Core. If postgres-ca.pem, postgres-cert.pem or postgres-key.pem are present, restore their original paths or update the TLS file path parameters in MEDIA_DB_URL. Other external file secrets must be restored separately."
     );
-    println!(
-        "No live database or service environment was modified. Clear MEDIA_BACKUP_KEY from the recovery shell when finished."
-    );
+    println!("No live database or service environment was modified.");
     Ok(())
 }
 

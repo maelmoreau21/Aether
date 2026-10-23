@@ -44,6 +44,7 @@ try {
   await accounts.getByLabel('Bibliothèque autorisée : Films de test', { exact: true }).check();
   await accounts.getByRole('button', { name: 'Enregistrer', exact: true }).click();
   await accounts.getByRole('button', { name: 'Modifier Compte de test', exact: true }).waitFor();
+  if (await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
   await page.locator('.admin-sidebar a[href$="#groups-section"]').click();
   const groups = page.locator('#groups-section');
   await groups.getByLabel('Nom', { exact: true }).fill('Famille de test');
@@ -54,6 +55,7 @@ try {
   const groupResponse = await groupCreated;
   assert.equal(groupResponse.status(),201,await groupResponse.text());
   await groups.getByRole('heading', { name: 'Famille de test' }).waitFor({timeout:5000}).catch(async error => {console.log(await groups.innerText());throw error;});
+  if (await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
   await page.locator('.admin-sidebar a[href$="#tasks-section"]').click();
   const tasks = page.locator('#tasks-section');
   await tasks.getByRole('link', { name: 'Configurer Indexer Films de test' }).click();
@@ -67,6 +69,7 @@ try {
   await tasks.getByRole('button', { name: 'Supprimer le déclencheur' }).click();
   await tasks.getByText(/Aucun déclencheur actif/).waitFor();
   assert.deepEqual(await (await page.request.get(`${origin}/api/v1/admin/tasks/schedules`)).json(), []);
+  if (await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
   await page.locator('.admin-sidebar a[href$="#api-keys-section"]').click();
   const keys = page.locator('#api-keys-section');
   await keys.getByLabel('Nom', { exact: true }).fill('Catalogue de test');
@@ -87,6 +90,7 @@ try {
   await keys.getByRole('button', { name: 'Révoquer', exact: true }).click();
   await keys.getByText('Révoquée', { exact: true }).waitFor();
   assert.equal((await page.request.get(`${origin}/api/v1/integrations/catalog`, { headers: { Authorization: `Bearer ${token}` } })).status(), 401);
+  if (await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
   await page.locator('.admin-sidebar a[href$="#general-section"]').click();
   const general = page.locator('#general-section');
   await general.getByLabel('Texte du bouton de connexion SSO', {exact:true}).fill('Connexion avec mon compte');
@@ -97,6 +101,7 @@ try {
   await page.waitForFunction(() => [...document.querySelectorAll('input')].some(input => input.value === 'Connexion avec mon compte'));
   assert.equal(await general.getByLabel('Texte du bouton de connexion SSO', {exact:true}).inputValue(),'Connexion avec mon compte');
   assert.equal((await (await page.request.get(`${origin}/api/v1/auth/oidc/status`)).json()).buttonLabel,'Connexion avec mon compte');
+  if (await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
   await page.locator('.admin-sidebar a[href$="#backups-section"]').click();
   const backups = page.locator('#backups-section');
   await backups.getByRole('heading', { name: 'Sauvegardes et base de données' }).waitFor();
@@ -112,6 +117,7 @@ try {
   await backups.getByText('Planification enregistrée.', { exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('.mobile-menu-toggle').click();
+  if (await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
   await page.locator('.admin-sidebar a[href$="#groups-section"]').click();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.evaluate(() => window.scrollTo(0, 0));

@@ -228,18 +228,20 @@ async fn roots(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     administrator(&state, &headers, false).await?;
     let mut all_roots = Vec::new();
-    if let Ok(local_root) = validate_library_root(&state.root, &state.root).await {
-        all_roots.push(local_root.to_string_lossy().into_owned());
-        if let Ok(mut entries) = tokio::fs::read_dir(&local_root).await {
-            while let Ok(Some(entry)) = entries.next_entry().await {
-                if let Ok(meta) = entry.metadata().await
-                    && meta.is_dir()
-                {
-                    let path = entry.path();
-                    if let Ok(sub) = validate_library_root(&path, &local_root).await {
-                        let sub_str = sub.to_string_lossy().into_owned();
-                        if !all_roots.contains(&sub_str) {
-                            all_roots.push(sub_str);
+    for allowed in crate::local_mounts::allowed_roots(&state.root).await {
+        if let Ok(local_root) = validate_library_root(&allowed, &allowed).await {
+            all_roots.push(local_root.to_string_lossy().into_owned());
+            if let Ok(mut entries) = tokio::fs::read_dir(&local_root).await {
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    if let Ok(meta) = entry.metadata().await
+                        && meta.is_dir()
+                    {
+                        let path = entry.path();
+                        if let Ok(sub) = validate_library_root(&path, &local_root).await {
+                            let sub_str = sub.to_string_lossy().into_owned();
+                            if !all_roots.contains(&sub_str) {
+                                all_roots.push(sub_str);
+                            }
                         }
                     }
                 }
@@ -377,7 +379,7 @@ async fn validate_folder(
     root: &str,
 ) -> Result<String, StatusCode> {
     Ok(if node_id == "local" {
-        let validated = validate_library_root(DiskPath::new(root), &state.root)
+        let validated = crate::local_mounts::validate(DiskPath::new(root), &state.root)
             .await
             .map_err(|_| StatusCode::BAD_REQUEST)?;
         validated

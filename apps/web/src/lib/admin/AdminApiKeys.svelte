@@ -44,8 +44,8 @@
 <style>
   h2,h3 { margin:0 0 .8rem; } p { color:var(--color-muted); line-height:1.6; } code { overflow-wrap:anywhere; } article,form,aside { padding:1.4rem; border:1px solid var(--color-line); border-radius:var(--radius-md); background:var(--color-surface); }
   .keys { display:grid; gap:.8rem; margin:1.4rem 0; } article { display:flex; align-items:center; justify-content:space-between; gap:1rem; } article p { margin:.3rem 0; } label { display:block; margin:.8rem 0; }
-  input:not([type='checkbox']),select,textarea { display:block; width:100%; max-width:480px; padding:.7rem; background:var(--color-raised); border:1px solid var(--color-line); border-radius:6px; color:var(--color-text); }
+  input:not([type='checkbox']),select,textarea { display:block; width:100%; max-width:480px; padding:.7rem; background:var(--color-raised); border:1px solid var(--color-line); border-radius: var(--radius-md); color:var(--color-text); }
   textarea { margin:1rem 0; min-height:100px; } fieldset { border:1px solid var(--color-line); margin:1rem 0; max-height:300px; overflow:auto; }
-  button { padding:.65rem .9rem; border:1px solid var(--color-line); border-radius:6px; color:var(--color-text); background:var(--color-raised); cursor:pointer; } button:disabled { opacity:.6; cursor:not-allowed; }
+  button { padding:.65rem .9rem; border:1px solid var(--color-line); border-radius: var(--radius-md); color:var(--color-text); background:var(--color-raised); cursor:pointer; } button:disabled { opacity:.6; cursor:not-allowed; }
   @media(max-width:640px) { article { flex-direction:column; align-items:flex-start; } }
 </style>

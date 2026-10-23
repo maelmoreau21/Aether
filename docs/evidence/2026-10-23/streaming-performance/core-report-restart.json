@@ -1,0 +1,149 @@
+{
+  "browser": "155.0.8059.86",
+  "os": "10.0.26300",
+  "headless": true,
+  "restart": true,
+  "results": {
+    "startupMs": 924.8197,
+    "internalSwitches": [
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.58253479003906,
+        "url": "http://127.0.0.1:51388/api/v1/assets/d95827b6-dec3-4a6c-aa13-c62fa705cc7c/content",
+        "time": 1.287721,
+        "fullscreen": true,
+        "decodedColors": 557,
+        "decodedFrames": 35
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -50.01076126098633,
+        "url": "http://127.0.0.1:51388/api/v1/assets/d95827b6-dec3-4a6c-aa13-c62fa705cc7c/content",
+        "time": 2.576715,
+        "fullscreen": true,
+        "decodedColors": 837,
+        "decodedFrames": 66
+      },
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.58395385742188,
+        "url": "http://127.0.0.1:51388/api/v1/assets/d95827b6-dec3-4a6c-aa13-c62fa705cc7c/content",
+        "time": 3.405214,
+        "fullscreen": true,
+        "decodedColors": 798,
+        "decodedFrames": 86
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.02558898925781,
+        "url": "http://127.0.0.1:51388/api/v1/assets/d95827b6-dec3-4a6c-aa13-c62fa705cc7c/content",
+        "time": 4.202638,
+        "fullscreen": true,
+        "decodedColors": 570,
+        "decodedFrames": 105
+      }
+    ],
+    "failedLanguageRetainedWithoutPause": true,
+    "reopenedAudio": [
+      {
+        "id": "internal-2",
+        "language": "en",
+        "passed": true
+      },
+      {
+        "id": "internal-1",
+        "language": "fr",
+        "passed": true
+      }
+    ],
+    "finalAudioWindowAndBackwardSeek": true,
+    "assTextFallback": true,
+    "integratedSubtitleAndNegativeOffset": true,
+    "signedOffsets": true,
+    "externalTracks": {
+      "container": "MKV",
+      "srtRendered": true,
+      "webvttRendered": true,
+      "externalOpusPcm": 0.048405617475509644,
+      "audioVideoSync": true,
+      "pausedSeek": true,
+      "subtitlesOff": true
+    },
+    "progress": {
+      "saved": true,
+      "resumed": true,
+      "manualWatched": true,
+      "manualUnwatched": true
+    },
+    "catalogue": true,
+    "singleWorkTwoVersions": true,
+    "playback": true,
+    "seek": true,
+    "pause": true,
+    "cspErrors": [],
+    "fallbackPreferenceBeforeClose": {
+      "mediaId": "d95827b6-dec3-4a6c-aa13-c62fa705cc7c",
+      "trackId": "internal-1"
+    },
+    "nativeFailurePreparedFallback": true,
+    "clickTimings": [
+      {
+        "start": 965.2000000476837,
+        "audioScope": "playing event only; not PCM or physical onset",
+        "dialogOpenMs": 24.399999976158142,
+        "firstFrameMs": 277,
+        "frameMediaTime": 0,
+        "videoPlayingMs": 617.5
+      },
+      {
+        "start": 6466.100000023842,
+        "audioScope": "playing event only; not PCM or physical onset",
+        "dialogOpenMs": 7.300000011920929,
+        "firstFrameMs": 82.80000001192093,
+        "frameMediaTime": 1,
+        "videoPlayingMs": 140.5
+      },
+      {
+        "start": 6914.400000035763,
+        "audioScope": "playing event only; not PCM or physical onset",
+        "dialogOpenMs": 7.5,
+        "firstFrameMs": 68.80000001192093,
+        "frameMediaTime": 1,
+        "videoPlayingMs": 110.39999997615814
+      },
+      {
+        "start": 10922.400000035763,
+        "audioScope": "playing event only; not PCM or physical onset",
+        "dialogOpenMs": 6.5,
+        "videoPlayingMs": 72.89999997615814,
+        "firstFrameMs": 84.39999997615814,
+        "frameMediaTime": 0
+      },
+      {
+        "start": 15359,
+        "audioScope": "playing event only; not PCM or physical onset",
+        "dialogOpenMs": 6.900000035762787,
+        "firstFrameMs": 56.60000002384186,
+        "frameMediaTime": 0,
+        "videoPlayingMs": 69.30000001192093
+      },
+      {
+        "start": 15736.200000047684,
+        "audioScope": "playing event only; not PCM or physical onset",
+        "dialogOpenMs": 4.399999976158142,
+        "firstFrameMs": 127.89999997615814,
+        "frameMediaTime": 0.167,
+        "videoPlayingMs": 144.5999999642372
+      }
+    ]
+  },
+  "captionLayout": {
+    "line": 70,
+    "snapToLines": false
+  },
+  "passed": true
+}

@@ -314,7 +314,7 @@ async fn signed_package_real_worker_live_permissions_persistence_and_lifecycle()
     );
     assert_eq!(
         call(&app, "POST", base, &cookie, csrf, p.clone()).await.0,
-        StatusCode::FORBIDDEN
+        StatusCode::BAD_REQUEST
     );
     assert_eq!(
         call(
@@ -406,6 +406,57 @@ async fn signed_package_real_worker_live_permissions_persistence_and_lifecycle()
     .await;
     assert_eq!(works["items"].as_array().unwrap().len(), 1);
     assert_eq!(works["items"][0]["libraryId"], "films");
+
+    // All-library scope includes another authorized work without per-library checkboxes.
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            &endpoint,
+            &cookie,
+            csrf,
+            json!({"enabled":true,"allLibraries":true})
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, all_works, _) = call(
+        &app,
+        "GET",
+        &format!("{endpoint}/works"),
+        &cookie,
+        "",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(all_works["items"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            &run,
+            &cookie,
+            csrf,
+            json!({"workId":"work-other"})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            &endpoint,
+            &cookie,
+            csrf,
+            json!({"enabled":true,"libraryIds":["films"]})
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
 
     // Verify extension settings GET and PUT
     let settings_endpoint = format!("{endpoint}/settings");
@@ -588,7 +639,7 @@ async fn signed_package_real_worker_live_permissions_persistence_and_lifecycle()
         Value::Null,
     )
     .await;
-    assert_eq!(history["runs"].as_array().unwrap().len(), 3);
+    assert_eq!(history["runs"].as_array().unwrap().len(), 4);
     assert_eq!(
         call(
             &app,

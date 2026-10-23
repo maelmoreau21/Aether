@@ -7,10 +7,28 @@
   let extensions = $state<Extension[]>([]), packs = $state<Pack[]>([]);
   let extensionId = $state(''), packId = $state(''), seed = $state('');
   let preview = $state('');
+  let collections=$state<{id:string;name:string;count:number}[]>([]),collectionId=$state('');
+  let collectionImages=$state<{id:string;name:string;url:string}[]>([]);
+  async function gallery(path:string,method='GET') {
+    const current=$session;if(!current)return;
+    busy=true;error='';
+    try{
+      const response=await fetch(path,{method,credentials:'same-origin',cache:'no-store',headers:{'x-csrf-token':current.csrfToken},signal:AbortSignal.timeout(20000)});
+      if(!response.ok)throw new Error('Collection indisponible.');
+      if($session?.user.id!==current.user.id)return;
+      if(method==='POST'){avatarRevision.update(value=>value+1);notice='Avatar enregistré.';}
+      else collectionImages=(await response.json()).images;
+    }catch(e){error=e instanceof Error?e.message:'Collection indisponible.';}finally{busy=false;}
+  }
   $effect(() => {
     const userId = $session?.user.id;
+    extensions=[];collections=[];collectionImages=[];collectionId='';packs=[];extensionId='';packId='';preview='';
     if (!userId) return;
     const controller = new AbortController();
+    void fetch('/api/v1/account/avatar/collections',{credentials:'same-origin',cache:'no-store',signal:controller.signal})
+      .then(async response=>response.ok?response.json():{packs:[]})
+      .then(value=>{if($session?.user.id===userId)collections=value.packs;}).catch(()=>{});
+
     void fetch('/api/v1/account/avatar/extensions', { credentials:'same-origin', cache:'no-store', signal:controller.signal })
       .then(async response => { if (!response.ok) throw new Error('Extensions indisponibles.'); return response.json() as Promise<{extensions:Extension[]}>; })
       .then(value => { if ($session?.user.id === userId) extensions=value.extensions; })
@@ -65,10 +83,15 @@
       {#if preview}<img src={preview} alt="Aperçu de l’avatar proposé" width="128" height="128" />{/if}
     {/if}
   {/if}
+  {#if collections.length}
+    <label>Collections du serveur<select disabled={busy} bind:value={collectionId} onchange={()=>{collectionImages=[];if(collectionId)void gallery(`/api/v1/account/avatar/collections/${encodeURIComponent(collectionId)}`);}}><option value="">Choisir une collection</option>{#each collections as collection (collection.id)}<option value={collection.id}>{collection.name} · {collection.count}</option>{/each}</select></label>
+    <div class="avatar-gallery">{#each collectionImages as item (item.id)}<button type="button" disabled={busy} aria-label={`Choisir ${item.name}`} onclick={()=>void gallery(item.url,'POST')}><img src={item.url} alt={item.name} width="80" height="80" loading="lazy" /></button>{/each}</div>
+  {/if}
   <button type="button" disabled={busy} onclick={() => void update()}>Retirer l’image</button>
   {#if busy}<p role="status">Enregistrement…</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}{#if error}<p role="alert">{error}</p>{/if}
 </div>
 <style>
+  .avatar-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:10px;max-height:420px;overflow:auto;margin:16px 0;}.avatar-gallery button{padding:4px;}.avatar-gallery img{width:100%;height:auto;aspect-ratio:1;object-fit:cover;border-radius:6px;}
   .avatar-editor { margin-bottom: 28px; padding-bottom: 24px; border-bottom: 1px solid var(--border-subtle); }
   label { display: grid; gap: 12px; font-size: 14px; }
   input { max-width: 100%; font: inherit; color: var(--text-primary); }

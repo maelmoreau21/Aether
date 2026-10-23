@@ -4,6 +4,10 @@
   import { session } from '../auth/session';
   import { history, loadHistory } from './watch-state';
   import Icon from '../ui/Icon.svelte';
+  import type { Work } from './api';
+  import { imagePreviewUrl } from './image-url';
+  let { works = [] }: { works?: Work[] } = $props();
+  function thumbnail(id: string, seriesId?: string) { const work=works.find(work=>work.id===(seriesId || id)); return imagePreviewUrl(work?.artwork?.backdrop || work?.posterUrl,640); }
 
   let error = $state('');
   let track = $state<HTMLDivElement>();
@@ -11,7 +15,7 @@
   let canScrollRight = $state(false);
 
   onMount(() => {
-    void loadHistory(true).catch(e => (error = e.message));
+    void loadHistory().catch(e => (error = e.message));
   });
 
   $effect(() => {
@@ -36,6 +40,7 @@
   }
 </script>
 
+{#if error || $history.length}
 <section class="continue-shelf" aria-label="Continuer à regarder">
   <div class="shelf-header">
     <div class="title-group">
@@ -79,7 +84,7 @@
         class="retry-btn"
         onclick={() => {
           error = '';
-          void loadHistory(true).catch(e => (error = e.message));
+          void loadHistory().catch(e => (error = e.message));
         }}
       >
         Réessayer
@@ -108,6 +113,7 @@
           aria-label={`Reprendre la lecture de ${item.title}`}
         >
           <div class="card-thumb">
+            {#if thumbnail(item.workId,item.seriesId)}<img class="resume-image" src={thumbnail(item.workId,item.seriesId)} alt="" loading="lazy" />{/if}
             <div class="thumb-bg" aria-hidden="true">
               <span class="thumb-letter">{(item.title ?? 'M').charAt(0)}</span>
             </div>
@@ -167,8 +173,12 @@
     </details>
   {/if}
 </section>
+{/if}
 
 <style>
+  .resume-image { position:absolute; inset:0; width:100%;height:100%;object-fit:cover;z-index:1; }
+  .card-thumb { position:relative; }
+  .thumb-overlay,.card-progress-track { z-index:2; }
   .continue-shelf {
     margin: 36px 0;
   }
@@ -200,9 +210,9 @@
     font-weight: 700;
     padding: 2px 8px;
     border-radius: var(--radius-full);
-    background: rgba(167, 139, 250, 0.15);
+    background: var(--color-accent-soft);
     color: var(--color-accent);
-    border: 1px solid rgba(167, 139, 250, 0.25);
+    border: 1px solid var(--color-accent-soft);
   }
 
   .carousel-nav {
@@ -225,7 +235,7 @@
 
   .nav-arrow:hover:not(:disabled) {
     background: var(--color-accent-soft);
-    border-color: rgba(167, 139, 250, 0.35);
+    border-color: var(--color-accent-soft);
     color: var(--color-accent-hover);
     transform: scale(1.08);
   }
@@ -321,8 +331,8 @@
 
   .continue-card:hover {
     transform: translateY(-4px);
-    border-color: rgba(167, 139, 250, 0.4);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.65), 0 0 16px rgba(139, 92, 246, 0.2);
+    border-color: var(--color-accent-soft);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.65), 0 0 16px var(--color-accent-soft);
   }
 
   .card-thumb {
@@ -344,7 +354,7 @@
     font-family: var(--font-display);
     font-size: 42px;
     font-weight: 700;
-    color: rgba(167, 139, 250, 0.25);
+    color: var(--color-accent-soft);
     user-select: none;
   }
 

@@ -1,5 +1,31 @@
 # Dépôts et catalogue d’extensions
 
+> Mise à jour du 23 octobre : aucune approbation d’éditeur ou de dépôt n’est requise.
+> Les signatures restent vérifiées avec la clé du catalogue. Configuration dédiée,
+> Toutes les bibliothèques et import d’avatars : [contrat actuel](PLUGIN_SETTINGS_AND_COLLECTIONS.md).
+> Les étapes de confiance explicite historiques ci-dessous sont remplacées par ce contrat.
+
+## Interface des extensions — 23 octobre 2026
+
+Le catalogue et les extensions installées utilisent des cartes avec un visuel
+local déterministe, un nom, une description courte et un état. Les visuels sont
+composés en CSS/SVG, sans téléchargement d’image tiers. Les catégories viennent
+du manifeste, avec un repli basé sur les permissions ; recherche et filtres
+s’appliquent ensemble. Le bouton **Voir les détails** ouvre la fiche avec la
+version sélectionnable, la compatibilité, le développeur, le dépôt et les accès
+demandés. Les paramètres des extensions installées restent séparés de leur
+installation ; activation, bibliothèques, réglages et désinstallation conservent
+les contrats existants. Aucun historique de versions installées n’est inventé.
+
+**Dépôts** présente une liste compacte ; **+ Nouveau dépôt** ouvre le formulaire.
+Les thèmes clair/sombre, le clavier et les petits écrans utilisent les tokens
+existants. Le test navigateur `test-extensions-live.mjs` couvre la découverte sur
+catalogue synthétique (catégorie, recherche vide, fiche et formulaire), puis le
+cycle réel sur SQLite et Wasm signé (paramètres, activation, exécution,
+désactivation, désinstallation). Les captures du catalogue contiennent des
+entrées de démonstration injectées uniquement dans le test, pas dans le produit.
+Aucun dépôt distant ni déploiement NAS n’est validé par ce test.
+
 Dans Administration → Extensions :
 
 1. Ouvrir **Dépôts**, renseigner un nom et l’URL HTTPS du `manifest.json` fourni
@@ -7,18 +33,28 @@ Dans Administration → Extensions :
 2. Ouvrir **Catalogue**, choisir l’extension et sa version. La version numérique
    la plus récente est sélectionnée par défaut ; les versions incompatibles
    restent identifiées et leur installation est refusée côté serveur.
-3. Pour un nouvel éditeur, comparer sa clé publique avec celle de l’auteur sur
-   un canal de confiance, puis l’approuver explicitement. Le manifeste ne peut
-   pas remplacer une clé déjà approuvée ou réactiver un éditeur révoqué.
+3. Aucun clic d’approbation de dépôt ou d’éditeur n’est nécessaire.
 4. Cliquer sur **Installer**. Le serveur télécharge le paquet, contrôle son
    empreinte, ses métadonnées et sa signature, puis le conserve désactivé.
-5. Dans **Installées**, configurer les paramètres, accorder les bibliothèques et
-   activer. Le runtime Wasm ne nécessite pas de redémarrage du serveur.
+5. Dans **Installées**, configurer les paramètres et activer (Toutes les bibliothèques par
+   défaut pour un fournisseur de métadonnées). Le runtime Wasm ne nécessite pas de redémarrage du serveur.
 
 Le principe est celui d’un catalogue de paquets ; les manifestes et DLL Jellyfin
-ne sont pas compatibles. Aucun dépôt officiel distant n’est inventé ni ajouté
-par défaut : il faut une URL réellement hébergée par l’auteur. Le dépôt voisin
-`Aether-Plugins` fournit un générateur, sans publier ni exposer de serveur.
+ne sont pas compatibles. Depuis la migration additive 0041 (SQLite/PostgreSQL),
+le dépôt `Aether Plugins` est préconfiguré une seule fois avec :
+
+```text
+https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/main/repository/manifest.json
+```
+
+La migration ne télécharge rien : le catalogue initial est vide jusqu’à
+**Actualiser les dépôts**. Elle n’installe aucun module. L’installation ne demande plus d’approbation.
+La suppression de ce dépôt est durable, y compris après réouverture de la base.
+Si cette URL avait déjà été ajoutée par l’administrateur, sa configuration est
+conservée. Le lien ne sera publiquement utilisable qu’après publication des
+fichiers `repository/` préparés dans le dépôt voisin `Aether-Plugins` sur `main`.
+Les quatre paquets signés sont préparés et vérifiés localement ; aucun push ou
+hébergement public n’est effectué par cette intervention.
 
 **Actualiser ce dépôt** récupère explicitement un nouveau catalogue. L’accueil
 ne télécharge aucun manifeste. Une erreur d’actualisation conserve le dernier
@@ -110,3 +146,25 @@ dans le binaire de test ; le navigateur appelle réellement l’API. Captures et
 rapport sont écrits sous `docs/evidence/2026-10-21/repositories/` par défaut.
 
 Le nom du dépôt est désormais facultatif. Installation manuelle hors interface : [import signé depuis les fichiers](PLAYLISTS_AND_MUSIC.md#extensions).
+
+
+## Interface du 23 octobre 2026
+
+Catalogue en cartes compactes, recherche, choix de version, accès demandés et
+éditeur dépliables. L’installation vérifie les signatures sans approbation manuelle ; elle
+n’active pas le module. Installées présente le statut et ouvre une seule
+configuration complète à la fois. Paramètres, bibliothèques, activation,
+désactivation et désinstallation restent indépendants. Les exécutions et le
+journal sont regroupés dans des volets fermés. Les clés techniques et empreintes
+restent consultables dans les détails. La navigation initiale ne double plus
+les sept lectures d’administration.
+
+Les tests Core/SQLite/Chrome réels couvrent l’ajout, le choix d’une ancienne
+version, la confiance, la signature, l’installation désactivée, la suppression
+du dépôt préconfiguré, sa persistance et la conservation du module. Les captures
+avec les quatre manifestes réels utilisent une UI de production et des API
+simulées ; elles ne prouvent pas le téléchargement GitHub. Le contrôle PostgreSQL
+est limité à la migration fournie, sans exécution PostgreSQL dans cette demande.
+
+Les preuves et les commandes du complément sont regroupées dans
+[STARTUP_AND_PLUGIN_CATALOGUE.md](STARTUP_AND_PLUGIN_CATALOGUE.md).

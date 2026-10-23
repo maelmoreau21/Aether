@@ -1,5 +1,7 @@
 <script module lang="ts">
   export type IconName =
+    | 'menu'
+    | 'close'
     | 'play'
     | 'pause'
     | 'volume'
@@ -36,6 +38,8 @@
     | 'moon';
 
   const paths: Record<IconName, string> = {
+    menu: 'M4 6h16M4 12h16M4 18h16',
+    close: 'M6 6l12 12M18 6 6 18',
     sun: 'M12 3v2m0 14v2M5.64 5.64l1.42 1.42m9.88 9.88 1.42 1.42M3 12h2m14 0h2M5.64 18.36l1.42-1.42m9.88-9.88 1.42-1.42M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z',
     moon: 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z',
     search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z',

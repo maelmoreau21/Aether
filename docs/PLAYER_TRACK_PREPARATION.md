@@ -1,5 +1,33 @@
 # P3/P4 — préparation des pistes (18 octobre 2026)
 
+## Démarrage progressif et reprise — 23 octobre 2026
+
+La progression sauvegardée se charge en parallèle des métadonnées vidéo. Le
+lecteur atteint cette position avant de demander le premier segment audio : une
+reprise au milieu du film ne prépare plus inutilement le segment zéro avant le
+segment utile. Une progression reçue après fermeture ne modifie pas le lecteur.
+
+Le démarrage exige toujours des données décodables (`HAVE_FUTURE_DATA`) et une
+réserve contiguë de 50 ms, au lieu de 750 ms. Ce seuil est une quantité de média
+en tampon, pas une promesse de démarrage en 50 ms. Le transport, l'index du
+conteneur, le décodage et une préparation de repli peuvent encore demander
+plus de temps. Pour les MKV AV1, le lecteur essaie maintenant la vidéo originale
+avec l'audio Opus sélectionné par segments. La présence de métadonnées ne suffit
+pas : il attend aussi des données décodables à la position demandée. En cas de
+refus du navigateur, il prépare explicitement la vidéo MP4 sans réencodage puis
+conserve le même audio sélectionné. La copie vidéo complète reste un repli,
+dont la première préparation peut être longue.
+
+Les bornes d'erreur, la pause, l'annulation et la synchronisation
+audio/vidéo restent actives. Le panneau d'erreur affiche désormais la cause
+technique remontée par le moteur au lieu de masquer toutes les causes derrière
+le même message. Les préférences du compte sont disponibles avant de choisir
+la piste, même lorsque l'interface générale se charge progressivement.
+
+Validation unitaire ciblée : 35 tests réussis dans `native.test.ts`,
+`startup-buffer.test.ts`, `segmented-audio.test.ts` et `external-audio.test.ts`.
+Ces tests ne certifient ni le décodage sur un NAS ni une durée de démarrage réelle.
+
 ## MP4 sans copie vidéo complète — 22 octobre 2026
 
 Pour les MP4 AV1, la vidéo est maintenant l'original servi avec Range. Chrome/Edge
@@ -152,3 +180,60 @@ n'a supprimé aucun fichier. Les essais finaux isolent les temporaires dans leur
 propre dossier jetable ; le nombre et le volume des anciens orphelins restent
 inchangés après les validations finales. Ce résidu et la purge après crash restent
 une limite explicite, sans annoncer le cache de production définitivement fiabilisé.
+
+
+## Validation locale du 23 octobre 2026 : démarrage natif et repli MKV
+
+Les pistes internes AV1/Opus MKV utilisent désormais la vidéo originale et des
+fenêtres audio Opus de dix secondes. Une erreur réelle de chargement/décodage
+vidéo déclenche le repli `preparedVideoUrl`, dont le fichier MP4 reste entièrement
+validé avant publication. Une lecture native réussie évite donc les copies
+complètes vidéo et audio au démarrage ; le repli peut encore être long sur un
+gros fichier. Aucun cache incomplet n'est exposé.
+
+Validation Chrome 155.0.8059.86 headless, Windows 10.0.26300, fixtures synthétiques
+représentatives AV1 10 bits/Opus : MP4 et MKV ont fourni des images décodées
+(542 à 861 couleurs distinctes sur les échantillons), des signaux PCM FR/EN
+identifiables, des changements de piste, pauses/seeks, sous-titres et reprise de
+progression fonctionnels. Le MKV conserve son URL `/content` pendant les quatre
+changements de piste, sans requête `/prepared/video`. Une panne forcée de cette
+URL confirme ensuite le repli vidéo préparé avec l'audio sélectionné actif.
+
+La mesure clic → `currentTime > 0.2 s` est de 628 ms pour MP4 et 790 ms pour MKV
+sur ce passage. Elle inclut plus de 200 ms de lecture et ne mesure pas exactement
+la première image. Elle ne démontre ni un démarrage en 50 ms, ni les performances
+d'un NAS, d'un réseau distant, d'un autre navigateur ou d'un film arbitraire.
+
+Commandes : test `scanner_flow` ciblé réussi (16,25 s), puis exécution directe du
+harness `target/debug/deps/browser_scanner-f7f850305e003846.exe --ignored --nocapture`
+réussie (49,79 s), avec le binaire Core recompilé par le test scanner et les assets
+Web finaux. Le harness Rust était inchangé ; cette exécution ne valide pas le
+nouvel endpoint de pagination des épisodes ajouté pendant ce passage.
+Rapports : `target/browser-scanner/report.json`, `report-restart.json` et
+`target/browser-scanner-current.log`. Les vérifications pixels échantillonnent
+plusieurs images pour traverser les flashs blancs de synchronisation de la fixture.
+
+## Fin MSE audio et régression CI — 23 octobre 2026
+
+Le journal Linux signalait une attente audio de 10 secondes avec la vidéo à
+11,95478 s, après des segments reçus HTTP 200. Le lecteur signale désormais
+`MediaSource.endOfStream()` après le dernier segment audio. Il autorise toujours
+l'ajout d'un segment après un seek en arrière depuis l'état MSE `ended`.
+Un écart final audio/vidéo d'au plus 150 ms peut terminer naturellement ; une
+troncature significative et une panne au milieu du média restent des erreurs.
+
+Le parcours scanner ouvre explicitement une nouvelle piste dans les 40 dernières
+millisecondes puis revient à une fenêtre audio antérieure et reprend la lecture.
+L'état « vu » éventuellement produit par ce seek est réinitialisé avant le test
+distinct du bouton manuel. Les tests unitaires vérifient aussi l'arrêt court
+normal, la reprise après EOS et le refus d'une vraie troncature.
+Le reliquat est comparé aux durées encodées, afin de préserver un décalage négatif
+choisi par l'utilisateur. Le test de persistance de langue attend son seek en
+pause pour ne pas dépendre du temps restant sur la fixture de douze secondes.
+
+Validation locale : scanner Core/Chrome 155.0.8059.86 Windows réussi en 35,70 s,
+MP4/MKV, images et PCM, réouvertures FR/EN et repli préparé. Le test distribué
+réussit en 9,47 s et distingue désormais la vidéo originale MKV du repli MP4,
+avec GET/HEAD/Range et refus utilisateur conservés. 124 tests Web, check, lint,
+build et Clippy ciblé réussis. Rapports dans `target/ci-scanner-tail-regression/`.
+Ces résultats locaux ne constituent pas une réexécution du workflow Linux distant.

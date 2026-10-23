@@ -7,3 +7,19 @@ export function imagePreviewUrl(url: string | null | undefined, width: 320 | 640
   parameters.set('width',String(width));
   return `${path}?${parameters}`;
 }
+
+const loadedImages = new Set<string>();
+
+export function isImageLoaded(url: string | null | undefined): boolean {
+  return Boolean(url && loadedImages.has(url));
+}
+
+export function markImageLoaded(url: string | null | undefined): void {
+  if (url) {
+    loadedImages.add(url);
+    if (loadedImages.size > 2000) {
+      const first = loadedImages.keys().next().value;
+      if (first) loadedImages.delete(first);
+    }
+  }
+}

@@ -7,6 +7,7 @@ const http = require('node:http');
 const assert = require('node:assert/strict');
 const {execFileSync, execFile, spawnSync} = require('node:child_process');
 const segmented = process.env.MEDIA_TEST_SEGMENTED === '1';
+const slowStart = process.env.MEDIA_TEST_SLOW_START === '1';
 const docker = process.env.MEDIA_TEST_DOCKER === '1';
 const videoContainer = process.env.MEDIA_TEST_VIDEO_CONTAINER || 'mp4';
 assert.ok(['mp4','webm'].includes(videoContainer));
@@ -18,7 +19,7 @@ const fixture = process.env.MEDIA_TEST_FIXTURE || path.join(root, 'tests/fixture
 const originalContainer = path.extname(fixture).toLowerCase()==='.webm'?'webm':'mp4';
 const probe = JSON.parse(execFileSync('ffprobe', ['-v','error','-show_streams','-of','json',fixture]));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'media-dual-opus-'));
-const report = {os:os.release(), segmented, docker, videoContainer, scope:'Synthetic AV1 10-bit + two Opus tracks; isolated HTTP, no physical surround proof', audioChannels:probe.streams.filter(t=>t.codec_type==='audio').map(t=>t.channels), probe, switches:[], preparations:[], delayedRequests:0, cancelledHttpRequests:0};
+const report = {os:os.release(), segmented, slowStart, docker, videoContainer, scope:'Synthetic AV1 10-bit + two Opus tracks; isolated HTTP, no physical surround proof', audioChannels:probe.streams.filter(t=>t.codec_type==='audio').map(t=>t.channels), probe, switches:[], preparations:[], delayedRequests:0, cancelledHttpRequests:0};
 const files = {'/original':fixture};
 let browser;
 let proxyId;
@@ -51,7 +52,13 @@ const server = http.createServer(async (req,res) => {
   res.writeHead(range ? 206 : 200, {'Content-Type':chunkMatch?'audio/mp4':name.startsWith('/audio-')?'audio/ogg':name==='/video'?`video/${videoContainer}`:`video/${originalContainer}`,
     'Content-Length':end-start+1,'Accept-Ranges':'bytes',...(range?{'Content-Range':`bytes ${start}-${end}/${size}`}:{})});
   if(req.method === 'HEAD') res.end();
-  else {const stream=fs.createReadStream(file,{start,end}); res.on('close',()=>stream.destroy()); stream.pipe(res);}
+  else {
+    const stream=fs.createReadStream(file,{start,end,highWaterMark:16384});res.on('close',()=>stream.destroy());
+    if(slowStart && (name==='/video'||name==='/original')) {
+      try {for await(const chunk of stream){await new Promise(resolve=>setTimeout(resolve,100));if(res.destroyed)break;if(!res.write(chunk))await new Promise(resolve=>res.once('drain',resolve));}if(!res.destroyed)res.end();}
+      catch(error){if(!res.destroyed)res.destroy(error);}
+    } else stream.pipe(res);
+  }
 });
 function compile(name) {
   return ts.transpileModule(fs.readFileSync(path.join(root,'apps/web/src/lib/player',name+'.ts'),'utf8'),
@@ -84,7 +91,7 @@ function compile(name) {
     const page=await browser.newPage(); page.setDefaultTimeout(15000);
     report.console=[];page.on('console',message=>report.console.push(message.text()));
     await page.goto(origin);
-    for(const name of ['errors','compatibility','source-selection','external-audio','segmented-audio','native']) {
+    for(const name of ['startup-buffer','errors','compatibility','source-selection','external-audio','segmented-audio','native']) {
       await page.addScriptTag({content:`window[${JSON.stringify(name)}]={};(function(exports,require){${compile(name)}\n})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`});
     }
     await page.evaluate(({probe,videoContainer,originalContainer})=>{
@@ -125,13 +132,21 @@ function compile(name) {
       return {failure,elapsedMs:performance.now()-started,loads,scope:'Descriptor and live browser capability check; not a DTS-HD decoded fixture'};
     });
     assert.match(report.dtsRejection.failure,/DTS-HD MA/);assert.equal(report.dtsRejection.loads,0);assert.ok(report.dtsRejection.elapsedMs<1000);
+    await page.evaluate(()=>{
+      const video=document.querySelector('video');window.startupSamples=[];window.startupWaiting=[];
+      video.addEventListener('play',()=>{const position=video.currentTime;let ahead=0;for(let i=0;i<video.buffered.length;i++)if(video.buffered.start(i)<=position+.025&&video.buffered.end(i)>position)ahead=video.buffered.end(i)-position;window.startupSamples.push({position,ahead,ready:video.readyState});});
+      video.addEventListener('waiting',()=>{if(!video.paused&&video.currentTime<2)window.startupWaiting.push(video.currentTime);});
+    });
     report.initial=await page.evaluate(async()=>{
       const started=performance.now(),video=document.querySelector('video');
       const frame=new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('No decoded video frame within 10 seconds')),10000);video.requestVideoFrameCallback(()=>{clearTimeout(timeout);resolve(performance.now()-started);});});
       const id=await window.openPlayer();return {id,firstImageMs:await frame,playReadyMs:performance.now()-started};
     });
     assert.equal(report.initial.id,'internal-1');
-    await page.waitForFunction(()=>document.querySelector('video').currentTime>.3);
+    await page.waitForFunction(()=>document.querySelector('video').currentTime>=2);
+    report.startupBuffer=await page.evaluate(()=>({samples:window.startupSamples,waitingBeforeTwoSeconds:window.startupWaiting,quality:document.querySelector('video').getVideoPlaybackQuality().toJSON?.() ?? {total:document.querySelector('video').getVideoPlaybackQuality().totalVideoFrames,dropped:document.querySelector('video').getVideoPlaybackQuality().droppedVideoFrames}}));
+    assert.ok(report.startupBuffer.samples[0].ahead>=.7,'Native play must start with a contiguous reserve');
+
     let lastTime=0,videoUrl;
     for(const id of ['internal-1','internal-2','internal-1','internal-2','internal-1']) {
       const switchReadyMs=await page.evaluate(async id=>{const started=performance.now();await window.player.selectAudio(id);return performance.now()-started;},id);

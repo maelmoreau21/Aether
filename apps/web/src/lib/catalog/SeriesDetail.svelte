@@ -1,7 +1,7 @@
 <script lang="ts">
   import WorkTools from './WorkTools.svelte';
   import { imagePreviewUrl } from './image-url';
-  import type { Work } from './api';
+  import { request, type Work } from './api';
   import PersonalFeedback from './PersonalFeedback.svelte';
   import EditorialCredits from './EditorialCredits.svelte';
   import type { Media } from '../player/types';
@@ -32,7 +32,35 @@
   } = $props();
 
   let backdropLoaded = $state(false);
+  const episodePageSize = 24;
+  let episodeOffset = $state(0);
+  $effect(() => { void work.id; void season; episodeOffset = 0; });
   const activeSeason = $derived(work.seasons?.find(item => item.number === season) ?? work.seasons?.[0]);
+  let pageEpisodes = $state<Work[]>([]);
+  let episodesLoading = $state(false);
+  let episodesError = $state('');
+  const episodeCount = $derived(activeSeason?.episodeCount ?? activeSeason?.episodes.length ?? 0);
+  const visibleEpisodes = $derived(work.episodesPage ? pageEpisodes : (activeSeason?.episodes ?? []).slice(episodeOffset, episodeOffset + episodePageSize));
+  $effect(() => {
+    const currentWork = work;
+    const selectedSeason = season;
+    const offset = episodeOffset;
+    if (!currentWork.episodesPage) return;
+    const controller = new AbortController();
+    episodesError = '';
+    if (currentWork.episodesPage.season === selectedSeason && currentWork.episodesPage.offset === offset) {
+      pageEpisodes = currentWork.seasons?.find(item => item.number === selectedSeason)?.episodes ?? [];
+      episodesLoading = false;
+    } else {
+      pageEpisodes = [];
+      episodesLoading = true;
+      void request<Work>(`/api/v1/catalog/${encodeURIComponent(currentWork.id)}?` + new URLSearchParams({ season: String(selectedSeason), episodeOffset: String(offset), episodeLimit: String(episodePageSize) }), controller.signal)
+        .then(result => { if (!controller.signal.aborted) pageEpisodes = result.seasons?.find(item => item.number === selectedSeason)?.episodes ?? []; })
+        .catch(cause => { if (!controller.signal.aborted) episodesError = cause instanceof Error ? cause.message : 'Épisodes indisponibles.'; })
+        .finally(() => { if (!controller.signal.aborted) episodesLoading = false; });
+    }
+    return () => controller.abort();
+  });
   function selectSeason(number: number) {
     season = number;
     document.getElementById('episodes-shelf-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -98,7 +126,7 @@
             {#each work.seasons as item (item.id)}
               <button class:chosen={activeSeason?.number === item.number} onclick={() => selectSeason(item.number)}>
                 {#if work.artwork?.[`season${item.number}`]}<img src={imagePreviewUrl(work.artwork[`season${item.number}`], 320)} alt="" loading="lazy" decoding="async" width="80" height="120" />{:else}<span class="season-placeholder" aria-hidden="true">{item.number === 0 ? '★' : item.number}</span>{/if}
-                {item.number === 0 ? 'Hors-série' : `Saison ${item.number}`} · {item.episodes.length} {item.episodes.length > 1 ? 'épisodes' : 'épisode'}
+                {item.number === 0 ? 'Hors-série' : `Saison ${item.number}`} · {item.episodeCount ?? item.episodes.length} {(item.episodeCount ?? item.episodes.length) > 1 ? 'épisodes' : 'épisode'}
               </button>
             {/each}
           </nav>
@@ -177,16 +205,18 @@
         <select aria-label="Saison" bind:value={season}>
           {#each work.seasons ?? [] as item (item.id)}
             <option value={item.number}>
-              {item.title || (item.number === 0 ? 'Hors-série' : `Saison ${item.number}`)} ({item.episodes.length} épisodes)
+              {item.title || (item.number === 0 ? 'Hors-série' : `Saison ${item.number}`)} ({item.episodeCount ?? item.episodes.length} épisodes)
             </option>
           {/each}
         </select>
       </label>
     </div>
 
+    {#if episodesLoading}<p role="status">Chargement des épisodes…</p>{/if}
+    {#if episodesError}<p role="alert">{episodesError}</p><button onclick={() => { episodeOffset = 0; season = work.seasons?.[0]?.number ?? 1; }}>Revenir à la première saison</button>{/if}
     <!-- Episodes Grid / List -->
     <div class="episodes-list">
-      {#each activeSeason?.episodes ?? [] as episode (episode.id)}
+      {#each visibleEpisodes as episode (episode.id)}
         <article class="episode">
           {#if episode.artwork?.thumb}<img class="episode-thumb" src={imagePreviewUrl(episode.artwork.thumb, 320)} alt="" loading="lazy" decoding="async" width="240" height="135" />{/if}
           <span class="episode-number">{String(episode.number).padStart(2, '0')}</span>
@@ -212,25 +242,34 @@
           </div>
         </article>
       {:else}
-        <div class="empty-episodes-box">
+        {#if !episodesLoading && !episodesError}<div class="empty-episodes-box">
           <Icon name="tv" size={28} />
           <p>Aucun épisode disponible pour cette saison.</p>
-        </div>
+        </div>{/if}
       {/each}
     </div>
+    {#if episodeCount > episodePageSize}
+      <nav class="episode-pagination" aria-label="Pagination des épisodes">
+        <button disabled={episodesLoading || episodeOffset === 0} onclick={() => { episodeOffset = Math.max(0, episodeOffset - episodePageSize); document.getElementById('episodes-shelf-title')?.scrollIntoView({ block: 'start' }); }}>Précédents</button>
+        <span role="status">{episodeOffset + 1}–{Math.min(episodeOffset + episodePageSize, episodeCount)} sur {episodeCount}</span>
+        <button disabled={episodesLoading || episodeOffset + episodePageSize >= episodeCount} onclick={() => { episodeOffset += episodePageSize; document.getElementById('episodes-shelf-title')?.scrollIntoView({ block: 'start' }); }}>Suivants</button>
+      </nav>
+    {/if}
   </section>
   <EditorialCredits {work} />
 </div>
 
 <style>
+  .episode-pagination { display:flex;align-items:center;justify-content:center;gap:16px;margin-top:24px; }
+  .episode-pagination button { padding:10px 14px;background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:6px; }
   .artwork-gallery { display:flex;flex-wrap:wrap;gap:12px;margin-block:16px; }
   .artwork-gallery img { max-width:100%;width:260px;max-height:160px;object-fit:contain;border-radius:6px; }
 
   .title-logo { max-width:min(340px,100%); max-height:110px; object-fit:contain; object-position:left; }
 
-  .season-placeholder { display:grid;place-items:center;width:80px;aspect-ratio:2/3;background:var(--bg-elevated);border-radius:4px;font-size:32px;color:var(--text-secondary); }
-  .season-shortcuts img { display:block; width:80px; aspect-ratio:2/3; object-fit:cover; margin-bottom:8px; border-radius:4px; }
-  .episode-thumb { height:auto; width:240px; max-width:25vw; aspect-ratio:16/9; object-fit:cover; border-radius:4px; }
+  .season-placeholder { display:grid;place-items:center;width:80px;aspect-ratio:2/3;background:var(--bg-elevated);border-radius:var(--radius-md);font-size:32px;color:var(--text-secondary); }
+  .season-shortcuts img { display:block; width:80px; aspect-ratio:2/3; object-fit:cover; margin-bottom:8px; border-radius:var(--radius-md); }
+  .episode-thumb { height:auto; width:240px; max-width:25vw; aspect-ratio:16/9; object-fit:cover; border-radius:var(--radius-md); }
   .season-shortcuts { display:flex; gap:8px; overflow-x:auto; max-width:100%; padding:2px; }
   .season-shortcuts button { flex:0 0 150px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;padding:10px 14px; border:1px solid var(--border-subtle); background:var(--bg-surface); color:var(--text-primary); border-radius:6px; }
   .season-shortcuts .chosen { border-color:var(--accent-primary); color:var(--accent-primary); }
@@ -574,7 +613,7 @@
     align-items: center;
     gap: 10px;
     padding: 12px 16px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: rgba(248, 113, 113, 0.12);
     border: 1px solid rgba(248, 113, 113, 0.25);
     color: var(--color-danger);

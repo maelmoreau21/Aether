@@ -7,11 +7,13 @@
 </script>
 
 <script lang="ts">
+  import { preloadCatalog } from '../catalog/page-cache';
   import { onMount } from 'svelte';
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
   import { session } from '../auth/session';
   import { accessibleLibraries, loadLibraries } from '../catalog/libraries';
-  import { resolve } from '$app/paths';
+  import { asset, resolve } from '$app/paths';
   import Icon from './Icon.svelte';
   import ProfileMenu from './ProfileMenu.svelte';
   import { serverPresentation } from '../config/presentation';
@@ -24,7 +26,6 @@
     name?: string;
   } = $props();
 
-  const base = $derived(resolve('/').replace(/\/$/, ''));
   let scrolled = $state(false);
   let libraryError = $state('');
   $effect(()=>{const id=$session?.user.id;if(id)void loadLibraries().then(()=>libraryError='').catch(()=>libraryError='Bibliothèques indisponibles');});
@@ -33,6 +34,12 @@
   function handleScroll() {
     scrolled = window.scrollY > 20;
   }
+
+  function navigateHome(event: MouseEvent) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    void goto(resolve('/'));
+  }
 </script>
 
 <svelte:window onscroll={handleScroll} />
@@ -40,9 +47,9 @@
 <header class="site-header" class:scrolled>
   <div class="header-inner">
     <div class="header-brand-group">
-      <a class="brand" href={resolve('/')} aria-label={`${$serverPresentation.serverName || name}, accueil`}>
+      <a class="brand" onpointerenter={() => preloadCatalog('home')} onfocus={() => preloadCatalog('home')} href={resolve('/')} onclick={navigateHome} title="Retour à l’accueil" aria-label={`${$serverPresentation.serverName || name}, accueil`}>
         <div class="brand-logo-wrapper">
-          <img src={`${base}/images/brand-mark.svg`} width="32" height="32" alt="" />
+          <img src={asset('images/brand-mark.svg')} width="32" height="32" alt="" />
         </div>
         <span class="brand-text">{$serverPresentation.serverName || name}</span>
       </a>
@@ -50,7 +57,10 @@
       <nav class="main-nav" aria-label="Navigation principale">
         {#each navLinks.filter(link=>link.key==='home') as link (link.key)}
           <a
+            onpointerenter={() => preloadCatalog('home')}
+            onfocus={() => preloadCatalog('home')}
             href={resolve(link.path)}
+            onclick={navigateHome}
             class="nav-link"
             aria-label={link.label}
             class:active={section === link.key}
@@ -60,7 +70,7 @@
           </a>
         {/each}
         {#each $accessibleLibraries as library (library.id)}
-          <a class="nav-link library-link" href={resolve(`${library.kind}/?library=${encodeURIComponent(library.id)}` as 'films/')} class:active={page.url.searchParams.get('library')===library.id} aria-current={page.url.searchParams.get('library')===library.id?'page':undefined}>
+          <a class="nav-link library-link" onpointerenter={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }} onfocus={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }} href={resolve(`${library.kind}/?library=${encodeURIComponent(library.id)}` as 'films/')} class:active={page.url.searchParams.get('library')===library.id} aria-current={page.url.searchParams.get('library')===library.id?'page':undefined}>
             {#if library.kind==='music'}<b aria-hidden="true">♫</b>{:else}<Icon name={library.kind==='films'?'film':'tv'} size={16} />{/if}<span>{library.name}</span>
           </a>
         {/each}
@@ -123,6 +133,7 @@
 
   .brand {
     display: flex;
+    cursor: pointer;
     align-items: center;
     gap: 10px;
     text-decoration: none;
@@ -139,12 +150,12 @@
     flex-shrink: 0;
     display: grid;
     place-items: center;
-    filter: drop-shadow(0 0 12px var(--color-accent-glow));
+    filter: none;
     transition: filter var(--transition-fast);
   }
 
   .brand:hover .brand-logo-wrapper {
-    filter: drop-shadow(0 0 18px var(--color-accent-glow));
+    filter: none;
   }
 
   .brand-text {
@@ -173,7 +184,7 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 14px;
+    padding: 12px 14px;
     border-radius: var(--radius-sm);
     color: var(--color-muted);
     font-size: 13.5px;
@@ -204,8 +215,8 @@
   .quick-search-btn {
     display: grid;
     place-items: center;
-    width: 38px;
-    height: 38px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     color: var(--color-muted);
     background: var(--color-surface);
@@ -267,8 +278,8 @@
 
     .quick-search-btn {
       display: inline-flex;
-      width: 36px;
-      height: 36px;
+      width: 44px;
+      height: 44px;
       flex-shrink: 0;
     }
   }

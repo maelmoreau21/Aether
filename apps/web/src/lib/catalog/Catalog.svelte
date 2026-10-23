@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { serverPresentation } from '../config/presentation';
-  import { preferences, savePreferences } from '../preferences';
+  import { ensurePreferences, savePreferences } from '../preferences';
   import { page } from '$app/state';
+  import { goto, beforeNavigate, afterNavigate } from '$app/navigation';
+  import { cachedCatalog, loadCatalog, invalidateCatalog, catalogRevision, saveCatalogScroll, catalogScroll } from './page-cache';
   import { resolve } from '$app/paths';
   import { DEFAULT_NAME, fetchBrandName } from '../config/brand';
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
@@ -13,9 +15,7 @@
   import { bestVersion } from '../player/version-choice';
   import CatalogHome from './CatalogHome.svelte';
   import CatalogGrid from './CatalogGrid.svelte';
-  import FilmDetail from './FilmDetail.svelte';
-  import SeriesDetail from './SeriesDetail.svelte';
-  import SettingsView from './SettingsView.svelte';
+  import CatalogSkeleton from './CatalogSkeleton.svelte';
   import Icon from '../ui/Icon.svelte';
   import {
     request,
@@ -23,9 +23,9 @@
     fetchMediaDescriptors,
     revalidateMediaDescriptor,
     getCachedMedia,
-    type Work,
-    type CatalogPage
+    type Work
   } from './api';
+  import { preloadProgress } from '../player/progress';
   import { session, getSessionGeneration } from '../auth/session';
 
   let { section = 'home' }: { section?: 'home' | 'films' | 'series' | 'search' | 'settings' } = $props();
@@ -38,11 +38,14 @@
   let error = $state('');
   let films = $state<Work[]>([]);
   let series = $state<Work[]>([]);
-  let totalFilms = $state(0);
-  let totalSeries = $state(0);
+  let totalFilms = $state<number | null>(null);
+  let totalSeries = $state<number | null>(null);
+  let moreFilms = $state(false);
+  let moreSeries = $state(false);
   let detail = $state<Work | null>(null);
   let selected = $state('');
   let playingEpisode = $state<Work | null>(null);
+  let followingEpisode = $state<Work | undefined>();
   let season = $state(1);
   let search = $state('');
   let sort = $state('title-asc');
@@ -64,6 +67,7 @@
       episodeLaunchController.abort();
       episodeLaunchController = null;
     }
+    if (!episode.synthetic) preloadProgress(episode.id);
     const controller = new AbortController();
     episodeLaunchController = controller;
     const launchGen = getSessionGeneration();
@@ -71,7 +75,27 @@
     mediaError = '';
 
     try {
-      const [, item] = await Promise.all([loadPlayer(), revalidateMediaDescriptor(versionId, controller.signal)]);
+      const descriptor = (async () => {
+        if (versionId !== 'auto') return revalidateMediaDescriptor(versionId, controller.signal);
+        const ids = playbackIds(episode);
+        const known = ids.map(getCachedMedia).filter((item): item is Media => item !== undefined);
+        const probe = document.createElement('video');
+        if (known.length === ids.length) {
+          const candidate = bestVersion(known, mime => probe.canPlayType(mime));
+          if (!candidate) throw new Error('Aucune version disponible.');
+          return revalidateMediaDescriptor(candidate.id, controller.signal);
+        }
+        const fresh = await fetchMediaDescriptors(ids, controller.signal, { revalidate: true });
+        const candidate = bestVersion(fresh, mime => probe.canPlayType(mime));
+        if (!candidate) throw new Error('Aucune version disponible.');
+        return candidate;
+      })();
+      void descriptor.catch(() => {});
+      await loadPlayer();
+      await tick();
+      if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
+      const openedHere = immersive?.open(descriptor);
+      const item = await descriptor;
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
       const cachedForEpisode = playbackIds(episode)
         .map(eid => (eid === item.id ? item : getCachedMedia(eid)))
@@ -81,12 +105,13 @@
       playingEpisode = episode;
       await tick();
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
-      immersive?.changeMedia(item);
+      if (!openedHere) immersive?.changeMedia(item, true);
     } catch (err) {
       if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
         media = media.filter(m => m.id !== versionId && getCachedMedia(m.id) !== undefined);
         mediaError = err instanceof Error ? err.message : 'Chargement de l’épisode impossible.';
-        immersive?.reportError(mediaError);
+        // Revalidation failed (e.g. HTTP 403): do not leave the player open on an unusable source.
+        immersive?.close();
       }
     } finally {
       if (episodeLaunchController === controller) {
@@ -110,6 +135,19 @@
     try { await playerLoading; }
     finally { playerLoading = undefined; }
   }
+
+  beforeNavigate(() => {
+    if (!workId) saveCatalogScroll(page.url.pathname + page.url.search, window.scrollY);
+  });
+  afterNavigate(() => {
+    if (workId) return;
+    const key = page.url.pathname + page.url.search;
+    const generation = getSessionGeneration();
+    const y = catalogScroll(key);
+    if (y !== undefined) void tick().then(() => requestAnimationFrame(() => {
+      if (key === page.url.pathname + page.url.search && generation === getSessionGeneration()) window.scrollTo({top: y, behavior: 'instant'});
+    }));
+  });
 
   const workId = $derived(page.url.searchParams.get('work') ?? '');
   const libraryId = $derived(page.url.searchParams.get('library') ?? '');
@@ -143,9 +181,26 @@
 
   const nextEpisode = $derived.by(() => {
     if (!playingEpisode || detail?.kind !== 'series') return undefined;
+    if (detail.episodesPage) return followingEpisode;
     const episodes = (detail.seasons ?? []).flatMap(s => s.episodes);
     const index = episodes.findIndex(episode => episode.id === playingEpisode?.id);
     return index >= 0 ? episodes[index + 1] : undefined;
+  });
+
+  $effect(() => {
+    const work = detail;
+    const episode = playingEpisode;
+    followingEpisode = undefined;
+    if (!work?.episodesPage || !episode || work.kind !== 'series') return;
+    const controller = new AbortController();
+    const generation = getSessionGeneration();
+    const params = new URLSearchParams({ episodeAfter: episode.id, episodeLimit: '1' });
+    void request<Work>(`/api/v1/catalog/${encodeURIComponent(work.id)}?${params}`, controller.signal).then(result => {
+      if (!controller.signal.aborted && generation === getSessionGeneration()) {
+        followingEpisode = result.seasons?.flatMap(season => season.episodes)[0];
+      }
+    }).catch(() => {});
+    return () => controller.abort();
   });
 
   function playNext() {
@@ -175,22 +230,30 @@
     }
     const controller = new AbortController();
     episodeLaunchController = controller;
+    if (detail && !detail.synthetic) preloadProgress(detail.id);
     const launchGen = getSessionGeneration();
     launching = true;
     mediaError = '';
 
     try {
-      const [, item] = await Promise.all([loadPlayer(), revalidateMediaDescriptor(targetId, controller.signal)]);
+      const descriptor = revalidateMediaDescriptor(targetId, controller.signal);
+      // Attach rejection immediately while the optional module download completes.
+      void descriptor.catch(() => {});
+      await loadPlayer();
+      await tick();
+      if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
+      immersive?.open(descriptor);
+      const item = await descriptor;
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
       media = [...media.filter(m => m.id !== item.id), item];
       selected = item.id;
       await tick();
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
-      immersive?.open(item);
     } catch (err) {
       if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
         media = media.filter(m => m.id !== targetId && getCachedMedia(m.id) !== undefined);
         mediaError = err instanceof Error ? err.message : 'Chargement des sources impossible.';
+        immersive?.close();
       }
     } finally {
       if (episodeLaunchController === controller) {
@@ -202,24 +265,27 @@
 
   async function handleDirectPlay(work: Work): Promise<void> {
     if (work.kind === 'series') {
-      window.location.href = detailUrl(work);
+      // detailUrl already applies SvelteKit resolve to the route and base.
+      // eslint-disable-next-line svelte/no-navigation-without-resolve
+      await goto(detailUrl(work));
       return;
     }
     const ids = playbackIds(work);
     const targetId = ids[0];
     if (!targetId) {
-      window.location.href = detailUrl(work);
+      // detailUrl already applies SvelteKit resolve to the route and base.
+      // eslint-disable-next-line svelte/no-navigation-without-resolve
+      await goto(detailUrl(work));
       return;
     }
     try {
-      const [, item] = await Promise.all([loadPlayer(), revalidateMediaDescriptor(targetId)]);
       detail = work;
-      media = [item];
-      selected = item.id;
-      await tick();
-      immersive?.open(item);
+      selected = targetId;
+      await openPlayer();
     } catch {
-      window.location.href = detailUrl(work);
+      // detailUrl already applies SvelteKit resolve to the route and base.
+      // eslint-disable-next-line svelte/no-navigation-without-resolve
+      await goto(detailUrl(work));
     }
   }
 
@@ -235,18 +301,18 @@
         }
       });
 
-    try {
-      const savedAudio = preferences().audioLanguage;
+    void ensurePreferences().then(saved => {
+      if (controller.signal.aborted || !saved) return;
+      const savedAudio = saved.audioLanguage;
       if (savedAudio) prefAudio = savedAudio;
-      const savedSub = preferences().subtitles;
+      const savedSub = saved.subtitles;
       if (savedSub) prefSubtitles = savedSub;
-    } catch {
-      // localStorage may be disabled in private browsing
-    }
+    }).catch(() => {});
 
     const artworkChanged=(event:Event)=>{
       const id=(event as CustomEvent<{id:string}>).detail.id;
-      if(detail?.id===id)void request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}`,controller.signal).then(work=>{if(!controller.signal.aborted&&detail?.id===id)detail=work;}).catch(()=>{});
+      invalidateCatalog(detail?.libraryId);
+      if(detail?.id===id)void request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}?episodeLimit=24`,controller.signal).then(work=>{if(!controller.signal.aborted&&detail?.id===id)detail=work;}).catch(()=>{});
     };
     window.addEventListener('media-artwork-updated',artworkChanged);
     return () => {controller.abort();window.removeEventListener('media-artwork-updated',artworkChanged);};
@@ -262,7 +328,8 @@
     }
   }
 
-  $effect(() => {
+  $effect.pre(() => {
+    void $catalogRevision;
     const id = workId;
     const q = query;
     const currentLibrary = libraryId;
@@ -277,7 +344,7 @@
 
     search = q;
     sort = sorting;
-    busy = true;
+
     launching = false;
     pendingCatalogKinds = 0;
     partialCatalogError = '';
@@ -285,11 +352,30 @@
     mediaError = '';
     detail = null;
     media = [];
-    films = [];
-    series = [];
-    totalFilms = 0;
-    totalSeries = 0;
+    totalFilms = null;
+    totalSeries = null;
+    moreFilms = false;
+    moreSeries = false;
     playingEpisode = null;
+
+    const kinds = currentSection === 'films' ? ['film'] : currentSection === 'series' ? ['series'] : ['film', 'series'];
+    const requests = kinds.map(kind => {
+      const url = `/api/v1/catalog?${new URLSearchParams({ ...filters, ...(currentLibrary ? {library: currentLibrary} : {}), kind, q, sort: sorting, offset: String(start), limit: '24', count: 'false' })}`;
+      return { kind, url, key: url };
+    });
+    let cachedKinds = 0;
+    if (!id) for (const {kind, key} of requests) {
+      const cached = cachedCatalog(key);
+      if (!cached) continue;
+      cachedKinds++;
+      if (kind === 'film') { films = cached.items; totalFilms = cached.total; moreFilms = cached.hasMore ?? (cached.total ?? 0) > start + 24; }
+      else { series = cached.items; totalSeries = cached.total; moreSeries = cached.hasMore ?? (cached.total ?? 0) > start + 24; }
+    }
+    if (cachedKinds === 0) {
+      films = [];
+      series = [];
+    }
+    busy = Boolean(id) || cachedKinds === 0;
 
     async function load() {
       try {
@@ -299,7 +385,7 @@
             throw new Error('Ouvrez ce média depuis sa bibliothèque Films ou Séries.');
           }
           void loadPlayer().catch(() => { /* A playback attempt reports the import error and can retry. */ });
-          const work = await request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}`, controller.signal);
+          const work = await request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}?episodeLimit=24&episodeOffset=0`, controller.signal);
           if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
           if (
             (currentSection === 'films' && work.kind !== 'film') ||
@@ -332,36 +418,21 @@
             media = allEpisodeIds.map(eid => getCachedMedia(eid)).filter((m): m is Media => m !== undefined);
           }
         } else {
-          const kinds =
-            currentSection === 'films'
-              ? ['film']
-              : currentSection === 'series'
-                ? ['series']
-                : ['film', 'series'];
           pendingCatalogKinds = kinds.length;
           let completedKinds = 0;
           const results = await Promise.allSettled(
-            kinds.map(async kind => {
+            requests.map(async ({kind, key, url}) => {
               try {
-                const result = await request<CatalogPage>(
-                  `/api/v1/catalog?${new URLSearchParams({
-                    ...filters,
-                    ...(currentLibrary ? {library:currentLibrary} : {}),
-                    kind,
-                    q,
-                    sort: sorting,
-                    offset: String(start),
-                    limit: '24'
-                  })}`,
-                  controller.signal
-                );
+                const result = await loadCatalog(key, url);
                 if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
                 if (kind === 'film') {
                   films = result.items;
                   totalFilms = result.total;
+                  moreFilms = result.hasMore ?? (result.total ?? 0) > start + 24;
                 } else {
                   series = result.items;
                   totalSeries = result.total;
+                  moreSeries = result.hasMore ?? (result.total ?? 0) > start + 24;
                 }
                 completedKinds += 1;
                 // Render the ready shelf and start its images immediately.
@@ -372,9 +443,11 @@
             })
           );
           if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
+          void loadPlayer().catch(() => {});
           const failure = results.find(result => result.status === 'rejected');
           if (failure?.status === 'rejected') {
-            if (completedKinds === 0) throw failure.reason;
+            if (failure.reason instanceof Error && /accès|session/.test(failure.reason.message)) { films = []; series = []; throw failure.reason; }
+            if (completedKinds === 0 && cachedKinds === 0) throw failure.reason;
             partialCatalogError = 'Une partie du catalogue est indisponible. Rechargez la page pour réessayer.';
           }
         }
@@ -408,7 +481,7 @@
 <a class="skip-link" href="#main-content">Aller au contenu</a>
 
 <Navbar {section} {name} />
-{#if !workId && section!=='settings'}<CatalogFilters />{/if}
+{#if !workId && section !== 'settings' && section !== 'home'}<CatalogFilters />{/if}
 
 <main id="main-content" tabindex="-1">
   {#if launching}<p role="status">Connexion à la source… <button onclick={()=>{episodeLaunchController?.abort();episodeLaunchController=null;launching=false;}}>Annuler</button></p>{/if}
@@ -416,27 +489,22 @@
   {#if partialCatalogError}<p role="alert">{partialCatalogError}</p>{/if}
   {#if section === 'home' && $serverPresentation.welcomeMessage}<p class="server-welcome">{$serverPresentation.welcomeMessage}</p>{/if}
   {#if section === 'settings'}
+    {#await import('./SettingsView.svelte')}
+      <CatalogSkeleton label="Chargement des paramètres…" />
+    {:then { default: SettingsView }}
     <SettingsView
       bind:prefAudio
       bind:prefSubtitles
       onSavePreference={savePreference}
     />
+    {:catch}<p role="alert">Chargement des paramètres impossible. Rechargez la page pour réessayer.</p>{/await}
 
   {:else if busy}
     <div class="page-heading">
       <span class="eyebrow">{title}</span>
       <h1>Votre médiathèque</h1>
     </div>
-    <div class="empty loading-empty" role="status">
-      <img
-        src={`${resolve('/').replace(/\/$/, '')}/images/logo-loading.svg`}
-        alt=""
-        class="logo-spinner"
-        width="48"
-        height="48"
-      />
-      <span>Chargement du catalogue…</span>
-    </div>
+    <CatalogSkeleton />
 
   {:else if error}
     <div class="page-heading">
@@ -465,6 +533,9 @@
 
   {:else if detail}
     {#if detail.kind === 'film'}
+      {#await import('./FilmDetail.svelte')}
+        <CatalogSkeleton label="Chargement du film…" />
+      {:then { default: FilmDetail }}
       <FilmDetail
         work={detail}
         {playableMedia}
@@ -473,7 +544,11 @@
         {mediaError}
         onPlay={openPlayer}
       />
+      {:catch}<p role="alert">Chargement du film impossible. Rechargez la page pour réessayer.</p>{/await}
     {:else}
+      {#await import('./SeriesDetail.svelte')}
+        <CatalogSkeleton label="Chargement des épisodes…" />
+      {:then { default: SeriesDetail }}
       <SeriesDetail
         work={detail}
         bind:season
@@ -484,6 +559,7 @@
         onLaunchEpisode={launchEpisode}
         onSelectEpisode={episode => (playingEpisode = episode)}
       />
+      {:catch}<p role="alert">Chargement des épisodes impossible. Rechargez la page pour réessayer.</p>{/await}
     {/if}
 
   {:else if section === 'home'}
@@ -506,6 +582,8 @@
       {series}
       {totalFilms}
       {totalSeries}
+      {moreFilms}
+      {moreSeries}
       bind:search
       bind:sort
       bind:selectedKindFilter
@@ -585,17 +663,7 @@
     margin: 32px 0;
   }
 
-  .loading-empty {
-    color: var(--color-muted);
-    font-size: 14.5px;
-  }
 
-  .logo-spinner {
-    width: 48px;
-    height: 48px;
-    display: block;
-    margin: 0 auto 12px;
-  }
 
   .error {
     border-color: rgba(248, 113, 113, 0.3);

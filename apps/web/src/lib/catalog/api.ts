@@ -7,6 +7,8 @@ export interface Edition { id: string; label: string; versions: { id: string; la
 export interface Work {
   tags?: string[]; minimumAge?: number | null; globalMediaId?: string | null;
   id: string; kind: 'film' | 'series' | 'episode'; title: string; year: number | null;
+  seasonNumber?: number;
+  episodesPage?: { season: number | null; offset: number; limit: number; nextOffset: number; hasMore: boolean };
   description: string; libraryId: string; synthetic: boolean; number?: number;
   posterUrl?: string | null;
   artwork?: Record<string, string | null>;
@@ -20,9 +22,9 @@ export interface Work {
   ratings?: { provider:string;value:number;max:number }[];
   externalIds?: Record<string, string>; metadataProvenance?: string | null;
   seasonCount?: number; episodeCount?: number; editions?: Edition[];
-  seasons?: { id: string; number: number; title: string; episodes: Work[] }[];
+  seasons?: { id: string; number: number; title: string; episodeCount?: number; episodes: Work[] }[];
 }
-export interface CatalogPage { items: Work[]; total: number; offset: number; limit: number; notice: string }
+export interface CatalogPage { items: Work[]; total: number | null; hasMore?: boolean; offset: number; limit: number; notice: string }
 export interface FetchDescriptorOptions { revalidate?: boolean }
 
 const MAX_DESCRIPTOR_CACHE_SIZE = 128;

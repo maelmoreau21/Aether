@@ -77,7 +77,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.goto(origin + '/app/series/');
     const card = page.locator('.media-card').filter({hasText:'Browser Series'});
     await card.waitFor();
-    await page.getByText('Page 1 sur 1',{exact:true}).waitFor();
+    await page.locator('.page-indicator').filter({hasText:/^Page 1(?: sur 1)?$/}).waitFor();
+    assert.equal(await page.getByRole('link',{name:'Page suivante →',exact:true}).count(),0);
     assert.equal(await page.locator('.media-card').count(), 1);
 
     // Record media URLs requested before clicking card

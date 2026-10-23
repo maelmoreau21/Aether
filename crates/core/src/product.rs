@@ -7,7 +7,7 @@ use crate::{
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{DefaultBodyLimit, Path, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::Response,
     routing::get,
@@ -125,10 +125,16 @@ async fn create_list(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(json!({"id":id,"name":name})))
 }
+#[derive(Default, Deserialize)]
+struct ListView {
+    #[serde(default)]
+    compact: bool,
+}
 async fn list(
     State(auth): State<AuthState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Query(view): Query<ListView>,
 ) -> Result<Json<Value>, Error> {
     let actor = crate::playlists::access(&auth, &headers, &id, false).await?;
     let (name, visibility, user): (String, String, String) =
@@ -137,25 +143,41 @@ async fn list(
             .fetch_one(&auth.store.pool)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let works:Vec<(String,i64)>=query_as("SELECT work_id,position FROM personal_list_items WHERE list_id=? ORDER BY position,work_id LIMIT 1000").bind(&id).fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    // List presentation needs summaries, not recursive series details and all their assets.
+    // Apply library authorization in this batch; parental policy still applies per work.
+    let works: Vec<(String, i64, String, String, String, Option<String>)> = query_as(
+        "SELECT w.id,i.position,w.title,w.kind,w.editorial_json,w.manual_json FROM personal_list_items i \
+         JOIN inventory_works w ON w.id=i.work_id \
+         JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id \
+         WHERE i.list_id=? AND w.kind IN ('film','series','episode') AND l.enabled=1 AND n.status!='revoked' \
+         AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) \
+         ORDER BY i.position,w.id LIMIT 1000",
+    )
+    .bind(&id).bind(actor.user.role.as_str()).bind(&actor.user.id)
+    .fetch_all(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut items = Vec::new();
     let mut entries = Vec::new();
-    for (work, position) in works {
-        if crate::feedback::authorized(&auth, &headers, &work, false)
-            .await
-            .is_ok()
-            && parental_allowed(
-                &auth.store,
-                &auth.authenticate(&headers).await?.user.id,
-                &work,
-            )
-            .await?
-            && let Some(detail) = crate::inventory::detail(&auth.store, &work)
+    for (work, position, mut title, kind, editorial, manual) in works {
+        if !parental_allowed(&auth.store, &actor.user.id, &work).await? {
+            continue;
+        }
+        let media = if view.compact {
+            for source in [Some(editorial), manual].into_iter().flatten() {
+                if let Ok(metadata) = serde_json::from_str::<Value>(&source)
+                    && let Some(override_title) = metadata["title"].as_str()
+                {
+                    title = override_title.to_owned();
+                }
+            }
+            Some(json!({"id":work,"title":title,"kind":kind}))
+        } else {
+            crate::inventory::detail(&auth.store, &work)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        {
-            entries.push(json!({"kind":"work","id":work,"position":position,"media":detail}));
-            items.push(detail);
+        };
+        if let Some(media) = media {
+            entries.push(json!({"kind":"work","id":work,"position":position,"media":media}));
+            items.push(media);
         }
     }
     let tracks:Vec<(String,i64)>=query_as("SELECT track_id,position FROM playlist_music_items WHERE list_id=? ORDER BY position,track_id LIMIT 1000").bind(&id).fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;

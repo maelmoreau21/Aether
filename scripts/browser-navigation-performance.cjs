@@ -69,6 +69,13 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));
   }
   const scenarios=[];
   if(mode==='after') {
+   await page.route('**/test-video', route => route.abort('failed'), { times: 1 });
+   await page.locator('.film-detail-view button').filter({hasText:/Lancer le film/}).first().click();
+   await page.locator('.player-error').waitFor();
+   await page.locator('.player-error button').filter({hasText:'Réessayer'}).click();
+   await page.waitForFunction(()=>{const video=document.querySelector('dialog video');return video&&!video.paused&&video.currentTime>0;});
+   await page.locator('dialog[open]').dispatchEvent('cancel');
+   scenarios.push('failed-initial-video-retry-really-plays');
    await page.locator('a.brand').click(); await page.locator('.catalog-home').waitFor();
    await page.evaluate(()=>{window.scrollTo({top:200,behavior:"instant"});document.querySelector('a[href*="work=film-a"]').click();});
    await page.locator('.film-detail-view').waitFor();

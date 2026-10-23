@@ -76,7 +76,25 @@ function legacyPreferences(userId: string, loaded: Preferences): Preferences {
   return patch;
 }
 
-export async function hydratePreferences(): Promise<Preferences | null> {
+let hydration: { generation: number; promise: Promise<Preferences | null> } | undefined;
+
+/** Share startup/focus refreshes, without carrying preferences across accounts. */
+export function hydratePreferences(): Promise<Preferences | null> {
+  const generation = getSessionGeneration();
+  if (hydration?.generation === generation) return hydration.promise;
+  const promise = fetchPreferences().finally(() => {
+    if (hydration?.promise === promise) hydration = undefined;
+  });
+  hydration = { generation, promise };
+  return promise;
+}
+
+export function ensurePreferences(): Promise<Preferences | null> {
+  if (hydration?.generation === getSessionGeneration()) return hydration.promise;
+  return owner === get(session)?.user.id ? Promise.resolve(current) : hydratePreferences();
+}
+
+async function fetchPreferences(): Promise<Preferences | null> {
   const started=revision;
   const authenticated = get(session);
   const generation = getSessionGeneration();

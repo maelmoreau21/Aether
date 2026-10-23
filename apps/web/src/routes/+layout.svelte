@@ -35,11 +35,17 @@
       if (current && loginPage) { void goto(resolve('/'), { replaceState: true }); return; }
       if (current) {
         const generation = getSessionGeneration();
-        const saved = await hydratePreferences();
-        if (cancelled || generation !== getSessionGeneration() || !saved) return;
+        const loadingPreferences = hydratePreferences();
+        // Catalogue requests and navigation can start while optional settings load.
+        verified = true;
         void loadServerPresentation();
-        setTheme(saved.theme ?? 'system', false);
-        setLocale(saved.locale ?? (navigator.language.toLowerCase().startsWith('en') ? 'en' : 'fr'), false);
+        void loadingPreferences.then(saved => {
+          if (cancelled || generation !== getSessionGeneration() || !saved) return;
+          setTheme(saved.theme ?? 'system', false);
+          setLocale(saved.locale ?? (navigator.language.toLowerCase().startsWith('en') ? 'en' : 'fr'), false);
+        }).catch(() => {
+          if (!cancelled && generation === getSessionGeneration()) preferenceSyncError.set('Vos préférences sont temporairement indisponibles.');
+        });
       }
       verified = true;
     }).catch(cause => { if (!cancelled) error = cause instanceof Error ? cause.message : 'Le serveur est indisponible. Réessayez pour vérifier votre session.'; });

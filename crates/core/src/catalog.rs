@@ -87,6 +87,7 @@ pub struct CatalogQuery {
     sort: Option<String>,
     offset: Option<usize>,
     limit: Option<usize>,
+    count: Option<bool>,
 }
 
 fn works(available: bool) -> Vec<Work> {
@@ -236,7 +237,7 @@ pub async fn list(
             codec: query.codec,
             language: query.language,
         };
-        return match crate::inventory::catalogue_filtered(
+        return match crate::inventory::catalogue_page(
             store,
             &visible.0,
             query.kind.as_deref(),
@@ -245,6 +246,7 @@ pub async fn list(
             offset,
             limit,
             &filter,
+            query.count.unwrap_or(true),
         )
         .await
         {
@@ -269,40 +271,82 @@ pub async fn list(
     let total = items.len();
     let items: Vec<_> = items.into_iter().skip(offset).take(limit).collect();
     Json(serde_json::json!({
-        "items":items, "total":total, "offset":offset, "limit":limit,
+        "items":items, "total": if query.count == Some(false) { None } else { Some(total) },
+        "hasMore": offset.saturating_add(limit) < total, "offset":offset, "limit":limit,
         "mode":"localhost-fixtures", "notice":NOTICE
     }))
     .into_response()
 }
 
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetailQuery {
+    season: Option<i64>,
+    episode_offset: Option<usize>,
+    episode_limit: Option<usize>,
+    episode_after: Option<String>,
+}
+
 pub async fn detail(
     State(inventory): State<Arc<Inventory>>,
     Path(id): Path<String>,
+    Query(params): Query<DetailQuery>,
     store: Option<Extension<crate::identity::IdentityStore>>,
     actor: Option<Extension<crate::auth::Authenticated>>,
     visible: Option<Extension<crate::permissions::VisibleLibraries>>,
 ) -> Response {
+    if params
+        .episode_limit
+        .is_some_and(|limit| limit == 0 || limit > 100)
+        || params
+            .episode_offset
+            .is_some_and(|offset| offset > 1_000_000)
+        || params
+            .episode_after
+            .as_ref()
+            .is_some_and(|id| id.len() > 256)
+    {
+        return error(StatusCode::BAD_REQUEST, "invalid_episode_page");
+    }
+    let page = params.episode_limit.and_then(|limit| {
+        actor
+            .as_ref()
+            .map(|Extension(actor)| crate::inventory::EpisodePage {
+                season: params.season,
+                offset: params.episode_offset.unwrap_or(0),
+                limit,
+                after: params.episode_after.clone(),
+                user: actor.user.id.clone(),
+                role: actor.user.role.as_str().to_owned(),
+            })
+    });
     if !id.starts_with("fixture-") {
         return match store {
-            Some(Extension(store)) => match crate::inventory::detail(&store, &id).await {
-                Ok(Some(mut value)) => {
-                    if let (Some(Extension(actor)), Some(Extension(visible))) = (&actor, &visible)
-                        && crate::product::expand_detail(
-                            &store,
-                            &actor.user.id,
-                            &visible.0,
-                            &mut value,
-                        )
-                        .await
-                        .is_err()
-                    {
-                        return error(StatusCode::INTERNAL_SERVER_ERROR, "catalogue_unavailable");
+            Some(Extension(store)) => {
+                match crate::inventory::detail_window(&store, &id, page.as_ref()).await {
+                    Ok(Some(mut value)) => {
+                        if let (Some(Extension(actor)), Some(Extension(visible))) =
+                            (&actor, &visible)
+                            && crate::product::expand_detail(
+                                &store,
+                                &actor.user.id,
+                                &visible.0,
+                                &mut value,
+                            )
+                            .await
+                            .is_err()
+                        {
+                            return error(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "catalogue_unavailable",
+                            );
+                        }
+                        Json(value).into_response()
                     }
-                    Json(value).into_response()
+                    Ok(None) => error(StatusCode::NOT_FOUND, "unknown_work"),
+                    Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
                 }
-                Ok(None) => error(StatusCode::NOT_FOUND, "unknown_work"),
-                Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
-            },
+            }
             None => error(StatusCode::NOT_FOUND, "unknown_work"),
         };
     }
@@ -317,7 +361,7 @@ pub async fn detail(
         return error(StatusCode::NOT_FOUND, "unknown_work");
     };
     let is_series = work.kind == "series";
-    Json(WorkDetail {
+    let detail = WorkDetail {
         editions: if is_series { vec![] } else { editions(work.id) },
         seasons: if is_series {
             vec![Season {
@@ -334,8 +378,29 @@ pub async fn detail(
             vec![]
         },
         work,
-    })
-    .into_response()
+    };
+    let Ok(mut value) = serde_json::to_value(detail) else {
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "catalogue_unavailable");
+    };
+    if let Some(page) = page {
+        let mut count = 0;
+        if let Some(seasons) = value["seasons"].as_array_mut() {
+            for season in seasons {
+                season["episodeCount"] = serde_json::json!(1);
+                if let Some(episodes) = season["episodes"].as_array_mut() {
+                    if page.after.is_some()
+                        || page.offset > 0
+                        || page.season.is_some_and(|number| number != 1)
+                    {
+                        episodes.clear();
+                    }
+                    count += episodes.len();
+                }
+            }
+        }
+        value["episodesPage"] = serde_json::json!({"season":1,"offset":page.offset,"limit":page.limit,"nextOffset":page.offset+count,"hasMore":false});
+    }
+    Json(value).into_response()
 }
 
 #[cfg(test)]

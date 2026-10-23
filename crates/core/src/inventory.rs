@@ -1925,6 +1925,25 @@ pub async fn catalogue_filtered(
     limit: usize,
     filter: &CatalogueFilter,
 ) -> Result<Value, sqlx::Error> {
+    catalogue_page(
+        store, visible, kind, search, sort, offset, limit, filter, true,
+    )
+    .await
+}
+
+/// Bounded shelf queries can omit the full-library count and fetch one lookahead row.
+#[allow(clippy::too_many_arguments)]
+pub async fn catalogue_page(
+    store: &IdentityStore,
+    visible: &[String],
+    kind: Option<&str>,
+    search: &str,
+    sort: &str,
+    offset: usize,
+    limit: usize,
+    filter: &CatalogueFilter,
+    exact_count: bool,
+) -> Result<Value, sqlx::Error> {
     let target_kind = match kind {
         Some("film") | Some("films") => Some("film"),
         Some("series") => Some("series"),
@@ -1932,7 +1951,8 @@ pub async fn catalogue_filtered(
         Some(_) => {
             return Ok(json!({
                 "items": [],
-                "total": 0,
+                "total": if exact_count { Some(0usize) } else { None },
+                "hasMore": false,
                 "offset": offset,
                 "limit": limit,
                 "mode": "local-library",
@@ -1944,7 +1964,8 @@ pub async fn catalogue_filtered(
     if visible.is_empty() {
         return Ok(json!({
             "items": [],
-            "total": 0,
+            "total": if exact_count { Some(0usize) } else { None },
+                "hasMore": false,
             "offset": offset,
             "limit": limit,
             "mode": "local-library",
@@ -2038,20 +2059,21 @@ pub async fn catalogue_filtered(
         .take_arguments()
         .map_err(sqlx::Error::Encode)?
         .unwrap_or_default();
-    let total: i64 =
-        sqlx::query_scalar_with::<sqlx::Any, i64, _>(sqlx::AssertSqlSafe(count_sql), arguments)
-            .fetch_one(&store.pool)
-            .await?;
-    let total = total as usize;
+    let total = if exact_count {
+        Some(
+            sqlx::query_scalar_with::<sqlx::Any, i64, _>(sqlx::AssertSqlSafe(count_sql), arguments)
+                .fetch_one(&store.pool)
+                .await? as usize,
+        )
+    } else {
+        None
+    };
 
-    if total == 0 || offset >= total || limit == 0 {
+    if limit == 0 || total.is_some_and(|total| total == 0 || offset >= total) {
         return Ok(json!({
-            "items": [],
-            "total": total,
-            "offset": offset,
-            "limit": limit,
-            "mode": "local-library",
-            "notice": "Bibliothèques locales indexées"
+            "items": [], "total": total, "hasMore": false,
+            "offset": offset, "limit": limit,
+            "mode": "local-library", "notice": "Bibliothèques locales indexées"
         }));
     }
 
@@ -2183,7 +2205,7 @@ pub async fn catalogue_filtered(
     }
 
     data_builder.push("LIMIT ");
-    data_builder.push_bind(limit as i64);
+    data_builder.push_bind(limit.saturating_add(usize::from(!exact_count)) as i64);
     data_builder.push(" OFFSET ");
     data_builder.push_bind(offset as i64);
 
@@ -2196,12 +2218,16 @@ pub async fn catalogue_filtered(
     let rows = sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(data_sql), arguments)
         .fetch_all(&store.pool)
         .await?;
-    let mut items: Vec<Value> = rows.iter().map(work).collect();
+    let has_more = total.map_or(rows.len() > limit, |total| {
+        offset.saturating_add(rows.len()) < total
+    });
+    let mut items: Vec<Value> = rows.iter().take(limit).map(work).collect();
     crate::product::decorate_many(store, &mut items).await?;
 
     Ok(json!({
         "items": items,
         "total": total,
+        "hasMore": has_more,
         "offset": offset,
         "limit": limit,
         "mode": "local-library",
@@ -2406,7 +2432,24 @@ async fn load_series_editions(
     Ok(map)
 }
 
+pub struct EpisodePage {
+    pub season: Option<i64>,
+    pub offset: usize,
+    pub limit: usize,
+    pub after: Option<String>,
+    pub user: String,
+    pub role: String,
+}
+
 pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value>, sqlx::Error> {
+    detail_window(store, work_id, None).await
+}
+
+pub async fn detail_window(
+    store: &IdentityStore,
+    work_id: &str,
+    page: Option<&EpisodePage>,
+) -> Result<Option<Value>, sqlx::Error> {
     let Some(row) = query(
         "SELECT w.*, COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=w.library_id AND f.active=1),w.library_id) AS display_library_id, wl.node_id AS node_id, wn.status AS node_status, \
          (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
@@ -2446,7 +2489,11 @@ pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value
 
     let kind: String = row.try_get("kind").unwrap_or_else(|_| "film".to_string());
 
-    if kind == "series" {
+    if kind == "series"
+        && let Some(page) = page
+    {
+        populate_episode_page(store, work_id, &mut value, page).await?;
+    } else if kind == "series" {
         let seasons_rows = query(
             "SELECT id, season_number, title FROM inventory_seasons WHERE series_id=? ORDER BY season_number ASC",
         )
@@ -2523,6 +2570,118 @@ pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value
     }
 
     Ok(Some(value))
+}
+
+async fn populate_episode_page(
+    store: &IdentityStore,
+    series: &str,
+    value: &mut Value,
+    page: &EpisodePage,
+) -> Result<(), sqlx::Error> {
+    // The same permissions and parental policy apply before pagination as on direct work access.
+    let eligible = format!(
+        "wl.enabled=1 AND wn.status!='revoked' AND \
+         (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=wl.id AND p.user_id=?)) \
+         AND {} AND EXISTS(SELECT 1 FROM inventory_editions pe \
+         JOIN inventory_versions pv ON pv.edition_id=pe.id JOIN inventory_sources ps ON ps.version_id=pv.id \
+         JOIN inventory_assets pa ON pa.source_id=ps.id JOIN libraries pl ON pl.id=ps.library_id \
+         JOIN media_nodes pn ON pn.id=pl.node_id WHERE pe.work_id=w.id AND pa.available=1 \
+         AND ps.root_snapshot=pl.root AND pl.enabled=1 AND pn.status!='revoked' AND pl.kind IN ('films','series'))",
+        crate::product::policy_sql()
+    );
+    let seasons_sql = format!(
+        "SELECT s.id,s.season_number,s.title,COUNT(*) AS episode_count FROM inventory_seasons s \
+         JOIN inventory_episodes ep ON ep.season_id=s.id JOIN inventory_works w ON w.id=ep.work_id \
+         JOIN libraries wl ON wl.id=w.library_id JOIN media_nodes wn ON wn.id=wl.node_id \
+         WHERE s.series_id=? AND {eligible} GROUP BY s.id,s.season_number,s.title ORDER BY s.season_number,s.id"
+    );
+    let seasons = sqlx::query(sqlx::AssertSqlSafe(crate::database::normalize_sql(
+        &seasons_sql,
+    )))
+    .bind(series)
+    .bind(&page.role)
+    .bind(&page.user)
+    .bind(&page.user)
+    .fetch_all(&store.pool)
+    .await?;
+    let selected_season = page.season.or_else(|| {
+        seasons
+            .first()
+            .map(|row| row.get::<i64, _>("season_number"))
+    });
+    let anchor: Option<(i64, i64, String)> = if let Some(after) = &page.after {
+        crate::database::query_as("SELECT s.season_number,ep.episode_number,w.id FROM inventory_seasons s JOIN inventory_episodes ep ON ep.season_id=s.id JOIN inventory_works w ON w.id=ep.work_id WHERE s.series_id=? AND w.id=?")
+            .bind(series).bind(after).fetch_optional(&store.pool).await?
+    } else {
+        None
+    };
+    let page_sql = format!(
+        "SELECT ep.season_id,s.season_number,ep.episode_number,w.*,wl.node_id,wn.status AS node_status, \
+         (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i WHERE i.work_id=w.id AND i.role='thumb' AND i.available=1 AND i.root_snapshot=wl.root AND wn.status='connected' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS thumb_url \
+         FROM inventory_seasons s JOIN inventory_episodes ep ON ep.season_id=s.id JOIN inventory_works w ON w.id=ep.work_id \
+         JOIN libraries wl ON wl.id=w.library_id JOIN media_nodes wn ON wn.id=wl.node_id \
+         WHERE s.series_id=? AND {eligible} \
+         AND (?=1 OR s.season_number=?) \
+         AND (?=0 OR s.season_number>? OR (s.season_number=? AND ep.episode_number>?) OR (s.season_number=? AND ep.episode_number=? AND w.id>?)) \
+         ORDER BY s.season_number,ep.episode_number,w.id LIMIT ? OFFSET ?"
+    );
+    let (anchor_season, anchor_episode, anchor_id) =
+        anchor.unwrap_or((i64::MAX, i64::MAX, String::new()));
+    let after = page.after.is_some();
+    let mut rows = sqlx::query(sqlx::AssertSqlSafe(crate::database::normalize_sql(
+        &page_sql,
+    )))
+    .bind(series)
+    .bind(&page.role)
+    .bind(&page.user)
+    .bind(&page.user)
+    .bind(i64::from(after))
+    .bind(selected_season.unwrap_or(-1))
+    .bind(i64::from(after))
+    .bind(anchor_season)
+    .bind(anchor_season)
+    .bind(anchor_episode)
+    .bind(anchor_season)
+    .bind(anchor_episode)
+    .bind(anchor_id)
+    .bind((page.limit + 1) as i64)
+    .bind(page.offset as i64)
+    .fetch_all(&store.pool)
+    .await?;
+    let has_more = rows.len() > page.limit;
+    rows.truncate(page.limit);
+    let count = rows.len();
+    let returned_season = if after {
+        rows.first().map(|row| row.get::<i64, _>("season_number"))
+    } else {
+        selected_season
+    };
+    let mut by_season: HashMap<String, Vec<Value>> = HashMap::new();
+    for row in rows {
+        let id: String = row.get("id");
+        let mut episode = work(&row);
+        episode["kind"] = json!("episode");
+        episode["number"] = json!(row.get::<i64, _>("episode_number"));
+        episode["seasonNumber"] = json!(row.get::<i64, _>("season_number"));
+        episode["editions"] = json!(load_work_editions(&store.pool, &id).await?);
+        by_season
+            .entry(row.get("season_id"))
+            .or_default()
+            .push(episode);
+    }
+    let mut total = 0i64;
+    let summaries: Vec<Value> = seasons.into_iter().map(|row| {
+        let id: String = row.get("id");
+        let count: i64 = row.get("episode_count");
+        total += count;
+        json!({"id":id,"number":row.get::<i64,_>("season_number"),"title":row.get::<String,_>("title"),"episodeCount":count,"episodes":by_season.remove(&id).unwrap_or_default()})
+    }).collect();
+    value["seasonCount"] = json!(summaries.len());
+    value["episodeCount"] = json!(total);
+    value["seasons"] = json!(summaries);
+    value["editions"] = json!([]);
+    value["episodesPage"] = json!({"season":returned_season,"offset":page.offset,"limit":page.limit,"nextOffset":page.offset + count,"hasMore":has_more});
+    Ok(())
 }
 
 pub async fn descriptor(
@@ -2634,22 +2793,24 @@ pub async fn descriptor(
                 "audioTrackId": format!("internal-{}", track.index), "language": language,
                 "url": format!("/api/v1/assets/{asset_id}/prepared/video"),
                 "externalAudioUrl": format!("/api/v1/assets/{asset_id}/prepared/audio-{}", track.index),
+                "audioSegmentUrl": format!("/api/v1/assets/{asset_id}/prepared/audio-{}-chunk-", track.index),
                 "prepare": true, "label": "interne", "mime": "video/mp4", "tracks": [track]
             }));
             if matches!(
                 row.get::<String, _>("mime").as_str(),
-                "video/mp4" | "video/webm"
+                "video/mp4" | "video/webm" | "video/x-matroska"
             ) {
-                // Native MP4/WebM can supply the video timeline. Never copy the entire video
-                // just to select a different internal audio track.
+                // Try the original timeline with explicit independent audio. MKV clients
+                // that reject real decoding retain an atomic prepared-video fallback.
                 if let Some(source) = sources.last_mut() {
                     source["url"] = json!(relay_url);
                     source["mime"] = source_obj["mime"].clone();
                     source["prepareVideo"] = json!(false);
-                    source["audioSegmentUrl"] = json!(format!(
-                        "/api/v1/assets/{asset_id}/prepared/audio-{}-chunk-",
-                        track.index
-                    ));
+                    if source_obj["mime"] == "video/x-matroska" {
+                        source["preparedVideoUrl"] =
+                            json!(format!("/api/v1/assets/{asset_id}/prepared/video"));
+                    }
+
                     source["directUrl"] = source_obj["directUrl"].clone();
                     source["tokenExpiresAt"] = source_obj["tokenExpiresAt"].clone();
                 }

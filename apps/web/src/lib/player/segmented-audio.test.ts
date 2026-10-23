@@ -21,6 +21,13 @@ describe('segmented audio seek cancellation',()=>{
     (audio as unknown as {element:{currentTime:number}}).element.currentTime=7;
     await audio.fill();expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/chunks/0','/chunks/0','/chunks/1']);
   });
+  it('loads only the saved-position window on a resumed session',async()=>{
+    const {audio}=harness();
+    (audio as unknown as {element:{currentTime:number}}).element.currentTime=26;
+    const fetcher=vi.fn().mockResolvedValue(new Response(new Uint8Array([1,2,3])));vi.stubGlobal('fetch',fetcher);
+    await audio.fill(true);
+    expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/chunks/2']);
+  });
   it('discards an obsolete response even when fetch completes after cancellation',async()=>{
     const {audio,appendBuffer,schedule}=harness();
     let respond!:(response:Response)=>void;

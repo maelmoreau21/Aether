@@ -3491,3 +3491,43 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
   256×256 et refus anonyme/CSRF réussi ; UI upload multipart et sélection dans
   galerie profil réussis avec API simulée. encoding_rs verrouillé à 0.8.35 pour
   éviter d’ajouter une exigence Rust 1.88 au seul support multipart.
+
+## 23 octobre 2026 — démarrage lecteur et catalogue progressif
+
+- Le catalogue démarre après vérification de session, sans attendre les préférences.
+  Leur hydratation est partagée ; le lecteur conserve les préférences disponibles,
+  signale leur panne et utilise alors les réglages de séance. Les paramètres
+  réhydratent aussi leurs décalages sans écraser une saisie en cours.
+- Accueil, Films, Séries et Recherche utilisent `count=false`, pages de 24 cartes,
+  `hasMore` et cache de session borné. Les fiches et paramètres sont importés à
+  leur ouverture. Le comptage exact reste le défaut de l'API pour les anciens clients.
+- Le détail série Web demande 24 épisodes côté serveur ; permissions, contrôle
+  parental et disponibilité s'appliquent avant pagination. `episodeAfter` récupère
+  un seul prochain épisode, y compris entre saisons. Les playlists utilisent des
+  résumés autorisés sans construire récursivement toutes les séries, 50 éléments
+  visibles ; leurs limites serveur existantes restent 500 listes/1 000 entrées.
+- MKV interne AV1/Opus : tentative vidéo originale avec audio Opus segmenté ; repli
+  MP4 préparé atomique si le navigateur échoue. Aucun cache partiel publié. Reprise
+  appliquée avant le premier segment audio ; réserve initiale 750→50 ms avec
+  données lisibles obligatoires. Erreurs techniques affichées ; Réessayer relance
+  réellement la lecture. Préparation complète encore possible sur client incompatible.
+- Preuves locales : catalogue SQLite authentifié 10 000 films, première page sans
+  comptage 6,23 ms contre 51–59 ms avec comptage ; pages profondes environ 50 ms.
+  Série de 10 000 épisodes : page de 24, réponse <64 KiB, 133,99 ms en debug ;
+  contrôle parental, retrait des droits et passage de saison vérifiés.
+- Web : 120 tests Vitest réussis. Chrome/API simulée : rangées indépendantes des
+  préférences lentes, pagination 10 000 éléments, cache/navigation et retry effectif.
+  Core réel + Chrome 155.0.8059.86 : AV1/Opus MP4/MKV, pixels/PCM, quatre pistes,
+  pause/seek/reprise/sous-titres ; MKV `/content` sans copie vidéo, puis panne forcée
+  et repli préparé réussis. Clic → >0,2 s de lecture : MP4 628 ms, MKV 790 ms,
+  distinct de la première image exacte. `scanner_flow` ciblé et harness
+  `browser_scanner` réussis ; docs/RESPONSIVENESS_AND_ARTWORK.md et
+  docs/PLAYER_TRACK_PREPARATION.md détaillent méthodes et limites.
+- Aucun résultat NAS/production ni garantie vidéo/interface de 50 ms partout.
+  Aucun déploiement, push ou changement des médias personnels.
+- Vérifications finales : `cargo fmt --check`, Clippy strict workspace/all-targets,
+  Web check 0/0, lint/build et `git diff --check` réussis. Le test Core réel
+  `cargo test --locked -p media-poc --test browser_series -j 1 -- --ignored --nocapture`
+  réussit en 31,19 s : huit images décodées, lecture/seek/pause, enchaînement
+  inter-saisons, révocation/restauration et isolation des comptes. Lancement
+  d'épisode mesuré à 1 001 ms sur cette fixture, sans extrapolation NAS.

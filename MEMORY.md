@@ -1,5 +1,16 @@
 # MEMORY.md — État et décisions Aether
 
+## 24 octobre 2026 — CI scanner, fermeture après choix audio validé
+
+- La boucle de réouverture FR/EN attend désormais la sélection Svelte
+  (`aria-checked=true`, contrôle disponible) avant de fermer le lecteur.
+  La préférence serveur seule pouvait déjà correspondre à un choix antérieur
+  et ne prouvait pas la fin de la transaction audio courante.
+- Test `cargo test --locked -p media-poc --test browser_scanner -j 1 --
+  --ignored --nocapture --test-threads=1` réussi localement : MP4/MKV, reprise
+  FR/EN, PCM et redémarrage Core. Rapport : target/ci-scanner-reopen/.
+  Aucun timeout augmenté ; GitHub Linux non relancé, aucun push.
+
 ## 23 octobre 2026 — Régression CI playlists, formulaire de dépôt replié
 
 - `browser-playlists.cjs` ouvre « + Nouveau dépôt » après l'onglet Dépôts

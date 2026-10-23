@@ -1,3 +1,9 @@
+## CI scanner, réouverture audio — 24 octobre 2026
+
+La boucle FR/EN de `browser_scanner` attend la piste validée dans le menu
+Svelte et la fin de l'action avant fermeture, en plus de sa préférence serveur.
+Une valeur persistée antérieure ne suffit pas à valider la sélection courante.
+
 ## CI playlists et dépôts d'extensions — 23 octobre 2026
 
 Le scénario `product_tests::mixed_playlists` avec

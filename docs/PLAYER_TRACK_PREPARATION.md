@@ -212,3 +212,28 @@ nouvel endpoint de pagination des épisodes ajouté pendant ce passage.
 Rapports : `target/browser-scanner/report.json`, `report-restart.json` et
 `target/browser-scanner-current.log`. Les vérifications pixels échantillonnent
 plusieurs images pour traverser les flashs blancs de synchronisation de la fixture.
+
+## Fin MSE audio et régression CI — 23 octobre 2026
+
+Le journal Linux signalait une attente audio de 10 secondes avec la vidéo à
+11,95478 s, après des segments reçus HTTP 200. Le lecteur signale désormais
+`MediaSource.endOfStream()` après le dernier segment audio. Il autorise toujours
+l'ajout d'un segment après un seek en arrière depuis l'état MSE `ended`.
+Un écart final audio/vidéo d'au plus 150 ms peut terminer naturellement ; une
+troncature significative et une panne au milieu du média restent des erreurs.
+
+Le parcours scanner ouvre explicitement une nouvelle piste dans les 40 dernières
+millisecondes puis revient à une fenêtre audio antérieure et reprend la lecture.
+L'état « vu » éventuellement produit par ce seek est réinitialisé avant le test
+distinct du bouton manuel. Les tests unitaires vérifient aussi l'arrêt court
+normal, la reprise après EOS et le refus d'une vraie troncature.
+Le reliquat est comparé aux durées encodées, afin de préserver un décalage négatif
+choisi par l'utilisateur. Le test de persistance de langue attend son seek en
+pause pour ne pas dépendre du temps restant sur la fixture de douze secondes.
+
+Validation locale : scanner Core/Chrome 155.0.8059.86 Windows réussi en 35,70 s,
+MP4/MKV, images et PCM, réouvertures FR/EN et repli préparé. Le test distribué
+réussit en 9,47 s et distingue désormais la vidéo originale MKV du repli MP4,
+avec GET/HEAD/Range et refus utilisateur conservés. 124 tests Web, check, lint,
+build et Clippy ciblé réussis. Rapports dans `target/ci-scanner-tail-regression/`.
+Ces résultats locaux ne constituent pas une réexécution du workflow Linux distant.

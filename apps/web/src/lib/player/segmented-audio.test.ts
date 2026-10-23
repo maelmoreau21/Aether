@@ -7,13 +7,27 @@ function harness() {
   const appendBuffer=vi.fn();const schedule=vi.fn();
   const audio=Object.assign(Object.create(SegmentedAudio.prototype),{
     closed:false,filling:false,seekEpoch:0,loaded:new Set<number>(),prefix:'/chunks/',offsetSeconds:0,
-    element:{currentTime:0,duration:60},mediaSource:{readyState:'open'},
-    buffer:{buffered:{length:0},appendBuffer},idle:vi.fn().mockResolvedValue(undefined),schedule
+    element:{currentTime:0,duration:60},mediaSource:{readyState:'open',endOfStream:vi.fn()},
+    buffer:{buffered:{length:0},appendBuffer,remove:vi.fn()},idle:vi.fn().mockResolvedValue(undefined),schedule
   }) as {fill(current?:boolean):Promise<void>;seekEpoch:number;idle:()=>Promise<void>};
   return {audio,appendBuffer,schedule};
 }
 afterEach(()=>vi.unstubAllGlobals());
 describe('segmented audio seek cancellation',()=>{
+  it('ends a final short window and can refill an evicted window after a backwards seek',async()=>{
+    const {audio,appendBuffer}=harness();
+    const state=audio as unknown as {element:{currentTime:number;duration:number};mediaSource:{readyState:string;endOfStream:()=>void};loaded:Set<number>};
+    state.element={currentTime:51,duration:52};
+    state.mediaSource.endOfStream=vi.fn(()=>{state.mediaSource.readyState='ended';});
+    const fetcher=vi.fn().mockImplementation(()=>Promise.resolve(new Response(new Uint8Array([1,2,3]))));vi.stubGlobal('fetch',fetcher);
+    await audio.fill(true);
+    expect(state.mediaSource.endOfStream).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls.map(call=>call[0])).toEqual(['/chunks/5']);
+    state.element.currentTime=1;
+    await audio.fill(true);
+    expect(fetcher.mock.calls.map(call=>call[0])).toEqual(['/chunks/5','/chunks/0']);
+    expect(appendBuffer).toHaveBeenCalledTimes(2);
+  });
   it('keeps packet-copy preparation away from startup and requests the next window with four seconds of lead',async()=>{
     const {audio}=harness();
     const fetcher=vi.fn().mockImplementation(()=>Promise.resolve(new Response(new Uint8Array([1,2,3]))));vi.stubGlobal('fetch',fetcher);

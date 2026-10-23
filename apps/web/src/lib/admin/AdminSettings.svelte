@@ -51,7 +51,7 @@
   label { display: grid; gap: 12px; margin-top: 24px; font-size: 15px; }
   input, textarea { box-sizing: border-box; width: 100%; padding: 14px; min-height: 48px; font: inherit; background: var(--bg-surface); color: var(--text-primary); border: 0; border-bottom: 2px solid var(--border-subtle); border-radius: 0; }
   textarea { resize: vertical; } p { font-size: 14px; line-height: 1.7; color: var(--text-secondary); }
-  button { margin-top: 16px; padding: 12px 24px; min-height: 44px; border: 0; border-radius: 4px; background: var(--brand-gradient); color: var(--color-on-accent); }
+  button { margin-top: 16px; padding: 12px 24px; min-height: 44px; border: 0; border-radius: var(--radius-md); background: var(--color-play); color: var(--color-on-play); }
   dl { max-width: 850px; } dl div { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr); gap: 24px; padding: 20px; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle); }
   dd { margin: 0; overflow-wrap: anywhere; } dt { color: var(--text-secondary); }
   @media(max-width: 640px) { dl div { grid-template-columns: minmax(0,1fr); gap: 10px; } }

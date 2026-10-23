@@ -496,7 +496,7 @@
   button[aria-expanded='true'] {
     color: var(--color-accent);
     background: var(--color-accent-soft);
-    border-color: rgba(167, 139, 250, 0.35);
+    border-color: var(--color-accent-soft);
   }
 
   .primary.play-btn {
@@ -656,7 +656,7 @@
   .floating-menu button[aria-checked='true'] {
     color: var(--color-accent-hover);
     background: var(--color-accent-soft);
-    border-color: rgba(167, 139, 250, 0.35);
+    border-color: var(--color-accent-soft);
     font-weight: 600;
   }
   .floating-menu small {

@@ -168,7 +168,7 @@
   }
 
   .media-card:hover .poster {
-    transform: translateY(-6px) scale(1.02);
+    transform: translateY(-2px) scale(1.025);
     border-color: var(--accent-primary);
     box-shadow: var(--shadow-card-hover);
   }
@@ -193,7 +193,7 @@
   }
 
   .media-card:hover .poster-image {
-    transform: scale(1.05);
+    transform: scale(1.025);
   }
 
   .poster-gradient {
@@ -353,7 +353,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    color: #fbbf24;
+    color: var(--accent-secondary);
     font-weight: 600;
   }
 
@@ -371,7 +371,7 @@
   }
 
   .synopsis {
-    display: -webkit-box;
+    display: none; /* Synopsis belongs on the detail view. */
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     line-clamp: 2;

@@ -5,10 +5,10 @@
 </script>
 <button class="ui-button {variant} {className}" {...rest}>{@render children()}</button>
 <style>
-  .ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 12px 20px; border: 0; border-radius: var(--radius-sm); font-size: 13px; font-weight: 650; line-height: 1.2; white-space: nowrap; }
-  .solid { background: var(--color-text); color: #15131b; }
-  .solid:hover:not(:disabled) { background: white; transform: translateY(-1px); }
-  .quiet { background: #ffffff09; color: var(--color-text); }
-  .quiet:hover:not(:disabled) { background: #ffffff15; }
+  .ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 12px 20px; border: 0; border-radius: var(--radius-md); font-size: 13px; font-weight: 650; line-height: 1.2; white-space: nowrap; }
+  .solid { background: var(--color-play); color: var(--color-on-play); }
+  .solid:hover:not(:disabled) { background: var(--color-play-hover); transform: translateY(-1px); }
+  .quiet { background: var(--color-surface); color: var(--color-text); }
+  .quiet:hover:not(:disabled) { background: var(--color-raised); }
   .ui-button:active:not(:disabled) { transform: translateY(0); }
 </style>

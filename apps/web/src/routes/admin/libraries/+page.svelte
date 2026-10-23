@@ -3,6 +3,7 @@
 </script>
 
 <script lang="ts">
+  import { invalidateCatalog } from '../../../lib/catalog/page-cache';
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import { session, type AuthUser } from '../../../lib/auth/session';
@@ -86,6 +87,10 @@
       throw new Error('Le Media Node distant est injoignable ou le jeton d’appairage est invalide.');
     }
     if (!response.ok) throw new Error('Le serveur est indisponible. Réessayez.');
+    if (init.method && init.method !== 'GET') {
+      const library = path.match(/\/libraries\/([^/]+)/)?.[1];
+      invalidateCatalog(library ? decodeURIComponent(library) : undefined);
+    }
     return response.json() as Promise<T>;
   }
 
@@ -286,7 +291,10 @@
           await request<Scan>(`/api/v1/admin/libraries/${encodeURIComponent(library.id)}/scan`)
         ] as const)
       );
-      for (const [id, scan] of results) scans[id] = scan;
+      for (const [id, scan] of results) {
+        if (scans[id]?.status !== scan.status && !['queued', 'running'].includes(scan.status)) invalidateCatalog(id);
+        scans[id] = scan;
+      }
     } catch (failure) {
       error = failure instanceof Error ? failure.message : 'État du scan indisponible.';
     } finally {

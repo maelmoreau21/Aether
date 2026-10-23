@@ -192,7 +192,7 @@
   label > span { display: flex; align-items: center; gap: 8px; }
   select, input { min-width: 0; width: 100%; max-width: 520px; min-height: 44px; border: 1px solid var(--border-subtle); border-radius: 4px; background-color: var(--bg-surface); color: var(--text-primary); }
   input { padding: 12px; }
-  button { justify-self: start; min-height: 44px; padding: 12px 20px; border: 0; border-radius: 4px; background: var(--brand-gradient); color: var(--color-on-accent); }
+  button { justify-self: start; min-height: 44px; padding: 12px 20px; border: 0; border-radius: 4px; background: var(--color-play); color: var(--color-on-accent); }
   .offsets { padding-top: 28px; border-top: 1px solid var(--border-subtle); }
   .offsets p { margin: 0; }
   @media (max-width: 760px) {

@@ -139,12 +139,12 @@
     flex-shrink: 0;
     display: grid;
     place-items: center;
-    filter: drop-shadow(0 0 12px var(--color-accent-glow));
+    filter: none;
     transition: filter var(--transition-fast);
   }
 
   .brand:hover .brand-logo-wrapper {
-    filter: drop-shadow(0 0 18px var(--color-accent-glow));
+    filter: none;
   }
 
   .brand-text {
@@ -173,7 +173,7 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 14px;
+    padding: 12px 14px;
     border-radius: var(--radius-sm);
     color: var(--color-muted);
     font-size: 13.5px;
@@ -204,8 +204,8 @@
   .quick-search-btn {
     display: grid;
     place-items: center;
-    width: 38px;
-    height: 38px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     color: var(--color-muted);
     background: var(--color-surface);
@@ -267,8 +267,8 @@
 
     .quick-search-btn {
       display: inline-flex;
-      width: 36px;
-      height: 36px;
+      width: 44px;
+      height: 44px;
       flex-shrink: 0;
     }
   }

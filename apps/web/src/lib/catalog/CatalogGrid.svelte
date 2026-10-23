@@ -291,12 +291,12 @@
     border-radius: var(--radius-full);
     background: var(--color-accent-soft);
     color: var(--color-accent);
-    border: 1px solid rgba(167, 139, 250, 0.25);
+    border: 1px solid var(--color-accent-soft);
   }
 
   h1 {
     font-family: var(--font-display);
-    font-size: clamp(30px, 3.8vw, 48px);
+    font-size: clamp(28px, 3vw, 36px);
     font-weight: 750;
     line-height: 1.15;
     letter-spacing: -0.04em;
@@ -448,8 +448,8 @@
   .genre-chip.active {
     color: var(--color-text-bright);
     background: var(--color-accent-soft);
-    border-color: rgba(167, 139, 250, 0.4);
-    box-shadow: 0 0 12px rgba(139, 92, 246, 0.2);
+    border-color: var(--color-accent-soft);
+    box-shadow: 0 0 12px var(--color-accent-soft);
     font-weight: 600;
   }
 
@@ -480,7 +480,7 @@
 
   .media-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(clamp(160px, 16vw, 220px), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(clamp(160px, 13vw, 190px), 1fr));
     gap: 24px 18px;
   }
 
@@ -531,7 +531,7 @@
 
   .page-nav-btn:hover {
     background: var(--color-raised);
-    border-color: rgba(167, 139, 250, 0.3);
+    border-color: var(--color-accent-soft);
     color: var(--color-accent-hover);
     transform: translateY(-1px);
   }

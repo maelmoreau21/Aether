@@ -105,6 +105,7 @@ export async function request<T>(url: string, signal: AbortSignal, timeoutMs=100
   if (response.status === 403) {
     if (requestSessionGen === getSessionGeneration()) {
       clearDescriptorCache();
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('media-access-denied'));
     }
     throw new Error('Votre compte n’a pas accès à cette ressource.');
   }
@@ -148,7 +149,7 @@ export function cacheMedia(media: Media): void {
   setCachedDescriptor(media.id, media);
 }
 
-export async function fetchMediaDescriptor(
+async function fetchDescriptor(
   id: string,
   signal?: AbortSignal,
   options?: FetchDescriptorOptions
@@ -243,6 +244,43 @@ export async function fetchMediaDescriptor(
     }
     throw err;
   }
+}
+
+// Share only work in flight. A playback click always requests fresh authorization.
+const descriptorRequests = new Map<string, { controller: AbortController; promise: Promise<Media>; consumers: number }>();
+onSessionGenerationChange(() => {
+  // Existing callers receive the original HTTP/session error; late data is rejected above.
+  descriptorRequests.clear();
+});
+export function fetchMediaDescriptor(id: string, signal?: AbortSignal, options?: FetchDescriptorOptions): Promise<Media> {
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+  const cached = getCachedMedia(id);
+  if (cached && !options?.revalidate) return Promise.resolve(cached);
+  const key = `${getSessionGeneration()}:${cacheGeneration}:${id}`;
+  let job = descriptorRequests.get(key);
+  if (!job || job.controller.signal.aborted) {
+    const controller = new AbortController();
+    const promise = fetchDescriptor(id, controller.signal, options).finally(() => {
+      if (descriptorRequests.get(key)?.controller === controller) descriptorRequests.delete(key);
+    });
+    job = { controller, promise, consumers: 0 };
+    descriptorRequests.set(key, job);
+  }
+  const shared = job;
+  shared.consumers++;
+  return new Promise<Media>((resolve, reject) => {
+    let done = false;
+    const finish = (error?: unknown, media?: Media) => {
+      if (done) return;
+      done = true;
+      signal?.removeEventListener('abort', abort);
+      if (--shared.consumers === 0) shared.controller.abort();
+      if (error !== undefined) reject(error); else resolve(media!);
+    };
+    const abort = () => finish(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+    signal?.addEventListener('abort', abort, { once: true });
+    shared.promise.then(media => finish(undefined, media), error => finish(error));
+  });
 }
 
 export async function revalidateMediaDescriptor(id: string, signal?: AbortSignal): Promise<Media> {

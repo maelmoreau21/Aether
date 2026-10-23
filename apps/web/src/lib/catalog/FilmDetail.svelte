@@ -500,7 +500,7 @@
 
   .version-choice {
     padding: 7px 16px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: var(--color-raised);
     border: 1px solid var(--color-line);
     color: var(--color-text);
@@ -518,7 +518,7 @@
     background: var(--color-accent-soft);
     border-color: var(--color-accent);
     color: var(--color-accent-hover);
-    box-shadow: 0 0 12px rgba(139, 92, 246, 0.25);
+    box-shadow: 0 0 12px var(--color-accent-soft);
   }
 
   .play-action-row {
@@ -536,19 +536,19 @@
     min-height: 52px;
     padding: 0 32px;
     border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--brand-gradient);
-    color: #1C1917;
+    border-radius: var(--radius-md);
+    background: var(--color-play);
+    color: var(--color-on-play);
     font-size: 15px;
     font-weight: 750;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    box-shadow: var(--shadow-sm);
     transition: all var(--transition-fast);
   }
 
   .hero-cta:hover:not(:disabled) {
-    background: var(--brand-gradient);
+    background: var(--color-play);
     transform: translateY(-2px);
-    box-shadow: 0 12px 30px rgba(255, 255, 255, 0.25);
+    box-shadow: var(--shadow-md);
   }
 
   .hero-cta:disabled {
@@ -567,7 +567,7 @@
     align-items: center;
     gap: 10px;
     padding: 12px 16px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: rgba(248, 113, 113, 0.12);
     border: 1px solid rgba(248, 113, 113, 0.25);
     color: var(--color-danger);

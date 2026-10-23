@@ -1,5 +1,46 @@
 # MEMORY.md — État et décisions Aether
 
+## 23 octobre 2026 — Cinema Design System, contrôle Web local
+
+- Charte OLED/Pierre Douce consolidée : rayons 6/10/12/16/20/24, surfaces,
+  contraste des boutons de lecture, thème initial externe sous CSP self.
+  Accueil sans sections décoratives vides ; hero limité, affiches 2:3,
+  reprise/épisodes 16:9, navigation et administration harmonisées.
+- Musique : vues morceaux/albums/artistes sur les résultats de la page courante,
+  durées, numéro et titre actif ; pochettes/photos absentes de l’API, initiales
+  sobres 1:1/circulaires. Pas de nouvelle API ou de faux artwork produit.
+- Chrome headless, build production et APIs/images synthétiques interceptées :
+  64 états de page, 74 captures clair/sombre en 390/768/1440/1920 et paysage ;
+  sans erreur JS/débordement. Thèmes, regroupements et saison testés.
+  Captures inspectées ; références docs/evidence/2026-10-23/cinema-ui/.
+- Check Svelte/TypeScript zéro erreur/avertissement, ESLint, 104 tests et build
+  réussis. Aucun test Rust relancé, aucun changement backend ; pas de preuve
+  NAS/mobile physique/PWA installée ou d’audit WCAG exhaustif.
+- Direction complète et limites : docs/UI_DIRECTION.md. Cache catalogue en cours
+  conservé ; aucun push, déploiement ou modification des médias personnels.
+
+
+## 23 octobre 2026 — Cache catalogue et ouverture du lecteur
+
+- Pages catalogue en mémoire par requête complète/session : SWR 30 s, LRU 48 pages,
+  4 Mio de JSON estimé (pas un plafond exact du heap), requêtes dédupliquées/bornées.
+  Retours frais sans fetch catalogue ni loader, scroll conservé ; erreurs réseau
+  non destructives, invalidation après mutations/scans observés/session/403.
+- Dialogue ouvert avant descripteur, mais aucune lecture sans descripteur frais ;
+  déduplication des requêtes en vol avec annulation par consommateur. Épisodes
+  multiversions : sélection après ouverture, sans double requête séquentielle à froid.
+  Navigation actions/filtres SvelteKit, historique déjà chargé réutilisé.
+- Chrome 155.0.8059.86, vraie UI/API simulée lente : dix retours 331–359 → 62–74 ms,
+  20 → 0 requêtes catalogue ; dialogue 322/314 → 8/3 ms, première image
+  514/421 → 416/402 ms (ouverture/réouverture, deux observations seulement).
+- Web 104 tests/check/lint/build, Rust catalogue 5/scanner 3/distribué 1,
+  Chrome Core/SQLite avec redémarrage et décodage AV1/Opus local réussis.
+  Cache Node existant réutilisé, aucun changement Rust/SQL/transcodage/timeouts.
+- Docker Desktop indisponible ; NAS/PostgreSQL/premier son physique non mesurés.
+  Scans externes visibles à la prochaine consultation périmée, pas de push serveur.
+  Méthode, rapports, limites et mesures production : docs/NAVIGATION_PERFORMANCE.md.
+  Aucun push, déploiement ou média personnel modifié.
+
 ## 22 octobre 2026 — CI raccourcie localement, mesure distante en attente
 
 - Intégration Rust répartie automatiquement sur trois runners par cibles Cargo

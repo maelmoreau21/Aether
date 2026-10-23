@@ -48,8 +48,8 @@
   <button disabled={busy}>Enregistrer les restrictions</button>
 </fieldset>{#if error}<p role="alert">{error}</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}</form>
 <style>
-  fieldset { display:grid;gap:12px;border:1px solid var(--color-line);border-radius:8px;margin:20px 0;padding:16px;min-width:0; }
+  fieldset { display:grid;gap:12px;border:1px solid var(--color-line);border-radius:var(--radius-md);margin:20px 0;padding:16px;min-width:0; }
   label { display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
-  button,input,select { background:var(--color-surface);color:var(--color-text);padding:10px;border:1px solid var(--color-line);border-radius:6px;max-width:100%; }
+  button,input,select { background:var(--color-surface);color:var(--color-text);padding:10px;border:1px solid var(--color-line);border-radius: var(--radius-md);max-width:100%; }
   .window { display:flex;gap:10px;flex-wrap:wrap;padding:10px;border:1px solid var(--color-line); } p { font-size:13px;line-height:1.5; }
 </style>

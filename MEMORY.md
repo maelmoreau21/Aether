@@ -1,5 +1,11 @@
 # MEMORY.md — État et décisions Aether
 
+## 23 octobre 2026 — Correction du lint Clippy items_after_test_module (local_mounts)
+
+- Correction de l'erreur clippy::items-after-test-module dans crates/core/src/local_mounts.rs : la fonction validate etait declaree apres le module de test mod tests.
+- Fonction validate repositionnee avant #[cfg(test)] mod tests.
+- Verifications validees : cargo clippy --locked --workspace --all-features --all-targets -- -D warnings, cargo fmt --check et suite complete de tests unitaires cargo test --locked --workspace --all-features --lib --bins.
+
 ## 23 octobre 2026 — Montages médias sans préfixe imposé
 
 - Sans MEDIA_LIBRARY_ROOT, découverte des montages de dossiers Linux via /proc/self/mountinfo ; exclusion des chemins système, /app, /data et /backups. Racine explicite toujours prioritaire.

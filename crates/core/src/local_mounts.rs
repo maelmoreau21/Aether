@@ -49,6 +49,18 @@ pub(crate) async fn allowed_roots(fallback: &Path) -> Vec<PathBuf> {
     roots
 }
 
+pub(crate) async fn validate(root: &Path, fallback: &Path) -> std::io::Result<PathBuf> {
+    for allowed in allowed_roots(fallback).await {
+        if let Ok(path) = crate::node::validate_library_root(root, &allowed).await {
+            return Ok(path);
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "directory outside allowed media mounts",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,16 +90,4 @@ mod tests {
             ]
         );
     }
-}
-
-pub(crate) async fn validate(root: &Path, fallback: &Path) -> std::io::Result<PathBuf> {
-    for allowed in allowed_roots(fallback).await {
-        if let Ok(path) = crate::node::validate_library_root(root, &allowed).await {
-            return Ok(path);
-        }
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::PermissionDenied,
-        "directory outside allowed media mounts",
-    ))
 }

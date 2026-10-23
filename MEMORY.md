@@ -1,5 +1,12 @@
 # MEMORY.md — État et décisions Aether
 
+## 23 octobre 2026 — Correction du test E2E browser_series
+
+- **Correction de la navigation d’administration dans scripts/browser-series.cjs** :
+  - Suite au passage de la barre de navigation d’administration dans un <dialog> tiroir fermé par défaut, les sélecteurs directs page.locator('a[href="#users-section"]') et page.locator('a[href="#libraries-section"]') échouaient par timeout de 30 secondes car les liens étaient masqués dans le dialogue fermé.
+  - Alignement avec les autres tests d’administration (scripts/browser-distributed.cjs, apps/web/scripts/test-admin-live.mjs) : ouverture du tiroir via .mobile-menu-toggle si aria-expanded === 'false' et ciblage scoped .admin-sidebar a[href$="#..."].
+  - Validation exécutée avec succès : cargo test --locked --test browser_series -- --ignored --nocapture (1 test passé en 63.33s sous Chrome headless, scan, lecture AV1/Opus, permissions 403, transitions inter-saisons et changement de compte vérifiés).
+
 ## 23 octobre 2026 — Fluidité initiale et dépôt de plugins préconfiguré
 
 - Réserve contiguë 0,75 s avant play, prête immédiatement si déjà en cache ;

@@ -145,6 +145,11 @@ fs.mkdirSync(out, {recursive: true});
       });
       await openMenu('audio');await page.locator(`[data-audio-id="${id}"]`).click();
       await page.waitForFunction(async language=>{const r=await fetch('/api/v1/preferences');return (await r.json()).audioLanguage===language;},language);
+      // A persisted language can predate this selection. Wait for Svelte's
+      // completed transaction before closing, otherwise destroy cancels it.
+      await openMenu('audio');
+      await page.locator(`[data-audio-id="${id}"][aria-checked="true"]:not(:disabled)`).waitFor();
+      await page.locator('[aria-label="Fermer le menu"]').click();
       await page.keyboard.press('Shift');await page.locator('button.return').click();
       await page.waitForFunction(()=>!document.querySelector('dialog#player')?.hasAttribute('open'));
       await page.locator('.hero-cta').click();

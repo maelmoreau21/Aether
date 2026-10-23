@@ -1,5 +1,17 @@
 # MEMORY.md — État et décisions Aether
 
+## 23 octobre 2026 — Régression CI playlists, formulaire de dépôt replié
+
+- `browser-playlists.cjs` ouvre « + Nouveau dépôt » après l'onglet Dépôts
+  avant d'attendre Adresse du dépôt. Le formulaire est replié par défaut ;
+  aucune modification produit ni augmentation de timeout.
+- `cargo test --locked -p media-poc --lib product_tests::mixed_playlists -j 1
+  -- --test-threads=1` réussi avec `MEDIA_TEST_PLAYLIST_BROWSER=1` et
+  `MEDIA_WEB_DIST=apps/web/build` résolu : vrai Core/SQLite/Chrome local,
+  partage/droits, lecture persistante, dépôts, révocation et PCM réussis.
+  Rapport local : `target/ci-playlists-repository/report.json`.
+- Syntaxe Node et diff vérifiés ; pas de push ni relance GitHub Actions.
+
 ## 23 octobre 2026 — Recherche streaming Rust et continuité VF/VO
 
 - Cache de préparation Node : ouverture confinée hors verrou global, lease

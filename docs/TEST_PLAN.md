@@ -1,3 +1,10 @@
+## CI playlists et dépôts d'extensions — 23 octobre 2026
+
+Le scénario `product_tests::mixed_playlists` avec
+`MEDIA_TEST_PLAYLIST_BROWSER=1` ouvre l'onglet Dépôts puis « + Nouveau dépôt »
+avant d'attendre le champ Adresse du dépôt, désormais replié par défaut.
+Les contrôles de partage, droits, lecture persistante et PCM restent actifs.
+
 ## Recherche de latence streaming — 23 octobre 2026
 
 Méthode, stratégies comparées, mesures brutes et limites :

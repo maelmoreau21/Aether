@@ -69,8 +69,8 @@ const out=process.env.MEDIA_REPORT_DIR||'target/playlists-browser';fs.mkdirSync(
     await settings.getByRole('heading',{name:'Partage des playlists',exact:true}).waitFor();
     await settings.goto(origin+'/app/admin/libraries/#extensions-section');
     await settings.locator('#extensions-heading').waitFor();assert.equal(await settings.locator('input[type=file]').count(),0);
-    await settings.getByRole('button',{name:/^Dépôts \(/}).click();await settings.getByLabel('Adresse du dépôt',{exact:true}).waitFor();
-    assert.equal(await settings.getByRole('button',{name:/^Dépôts \(/}).getAttribute('aria-current'),'page');
+    await settings.getByRole('button',{name:/^Dépôts/}).click();await settings.getByLabel('Adresse du dépôt',{exact:true}).waitFor();
+    assert.equal(await settings.getByRole('button',{name:/^Dépôts/}).getAttribute('aria-current'),'page');
     await settings.screenshot({path:out+'/extensions-repositories.png'});report.repositoryOnlyInterface=true;
     await settings.getByRole('button',{name:'Catalogue',exact:true}).click();await settings.getByLabel('Rechercher dans le catalogue',{exact:true}).waitFor();
     assert.equal((await api(settings,'/api/v1/admin/playlists/policy','PUT',{allowPublic:false,allowSharing:false})).status,204);

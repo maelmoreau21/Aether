@@ -6,12 +6,14 @@
   import { invalidateCatalog } from '../../../lib/catalog/page-cache';
   import { onMount } from 'svelte';
   import { asset, resolve } from '$app/paths';
+  import { goto } from '$app/navigation';
   import { session, type AuthUser } from '../../../lib/auth/session';
   import ProfileMenu from '../../../lib/ui/ProfileMenu.svelte';
   import Icon from '../../../lib/ui/Icon.svelte';
   import type { Library, Scan, AdminNode, OidcAdminStatus, CoreHealth, EnrollmentToken, RefreshMode } from '../../../lib/admin/types';
   import AdminSettings from '../../../lib/admin/AdminSettings.svelte';
   import { DEFAULT_NAME } from '../../../lib/config/brand';
+  import { serverPresentation } from '../../../lib/config/presentation';
   import AdminOverview from '../../../lib/admin/AdminOverview.svelte';
   import { defaultLibraryOptions } from '../../../lib/admin/types';
   import AdminLibraries from '../../../lib/admin/AdminLibraries.svelte';
@@ -355,6 +357,11 @@
     '#api-keys-section': 'Clés API', '#extensions-section': 'Extensions'
   } as Record<string, string>)[currentHash]);
   function chooseSection(hash: string) { currentHash = hash; closeMenu(); }
+  function navigateHome(event: MouseEvent) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    void goto(resolve('/'));
+  }
 
   const sections = new Set(['#overview', '#general-section', '#network-section', '#libraries-section', '#nodes-section', '#users-section', '#sso-section', '#tasks-section', '#backups-section', '#groups-section', '#api-keys-section', '#extensions-section']);
   function selectedSection() {
@@ -392,7 +399,8 @@
 <header class="admin-header">
   <div class="header-left">
     {#if administrator}<button class="mobile-menu-toggle" bind:this={menuButton} type="button" aria-expanded={menuOpen} aria-controls="admin-navigation" disabled={loading} onclick={openMenu}><Icon name="menu" size={18} /><span>Menu</span></button>{/if}
-    <a class="back-link" href={resolve('/')}><Icon name="chevron-left" size={14} /><span>Retour</span></a>
+    <a class="brand admin-brand" href={resolve('/')} onclick={navigateHome} title="Retour à l’accueil" aria-label={`${$serverPresentation.serverName || DEFAULT_NAME}, accueil`}><img src={asset('images/brand-mark.svg')} width="28" height="28" alt="" /><span class="brand-text">{$serverPresentation.serverName || DEFAULT_NAME}</span></a>
+    <a class="back-link" href={resolve('/')} onclick={navigateHome}><Icon name="chevron-left" size={14} /><span>Retour</span></a>
   </div>
   <div class="header-right">
     <ProfileMenu />
@@ -634,10 +642,10 @@
 
 <style>
   .admin-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px var(--page-gutter);border-bottom:1px solid var(--color-line);background:var(--color-surface);position:sticky;top:0;z-index:100;min-height:60px;box-sizing:border-box;}
-  .header-left{display:flex;align-items:center;gap:16px;min-width:0;}.back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--color-muted);text-decoration:none;}.back-link:hover{color:var(--color-text);}.mobile-menu-toggle{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--color-line);border-radius:var(--radius-sm);background:var(--color-raised);color:var(--color-text);padding:8px 12px;min-height:40px;font:inherit;font-size:13px;cursor:pointer;}.mobile-menu-toggle:disabled{opacity:.5;cursor:default;}
+  .header-left{display:flex;align-items:center;gap:16px;min-width:0;}.admin-brand{display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:var(--color-text);font-weight:700;font-size:16px;margin-right:6px;cursor:pointer;}.admin-brand:hover{opacity:.9;}.back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--color-muted);text-decoration:none;}.back-link:hover{color:var(--color-text);}.mobile-menu-toggle{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--color-line);border-radius:var(--radius-sm);background:var(--color-raised);color:var(--color-text);padding:8px 12px;min-height:40px;font:inherit;font-size:13px;cursor:pointer;}.mobile-menu-toggle:disabled{opacity:.5;cursor:default;}
   main{max-width:1600px;margin:0 auto;padding:24px var(--page-gutter) 64px;}.admin-dashboard-container{display:block;min-width:0;}.admin-content-area{display:flex;flex-direction:column;gap:20px;min-width:0;}
   .admin-nav-dialog{position:fixed;inset:0 auto 0 0;width:min(280px,90vw);height:100dvh;max-height:100dvh;max-width:none;box-sizing:border-box;margin:0;padding:16px;border:0;border-right:1px solid var(--color-line);background:var(--color-surface);color:var(--color-text);overflow-y:auto;overscroll-behavior:contain;}.admin-nav-dialog::backdrop{background:rgb(0 0 0 / .4);}.drawer-heading{display:flex;align-items:center;justify-content:space-between;padding:0 8px 16px;border-bottom:1px solid var(--color-line);}.drawer-heading strong{font-size:15px;}.drawer-heading button{display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--color-text);cursor:pointer;}.drawer-heading button:hover{background:var(--color-raised);}.sidebar-sections{display:grid;gap:14px;padding-top:16px;}.sidebar-group{display:grid;gap:3px;}.server-settings-nav{margin-top:-12px;}.group-label{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--color-muted);padding:0 10px 4px;text-transform:uppercase;}.sidebar-nav-item{display:flex;align-items:center;gap:10px;min-height:40px;padding:8px 10px;border-radius:var(--radius-sm);color:var(--color-muted);text-decoration:none;font-size:13px;box-sizing:border-box;}.sidebar-nav-item:hover{background:var(--color-raised);color:var(--color-text);}.sidebar-nav-item.active{background:var(--color-accent-soft);color:var(--color-accent);font-weight:600;}.nav-icon{display:inline-flex;flex-shrink:0;}.nav-text{min-width:0;overflow-wrap:anywhere;}.sidebar-nav-item:focus-visible,.mobile-menu-toggle:focus-visible,.drawer-heading button:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;}
   .error-banner,.notice-banner{padding:12px 16px;border-radius:var(--radius-sm);margin-bottom:20px;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:12px;}.banner-content{display:flex;align-items:center;gap:10px;min-width:0;overflow-wrap:anywhere;}.banner-content p{margin:0;}.error-banner{background:var(--color-danger-soft);border:1px solid var(--color-danger);color:var(--color-danger);}.notice-banner{background:var(--color-success-soft);border:1px solid var(--color-success);color:var(--color-success);}.small-btn{border:1px solid currentColor;background:transparent;color:inherit;border-radius:var(--radius-sm);padding:6px 12px;font:inherit;cursor:pointer;}.loading-state{display:flex;flex-direction:column;align-items:center;gap:16px;padding:60px 0;color:var(--color-muted);}.logo-spinner{width:48px;height:48px;display:block;margin:0 auto;}
   .admin-content-area :global(:where(section,article,form,fieldset,header,label,details,.card)){min-width:0;}.admin-content-area :global(:where(h2,h3,p,dd,code,label,button,summary)){overflow-wrap:anywhere;}.admin-content-area :global(:where(input,select,button)){max-width:100%;}
-  @media(max-width:480px){main{padding:20px 16px 48px;}.admin-header{padding:8px 16px;}.header-left{gap:10px;}}
+  @media(max-width:480px){main{padding:20px 16px 48px;}.admin-header{padding:8px 16px;}.header-left{gap:10px;}.admin-brand .brand-text{display:none;}}
 </style>

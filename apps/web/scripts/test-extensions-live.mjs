@@ -6,7 +6,7 @@ const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !process.env.MEDIA_TEST_PACKAGE || !process.env.MEDIA_TEST_PUBLIC_KEY) throw new Error('Use the Rust extensions browser harness.');
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, colorScheme: 'dark' });
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('response', async response => {
@@ -24,7 +24,42 @@ try {
     data: {...JSON.parse(await readFile(process.env.MEDIA_TEST_PACKAGE,'utf8')),publicKey:process.env.MEDIA_TEST_PUBLIC_KEY}
   });
   assert.equal(imported.status(),201);
+  // Synthetic catalogue exercises discovery without downloading a remote repository.
+  const signedPackage = JSON.parse(await readFile(process.env.MEDIA_TEST_PACKAGE, 'utf8'));
+  const catalogueRoute = '**/api/v1/admin/extensions/catalogue';
+  await page.route(catalogueRoute, route => route.fulfill({ json: { entries: [
+    { repositoryId: 'test', repositoryName: 'Dépôt synthétique', compatible: true,
+      manifest: signedPackage.manifest, publisherId: 'test', publicKey: process.env.MEDIA_TEST_PUBLIC_KEY },
+    ...['Avatars', 'Illustrations', 'Musique'].map((name, index) => ({ repositoryId: 'test', repositoryName: 'Dépôt synthétique', compatible: index !== 2, manifest: {...signedPackage.manifest, id: `preview-${index}`, name: `${name} · Démo`, description: 'Aperçu synthétique du catalogue, sans extension installable.', category: name, permissions: index === 0 ? ['avatars'] : ['metadata.read']}, publisherId: 'test', publicKey: process.env.MEDIA_TEST_PUBLIC_KEY }))
+  ] } }));
   await page.reload();
+  await panel.getByRole('button', {name:'Catalogue',exact:true}).click();
+  await panel.locator('.artwork-button').first().waitFor();
+  await panel.getByRole('button', {name:'Avatars',exact:true}).click();
+  assert.equal(await panel.locator('.catalogue-card').count(), 1);
+  await panel.getByRole('button', {name:'Tout',exact:true}).click();
+  const outputPreview = process.env.MEDIA_REPORT_DIR || '../../target/extensions-lifecycle-browser';
+  await mkdir(outputPreview, { recursive: true });
+  await page.screenshot({ path: `${outputPreview}/catalogue-desktop.png`, fullPage: true });
+  await panel.getByRole('button', {name: /^Détails de/}).first().click();
+  await panel.getByRole('heading', {name: 'Versions disponibles'}).waitFor();
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.screenshot({ path: `${outputPreview}/catalogue-detail-mobile.png`, fullPage: true });
+  await panel.getByRole('button', {name: 'Retour au catalogue'}).click();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.screenshot({ path: `${outputPreview}/catalogue-mobile.png`, fullPage: true });
+  await panel.getByRole('searchbox').fill('introuvable-synthetique');
+  await panel.getByText('Aucune extension ne correspond.', {exact:false}).waitFor();
+  await panel.getByRole('searchbox').fill('');
+  await panel.getByRole('button', {name:'Dépôts',exact:true}).click();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.screenshot({ path: `${outputPreview}/repositories-mobile.png`, fullPage: true });
+  await panel.getByRole('button', {name:'+ Nouveau dépôt',exact:true}).click();
+  await panel.getByLabel('Adresse du dépôt', {exact:true}).waitFor();
+  await panel.getByRole('button', {name:'Fermer',exact:true}).click();
+  await page.unroute(catalogueRoute);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await panel.getByRole('button', {name:'Installées',exact:true}).click();
   const extension = panel.locator('.extension-detail');
   await panel.locator('.installed-card').getByRole('button', {name:/^Paramètres de/}).click();

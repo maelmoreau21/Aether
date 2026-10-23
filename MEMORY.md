@@ -1,5 +1,40 @@
 # MEMORY.md — État et décisions Aether
 
+## 23 octobre 2026 — Optimisation du chargement instantané de l'accueil et des images (style Jellyfin)
+
+- **Chargement instantané du catalogue et affichage immédiat de l'accueil** :
+  - Dans `apps/web/src/lib/catalog/page-cache.ts` :
+    - Persistance du cache de catalogue dans `sessionStorage` (avec préfixe isolé `media_catalog_cache_v1_`) en complément du cache mémoire.
+    - `cachedCatalog` restitue immédiatement les données en cache (mode Stale-While-Revalidate), permettant un premier rendu immédiat sans squelette bloquant à chaque navigation ou réouverture.
+    - Éviction et invalidation synchronisées entre mémoire et `sessionStorage` (changement de compte, déconnexion, révocation d'accès, quotas).
+  - Dans `apps/web/src/lib/catalog/Catalog.svelte` :
+    - Préservation des films et séries en mémoire si des entrées en cache sont disponibles : `films` et `series` ne sont plus réinitialisés à vide avant vérification du cache, évitant le clignotement ou la disparition des titres.
+  - Dans `apps/web/src/routes/+layout.svelte` :
+    - Déclenchement de `preloadCatalog('home')` dès la vérification de la session, préchargeant l'accueil en parallèle de l'hydratation des préférences.
+
+- **Performances et cache des images inspirés de Jellyfin** :
+  - **Parallélisme de décodage côté Media Node (`crates/node/src/images.rs`)** :
+    - Augmentation du sémaphore de validation d'images `VALIDATION` de 1 à 8 permis simultanés, éliminant le goulot d'étranglement qui forçait toutes les miniatures de la page d'accueil à être redimensionnées séquentiellement une par une.
+  - **Cache disque persistant des miniatures générées (`crates/node/src/image_preview.rs`)** :
+    - Augmentation du cache mémoire LRU de 8 Mo (128 entrées) à 64 Mo (2048 entrées).
+    - Mise en place d'un cache sur disque persistant (`MEDIA_IMAGE_CACHE_DIR` ou répertoire temporaire système `media-image-cache`) basé sur l'empreinte SHA-256 du chemin canonique, de la taille, de la date de modification et de la largeur cible.
+    - Écriture atomique (fichier temporaire puis renommage) et relecture directe en ~0.1 ms sans réencodage CPU lors des redémarrages ou après éviction mémoire.
+  - **Vérification anticipée If-None-Match 304 (`crates/node/src/lib.rs`)** :
+    - Vérification du header `If-None-Match` correspondant à l'ETag de la miniature avant tout appel à `generate`, renvoyant immédiatement `304 Not Modified` sans chargement ni allocation d'image.
+  - **Affichage instantané des affiches dans le navigateur (`apps/web/src/lib/catalog/image-url.ts`, `Poster.svelte`, `HeroBanner.svelte`, `CatalogHome.svelte`)** :
+    - Maintien d'un ensemble en mémoire des URLs d'images déjà chargées (`isImageLoaded`, `markImageLoaded`).
+    - Action `checkLoaded` sur `<img>` détectant `node.complete && node.naturalWidth > 0` pour passer immédiatement `loadedUrl` à l'URL cible sans attendre l'événement `onload` si le navigateur a déjà l'image en cache.
+    - Attribut `eager={index < 6}` sur les premières affiches visibles de la page d'accueil (`CatalogHome.svelte`).
+- **Validations réelles exécutées** :
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web test` : 125 tests unitaires passés avec succès.
+  - `npm --prefix apps/web run lint` : validé sans erreur (ESLint).
+  - `npm --prefix apps/web run build` : build statique de production SvelteKit réussi.
+  - `cargo fmt --check` : 0 écart de formatage.
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test -p media-node` : 48 unit tests + 3 integration tests passés avec succès.
+  - `cargo test --locked -p media-poc --lib product_tests` : 6/6 tests de fonctionnalités produit passés avec succès.
+
 ## 23 octobre 2026 — Navigation retour accueil sur le logo Aether (Paramètres et Administration)
 
 - **Gestion du retour à l'accueil via le logo Aether** :

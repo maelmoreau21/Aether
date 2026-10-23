@@ -11,6 +11,7 @@
   import { goto } from '$app/navigation';
   import { asset, resolve } from '$app/paths';
   import { readSession } from '../lib/auth/session';
+  import { preloadCatalog } from '../lib/catalog/page-cache';
   import MusicPlayer from '../lib/music/MusicPlayer.svelte';
 
   onMount(() => {
@@ -37,6 +38,7 @@
         const generation = getSessionGeneration();
         const loadingPreferences = hydratePreferences();
         // Catalogue requests and navigation can start while optional settings load.
+        preloadCatalog('home');
         verified = true;
         void loadServerPresentation();
         void loadingPreferences.then(saved => {

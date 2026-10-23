@@ -352,8 +352,6 @@
     mediaError = '';
     detail = null;
     media = [];
-    films = [];
-    series = [];
     totalFilms = null;
     totalSeries = null;
     moreFilms = false;
@@ -372,6 +370,10 @@
       cachedKinds++;
       if (kind === 'film') { films = cached.items; totalFilms = cached.total; moreFilms = cached.hasMore ?? (cached.total ?? 0) > start + 24; }
       else { series = cached.items; totalSeries = cached.total; moreSeries = cached.hasMore ?? (cached.total ?? 0) > start + 24; }
+    }
+    if (cachedKinds === 0) {
+      films = [];
+      series = [];
     }
     busy = Boolean(id) || cachedKinds === 0;
 

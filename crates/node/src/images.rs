@@ -13,7 +13,7 @@ use tokio::sync::Semaphore;
 use crate::{files::OpenedFile, scanner::FolderVideos};
 
 pub const MAX_BYTES: u64 = 10 * 1024 * 1024;
-pub(crate) static VALIDATION: Semaphore = Semaphore::const_new(1);
+pub(crate) static VALIDATION: Semaphore = Semaphore::const_new(8);
 
 type ValidationKey = (PathBuf, u64, String);
 

@@ -2,10 +2,9 @@
   import type { Work } from './api';
   import { history } from './watch-state';
   import Icon from '../ui/Icon.svelte';
-  import { imagePreviewUrl } from './image-url';
+  import { imagePreviewUrl, isImageLoaded, markImageLoaded } from './image-url';
 
   let failedUrls = $state<string[]>([]);
-  let loadedUrl = $state('');
   let {
     work,
     href = '',
@@ -20,6 +19,20 @@
 
   const previewUrl = $derived(imagePreviewUrl(work.posterUrl,showMetadata ? 320 : 640));
   const imageUrl = $derived([previewUrl,work.posterUrl ?? ''].find(url => url && !failedUrls.includes(url)) ?? '');
+  let loadedUrl = $state('');
+
+  $effect(() => {
+    if (imageUrl && isImageLoaded(imageUrl)) {
+      loadedUrl = imageUrl;
+    }
+  });
+
+  function checkLoaded(node: HTMLImageElement) {
+    if (node.complete && node.naturalWidth > 0 && imageUrl) {
+      loadedUrl = imageUrl;
+      markImageLoaded(imageUrl);
+    }
+  }
   const watchProgress = $derived($history.find(item => item.workId === work.id));
   const isWatched = $derived(watchProgress?.watched ?? false);
   const progressRatio = $derived(
@@ -43,7 +56,11 @@
         loading={eager ? 'eager' : 'lazy'}
         fetchpriority={eager ? 'high' : 'auto'}
         decoding="async"
-        onload={() => { loadedUrl = imageUrl; }}
+        use:checkLoaded
+        onload={() => {
+          loadedUrl = imageUrl;
+          markImageLoaded(imageUrl);
+        }}
         onerror={() => { failedUrls = [...failedUrls.slice(-3), imageUrl]; }}
       />
       <div class="poster-gradient" aria-hidden="true"></div>

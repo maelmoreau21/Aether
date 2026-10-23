@@ -80,8 +80,6 @@ services:
       - MEDIA_BACKUP_DIR=/backups
       # Store the encryption key separately from archives; no fallback key is generated.
       - MEDIA_BACKUP_KEY=${MEDIA_BACKUP_KEY:-}
-      - MEDIA_LIBRARY_ROOT=/media
-      - MEDIA_WEB_DIST=/app/apps/web/build
       - MEDIA_OIDC_ENABLED=${MEDIA_OIDC_ENABLED:-false}
       - MEDIA_OIDC_ISSUER=${MEDIA_OIDC_ISSUER:-}
       - MEDIA_OIDC_CLIENT_ID=${MEDIA_OIDC_CLIENT_ID:-}

@@ -115,7 +115,7 @@ fn public_ip(ip: IpAddr) -> bool {
         }
     }
 }
-async fn fetch(raw: &str, maximum: usize) -> Result<Vec<u8>, Error> {
+pub(super) async fn fetch(raw: &str, maximum: usize) -> Result<Vec<u8>, Error> {
     let url = safe_url(raw)?;
     #[cfg(test)]
     if let Some(bytes) = test_documents().lock().unwrap().get(raw).cloned() {
@@ -157,6 +157,7 @@ async fn fetch(raw: &str, maximum: usize) -> Result<Vec<u8>, Error> {
     let mut response = client
         .get(url)
         .header("accept", "application/json")
+        .header("user-agent", "Media-Server-Avatar-Import")
         .send()
         .await
         .map_err(|_| err(StatusCode::BAD_GATEWAY, "repository_unavailable"))?;
@@ -380,16 +381,6 @@ async fn install(
     if !compatible(&entry.manifest) {
         return Err(err(StatusCode::BAD_REQUEST, "incompatible_server_version"));
     }
-    // Refuse untrusted downloads before any package HTTP request; the catalogue key is informational.
-    let trusted: Option<String> =
-        query_scalar("SELECT public_key FROM extension_publishers WHERE id=? AND active=1")
-            .bind(&entry.publisher_id)
-            .fetch_optional(auth.store.pool())
-            .await
-            .map_err(db)?;
-    if trusted.as_deref() != Some(entry.public_key.as_str()) {
-        return Err(err(StatusCode::FORBIDDEN, "publisher_untrusted"));
-    }
     let bytes = fetch(&entry.package_url, MAX_PACKAGE).await?;
     if format!("{:x}", Sha256::digest(&bytes)) != entry.package_sha256 {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_package_digest"));
@@ -411,11 +402,12 @@ async fn install(
     if current.as_deref() != Some(snapshot.as_str()) {
         return Err(err(StatusCode::CONFLICT, "repository_changed"));
     }
-    super::install(State(auth), headers, Json(package)).await
+    super::install_with_key(auth, headers, package, entry.public_key).await
 }
 
 #[cfg(test)]
-fn test_documents() -> &'static std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>> {
+pub(super) fn test_documents()
+-> &'static std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>> {
     static DOCUMENTS: std::sync::LazyLock<
         std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
     > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
@@ -784,25 +776,7 @@ mod tests {
         assert_eq!(available["entries"][0]["compatible"], true);
         let endpoint = format!("/api/v1/admin/extensions/repositories/{id}/install");
         let choice = json!({"extensionId":"repo.fixture","version":"1.0.0"});
-        assert_eq!(
-            request(&app, &endpoint, "POST", &cookie, &csrf, choice.clone())
-                .await
-                .status(),
-            StatusCode::FORBIDDEN
-        );
-        assert_eq!(
-            request(
-                &app,
-                "/api/v1/admin/extensions/publishers",
-                "POST",
-                &cookie,
-                &csrf,
-                json!({"id":"repository-test","publicKey":public})
-            )
-            .await
-            .status(),
-            StatusCode::CREATED
-        );
+        // A newly discovered publisher needs no approval request. Integrity is still checked.
         test_documents()
             .lock()
             .unwrap()

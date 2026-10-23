@@ -154,7 +154,7 @@ L'endpoint interne `/api/v1/health` est volontairement placé en amont du middle
 | `MEDIA_PUBLIC_URL` | `http://127.0.0.1:3000` | Origine publique canonique (`https://...` pour LAN/Internet, ou `http://` uniquement sur loopback `127.0.0.1`/`localhost`/`[::1]`) |
 | `MEDIA_DB_PATH` | `/data/core.sqlite3` | Chemin du fichier SQLite dans le volume persistant |
 | `MEDIA_SQLITE_BUSY_TIMEOUT_SECS` | `15` | Délai d'attente max sur verrou d'écriture SQLite avant erreur BUSY (45s+ recommandé sur 10k+ médias) |
-| `MEDIA_LIBRARY_ROOT` | `/media` | Racine absolue du dossier des bibliothèques montées en lecture seule |
+| `MEDIA_LIBRARY_ROOT` | optionnelle | Restriction explicite à une racine ; sinon découverte des montages de dossiers Linux |
 | `MEDIA_WEB_DIST` | `/app/apps/web/build` | Répertoire des assets Web statiques pré-compilés |
 
 ---
@@ -381,3 +381,24 @@ Mesures réelles enregistrées lors de la validation automatisée de bout en bou
 | **Mémoire RSS pic pendant le scan ffprobe** | **12,56 Mo** | Parcours récursif d'une bibliothèque et extraction de métadonnées |
 
 Ces mesures confirment qu'Aether s'exécute avec une empreinte système particulièrement légère, parfaitement dimensionnée pour le Synology DS1522+ et les serveurs personnels à ressources modérées.
+
+### Dossiers montés à des chemins libres
+
+Sans `MEDIA_LIBRARY_ROOT`, le Core propose les montages de dossiers Linux dans
+Administration → Bibliothèques. Les dossiers système et `/data`, `/backups`,
+`/app` sont exclus. Sélectionner les dossiers et lancer leur scan reste explicite.
+Les chemins restent confinés aux montages découverts ; les droits de bibliothèque
+et les contrôles contre les liens restent appliqués. Hors Linux, configurer une racine.
+`MEDIA_WEB_DIST` est facultative : l’image inclut le bon chemin par défaut.
+
+```yaml
+volumes:
+  - ./aether_data:/data
+  - ./aether_backups:/backups
+  - ${FILMS_UHD}:/Films_UHD:ro
+  - ${SERIES_UHD}:/Séries_UHD:ro
+```
+
+Docker exige une destination absolue : le `/` initial est nécessaire,
+mais aucun préfixe `/media` n’est imposé. Une ancienne image doit être reconstruite
+pour utiliser cette découverte et supprimer sa valeur historique `/media`.

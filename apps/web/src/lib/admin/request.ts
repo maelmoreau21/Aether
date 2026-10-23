@@ -6,12 +6,21 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
   const current = get(session);
   if (current?.user.role !== 'administrator') throw new Error('Accès administrateur requis.');
   const response = await fetch(path, {
-    ...init, credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(path.includes('/extensions/') ? 70000 : 30000),
-    headers: { 'content-type': 'application/json', 'x-csrf-token': current.csrfToken, ...init.headers }
+    ...init, credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(path.includes('/avatar-packs') ? 310000 : path.includes('/extensions/') ? 70000 : 30000),
+    headers: { ...(init.body instanceof FormData ? {} : {'content-type':'application/json'}), 'x-csrf-token': current.csrfToken, ...init.headers }
   });
   if (!response.ok) {
     const detail = await response.json().catch(() => null) as { error?: string; pluginError?: string } | null;
     const messages: Record<string,string> = {
+      plugin_storage_failed: 'Le dossier data/plugins est indisponible ou un fichier installé est altéré. Vérifiez les droits du volume.',
+      invalid_avatar_upload: 'Choisissez un nom et des images PNG, JPEG ou WebP pour cette collection.',
+      github_avatar_repository_required: 'Collez le lien racine d’un dépôt GitHub public, sans /tree/ ni paramètre.',
+      avatar_import_busy: 'Une collection est déjà en cours d’import.',
+      avatar_import_timeout: 'L’import a dépassé cinq minutes. Réessayez avec une plus petite collection.',
+      avatar_pack_size_limit: 'Choisissez un dossier contenant de 1 à 500 images, de 2 Mo maximum chacune.',
+      avatar_source_too_large: 'Ce dépôt est trop volumineux pour être parcouru.',
+      avatar_pack_limit: 'Le serveur contient déjà 32 collections.',
+      invalid_avatar_image: 'Une image de cette collection est invalide. Aucun avatar n’a été importé.',
       missing_api_key: 'La clé API du fournisseur est absente. Configurez cette extension.',
       external_id_required: 'Ce fournisseur exige un identifiant externe. Complétez les métadonnées de l’œuvre ou appliquez d’abord celles d’un fournisseur de recherche.',
       unsupported_operation: 'Ce paquet ne prend pas en charge cette opération. Vérifiez sa version.',

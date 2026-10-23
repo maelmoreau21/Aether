@@ -19,24 +19,19 @@ try {
   const panel = page.locator('#extensions-section');
   await panel.getByRole('button', {name:'Installées',exact:true}).click();
   await panel.getByText('Aucune extension installée.', { exact: true }).waitFor();
-  await panel.getByText('Éditeurs approuvés', { exact: true }).click();
-  await panel.getByLabel('Identifiant de l’éditeur', { exact: true }).fill('test');
-  await panel.getByLabel('Clé publique Ed25519 (Base64)', { exact: true }).fill(process.env.MEDIA_TEST_PUBLIC_KEY);
-  await panel.getByRole('button', { name: 'Approuver cet éditeur', exact: true }).click();
-  await panel.getByText('Éditeur approuvé.', { exact: true }).waitFor({ timeout: 10000 }).catch(async error => { console.log(await panel.innerText()); throw error; });
   const imported = await page.request.post(`${origin}/api/v1/admin/extensions`, {
     headers: {origin, 'x-csrf-token':csrfToken},
-    data: JSON.parse(await readFile(process.env.MEDIA_TEST_PACKAGE,'utf8'))
+    data: {...JSON.parse(await readFile(process.env.MEDIA_TEST_PACKAGE,'utf8')),publicKey:process.env.MEDIA_TEST_PUBLIC_KEY}
   });
   assert.equal(imported.status(),201);
   await page.reload();
   await panel.getByRole('button', {name:'Installées',exact:true}).click();
-  const extension = panel.locator('.installed-card');
-  await extension.getByText('Configurer et gérer', { exact: true }).click();
-  await extension.getByLabel('Films synthétiques', { exact: true }).check();
-  await extension.getByRole('button', { name: 'Enregistrer et activer', exact: true }).click();
+  const extension = panel.locator('.extension-detail');
+  await panel.locator('.installed-card').getByRole('button', {name:/^Paramètres de/}).click();
+  await extension.getByRole('switch').check();
   await panel.getByText('Permissions enregistrées et extension activée.', { exact: true }).waitFor();
-  await extension.getByRole('button', { name: 'Rechercher dans les bibliothèques autorisées', exact: true }).click();
+  await extension.getByText('Tester ce fournisseur sur une œuvre',{exact:true}).click();
+  await extension.getByRole('button', { name: 'Rechercher dans le catalogue', exact: true }).click();
   await extension.getByLabel('Œuvre à analyser', { exact: true }).selectOption('work-films');
   await extension.getByRole('button', { name: 'Exécuter sur cette œuvre', exact: true }).click();
   await panel.getByText('Proposition générée. Consultez les résultats ci-dessous.', { exact: true }).waitFor();
@@ -46,14 +41,14 @@ try {
   await panel.getByRole('button', {name:'Installées',exact:true}).click();
   await panel.getByText(/^Dernières exécutions/).click();
   await panel.locator('strong').filter({ hasText: /^Titre original$/ }).waitFor();
-  await extension.getByText('Configurer et gérer', { exact: true }).click();
+  await panel.locator('.installed-card').getByRole('button', {name:/^Paramètres de/}).click();
   const output = process.env.MEDIA_REPORT_DIR || '../../target/extensions-lifecycle-browser';
   await mkdir(output, { recursive: true });
   await page.screenshot({ path: `${output}/desktop.png`, fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: `${output}/mobile.png`, fullPage: true });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-  await extension.getByRole('button', { name: 'Désactiver', exact: true }).click();
+  await extension.getByRole('switch').uncheck();
   await panel.getByText('Extension désactivée.', { exact: true }).waitFor();
   const denied = await page.request.post(`${origin}/api/v1/admin/extensions/test.metadata/run`, { headers: { origin, 'x-csrf-token': csrfToken }, data: { workId: 'work-films' } });
   assert.equal(denied.status(), 403);

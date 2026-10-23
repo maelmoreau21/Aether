@@ -1,5 +1,10 @@
 # Dépôts et catalogue d’extensions
 
+> Mise à jour du 23 octobre : aucune approbation d’éditeur ou de dépôt n’est requise.
+> Les signatures restent vérifiées avec la clé du catalogue. Configuration dédiée,
+> Toutes les bibliothèques et import d’avatars : [contrat actuel](PLUGIN_SETTINGS_AND_COLLECTIONS.md).
+> Les étapes de confiance explicite historiques ci-dessous sont remplacées par ce contrat.
+
 Dans Administration → Extensions :
 
 1. Ouvrir **Dépôts**, renseigner un nom et l’URL HTTPS du `manifest.json` fourni
@@ -7,13 +12,11 @@ Dans Administration → Extensions :
 2. Ouvrir **Catalogue**, choisir l’extension et sa version. La version numérique
    la plus récente est sélectionnée par défaut ; les versions incompatibles
    restent identifiées et leur installation est refusée côté serveur.
-3. Pour un nouvel éditeur, comparer sa clé publique avec celle de l’auteur sur
-   un canal de confiance, puis l’approuver explicitement. Le manifeste ne peut
-   pas remplacer une clé déjà approuvée ou réactiver un éditeur révoqué.
+3. Aucun clic d’approbation de dépôt ou d’éditeur n’est nécessaire.
 4. Cliquer sur **Installer**. Le serveur télécharge le paquet, contrôle son
    empreinte, ses métadonnées et sa signature, puis le conserve désactivé.
-5. Dans **Installées**, configurer les paramètres, accorder les bibliothèques et
-   activer. Le runtime Wasm ne nécessite pas de redémarrage du serveur.
+5. Dans **Installées**, configurer les paramètres et activer (Toutes les bibliothèques par
+   défaut pour un fournisseur de métadonnées). Le runtime Wasm ne nécessite pas de redémarrage du serveur.
 
 Le principe est celui d’un catalogue de paquets ; les manifestes et DLL Jellyfin
 ne sont pas compatibles. Depuis la migration additive 0041 (SQLite/PostgreSQL),
@@ -24,7 +27,7 @@ https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/main/repository/ma
 ```
 
 La migration ne télécharge rien : le catalogue initial est vide jusqu’à
-**Actualiser les dépôts**. Elle n’approuve aucun éditeur et n’installe aucun module.
+**Actualiser les dépôts**. Elle n’installe aucun module. L’installation ne demande plus d’approbation.
 La suppression de ce dépôt est durable, y compris après réouverture de la base.
 Si cette URL avait déjà été ajoutée par l’administrateur, sa configuration est
 conservée. Le lien ne sera publiquement utilisable qu’après publication des
@@ -127,7 +130,7 @@ Le nom du dépôt est désormais facultatif. Installation manuelle hors interfac
 ## Interface du 23 octobre 2026
 
 Catalogue en cartes compactes, recherche, choix de version, accès demandés et
-éditeur dépliables. L’installation exige toujours la confiance explicite ; elle
+éditeur dépliables. L’installation vérifie les signatures sans approbation manuelle ; elle
 n’active pas le module. Installées présente le statut et ouvre une seule
 configuration complète à la fois. Paramètres, bibliothèques, activation,
 désactivation et désinstallation restent indépendants. Les exécutions et le

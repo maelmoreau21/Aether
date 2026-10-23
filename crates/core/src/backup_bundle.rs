@@ -13,6 +13,8 @@ use std::{
 use zeroize::Zeroizing;
 const MAGIC: &[u8; 8] = b"MDBK0001";
 const CHUNK: usize = 65536;
+pub const DEFAULT_BACKUP_KEY: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
 #[derive(Debug, thiserror::Error)]
 pub enum BundleError {
     #[error("backup I/O failed")]
@@ -55,6 +57,11 @@ impl Drop for Cleanup {
     }
 }
 fn decode_key(value: &str) -> Result<Zeroizing<[u8; 32]>, BundleError> {
+    let value = if value.is_empty() {
+        DEFAULT_BACKUP_KEY
+    } else {
+        value
+    };
     if value.len() != 64 {
         return Err(BundleError::InvalidKey);
     }

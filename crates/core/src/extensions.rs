@@ -33,6 +33,8 @@ static EXECUTIONS: Semaphore = Semaphore::const_new(1);
 
 #[path = "extension_adapters.rs"]
 mod adapters;
+#[path = "extension_avatar_collections.rs"]
+mod collections;
 #[path = "extension_repositories.rs"]
 mod repositories;
 
@@ -64,6 +66,9 @@ fn now() -> i64 {
 }
 fn identifier(value: &str) -> bool {
     !value.is_empty()
+        && value != "."
+        && value != ".."
+        && !value.ends_with('.')
         && value.len() <= 80
         && value
             .bytes()
@@ -145,6 +150,7 @@ pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'st
 pub fn router(auth: AuthState) -> Router {
     Router::new()
         .merge(repositories::router())
+        .merge(collections::router())
         .route("/api/v1/admin/extensions", get(list).post(install))
         .route(
             "/api/v1/admin/extensions/publishers",
@@ -349,17 +355,18 @@ struct Installed {
     sha256: String,
     enabled: bool,
     library_ids: Vec<String>,
+    all_libraries: bool,
     settings: Value,
 }
 async fn list(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
-    let rows: Vec<(String, String, i64)> =
-        query_as("SELECT id,package_json,enabled FROM extensions ORDER BY id")
+    let rows: Vec<(String, String, i64, i64)> =
+        query_as("SELECT id,package_json,enabled,all_libraries FROM extensions ORDER BY id")
             .fetch_all(auth.store.pool())
             .await
             .map_err(db)?;
     let mut installed = Vec::new();
-    for (id, bytes, enabled) in rows {
+    for (id, bytes, enabled, all_libraries) in rows {
         let package: Package = serde_json::from_str(&bytes)
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_stored_package"))?;
         let grants: Vec<String> = query_scalar(
@@ -384,29 +391,60 @@ async fn list(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<
             sha256: package.sha256,
             enabled: enabled == 1,
             library_ids: grants,
+            all_libraries: all_libraries == 1,
             settings,
         });
     }
     Ok(Json(json!({"apiVersion":1,"extensions":installed})))
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallPackage {
+    #[serde(flatten)]
+    package: Package,
+    public_key: Option<String>,
+}
 async fn install(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Json(package): Json<Package>,
+    Json(input): Json<InstallPackage>,
+) -> Result<(StatusCode, Json<Value>), Error> {
+    admin(&auth, &headers, true).await?;
+    let key = if let Some(key) = input.public_key {
+        key
+    } else {
+        // Compatibility for old local imports; new imports supply their public key directly.
+        query_scalar("SELECT public_key FROM extension_publishers WHERE id=? AND active=1")
+            .bind(&input.package.publisher_id)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "package_public_key_required"))?
+    };
+    install_with_key(auth, headers, input.package, key).await
+}
+async fn install_with_key(
+    auth: AuthState,
+    headers: HeaderMap,
+    package: Package,
+    public_key: String,
 ) -> Result<(StatusCode, Json<Value>), Error> {
     let actor = admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
-    let key: Option<String> =
-        query_scalar("SELECT public_key FROM extension_publishers WHERE id=? AND active=1")
+    let key = STANDARD
+        .decode(&public_key)
+        .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_public_key"))?;
+    validate_package(&package, &key).map_err(|code| err(StatusCode::BAD_REQUEST, code))?;
+    // Registry identity is the key digest, not a publisher name supplied by a repository.
+    // Different authors may use the same display name without replacing another key.
+    let key_id: Option<String> =
+        query_scalar("SELECT id FROM extension_publishers WHERE id=? AND public_key=?")
             .bind(&package.publisher_id)
+            .bind(&public_key)
             .fetch_optional(auth.store.pool())
             .await
             .map_err(db)?;
-    let key = key.ok_or_else(|| err(StatusCode::FORBIDDEN, "publisher_untrusted"))?;
-    let key = STANDARD
-        .decode(key)
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_publisher"))?;
-    validate_package(&package, &key).map_err(|code| err(StatusCode::BAD_REQUEST, code))?;
+    let key_id = key_id.unwrap_or_else(|| format!("key.{:x}", Sha256::digest(&key)));
     let count: i64 = query_scalar("SELECT COUNT(*) FROM extensions")
         .fetch_one(auth.store.pool())
         .await
@@ -418,11 +456,14 @@ async fn install(
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_package"))?;
     // Duplicate IDs are refused: updates must not inherit previous consents.
     let mut tx = auth.store.pool().begin().await.map_err(db)?;
-    query("INSERT INTO extensions(id,publisher_id,package_json,generation) VALUES(?,?,?,?)")
+    query("INSERT INTO extension_publishers(id,public_key,active) VALUES(?,?,1) ON CONFLICT(id) DO UPDATE SET active=1")
+        .bind(&key_id).bind(&public_key).execute(&mut *tx).await.map_err(db)?;
+    query("INSERT INTO extensions(id,publisher_id,package_json,generation,all_libraries) VALUES(?,?,?,?,?)")
         .bind(&package.manifest.id)
-        .bind(&package.publisher_id)
+        .bind(&key_id)
         .bind(bytes)
         .bind(uuid::Uuid::new_v4().to_string())
+        .bind(i64::from(package.manifest.permissions.iter().any(|permission|permission=="metadata.read")))
         .execute(&mut *tx)
         .await
         .map_err(|_| err(StatusCode::CONFLICT, "extension_exists"))?;
@@ -433,6 +474,9 @@ async fn install(
         &format!("installed:{}:{}", package.manifest.version, package.sha256),
     )
     .await?;
+    crate::extension_storage::persist(&auth.store, &package)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "plugin_storage_failed"))?;
     tx.commit().await.map_err(db)?;
     Ok((
         StatusCode::CREATED,
@@ -443,7 +487,10 @@ async fn install(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Configuration {
     enabled: bool,
+    #[serde(default)]
     library_ids: Vec<String>,
+    #[serde(default)]
+    all_libraries: bool,
 }
 async fn configure(
     State(auth): State<AuthState>,
@@ -464,8 +511,8 @@ async fn configure(
         }
     }
     let mut tx = auth.store.pool().begin().await.map_err(db)?;
-    let changed = query("UPDATE extensions SET enabled=?,generation=? WHERE id=? AND (?=0 OR EXISTS(SELECT 1 FROM extension_publishers p WHERE p.id=extensions.publisher_id AND p.active=1))")
-        .bind(i64::from(input.enabled)).bind(uuid::Uuid::new_v4().to_string()).bind(&id).bind(i64::from(input.enabled)).execute(&mut *tx).await.map_err(db)?;
+    let changed = query("UPDATE extensions SET enabled=?,generation=?,all_libraries=? WHERE id=? AND (?=0 OR EXISTS(SELECT 1 FROM extension_publishers p WHERE p.id=extensions.publisher_id AND p.active=1))")
+        .bind(i64::from(input.enabled)).bind(uuid::Uuid::new_v4().to_string()).bind(i64::from(input.all_libraries)).bind(&id).bind(i64::from(input.enabled)).execute(&mut *tx).await.map_err(db)?;
     if changed.rows_affected() == 0 {
         return Err(err(StatusCode::NOT_FOUND, "extension_unavailable"));
     }
@@ -477,7 +524,7 @@ async fn configure(
     for library in &input.library_ids {
         query("INSERT INTO extension_grants(extension_id,library_id) VALUES(?,?) ON CONFLICT DO NOTHING").bind(&id).bind(library).execute(&mut *tx).await.map_err(db)?;
     }
-    let action = json!({"action": if input.enabled { "permissions.enabled" } else { "permissions.disabled" }, "libraryIds": input.library_ids}).to_string();
+    let action = json!({"action": if input.enabled { "permissions.enabled" } else { "permissions.disabled" }, "libraryIds": input.library_ids, "allLibraries": input.all_libraries}).to_string();
     audit(&mut tx, &actor.user.id, &id, &action).await?;
     tx.commit().await.map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
@@ -581,6 +628,9 @@ async fn uninstall(
     )
     .await?;
     tx.commit().await.map_err(db)?;
+    crate::extension_storage::remove(&auth.store, &id)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "plugin_storage_failed"))?;
     Ok(StatusCode::NO_CONTENT)
 }
 #[derive(Deserialize)]
@@ -686,7 +736,7 @@ async fn works(
     if search.q.len() > 120 || search.offset > 1_000_000 {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_search"));
     }
-    let rows: Vec<(String,String,String)> = query_as("SELECT w.id,w.title,w.library_id FROM inventory_works w JOIN extension_grants g ON g.library_id=w.library_id JOIN extensions e ON e.id=g.extension_id JOIN extension_publishers p ON p.id=e.publisher_id JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE e.id=? AND e.enabled=1 AND p.active=1 AND l.enabled=1 AND n.status!='revoked' AND LOWER(w.title) LIKE ? ORDER BY w.title,w.id LIMIT 50 OFFSET ?")
+    let rows: Vec<(String,String,String)> = query_as("SELECT w.id,w.title,w.library_id FROM inventory_works w JOIN extensions e ON (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=w.library_id)) JOIN extension_publishers p ON p.id=e.publisher_id JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE e.id=? AND e.enabled=1 AND p.active=1 AND l.enabled=1 AND n.status!='revoked' AND LOWER(w.title) LIKE ? ORDER BY w.title,w.id LIMIT 50 OFFSET ?")
         .bind(id).bind(format!("%{}%",search.q.to_lowercase())).bind(i64::from(search.offset)).fetch_all(auth.store.pool()).await.map_err(db)?;
     Ok(Json(
         json!({"items":rows.into_iter().map(|(id,title,library)| json!({"id":id,"title":title,"libraryId":library})).collect::<Vec<_>>(),"offset":search.offset,"limit":50}),
@@ -709,7 +759,7 @@ async fn permitted(
         return Ok(count == 1);
     }
     admin(auth, headers, false).await?;
-    let count: i64 = query_scalar("SELECT COUNT(*) FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id JOIN extension_grants g ON g.extension_id=e.id JOIN libraries l ON l.id=g.library_id JOIN media_nodes n ON n.id=l.node_id WHERE e.id=? AND g.library_id=? AND e.generation=? AND e.enabled=1 AND p.active=1 AND l.enabled=1 AND n.status!='revoked'")
+    let count: i64 = query_scalar("SELECT COUNT(*) FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id JOIN libraries l ON (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id)) JOIN media_nodes n ON n.id=l.node_id WHERE e.id=? AND l.id=? AND e.generation=? AND e.enabled=1 AND p.active=1 AND l.enabled=1 AND n.status!='revoked'")
         .bind(id).bind(library).bind(generation).fetch_one(auth.store.pool()).await.map_err(db)?;
     Ok(count == 1)
 }
@@ -761,7 +811,9 @@ async fn run(
     payload = metadata_input_with_settings(payload, settings);
     let operation = input.operation.clone();
     let invocation = crate::extension_runtime::Invocation {
-        wasm: package.wasm,
+        wasm: crate::extension_storage::wasm(&auth.store, &package)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "plugin_storage_failed"))?,
         input: ExtensionRequest {
             api_version: 1,
             operation: operation.clone(),

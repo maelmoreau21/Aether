@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "source": "https://github.com/cedev-1/jellyfin-avatars",
+  "folders": 7,
+  "importedFolder": "sonny",
+  "normalizedImages": 26,
+  "backend": "real Core / temporary SQLite / real HTTPS",
+  "command": "MEDIA_TEST_AVATAR_LIVE=1 cargo test --locked -p media-poc --lib extensions::collections::tests::imports_normalized -j 1 -- --nocapture --test-threads=1"
+}

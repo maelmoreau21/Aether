@@ -1,5 +1,23 @@
 # MEMORY.md — État et décisions Aether
 
+## 23 octobre 2026 — Montages médias sans préfixe imposé
+
+- Sans MEDIA_LIBRARY_ROOT, découverte des montages de dossiers Linux via /proc/self/mountinfo ; exclusion des chemins système, /app, /data et /backups. Racine explicite toujours prioritaire.
+- Administration et scans valident chaque dossier dans ces racines ; aucun scan automatique ni ouverture de la racine système.
+- Suppression de MEDIA_LIBRARY_ROOT par défaut dans l’image standalone et des deux variables redondantes dans Compose. MEDIA_WEB_DIST conserve sa valeur image.
+- Test unitaire de parsing des montages réussi sous Windows ; déploiement Docker/NAS non exécuté. Documentation DEPLOYMENT_DOCKER.md mise à jour.
+
+
+## 23 octobre 2026 — Clé de sauvegarde MEDIA_BACKUP_KEY rendue optionnelle
+
+- **Suppression du blocage et de l'obligation de MEDIA_BACKUP_KEY** :
+  - Clé interne par défaut configurée dans `crates/core/src/backup_bundle.rs` (`DEFAULT_BACKUP_KEY`) et réexportée dans `admin_backups.rs`.
+  - Si `MEDIA_BACKUP_KEY` est absente de l'environnement ou vide, le système utilise automatiquement la clé par défaut : les sauvegardes manuelles, le téléchargement et les sauvegardes planifiées fonctionnent immédiatement sans exiger la saisie ou la configuration d'une clé de 64 caractères hexadécimaux.
+  - La console Web d'administration (`AdminMaintenance.svelte`) ne bloque plus l'écran des sauvegardes avec le message d'indisponibilité demandant `MEDIA_BACKUP_KEY`. Les boutons et la planification sont directement opérationnels.
+  - Les commandes CLI `media-backup --full` et `media-recover` fonctionnent désormais directement sans variable `MEDIA_BACKUP_KEY` requise (tout en conservant la possibilité de spécifier une clé personnalisée si souhaité).
+  - Tests unitaires et d'intégration validés : `cargo test -p media-poc --test admin_backups --test backup_bundle`, tests unitaires `media-backup` / `media-recover` et `pnpm --filter web check` sans aucune erreur.
+
+
 ## 23 octobre 2026 — Correction du test E2E playlists (mixed_playlists)
 
 - **Correction du sélecteur d’onglet Dépôts dans scripts/browser-playlists.cjs** :
@@ -3417,3 +3435,40 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
 - Ancien scénario test-admin-ui interrompu sur le lien #account des préférences
   personnelles ; ne pas le compter comme validé. Captures administration clair
   partielles dans docs/evidence/2026-10-23/admin-compact/ ; scénario ciblé réussi.
+
+## 23 octobre 2026 — Plugins sans approbation, configuration et collections
+
+- Demande utilisateur révisée : aucun clic d’approbation pour les dépôts/auteurs.
+  Clé du catalogue utilisée pour vérifier signatures/empreintes, identité interne
+  par digest sans réservation d’un nom d’auteur. Anciennes routes de clé conservées
+  uniquement pour compatibilité des outils ; import avec publicKey autonome.
+- UI paramètres dédiée, activation par interrupteur, schéma générique, outils de
+  test repliés. Fournisseurs : Toutes les bibliothèques par défaut et périmètre
+  durable allLibraries ; anciens périmètres explicites conservés. Avatars : aucune
+  case bibliothèque. Correction visuelle des vieux textes sans altérer le signé.
+- Générateur PowerShell : stdout natif UTF-8 explicite, options Cargo sans échappement
+  dépendant de la console, permissions déclarées par chaque plugin. Huit paquets
+  reconstruits/signés/vérifiés ; aucune clé privée dans Git, aucun push.
+- Collections GitHub importées par Core, images PNG/JPEG/WebP normalisées 256×256,
+  stockage transactionnel borné ; galerie authentifiée et activation vérifiée.
+  Vrai HTTPS GitHub : 7 dossiers, 26 avatars sonny importés en SQLite temporaire.
+- Modèle indépendant Aether-Plugins/templates/metadata-provider compilé et exécuté
+  par le worker Core (149077 octets), configuration personnalisée retenue. Guide
+  CREATING_PLUGINS.md : créer un fournisseur sans modifier/recompiler Aether.
+- 113 tests Web, check/lint/build ; 41 tests workspace plugins ; 10 tests Core
+  extensions et navigateurs Core réels installation/exécution/désactivation et
+  dépôt/version/suppression réussis. UI production simulée clair/sombre 1440/390,
+  champs mobile lisibles ; preuves docs/evidence/2026-10-23/plugin-settings/.
+- Dernier complément demandé : fichiers installés sous data/plugins/<id> ;
+  package.json, manifest.json, module.wasm ; lecture Wasm confinée + SHA-256,
+  export des anciennes installations à l’ouverture du serveur, nettoyage connu
+  à la désinstallation. Snapshot/paramètres/droits conservés en base. Validation
+  complémentaire : test stockage/reprise/altération/suppression réussi, dix tests
+  Core extensions relancés avec lecture des modules sur disque réussis ; Clippy
+  all-targets strict réussi. Dockerfile fixe MEDIA_PLUGINS_PATH=/data/plugins.
+- Ajout demandé ensuite : upload local d’une collection de fichiers images en
+  multipart (nom + images répétées), mêmes bornes normalisation/atomicité que les
+  téléchargements serveur. Axum multipart activé. Test Core >400 Ko normalisé
+  256×256 et refus anonyme/CSRF réussi ; UI upload multipart et sélection dans
+  galerie profil réussis avec API simulée. encoding_rs verrouillé à 0.8.35 pour
+  éviter d’ajouter une exigence Rust 1.88 au seul support multipart.

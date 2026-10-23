@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "storage": "plugins directory next to SQLite database; default data/plugins",
+  "storageChecks": [
+    "package, manifest and Wasm files",
+    "bounded confined reads",
+    "Wasm hash tampering rejected",
+    "DB-only installations materialized",
+    "restart and known artifact removal"
+  ],
+  "uploadChecks": [
+    "real Core multipart request above 400 kB",
+    "normalized local PNG 256x256",
+    "anonymous rejected",
+    "CSRF rejected"
+  ],
+  "commands": [
+    "cargo test --locked -p media-poc --lib extension_storage -j 1 -- --test-threads=1",
+    "cargo test --locked -p media-poc --lib extensions::collections -j 1 -- --test-threads=1",
+    "cargo clippy --locked --all-targets -j 1 -- -D warnings"
+  ],
+  "scope": "Temporary SQLite and synthetic images; no NAS or Docker deployment."
+}

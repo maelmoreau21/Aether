@@ -115,5 +115,6 @@ pub async fn import(store: &IdentityStore, root: &Path) -> io::Result<usize> {
         }
         tx.commit().await.map_err(io::Error::other)?;
     }
+    crate::extension_storage::sync_installed(store).await?;
     Ok(imported)
 }

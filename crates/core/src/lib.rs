@@ -25,6 +25,7 @@ pub mod identity;
 pub mod inventory;
 pub mod libraries;
 pub mod library_options;
+mod local_mounts;
 pub mod media;
 pub mod music;
 pub mod node;
@@ -511,3 +512,5 @@ mod tests {
         );
     }
 }
+
+pub mod extension_storage;

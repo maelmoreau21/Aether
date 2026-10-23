@@ -270,7 +270,9 @@ pub(super) async fn avatar_operation(
     authorize_operation(&package.manifest, &input.operation)?;
     // Avatar operations receive no library data and no network capability.
     let invocation = crate::extension_runtime::Invocation::new(
-        package.wasm,
+        crate::extension_storage::wasm(&auth.store, &package)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "plugin_storage_failed"))?,
         ExtensionRequest {
             api_version: 1,
             operation: input.operation,

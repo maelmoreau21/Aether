@@ -37,14 +37,10 @@ try {
   await panel.getByRole('heading',{name:'Repository browser fixture',exact:true}).waitFor();
   const versions=panel.getByLabel('Version de Repository browser fixture',{exact:true});
   assert.equal(await versions.inputValue(),'1.1.0');
-  assert.equal(await panel.getByRole('button',{name:'Installer Repository browser fixture',exact:true}).isDisabled(),true);
+  assert.equal(await panel.getByRole('button',{name:'Installer Repository browser fixture',exact:true}).isDisabled(),false);
   await versions.selectOption('1.0.0');
-  await panel.getByText('Vérifier l’éditeur repository-browser',{exact:true}).click();
-  await panel.getByRole('button',{name:'J’ai vérifié cette clé : approuver',exact:true}).click();
-  await panel.getByText('Éditeur approuvé.',{exact:true}).waitFor();
-  await page.screenshot({path:`${output}/catalogue-desktop.png`,fullPage:true});
   await panel.getByRole('button',{name:'Installer Repository browser fixture',exact:true}).click();
-  await panel.getByText('Extension installée. Configurez ses paramètres et ses bibliothèques puis activez-la. Aucun redémarrage nécessaire.',{exact:true}).waitFor();
+  await panel.getByText('Extension installée. Configurez-la puis activez-la.',{exact:true}).waitFor();
   const installed=await (await page.request.get(`${origin}/api/v1/admin/extensions`)).json();
   assert.equal(installed.extensions[0].manifest.version,'1.0.0');
   assert.equal(installed.extensions[0].enabled,false);
@@ -65,8 +61,8 @@ try {
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:`${output}/installed-mobile.png`,fullPage:true});
   assert.deepEqual(errors,[]);
-  await writeFile(`${output}/report.json`,JSON.stringify({passed:true,browser:browser.version(),backend:'real Core / temporary SQLite',transport:'HTTPS documents injected only under cfg(test); no public repository claimed',checks:['private URL rejected','repository added and persisted','latest version selected','older version explicitly chosen','publisher trust required','signed package installed disabled','repository refresh and removal preserve installed extension','390px layout'],jsErrors:errors},null,2));
-  console.log('Repository browser flow passed: add, catalogue, version selection, publisher trust, signed install, persistence, refresh/remove and mobile layout.');
+  await writeFile(`${output}/report.json`,JSON.stringify({passed:true,browser:browser.version(),backend:'real Core / temporary SQLite',transport:'HTTPS documents injected only under cfg(test); no public repository claimed',checks:['private URL rejected','repository added and persisted','latest version selected','older version explicitly chosen','no publisher approval required','signed package installed disabled','repository refresh and removal preserve installed extension','390px layout'],jsErrors:errors},null,2));
+  console.log('Repository browser flow passed: add, catalogue, version selection, no approval, signed install, persistence, refresh/remove and mobile layout.');
 } catch(error) {
   await page.screenshot({path:`${output}/failure.png`,fullPage:true});
   console.log(await page.locator('#extensions-section').innerText());

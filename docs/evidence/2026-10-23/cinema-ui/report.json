@@ -1,0 +1,526 @@
+{
+  "browser": "155.0.8059.86",
+  "scope": "Production Svelte UI, intercepted APIs and synthetic test SVGs, no NAS or physical device proof",
+  "checks": [
+    "overflow",
+    "page errors",
+    "theme switching light-dark-system",
+    "music grouping",
+    "season switching",
+    "landscape and reduced motion"
+  ],
+  "screens": [
+    {
+      "theme": "light",
+      "width": 390,
+      "path": "",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "path": "films/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "path": "films/?work=film-0",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "path": "series/?work=film-0s",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "path": "music/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "path": "lists/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "path": "settings/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "path": "admin/libraries/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 768,
+      "path": "",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 768,
+      "path": "films/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 768,
+      "path": "films/?work=film-0",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 768,
+      "path": "series/?work=film-0s",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 768,
+      "path": "music/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 768,
+      "path": "lists/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 768,
+      "path": "settings/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 768,
+      "path": "admin/libraries/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 1440,
+      "path": "",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 1440,
+      "path": "films/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 1440,
+      "path": "films/?work=film-0",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 1440,
+      "path": "series/?work=film-0s",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 1440,
+      "path": "music/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 1440,
+      "path": "lists/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 1440,
+      "path": "settings/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 1440,
+      "path": "admin/libraries/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 1920,
+      "path": "",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 1920,
+      "path": "films/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 1920,
+      "path": "films/?work=film-0",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 1920,
+      "path": "series/?work=film-0s",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "light",
+      "width": 1920,
+      "path": "music/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 1920,
+      "path": "lists/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 1920,
+      "path": "settings/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "light",
+      "width": 1920,
+      "path": "admin/libraries/",
+      "overflow": false,
+      "bg": "rgb(239, 236, 230)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "path": "",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "path": "films/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "path": "films/?work=film-0",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "path": "series/?work=film-0s",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "path": "music/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "path": "lists/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "path": "settings/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "path": "admin/libraries/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 768,
+      "path": "",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 768,
+      "path": "films/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 768,
+      "path": "films/?work=film-0",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 768,
+      "path": "series/?work=film-0s",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 768,
+      "path": "music/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 768,
+      "path": "lists/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 768,
+      "path": "settings/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 768,
+      "path": "admin/libraries/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "path": "",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "path": "films/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "path": "films/?work=film-0",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "path": "series/?work=film-0s",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "path": "music/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "path": "lists/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "path": "settings/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "path": "admin/libraries/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 1920,
+      "path": "",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 1920,
+      "path": "films/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 1920,
+      "path": "films/?work=film-0",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 1920,
+      "path": "series/?work=film-0s",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": "2 / 3"
+    },
+    {
+      "theme": "dark",
+      "width": 1920,
+      "path": "music/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 1920,
+      "path": "lists/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 1920,
+      "path": "settings/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    },
+    {
+      "theme": "dark",
+      "width": 1920,
+      "path": "admin/libraries/",
+      "overflow": false,
+      "bg": "rgb(9, 9, 11)",
+      "poster": null
+    }
+  ]
+}

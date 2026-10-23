@@ -1,0 +1,1 @@
+(()=>{try{const mode=localStorage.getItem('media_theme');const theme=mode==='light'||mode==='dark'?mode:matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=theme;}catch{}})();

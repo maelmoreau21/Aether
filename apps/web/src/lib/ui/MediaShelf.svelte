@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { onMount, type Snippet } from 'svelte';
   import Icon from './Icon.svelte';
 
   let {
@@ -7,6 +7,8 @@
     count,
     viewAllHref,
     viewAllLabel = 'Tout voir →',
+    onAction,
+    actionLabel,
     layout = 'row',
     children
   }: {
@@ -14,6 +16,8 @@
     count?: number;
     viewAllHref?: string;
     viewAllLabel?: string;
+    onAction?: () => void;
+    actionLabel?: string;
     layout?: 'row' | 'grid';
     children: Snippet;
   } = $props();
@@ -28,12 +32,22 @@
     canScrollRight = track.scrollLeft + track.clientWidth < track.scrollWidth - 10;
   }
 
+  onMount(() => {
+    if (!track) return;
+    const resize = new ResizeObserver(updateScrollState);
+    resize.observe(track);
+    const content = new MutationObserver(updateScrollState);
+    content.observe(track,{childList:true});
+    updateScrollState();
+    return () => { resize.disconnect(); content.disconnect(); };
+  });
+
   function scroll(direction: 'left' | 'right') {
     if (!track) return;
     const distance = track.clientWidth * 0.75;
     track.scrollBy({
       left: direction === 'left' ? -distance : distance,
-      behavior: 'smooth'
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
     });
   }
 </script>
@@ -48,20 +62,26 @@
     </div>
 
     <div class="actions-group">
+      {#if onAction && actionLabel}
+        <button type="button" class="shelf-action-btn" onclick={onAction}>
+          <Icon name="refresh" size={13} />
+          <span>{actionLabel}</span>
+        </button>
+      {/if}
+
       {#if viewAllHref}
         <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- viewAllHref already resolved by caller -->
         <a class="view-all-link" href={viewAllHref}>{viewAllLabel}</a>
       {/if}
 
       {#if layout === 'row'}
-        <div class="carousel-nav" aria-hidden="true">
+        <div class="carousel-nav">
           <button
             type="button"
             class="nav-arrow"
             disabled={!canScrollLeft}
             onclick={() => scroll('left')}
             aria-label="Faire défiler vers la gauche"
-            tabindex="-1"
           >
             <Icon name="chevron-left" size={18} />
           </button>
@@ -71,7 +91,6 @@
             disabled={!canScrollRight}
             onclick={() => scroll('right')}
             aria-label="Faire défiler vers la droite"
-            tabindex="-1"
           >
             <Icon name="chevron-right" size={18} />
           </button>
@@ -93,7 +112,7 @@
 
 <style>
   .shelf-container {
-    margin: 40px 0;
+    margin: 0;
     position: relative;
   }
 
@@ -112,7 +131,7 @@
   }
 
   h2 {
-    font-size: clamp(20px, 2.2vw, 26px);
+    font-size: clamp(20px, 2.2vw, 24px);
     font-weight: 650;
     letter-spacing: -0.03em;
     color: var(--color-text-bright);
@@ -132,6 +151,28 @@
     display: flex;
     align-items: center;
     gap: 16px;
+  }
+
+  .shelf-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    color: var(--color-accent);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .shelf-action-btn:hover {
+    background: var(--color-accent-soft);
+    border-color: var(--color-accent);
+    color: var(--color-accent-hover);
+    transform: translateY(-1px);
   }
 
   .view-all-link {
@@ -158,8 +199,8 @@
   .nav-arrow {
     display: grid;
     place-items: center;
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid var(--color-line);
@@ -169,7 +210,7 @@
 
   .nav-arrow:hover:not(:disabled) {
     background: var(--color-accent-soft);
-    border-color: rgba(167, 139, 250, 0.35);
+    border-color: var(--color-accent-soft);
     color: var(--color-accent-hover);
     transform: scale(1.08);
   }
@@ -182,7 +223,7 @@
   /* Carousel Track */
   .shelf-track.carousel {
     display: flex;
-    gap: 18px;
+    gap: 16px;
     overflow-x: auto;
     scroll-behavior: smooth;
     padding: 8px 4px 16px;
@@ -196,21 +237,21 @@
   }
 
   .shelf-track.carousel :global(> *) {
-    flex: 0 0 clamp(160px, 16vw, 220px);
+    flex: 0 0 clamp(160px, 13vw, 190px);
     scroll-snap-align: start;
   }
 
   /* Grid Track */
   .shelf-track.grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(clamp(160px, 16vw, 220px), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(clamp(160px, 13vw, 190px), 1fr));
     gap: 22px 18px;
     padding: 8px 0;
   }
 
   @media (max-width: 640px) {
     .shelf-container {
-      margin: 28px 0;
+      margin: 0;
     }
 
     .carousel-nav {

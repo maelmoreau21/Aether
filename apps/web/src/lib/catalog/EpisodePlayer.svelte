@@ -100,14 +100,13 @@
     onselect?.();
     let id=selected;
     if(id==='auto' && versionIds.length === 1) id = versionIds[0];
-    else if(id==='auto'){
+    if (onlaunch) { await onlaunch(episode, id); return; }
+    if(id==='auto'){
       const candidates=await fetchMediaDescriptors(versionIds,new AbortController().signal);
       const probe=document.createElement('video');
       id=bestVersion(candidates,mime=>probe.canPlayType(mime))?.id??versionIds[0]??'';
     }
-    if (onlaunch) {
-      await onlaunch(episode, id);
-    } else {
+    {
       await tick();
       const item = await revalidateMediaDescriptor(id);
       immersive?.open(item);

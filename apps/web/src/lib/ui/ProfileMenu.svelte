@@ -259,7 +259,7 @@
     min-height: 44px;
     padding: 10px 12px;
     border: 0;
-    border-radius: 8px;
+    border-radius:var(--radius-md);
     background: transparent;
     color: var(--color-text);
     font-size: 12px;

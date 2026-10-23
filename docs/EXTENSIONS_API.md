@@ -1,5 +1,10 @@
 # Extensions API v1 — premier parcours local
 
+> Mise à jour du 23 octobre : aucune approbation d’éditeur ou de dépôt n’est requise.
+> Les signatures restent vérifiées avec la clé du catalogue. Configuration dédiée,
+> Toutes les bibliothèques et import d’avatars : [contrat actuel](PLUGIN_SETTINGS_AND_COLLECTIONS.md).
+> Les étapes de confiance explicite historiques ci-dessous sont remplacées par ce contrat.
+
 Les dépôts HTTPS et l’installation depuis Catalogue sont désormais décrits dans
 [Dépôts et catalogue](EXTENSION_REPOSITORIES.md). Ils réutilisent les signatures,
 la confiance explicite et l’activation séparée du parcours local ci-dessous.
@@ -45,9 +50,10 @@ tuple `["media-extension-package-v1", manifest, publisherId, sha256]` avec les
 champs du manifeste dans l'ordre du type Rust. Utiliser `Package::signing_bytes`
 ou l'outil de paquetage; il ne s'agit pas d'une canonicalisation JSON universelle.
 Le digest est recalculé sur les octets Wasm avant vérification de signature.
-Une clé publique doit être approuvée par un administrateur via un canal externe
-de confiance. Aucun éditeur préapprouvé, aucune clé privée dans le serveur.
-Rotation : nouvel identifiant d'éditeur. Révocation : irréversible pour cet ID.
+La clé publique du catalogue (ou publicKey à l’import) vérifie la signature sans
+approbation manuelle. Son digest identifie la clé côté Core, indépendamment du
+nom d’auteur. Aucune clé privée dans le serveur. Les anciennes routes de gestion
+de clés sont conservées pour compatibilité des outils existants.
 
 Le paquet est conservé en base applicative, hors médias; installation atomique
 par insertion et unicité. Installation et activation restent séparées.

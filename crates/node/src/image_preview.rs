@@ -14,8 +14,8 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-const CACHE_BYTES: usize = 8 * 1024 * 1024;
-const CACHE_ENTRIES: usize = 128;
+const CACHE_BYTES: usize = 64 * 1024 * 1024;
+const CACHE_ENTRIES: usize = 2048;
 const MAX_ENCODED: usize = 2 * 1024 * 1024;
 type Key = (PathBuf, u64, String, u32);
 #[derive(Clone)]
@@ -88,6 +88,67 @@ fn encode(image: &image::DynamicImage) -> io::Result<(Vec<u8>, &'static str)> {
     Ok((encoded, mime))
 }
 
+fn disk_cache_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("MEDIA_IMAGE_CACHE_DIR") {
+        PathBuf::from(dir)
+    } else {
+        std::env::temp_dir().join("media-image-cache")
+    }
+}
+
+fn disk_cache_path(key: &Key) -> PathBuf {
+    let payload = format!("{}:{}:{}:{}", key.0.to_string_lossy(), key.1, key.2, key.3);
+    let hash = media_contracts::protocol::sha256_hex(payload.as_bytes());
+    disk_cache_dir().join(format!("{hash}.img"))
+}
+
+fn read_disk_cache(key: &Key) -> Option<Preview> {
+    let path = disk_cache_path(key);
+    let bytes = std::fs::read(&path).ok()?;
+    if bytes.len() < 2 {
+        return None;
+    }
+    let mime = match bytes[0] {
+        1 => "image/jpeg",
+        2 => "image/png",
+        _ => return None,
+    };
+    let source_mime = match bytes[1] {
+        1 => "image/jpeg",
+        2 => "image/png",
+        3 => "image/webp",
+        _ => return None,
+    };
+    Some(Preview {
+        bytes: Bytes::from(bytes[2..].to_vec()),
+        mime,
+        source_mime,
+    })
+}
+
+fn write_disk_cache(key: &Key, preview: &Preview) {
+    let dir = disk_cache_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let target = disk_cache_path(key);
+    let temp = dir.join(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
+    let mime_byte = match preview.mime {
+        "image/png" => 2u8,
+        _ => 1u8,
+    };
+    let source_mime_byte = match preview.source_mime {
+        "image/png" => 2u8,
+        "image/webp" => 3u8,
+        _ => 1u8,
+    };
+    let mut file_bytes = Vec::with_capacity(2 + preview.bytes.len());
+    file_bytes.push(mime_byte);
+    file_bytes.push(source_mime_byte);
+    file_bytes.extend_from_slice(&preview.bytes);
+    if std::fs::write(&temp, file_bytes).is_ok() {
+        let _ = std::fs::rename(temp, target);
+    }
+}
+
 pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Preview> {
     if ![320, 640, 1280].contains(&width) {
         return Err(invalid());
@@ -106,12 +167,20 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
     if let Some(value) = cached(&key) {
         return Ok(value);
     }
+    if let Some(disk_value) = read_disk_cache(&key) {
+        remember(key, disk_value.clone());
+        return Ok(disk_value);
+    }
     // Share the decoder budget with scans and original-image validation. The
     // permit is held by the blocking job even if its HTTP caller is cancelled.
     let permit = images::VALIDATION.acquire().await.map_err(|_| invalid())?;
     opened.verify_unchanged_sync()?;
     if let Some(value) = cached(&key) {
         return Ok(value);
+    }
+    if let Some(disk_value) = read_disk_cache(&key) {
+        remember(key, disk_value.clone());
+        return Ok(disk_value);
     }
     let mut source = opened.try_clone()?;
     let result = tokio::task::spawn_blocking(move || {
@@ -165,6 +234,7 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
     .await
     .map_err(|_| invalid())??;
     images::remember_validated_image(key.0.clone(), key.1, key.2.clone(), result.source_mime);
+    write_disk_cache(&key, &result);
     remember(key, result.clone());
     Ok(result)
 }

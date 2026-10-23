@@ -1,5 +1,275 @@
 # MEMORY.md — État et décisions Aether
 
+## 24 octobre 2026 — CI scanner, fermeture après choix audio validé
+
+- La boucle de réouverture FR/EN attend désormais la sélection Svelte
+  (`aria-checked=true`, contrôle disponible) avant de fermer le lecteur.
+  La préférence serveur seule pouvait déjà correspondre à un choix antérieur
+  et ne prouvait pas la fin de la transaction audio courante.
+- Test `cargo test --locked -p media-poc --test browser_scanner -j 1 --
+  --ignored --nocapture --test-threads=1` réussi localement : MP4/MKV, reprise
+  FR/EN, PCM et redémarrage Core. Rapport : target/ci-scanner-reopen/.
+  Aucun timeout augmenté ; GitHub Linux non relancé, aucun push.
+
+## 23 octobre 2026 — Régression CI playlists, formulaire de dépôt replié
+
+- `browser-playlists.cjs` ouvre « + Nouveau dépôt » après l'onglet Dépôts
+  avant d'attendre Adresse du dépôt. Le formulaire est replié par défaut ;
+  aucune modification produit ni augmentation de timeout.
+- `cargo test --locked -p media-poc --lib product_tests::mixed_playlists -j 1
+  -- --test-threads=1` réussi avec `MEDIA_TEST_PLAYLIST_BROWSER=1` et
+  `MEDIA_WEB_DIST=apps/web/build` résolu : vrai Core/SQLite/Chrome local,
+  partage/droits, lecture persistante, dépôts, révocation et PCM réussis.
+  Rapport local : `target/ci-playlists-repository/report.json`.
+- Syntaxe Node et diff vérifiés ; pas de push ni relance GitHub Actions.
+
+## 23 octobre 2026 — Recherche streaming Rust et continuité VF/VO
+
+- Cache de préparation Node : ouverture confinée hors verrou global, lease
+  conservée pendant ouverture/streaming, worker libéré au hit après attente.
+  Microbenchmark Windows debug, 8 sessions/512 premiers blocs de 64 Kio :
+  médiane 255,9 → 101,7 ms sur trois alternances ; pas une mesure de décodage.
+- Changement audio indépendant : ancienne vidéo/piste maintenue pendant la
+  préparation du candidat ; commit aligné à la position courante, pause manuelle
+  et erreurs préservées. Suivi des fenêtres actif pendant chargement du candidat.
+- Blocage long reproduit : Chrome peut déclarer readyState=4 après réouverture
+  avec buffered vide/ancien. Accepter HAVE_ENOUGH_DATA hors seek supprime notre
+  attente artificielle ; réserve conservée pour readyState=3, aucun retry ajouté.
+- Retard audio contrôlé 300 ms : trou vidéo médian 343,3 → 66,5 ms, silence PCM
+  346,1 → 9,2 ms ; délai de la nouvelle langue toujours environ 360 ms.
+- 50 ms observés sur fixtures chaudes 320×180 dans le moteur isolé : pas de
+  promesse NAS/1080p/application complète. Long 1080p/12 fps, 336 Mio : huit
+  ouvertures/seeks par stratégie et seize switches passent après correctif ;
+  reprise segmentée médiane 122,7 ms, PCM seek p95 234,4 ms, objectifs ouverts.
+- Méthode, preuves et limites : docs/STREAMING_PERFORMANCE.md. Aucun réencodage,
+  changement d'architecture, push, déploiement ou modification de médias privés.
+- Validation locale : 136 tests Web, check/lint/build, 49 tests Node, cinq
+  intégrations Core, microbenchmark cache, Clippy workspace/all-targets strict
+  et format réussis. Mesures Core/SQLite/Svelte : premier clic → frame
+  277–296 ms, réouvertures usuelles 57–85 ms sur petites fixtures (passage
+  précédent 144–194 / 44–67 ms, forte variabilité) ; repli
+  après erreur réseau vérifié. Son physique/CPU-RSS Rust par session non mesurés.
+
+## 23 octobre 2026 — Optimisation du chargement instantané de l'accueil et des images (style Jellyfin)
+
+- **Chargement instantané du catalogue et affichage immédiat de l'accueil** :
+  - Dans `apps/web/src/lib/catalog/page-cache.ts` :
+    - Persistance du cache de catalogue dans `sessionStorage` (avec préfixe isolé `media_catalog_cache_v1_`) en complément du cache mémoire.
+    - `cachedCatalog` restitue immédiatement les données en cache (mode Stale-While-Revalidate), permettant un premier rendu immédiat sans squelette bloquant à chaque navigation ou réouverture.
+    - Éviction et invalidation synchronisées entre mémoire et `sessionStorage` (changement de compte, déconnexion, révocation d'accès, quotas).
+  - Dans `apps/web/src/lib/catalog/Catalog.svelte` :
+    - Préservation des films et séries en mémoire si des entrées en cache sont disponibles : `films` et `series` ne sont plus réinitialisés à vide avant vérification du cache, évitant le clignotement ou la disparition des titres.
+  - Dans `apps/web/src/routes/+layout.svelte` :
+    - Déclenchement de `preloadCatalog('home')` dès la vérification de la session, préchargeant l'accueil en parallèle de l'hydratation des préférences.
+
+- **Performances et cache des images inspirés de Jellyfin** :
+  - **Parallélisme de décodage côté Media Node (`crates/node/src/images.rs`)** :
+    - Augmentation du sémaphore de validation d'images `VALIDATION` de 1 à 8 permis simultanés, éliminant le goulot d'étranglement qui forçait toutes les miniatures de la page d'accueil à être redimensionnées séquentiellement une par une.
+  - **Cache disque persistant des miniatures générées (`crates/node/src/image_preview.rs`)** :
+    - Augmentation du cache mémoire LRU de 8 Mo (128 entrées) à 64 Mo (2048 entrées).
+    - Mise en place d'un cache sur disque persistant (`MEDIA_IMAGE_CACHE_DIR` ou répertoire temporaire système `media-image-cache`) basé sur l'empreinte SHA-256 du chemin canonique, de la taille, de la date de modification et de la largeur cible.
+    - Écriture atomique (fichier temporaire puis renommage) et relecture directe en ~0.1 ms sans réencodage CPU lors des redémarrages ou après éviction mémoire.
+  - **Vérification anticipée If-None-Match 304 (`crates/node/src/lib.rs`)** :
+    - Vérification du header `If-None-Match` correspondant à l'ETag de la miniature avant tout appel à `generate`, renvoyant immédiatement `304 Not Modified` sans chargement ni allocation d'image.
+  - **Affichage instantané des affiches dans le navigateur (`apps/web/src/lib/catalog/image-url.ts`, `Poster.svelte`, `HeroBanner.svelte`, `CatalogHome.svelte`)** :
+    - Maintien d'un ensemble en mémoire des URLs d'images déjà chargées (`isImageLoaded`, `markImageLoaded`).
+    - Action `checkLoaded` sur `<img>` détectant `node.complete && node.naturalWidth > 0` pour passer immédiatement `loadedUrl` à l'URL cible sans attendre l'événement `onload` si le navigateur a déjà l'image en cache.
+    - Attribut `eager={index < 6}` sur les premières affiches visibles de la page d'accueil (`CatalogHome.svelte`).
+- **Validations réelles exécutées** :
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web test` : 125 tests unitaires passés avec succès.
+  - `npm --prefix apps/web run lint` : validé sans erreur (ESLint).
+  - `npm --prefix apps/web run build` : build statique de production SvelteKit réussi.
+  - `cargo fmt --check` : 0 écart de formatage.
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test -p media-node` : 48 unit tests + 3 integration tests passés avec succès.
+  - `cargo test --locked -p media-poc --lib product_tests` : 6/6 tests de fonctionnalités produit passés avec succès.
+
+## 23 octobre 2026 — Navigation retour accueil sur le logo Aether (Paramètres et Administration)
+
+- **Gestion du retour à l'accueil via le logo Aether** :
+  - Dans `apps/web/src/lib/ui/Navbar.svelte` (utilisé dans les Paramètres personnels `/settings`) :
+    - Ajout du gestionnaire `navigateHome` avec appel direct à `goto(resolve('/'))` lors du clic sur le logo (`a.brand`) et le lien Accueil, avec support des touches modificatrices (Ctrl/Cmd).
+    - Ajout de l'infobulle accessible `title="Retour à l’accueil"` et du style `cursor: pointer`.
+  - Dans `apps/web/src/routes/admin/libraries/+page.svelte` (Administration du serveur / Paramètres système) :
+    - Ajout du logo Aether (`a.brand.admin-brand`) dans l'en-tête d'administration (`admin-header`), permettant également de revenir directement à l'accueil via un clic ou le lien de retour.
+- **Validations réelles exécutées** :
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web test` : 124 tests unitaires passés avec succès.
+  - `npm --prefix apps/web run lint` : 0 erreur.
+  - `npm --prefix apps/web run build` : build statique de production SvelteKit réussi.
+  - Test E2E Playwright de navigation validé (clic sur logo dans `/settings/` et dans `/admin/libraries/` redirigeant vers `/app/`).
+
+## 23 octobre 2026 — Page d'accueil orientée découverte et retrait des filtres
+
+- **Retrait du menu « Filtrer le catalogue » sur la page d'accueil** :
+  - Conditionnement de `<CatalogFilters />` dans `apps/web/src/lib/catalog/Catalog.svelte` pour n'apparaître que dans les sections de catalogue dédiées (`films`, `series`, `search`), et plus sur l'accueil (`home`) ni les paramètres.
+- **Dynamisation et enrichissement de la découverte sur la page d'accueil** :
+  - **HeroBanner interactif et tournant** : rotation dynamique parmi les œuvres avec visuel de fond (`artwork.backdrop`), évitant l'affichage statique permanent du tout premier média, et ajout du bouton « Surprenez-moi » permettant de changer de recommandation en vedette à la volée.
+  - **Rayon « Pépites au hasard · À découvrir »** : sélection aléatoire renouvelée à chaque session ou via le bouton d'action « Mélanger », invitant à redécouvrir des œuvres inattendues de la médiathèque.
+  - **Rayons thématiques et qualitatifs conditionnels** : ajout des étagères « Les mieux notés · Coups de cœur », « Grands classiques & Cinéma d'époque » (œuvres antérieures à 2010), « Séries à dévorer · Formats courts » (saisons $\le 2$), et rotation aléatoire des genres découverts à chaque visite.
+  - **Composant `MediaShelf` enrichi** : prise en charge d'un bouton d'action dédié (`onAction` / `actionLabel`) intégré à la barre d'en-tête de l'étagère.
+- **Validations réelles exécutées** :
+  - `pnpm --filter media-web check` : 0 erreur, 0 avertissement.
+  - `pnpm --filter media-web test` : 124 tests unitaires passés avec succès.
+  - `pnpm --filter media-web lint` : validé sans erreur.
+  - `pnpm --filter media-web build` : build statique de production SvelteKit réussi.
+  - `cargo fmt --check` et tests Rust `product_tests` (6/6 passés).
+
+## 23 octobre 2026 — Refonte de l’interface des extensions
+
+- Catalogue et installées en cartes à visuels CSS/SVG locaux ; catégories issues des manifestes/permissions, recherche combinée, fiche catalogue dédiée avec choix de version, compatibilité, provenance et accès. Aucune image distante ni extension produit ajoutée.
+- Dépôts en liste compacte avec formulaire « Nouveau dépôt » repliable ; fiche installée enrichie avec visuel, état, version et auteur. Contrats Core, réglages, activation et permissions conservés.
+- Validation : `npm run check` (0 erreur/0 avertissement), `npm run lint`, `npm run build`, `git diff --check` réussis. `cargo test --locked -p media-poc --test extensions browser_extension_installs_and_executes_real_rust_module -j 1 -- --ignored --nocapture --test-threads=1` : 1 passé (13,90 s).
+- Chrome desktop/mobile : catégories, recherche sans résultat, fiche catalogue, formulaire dépôt et absence de débordement ; cycle réel SQLite/Wasm signé activation/exécution/désactivation/désinstallation réussi. Captures sous `target/extensions-lifecycle-browser/`. Les entrées de démonstration du catalogue sont injectées par Playwright uniquement. Aucun dépôt distant, NAS ou déploiement vérifié.
+
+
+## 23 octobre 2026 — Correction du test E2E browser_scanner (reopenedAudio)
+
+- **Diagnostic de l'échec ligne 113 de scripts/browser-scanner.cjs** :
+  - La fixture synthétique representative (MKV/MP4) a une durée totale de 12 secondes.
+  - Durant les étapes de test précédentes (switches audio 1 & 2, simulation de panne réseau), la vidéo avançait en continu.
+  - Lors de la boucle reopenedAudio (fermeture puis réouverture avec internal-2 puis internal-1), le deuxième tour atteignait 11.95s / 12.0s (fin de média), déclenchant l'état ended (paused=true) et marquant automatiquement le média comme vu (watched=true, ratio >= 0.95), provoquant une interruption de lecture.
+  - De plus, le clic sur .hero-cta s'exécutait immédiatement après button.return sans attendre la fermeture effective du dialogue modal dialog#player.
+- **Correction appliquée dans scripts/browser-scanner.cjs** :
+  - Réinitialisation de la position de lecture (v.currentTime = 1) dans la boucle reopenedAudio si la vidéo dépasse 3 secondes pour ne jamais heurter la limite des 12 secondes.
+  - Attente explicite de la fermeture du dialogue (!document.querySelector('dialog#player')?.hasAttribute('open')) avant de cliquer sur .hero-cta pour rouvrir le lecteur.
+- **Validation** :
+  - Exécution complète réussie de cargo test --locked --test browser_scanner -- --ignored --nocapture (1 passed en 29.70s, switch internal-2 & internal-1 validés, 0 warning/erreur).
+
+## 23 octobre 2026 — Correction du lint Clippy items_after_test_module (local_mounts)
+
+- Correction de l'erreur clippy::items-after-test-module dans crates/core/src/local_mounts.rs : la fonction validate etait declaree apres le module de test mod tests.
+- Fonction validate repositionnee avant #[cfg(test)] mod tests.
+- Verifications validees : cargo clippy --locked --workspace --all-features --all-targets -- -D warnings, cargo fmt --check et suite complete de tests unitaires cargo test --locked --workspace --all-features --lib --bins.
+
+## 23 octobre 2026 — Montages médias sans préfixe imposé
+
+- Sans MEDIA_LIBRARY_ROOT, découverte des montages de dossiers Linux via /proc/self/mountinfo ; exclusion des chemins système, /app, /data et /backups. Racine explicite toujours prioritaire.
+- Administration et scans valident chaque dossier dans ces racines ; aucun scan automatique ni ouverture de la racine système.
+- Suppression de MEDIA_LIBRARY_ROOT par défaut dans l’image standalone et des deux variables redondantes dans Compose. MEDIA_WEB_DIST conserve sa valeur image.
+- Test unitaire de parsing des montages réussi sous Windows ; déploiement Docker/NAS non exécuté. Documentation DEPLOYMENT_DOCKER.md mise à jour.
+
+
+## 23 octobre 2026 — Clé de sauvegarde MEDIA_BACKUP_KEY rendue optionnelle
+
+- **Suppression du blocage et de l'obligation de MEDIA_BACKUP_KEY** :
+  - Clé interne par défaut configurée dans `crates/core/src/backup_bundle.rs` (`DEFAULT_BACKUP_KEY`) et réexportée dans `admin_backups.rs`.
+  - Si `MEDIA_BACKUP_KEY` est absente de l'environnement ou vide, le système utilise automatiquement la clé par défaut : les sauvegardes manuelles, le téléchargement et les sauvegardes planifiées fonctionnent immédiatement sans exiger la saisie ou la configuration d'une clé de 64 caractères hexadécimaux.
+  - La console Web d'administration (`AdminMaintenance.svelte`) ne bloque plus l'écran des sauvegardes avec le message d'indisponibilité demandant `MEDIA_BACKUP_KEY`. Les boutons et la planification sont directement opérationnels.
+  - Les commandes CLI `media-backup --full` et `media-recover` fonctionnent désormais directement sans variable `MEDIA_BACKUP_KEY` requise (tout en conservant la possibilité de spécifier une clé personnalisée si souhaité).
+  - Tests unitaires et d'intégration validés : `cargo test -p media-poc --test admin_backups --test backup_bundle`, tests unitaires `media-backup` / `media-recover` et `pnpm --filter web check` sans aucune erreur.
+
+
+## 23 octobre 2026 — Correction du test E2E playlists (mixed_playlists)
+
+- **Correction du sélecteur d’onglet Dépôts dans scripts/browser-playlists.cjs** :
+  - L’onglet « Dépôts » dans AdminExtensions.svelte possédait un attribut `aria-label="Dépôts"` qui surchargeait le nom accessible de l’élément (« Dépôts » au lieu de « Dépôts (X) »). Le sélecteur Playwright `getByRole('button', { name: /^Dépôts \(/ })` expirait donc par timeout de 30 secondes.
+  - Ajustement du sélecteur avec `{ name: /^Dépôts/ }` pour s'aligner sur la présence éventuelle de `aria-label` ou du compteur textuel, de manière cohérente avec les autres tests d'extensions.
+  - Validation exécutée avec succès : `cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1` (1 test passé en 3.31s, playlists mixtes, partage, intégrité audio et politique de partage vérifiés).
+
+## 23 octobre 2026 — Correction du test E2E browser_series
+
+- **Correction de la navigation d’administration dans scripts/browser-series.cjs** :
+  - Suite au passage de la barre de navigation d’administration dans un <dialog> tiroir fermé par défaut, les sélecteurs directs page.locator('a[href="#users-section"]') et page.locator('a[href="#libraries-section"]') échouaient par timeout de 30 secondes car les liens étaient masqués dans le dialogue fermé.
+  - Alignement avec les autres tests d’administration (scripts/browser-distributed.cjs, apps/web/scripts/test-admin-live.mjs) : ouverture du tiroir via .mobile-menu-toggle si aria-expanded === 'false' et ciblage scoped .admin-sidebar a[href$="#..."].
+  - Validation exécutée avec succès : cargo test --locked --test browser_series -- --ignored --nocapture (1 test passé en 63.33s sous Chrome headless, scan, lecture AV1/Opus, permissions 403, transitions inter-saisons et changement de compte vérifiés).
+
+## 23 octobre 2026 — Fluidité initiale et dépôt de plugins préconfiguré
+
+- Réserve contiguë 0,75 s avant play, prête immédiatement si déjà en cache ;
+  attente bornée/annulable, aucun play tardif. Opus segmenté : seconde fenêtre
+  préparée avec quatre secondes d’avance, sans job immédiat au démarrage.
+- Petite dérive audio : correction de vitesse ±2 % avec hauteur conservée,
+  zone neutre 40 ms, resynchronisation forte >250 ms. Test Chrome segmenté :
+  cinq play initiaux → un, aucun waiting avant 2 s, zéro image perdue ; preuve
+  courte synthétique, pas NAS/4K/endurance/sortie physique. Préparation audio
+  froide 974 ms : cible globale 200 ms non tenue.
+- Migration 0041 SQLite/PostgreSQL : dépôt Aether Plugins ajouté une seule fois,
+  supprimable durablement, snapshot initial vide et actualisation explicite.
+  Confiance éditeur/installation désactivée/droits/activation restent séparés.
+- Aether-Plugins : quatre paquets signés versionnés, manifeste/public key dans
+  repository/, Build-Repository.ps1 détecte les plugins et vérifie les sorties.
+  Clé privée hors Git, aucun fournisseur/API secret dans les paquets.
+- URL préparée : https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/main/repository/manifest.json
+  Publication sur main encore nécessaire ; aucun push ou déploiement effectué.
+- Administration : cartes compactes, configuration dépliable, catalogue par
+  défaut, suppression du double chargement initial. Core/SQLite/Chrome réel :
+  dépôt, signature/confiance/version/install/retrait/persistance réussis (4 tests).
+- 112 tests Web/check/lint/build, format et Clippy strict réussis ; cycle de vie
+  navigateur Core/SQLite/Rust-Wasm réel également réussi. Catalogue de quatre
+  manifestes signé vérifié en UI production clair/sombre 1440/390 sans erreur.
+- Détails, mesures, limites et preuves : docs/STARTUP_AND_PLUGIN_CATALOGUE.md.
+
+
+## 23 octobre 2026 — Latence catalogue/lecture et alias d'images
+
+- Préchargement catalogue au survol/focus des liens accueil/bibliothèques, URL
+  commune au cache d'affichage, reprise anticipée dès clic et module lecteur
+  importé après catalogue. Suppression du fondu d'affiche de 300 ms.
+- Audio Ogg indépendant chargé pendant les métadonnées vidéo, activé après
+  réussite des deux ; Opus segmenté et préparations serveur gardent leur ordre.
+- Catalogue : suppression de trois lectures d'images corrélées redondantes ;
+  résolution groupée existante conserve ordre/masquage/permissions.
+- Scanner : alias cover/default/movie/show et fonds background/art ; fond
+  préfixé retrouvé même sans image générique dans un dossier partageable.
+  Identités ambiguës/symlinks refusés ; nouveau scan requis pour ces alias.
+- Web 106 tests/check/lint/build, catalogue 5, images 5 et scanner Node 7 réussis.
+  Chrome : retours catalogue 89–134 ms ; moteur/HTTP isolé Ogg image 88 ms/prêt
+  188 ms, segmenté 263/585 ms. UI/API lente : image 752/488 ms, cible 200 ms
+  non atteinte. SQLite 10k première page 269→345 ms : pas de gain général prouvé.
+- 404 logos/indicateurs sur routes imbriquées : utiliser asset('images/...'),
+  pas resolve('/') pour construire les chemins statiques ; paths.relative=false
+  conserve des URLs /app stables après navigation. posters_flow 1 réussi,
+  format et Clippy strict all-targets réussis.
+- Contrôle final build production : catalogue retour 72–104 ms, bibliothèque
+  préchargée 122 ms ; zéro erreur JS/image HTTP, image film 644/384 ms avec
+  API lente simulée. La cible globale de 200 ms reste ouverte.
+- Détails/preuves : docs/NAVIGATION_PERFORMANCE.md, docs/LOCAL_FILM_POSTERS.md.
+  NAS/PostgreSQL/son physique non mesurés ; aucun push ni déploiement.
+
+
+## 23 octobre 2026 — Cinema Design System, contrôle Web local
+
+- Charte OLED/Pierre Douce consolidée : rayons 6/10/12/16/20/24, surfaces,
+  contraste des boutons de lecture, thème initial externe sous CSP self.
+  Accueil sans sections décoratives vides ; hero limité, affiches 2:3,
+  reprise/épisodes 16:9, navigation et administration harmonisées.
+- Musique : vues morceaux/albums/artistes sur les résultats de la page courante,
+  durées, numéro et titre actif ; pochettes/photos absentes de l’API, initiales
+  sobres 1:1/circulaires. Pas de nouvelle API ou de faux artwork produit.
+- Chrome headless, build production et APIs/images synthétiques interceptées :
+  64 états de page, 74 captures clair/sombre en 390/768/1440/1920 et paysage ;
+  sans erreur JS/débordement. Thèmes, regroupements et saison testés.
+  Captures inspectées ; références docs/evidence/2026-10-23/cinema-ui/.
+- Check Svelte/TypeScript zéro erreur/avertissement, ESLint, 104 tests et build
+  réussis. Aucun test Rust relancé, aucun changement backend ; pas de preuve
+  NAS/mobile physique/PWA installée ou d’audit WCAG exhaustif.
+- Direction complète et limites : docs/UI_DIRECTION.md. Cache catalogue en cours
+  conservé ; aucun push, déploiement ou modification des médias personnels.
+
+
+## 23 octobre 2026 — Cache catalogue et ouverture du lecteur
+
+- Pages catalogue en mémoire par requête complète/session : SWR 30 s, LRU 48 pages,
+  4 Mio de JSON estimé (pas un plafond exact du heap), requêtes dédupliquées/bornées.
+  Retours frais sans fetch catalogue ni loader, scroll conservé ; erreurs réseau
+  non destructives, invalidation après mutations/scans observés/session/403.
+- Dialogue ouvert avant descripteur, mais aucune lecture sans descripteur frais ;
+  déduplication des requêtes en vol avec annulation par consommateur. Épisodes
+  multiversions : sélection après ouverture, sans double requête séquentielle à froid.
+  Navigation actions/filtres SvelteKit, historique déjà chargé réutilisé.
+- Chrome 155.0.8059.86, vraie UI/API simulée lente : dix retours 331–359 → 62–74 ms,
+  20 → 0 requêtes catalogue ; dialogue 322/314 → 8/3 ms, première image
+  514/421 → 416/402 ms (ouverture/réouverture, deux observations seulement).
+- Web 104 tests/check/lint/build, Rust catalogue 5/scanner 3/distribué 1,
+  Chrome Core/SQLite avec redémarrage et décodage AV1/Opus local réussis.
+  Cache Node existant réutilisé, aucun changement Rust/SQL/transcodage/timeouts.
+- Docker Desktop indisponible ; NAS/PostgreSQL/premier son physique non mesurés.
+  Scans externes visibles à la prochaine consultation périmée, pas de push serveur.
+  Méthode, rapports, limites et mesures production : docs/NAVIGATION_PERFORMANCE.md.
+  Aucun push, déploiement ou média personnel modifié.
+
 ## 22 octobre 2026 — CI raccourcie localement, mesure distante en attente
 
 - Intégration Rust répartie automatiquement sur trois runners par cibles Cargo
@@ -3294,3 +3564,117 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
 - Lecteur : chargement simple, diagnostics dans Statistiques du flux optionnelles ;
   mesures video navigateur chaque seconde pendant ouverture du panneau seulement.
 - Web : 96 tests reussis. Verification SSO reel et NAS non effectuee pour ce jalon.
+
+## 23 octobre 2026 — Administration sans colonne latérale permanente
+
+- Bouton Menu et tiroir modal fermé par défaut sur toute largeur ; aucune place
+  réservée. Navigation, Échap, clic extérieur et retour du focus vérifiés Chrome.
+- Vue d’ensemble réduite aux états utiles ; informations techniques repliées.
+  Introductions et badges redondants retirés, catalogue plus court, version
+  sélectionnable seulement si plusieurs choix. Droits/alertes restent explicites.
+- Check sans erreur/avertissement, lint, 112 tests et build réussis. UI production
+  clair/sombre 1440/390 et cycle catalogue : API simulée, aucune erreur navigateur.
+  Preuves : docs/evidence/2026-10-23/startup-plugins/catalogue-ui/.
+- Ancien scénario test-admin-ui interrompu sur le lien #account des préférences
+  personnelles ; ne pas le compter comme validé. Captures administration clair
+  partielles dans docs/evidence/2026-10-23/admin-compact/ ; scénario ciblé réussi.
+
+## 23 octobre 2026 — Plugins sans approbation, configuration et collections
+
+- Demande utilisateur révisée : aucun clic d’approbation pour les dépôts/auteurs.
+  Clé du catalogue utilisée pour vérifier signatures/empreintes, identité interne
+  par digest sans réservation d’un nom d’auteur. Anciennes routes de clé conservées
+  uniquement pour compatibilité des outils ; import avec publicKey autonome.
+- UI paramètres dédiée, activation par interrupteur, schéma générique, outils de
+  test repliés. Fournisseurs : Toutes les bibliothèques par défaut et périmètre
+  durable allLibraries ; anciens périmètres explicites conservés. Avatars : aucune
+  case bibliothèque. Correction visuelle des vieux textes sans altérer le signé.
+- Générateur PowerShell : stdout natif UTF-8 explicite, options Cargo sans échappement
+  dépendant de la console, permissions déclarées par chaque plugin. Huit paquets
+  reconstruits/signés/vérifiés ; aucune clé privée dans Git, aucun push.
+- Collections GitHub importées par Core, images PNG/JPEG/WebP normalisées 256×256,
+  stockage transactionnel borné ; galerie authentifiée et activation vérifiée.
+  Vrai HTTPS GitHub : 7 dossiers, 26 avatars sonny importés en SQLite temporaire.
+- Modèle indépendant Aether-Plugins/templates/metadata-provider compilé et exécuté
+  par le worker Core (149077 octets), configuration personnalisée retenue. Guide
+  CREATING_PLUGINS.md : créer un fournisseur sans modifier/recompiler Aether.
+- 113 tests Web, check/lint/build ; 41 tests workspace plugins ; 10 tests Core
+  extensions et navigateurs Core réels installation/exécution/désactivation et
+  dépôt/version/suppression réussis. UI production simulée clair/sombre 1440/390,
+  champs mobile lisibles ; preuves docs/evidence/2026-10-23/plugin-settings/.
+- Dernier complément demandé : fichiers installés sous data/plugins/<id> ;
+  package.json, manifest.json, module.wasm ; lecture Wasm confinée + SHA-256,
+  export des anciennes installations à l’ouverture du serveur, nettoyage connu
+  à la désinstallation. Snapshot/paramètres/droits conservés en base. Validation
+  complémentaire : test stockage/reprise/altération/suppression réussi, dix tests
+  Core extensions relancés avec lecture des modules sur disque réussis ; Clippy
+  all-targets strict réussi. Dockerfile fixe MEDIA_PLUGINS_PATH=/data/plugins.
+- Ajout demandé ensuite : upload local d’une collection de fichiers images en
+  multipart (nom + images répétées), mêmes bornes normalisation/atomicité que les
+  téléchargements serveur. Axum multipart activé. Test Core >400 Ko normalisé
+  256×256 et refus anonyme/CSRF réussi ; UI upload multipart et sélection dans
+  galerie profil réussis avec API simulée. encoding_rs verrouillé à 0.8.35 pour
+  éviter d’ajouter une exigence Rust 1.88 au seul support multipart.
+
+## 23 octobre 2026 — démarrage lecteur et catalogue progressif
+
+- Le catalogue démarre après vérification de session, sans attendre les préférences.
+  Leur hydratation est partagée ; le lecteur conserve les préférences disponibles,
+  signale leur panne et utilise alors les réglages de séance. Les paramètres
+  réhydratent aussi leurs décalages sans écraser une saisie en cours.
+- Accueil, Films, Séries et Recherche utilisent `count=false`, pages de 24 cartes,
+  `hasMore` et cache de session borné. Les fiches et paramètres sont importés à
+  leur ouverture. Le comptage exact reste le défaut de l'API pour les anciens clients.
+- Le détail série Web demande 24 épisodes côté serveur ; permissions, contrôle
+  parental et disponibilité s'appliquent avant pagination. `episodeAfter` récupère
+  un seul prochain épisode, y compris entre saisons. Les playlists utilisent des
+  résumés autorisés sans construire récursivement toutes les séries, 50 éléments
+  visibles ; leurs limites serveur existantes restent 500 listes/1 000 entrées.
+- MKV interne AV1/Opus : tentative vidéo originale avec audio Opus segmenté ; repli
+  MP4 préparé atomique si le navigateur échoue. Aucun cache partiel publié. Reprise
+  appliquée avant le premier segment audio ; réserve initiale 750→50 ms avec
+  données lisibles obligatoires. Erreurs techniques affichées ; Réessayer relance
+  réellement la lecture. Préparation complète encore possible sur client incompatible.
+- Preuves locales : catalogue SQLite authentifié 10 000 films, première page sans
+  comptage 6,23 ms contre 51–59 ms avec comptage ; pages profondes environ 50 ms.
+  Série de 10 000 épisodes : page de 24, réponse <64 KiB, 133,99 ms en debug ;
+  contrôle parental, retrait des droits et passage de saison vérifiés.
+- Web : 120 tests Vitest réussis. Chrome/API simulée : rangées indépendantes des
+  préférences lentes, pagination 10 000 éléments, cache/navigation et retry effectif.
+  Core réel + Chrome 155.0.8059.86 : AV1/Opus MP4/MKV, pixels/PCM, quatre pistes,
+  pause/seek/reprise/sous-titres ; MKV `/content` sans copie vidéo, puis panne forcée
+  et repli préparé réussis. Clic → >0,2 s de lecture : MP4 628 ms, MKV 790 ms,
+  distinct de la première image exacte. `scanner_flow` ciblé et harness
+  `browser_scanner` réussis ; docs/RESPONSIVENESS_AND_ARTWORK.md et
+  docs/PLAYER_TRACK_PREPARATION.md détaillent méthodes et limites.
+- Aucun résultat NAS/production ni garantie vidéo/interface de 50 ms partout.
+  Aucun déploiement, push ou changement des médias personnels.
+- Vérifications finales : `cargo fmt --check`, Clippy strict workspace/all-targets,
+  Web check 0/0, lint/build et `git diff --check` réussis. Le test Core réel
+  `cargo test --locked -p media-poc --test browser_series -j 1 -- --ignored --nocapture`
+  réussit en 31,19 s : huit images décodées, lecture/seek/pause, enchaînement
+  inter-saisons, révocation/restauration et isolation des comptes. Lancement
+  d'épisode mesuré à 1 001 ms sur cette fixture, sans extrapolation NAS.
+
+## 23 octobre 2026 — corrections CI lecteur et multi-Node
+
+- Échec CI `browser_scanner` au retour MKV : vidéo bloquée à 11,95478 s malgré
+  des segments audio HTTP 200. Le MSE audio ne signalait pas sa fin ; le reliquat
+  entre le dernier paquet Opus et la fin vidéo devenait une erreur après 10 s.
+  `endOfStream()` clôt désormais le dernier segment ; un seek peut rouvrir le MSE.
+  La fin vidéo tolère seulement un reliquat de 150 ms (paquet Opus + arrondi),
+  sans supprimer les erreurs de troncature réelle ou de panne en cours de lecture.
+  Les décalages audio explicites restent pris en compte ; les tests de persistance
+  de langue attendent un seek stabilisé en pause, indépendamment du test de fin.
+- Régression Chrome dédiée : nouvelle piste dans les 40 dernières ms, retour à
+  une fenêtre antérieure après EOS, reprise audio/vidéo. Le test remet l'état
+  « non vu » avant le contrôle manuel, car ce seek peut légitimement marquer vu.
+- `distributed_multi_node` attendait à tort la signature MP4 pour l'URL originale
+  MKV. Il vérifie les octets/MIME originaux et, séparément, le repli MP4 préparé,
+  Range GET/HEAD 206, Range invalide 416 et refus utilisateur 403.
+- Validation locale : `cargo test --locked --test distributed_multi_node -j 1 --
+  --nocapture --test-threads=1` réussi (9,47 s) ; `cargo test --locked --test
+  browser_scanner -j 1 -- --ignored --nocapture` réussi (35,70 s), Core/Chrome
+  155.0.8059.86 Windows, MP4/MKV, pixels/PCM et régression fin/seek. Rapports
+  `target/ci-scanner-tail-regression/`. 124 tests Web, check 0/0, lint/build,
+  formatage et Clippy ciblé strict réussis. Linux CI reste à relancer ; aucun push.

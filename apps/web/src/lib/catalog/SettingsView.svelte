@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { preferences, savePreferences } from '../preferences';
+  import { preferences, ensurePreferences, savePreferences } from '../preferences';
   import { resolve } from '$app/paths';
   import { session } from '../auth/session';
   import ProfileAvatar from '../ui/ProfileAvatar.svelte';
@@ -29,6 +29,7 @@
   let current = $state('account');
   let audioOffset = $state(preferences().offsets?.audio ?? 0);
   let subtitleOffset = $state(preferences().offsets?.subtitle ?? 0);
+  let offsetsEdited = false;
   const pages = [
     { id: 'account', label: 'Compte', icon: 'profile' },
     { id: 'appearance', label: 'Apparence', icon: 'sun' },
@@ -36,12 +37,19 @@
     { id: 'sso', label: 'Connexion SSO', icon: 'shield' }
   ] as const;
   onMount(() => {
+    let disposed = false;
+    void ensurePreferences().then(saved => {
+      if (disposed || offsetsEdited || !saved) return;
+      audioOffset = saved.offsets?.audio ?? 0;
+      subtitleOffset = saved.offsets?.subtitle ?? 0;
+    }).catch(() => {});
     const sync = () => { const id = window.location.hash.slice(1); current = pages.some(page => page.id === id) ? id : 'account'; };
     sync(); window.addEventListener('hashchange', sync);
-    return () => window.removeEventListener('hashchange', sync);
+    return () => { disposed = true; window.removeEventListener('hashchange', sync); };
   });
   function saveOffsets(event: SubmitEvent) {
     event.preventDefault();
+    offsetsEdited = true;
     if ([audioOffset, subtitleOffset].every(value => Number.isFinite(value) && Math.abs(value) <= 30)) {
       savePreferences({ offsets: { audio: audioOffset, subtitle: subtitleOffset } });
     }
@@ -148,8 +156,8 @@
 
         <form class="offsets" onsubmit={saveOffsets}>
           <h3>Synchronisation</h3><p class="muted">Décalages par défaut, de −30 à +30 secondes. Un décalage positif retarde la piste. Le décalage audio concerne les pistes externes.</p>
-          <label>Décalage audio (secondes)<input type="number" min="-30" max="30" step="0.1" required bind:value={audioOffset} /></label>
-          <label>Décalage des sous-titres (secondes)<input type="number" min="-30" max="30" step="0.1" required bind:value={subtitleOffset} /></label>
+          <label>Décalage audio (secondes)<input type="number" min="-30" max="30" step="0.1" required bind:value={audioOffset} oninput={() => { offsetsEdited = true; }} /></label>
+          <label>Décalage des sous-titres (secondes)<input type="number" min="-30" max="30" step="0.1" required bind:value={subtitleOffset} oninput={() => { offsetsEdited = true; }} /></label>
           <button type="submit">Enregistrer les décalages</button>
         </form>
       </section></div>
@@ -192,7 +200,7 @@
   label > span { display: flex; align-items: center; gap: 8px; }
   select, input { min-width: 0; width: 100%; max-width: 520px; min-height: 44px; border: 1px solid var(--border-subtle); border-radius: 4px; background-color: var(--bg-surface); color: var(--text-primary); }
   input { padding: 12px; }
-  button { justify-self: start; min-height: 44px; padding: 12px 20px; border: 0; border-radius: 4px; background: var(--brand-gradient); color: var(--color-on-accent); }
+  button { justify-self: start; min-height: 44px; padding: 12px 20px; border: 0; border-radius: 4px; background: var(--color-play); color: var(--color-on-accent); }
   .offsets { padding-top: 28px; border-top: 1px solid var(--border-subtle); }
   .offsets p { margin: 0; }
   @media (max-width: 760px) {

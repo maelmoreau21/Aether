@@ -17,6 +17,8 @@ use std::{
 };
 use tokio::sync::Semaphore;
 
+pub use crate::backup_bundle::DEFAULT_BACKUP_KEY;
+
 struct Backups {
     auth: AuthState,
     source: Option<PathBuf>,
@@ -75,7 +77,8 @@ pub async fn router_with_configuration(
     configuration.remove("MEDIA_BACKUP_KEY_FILE");
     let key = key
         .filter(|key| key.len() == 64 && key.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .map(|key| Arc::new(zeroize::Zeroizing::new(key)));
+        .unwrap_or_else(|| DEFAULT_BACKUP_KEY.to_string());
+    let key = Some(Arc::new(zeroize::Zeroizing::new(key)));
     let mut connection = auth.store.pool().acquire().await?;
     let source = if connection.backend_name() == "SQLite" {
         let rows = crate::database::query("PRAGMA database_list")
@@ -231,7 +234,7 @@ async fn list(
     headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     administrator(&state, &headers, false).await?;
-    let available = state.key.is_some() && (state.source.is_some() || state.postgres_url.is_some());
+    let available = state.source.is_some() || state.postgres_url.is_some();
     let archives = if available {
         let directory = validate_directory(&state).await?;
         tokio::task::spawn_blocking(move || -> Result<Vec<Archive>, StatusCode> {
@@ -279,11 +282,31 @@ async fn list(
         Vec::new()
     };
     let schedule = load_schedule(&state).await?;
-    Ok(([(header::CACHE_CONTROL, "no-store")], Json(Listing { schedule, available, reason: (!available).then_some("Configure MEDIA_BACKUP_KEY with 64 hexadecimal characters; PostgreSQL also requires pg_dump 18 on the server."), running: state.gate.available_permits() == 0, archives })).into_response())
+    let reason = (!available).then_some(if state.postgres_url.is_some() {
+        "PostgreSQL requires pg_dump 18 on the server."
+    } else {
+        "Database is unavailable."
+    });
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(Listing {
+            schedule,
+            available,
+            reason,
+            running: state.gate.available_permits() == 0,
+            archives,
+        }),
+    )
+        .into_response())
 }
 
 async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
-    let key = state.key.as_ref().ok_or(StatusCode::NOT_IMPLEMENTED)?;
+    let fallback_key = DEFAULT_BACKUP_KEY.to_string();
+    let key = state
+        .key
+        .as_ref()
+        .map(|k| k.as_str())
+        .unwrap_or(&fallback_key);
     let directory = validate_directory(state).await?;
     let path = directory.clone();
     tokio::task::spawn_blocking(move || {
@@ -339,7 +362,7 @@ async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
         &temporary.0,
         state.configuration.clone(),
         &directory.join(format!("{id}.media-backup")),
-        key.as_str(),
+        key,
         engine,
     )
     .await
@@ -356,7 +379,7 @@ async fn create(
     headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     administrator(&state, &headers, true).await?;
-    if state.key.is_none() || (state.source.is_none() && state.postgres_url.is_none()) {
+    if state.source.is_none() && state.postgres_url.is_none() {
         return Err(StatusCode::NOT_IMPLEMENTED);
     }
     let permit = state
@@ -419,7 +442,7 @@ async fn update_schedule(
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
     if input.enabled {
-        if state.key.is_none() || (state.source.is_none() && state.postgres_url.is_none()) {
+        if state.source.is_none() && state.postgres_url.is_none() {
             return Err(StatusCode::NOT_IMPLEMENTED);
         }
         validate_directory(&state).await?;
@@ -441,7 +464,7 @@ async fn update_schedule(
 }
 
 async fn scheduled_tick(state: &Backups) -> Result<(), StatusCode> {
-    if state.key.is_none() || (state.source.is_none() && state.postgres_url.is_none()) {
+    if state.source.is_none() && state.postgres_url.is_none() {
         return Ok(());
     }
     let schedule = load_schedule(state).await?;

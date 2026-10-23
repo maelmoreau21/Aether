@@ -1,0 +1,67 @@
+{
+  "passed": true,
+  "browser": "155.0.8059.86",
+  "scope": "Production Svelte UI with actual signed manifests; simulated APIs. Real Core persistence/signatures/install verified separately.",
+  "cards": 8,
+  "checks": [
+    "collapsed desktop/mobile navigation, Escape/focus/outside click",
+    "refresh pending default repository",
+    "dark/light 1440/390 no overflow",
+    "no publisher approval or publisher API calls",
+    "avatar collection import",
+    "multipart local image upload",
+    "profile gallery choice",
+    "dynamic schema save",
+    "metadata defaults to all libraries",
+    "individual install disabled",
+    "explicit activation",
+    "remove repository preserves installation"
+  ],
+  "mutations": [
+    {
+      "path": "/api/v1/admin/extensions/repositories/community-default/refresh",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/admin/extensions/repositories/community-default/install",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/admin/extensions/avatars/avatar-packs/source",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/admin/extensions/avatars/avatar-packs",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/admin/extensions/avatars/avatar-packs/upload",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/admin/extensions/avatars/settings",
+      "method": "PUT"
+    },
+    {
+      "path": "/api/v1/admin/extensions/avatars",
+      "method": "PUT"
+    },
+    {
+      "path": "/api/v1/admin/extensions/repositories/community-default/install",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/admin/extensions/tmdb",
+      "method": "PUT"
+    },
+    {
+      "path": "/api/v1/admin/extensions/repositories/community-default",
+      "method": "DELETE"
+    },
+    {
+      "path": "/api/v1/account/avatar/collections/test-pack/one",
+      "method": "POST"
+    }
+  ],
+  "errors": []
+}

@@ -1,16 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { resolve } from '$app/paths';
+  import { asset } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
   import PlayerControls, { type Menu } from './PlayerControls.svelte';
   import type { Media, Player, PlayerFactory, PlaybackState } from './types';
   import { preferredSubtitle, type SubtitlePreference } from './subtitle-preference';
   import { ProgressTracker } from './progress';
   import { getSessionGeneration } from '../auth/session';
-  import { preferences, savePreferences } from '../preferences';
+  import { preferences, savePreferences, ensurePreferences } from '../preferences';
   import { chooseSource, playbackMime, audioLanguage, audioSelectionNotice } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
-  const base = resolve('/').replace(/\/$/, '');
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
   let dialog: HTMLDialogElement;
@@ -82,33 +81,34 @@
     if (!engine) return;
     busy = true; error = ''; notice = ''; wake();
     try {
+      // Preferences are optional: an outage must not prevent authorized playback.
+      // preferences() is cleared by session generation changes.
+      let preferenceNotice = '';
+      try { await ensurePreferences(); }
+      catch { preferenceNotice = 'Préférences indisponibles : réglages locaux à cette séance.'; }
+      if (current !== generation) return;
+      readPlaybackPreferences();
       const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))));
       if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
       const tracker = !restore && media.workId && !media.synthetic
         ? new ProgressTracker(media.workId, message => { if (current === generation) notice = message; }) : undefined;
       if (tracker) progressTracker = tracker;
       const resume = tracker?.load();
-      await engine.load(media, source.audioTrackId);
+      await engine.load(media, source.audioTrackId, restore?.position ?? resume ?? 0);
       if (current !== generation) return;
-      notice = audioSelectionNotice(media, source, preferredLanguage);
+      notice = preferenceNotice || audioSelectionNotice(media, source, preferredLanguage);
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
       await engine.selectSubtitle(usableSubtitle); subtitle = usableSubtitle;
-      if (resume) {
-        const position = await resume;
-        if (current !== generation) return;
-        if (position > 0) engine.seek(position);
-      }
-      if (restore) { engine.setVolume(restore.volume); engine.setSpeed(restore.speed); engine.seek(Math.min(restore.position, Math.max(0, engine.state().duration - .05))); }
+      if (restore) { engine.setVolume(restore.volume); engine.setSpeed(restore.speed); }
       if (current !== generation) return;
       active = media;
       if (!restore || !restore.paused) await engine.play();
     } catch (e) { if (current === generation) fail(e instanceof Error ? e.message : String(e)); }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
   }
-  export function open(media: Media) {
-    if (opened) return;
+  function readPlaybackPreferences() {
     preferredLanguage = 'fr'; subtitlePreference = undefined; preferredAudio = undefined; audioOffset = 0; subtitleOffset = 0;
     try {
       const account = preferences();
@@ -124,10 +124,13 @@
       else if (initialSubtitles === 'always') subtitlePreference = { enabled: true, language: 'fr', forced: false };
       else subtitlePreference = undefined;
     } catch { /* Preferences are optional when browser storage is unavailable. */ }
+  }
+  export function open(media: Media | Promise<Media>) {
+    if (opened) return false;
     generation++; const current = generation;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     scrollPosition = window.scrollY;
-    statistics = false; loadStage = 'Chargement de votre séance…'; audio = ''; active = media; opened = true; busy = true; error = ''; notice = ''; menu = null;
+    statistics = false; loadStage = 'Chargement de votre séance…'; audio = ''; active = media instanceof Promise ? undefined : media; opened = true; busy = true; error = ''; notice = ''; menu = null;
     keyboardPinned = false; visible = true; document.body.classList.add('immersive-open');
     dialog.showModal();
     surface?.focus();
@@ -135,7 +138,11 @@
     requestFullscreen();
     engine = createPlayer(video, message => { if (current === generation) fail(message); });
     engine.setStatusListener?.(message=>{if(current===generation)loadStage=message;});
-    void prepare(media);
+    if (media instanceof Promise) {
+      void media.then(item => { if (current === generation && opened) { active = item; void prepare(item); } })
+        .catch(cause => { if (current === generation) fail(cause instanceof Error ? cause.message : String(cause)); });
+    } else void prepare(media);
+    return true;
   }
   export function close() {
     if (!opened) return;
@@ -157,8 +164,8 @@
     void leavingFullscreen.then(() => requestAnimationFrame(restoreNavigation));
     busy = false; error = ''; paused = true;
   }
-  export function changeMedia(media: Media) {
-    if (!opened) { open(media); return; }
+  export function changeMedia(media: Media, requireOpen = false) {
+    if (!opened) { if (!requireOpen) open(media); return; }
     if (!engine || busy) return;
     progressTracker?.save(engine.state(), true);
     progressTracker = undefined;
@@ -183,8 +190,11 @@
   function mute() { volume(playback.volume === 0 ? previousVolume || 1 : 0); }
   function seek(value: number) { if (!busy) { engine?.seek(value); sync(); wake(); } }
   function selectAudio(id: string) {
+    const current = generation;
     const accountGeneration = getSessionGeneration();
-    void action(async player => { await player.selectAudio(id); audio = id; notice = '';
+    void action(async player => { await player.selectAudio(id);
+      if (current !== generation || !opened) return;
+      audio = id; notice = '';
       const language = audioLanguage(active?.sources.find(source => source.audioTrackId === id)?.language ?? 'und');
       if (language && language !== 'und') preferredLanguage = language;
       if (accountGeneration !== getSessionGeneration()) return;
@@ -277,8 +287,8 @@
       <button class="stats-toggle" aria-expanded={statistics} aria-controls="stream-statistics" onclick={() => { statistics = !statistics; wake(); }}>Statistiques du flux</button>
       {#if nextTitle && onNext}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
     </div>
-    {#if busy}<div class="loading" role="status"><img src="{base}/images/logo-loading.svg" alt="" class="player-spinner" width="40" height="40" />Chargement de votre séance…<button onclick={close}>Annuler</button></div>{/if}
-    {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>La lecture a rencontré un problème. Réessayez ou choisissez une autre piste ou version.</p><button onclick={() => { if (active) void prepare(active, playback); }}>Réessayer</button></div>{/if}
+    {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" />{loadStage}<button onclick={close}>Annuler</button></div>{/if}
+    {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, { ...playback, paused: false }); }}>Réessayer</button></div>{/if}
     {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label="Statistiques du flux">
       <header><strong>Statistiques du flux</strong><button onclick={() => { statistics = false; wake(); }}>Fermer</button></header>
       <p>Mesures vidéo du navigateur · actualisation chaque seconde</p>
@@ -352,7 +362,7 @@
   }
   .return:hover {
     background: rgba(255, 255, 255, 0.2);
-    border-color: rgba(167, 139, 250, 0.4);
+    border-color: var(--color-accent-soft);
     transform: scale(1.06);
     box-shadow: 0 0 16px var(--color-accent-glow);
   }

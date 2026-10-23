@@ -1,4 +1,4 @@
-//! Extension API v1 for Aether plugins.
+﻿//! Extension API v1 for Aether plugins.
 //! Designed for sandboxed WebAssembly execution (target wasm32-unknown-unknown)
 //! with host-brokered capabilities (secure HTTPS access, configuration, metadata contracts).
 
@@ -133,6 +133,8 @@ pub enum MediaType {
     TvShow,
     Episode,
     Anime,
+    /// Music release (album/single) or track.
+    Music,
 }
 
 /// Capabilities exposed by a plugin
@@ -143,6 +145,8 @@ pub enum PluginCapability {
     Details,
     Images,
     Avatars,
+    /// Plain and time-synced lyrics (lyrics.get operation).
+    Lyrics,
 }
 
 /// Image category
@@ -306,6 +310,55 @@ pub struct ImagesRequest {
     pub external_ids: BTreeMap<String, String>,
 }
 
+// =========================================================================
+// Lyrics Contracts (`lyrics.get` operation)
+// =========================================================================
+
+/// One time-synced lyric line.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricLine {
+    pub time_ms: u64,
+    pub text: String,
+}
+
+/// Lyrics of a track returned by a lyrics provider.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Lyrics {
+    pub id: u64,
+    pub track_name: String,
+    pub artist_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_secs: Option<f64>,
+    pub instrumental: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plain: Option<String>,
+    /// Raw LRC text (`[mm:ss.xx] line`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synced: Option<String>,
+    #[serde(default)]
+    pub synced_lines: Vec<LyricLine>,
+}
+
+/// Request payload of the `lyrics.get` operation.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricsRequest {
+    /// Provider identifier; when set, other fields are ignored.
+    #[serde(default)]
+    pub id: Option<u64>,
+    #[serde(default)]
+    pub track: String,
+    #[serde(default)]
+    pub artist: String,
+    #[serde(default)]
+    pub album: Option<String>,
+    #[serde(default)]
+    pub duration_secs: Option<u32>,
+}
 /// Legacy / simple metadata proposal
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

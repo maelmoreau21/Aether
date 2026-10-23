@@ -17,6 +17,45 @@ function setup() {
   return { video, audio, error, bridge };
 }
 describe('independent audio timeline',()=>{
+  it('lets the video finish a normal Opus packet tail without a ten-second stall',async()=>{
+    vi.useFakeTimers();const {video,audio,error,bridge}=setup();await bridge.load('/audio');
+    audio.duration=11.96;video.currentTime=11.96;audio.currentTime=11.96;
+    await video.play();audio.dispatchEvent(new Event('waiting'));audio.dispatchEvent(new Event('ended'));
+    await vi.advanceTimersByTimeAsync(11000);
+    expect(video.paused).toBe(false);expect(error).not.toHaveBeenCalled();expect(audio.paused).toBe(true);
+    await bridge.bufferForPlayback();await bridge.play();
+    expect(error).not.toHaveBeenCalled();bridge.destroy();
+  });
+  it('preserves an explicit negative offset when audio naturally ends before video',async()=>{
+    vi.useFakeTimers();const {video,audio,error,bridge}=setup();await bridge.load('/audio');
+    audio.duration=11.96;video.currentTime=11.71;audio.currentTime=11.96;
+    bridge.setOffset(-.25);await video.play();audio.dispatchEvent(new Event('waiting'));audio.dispatchEvent(new Event('ended'));
+    await vi.advanceTimersByTimeAsync(11000);
+    expect(video.paused).toBe(false);expect(error).not.toHaveBeenCalled();
+    await bridge.bufferForPlayback();await bridge.play();bridge.destroy();
+  });
+  it('recovers a held video when EOS reveals a short final packet, but rejects real truncation',async()=>{
+    vi.useFakeTimers();const {video,audio,error,bridge}=setup();await bridge.load('/audio');
+    video.currentTime=11.96;await video.play();audio.readyState=1;audio.dispatchEvent(new Event('waiting'));
+    expect(video.paused).toBe(true);
+    audio.duration=11.96;audio.dispatchEvent(new Event('ended'));await vi.advanceTimersByTimeAsync(0);
+    expect(video.paused).toBe(false);
+    await vi.advanceTimersByTimeAsync(11000);expect(error).not.toHaveBeenCalled();
+    audio.duration=10;audio.dispatchEvent(new Event('ended'));
+    expect(video.paused).toBe(true);expect(error).toHaveBeenCalledOnce();bridge.destroy();
+  });
+  it('corrects small clock drift smoothly without pausing or seeking the video',async()=>{
+    vi.useFakeTimers();const {video,audio,bridge}=setup();await bridge.load('/audio');await video.play();await bridge.play();
+    video.currentTime=1;audio.currentTime=1.1;
+    const paused=vi.spyOn(video,'pause');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(paused).not.toHaveBeenCalled();expect(video.paused).toBe(false);expect(audio.currentTime).toBe(1.1);expect(audio.playbackRate).toBe(.98);
+    audio.currentTime=.9;await vi.advanceTimersByTimeAsync(100);expect(audio.playbackRate).toBe(1.02);
+    audio.currentTime=1.01;await vi.advanceTimersByTimeAsync(100);expect(audio.playbackRate).toBe(1);
+    video.playbackRate=1.5;audio.currentTime=1.1;await vi.advanceTimersByTimeAsync(100);expect(audio.playbackRate).toBeCloseTo(1.47);
+    audio.currentTime=0;await vi.advanceTimersByTimeAsync(100);expect(paused).toHaveBeenCalled();expect(audio.currentTime).toBe(1);
+    bridge.destroy();
+  });
   it('applies signed offsets without playing delayed audio before its start',async()=>{
     vi.useFakeTimers(); const {video,audio,bridge}=setup(); await bridge.load('/audio');
     bridge.setOffset(2); await video.play(); await bridge.play(); expect(audio.paused).toBe(true);

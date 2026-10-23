@@ -173,17 +173,38 @@ impl LocalNode {
                         return Err(NodeErrorCode::ImageChangedRescanRequired);
                     }
                     if let Some(width) = image_width.map_err(|_| NodeErrorCode::InvalidImage)? {
+                        let etag = format!(
+                            "\"preview-v1-{}-{:x}-{width}\"",
+                            opened.modified_ns(),
+                            opened.size()
+                        );
+                        let unchanged = headers
+                            .get(header::IF_NONE_MATCH)
+                            .and_then(|v| v.to_str().ok())
+                            .is_some_and(|condition| {
+                                condition.split(',').any(|v| {
+                                    let v = v.trim();
+                                    v == "*" || v.strip_prefix("W/").unwrap_or(v) == etag
+                                })
+                            });
+                        if unchanged && !headers.contains_key(header::RANGE) {
+                            let res = Response::builder()
+                                .status(axum::http::StatusCode::NOT_MODIFIED)
+                                .header(header::ETAG, &etag)
+                                .header(
+                                    header::CACHE_CONTROL,
+                                    HeaderValue::from_static("private, no-cache"),
+                                )
+                                .body(stream::empty_body())
+                                .map_err(|_| NodeErrorCode::ImageStreamError)?;
+                            return Ok(res);
+                        }
                         let preview = image_preview::generate(&opened, width)
                             .await
                             .map_err(|_| NodeErrorCode::InvalidImage)?;
                         if preview.source_mime != grant.mime {
                             return Err(NodeErrorCode::ImageChangedRescanRequired);
                         }
-                        let etag = format!(
-                            "\"preview-v1-{}-{:x}-{width}\"",
-                            opened.modified_ns(),
-                            opened.size()
-                        );
                         return image_preview::response(preview, &method, &headers, &etag)
                             .map_err(|_| NodeErrorCode::ImageStreamError);
                     }

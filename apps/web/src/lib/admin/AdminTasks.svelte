@@ -159,12 +159,12 @@
   .clock { display: grid; place-items: center; flex-shrink: 0; width: 52px; height: 52px; border-radius: 50%; background: var(--accent-primary); color: var(--color-on-accent); }
   .task-copy { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
   .task-title { font-size: 18px; } .task-subtitle { font-size: 14px; color: var(--text-secondary); line-height: 1.45; }
-  button { font: inherit; color: var(--text-primary); min-height: 44px; padding: 10px 16px; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--bg-surface); }
+  button { font: inherit; color: var(--text-primary); min-height: 44px; padding: 10px 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); }
   button:hover:not(:disabled) { background: var(--bg-elevated); }
   .run { display: grid; place-items: center; width: 48px; padding: 8px; flex-shrink: 0; border: 0; background: transparent; }
   .refresh { display: inline-flex; align-items: center; gap: 8px; }
-  .primary { display: inline-flex; align-items: center; gap: 12px; border: 0; background: var(--brand-gradient); color: var(--color-on-accent); }
-  .primary:hover:not(:disabled) { background: var(--brand-gradient); box-shadow: var(--shadow-sm); } .primary > span { font-size: 24px; line-height: 1; }
+  .primary { display: inline-flex; align-items: center; gap: 12px; border: 0; background: var(--color-play); color: var(--color-on-play); }
+  .primary:hover:not(:disabled) { background: var(--color-play); box-shadow: var(--shadow-sm); } .primary > span { font-size: 24px; line-height: 1; }
   .back { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; margin-bottom: 24px; color: var(--text-secondary); }
   .description { margin: 24px 0; font-size: 16px; color: var(--text-secondary); line-height: 1.6; }
   .reason { color: var(--text-secondary); line-height: 1.6; } .reason a { color: var(--accent-primary); text-decoration: underline; }
@@ -177,10 +177,10 @@
   dl { display: flex; flex-wrap: wrap; gap: 24px; margin: 24px 0; } dt { font-size: 13px; color: var(--text-secondary); } dd { margin: 6px 0 0; font-size: 18px; }
   li { overflow-wrap: anywhere; line-height: 1.6; } .feedback { padding: 16px; background: var(--color-success-soft); margin-top: 20px; }
   .error { background: var(--color-danger-soft); border-left: 3px solid var(--status-error); }
-  dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-elevated); color: var(--text-primary); padding: 24px; }
+  dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-xl); background: var(--bg-elevated); color: var(--text-primary); padding: 24px; }
   dialog::backdrop { background: rgb(0 0 0 / .65); } dialog form, label { display: grid; gap: 10px; }
   dialog form { gap: 20px; } dialog p { margin: 0; line-height: 1.5; color: var(--text-secondary); }
-  input { min-width: 0; width: 100%; padding: 12px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: 4px; }
+  input { min-width: 0; width: 100%; padding: 12px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
   .dialog-actions { display: flex; justify-content: flex-end; gap: 12px; }
   @media (max-width: 640px) {
     .list-header { flex-wrap: wrap; } .task-link { padding: 16px 12px; gap: 12px; } .task-row { padding-right: 8px; }

@@ -1,101 +1,82 @@
-> Charte courante (19 octobre 2026) : Pierre Douce clair (#EFECE6 / #FAF9F6),
-> Cinéma OLED sombre (#09090B / #121215), accents ambre #F59E0B et corail #EF4444.
-> La direction améthyste ci-dessous est historique. Référence CSS :
-> `apps/web/src/lib/styles/tokens.css` ; présentation administration : ADMIN_CONSOLE.md.
+# Cinema Design System — 23 octobre 2026
 
-# Première direction visuelle — 15 octobre 2026
+## Direction et périmètre
 
-## Intention
+La direction historique améthyste est remplacée par Cinéma OLED (sombre) et
+Pierre Douce (clair). Référence artistique : règles détaillées de la demande
+utilisateur ; aucune image de maquette jointe à cette intervention.
+Le logo officiel `static/images/brand-mark.svg` est conservé sans modification.
 
-Passer du formulaire technique autour d'une vidéo à une expérience de streaming
-éditoriale : noir encre, blanc chaud, améthyste, grande composition cinématographique,
-hiérarchie typographique et contrôles secondaires plus discrets. Le signe de marque
-rose du dépôt est conservé. Pas de copie de navigation Netflix, de faux films,
-de recherche factice ou de comptes/profils inventés.
+L’interface privilégie les images réelles du catalogue, une navigation horizontale,
+un hero contenu et des rangées sans panneaux explicatifs vides. Aucun média,
+image de test ou métadonnée fictive n’est ajouté au produit.
 
-L'écran principal est une première direction concrète, pas une expérience produit
-terminée : un hero original, deux cartes des véritables éditions de fixture MKV/MP4,
-un lecteur avec poster d'attente, un panneau de séance, puis un pied de page sobre.
-Le visuel de paysage est signalé comme illustration d'ambiance ; le média réel reste
-la mire synthétique P0. Les cartes sélectionnent réellement la source ; Charger
-reste une action explicite. Les ancres Découvrir/La salle sont fonctionnelles.
+## Source visuelle unique
 
-## Fondations réutilisables
+`apps/web/src/lib/styles/tokens.css` définit couleurs sémantiques, états, ombres,
+polices locales, espacements et rayons 6/10/12/16/20/24 px et pill 9999 px.
+Fond sombre #09090B, surfaces #121215/#1E1E24 ; fond clair #EFECE6,
+surfaces #FAF9F6/#E5E0D8. Le corail marque la sélection, l’ambre la lecture sombre.
+Le bouton clair utilise #C2410C avec texte blanc pour préserver le contraste ;
+#EA580C reste la teinte de marque. Pas de dégradé ambre/corail sur les actions.
+Les interactions usuelles durent 150–220 ms et respectent reduced-motion.
 
-`apps/web/src/lib/styles/tokens.css`, importé une fois par le layout :
+Clair/Sombre/Système restent synchronisés avec les préférences du compte.
+`static/theme-init.js`, chargé dans le head avant le rendu, applique le miroir
+local de la préférence puis le système. La préférence authentifiée reste
+prioritaire après hydratation ; CSP script-src self, aucun script inline ajouté.
 
-- Palette : canvas #09090e, surface #121219, raised #1b1b25, texte #f5f2ed,
-  secondaire #a5a3b2, accent #b4a1f8, erreur #f3aaa9.
-- Typographie locale : Segoe UI Variable/Segoe UI/system-ui, sans CDN ni téléchargement.
-  Georgia italique pour l'accent éditorial. Titre principal 54–84 px desktop,
-  47–66px mobile ; corps et textes fonctionnels distincts.
-- Espacements 4/8/12/16/24/32/48/64, gouttières 20–80 px ; rayons 6/12/18 px.
-- Ombre réservée à la zone de lecture, panneaux sans grille de cadres voyants.
-  Boutons blanc chaud, variantes discrètes, cartes sélectionnées améthyste.
-- Hover/focus/active/disabled, lien d'évitement, libellés explicites, icônes
-  décoratives masquées aux technologies d'assistance et prefers-reduced-motion.
+## Compositions
 
-Composants Svelte légers dans lib/ui : Button, Field, Badge, Icon, MediaCard.
-Ils portent uniquement la présentation et transmettent les événements. Pas de
-nouvelle bibliothèque UI, police distante, store ou abstraction du lecteur ajoutée.
-Les sélecteurs natifs conservent le clavier et leurs noms accessibles P1.
+- Header 72 px, recherche et profil, bibliothèques accessibles défilables si
+  nécessaire ; logo inchangé. Administration séparée avec navigation latérale.
+- Hero avec vrai backdrop lorsque disponible, sans agrandir une affiche portrait
+  en faux backdrop ; rayon 24 px, hauteur desktop 350–480 px, mobile 360 px.
+- Films/séries : affiches 2:3, rayon 12 px, largeur de rangée 160–190 px,
+  deux affiches et amorce de la suivante sur mobile. Synopsis sur la fiche.
+- Épisodes et reprise : 16:9, reprise illustrée avec l’artwork connu du catalogue,
+  repli neutre si absent. Aucune section de reprise affichée sans historique.
+- Musique : morceaux en lignes, durée, numéro et titre actif. Albums regroupés
+  par artiste d’album et nom ; artistes regroupés depuis les résultats chargés.
+  Les regroupements concernent la page courante de 100 pistes, pas toute la
+  bibliothèque. Couvertures carrées et artistes circulaires avec initiale de
+  repli : l’API actuelle ne fournit aucune pochette ou photo d’artiste.
+  Le lecteur persiste dans le layout, conserve ses fonctionnalités et safe area.
+- Playlists : formulaires et listes existants, mêmes surfaces et rayons.
+- Paramètres/administration : composants existants harmonisés, logique conservée.
+  Les tableaux restent fonctionnels ; aucun hero cinéma dans l’administration.
 
-## Ressources et frontières
+## Composants accessibles
 
-Image originale créée avec imagegen, copiée dans static/images/cinematic-horizon.png
-(1 996 166 octets, 1672×941). Pas de média P0 modifié. SVG de marque existant copié
-sans changement ; chevron SVG local. Tout est servi par Rust depuis le build statique.
-CSP : ajout limité de img-src self pour ces images ; ni data ni domaine tiers ajouté.
-Aucun changement de route, contrat API, inventaire, lecture/remux, audio, WebVTT,
-cache, authentification ou persistance pour la refonte. Player/NativePlayer conservés.
+Évaluation du 23 octobre : [Bits UI](https://bits-ui.com/docs/introduction)
+fournit des primitives sans style, avec gestion clavier/focus ;
+[shadcn-svelte](https://shadcn-svelte.com/docs/components) propose des composants
+à adapter. Décision : garder les composants natifs existants pour cette refonte,
+sans migration générale ni nouvelle dépendance. Bits UI pourra être retenu pour
+un futur composant complexe démontrant un besoin. Les flèches des rangées sont
+accessibles au clavier et leur disponibilité est recalculée au redimensionnement.
 
-## Vérification réellement exécutée
+## Vérifications et limites
 
-Windows 10.0.26300, Chrome 155.0.8059.40, Edge 155.0.4283.45, Firefox 155.0.1,
-Playwright 1.64.1 ou geckodriver 0.37.1, headless, fixtures 12 s locales :
+Script reproductible : `node scripts/browser-cinema-ui.cjs`, contre le build Web
+servi localement sur le port 5181 (Vite preview). Captures et mesures dans
+`target/cinema-ui/`. Chrome headless ; clair/sombre ; 390/768/1440/1920 px.
+Le script intercepte les APIs et les images avec des fixtures de test explicites.
+Cette preuve porte sur la vraie interface Svelte, pas sur un serveur NAS ou sur
+la disponibilité des artworks d’une bibliothèque personnelle.
 
-- scripts/browser-p1.cjs : six parcours MKV/MP4, pixels et PCM FR/EN,
-  changements audio pause/lecture, position/volume/vitesse conservés, seeks
-  arrière/avant EN, trois cues WebVTT/off, choix texte conservé, fin et erreur404.
-  Chrome/Edge à 1,5× ; Firefox à 1×. Fichiers médias/VTT identiques avant/après.
-- Limite Firefox déjà observée avant refonte : retour FR Opus 5.1 à 1,5× sans
-  PCM attendu ; passage à 1× réussi. La cause précise n'est pas établie et aucune
-  nouvelle récupération n'est ajoutée. Ne pas annoncer la vitesse multicanale
-  Firefox comme validée. Ce point technique reste ouvert, hors refonte visuelle.
-- scripts/browser-p1-layout.cjs : 360/390/768/1280/1440/1920 px, absence de
-  débordement, focus clavier, images chargées, zéro violation CSP ; carte MP4
-  chargeant la vraie source ; Core503/VTT404/audio404 visibles et une seule
-  tentative audio. Captures desktop/mobile inspectées.
-- npm run check : zéro erreur/avertissement ; lint,5 tests unitaires, build passent ;
-  npm audit --audit-level=high : zéro vulnérabilité signalée.
-- cargo fmt --check, cargo clippy --locked --all-targets -- -D warnings,
-  cargo test --locked :10 tests intégration réussis, dont 9 P0 inchangés.
-- git diff --check réussi. CI distante non exécutée.
+Contrôles Web : `npm run check`, `npm run lint`, `npm test`, `npm run build`
+depuis `apps/web`. Aucun changement de backend ou de format média.
+Les essais navigateur/PWA physiques, Safari, Android/iOS, écoute humaine et
+validation sur les médias personnels restent à effectuer. Les fiches musicales
+indépendantes et images d’album/artiste ne sont pas des APIs existantes : aucune
+prise en charge complète de ces fonctions n’est revendiquée ici.
 
-Preuves dans evidence/2026-10-15/p1-ui-v1/. Les viewports mobiles ne prouvent pas
-Safari/iOS/Android réels. Pas d'écoute humaine, de sortie physique 5.1 / 10 bits,
-de film long, de déploiement NAS ou de mesure de charge.
-
-Prochain petit jalon visuel : recueillir un retour sur cette composition et ses
-proportions avant de l'étendre à d'autres écrans. L'admin local/SQLite et les
-bibliothèques réelles restent des étapes P1 distinctes, non ajoutées ici.
-
-## Évolution du lecteur
-
-Le lecteur encadré décrit historiquement ci-dessus est remplacé par la surface
-immersive documentée dans IMMERSIVE_PLAYER.md. La direction de l’accueil demeure.
-
-
-## Navigation et accès personnel (15 octobre 2026)
-
-Accueil / Films / Séries / Recherche restent dans la navigation principale.
-La recherche associe une vraie loupe SVG à son libellé, y compris sur mobile.
-Les paramètres sont déplacés dans le menu profil en haut à droite, avec avatar
-améthyste de repli. « Aucun profil configuré » et « Profil · Bientôt » ne
-prétendent pas fournir un compte réel ; aucune entrée de déconnexion factice.
-
-ProfileMenu utilise un popover natif auto, la navigation Tab et le retour de focus
-sur Échap. Clic extérieur, nouveau clic sur l'avatar et navigation le ferment.
-Les couleurs, rayons et états d'interaction réutilisent les tokens existants ;
-aucune dépendance ni modification du lecteur. Captures desktop/mobile et
-résultats vérifiés dans evidence/2026-10-15/profile-navigation/.
+Résultat final : 64 états de page dans le rapport, 74 captures (albums/artistes
+et paysage inclus), sans erreur JavaScript ni débordement global détecté.
+Les captures desktop/mobile, catalogue/fiche série, musique et administration
+ont été inspectées visuellement. Les changements Clair/Sombre/Système, les
+regroupements musicaux et le changement de saison sans navigation passent.
+Références sélectionnées : `docs/evidence/2026-10-23/cinema-ui/`.
+Contraste calculé des CTA lecture : 8,14:1 sombre, 5,18:1 clair ; ce calcul ne
+constitue pas un audit WCAG complet de tous les états et composants.

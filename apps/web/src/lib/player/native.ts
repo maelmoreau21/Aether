@@ -1,3 +1,4 @@
+import { waitForStartupBuffer } from './startup-buffer';
 import type { Media, Player, PlaybackState, Source } from './types';
 import { ExternalAudio } from './external-audio';
 import { SegmentedAudio } from './segmented-audio';
@@ -20,6 +21,8 @@ export class NativePlayer implements Player {
   setStatusListener(listener:(message:string)=>void) { this.status=listener; }
   private busy = false;
   private destroyed = false;
+  private startup?: AbortController;
+  private pauseRevision = 0;
   private cancel?: () => void;
   private stallTimer?: ReturnType<typeof setTimeout>;
   private clearStall = () => { clearTimeout(this.stallTimer); this.stallTimer = undefined; };
@@ -55,12 +58,12 @@ export class NativePlayer implements Player {
   state(): PlaybackState {
     return { position: this.video.currentTime, duration: this.video.duration, paused: this.video.paused && !this.externalAudio?.isBuffering(), volume: this.video.volume, speed: this.video.playbackRate };
   }
-  async load(media: Media, initialAudioTrackId?: string) {
+  async load(media: Media, initialAudioTrackId?: string, initialPosition: number | Promise<number> = 0) {
     this.media = media;
     this.subtitle = null;
     const source = chooseSource(media, initialAudioTrackId);
     if (!source) throw new Error('Aucune source disponible pour ce média.');
-    try { await this.replace(source, 0, true); }
+    try { await this.replace(source, initialPosition, true); }
     catch(error) { throw new Error(`Piste ${source.language.toUpperCase()} (${source.audioTrackId}) : ${error instanceof Error ? error.message : String(error)}`); }
   }
   private async prepareUrl(url: string) {
@@ -83,7 +86,7 @@ export class NativePlayer implements Player {
     } finally { clearTimeout(timeout); this.preparations.delete(controller); }
     if (this.destroyed) throw new Error('Lecteur fermé.');
   }
-  private async replace(source: Source, position: number, paused: boolean) {
+  private async replace(source: Source, position: number | Promise<number>, paused: boolean) {
     if (this.busy || this.destroyed) throw new Error('Lecteur indisponible pendant le changement de source.');
     const unsupported=unsupportedAudio(source,mime=>this.video.canPlayType(mime));
     if (unsupported) {
@@ -92,12 +95,19 @@ export class NativePlayer implements Player {
     }
     this.busy = true;
     const previous = this.source;
+    const independentSwitch = previous?.url === source.url && Boolean(source.externalAudioUrl);
+    let pausedForReplacement = false;
+    let resumeReplacement = false;
+    let replacementPauseRevision: number | undefined;
     const segmented = Boolean(source.audioSegmentUrl && SegmentedAudio.supported());
     const audioUrl = segmented ? source.audioSegmentUrl! : source.externalAudioUrl;
     const createAudio = () => segmented
       ? new SegmentedAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError)
       : new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError);
-    this.pause();
+    // Keep the current presentation running while the replacement audio is
+    // prepared. A cold Node preparation must not freeze an otherwise healthy
+    // video; the commit below still aligns both clocks before resuming.
+    if (!independentSwitch) { this.pause(); pausedForReplacement = true; }
     try {
       if (source.prepare) {
         if (source.prepareVideo !== false && previous?.url !== source.url) await this.prepareUrl(source.url);
@@ -111,20 +121,38 @@ export class NativePlayer implements Player {
           this.status(`Chargement audio ${source.language.toUpperCase()} (${source.audioTrackId})${segmented ? ' par segments' : ''}…`);
           await candidate.load(audioUrl!, false);
           if (this.destroyed) throw new Error('Lecteur fermé.');
+          resumeReplacement = !this.state().paused;
+          this.pause(); pausedForReplacement = true;
+          replacementPauseRevision = this.pauseRevision;
+          // The video may have advanced during preparation. Buffer at its
+          // current position before discarding the previous usable track.
+          await candidate.bufferForPlayback();
+          if (this.destroyed) throw new Error('Lecteur fermé.');
+          // Validate the candidate and commit synchronously: a preparation
+          // failure queued as buffering resolved must retain the old track.
+          candidate.assertReady();
           this.externalAudio?.destroy();
           this.externalAudio = candidate;
           candidate.activate();
-        } catch (error) { candidate.destroy(); throw error; }
+          this.source = source;
+          if (resumeReplacement && replacementPauseRevision === this.pauseRevision) await this.play();
+        } catch (error) {
+          // Once committed, this is the current source. A rejected play()
+          // leaves it paused and retryable rather than pointing at destroyed audio.
+          if (this.externalAudio !== candidate) candidate.destroy();
+          throw error;
+        }
         finally { if (this.pendingAudio === candidate) this.pendingAudio = undefined; }
-        this.source = source;
-        if (!paused) await this.play();
         return;
       }
     } catch (error) {
       for(const controller of this.preparations)controller.abort();
       try {
         // A rejected candidate must restore the presentation, not just retain its URL.
-        if (!this.destroyed && previous && this.source === previous && !paused) {
+        const resumePrevious = independentSwitch
+          ? resumeReplacement && replacementPauseRevision === this.pauseRevision
+          : !paused;
+        if (!this.destroyed && previous && this.source === previous && pausedForReplacement && resumePrevious) {
           try { await this.play(); }
           catch (resumeError) {
             throw new Error(`${error instanceof Error ? error.message : String(error)} Ancienne piste conservée mais reprise impossible : ${resumeError instanceof Error ? resumeError.message : String(resumeError)}`);
@@ -153,7 +181,10 @@ export class NativePlayer implements Player {
 
     const loadCandidate = (candidateUrl: string, timeoutMs=10000) =>
       new Promise<void>((resolve, reject) => {
+        let settled = false;
         const finish = (error?: Error) => {
+          if (settled) return;
+          settled = true;
           clearTimeout(timer);
           this.video.removeEventListener('loadedmetadata', metadata);
           this.video.removeEventListener('seeked', seeked);
@@ -171,9 +202,15 @@ export class NativePlayer implements Player {
           metadataReceived = true;
           this.video.volume = volume;
           this.video.playbackRate = speed;
-          const target = Math.min(position, Math.max(0, this.video.duration - 0.05));
-          if (target > 0) this.video.currentTime = target;
-          else finish();
+          // Resolve saved progress alongside metadata, before audio windows load.
+          // Starting segmented audio at zero then seeking copied two windows and
+          // raced the startup buffer against the newly requested window.
+          void Promise.resolve(position).then(position => {
+            if (settled || this.destroyed) return;
+            const target = Number.isFinite(position) ? Math.max(0, Math.min(position, Math.max(0, this.video.duration - 0.05))) : 0;
+            if (target > 0 && Math.abs(this.video.currentTime - target) > .001) this.video.currentTime = target;
+            else finish();
+          }, error => finish(error instanceof Error ? error : new Error(String(error))));
         };
         const failed = () =>
           finish(
@@ -196,23 +233,55 @@ export class NativePlayer implements Player {
         this.video.load();
       });
 
+    const loadVideo = async (url: string, timeoutMs: number) => {
+      await loadCandidate(url, timeoutMs);
+      if (!source.preparedVideoUrl) return;
+      // Matroska acceptance must include decoded data at the requested position,
+      // not just a MIME hint or a successful container metadata parse.
+      const probe = new AbortController(); this.preparations.add(probe);
+      try { await waitForStartupBuffer(this.video, probe.signal); }
+      finally { this.preparations.delete(probe); }
+    };
+
     try {
+      // Load independent, already-prepared Ogg audio while video metadata arrives.
+      // Keep it inactive until both resources are ready; segmented Opus needs the
+      // video's duration/index and retains its ordered initialization.
+      let audioLoading: Promise<void> | undefined;
+      if (source.externalAudioUrl && !segmented) {
+        this.externalAudio = createAudio();
+        audioLoading = this.externalAudio.load(audioUrl!, false);
+        void audioLoading.catch(() => {});
+      }
       try {
         this.status(hasFreshDirect ? 'Connexion directe au Media Node…' : 'Chargement de la vidéo…');
-        await loadCandidate(primaryUrl, fallbackUrl ? 2500 : 10000);
-      } catch (primaryErr) {
-        if (fallbackUrl && !this.destroyed) {
-          this.status('Node direct indisponible. Connexion au relais…');
-          await loadCandidate(fallbackUrl,7500);
-        } else {
-          throw primaryErr;
+        try {
+          await loadVideo(primaryUrl, fallbackUrl ? 2500 : 10000);
+        } catch (primaryErr) {
+          if (fallbackUrl && !this.destroyed) {
+            this.status('Node direct indisponible. Connexion au relais…');
+            await loadVideo(fallbackUrl,7500);
+          } else {
+            throw primaryErr;
+          }
         }
+      } catch (originalError) {
+        if (!source.preparedVideoUrl || this.destroyed) throw originalError;
+        this.status('Vidéo originale non lisible sur ce navigateur. Préparation sans réencodage…');
+        await this.prepareUrl(source.preparedVideoUrl);
+        await loadCandidate(source.preparedVideoUrl);
       }
       this.source = source;
       if (source.externalAudioUrl) {
         this.status(`Chargement audio ${source.language.toUpperCase()} (${source.audioTrackId})${segmented ? ' par segments' : ''}…`);
-        this.externalAudio = createAudio();
-        await this.externalAudio.load(audioUrl!);
+        if (audioLoading) {
+          await audioLoading;
+          if (this.destroyed) throw new Error('Lecteur fermé.');
+          this.externalAudio?.activate();
+        } else {
+          this.externalAudio = createAudio();
+          await this.externalAudio.load(audioUrl!);
+        }
       }
       await this.selectSubtitle(this.subtitle);
       if (!paused) await this.play();
@@ -261,20 +330,32 @@ export class NativePlayer implements Player {
   }
   async play() {
     if (!this.source || this.destroyed) throw new Error('Source interrompue ou indisponible. Rechargez explicitement la source.');
+    this.startup?.abort();
+    const startup = new AbortController(); this.startup = startup;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([(async () => {
+        this.status('Mise en mémoire tampon…');
+        await Promise.all([waitForStartupBuffer(this.video, startup.signal), this.externalAudio?.bufferForPlayback()]);
+        if (startup.signal.aborted || this.destroyed) throw new Error('Démarrage annulé.');
         // Wait until video leaves seeking/buffering before starting independent audio.
         // Otherwise its waiting event can cancel the pending audio play promise.
         await this.video.play();
-        if (this.externalAudio) await this.externalAudio.play();
+        if (startup.signal.aborted || this.destroyed) throw new Error('Démarrage annulé.');
+        if (this.externalAudio) {
+          await this.externalAudio.play();
+          if (startup.signal.aborted || this.destroyed) throw new Error('Démarrage annulé.');
+        }
       })(), new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { this.video.pause(); reject(new Error('Démarrage de lecture expiré après 10 secondes.')); }, 10000);
+        timer = setTimeout(() => {
+          if (!this.destroyed && this.startup === startup) this.video.pause();
+          reject(new Error('Démarrage de lecture expiré après 10 secondes.'));
+        }, 10000);
       })]);
-    } catch (error) { this.pause(); throw error; }
-    finally { clearTimeout(timer); }
+    } catch (error) { if (!this.destroyed && this.startup === startup) this.pause(); throw error; }
+    finally { clearTimeout(timer); if (this.startup === startup) this.startup = undefined; }
   }
-  pause() { this.externalAudio?.pause(); this.video.pause(); }
+  pause() { this.pauseRevision++; this.startup?.abort(); this.externalAudio?.pause(); this.pendingAudio?.pause(); this.video.pause(); }
   seek(position: number) { if (Number.isFinite(position)) this.video.currentTime = Math.max(0, Math.min(position, this.video.duration || 0)); }
   setVolume(volume: number) { this.video.volume = Math.max(0, Math.min(1, volume)); }
   setAudioOffset(seconds: number) {
@@ -296,6 +377,7 @@ export class NativePlayer implements Player {
   setSpeed(speed: number) { if ([0.5, 1, 1.5, 2].includes(speed)) this.video.playbackRate = speed; }
   destroy() {
     this.destroyed = true;
+    this.startup?.abort();
     for(const controller of this.preparations)controller.abort();this.preparations.clear();
     this.cancel?.();
     this.pendingAudio?.destroy(); this.pendingAudio = undefined;

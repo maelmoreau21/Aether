@@ -2,16 +2,18 @@
   import { resolve } from '$app/paths';
   import type { Work } from '../catalog/api';
   import Icon from './Icon.svelte';
-  import { imagePreviewUrl } from '../catalog/image-url';
+  import { imagePreviewUrl, isImageLoaded, markImageLoaded } from '../catalog/image-url';
 
-  let loadedUrl = $state('');
+  
 
   let {
     featured = null,
-    onPlay
+    onPlay,
+    onRandomize
   }: {
     featured?: Work | null;
     onPlay?: (work: Work) => void;
+    onRandomize?: () => void;
   } = $props();
 
   const detailUrl = $derived(
@@ -22,7 +24,21 @@
       : resolve('films/')
   );
 
-  const imageUrl = $derived(imagePreviewUrl(featured?.artwork?.backdrop || featured?.posterUrl,1280));
+  const imageUrl = $derived(imagePreviewUrl(featured?.artwork?.backdrop,1280));
+  let loadedUrl = $state('');
+
+  $effect(() => {
+    if (imageUrl && isImageLoaded(imageUrl)) {
+      loadedUrl = imageUrl;
+    }
+  });
+
+  function checkLoaded(node: HTMLImageElement) {
+    if (node.complete && node.naturalWidth > 0 && imageUrl) {
+      loadedUrl = imageUrl;
+      markImageLoaded(imageUrl);
+    }
+  }
 </script>
 
 <section class="hero-banner" class:has-featured={!!featured} aria-label="Média en vedette">
@@ -32,7 +48,7 @@
       class="backdrop-art"
       style:background-image="radial-gradient(ellipse at 75% 40%, var(--color-accent-soft), transparent 65%)"
     ></div>
-    {#if featured?.artwork?.backdrop || featured?.posterUrl}
+    {#if featured?.artwork?.backdrop}
       <img
         class="backdrop-img"
         class:loaded={loadedUrl === imageUrl}
@@ -41,7 +57,11 @@
         loading="eager"
         fetchpriority="high"
         decoding="async"
-        onload={() => { loadedUrl = imageUrl; }}
+        use:checkLoaded
+        onload={() => {
+          loadedUrl = imageUrl;
+          markImageLoaded(imageUrl);
+        }}
       />
     {/if}
     <div class="backdrop-gradient-vignette"></div>
@@ -93,7 +113,7 @@
 
     <p class="hero-synopsis">
       {#if featured}
-        {featured.plot || featured.description || 'Découvrez cette œuvre en lecture directe haute fidélité.'}
+        {featured.plot || featured.description || ''}
       {:else}
         Retrouvez vos films préférés et explorez vos séries en lecture directe haute fidélité. Sans transcodage forcé, vos médias sont diffusés dans leur format d’origine.
       {/if}
@@ -124,6 +144,19 @@
           <Icon name="info" size={20} />
           <span>Plus d'infos</span>
         </a>
+
+        {#if onRandomize}
+          <button
+            type="button"
+            class="btn-tertiary"
+            onclick={onRandomize}
+            title="Découvrir un autre titre au hasard"
+            aria-label="Découvrir un autre titre au hasard"
+          >
+            <Icon name="sparkles" size={18} />
+            <span>Surprenez-moi</span>
+          </button>
+        {/if}
       {:else}
         <a class="btn-primary" href={resolve('films/')}>
           <Icon name="film" size={18} />
@@ -141,12 +174,12 @@
 <style>
   .hero-banner {
     position: relative;
-    min-height: clamp(400px, 52vh, 600px);
+    min-height: clamp(350px, 30vw, 480px);
     display: flex;
     align-items: flex-end;
-    padding: clamp(32px, 5vw, 64px) var(--page-gutter);
-    margin: 0 calc(-1 * var(--page-gutter)) 24px;
-    border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+    padding: clamp(24px, 4vw, 48px);
+    margin: 24px 0 0;
+    border-radius: var(--radius-2xl);
     overflow: hidden;
   }
 
@@ -221,7 +254,7 @@
     text-transform: uppercase;
     font-size: 11px;
     font-weight: 750;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.06em;
     color: var(--color-accent);
     background: var(--color-accent-soft);
     border: 1px solid var(--border-subtle);
@@ -247,6 +280,7 @@
     color: var(--accent-secondary);
     background: rgba(251, 191, 36, 0.15);
     border: 1px solid rgba(251, 191, 36, 0.25);
+    backdrop-filter: blur(8px);
   }
 
   .mpaa-pill {
@@ -310,20 +344,20 @@
     min-height: 48px;
     padding: 0 26px;
     border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--brand-gradient);
-    color: #1C1917;
+    border-radius: var(--radius-md);
+    background: var(--color-play);
+    color: var(--color-on-play);
     font-size: 14px;
     font-weight: 700;
     text-decoration: none;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-sm);
     transition: all var(--transition-fast);
   }
 
   .btn-primary:hover:not(:disabled) {
-    background: var(--brand-gradient);
+    background: var(--color-play);
     transform: translateY(-2px);
-    box-shadow: 0 10px 28px rgba(255, 255, 255, 0.25);
+    box-shadow: var(--shadow-sm);
   }
 
   .btn-secondary {
@@ -334,7 +368,7 @@
     min-height: 48px;
     padding: 0 22px;
     border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -351,10 +385,36 @@
     transform: translateY(-2px);
   }
 
+  .btn-tertiary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 0 20px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    color: var(--color-accent);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .btn-tertiary:hover {
+    background: var(--color-accent-soft);
+    border-color: var(--color-accent);
+    color: var(--color-accent-hover);
+    transform: translateY(-2px);
+  }
+
   @media (max-width: 768px) {
     .hero-banner {
       min-height: 360px;
-      padding: 24px var(--page-gutter);
+      padding: 24px;
       margin-bottom: 16px;
     }
 
@@ -362,10 +422,10 @@
       width: 100%;
     }
 
-    .btn-primary, .btn-secondary {
+    .btn-primary, .btn-secondary, .btn-tertiary {
       flex: 1;
       min-height: 44px;
-      padding: 0 16px;
+      padding: 0 14px;
       font-size: 13px;
     }
   }

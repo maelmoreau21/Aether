@@ -1,3 +1,39 @@
+## CI scanner, réouverture audio — 24 octobre 2026
+
+La boucle FR/EN de `browser_scanner` attend la piste validée dans le menu
+Svelte et la fin de l'action avant fermeture, en plus de sa préférence serveur.
+Une valeur persistée antérieure ne suffit pas à valider la sélection courante.
+
+## CI playlists et dépôts d'extensions — 23 octobre 2026
+
+Le scénario `product_tests::mixed_playlists` avec
+`MEDIA_TEST_PLAYLIST_BROWSER=1` ouvre l'onglet Dépôts puis « + Nouveau dépôt »
+avant d'attendre le champ Adresse du dépôt, désormais replié par défaut.
+Les contrôles de partage, droits, lecture persistante et PCM restent actifs.
+
+## Recherche de latence streaming — 23 octobre 2026
+
+Méthode, stratégies comparées, mesures brutes et limites :
+[STREAMING_PERFORMANCE.md](STREAMING_PERFORMANCE.md).
+Le banc `scripts/browser-streaming-performance.cjs` distingue clic navigateur,
+première image soumise au compositeur, PCM décodé, seek et changement audio.
+Le scénario `browser_scanner` mesure aussi clic → dialogue/image sur le vrai
+Core/SQLite/Node local. Un banc HTTP synthétique ne remplace pas ce parcours.
+
+Régressions ciblées : conservation de la vidéo pendant préparation VF/VO,
+pause manuelle et erreur du candidat, franchissement de fenêtre audio pendant
+son chargement, annulation et durée de vie des leases du cache Node.
+Le microbenchmark Node ignoré `benchmark_preparation_cache_open_concurrency`
+compare explicitement les deux durées de verrouillage sur le même fichier.
+Il ne mesure ni un décodeur ni une première image.
+
+## Navigation et lancement — 23 octobre 2026
+
+Cache session/SWR borné, annulations, déduplication, parcours Chrome et mesures
+avant/après : [NAVIGATION_PERFORMANCE.md](NAVIGATION_PERFORMANCE.md).
+104 tests Web, tests Rust catalogue/scanner/distribué et Chrome Core/SQLite
+exécutés ; Docker Desktop indisponible, mesures NAS/PostgreSQL non faites.
+
 ## Bibliothèques multi-dossiers — 22 octobre 2026
 
 Contrat : [LIBRARY_FOLDERS.md](LIBRARY_FOLDERS.md).

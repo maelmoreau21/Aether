@@ -26,4 +26,4 @@
   <p>Ce droit contrôle le téléchargement proposé par l’application. Un client autorisé à lire reçoit les octets du média et peut les enregistrer. Une copie déjà téléchargée reste sur l’appareil.</p>
   <button>Enregistrer les permissions</button>
 </fieldset>{#if error}<p role="alert">{error}</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}</form>
-<style>fieldset { display:grid;gap:12px;border:1px solid var(--color-line);border-radius:8px;margin-block:20px;padding:16px; } label { display:flex;gap:10px;align-items:center; } p { font-size:13px;line-height:1.5; } button { padding:12px;background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-line);border-radius:6px; }</style>
+<style>fieldset { display:grid;gap:12px;border:1px solid var(--color-line);border-radius:var(--radius-md);margin-block:20px;padding:16px; } label { display:flex;gap:10px;align-items:center; } p { font-size:13px;line-height:1.5; } button { padding:12px;background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-line);border-radius: var(--radius-md); }</style>

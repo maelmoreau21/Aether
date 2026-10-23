@@ -1045,7 +1045,7 @@ where
             });
         let artwork_stem = relative.file_stem().unwrap_or_default().to_string_lossy();
         for (role, names) in [
-            ("backdrop", vec!["backdrop", "fanart"]),
+            ("backdrop", vec!["backdrop", "fanart", "background", "art"]),
             ("logo", vec!["logo", "clearlogo"]),
             ("landscape", vec!["landscape"]),
             ("banner", vec!["banner"]),
@@ -1060,11 +1060,17 @@ where
                 .iter()
                 .map(|name| format!("{artwork_stem}-{name}"))
                 .collect();
-            let candidates: Vec<&str> = if shared_artwork {
-                names
-            } else {
-                exact_names.iter().map(String::as_str).collect()
-            };
+            let candidates: Vec<&str> = names
+                .iter()
+                .copied()
+                .filter(|_| shared_artwork)
+                .chain(
+                    exact_names
+                        .iter()
+                        .map(String::as_str)
+                        .filter(|_| exact_artwork),
+                )
+                .collect();
             let memo_key = if shared_artwork {
                 role.to_owned()
             } else {
@@ -1225,6 +1231,32 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn single_film_discovers_prefixed_artwork_without_generic_image() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("Film (2024)");
+        tokio::fs::create_dir(&dir).await.unwrap();
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/generated/p1/clip-mp4-fr.mp4");
+        tokio::fs::copy(fixture, dir.join("Film.mp4"))
+            .await
+            .unwrap();
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(2, 3)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        tokio::fs::write(dir.join("Film-background.png"), bytes.into_inner())
+            .await
+            .unwrap();
+        let report = scan(root.path(), &HashMap::new(), &AtomicBool::new(false))
+            .await
+            .unwrap();
+        assert_eq!(report.files.len(), 1);
+        assert_eq!(
+            report.files[0].artwork["backdrop"].path,
+            "Film (2024)/Film-background.png"
+        );
+    }
     #[tokio::test]
     async fn traversal_refuses_directory_links_and_windows_junctions() {
         let temp = tempfile::tempdir().unwrap();

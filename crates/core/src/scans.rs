@@ -291,8 +291,7 @@ async fn enqueue_one(
         .filter(|s| !s.is_empty())
         .collect();
     if node_id == "local" {
-        node::LocalNode
-            .validate_root(std::path::Path::new(&root), &state.root)
+        crate::local_mounts::validate(std::path::Path::new(&root), &state.root)
             .await
             .map_err(|_| StatusCode::BAD_REQUEST)?;
     }
@@ -353,7 +352,7 @@ async fn enqueue_one(
             let _permit = slots.acquire().await?;
             if cancel.load(Ordering::Acquire) { return Err("Scan arrêté".into()); }
             crate::database::query("UPDATE scan_jobs SET status='running' WHERE library_id=?").bind(&job_id).execute(&store.pool).await?;
-            let root = node::LocalNode.validate_root(std::path::Path::new(&root), &allowed_root).await?;
+            let root = crate::local_mounts::validate(std::path::Path::new(&root), &allowed_root).await?;
             if kind == "music" {
                 let count = crate::music::scan(&store, &job_id, &root, &cancel).await?;
                 crate::database::query("UPDATE scan_jobs SET status='completed',discovered=?,probed=?,reused=0 WHERE library_id=?").bind(count as i64).bind(count as i64).bind(&job_id).execute(&store.pool).await?;

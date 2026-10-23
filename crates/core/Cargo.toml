@@ -12,7 +12,7 @@ image = { version = "=0.25.10", default-features = false, features = ["jpeg", "p
 media-contracts = { path = "../shared" }
 media-extension-sdk = { path = "../extension-sdk" }
 media-node = { path = "../node" }
-axum = "0.8.9"
+axum = { version = "0.8.9", features = ["multipart"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

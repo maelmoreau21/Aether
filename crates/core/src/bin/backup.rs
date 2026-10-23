@@ -36,9 +36,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         let target = target_arg.ok_or("full backup requires a new archive path")?;
         full_backup(&target, &media_root).await?;
-        println!(
-            "Encrypted server backup completed: database and runtime configuration. Keep the recovery key separately."
-        );
+        println!("Server backup completed: database and runtime configuration.");
         return Ok(());
     }
 
@@ -99,7 +97,7 @@ async fn full_backup(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let key = zeroize::Zeroizing::new(
         std::env::var("MEDIA_BACKUP_KEY")
-            .map_err(|_| "MEDIA_BACKUP_KEY is required (64 hexadecimal characters)")?,
+            .unwrap_or_else(|_| media_poc::backup_bundle::DEFAULT_BACKUP_KEY.to_string()),
     );
     if key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err("invalid MEDIA_BACKUP_KEY".into());

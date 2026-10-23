@@ -54,6 +54,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             media_poc::extension_files::import(&database, std::path::Path::new(&directory)).await?;
         eprintln!("{{\"event\":\"local_extensions_imported\",\"count\":{imported}}}");
     }
+    if media_poc::extension_storage::sync_installed(&database)
+        .await
+        .is_err()
+    {
+        eprintln!("plugin storage unavailable; affected plugins cannot execute");
+    }
     let inventory = if library_root.is_some() {
         Inventory::local(root).await?
     } else {

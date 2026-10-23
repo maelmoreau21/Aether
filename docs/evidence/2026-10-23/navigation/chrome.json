@@ -1,0 +1,153 @@
+{
+  "browser": "155.0.8059.86",
+  "scope": "Real UI, mocked API 180 ms catalogue / 300 ms descriptor, local synthetic MP4. No Core/Node/NAS proof.",
+  "runs": [
+    {
+      "mode": "before",
+      "returns": [
+        {
+          "ms": 358.91069999999945,
+          "requests": 2
+        },
+        {
+          "ms": 346.0598999999993,
+          "requests": 2
+        },
+        {
+          "ms": 334.9991,
+          "requests": 2
+        },
+        {
+          "ms": 346.8109000000004,
+          "requests": 2
+        },
+        {
+          "ms": 331.41649999999936,
+          "requests": 2
+        },
+        {
+          "ms": 346.64779999999973,
+          "requests": 2
+        },
+        {
+          "ms": 347.85549999999967,
+          "requests": 2
+        },
+        {
+          "ms": 350.7677999999996,
+          "requests": 2
+        },
+        {
+          "ms": 347.03769999999986,
+          "requests": 2
+        },
+        {
+          "ms": 333.10180000000037,
+          "requests": 2
+        }
+      ],
+      "openings": [
+        {
+          "shellMs": 832.1025000000009,
+          "playingMs": 948.2646999999997,
+          "descriptorRequests": 1,
+          "ui": {
+            "start": 6426.9000000059605,
+            "shellMs": 321.7999999821186,
+            "firstFrameMs": 513.5,
+            "playingMs": 514.4000000059605
+          }
+        },
+        {
+          "shellMs": 578.4642000000003,
+          "playingMs": 689.2499000000007,
+          "descriptorRequests": 1,
+          "ui": {
+            "start": 7630.4000000059605,
+            "shellMs": 313.90000000596046,
+            "playingMs": 415,
+            "firstFrameMs": 421.19999998807907
+          }
+        }
+      ],
+      "scenarios": [],
+      "heapBytes": 20374101,
+      "errors": []
+    },
+    {
+      "mode": "after",
+      "returns": [
+        {
+          "ms": 74.13100000000122,
+          "requests": 0
+        },
+        {
+          "ms": 67.73430000000008,
+          "requests": 0
+        },
+        {
+          "ms": 69.96180000000095,
+          "requests": 0
+        },
+        {
+          "ms": 61.60620000000017,
+          "requests": 0
+        },
+        {
+          "ms": 67.74039999999877,
+          "requests": 0
+        },
+        {
+          "ms": 64.77420000000166,
+          "requests": 0
+        },
+        {
+          "ms": 68.5650999999998,
+          "requests": 0
+        },
+        {
+          "ms": 68.01260000000002,
+          "requests": 0
+        },
+        {
+          "ms": 72.52859999999964,
+          "requests": 0
+        },
+        {
+          "ms": 64.29569999999876,
+          "requests": 0
+        }
+      ],
+      "openings": [
+        {
+          "shellMs": 39.92829999999958,
+          "playingMs": 879.6147999999994,
+          "descriptorRequests": 1,
+          "ui": {
+            "start": 3357.5,
+            "shellMs": 7.600000023841858,
+            "firstFrameMs": 415.5,
+            "playingMs": 417.40000000596046
+          }
+        },
+        {
+          "shellMs": 282.35469999999987,
+          "playingMs": 694.2108000000007,
+          "descriptorRequests": 1,
+          "ui": {
+            "start": 4505.700000017881,
+            "shellMs": 2.7999999821186066,
+            "firstFrameMs": 402,
+            "playingMs": 403.40000000596046
+          }
+        }
+      ],
+      "scenarios": [
+        "home-series-episode-home",
+        "films-series-films-no-blocking-loader"
+      ],
+      "heapBytes": 16501627,
+      "errors": []
+    }
+  ]
+}

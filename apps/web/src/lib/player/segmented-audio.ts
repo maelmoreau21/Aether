@@ -20,6 +20,11 @@ export class SegmentedAudio extends ExternalAudio {
   private prefix = '';
   private opened?: () => void;
   private rejectOpen?: (error: Error) => void;
+  private loading = true;
+  private rejectLoad?: (error: Error) => void;
+  private activated = false;
+  private preparationError?: Error;
+  private rejectBuffer?: (error: Error) => void;
 
   constructor(private element: HTMLVideoElement, offset: number, private reportError: (message: string) => void) {
     super(element, offset, reportError); this.offsetSeconds = offset;
@@ -28,12 +33,18 @@ export class SegmentedAudio extends ExternalAudio {
     this.prefix = prefix;
     const index = /audio-(\d+)-chunk-$/.exec(prefix)?.[1];
     if(index)this.audio.dataset.internalAudioTrack=`internal-${index}`;
+    const failed = new Promise<never>((_, reject) => { this.rejectLoad = reject; });
     const opened = new Promise<void>((resolve, reject) => {
       this.rejectOpen = reject;
       this.opened = () => {
         try {
           this.buffer = this.mediaSource.addSourceBuffer(MIME);
           this.mediaSource.duration = this.element.duration;
+          // A replacement track loads while the previous presentation advances.
+          // Keep following its current window even before audio metadata/seek
+          // completes, otherwise crossing a boundary can deadlock ready().
+          this.element.addEventListener('seeking', this.seekChanged);
+          this.interval = setInterval(this.schedule, 250);
           this.rejectOpen = undefined;
           resolve();
         } catch (error) { reject(error); }
@@ -42,18 +53,43 @@ export class SegmentedAudio extends ExternalAudio {
     });
     // Set src before waiting for sourceopen. The audio metadata wait completes
     // only once the first bounded window has arrived.
-    const mediaLoad = super.load(this.objectUrl, activate, MIME);
+    const mediaLoad = super.load(this.objectUrl, false, MIME);
     try {
-      await Promise.all([mediaLoad, (async()=>{await opened;await this.fill(true);})()]);
+      await Promise.race([Promise.all([mediaLoad, (async()=>{await opened;await this.fill(true);})()]), failed]);
       if (this.closed) throw new Error('Lecteur fermé.');
-      this.element.addEventListener('seeking', this.seekChanged);
-      this.interval = setInterval(this.schedule, 250);
+      this.loading = false; this.rejectLoad = undefined;
+      if (activate) this.activate();
     } catch (error) { this.destroy(); throw error; }
   }
   private seekChanged = () => {this.seekEpoch++;this.controller?.abort();this.schedule();};
-  private schedule = () => { void this.fill().catch(error => {
-    if (!this.closed) {this.element.pause();this.reportError(error instanceof Error ? error.message : String(error));}
+  private schedule = () => { if (this.preparationError) return; void this.fill(this.loading).catch(error => {
+    if (this.closed) return;
+    if (!this.activated) {
+      // A loaded candidate still belongs to the replacement transaction until
+      // activate(). Its next window can fail while commit buffering is pending;
+      // never route that error through the current presentation's fatal handler.
+      this.preparationError = error instanceof Error ? error : new Error(String(error));
+      clearInterval(this.interval);
+      this.rejectLoad?.(this.preparationError);
+      this.rejectBuffer?.(this.preparationError);
+    }
+    else {this.element.pause();this.reportError(error instanceof Error ? error.message : String(error));}
   }); };
+  override activate() {
+    this.assertReady();
+    super.activate(); this.activated = true;
+  }
+  override assertReady() {
+    super.assertReady();
+    if (this.preparationError) throw this.preparationError;
+  }
+  override async bufferForPlayback() {
+    if (this.preparationError) throw this.preparationError;
+    const failed = new Promise<never>((_, reject) => { this.rejectBuffer = reject; });
+    try { await Promise.race([super.bufferForPlayback(), failed]); }
+    catch (error) { super.pause(); throw error; }
+    finally { this.rejectBuffer = undefined; }
+  }
   private async idle() {
     if (!this.buffer?.updating) return;
     const buffer = this.buffer;
@@ -65,14 +101,17 @@ export class SegmentedAudio extends ExternalAudio {
     });
   }
   private async fill(onlyCurrent = false) {
-    if (this.closed || this.filling || !this.buffer || this.mediaSource.readyState !== 'open') return;
+    if (this.closed || this.filling || !this.buffer || this.mediaSource.readyState === 'closed') return;
     this.filling = true;
     const epoch = this.seekEpoch;
+    const target = Math.max(0, this.element.currentTime - this.offsetSeconds);
+    const current = Math.floor(target / SECONDS);
     try {
-      const target = Math.max(0, this.element.currentTime - this.offsetSeconds);
-      const current = Math.floor(target / SECONDS);
       // At most the current window and one ahead; never copy the full episode.
-      for (const chunk of onlyCurrent ? [current] : [current, current + 1]) {
+      // Do not launch the next packet-copy job while the first frames decode.
+      // Request it with four seconds of lead instead of immediately on startup.
+      const nearingBoundary = (current + 1) * SECONDS - target <= 4;
+      for (const chunk of onlyCurrent || !nearingBoundary ? [current] : [current, current + 1]) {
         if (this.closed || epoch !== this.seekEpoch) return;
         const ranges=this.buffer.buffered;
         const retained=Array.from({length:ranges.length},(_,i)=>i).some(i=>ranges.start(i)<=chunk*SECONDS+.05 && ranges.end(i)>=Math.min(this.element.duration,(chunk+1)*SECONDS)-.05);
@@ -118,11 +157,20 @@ export class SegmentedAudio extends ExternalAudio {
           await this.idle();this.buffer.remove(chunk*SECONDS,(chunk+1)*SECONDS);await this.idle();this.loaded.delete(chunk);
         }
       }
+      // Without EOS an Opus packet ending just before the video's final frame
+      // looks like an infinite network stall. Appending after a backwards seek
+      // reopens an ended MediaSource; do not reject that state above.
+      const last = Math.ceil(this.element.duration / SECONDS) - 1;
+      if (!this.closed && epoch === this.seekEpoch && this.loaded.has(last) && this.mediaSource.readyState === 'open') {
+        await this.idle();
+        if (!this.closed && epoch === this.seekEpoch && this.mediaSource.readyState === 'open') this.mediaSource.endOfStream();
+      }
     } finally {
       this.filling=false;
       // A seek may have arrived while fetch or SourceBuffer was finishing.
       // Start the latest position immediately instead of waiting for the timer.
-      if (!this.closed && epoch !== this.seekEpoch) this.schedule();
+      const latestWindow = Math.floor(Math.max(0, this.element.currentTime - this.offsetSeconds) / SECONDS);
+      if (!this.closed && (epoch !== this.seekEpoch || latestWindow !== current)) this.schedule();
     }
   }
   override setOffset(seconds: number) {if(!Number.isFinite(seconds)||Math.abs(seconds)>30)return;this.offsetSeconds=seconds;super.setOffset(seconds);this.schedule();}
@@ -132,6 +180,8 @@ export class SegmentedAudio extends ExternalAudio {
     this.element.removeEventListener('seeking',this.seekChanged);
     if(this.opened)this.mediaSource.removeEventListener('sourceopen',this.opened);
     this.rejectOpen?.(new Error('Lecteur fermé.'));this.rejectOpen=undefined;
+    this.rejectLoad?.(new Error('Lecteur fermé.'));this.rejectLoad=undefined;
+    this.rejectBuffer?.(new Error('Lecteur fermé.'));this.rejectBuffer=undefined;
     if(this.buffer?.updating){try{this.buffer.abort();}catch{/* MSE can already be closed. */}}
     super.destroy();URL.revokeObjectURL(this.objectUrl);
   }

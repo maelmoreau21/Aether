@@ -841,7 +841,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         assert_eq!(status, StatusCode::PARTIAL_CONTENT, "remote audio chunk");
         assert_eq!(&bytes[4..8], b"ftyp");
         let video = prepared["url"].as_str().unwrap();
-        let (status, _, bytes) = http_request(
+        let (status, headers, bytes) = http_request(
             &core_origin,
             Method::GET,
             video,
@@ -850,7 +850,23 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         )
         .await;
         assert_eq!(status, StatusCode::PARTIAL_CONTENT);
-        assert_eq!(&bytes[4..8], b"ftyp");
+        let (fixture_name, expected_mime) = if asset_id == &film_asset_id {
+            ("av1-opus.mp4", "video/mp4")
+        } else {
+            ("av1-opus.mkv", "video/x-matroska")
+        };
+        let original = tokio::fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/generated")
+                .join(fixture_name),
+        )
+        .await
+        .unwrap();
+        assert_eq!(video, format!("/api/v1/assets/{asset_id}/content"));
+        assert_eq!(prepared["mime"], expected_mime);
+        assert_eq!(prepared["prepareVideo"], false);
+        assert_eq!(headers[header::CONTENT_TYPE], expected_mime);
+        assert_eq!(bytes.as_ref(), &original[..32]);
         assert_eq!(
             http_request(
                 &core_origin,
@@ -875,6 +891,68 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
             .0,
             StatusCode::FORBIDDEN
         );
+        if asset_id == &ep1_asset_id {
+            // MKV decoding failures retain an explicit, authorized MP4 fallback.
+            let fallback = prepared["preparedVideoUrl"].as_str().unwrap();
+            assert_eq!(
+                fallback,
+                format!("/api/v1/assets/{asset_id}/prepared/video")
+            );
+            for method in [Method::GET, Method::HEAD] {
+                let (status, headers, bytes) = http_request(
+                    &core_origin,
+                    method.clone(),
+                    fallback,
+                    &[("cookie", &alice_cookie), ("range", "bytes=0-31")],
+                    vec![],
+                )
+                .await;
+                assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+                assert_eq!(headers[header::CONTENT_TYPE], "video/mp4");
+                assert_eq!(headers[header::CONTENT_LENGTH], "32");
+                assert!(
+                    headers[header::CONTENT_RANGE]
+                        .to_str()
+                        .unwrap()
+                        .starts_with("bytes 0-31/")
+                );
+                if method == Method::GET {
+                    assert_eq!(bytes.len(), 32);
+                    assert_eq!(&bytes[4..8], b"ftyp");
+                } else {
+                    assert!(bytes.is_empty());
+                }
+                assert_eq!(
+                    http_request(
+                        &core_origin,
+                        method,
+                        fallback,
+                        &[("cookie", &bob_cookie)],
+                        vec![]
+                    )
+                    .await
+                    .0,
+                    StatusCode::FORBIDDEN
+                );
+            }
+            assert_eq!(
+                http_request(
+                    &core_origin,
+                    Method::GET,
+                    fallback,
+                    &[
+                        ("cookie", &alice_cookie),
+                        ("range", "bytes=999999999-1000000000")
+                    ],
+                    vec![],
+                )
+                .await
+                .0,
+                StatusCode::RANGE_NOT_SATISFIABLE
+            );
+        } else {
+            assert!(prepared["preparedVideoUrl"].is_null());
+        }
         if asset_id == &film_asset_id {
             let subtitle = md["subtitles"][0]["url"].as_str().unwrap();
             let (status, _, bytes) = http_request(

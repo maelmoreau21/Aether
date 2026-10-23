@@ -1,5 +1,18 @@
 # Affiches locales Films — P1
 
+## Complément du 23 octobre 2026
+
+Affiches Films : après les noms historiques, `cover`, `default`, `movie`, puis
+`<vidéo>-folder`, `-cover`, `-default`, `-movie`. Séries : `poster`, `folder`,
+`cover`, `default`, `show`. Fonds : `backdrop`, `fanart`, `background`, `art`.
+Un fond préfixé par le nom vidéo est aussi recherché lorsque le dossier permet
+le partage mais ne contient aucune image générique. Les ambiguïtés entre œuvres
+et entre extensions de même base continuent d'interdire le partage.
+Ces alias reprennent une partie des [conventions locales Jellyfin](https://jellyfin.org/docs/general/server/media/movies/).
+Un nouveau scan est nécessaire pour les découvrir dans un inventaire existant.
+Aucun téléchargement depuis un fournisseur de métadonnées n'est ajouté.
+Voir les mesures et limites dans [Navigation](NAVIGATION_PERFORMANCE.md).
+
 ## Chargement initial — 20 octobre 2026
 
 L’accueil affiche chaque rayon dès que sa requête catalogue répond, puis charge

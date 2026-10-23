@@ -73,8 +73,23 @@ pub struct User {
 #[derive(Clone)]
 pub struct IdentityStore {
     pub(crate) pool: AnyPool,
+    pub(crate) plugins_path: std::path::PathBuf,
+}
+fn plugin_path(database: Option<&Path>) -> Result<std::path::PathBuf, IdentityError> {
+    let path = std::env::var_os("MEDIA_PLUGINS_PATH")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            database
+                .and_then(Path::parent)
+                .unwrap_or(Path::new("data"))
+                .join("plugins")
+        });
+    std::path::absolute(path).map_err(|_| IdentityError::Configuration)
 }
 impl IdentityStore {
+    pub fn plugins_path(&self) -> &Path {
+        &self.plugins_path
+    }
     /// Explicit external PostgreSQL connection; never transfers SQLite data.
     pub async fn open_postgres(url: &str) -> Result<Self, IdentityError> {
         sqlx::any::install_default_drivers();
@@ -90,7 +105,10 @@ impl IdentityStore {
         let mut conn = pool.acquire().await?;
         crate::inventory::backfill_title_sort_unicode(&mut conn).await?;
         drop(conn);
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            plugins_path: plugin_path(None)?,
+        })
     }
 
     pub async fn open_configured(media_root: &Path) -> Result<Self, IdentityError> {
@@ -191,7 +209,10 @@ impl IdentityStore {
             .execute(&mut *conn)
             .await?;
         drop(conn);
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            plugins_path: plugin_path(Some(path))?,
+        })
     }
 
     pub async fn user(&self, id: &str) -> Result<Option<User>, IdentityError> {

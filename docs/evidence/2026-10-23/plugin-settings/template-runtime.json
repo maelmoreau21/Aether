@@ -1,0 +1,11 @@
+{
+  "moduleBytes": 149077,
+  "passed": true,
+  "result": {
+    "apiVersion": 1,
+    "result": {
+      "summary": "Auteur indépendant : Film témoin",
+      "title": "Film témoin"
+    }
+  }
+}

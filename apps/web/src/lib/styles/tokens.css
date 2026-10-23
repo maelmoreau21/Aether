@@ -2,11 +2,15 @@
 
 :root, [data-theme="light"] {
   color-scheme: light;
+  --color-on-accent: #FFFFFF;
+  --color-play: #C2410C;
+  --color-on-play: #FFFFFF;
+  --color-play-hover: #9A3412;
 
   /* 2. Couleurs de marque & États (communs aux deux thèmes) */
   --brand-amber: #F59E0B;
   --brand-red: #EF4444;
-  --brand-gradient: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%);
+  --brand-gradient: var(--color-play);
 
   /* 3. Thème Clair — "Pierre Douce" (Light Mode) */
   --bg-main: #EFECE6;
@@ -16,14 +20,14 @@
 
   --text-primary: #1C1917;
   --text-secondary: #57534E;
-  --text-muted: #A8A29E;
+  --text-muted: #78716C;
 
   --accent-primary: #EA580C;
   --accent-secondary: #D97706;
 
-  --status-success: #10B981;
-  --status-warning: #F59E0B;
-  --status-error: #EF4444;
+  --status-success: #059669;
+  --status-warning: #B45309;
+  --status-error: #DC2626;
 
   /* Surfaces & Canvas Aether */
   --color-canvas: var(--bg-main);
@@ -45,14 +49,14 @@
   --color-text: var(--text-primary);
   --color-text-bright: var(--text-primary);
   --color-muted: var(--text-secondary);
-  --color-subtle: var(--text-muted);
+  --color-subtle: var(--text-secondary);
 
   /* Accent */
-  --color-accent: var(--accent-primary);
+  --color-accent: #C2410C;
   --color-accent-hover: #C2410C;
   --color-accent-soft: rgba(234, 88, 12, 0.12);
   --color-accent-soft-hover: rgba(234, 88, 12, 0.2);
-  --color-accent-solid: var(--accent-primary);
+  --color-accent-solid: #C2410C;
   --color-accent-glow: rgba(234, 88, 12, 0.22);
 
   /* Status Colors */
@@ -68,7 +72,7 @@
   --shadow-screen: 0 20px 80px rgba(28, 25, 23, 0.18);
   --shadow-card: 0 4px 14px rgba(28, 25, 23, 0.07);
   --shadow-card-hover: 0 16px 36px rgba(28, 25, 23, 0.14), 0 0 0 1px var(--border-subtle);
-  --shadow-glow: 0 0 30px var(--color-accent-glow);
+  --shadow-glow: var(--shadow-sm);
 
   /* Gradients */
   --gradient-hero: linear-gradient(180deg, rgba(239, 236, 230, 0.15) 0%, rgba(239, 236, 230, 0.85) 65%, #EFECE6 100%);
@@ -84,6 +88,10 @@
 
 [data-theme="dark"] {
   color-scheme: dark;
+    --color-on-accent: #1C1917;
+    --color-play: #F59E0B;
+    --color-on-play: #1C1917;
+    --color-play-hover: #FBBF24;
 
   /* 4. Thème Sombre — "Cinéma OLED" (Dark Mode) */
   --bg-main: #09090B;
@@ -93,8 +101,11 @@
 
   --text-primary: #FAFAFA;
   --text-secondary: #A1A1AA;
-  --text-muted: #52525B;
+  --text-muted: #71717A;
 
+  --status-success: #10B981;
+  --status-warning: #F59E0B;
+  --status-error: #EF4444;
   --accent-primary: #EF4444;
   --accent-secondary: #F59E0B;
 
@@ -118,7 +129,7 @@
   --color-text: var(--text-primary);
   --color-text-bright: var(--text-primary);
   --color-muted: var(--text-secondary);
-  --color-subtle: var(--text-muted);
+  --color-subtle: var(--text-secondary);
 
   /* Accent */
   --color-accent: var(--accent-primary);
@@ -140,8 +151,8 @@
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.8);
   --shadow-screen: 0 20px 80px rgba(0, 0, 0, 0.9);
   --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.5);
-  --shadow-card-hover: 0 16px 36px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(239, 68, 68, 0.3);
-  --shadow-glow: 0 0 30px var(--color-accent-glow);
+  --shadow-card-hover: 0 16px 36px rgba(0, 0, 0, 0.75), 0 0 0 1px var(--color-line);
+  --shadow-glow: var(--shadow-sm);
 
   /* Gradients */
   --gradient-hero: linear-gradient(180deg, rgba(9, 9, 11, 0.1) 0%, rgba(9, 9, 11, 0.75) 65%, #09090B 100%);
@@ -158,6 +169,10 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
+    --color-on-accent: #1C1917;
+    --color-play: #F59E0B;
+    --color-on-play: #1C1917;
+    --color-play-hover: #FBBF24;
 
     --bg-main: #09090B;
     --bg-surface: #121215;
@@ -166,9 +181,12 @@
 
     --text-primary: #FAFAFA;
     --text-secondary: #A1A1AA;
-    --text-muted: #52525B;
+    --text-muted: #71717A;
 
-    --accent-primary: #EF4444;
+    --status-success: #10B981;
+  --status-warning: #F59E0B;
+  --status-error: #EF4444;
+  --accent-primary: #EF4444;
     --accent-secondary: #F59E0B;
 
     --color-canvas: var(--bg-main);
@@ -188,7 +206,7 @@
     --color-text: var(--text-primary);
     --color-text-bright: var(--text-primary);
     --color-muted: var(--text-secondary);
-    --color-subtle: var(--text-muted);
+    --color-subtle: var(--text-secondary);
 
     --color-accent: var(--accent-primary);
     --color-accent-hover: #F87171;
@@ -207,8 +225,8 @@
     --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.8);
     --shadow-screen: 0 20px 80px rgba(0, 0, 0, 0.9);
     --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.5);
-    --shadow-card-hover: 0 16px 36px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(239, 68, 68, 0.3);
-    --shadow-glow: 0 0 30px var(--color-accent-glow);
+    --shadow-card-hover: 0 16px 36px rgba(0, 0, 0, 0.75), 0 0 0 1px var(--color-line);
+    --shadow-glow: var(--shadow-sm);
 
     --gradient-hero: linear-gradient(180deg, rgba(9, 9, 11, 0.1) 0%, rgba(9, 9, 11, 0.75) 65%, #09090B 100%);
     --gradient-hero-horizontal: linear-gradient(90deg, #09090B 0%, rgba(9, 9, 11, 0.85) 35%, rgba(9, 9, 11, 0.2) 70%, transparent 100%);
@@ -222,7 +240,7 @@
 }
 
 :root {
-  --color-on-accent: #FFFFFF;
+
   --color-success-soft: color-mix(in srgb, var(--status-success) 12%, var(--bg-surface));
   --color-warning-soft: color-mix(in srgb, var(--status-warning) 12%, var(--bg-surface));
   --color-danger-soft: color-mix(in srgb, var(--status-error) 12%, var(--bg-surface));
@@ -231,17 +249,19 @@
   --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
 
   /* Radii */
-  --radius-xs: 4px;
-  --radius-sm: 8px;
+  --radius-xs: 6px;
+  --radius-sm: 10px;
   --radius-md: 12px;
   --radius-lg: 16px;
-  --radius-xl: 22px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-pill: var(--radius-full);
   --radius-full: 9999px;
 
   /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-smooth: 350ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-normal: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-smooth: 220ms cubic-bezier(0.16, 1, 0.3, 1);
 
   /* Spacing */
   --space-1: 4px;
@@ -339,7 +359,7 @@ select {
   width: 100%;
   min-height: 44px;
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--color-raised) url('/images/chevron.svg') no-repeat right 12px center / 14px;
   color: var(--color-text);
   padding: 10px 34px 10px 14px;
@@ -373,7 +393,7 @@ option {
   font-size: 11px;
   font-weight: 700;
   line-height: 1.4;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.06em;
   color: var(--color-accent);
   margin: 0;
 }
@@ -419,3 +439,10 @@ option {
     animation: none !important;
   }
 }
+
+/* Shared form grammar, including administration and music. */
+input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea { min-height:44px; border:1px solid var(--color-line); border-radius:var(--radius-md); background:var(--color-surface); color:var(--color-text); padding:10px 14px; font:inherit; }
+button:active:not(:disabled) { filter:brightness(.94); }
+@media(max-width:767px) { :root { --page-gutter:16px; } }
+
+@media (pointer:coarse) { button, select, summary { min-height:44px; } }

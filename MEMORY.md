@@ -1,5 +1,12 @@
 # MEMORY.md — État et décisions Aether
 
+## 23 octobre 2026 — Correction du test E2E playlists (mixed_playlists)
+
+- **Correction du sélecteur d’onglet Dépôts dans scripts/browser-playlists.cjs** :
+  - L’onglet « Dépôts » dans AdminExtensions.svelte possédait un attribut `aria-label="Dépôts"` qui surchargeait le nom accessible de l’élément (« Dépôts » au lieu de « Dépôts (X) »). Le sélecteur Playwright `getByRole('button', { name: /^Dépôts \(/ })` expirait donc par timeout de 30 secondes.
+  - Ajustement du sélecteur avec `{ name: /^Dépôts/ }` pour s'aligner sur la présence éventuelle de `aria-label` ou du compteur textuel, de manière cohérente avec les autres tests d'extensions.
+  - Validation exécutée avec succès : `cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1` (1 test passé en 3.31s, playlists mixtes, partage, intégrité audio et politique de partage vérifiés).
+
 ## 23 octobre 2026 — Correction du test E2E browser_series
 
 - **Correction de la navigation d’administration dans scripts/browser-series.cjs** :

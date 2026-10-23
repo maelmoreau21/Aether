@@ -136,8 +136,8 @@
       onAction={reRollRandom}
       actionLabel="Mélanger"
     >
-      {#each randomPicks as work (work.id)}
-        <Poster {work} href={detailUrl(work)} />
+      {#each randomPicks as work, index (work.id)}
+        <Poster {work} href={detailUrl(work)} eager={index < 6} />
       {/each}
     </MediaShelf>
   {/if}
@@ -148,8 +148,8 @@
       title="Les mieux notés · Coups de cœur"
       count={topRated.length}
     >
-      {#each topRated as work (work.id)}
-        <Poster {work} href={detailUrl(work)} />
+      {#each topRated as work, index (work.id)}
+        <Poster {work} href={detailUrl(work)} eager={index < 4} />
       {/each}
     </MediaShelf>
   {/if}

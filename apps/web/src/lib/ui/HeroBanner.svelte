@@ -2,9 +2,9 @@
   import { resolve } from '$app/paths';
   import type { Work } from '../catalog/api';
   import Icon from './Icon.svelte';
-  import { imagePreviewUrl } from '../catalog/image-url';
+  import { imagePreviewUrl, isImageLoaded, markImageLoaded } from '../catalog/image-url';
 
-  let loadedUrl = $state('');
+  
 
   let {
     featured = null,
@@ -25,6 +25,20 @@
   );
 
   const imageUrl = $derived(imagePreviewUrl(featured?.artwork?.backdrop,1280));
+  let loadedUrl = $state('');
+
+  $effect(() => {
+    if (imageUrl && isImageLoaded(imageUrl)) {
+      loadedUrl = imageUrl;
+    }
+  });
+
+  function checkLoaded(node: HTMLImageElement) {
+    if (node.complete && node.naturalWidth > 0 && imageUrl) {
+      loadedUrl = imageUrl;
+      markImageLoaded(imageUrl);
+    }
+  }
 </script>
 
 <section class="hero-banner" class:has-featured={!!featured} aria-label="Média en vedette">
@@ -43,7 +57,11 @@
         loading="eager"
         fetchpriority="high"
         decoding="async"
-        onload={() => { loadedUrl = imageUrl; }}
+        use:checkLoaded
+        onload={() => {
+          loadedUrl = imageUrl;
+          markImageLoaded(imageUrl);
+        }}
       />
     {/if}
     <div class="backdrop-gradient-vignette"></div>

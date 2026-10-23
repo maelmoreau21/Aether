@@ -1,3 +1,10 @@
+## Navigation et lancement — 23 octobre 2026
+
+Cache session/SWR borné, annulations, déduplication, parcours Chrome et mesures
+avant/après : [NAVIGATION_PERFORMANCE.md](NAVIGATION_PERFORMANCE.md).
+104 tests Web, tests Rust catalogue/scanner/distribué et Chrome Core/SQLite
+exécutés ; Docker Desktop indisponible, mesures NAS/PostgreSQL non faites.
+
 ## Bibliothèques multi-dossiers — 22 octobre 2026
 
 Contrat : [LIBRARY_FOLDERS.md](LIBRARY_FOLDERS.md).

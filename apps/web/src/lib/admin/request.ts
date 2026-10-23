@@ -1,3 +1,4 @@
+import { invalidateCatalog } from '../catalog/page-cache';
 import { get } from 'svelte/store';
 import { session } from '../auth/session';
 
@@ -25,6 +26,10 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
     if (code && messages[code]) throw new Error(messages[code]);
     if (detail?.pluginError) throw new Error(`Extension : ${detail.pluginError}`);
     throw new Error(response.status === 401 ? 'Session expirée. Reconnectez-vous.' : response.status === 403 ? 'Accès refusé.' : response.status === 409 ? 'Ce nom existe déjà ou la limite du serveur est atteinte.' : response.status === 400 ? 'Vérifiez les champs et les droits sur les bibliothèques sélectionnées.' : 'Opération impossible. Réessayez.');
+  }
+  if (init.method && init.method !== 'GET') {
+    const library = path.match(/\/libraries\/([^/]+)/)?.[1];
+    invalidateCatalog(library ? decodeURIComponent(library) : undefined);
   }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }

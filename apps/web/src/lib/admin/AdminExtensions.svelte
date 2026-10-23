@@ -450,11 +450,11 @@
   p,label { color: var(--text-secondary); line-height: 1.6; }
   .heading,.row,.actions,.settings-actions { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
   .heading { justify-content: space-between; }
-  .card,details { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border-subtle); border-radius: 10px; }
+  .card,details { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border-subtle); border-radius:var(--radius-md); }
   form { display: grid; gap: .7rem; margin-block: 1rem; }
   label { display: grid; gap: .3rem; } .check { display: flex; align-items: center; gap: .5rem; }
-  input:not([type=checkbox]),select { min-width: 0; width: 100%; padding: .6rem; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); box-sizing: border-box; }
-  button { padding: .6rem .8rem; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
+  input:not([type=checkbox]),select { min-width: 0; width: 100%; padding: .6rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-elevated); color: var(--text-primary); box-sizing: border-box; }
+  button { padding: .6rem .8rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
   button:disabled { opacity: .5; cursor: default; } code { color: var(--text-secondary); overflow-wrap: anywhere; }
   fieldset { border: 1px solid var(--border-subtle); display: grid; gap: .4rem; }
   summary { cursor: pointer; } [role=alert] { border-inline-start: 3px solid var(--text-primary); padding-inline-start: .8rem; }
@@ -469,7 +469,7 @@
   .plugin-header { padding: 1rem 1rem 0 1rem; }
   .plugin-title-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
   .plugin-badges { display: flex; gap: .4rem; flex-wrap: wrap; }
-  .badge { font-size: .75rem; padding: .2rem .5rem; border-radius: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+  .badge { font-size: .75rem; padding: .2rem .5rem; border-radius: var(--radius-md); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
   .badge { background: var(--bg-elevated); color: var(--text-secondary); }
   .plugin-desc { margin: .5rem 0 .2rem 0; }
   .plugin-meta { font-size: .85rem; margin: 0 0 .5rem 0; opacity: .8; }
@@ -477,7 +477,7 @@
   .manage-extension > fieldset, .manage-extension > .actions, .manage-extension > form, .settings-toggle { padding-inline: 1rem; }
   .settings-toggle { margin-top: .5rem; }
   .btn-settings { background: var(--bg-elevated); color: var(--accent-primary); border-color: var(--accent-primary); font-weight: 500; }
-  .settings-panel { margin: 1rem; padding: 1rem; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; }
+  .settings-panel { margin: 1rem; padding: 1rem; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius:var(--radius-md); }
   .setting-row { margin-bottom: .8rem; }
   .setting-row small { color: var(--text-secondary); opacity: .8; display: block; margin-top: .2rem; }
   @media(max-width:600px) { section { padding: 1rem; } }

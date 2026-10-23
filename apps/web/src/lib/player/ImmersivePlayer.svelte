@@ -107,8 +107,8 @@
     } catch (e) { if (current === generation) fail(e instanceof Error ? e.message : String(e)); }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
   }
-  export function open(media: Media) {
-    if (opened) return;
+  export function open(media: Media | Promise<Media>) {
+    if (opened) return false;
     preferredLanguage = 'fr'; subtitlePreference = undefined; preferredAudio = undefined; audioOffset = 0; subtitleOffset = 0;
     try {
       const account = preferences();
@@ -127,7 +127,7 @@
     generation++; const current = generation;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     scrollPosition = window.scrollY;
-    statistics = false; loadStage = 'Chargement de votre séance…'; audio = ''; active = media; opened = true; busy = true; error = ''; notice = ''; menu = null;
+    statistics = false; loadStage = 'Chargement de votre séance…'; audio = ''; active = media instanceof Promise ? undefined : media; opened = true; busy = true; error = ''; notice = ''; menu = null;
     keyboardPinned = false; visible = true; document.body.classList.add('immersive-open');
     dialog.showModal();
     surface?.focus();
@@ -135,7 +135,11 @@
     requestFullscreen();
     engine = createPlayer(video, message => { if (current === generation) fail(message); });
     engine.setStatusListener?.(message=>{if(current===generation)loadStage=message;});
-    void prepare(media);
+    if (media instanceof Promise) {
+      void media.then(item => { if (current === generation && opened) { active = item; void prepare(item); } })
+        .catch(cause => { if (current === generation) fail(cause instanceof Error ? cause.message : String(cause)); });
+    } else void prepare(media);
+    return true;
   }
   export function close() {
     if (!opened) return;
@@ -157,8 +161,8 @@
     void leavingFullscreen.then(() => requestAnimationFrame(restoreNavigation));
     busy = false; error = ''; paused = true;
   }
-  export function changeMedia(media: Media) {
-    if (!opened) { open(media); return; }
+  export function changeMedia(media: Media, requireOpen = false) {
+    if (!opened) { if (!requireOpen) open(media); return; }
     if (!engine || busy) return;
     progressTracker?.save(engine.state(), true);
     progressTracker = undefined;
@@ -277,7 +281,7 @@
       <button class="stats-toggle" aria-expanded={statistics} aria-controls="stream-statistics" onclick={() => { statistics = !statistics; wake(); }}>Statistiques du flux</button>
       {#if nextTitle && onNext}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
     </div>
-    {#if busy}<div class="loading" role="status"><img src="{base}/images/logo-loading.svg" alt="" class="player-spinner" width="40" height="40" />Chargement de votre séance…<button onclick={close}>Annuler</button></div>{/if}
+    {#if busy}<div class="loading" role="status"><img src="{base}/images/logo-loading.svg" alt="" class="player-spinner" width="40" height="40" />{loadStage}<button onclick={close}>Annuler</button></div>{/if}
     {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>La lecture a rencontré un problème. Réessayez ou choisissez une autre piste ou version.</p><button onclick={() => { if (active) void prepare(active, playback); }}>Réessayer</button></div>{/if}
     {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label="Statistiques du flux">
       <header><strong>Statistiques du flux</strong><button onclick={() => { statistics = false; wake(); }}>Fermer</button></header>
@@ -352,7 +356,7 @@
   }
   .return:hover {
     background: rgba(255, 255, 255, 0.2);
-    border-color: rgba(167, 139, 250, 0.4);
+    border-color: var(--color-accent-soft);
     transform: scale(1.06);
     box-shadow: 0 0 16px var(--color-accent-glow);
   }

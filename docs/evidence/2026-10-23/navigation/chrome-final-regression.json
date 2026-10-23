@@ -1,0 +1,83 @@
+{
+  "browser": "155.0.8059.86",
+  "scope": "Real UI, mocked API 180 ms catalogue / 300 ms descriptor, local synthetic MP4. No Core/Node/NAS proof.",
+  "runs": [
+    {
+      "mode": "after",
+      "returns": [
+        {
+          "ms": 78.24150000000009,
+          "requests": 0
+        },
+        {
+          "ms": 68.52270000000044,
+          "requests": 0
+        },
+        {
+          "ms": 76.45290000000023,
+          "requests": 0
+        },
+        {
+          "ms": 76.71280000000024,
+          "requests": 0
+        },
+        {
+          "ms": 74.46389999999974,
+          "requests": 0
+        },
+        {
+          "ms": 71.61219999999958,
+          "requests": 0
+        },
+        {
+          "ms": 79.90909999999985,
+          "requests": 0
+        },
+        {
+          "ms": 87.30549999999948,
+          "requests": 0
+        },
+        {
+          "ms": 83.71549999999934,
+          "requests": 0
+        },
+        {
+          "ms": 67.77070000000003,
+          "requests": 0
+        }
+      ],
+      "openings": [
+        {
+          "shellMs": 52.809299999999894,
+          "playingMs": 1025.2093999999997,
+          "descriptorRequests": 1,
+          "ui": {
+            "start": 4288.5999999940395,
+            "shellMs": 10.099999994039536,
+            "playingMs": 630.8000000119209,
+            "firstFrameMs": 649.5
+          }
+        },
+        {
+          "shellMs": 268.0037999999995,
+          "playingMs": 678.7894999999999,
+          "descriptorRequests": 1,
+          "ui": {
+            "start": 5556.4000000059605,
+            "shellMs": 3.899999976158142,
+            "playingMs": 411.89999997615814,
+            "firstFrameMs": 423.19999998807907
+          }
+        }
+      ],
+      "scenarios": [
+        "catalogue-scroll-restored",
+        "cancel-episode-before-descriptor-no-late-reopen",
+        "home-series-episode-home",
+        "films-series-films-no-blocking-loader"
+      ],
+      "heapBytes": 16712261,
+      "errors": []
+    }
+  ]
+}

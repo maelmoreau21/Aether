@@ -22,7 +22,7 @@
       : resolve('films/')
   );
 
-  const imageUrl = $derived(imagePreviewUrl(featured?.artwork?.backdrop || featured?.posterUrl,1280));
+  const imageUrl = $derived(imagePreviewUrl(featured?.artwork?.backdrop,1280));
 </script>
 
 <section class="hero-banner" class:has-featured={!!featured} aria-label="Média en vedette">
@@ -32,7 +32,7 @@
       class="backdrop-art"
       style:background-image="radial-gradient(ellipse at 75% 40%, var(--color-accent-soft), transparent 65%)"
     ></div>
-    {#if featured?.artwork?.backdrop || featured?.posterUrl}
+    {#if featured?.artwork?.backdrop}
       <img
         class="backdrop-img"
         class:loaded={loadedUrl === imageUrl}
@@ -93,7 +93,7 @@
 
     <p class="hero-synopsis">
       {#if featured}
-        {featured.plot || featured.description || 'Découvrez cette œuvre en lecture directe haute fidélité.'}
+        {featured.plot || featured.description || ''}
       {:else}
         Retrouvez vos films préférés et explorez vos séries en lecture directe haute fidélité. Sans transcodage forcé, vos médias sont diffusés dans leur format d’origine.
       {/if}
@@ -141,12 +141,12 @@
 <style>
   .hero-banner {
     position: relative;
-    min-height: clamp(400px, 52vh, 600px);
+    min-height: clamp(350px, 30vw, 480px);
     display: flex;
     align-items: flex-end;
-    padding: clamp(32px, 5vw, 64px) var(--page-gutter);
-    margin: 0 calc(-1 * var(--page-gutter)) 24px;
-    border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+    padding: clamp(24px, 4vw, 48px);
+    margin: 24px 0 0;
+    border-radius: var(--radius-2xl);
     overflow: hidden;
   }
 
@@ -221,7 +221,7 @@
     text-transform: uppercase;
     font-size: 11px;
     font-weight: 750;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.06em;
     color: var(--color-accent);
     background: var(--color-accent-soft);
     border: 1px solid var(--border-subtle);
@@ -310,20 +310,20 @@
     min-height: 48px;
     padding: 0 26px;
     border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--brand-gradient);
-    color: #1C1917;
+    border-radius: var(--radius-md);
+    background: var(--color-play);
+    color: var(--color-on-play);
     font-size: 14px;
     font-weight: 700;
     text-decoration: none;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-sm);
     transition: all var(--transition-fast);
   }
 
   .btn-primary:hover:not(:disabled) {
-    background: var(--brand-gradient);
+    background: var(--color-play);
     transform: translateY(-2px);
-    box-shadow: 0 10px 28px rgba(255, 255, 255, 0.25);
+    box-shadow: var(--shadow-sm);
   }
 
   .btn-secondary {
@@ -334,7 +334,7 @@
     min-height: 48px;
     padding: 0 22px;
     border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -354,7 +354,7 @@
   @media (max-width: 768px) {
     .hero-banner {
       min-height: 360px;
-      padding: 24px var(--page-gutter);
+      padding: 24px;
       margin-bottom: 16px;
     }
 

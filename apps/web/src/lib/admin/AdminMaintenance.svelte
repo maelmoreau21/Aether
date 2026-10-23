@@ -95,9 +95,9 @@
   .notice p { color: var(--text-secondary); }
   form { display: grid; gap: 1rem; }
   form label { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; color: var(--text-primary); }
-  input[type="number"] { max-width: 10rem; padding: .6rem; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: 8px; }
+  input[type="number"] { max-width: 10rem; padding: .6rem; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius:var(--radius-md); }
   .actions { display: flex; flex-wrap: wrap; gap: .75rem; }
-  button, a { border: 1px solid var(--border-subtle); border-radius: 8px; padding: .7rem 1rem; background: var(--bg-elevated); color: var(--text-primary); font: inherit; }
+  button, a { border: 1px solid var(--border-subtle); border-radius:var(--radius-md); padding: .7rem 1rem; background: var(--bg-elevated); color: var(--text-primary); font: inherit; }
   button { cursor: pointer; } button:disabled { cursor: default; opacity: .5; }
   .archives { padding: 0; margin: 0; list-style: none; }
   li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--border-subtle); }

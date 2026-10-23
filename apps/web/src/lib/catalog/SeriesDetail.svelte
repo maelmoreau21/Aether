@@ -228,9 +228,9 @@
 
   .title-logo { max-width:min(340px,100%); max-height:110px; object-fit:contain; object-position:left; }
 
-  .season-placeholder { display:grid;place-items:center;width:80px;aspect-ratio:2/3;background:var(--bg-elevated);border-radius:4px;font-size:32px;color:var(--text-secondary); }
-  .season-shortcuts img { display:block; width:80px; aspect-ratio:2/3; object-fit:cover; margin-bottom:8px; border-radius:4px; }
-  .episode-thumb { height:auto; width:240px; max-width:25vw; aspect-ratio:16/9; object-fit:cover; border-radius:4px; }
+  .season-placeholder { display:grid;place-items:center;width:80px;aspect-ratio:2/3;background:var(--bg-elevated);border-radius:var(--radius-md);font-size:32px;color:var(--text-secondary); }
+  .season-shortcuts img { display:block; width:80px; aspect-ratio:2/3; object-fit:cover; margin-bottom:8px; border-radius:var(--radius-md); }
+  .episode-thumb { height:auto; width:240px; max-width:25vw; aspect-ratio:16/9; object-fit:cover; border-radius:var(--radius-md); }
   .season-shortcuts { display:flex; gap:8px; overflow-x:auto; max-width:100%; padding:2px; }
   .season-shortcuts button { flex:0 0 150px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;padding:10px 14px; border:1px solid var(--border-subtle); background:var(--bg-surface); color:var(--text-primary); border-radius:6px; }
   .season-shortcuts .chosen { border-color:var(--accent-primary); color:var(--accent-primary); }
@@ -574,7 +574,7 @@
     align-items: center;
     gap: 10px;
     padding: 12px 16px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: rgba(248, 113, 113, 0.12);
     border: 1px solid rgba(248, 113, 113, 0.25);
     color: var(--color-danger);

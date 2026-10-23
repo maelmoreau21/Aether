@@ -3,6 +3,8 @@
   import { serverPresentation } from '../config/presentation';
   import { preferences, savePreferences } from '../preferences';
   import { page } from '$app/state';
+  import { goto, beforeNavigate, afterNavigate } from '$app/navigation';
+  import { cachedCatalog, loadCatalog, invalidateCatalog, catalogRevision, saveCatalogScroll, catalogScroll } from './page-cache';
   import { resolve } from '$app/paths';
   import { DEFAULT_NAME, fetchBrandName } from '../config/brand';
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
@@ -23,8 +25,7 @@
     fetchMediaDescriptors,
     revalidateMediaDescriptor,
     getCachedMedia,
-    type Work,
-    type CatalogPage
+    type Work
   } from './api';
   import { session, getSessionGeneration } from '../auth/session';
 
@@ -71,7 +72,27 @@
     mediaError = '';
 
     try {
-      const [, item] = await Promise.all([loadPlayer(), revalidateMediaDescriptor(versionId, controller.signal)]);
+      const descriptor = (async () => {
+        if (versionId !== 'auto') return revalidateMediaDescriptor(versionId, controller.signal);
+        const ids = playbackIds(episode);
+        const known = ids.map(getCachedMedia).filter((item): item is Media => item !== undefined);
+        const probe = document.createElement('video');
+        if (known.length === ids.length) {
+          const candidate = bestVersion(known, mime => probe.canPlayType(mime));
+          if (!candidate) throw new Error('Aucune version disponible.');
+          return revalidateMediaDescriptor(candidate.id, controller.signal);
+        }
+        const fresh = await fetchMediaDescriptors(ids, controller.signal, { revalidate: true });
+        const candidate = bestVersion(fresh, mime => probe.canPlayType(mime));
+        if (!candidate) throw new Error('Aucune version disponible.');
+        return candidate;
+      })();
+      void descriptor.catch(() => {});
+      await loadPlayer();
+      await tick();
+      if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
+      const openedHere = immersive?.open(descriptor);
+      const item = await descriptor;
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
       const cachedForEpisode = playbackIds(episode)
         .map(eid => (eid === item.id ? item : getCachedMedia(eid)))
@@ -81,7 +102,7 @@
       playingEpisode = episode;
       await tick();
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
-      immersive?.changeMedia(item);
+      if (!openedHere) immersive?.changeMedia(item, true);
     } catch (err) {
       if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
         media = media.filter(m => m.id !== versionId && getCachedMedia(m.id) !== undefined);
@@ -110,6 +131,19 @@
     try { await playerLoading; }
     finally { playerLoading = undefined; }
   }
+
+  beforeNavigate(() => {
+    if (!workId) saveCatalogScroll(page.url.pathname + page.url.search, window.scrollY);
+  });
+  afterNavigate(() => {
+    if (workId) return;
+    const key = page.url.pathname + page.url.search;
+    const generation = getSessionGeneration();
+    const y = catalogScroll(key);
+    if (y !== undefined) void tick().then(() => requestAnimationFrame(() => {
+      if (key === page.url.pathname + page.url.search && generation === getSessionGeneration()) window.scrollTo({top: y, behavior: 'instant'});
+    }));
+  });
 
   const workId = $derived(page.url.searchParams.get('work') ?? '');
   const libraryId = $derived(page.url.searchParams.get('library') ?? '');
@@ -180,13 +214,19 @@
     mediaError = '';
 
     try {
-      const [, item] = await Promise.all([loadPlayer(), revalidateMediaDescriptor(targetId, controller.signal)]);
+      const descriptor = revalidateMediaDescriptor(targetId, controller.signal);
+      // Attach rejection immediately while the optional module download completes.
+      void descriptor.catch(() => {});
+      await loadPlayer();
+      await tick();
+      if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
+      immersive?.open(descriptor);
+      const item = await descriptor;
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
       media = [...media.filter(m => m.id !== item.id), item];
       selected = item.id;
       await tick();
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
-      immersive?.open(item);
     } catch (err) {
       if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
         media = media.filter(m => m.id !== targetId && getCachedMedia(m.id) !== undefined);
@@ -202,24 +242,27 @@
 
   async function handleDirectPlay(work: Work): Promise<void> {
     if (work.kind === 'series') {
-      window.location.href = detailUrl(work);
+      // detailUrl already applies SvelteKit resolve to the route and base.
+      // eslint-disable-next-line svelte/no-navigation-without-resolve
+      await goto(detailUrl(work));
       return;
     }
     const ids = playbackIds(work);
     const targetId = ids[0];
     if (!targetId) {
-      window.location.href = detailUrl(work);
+      // detailUrl already applies SvelteKit resolve to the route and base.
+      // eslint-disable-next-line svelte/no-navigation-without-resolve
+      await goto(detailUrl(work));
       return;
     }
     try {
-      const [, item] = await Promise.all([loadPlayer(), revalidateMediaDescriptor(targetId)]);
       detail = work;
-      media = [item];
-      selected = item.id;
-      await tick();
-      immersive?.open(item);
+      selected = targetId;
+      await openPlayer();
     } catch {
-      window.location.href = detailUrl(work);
+      // detailUrl already applies SvelteKit resolve to the route and base.
+      // eslint-disable-next-line svelte/no-navigation-without-resolve
+      await goto(detailUrl(work));
     }
   }
 
@@ -246,6 +289,7 @@
 
     const artworkChanged=(event:Event)=>{
       const id=(event as CustomEvent<{id:string}>).detail.id;
+      invalidateCatalog(detail?.libraryId);
       if(detail?.id===id)void request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}`,controller.signal).then(work=>{if(!controller.signal.aborted&&detail?.id===id)detail=work;}).catch(()=>{});
     };
     window.addEventListener('media-artwork-updated',artworkChanged);
@@ -262,7 +306,8 @@
     }
   }
 
-  $effect(() => {
+  $effect.pre(() => {
+    void $catalogRevision;
     const id = workId;
     const q = query;
     const currentLibrary = libraryId;
@@ -277,7 +322,7 @@
 
     search = q;
     sort = sorting;
-    busy = true;
+
     launching = false;
     pendingCatalogKinds = 0;
     partialCatalogError = '';
@@ -290,6 +335,21 @@
     totalFilms = 0;
     totalSeries = 0;
     playingEpisode = null;
+
+    const kinds = currentSection === 'films' ? ['film'] : currentSection === 'series' ? ['series'] : ['film', 'series'];
+    const requests = kinds.map(kind => {
+      const url = `/api/v1/catalog?${new URLSearchParams({ ...filters, ...(currentLibrary ? {library: currentLibrary} : {}), kind, q, sort: sorting, offset: String(start), limit: '24' })}`;
+      return { kind, url, key: `${currentSection}:${url}` };
+    });
+    let cachedKinds = 0;
+    if (!id) for (const {kind, key} of requests) {
+      const cached = cachedCatalog(key);
+      if (!cached) continue;
+      cachedKinds++;
+      if (kind === 'film') { films = cached.items; totalFilms = cached.total; }
+      else { series = cached.items; totalSeries = cached.total; }
+    }
+    busy = Boolean(id) || cachedKinds === 0;
 
     async function load() {
       try {
@@ -332,29 +392,12 @@
             media = allEpisodeIds.map(eid => getCachedMedia(eid)).filter((m): m is Media => m !== undefined);
           }
         } else {
-          const kinds =
-            currentSection === 'films'
-              ? ['film']
-              : currentSection === 'series'
-                ? ['series']
-                : ['film', 'series'];
           pendingCatalogKinds = kinds.length;
           let completedKinds = 0;
           const results = await Promise.allSettled(
-            kinds.map(async kind => {
+            requests.map(async ({kind, key, url}) => {
               try {
-                const result = await request<CatalogPage>(
-                  `/api/v1/catalog?${new URLSearchParams({
-                    ...filters,
-                    ...(currentLibrary ? {library:currentLibrary} : {}),
-                    kind,
-                    q,
-                    sort: sorting,
-                    offset: String(start),
-                    limit: '24'
-                  })}`,
-                  controller.signal
-                );
+                const result = await loadCatalog(key, url);
                 if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
                 if (kind === 'film') {
                   films = result.items;
@@ -374,7 +417,8 @@
           if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
           const failure = results.find(result => result.status === 'rejected');
           if (failure?.status === 'rejected') {
-            if (completedKinds === 0) throw failure.reason;
+            if (failure.reason instanceof Error && /accès|session/.test(failure.reason.message)) { films = []; series = []; throw failure.reason; }
+            if (completedKinds === 0 && cachedKinds === 0) throw failure.reason;
             partialCatalogError = 'Une partie du catalogue est indisponible. Rechargez la page pour réessayer.';
           }
         }

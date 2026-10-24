@@ -6,13 +6,13 @@
   import PathPickerModal from './PathPickerModal.svelte';
   import { scanLabels } from './types';
   import Icon from '../ui/Icon.svelte';
-  let { libraries, nodes, scans, pending, availableRootsForNode, saving, editing, error,
+  let { libraries, nodes, scans, pending, saving, editing, error,
     name = $bindable(), kind = $bindable(), nodeId = $bindable(), root = $bindable(), folders = $bindable(), enabled = $bindable(),
     excludedPatterns = $bindable(''),
     options = $bindable(), onchanged,
     onsave, onscan, onedit, onreset, onnodechange }: {
       libraries: Library[]; nodes: AdminNode[]; scans: Record<string, Scan>; pending: string[];
-      availableRootsForNode: string[]; saving: boolean; editing: string | null; error: string;
+      saving: boolean; editing: string | null; error: string;
       name: string; kind: 'films' | 'series' | 'music'; nodeId: string; root: string; folders: { nodeId: string; root: string }[]; enabled: boolean;
       excludedPatterns: string;
       options: LibraryOptions; onchanged: () => Promise<void>;

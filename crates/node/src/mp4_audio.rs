@@ -1823,14 +1823,13 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            response
+            !response
                 .into_body()
                 .collect()
                 .await
                 .unwrap()
                 .to_bytes()
-                .len()
-                > 0
+                .is_empty()
         );
     }
 }

@@ -567,7 +567,6 @@
             {nodes}
             {scans}
             {pending}
-            {availableRootsForNode}
             {saving}
             {editing}
             {error}

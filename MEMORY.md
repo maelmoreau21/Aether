@@ -1,5 +1,35 @@
 # MEMORY.md — État et décisions Aether
 
+## 24 octobre 2026 — Sélecteur de dossiers hiérarchique et saisie libre de chemin (ergonomie Jellyfin)
+
+- **Problème initial** :
+  - Dans la gestion des bibliothèques (`AdminLibraries.svelte`), l'ajout de dossier était restreint à une liste déroulante plate (`<select>`) énumérant d'un bloc la racine et tous ses sous-dossiers immédiats.
+  - Impossibilité pour l'administrateur d'explorer l'arborescence dossier par dossier (voir les dossiers à la racine, puis cliquer pour déplier un sous-dossier, remonter avec `...`), ni de saisir manuellement un chemin disque.
+- **Modifications apportées** :
+  - **Backend Core** :
+    - Nouvelle route d'administration sécurisée `GET /api/v1/admin/filesystem/browse` (`browse_filesystem` dans `crates/core/src/libraries.rs`).
+    - Authentification `administrator` obligatoire (401 non authentifié, 403 non-administrateur).
+    - Navigation par dossier : renvoie `path`, `parent` (pour le bouton `...` de remontée vers le parent) et la liste triée des sous-dossiers (`directories: [{ name, path }]`).
+    - Gestion multi-plateforme : sous Unix/Linux démarre à `/` ; sous Windows liste les lecteurs disponibles (`C:\`, `D:\`) lorsque la racine est vide, puis permet la descente dans l'arborescence native.
+  - **Frontend Web** :
+    - Création du composant modal `apps/web/src/lib/admin/PathPickerModal.svelte` calqué sur l'ergonomie de sélection de chemin de Jellyfin :
+      - Entête avec flèche retour `<-` et titre « Sélectionner un chemin ».
+      - Champ texte « Dossier » avec bouton de navigation/recherche (ou touche Entrée) permettant de taper ou coller directement n'importe quel chemin.
+      - Liste des dossiers du niveau courant avec entrée `...` pour remonter d'un cran, chaque ligne de dossier ouvrant ses sous-dossiers au clic.
+      - Bouton « OK » validant le chemin courant dans le formulaire.
+    - Mise à jour de `AdminLibraries.svelte` :
+      - Champ texte modifiable directement pour le chemin du dossier (`root`).
+      - Bouton « Parcourir… » ouvrant la modale de sélection hiérarchique.
+      - Bouton « Ajouter ce dossier » sans blocage sur une liste fermée pré-déterminée.
+      - Prise en compte automatique du chemin saisi si l'utilisateur valide le formulaire sans avoir cliqué sur « Ajouter ce dossier ».
+- **Vérifications réelles** :
+  - `cargo fmt --check` : conforme.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --lib libraries` : 6 passed, 0 failed.
+  - `npm --prefix apps/web test` : 25 suites réussies, 150 tests réussis.
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement Svelte/TypeScript.
+
+
 ## 24 octobre 2026 — Diagnostic et résilience de l'erreur 503 sur la préparation vidéo progressive
 
 - **Cause racine de l'erreur "Préparation vidéo progressive : HTTP 503 (Media Node indisponible)"** :

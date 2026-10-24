@@ -3,6 +3,7 @@
   import type { Library, AdminNode, Scan, RefreshMode, LibraryOptions } from './types';
   import LibraryOptionsForm from './LibraryOptions.svelte';
   import LibraryImages from './LibraryImages.svelte';
+  import PathPickerModal from './PathPickerModal.svelte';
   import { scanLabels } from './types';
   import Icon from '../ui/Icon.svelte';
   let { libraries, nodes, scans, pending, availableRootsForNode, saving, editing, error,
@@ -21,11 +22,17 @@
   let editor = $state<HTMLDialogElement>(), refresher = $state<HTMLDialogElement>();
   let imageTarget = $state<Library | null>(null);
   let target = $state<Library | null>(null), mode = $state<RefreshMode>('incremental'), refreshing = $state(false);
+  let showPathPicker = $state(false);
   const activeNodes = $derived(nodes.filter(n => n.status !== 'revoked'));
   function closeMenu(event: MouseEvent) { const details = (event.currentTarget as HTMLElement).closest('details'); details?.removeAttribute('open'); details?.querySelector('summary')?.focus(); }
   function manage(library?: Library) { if (library) onedit(library); else onreset(); editor?.showModal(); }
   function refreshLibrary(library: Library | null) { target = library; mode = 'incremental'; refresher?.showModal(); }
-  async function submit(event: SubmitEvent) { if (await onsave(event)) editor?.close(); }
+  async function submit(event: SubmitEvent) {
+    if (folders.length === 0 && root.trim()) {
+      folders = [{ nodeId, root: root.trim() }];
+    }
+    if (await onsave(event)) editor?.close();
+  }
   async function refresh(event: SubmitEvent) {
     event.preventDefault(); if (refreshing) return; refreshing = true;
     try {
@@ -78,9 +85,39 @@
         <li><div><strong>{nodes.find(node => node.id === folder.nodeId)?.name ?? folder.nodeId}</strong><span>{folder.root}</span></div><button type="button" aria-label={`Retirer ${folder.root}`} onclick={() => folders = folders.filter((_, i) => i !== index)}>Retirer</button></li>
       {:else}<li class="empty-folders">Aucun dossier ajouté. Choisissez un serveur et un dossier ci-dessous.</li>{/each}</ul>
     <label for="library-node">Serveur du dossier</label><select id="library-node" bind:value={nodeId} onchange={onnodechange}><option value="local">Node local</option>{#each activeNodes.filter(n => n.id !== 'local') as node (node.id)}<option value={node.id}>{node.name}</option>{/each}</select>
-    <label for="library-root">Dossier autorisé</label><select id="library-root" bind:value={root} required><option value="" disabled>Choisir une racine</option>{#each availableRootsForNode as item (item)}<option value={item}>{item}</option>{/each}</select>
-    {#if availableRootsForNode.length === 0}<p>Aucune racine disponible sur ce Node.</p>{/if}
-    <button type="button" disabled={folders.length >= 32 || !availableRootsForNode.includes(root) || folders.some(folder => folder.nodeId === nodeId && folder.root === root)} onclick={() => folders = [...folders, { nodeId, root }]}><span aria-hidden="true">+</span> Ajouter ce dossier</button>
+    <label for="library-root">Dossier</label>
+    <div class="folder-input-row">
+      <input
+        id="library-root"
+        type="text"
+        bind:value={root}
+        placeholder="ex: /media/films ou C:\Films"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button
+        type="button"
+        class="browse-btn"
+        onclick={() => showPathPicker = true}
+        title="Parcourir les dossiers"
+      >
+        <Icon name="search" size={16} /> Parcourir…
+      </button>
+    </div>
+
+    <button
+      type="button"
+      class="add-folder-btn"
+      disabled={folders.length >= 32 || !root.trim() || folders.some(folder => folder.nodeId === nodeId && folder.root === root.trim())}
+      onclick={() => {
+        if (root.trim()) {
+          folders = [...folders, { nodeId, root: root.trim() }];
+          root = '';
+        }
+      }}
+    >
+      <span aria-hidden="true">+</span> Ajouter ce dossier
+    </button>
     </section>
     <label for="library-excluded">Dossiers ou motifs à exclure (séparés par des virgules)</label>
     <input id="library-excluded" bind:value={excludedPatterns} placeholder="ex: bonus, trailers, #recycle" autocomplete="off" />
@@ -108,6 +145,15 @@
   </form>
 </dialog>
 {#if imageTarget}<LibraryImages library={imageTarget} onclose={() => imageTarget = null} {onchanged} />{/if}
+{#if showPathPicker}
+  <PathPickerModal
+    open={showPathPicker}
+    initialPath={root}
+    {nodeId}
+    onselect={(selected) => { root = selected; }}
+    onclose={() => { showPathPicker = false; }}
+  />
+{/if}
 <style>
   .folder-count { margin:0; padding:0 18px 18px; font-size:12px; }
   .folders { margin:24px 0; padding:20px; border:1px solid var(--border-subtle); border-radius:12px; background:var(--bg-elevated); }
@@ -152,5 +198,9 @@
   .check { display: flex; align-items: center; gap: 10px; }
   .actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
   [role='alert'] { color: var(--status-error); overflow-wrap: anywhere; }
+  .folder-input-row { display: flex; gap: 8px; align-items: center; }
+  .folder-input-row input { flex: 1; min-width: 0; }
+  .browse-btn { flex-shrink: 0; white-space: nowrap; height: 44px; }
+  .add-folder-btn { margin-top: 10px; width: 100%; }
   @media(max-width: 600px) { .library-grid { grid-template-columns: minmax(0, 1fr); } dialog { padding: 20px; } }
 </style>

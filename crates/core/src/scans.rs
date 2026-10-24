@@ -260,17 +260,12 @@ async fn status(
                 .unwrap_or_else(|_| vec!["État de scan illisible".into()]),
         );
     }
-    if let Some(pending_status) = pending {
-        let rank = |s: &str| match s {
-            "running" => 5,
-            "queued" => 4,
-            "error" => 3,
-            "completed" => 2,
-            _ => 1,
-        };
-        if rank(&pending_status) > rank(&status.status) {
-            status.status = pending_status;
-        }
+    // Only elevate or dispatch if scan_jobs isn't already reflecting an active state ("running" or "queued").
+    // If durable_tasks has queued/running work but scan_jobs is idle or completed, ensure it doesn't report completed prematurely.
+    if matches!(status.status.as_str(), "idle" | "completed")
+        && let Some(pending_status) = pending
+    {
+        status.status = pending_status;
         let _ = crate::scheduler::dispatch_once(
             &state.auth,
             &state.root,

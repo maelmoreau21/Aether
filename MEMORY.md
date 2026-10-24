@@ -1,5 +1,38 @@
 # MEMORY.md — État et décisions Aether
 
+## 24 octobre 2026 — Menu paramètres du lecteur, masquage des détails de nœuds et données de lecture (style Jellyfin)
+
+- **Demande utilisateur** :
+  - Lors du chargement d'un flux, le lecteur affichait des messages techniques mentionnant la connexion au Media Node ou au relais. Les utilisateurs finaux n'ont pas à voir sur quel nœud se trouve le média.
+  - Déplacement de ces informations techniques dans les statistiques de lecture (« Données de lecture »).
+  - Ajout en bas à droite des contrôles du lecteur d'un bouton d'engrenage « Paramètres » ouvrant un menu calqué sur l'ergonomie Jellyfin (Format d'image, Vitesse de lecture, Mode de répétition, Données de lecture).
+- **Modifications apportées** :
+  - `apps/web/src/lib/player/native.ts` :
+    - Remplacement des messages explicites (« Connexion directe au Media Node… », « Node direct indisponible. Connexion au relais… ») par un état neutre et convivial (« Chargement de la vidéo… »).
+  - `apps/web/src/lib/player/ImmersivePlayer.svelte` :
+    - Écran de chargement épuré (`Chargement de la vidéo…` avec spinner animé).
+    - Retrait du bouton redondant « Statistiques du flux » de la barre supérieure.
+    - Gestion de l'aspect ratio (`style:object-fit={aspectRatio}` : Normal / contain, Remplir / cover, Étirer / fill).
+    - Gestion du mode répétition (`loop={repeat}`).
+    - Overlay « Données de lecture » accessible via les paramètres, affichant clairement le Nœud serveur, le Mode de transport (Direct Node / Relais Core), la résolution, le buffer, les images perdues et le diagnostic technique.
+  - `apps/web/src/lib/player/PlayerControls.svelte` :
+    - Réorganisation des contrôles de droite pour correspondre fidèlement à la maquette :
+      - Sous-titres `[CC]`
+      - Piste audio `♪`
+      - Groupe volume (icône haut-parleur + curseur)
+      - Bouton Paramètres `⚙`
+      - Plein écran `⛶`
+    - Menu contextuel « Paramètres » :
+      - Format d'image (Normal, Remplir, Étirer avec bascule dynamique)
+      - Vitesse de lecture (1x, 1.25x, 1.5x... avec sous-menu et bouton retour `←`)
+      - Mode de répétition (Aucun / Répéter)
+      - Données de lecture (ouverture de l'overlay de statistiques techniques détaillées)
+- **Vérifications réelles** :
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement Svelte/TypeScript.
+  - `npm --prefix apps/web test` : 25 suites réussies, 150 tests réussis.
+  - `npm --prefix apps/web run build` : compilation statique Vite/SvelteKit réussie.
+
+
 ## 24 octobre 2026 — Sélecteur de dossiers hiérarchique et saisie libre de chemin (ergonomie Jellyfin)
 
 - **Problème initial** :

@@ -5,7 +5,7 @@
   import { audioChoices } from './available-audio';
   import type { Media, PlaybackState } from './types';
 
-  export type Menu = 'audio' | 'subtitles' | 'video' | 'speed' | null;
+  export type Menu = 'audio' | 'subtitles' | 'video' | 'speed' | 'settings' | null;
 
   let {
     state: playback,
@@ -27,6 +27,7 @@
     onSpeed,
     onFullscreen,
     audioOffset = 0, subtitleOffset = 0, onAudioOffset, onSubtitleOffset,
+    aspectRatio = 'contain', onAspectRatio, repeat = false, onRepeat, onStats,
     onWake
   }: {
     audioOffset?: number; subtitleOffset?: number; onAudioOffset?: (value: number) => void; onSubtitleOffset?: (value: number) => void;
@@ -48,6 +49,11 @@
     onSource: (id: string) => void;
     onSpeed: (speed: number) => void;
     onFullscreen: () => void;
+    aspectRatio?: 'contain' | 'cover' | 'fill';
+    onAspectRatio?: (ratio: 'contain' | 'cover' | 'fill') => void;
+    repeat?: boolean;
+    onRepeat?: (repeat: boolean) => void;
+    onStats?: () => void;
     onWake: () => void;
   } = $props();
 
@@ -69,7 +75,9 @@
         ? 'Sous-titres'
         : menu === 'video'
           ? 'Vidéo et sources'
-          : 'Vitesse de lecture'
+          : menu === 'settings'
+            ? 'Paramètres'
+            : 'Vitesse de lecture'
   );
 
   function clock(seconds: number) {
@@ -149,6 +157,11 @@
       onkeydown={navigateMenu}
     >
       <div class="menu-heading" role="none">
+        {#if menu === 'speed'}
+          <button type="button" class="menu-back" aria-label="Retour aux paramètres" tabindex="-1" onclick={() => menu = 'settings'}>
+            <Icon name="back" size={18} />
+          </button>
+        {/if}
         <span>{title}</span>
         <button type="button" class="menu-close" aria-label="Fermer le menu" tabindex="-1" onclick={closeMenu}>×</button>
       </div>
@@ -269,6 +282,50 @@
             </button>
           {/each}
         </div>
+      {:else if menu === 'settings'}
+        <div role="group" aria-label="Paramètres du lecteur">
+          <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+              const next = aspectRatio === 'contain' ? 'cover' : aspectRatio === 'cover' ? 'fill' : 'contain';
+              onAspectRatio?.(next);
+            }}
+          >
+            <span>Format d'image</span>
+            <span class="setting-value">{aspectRatio === 'cover' ? 'Remplir' : aspectRatio === 'fill' ? 'Étirer' : 'Normal'}</span>
+          </button>
+
+          <button
+            type="button"
+            role="menuitem"
+            onclick={() => menu = 'speed'}
+          >
+            <span>Vitesse de lecture</span>
+            <span class="setting-value">{playback.speed === 1 ? '1x' : `${playback.speed.toLocaleString('fr')}x`}</span>
+          </button>
+
+          <button
+            type="button"
+            role="menuitem"
+            onclick={() => onRepeat?.(!repeat)}
+          >
+            <span>Mode de répétition</span>
+            <span class="setting-value">{repeat ? 'Répéter' : 'Aucun'}</span>
+          </button>
+
+          <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+              closeMenu();
+              onStats?.();
+            }}
+          >
+            <span>Données de lecture</span>
+            <span class="setting-arrow">›</span>
+          </button>
+        </div>
       {/if}
     </div>
   {/if}
@@ -326,6 +383,42 @@
         <span class="skip-num">10</span>
       </button>
 
+      <span class="time" aria-label="{clock(playback.position)} sur {clock(playback.duration)}">
+        <span class="current-time">{clock(playback.position)}</span>
+        <span class="duration-time"> / {clock(playback.duration)}</span>
+        {#if playback.duration > 0}
+          <span class="remaining-time"> (-{clock(remainingTime)})</span>
+        {/if}
+      </span>
+    </div>
+
+    <div class="right-controls" bind:this={triggers}>
+      <button
+        data-menu="subtitles"
+        aria-label="Sous-titres"
+        aria-haspopup="menu"
+        aria-expanded={menu === 'subtitles'}
+        aria-controls={menu === 'subtitles' ? 'player-menu' : undefined}
+        onclick={() => toggleMenu('subtitles')}
+        disabled={busy}
+      >
+        <Icon name="captions" size={22} />
+      </button>
+
+      {#if selectableAudio.length > 1}
+      <button
+        data-menu="audio"
+        aria-label="Audio"
+        aria-haspopup="menu"
+        aria-expanded={menu === 'audio'}
+        aria-controls={menu === 'audio' ? 'player-menu' : undefined}
+        onclick={() => toggleMenu('audio')}
+        disabled={busy}
+      >
+        <Icon name="globe" size={20} />
+      </button>
+      {/if}
+
       <div class="volume-group">
         <button
           class="mute"
@@ -347,67 +440,16 @@
         />
       </div>
 
-      <span class="time" aria-label="{clock(playback.position)} sur {clock(playback.duration)}">
-        <span class="current-time">{clock(playback.position)}</span>
-        <span class="duration-time"> / {clock(playback.duration)}</span>
-        {#if playback.duration > 0}
-          <span class="remaining-time"> (-{clock(remainingTime)})</span>
-        {/if}
-      </span>
-    </div>
-
-    <div class="right-controls" bind:this={triggers}>
-      {#if selectableAudio.length > 1}
       <button
-        data-menu="audio"
-        aria-label="Audio"
+        data-menu="settings"
+        aria-label="Paramètres"
         aria-haspopup="menu"
-        aria-expanded={menu === 'audio'}
-        aria-controls={menu === 'audio' ? 'player-menu' : undefined}
-        onclick={() => toggleMenu('audio')}
+        aria-expanded={menu === 'settings'}
+        aria-controls={menu === 'settings' ? 'player-menu' : undefined}
+        onclick={() => toggleMenu('settings')}
         disabled={busy}
       >
-        <Icon name="globe" size={20} />
-        <span class="control-label">Audio</span>
-      </button>
-      {/if}
-
-      <button
-        data-menu="subtitles"
-        aria-label="Sous-titres"
-        aria-haspopup="menu"
-        aria-expanded={menu === 'subtitles'}
-        aria-controls={menu === 'subtitles' ? 'player-menu' : undefined}
-        onclick={() => toggleMenu('subtitles')}
-        disabled={busy}
-      >
-        <Icon name="captions" size={22} />
-        <span class="control-label">Sous-titres</span>
-      </button>
-
-      <button
-        data-menu="video"
-        aria-label="Vidéo et sources"
-        aria-haspopup="menu"
-        aria-expanded={menu === 'video'}
-        aria-controls={menu === 'video' ? 'player-menu' : undefined}
-        onclick={() => toggleMenu('video')}
-        disabled={busy}
-      >
-        <Icon name="film" size={20} />
-        <span class="control-label">Vidéo</span>
-      </button>
-
-      <button
-        data-menu="speed"
-        aria-label="Vitesse"
-        aria-haspopup="menu"
-        aria-expanded={menu === 'speed'}
-        aria-controls={menu === 'speed' ? 'player-menu' : undefined}
-        onclick={() => toggleMenu('speed')}
-        disabled={busy}
-      >
-        <span class="speed-value">{playback.speed.toLocaleString('fr')}×</span>
+        <Icon name="settings" size={20} />
       </button>
 
       <button
@@ -568,15 +610,6 @@
     font-size: 11.5px;
   }
 
-  .control-label {
-    font-size: 12.5px;
-    font-weight: 600;
-  }
-  .speed-value {
-    font-size: 12.5px;
-    font-weight: 700;
-  }
-
   .progress-line {
     position: relative;
     margin-bottom: 16px;
@@ -642,6 +675,7 @@
     border-radius: 50%;
   }
 
+  .floating-menu button[role="menuitem"],
   .floating-menu button[role="menuitemradio"] {
     width: 100%;
     min-height: 48px;
@@ -652,6 +686,30 @@
     font-weight: 500;
     gap: 16px;
     border-radius: var(--radius-sm);
+  }
+  .setting-value {
+    color: var(--color-muted, #94a3b8);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .setting-arrow {
+    color: var(--color-muted, #94a3b8);
+    font-size: 18px;
+    line-height: 1;
+  }
+  .menu-back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+    margin-right: 8px;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--color-text-bright);
   }
   .floating-menu button[aria-checked='true'] {
     color: var(--color-accent-hover);
@@ -714,9 +772,7 @@
     .volume-group {
       display: none;
     }
-    .control-label {
-      display: none;
-    }
+
     .floating-menu {
       right: 16px;
       bottom: calc(100% - 70px);

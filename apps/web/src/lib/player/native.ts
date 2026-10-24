@@ -73,7 +73,7 @@ export class NativePlayer implements Player {
   }
   private async prepareUrl(url: string) {
     const controller = new AbortController(); this.preparations.add(controller);
-    this.status('Préparation des pistes sur le Media Node… Première préparation potentiellement longue.');
+    this.status('Préparation des pistes… Première préparation potentiellement longue.');
     const timeout = setTimeout(() => controller.abort(), 3610000);
     try {
       const response = await fetch(url, { method: 'HEAD', signal: controller.signal });
@@ -278,12 +278,12 @@ export class NativePlayer implements Player {
         void audioLoading.catch(() => {});
       }
       try {
-        this.status(hasFreshDirect ? 'Connexion directe au Media Node…' : 'Chargement de la vidéo…');
+        this.status('Chargement de la vidéo…');
         try {
           await loadVideo(primaryUrl, fallbackUrl ? 2500 : 10000);
         } catch (primaryErr) {
           if (fallbackUrl && !this.destroyed) {
-            this.status('Node direct indisponible. Connexion au relais…');
+            this.status('Chargement de la vidéo…');
             await loadVideo(fallbackUrl,7500);
           } else {
             throw primaryErr;

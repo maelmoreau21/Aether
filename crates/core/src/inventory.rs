@@ -3124,7 +3124,8 @@ pub async fn prepared(
                 response
             }
             _ => {
-                let mut response = crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
+                let mut response =
+                    crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
                 response.headers_mut().insert(
                     "x-media-preparation-error",
                     axum::http::HeaderValue::from_static("node_unavailable"),

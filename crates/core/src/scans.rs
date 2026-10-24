@@ -219,6 +219,16 @@ async fn status(
     .fetch_all(&state.auth.store.pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let pending: Option<String> = crate::database::query_scalar(
+        "SELECT status FROM durable_tasks WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND status IN ('running','queued','paused') ORDER BY CASE status WHEN 'running' THEN 1 WHEN 'queued' THEN 2 ELSE 3 END LIMIT 1"
+    )
+    .bind(&id)
+    .bind(&id)
+    .fetch_optional(&state.auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     let mut status = Status {
         status: "idle".into(),
         discovered: 0,
@@ -249,6 +259,25 @@ async fn status(
             serde_json::from_str::<Vec<String>>(&item.errors_json)
                 .unwrap_or_else(|_| vec!["État de scan illisible".into()]),
         );
+    }
+    if let Some(pending_status) = pending {
+        let rank = |s: &str| match s {
+            "running" => 5,
+            "queued" => 4,
+            "error" => 3,
+            "completed" => 2,
+            _ => 1,
+        };
+        if rank(&pending_status) > rank(&status.status) {
+            status.status = pending_status;
+        }
+        let _ = crate::scheduler::dispatch_once(
+            &state.auth,
+            &state.root,
+            &state.jobs,
+            media_contracts::protocol::unix_now(),
+        )
+        .await;
     }
     Ok(Json(status))
 }
@@ -361,7 +390,7 @@ async fn enqueue_one(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
     let library: Option<(String, String, String, String)> = crate::database::query_as(
-        "SELECT l.root, l.kind, l.node_id, l.excluded_patterns FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series', 'music') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
+        "SELECT l.root, l.kind, l.node_id, l.excluded_patterns FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND (l.enabled=1 OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.kind IN ('films', 'series', 'music') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
     )
     .bind(&id)
     .fetch_optional(&state.auth.store.pool)

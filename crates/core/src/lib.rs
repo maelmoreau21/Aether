@@ -212,27 +212,25 @@ async fn local_stream_priority(
     next: Next,
 ) -> Response {
     let path = request.uri().path();
-    let streamed =
-        path.contains("/content") || path.contains("/audio/") || path.contains("/prepared/");
+    let is_prepared_or_audio = path.contains("/prepared/") || path.contains("/audio/");
+    let streamed = path.contains("/content") || is_prepared_or_audio;
     let _demand =
         streamed.then(|| media_node::server::ActiveStreamGuard::enter(&scans::LOCAL_STREAMS));
-    if streamed {
+    if is_prepared_or_audio {
         if let Ok(tokens) = jobs.cancellations.lock() {
             for token in tokens.values() {
                 token.store(true, std::sync::atomic::Ordering::Release);
             }
         }
-        if path.contains("/prepared/") || path.contains("/audio/") {
-            let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(250);
-            while jobs
-                .cancellations
-                .lock()
-                .map(|tokens| !tokens.is_empty())
-                .unwrap_or(false)
-                && tokio::time::Instant::now() < deadline
-            {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(250);
+        while jobs
+            .cancellations
+            .lock()
+            .map(|tokens| !tokens.is_empty())
+            .unwrap_or(false)
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
     let response = next.run(request).await;

@@ -1,5 +1,26 @@
 # MEMORY.md — État et décisions Aether
 
+## 25 octobre 2026 — Correction des tests d'intégration CI Shards 1 et 2 (Preemption Playback et Multi-Folder Scan)
+
+- **Problèmes résolus** :
+  1. **Shard 2 (`scanner_performance.rs`)** :
+     - Le test `test_concurrent_playback_and_catalog_navigation_during_scan` échouait en CI avec `Scan stopped or preempted for playback`.
+     - *Cause* : Le middleware `local_stream_priority` dans `crates/core/src/lib.rs` annulait sans distinction tous les scans en cours (`cancel.store(true)`) dès qu'une requête HTTP contenait `/content`. Or, pour le Direct Play de médias locaux sur `/content`, le préchauffage ou préemption brutale de scan n'est requis que pour les transcodages lourds en arrière-plan (`/prepared/` et `/audio/`), pas pour les simples lectures Range directes.
+     - *Correction* : Seules les requêtes vers `/prepared/` et `/audio/` déclenchent la préemption et l'attente d'annulation de scans.
+  2. **Shard 1 (`scanner_flow.rs`)** :
+     - Le test `grouped_folders_scan_filter_stream_and_remove` échouait avec `assertion left == right failed: left: Number(1), right: 2`.
+     - *Causes* :
+       - `task_engine::enqueue_spec` et `task_engine::claim` n'autorisaient pas les bibliothèques virtuelles/dossiers enfants (`library_folders`) car la clause SQL vérifiait strictement `l.enabled=1` sur l'ID enfant, alors que les dossiers enfants ont leur activation liée à `library_folders.active=1` et `parent.enabled=1`.
+       - De plus, en test in-process (sans scheduler loop d'arrière-plan démarré), après le scan du premier dossier, `scans::status` ne consultait que `scan_jobs` sans vérifier les tâches résiduelles dans `durable_tasks`, ce qui renvoyait `status: "completed"` de manière prématurée avant le traitement du deuxième dossier.
+     - *Correction* :
+       - Dans `crates/core/src/task_engine.rs` (`enqueue_spec` et `claim`) et `crates/core/src/scans.rs` (`enqueue_one`), autorisation des dossiers enfants rattachés via `(l.enabled=1 OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))`.
+       - Dans `crates/core/src/scans.rs` (`status`), vérification de l'existence de tâches résiduelles dans `durable_tasks` pour la bibliothèque ou ses sous-dossiers. Si une tâche est `queued` ou `running`, le statut reste `queued`/`running` et un tour de `dispatch_once` est déclenché pour pomper la file.
+- **Validation** :
+  - `cargo test -p media-poc --test scanner_flow` : 3/3 réussis.
+  - `cargo test -p media-poc --test scanner_performance -- test_concurrent_playback_and_catalog_navigation_during_scan` : 1/1 réussi.
+  - `cargo fmt --check` : conforme.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement, 0 erreur.
+
 ## 24 octobre 2026 — Reconnaissance et affichage des films et vidéos dans des dossiers
 
 - **Problème résolu** :

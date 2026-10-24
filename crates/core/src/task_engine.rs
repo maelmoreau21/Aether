@@ -196,7 +196,7 @@ async fn enqueue_spec(
         tx.commit().await?;
         return Ok(job);
     }
-    let node: Option<String>=query_scalar("SELECT l.node_id FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films','series','music') AND n.status!='revoked' AND l.id NOT IN ('fixture-films','fixture-series')").bind(library_id).fetch_optional(&mut *tx).await?;
+    let node: Option<String>=query_scalar("SELECT l.node_id FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND (l.enabled=1 OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.kind IN ('films','series','music') AND n.status!='revoked' AND l.id NOT IN ('fixture-films','fixture-series')").bind(library_id).fetch_optional(&mut *tx).await?;
     let node = node.ok_or(EngineError::Unavailable)?;
     if category != "scan" {
         let sql = if category == "image" {
@@ -314,7 +314,7 @@ pub async fn claim(
     if active >= node_limit {
         return Ok(None);
     }
-    let id:Option<String>=query_scalar("SELECT j.id FROM durable_tasks j JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.node_id=? AND j.status='queued' AND j.lease_until IS NULL AND j.available_at<=? AND j.failure_count<j.max_attempts AND l.node_id=j.node_id AND l.enabled=1 AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1").bind(node_id).bind(now).fetch_optional(&mut *tx).await?;
+    let id:Option<String>=query_scalar("SELECT j.id FROM durable_tasks j JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.node_id=? AND j.status='queued' AND j.lease_until IS NULL AND j.available_at<=? AND j.failure_count<j.max_attempts AND l.node_id=j.node_id AND (l.enabled=1 OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1").bind(node_id).bind(now).fetch_optional(&mut *tx).await?;
     let Some(id) = id else { return Ok(None) };
     query("UPDATE durable_tasks SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 WHERE id=? AND status='queued'").bind(now.saturating_add(lease_seconds)).bind(now).bind(now).bind(&id).execute(&mut *tx).await?;
     let job = query_as("SELECT * FROM durable_tasks WHERE id=?")

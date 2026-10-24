@@ -2888,6 +2888,31 @@ pub async fn descriptor(
         source["tracks"] = json!(track.probe.streams);
         sources.push(source);
     }
+    let chapter_list: Vec<(f64, String)> = probe.chapters.iter().filter_map(|chapter| {
+        let start = chapter["start_time"].as_str()?.parse::<f64>().ok()?;
+        if !start.is_finite() || start < 0. { return None; }
+        Some((start, chapter["tags"]["title"].as_str().unwrap_or("Chapitre").to_string()))
+    }).take(1000).collect();
+
+    let total_dur = probe.format.get("duration").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok());
+    let mut intro_segment: Option<serde_json::Value> = None;
+    let mut credits_segment: Option<serde_json::Value> = None;
+
+    for (i, (start, title)) in chapter_list.iter().enumerate() {
+        let clean = title.to_lowercase();
+        let next_start = if i + 1 < chapter_list.len() { chapter_list[i + 1].0 } else { total_dur.unwrap_or(*start + 90.0) };
+        let dur = next_start - start;
+        if (clean.contains("intro") || clean.contains("opening") || clean.contains("generique debut") || clean.starts_with("op")) && dur >= 15.0 && dur <= 150.0 {
+            if intro_segment.is_none() {
+                intro_segment = Some(json!({ "start": start, "end": next_start }));
+            }
+        } else if (clean.contains("credits") || clean.contains("ending") || clean.contains("generique fin") || clean.contains("generique de fin") || clean.starts_with("ed")) && dur >= 10.0 && dur <= 300.0 {
+            if credits_segment.is_none() {
+                credits_segment = Some(json!({ "start": start, "end": next_start }));
+            }
+        }
+    }
+
     Ok(Some(json!({
         "id": asset_id,
         "title": row.get::<String,_>("title"),
@@ -2898,11 +2923,9 @@ pub async fn descriptor(
         "available": node_status == "connected",
         "sources": sources,
         "subtitles": subtitles,
-        "chapters": probe.chapters.iter().filter_map(|chapter| {
-            let start = chapter["start_time"].as_str()?.parse::<f64>().ok()?;
-            if !start.is_finite() || start < 0. { return None; }
-            Some(json!({"start":start,"title":chapter["tags"]["title"].as_str().unwrap_or("Chapitre")}))
-        }).take(1000).collect::<Vec<_>>()
+        "chapters": chapter_list.iter().map(|(start, title)| json!({"start": start, "title": title})).collect::<Vec<_>>(),
+        "intro": intro_segment,
+        "credits": credits_segment
     })))
 }
 

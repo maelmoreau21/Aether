@@ -1,4 +1,4 @@
-﻿//! Extension API v1 for Aether plugins.
+//! Extension API v1 for Aether plugins.
 //! Designed for sandboxed WebAssembly execution (target wasm32-unknown-unknown)
 //! with host-brokered capabilities (secure HTTPS access, configuration, metadata contracts).
 
@@ -147,6 +147,8 @@ pub enum PluginCapability {
     Avatars,
     /// Plain and time-synced lyrics (lyrics.get operation).
     Lyrics,
+    /// Intro and credits segment detection.
+    Markers,
 }
 
 /// Image category
@@ -358,6 +360,42 @@ pub struct LyricsRequest {
     pub album: Option<String>,
     #[serde(default)]
     pub duration_secs: Option<u32>,
+}
+
+// =========================================================================
+// Timeline Markers Contracts (markers.get / intro.detect operations)
+// =========================================================================
+
+/// Marker indicating an intro, credits or recap interval.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SegmentMarker {
+    pub start: f64,
+    pub end: f64,
+    #[serde(default = "default_marker_type")]
+    pub marker_type: String,
+    #[serde(default = "default_marker_confidence")]
+    pub confidence: f64,
+}
+
+fn default_marker_type() -> String {
+    "intro".into()
+}
+
+fn default_marker_confidence() -> f64 {
+    1.0
+}
+
+/// Media markers collection returned for a playable asset.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaMarkers {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intro: Option<SegmentMarker>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credits: Option<SegmentMarker>,
+    #[serde(default)]
+    pub markers: Vec<SegmentMarker>,
 }
 /// Legacy / simple metadata proposal
 #[derive(Clone, Debug, Serialize, Deserialize)]

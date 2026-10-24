@@ -418,7 +418,7 @@ jobs:
   publish:
     name: Publication Docker GHCR
     needs: [workflows, rust, security-audit, frontend, browser, images]
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.base_ref == 'develop' || github.base_ref == 'main')
     permissions:
       contents: read
       packages: write

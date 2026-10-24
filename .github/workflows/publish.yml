@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build-and-publish:
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.base_ref == 'develop' || github.base_ref == 'main')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -41,7 +41,8 @@ jobs:
           images: ghcr.io/maelmoreau21/${{ matrix.image }}
           tags: |
             type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=develop,enable=${{ github.base_ref == 'develop' || github.ref == 'refs/heads/develop' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
             type=sha,format=long
       - uses: docker/build-push-action@v6
         id: build

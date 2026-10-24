@@ -11,6 +11,7 @@ mod image_preview;
 pub mod images;
 pub use image_preview::width as image_preview_width;
 pub mod inventory;
+pub mod mp4_audio;
 pub mod music;
 pub mod nfo;
 pub mod packaging;
@@ -21,6 +22,7 @@ mod sidecar_manifest;
 pub mod stream;
 pub mod subtitles;
 pub mod transport;
+pub mod video_stream;
 
 pub use files::{OpenedFile, confined_file, validate_library_root};
 pub use inventory::{

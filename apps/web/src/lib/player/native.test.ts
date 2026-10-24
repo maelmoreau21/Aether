@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { NativePlayer } from './native';
 import { ExternalAudio } from './external-audio';
+import { SegmentedAudio } from './segmented-audio';
 import { AudioSelectionRetainedError } from './errors';
 import type { Media } from './types';
 vi.mock('./external-audio', () => ({ ExternalAudio: class {
@@ -23,6 +24,21 @@ const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr',
 function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
+  it('preloads the saved audio window in parallel with video metadata when the descriptor supplies duration', async()=>{
+    const {video,player}=setup();video.auto=false;
+    vi.stubGlobal('MediaSource',class {});
+    const supported=vi.spyOn(SegmentedAudio,'supported').mockReturnValue(true);
+    const objectUrl=vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:test');
+    const revoke=vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
+    let ready!:()=>void;
+    const preload=vi.spyOn(SegmentedAudio.prototype,'preload').mockImplementationOnce(()=>new Promise<void>(resolve=>{ready=resolve;}));
+    const position=Promise.resolve(6);
+    const loading=player.load({...media,sources:[{...media.sources[0],externalAudioUrl:'/audio',audioSegmentUrl:'/chunks-',durationSeconds:12,audioSegmentMode:'absolute'}]},'fr',position);
+    expect(preload).toHaveBeenCalledWith('/chunks-',position);expect(video.loads).toBe(1);
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();video.dispatchEvent(new Event('seeked'));
+    ready();await loading;expect(video.currentTime).toBe(6);
+    player.destroy();preload.mockRestore();supported.mockRestore();objectUrl.mockRestore();revoke.mockRestore();
+  });
   it('does not pause a reused video when the destroyed player times out on an unresolved play promise', async()=>{
     vi.useFakeTimers();const {video,player}=setup();await player.load(media);
     const play=vi.spyOn(video,'play').mockImplementationOnce(()=>new Promise<void>(()=>{}));

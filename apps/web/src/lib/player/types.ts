@@ -20,6 +20,10 @@ export interface Source {
   prepareVideo?: boolean;
   preparedVideoUrl?: string;
   audioSegmentUrl?: string;
+  audioSegmentMode?: 'absolute' | 'rebased';
+  durationSeconds?: number;
+  videoStreamUrl?: string;
+  videoMime?: string;
   label?: string;
   audioOffsetSeconds?: number;
 }

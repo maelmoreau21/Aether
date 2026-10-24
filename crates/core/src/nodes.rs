@@ -1961,7 +1961,20 @@ pub async fn relay_from_remote_node(
     }
 
     // Only the response headers are bounded here; the media body remains streamed.
-    let head_wait = if path_and_query.contains("/prepared/") {
+    let component = path_and_query
+        .split("/prepared/")
+        .nth(1)
+        .and_then(|value| value.split('?').next());
+    let progressive = component.is_some_and(|value| {
+        media_node::video_stream::position(value).is_some()
+            || media_node::packaging::Component::opus_chunk(value).is_some()
+            || media_node::packaging::Component::audio_chunk(value).is_some()
+    });
+    let head_wait = if progressive {
+        // Bounded windows and live pipes must not inherit the hour-long budget
+        // retained for explicit legacy full-file preparations.
+        Duration::from_secs(35)
+    } else if path_and_query.contains("/prepared/") {
         Duration::from_secs(media_node::packaging::MAX_PREPARATION_SECONDS + 5)
     } else {
         Duration::from_secs(6)
@@ -2474,12 +2487,11 @@ async fn authorize_playback(
          AND (u.role='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=u.id))")
         .bind(claims.library_id.as_str()).bind(&claims.session_hash).bind(&rec.id)
         .fetch_one(&state.auth.store.pool).await.unwrap_or(0) == 1;
-    let valid_session = state
-        .auth
-        .session_from_hash(&claims.session_hash)
-        .await
-        .is_ok();
-    let parental = match state.auth.session_from_hash(&claims.session_hash).await {
+    // Resolve the live identity once per authorization request, including its
+    // access schedule. Reuse that validated identity for the parental check.
+    let session = state.auth.session_from_hash(&claims.session_hash).await;
+    let valid_session = session.is_ok();
+    let parental = match session {
         Ok(user) => crate::product::target_allowed(
             &state.auth.store,
             &user.id,

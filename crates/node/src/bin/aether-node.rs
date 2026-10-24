@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let allowed_roots: Vec<PathBuf> = std::env::var("MEDIA_NODE_ROOTS")
         .unwrap_or_default()
-        .split([';', ':'])
+        .split(|character| character == ';' || (!cfg!(windows) && character == ':'))
         .filter(|s| !s.trim().is_empty())
         .map(|s| PathBuf::from(s.trim()))
         .collect();

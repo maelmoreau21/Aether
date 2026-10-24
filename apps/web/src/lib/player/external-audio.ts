@@ -86,8 +86,8 @@ export class ExternalAudio {
       }).catch(() => { if (epoch === this.resumeEpoch) this.error(); });
     }
   };
-  private align(force = false) {
-    const target = this.video.currentTime - this.offset;
+  private align(force = false, position = this.video.currentTime) {
+    const target = position - this.offset;
     if (target < 0 || (Number.isFinite(this.audio.duration) && target >= this.audio.duration)) {
       this.audio.pause(); return false;
     }
@@ -132,7 +132,7 @@ export class ExternalAudio {
       check();
     });
   }
-  async load(url: string, activate = true, mime = 'audio/ogg; codecs="opus"') {
+  async load(url: string, activate = true, mime = 'audio/ogg; codecs="opus"', initialPosition?: number) {
     const format = mime.startsWith('audio/mp4') ? 'MP4/Opus segmenté' : 'Ogg/Opus';
     if (!this.audio.canPlayType(mime)) throw new Error(`Ce navigateur ne déclare pas la lecture audio ${mime}.`);
     await new Promise<void>((resolve, reject) => {
@@ -148,8 +148,9 @@ export class ExternalAudio {
       this.audio.src = url; this.audio.load();
     });
     this.settings();
-    if (this.video.currentTime >= this.offset && Number.isFinite(this.audio.duration) && this.video.currentTime - this.offset >= this.audio.duration && !this.naturalTail()) throw new Error('La piste audio externe se termine avant cette position.');
-    this.align(true); if (!this.naturalTail()) await this.ready();
+    const position = initialPosition ?? this.video.currentTime;
+    if (position >= this.offset && Number.isFinite(this.audio.duration) && position - this.offset >= this.audio.duration && !this.naturalTail()) throw new Error('La piste audio externe se termine avant cette position.');
+    this.align(true, position); if (!this.naturalTail()) await this.ready();
     if (this.stopped) throw new Error('Lecteur fermé.');
     if (activate) this.activate();
   }

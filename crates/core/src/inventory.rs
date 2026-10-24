@@ -2769,6 +2769,15 @@ pub async fn descriptor(
     )
     .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
     let mut sources = vec![source_obj.clone()];
+    let duration = probe
+        .format
+        .get("duration")
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0);
+    let video_source = probe.streams.iter().find(|track| {
+        track.codec_type.as_deref() == Some("video") && track.codec_name.as_deref() == Some("av1")
+    });
     // Optional preparation is restricted to known codecs; original source stays available.
     if probe
         .streams
@@ -2796,6 +2805,26 @@ pub async fn descriptor(
                 "audioSegmentUrl": format!("/api/v1/assets/{asset_id}/prepared/audio-{}-chunk-", track.index),
                 "prepare": true, "label": "interne", "mime": "video/mp4", "tracks": [track]
             }));
+            if let Some(source) = sources.last_mut() {
+                if let Some(duration) = duration {
+                    source["durationSeconds"] = json!(duration);
+                }
+                if let Some(video) = video_source {
+                    if let Some(mime) = av1_video_mime(video) {
+                        source["videoMime"] = json!(mime);
+                    }
+                    let index = video.index;
+                    source["videoStreamUrl"] = json!(format!(
+                        "/api/v1/assets/{asset_id}/prepared/video-stream-{index}-"
+                    ));
+                }
+                if let Some(id) = native_opus_track_id(&probe, track) {
+                    source["audioSegmentUrl"] = json!(format!(
+                        "/api/v1/assets/{asset_id}/prepared/opus-{id}-chunk-"
+                    ));
+                    source["audioSegmentMode"] = json!("absolute");
+                }
+            }
             if matches!(
                 row.get::<String, _>("mime").as_str(),
                 "video/mp4" | "video/webm" | "video/x-matroska"
@@ -2878,6 +2907,65 @@ pub async fn descriptor(
 }
 
 /// Authorized, inventory-resolved local preparation; unsupported remote packaging is explicit.
+// RFC 6381 derives from the actual av1C record, including tier and bit depth;
+// never invent a level from resolution or a generic canPlayType result.
+fn av1_video_mime(track: &media_node::probe::Track) -> Option<String> {
+    if track.codec_type.as_deref() != Some("video") || track.codec_name.as_deref() != Some("av1") {
+        return None;
+    }
+    let dump = track.details.get("extradata")?.as_str()?;
+    let line = dump.lines().find(|line| line.starts_with("00000000:"))?;
+    let hex = line.split_once(':')?.1.trim_start().split("  ").next()?;
+    let bytes = hex
+        .split_whitespace()
+        .flat_map(|word| word.as_bytes().chunks(2))
+        .take(4)
+        .map(|pair| {
+            std::str::from_utf8(pair)
+                .ok()
+                .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+        })
+        .collect::<Option<Vec<_>>>()?;
+    if bytes.len() != 4 || bytes[0] != 0x81 {
+        return None;
+    }
+    let profile = bytes[1] >> 5;
+    let level = bytes[1] & 31;
+    if profile > 2 || level > 23 || bytes[2] & 0x20 != 0 && bytes[2] & 0x40 == 0 {
+        return None;
+    }
+    let tier = if bytes[2] & 0x80 != 0 { 'H' } else { 'M' };
+    let depth = if bytes[2] & 0x40 == 0 {
+        8
+    } else if bytes[2] & 0x20 != 0 {
+        12
+    } else {
+        10
+    };
+    Some(format!(
+        "video/mp4; codecs=\"av01.{profile}.{level:02}{tier}.{depth:02}\""
+    ))
+}
+
+fn native_opus_track_id(probe: &Probe, track: &media_node::probe::Track) -> Option<u32> {
+    if track.codec_type.as_deref() != Some("audio") || track.codec_name.as_deref() != Some("opus") {
+        return None;
+    }
+    let id = track.details.get("id")?.as_str()?;
+    let id = if let Some(hex) = id.strip_prefix("0x") {
+        u32::from_str_radix(hex, 16).ok()?
+    } else {
+        id.parse::<u32>().ok()?
+    };
+    probe
+        .format
+        .get("native_opus_tracks_v1")?
+        .as_array()?
+        .iter()
+        .any(|value| value.as_u64() == Some(u64::from(id)))
+        .then_some(id)
+}
+
 pub async fn prepared(
     store: &IdentityStore,
     preparations: &media_node::packaging::Preparations,
@@ -2904,66 +2992,103 @@ pub async fn prepared(
         Ok(probe) => probe,
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
     };
-    let selected =
-        if let Some(Component::AudioChunk(index, chunk)) = Component::audio_chunk(component) {
-            let duration = probe
-                .format
-                .get("duration")
-                .and_then(Value::as_str)
-                .and_then(|v| v.parse::<f64>().ok());
-            probe
-                .streams
-                .iter()
-                .find(|t| {
-                    t.index == index
-                        && t.codec_type.as_deref() == Some("audio")
-                        && t.codec_name.as_deref() == Some("opus")
-                })
-                .filter(|_| {
-                    duration.is_some_and(|d| {
-                        d.is_finite()
-                            && f64::from(chunk * media_node::packaging::AUDIO_CHUNK_SECONDS) < d
-                    })
-                })
-                .map(|_| Component::AudioChunk(index, chunk))
-        } else if component == "video"
-            && probe.streams.iter().any(|t| {
-                t.codec_type.as_deref() == Some("video") && t.codec_name.as_deref() == Some("av1")
+    let stream_position = media_node::video_stream::position(component);
+    let selected = if let Some((index, position)) = stream_position {
+        let duration = probe
+            .format
+            .get("duration")
+            .and_then(Value::as_str)
+            .and_then(|value| value.parse::<f64>().ok());
+        probe
+            .streams
+            .iter()
+            .any(|track| {
+                track.index == index
+                    && track.codec_type.as_deref() == Some("video")
+                    && track.codec_name.as_deref() == Some("av1")
             })
-        {
-            Some(Component::Video)
-        } else if let Some(index) = component
-            .strip_prefix("audio-")
-            .and_then(|s| s.parse::<u32>().ok())
-        {
-            probe
-                .streams
-                .iter()
-                .find(|t| {
-                    t.index == index
-                        && t.codec_type.as_deref() == Some("audio")
-                        && t.codec_name.as_deref() == Some("opus")
+            .then_some(Component::Video)
+            .filter(|_| {
+                duration.is_some_and(|duration| {
+                    duration.is_finite() && f64::from(position) / 1000.0 < duration
                 })
-                .map(|_| Component::Audio(index))
-        } else if let Some(index) = component
-            .strip_prefix("subtitle-")
-            .and_then(|s| s.parse::<u32>().ok())
-        {
-            probe
-                .streams
-                .iter()
-                .find(|t| {
-                    t.index == index
-                        && t.codec_type.as_deref() == Some("subtitle")
-                        && matches!(
-                            t.codec_name.as_deref(),
-                            Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text")
-                        )
+            })
+    } else if let Some(Component::OpusChunk(id, chunk)) = Component::opus_chunk(component) {
+        let duration = probe
+            .format
+            .get("duration")
+            .and_then(Value::as_str)
+            .and_then(|value| value.parse::<f64>().ok());
+        probe
+            .streams
+            .iter()
+            .any(|track| native_opus_track_id(&probe, track) == Some(id))
+            .then_some(Component::OpusChunk(id, chunk))
+            .filter(|_| {
+                duration.is_some_and(|duration| {
+                    duration.is_finite()
+                        && f64::from(chunk * media_node::packaging::AUDIO_CHUNK_SECONDS) < duration
                 })
-                .map(|_| Component::Subtitle(index))
-        } else {
-            None
-        };
+            })
+    } else if let Some(Component::AudioChunk(index, chunk)) = Component::audio_chunk(component) {
+        let duration = probe
+            .format
+            .get("duration")
+            .and_then(Value::as_str)
+            .and_then(|v| v.parse::<f64>().ok());
+        probe
+            .streams
+            .iter()
+            .find(|t| {
+                t.index == index
+                    && t.codec_type.as_deref() == Some("audio")
+                    && t.codec_name.as_deref() == Some("opus")
+            })
+            .filter(|_| {
+                duration.is_some_and(|d| {
+                    d.is_finite()
+                        && f64::from(chunk * media_node::packaging::AUDIO_CHUNK_SECONDS) < d
+                })
+            })
+            .map(|_| Component::AudioChunk(index, chunk))
+    } else if component == "video"
+        && probe.streams.iter().any(|t| {
+            t.codec_type.as_deref() == Some("video") && t.codec_name.as_deref() == Some("av1")
+        })
+    {
+        Some(Component::Video)
+    } else if let Some(index) = component
+        .strip_prefix("audio-")
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        probe
+            .streams
+            .iter()
+            .find(|t| {
+                t.index == index
+                    && t.codec_type.as_deref() == Some("audio")
+                    && t.codec_name.as_deref() == Some("opus")
+            })
+            .map(|_| Component::Audio(index))
+    } else if let Some(index) = component
+        .strip_prefix("subtitle-")
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        probe
+            .streams
+            .iter()
+            .find(|t| {
+                t.index == index
+                    && t.codec_type.as_deref() == Some("subtitle")
+                    && matches!(
+                        t.codec_name.as_deref(),
+                        Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text")
+                    )
+            })
+            .map(|_| Component::Subtitle(index))
+    } else {
+        None
+    };
     let Some(selected) = selected else {
         return crate::error(StatusCode::UNPROCESSABLE_ENTITY, "unsupported_track");
     };
@@ -2993,6 +3118,68 @@ pub async fn prepared(
             "{}",
             json!({"event":"prepared_audio_track","asset":asset_id,"index":index,"language":track.tags.get("language"),"channels":track.details.get("channels"),"codec":track.codec_name})
         );
+    }
+    if matches!(selected, Component::OpusChunk(..)) || stream_position.is_some() {
+        let opened = match media_node::OpenedFile::open_in_root(
+            Path::new(&row.get::<String, _>("root")),
+            Path::new(&row.get::<String, _>("relative_path")),
+        )
+        .await
+        {
+            Ok(opened)
+                if opened.size() == row.get::<i64, _>("size") as u64
+                    && opened.modified_ns() == row.get::<String, _>("modified_ns") =>
+            {
+                opened
+            }
+            _ => {
+                return crate::error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "asset_changed_rescan_required",
+                );
+            }
+        };
+        let streamed = if let Component::OpusChunk(id, chunk) = selected {
+            preparations
+                .native_audio()
+                .serve(opened, id, chunk, &request)
+                .await
+        } else {
+            preparations
+                .video_streams()
+                .serve(
+                    opened,
+                    stream_position.map_or(0, |(index, _)| index),
+                    stream_position.map_or(0, |(_, position)| position),
+                    &request,
+                )
+                .await
+        };
+        return match streamed {
+            Ok(response) => {
+                let (parts, body) = response.into_parts();
+                Response::from_parts(parts, Body::new(body))
+            }
+            Err(error) => {
+                let code = media_node::packaging::preparation_error_code(&error);
+                let status = if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::Unsupported
+                        | std::io::ErrorKind::InvalidData
+                        | std::io::ErrorKind::InvalidInput
+                ) {
+                    StatusCode::UNPROCESSABLE_ENTITY
+                } else {
+                    StatusCode::SERVICE_UNAVAILABLE
+                };
+                let mut response = crate::error(status, code);
+                response.headers_mut().insert(
+                    "x-media-preparation-error",
+                    axum::http::HeaderValue::from_static(code),
+                );
+                response
+            }
+        };
     }
     let opened = preparations
         .prepare(
@@ -3419,6 +3606,35 @@ pub async fn backfill_title_sort_unicode(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn packet_stream_descriptors_use_validated_track_ids_and_real_av1_configuration() {
+        let probe: super::Probe = serde_json::from_value(serde_json::json!({
+            "streams": [{"index": 1, "codec_type":"audio", "codec_name":"opus", "id":"0x2"}],
+            "format": {"native_opus_tracks_v1":[2]}
+        }))
+        .unwrap();
+        assert_eq!(
+            super::native_opus_track_id(&probe, &probe.streams[0]),
+            Some(2)
+        );
+        let mut unsupported = probe.clone();
+        unsupported.format.clear();
+        assert_eq!(
+            super::native_opus_track_id(&unsupported, &unsupported.streams[0]),
+            None
+        );
+        let video = serde_json::from_value(
+            serde_json::json!({"index":0,"codec_type":"video", "codec_name":"av1",
+            "extradata":"\n00000000: 8108 4c00                                ..L.\n"}),
+        )
+        .unwrap();
+        assert_eq!(
+            super::av1_video_mime(&video).as_deref(),
+            Some("video/mp4; codecs=\"av01.0.08M.10\"")
+        );
+        let guessed = serde_json::from_value(serde_json::json!({"index":0,"codec_type":"video", "codec_name":"av1", "level":8,"pix_fmt":"yuv420p10le"})).unwrap();
+        assert_eq!(super::av1_video_mime(&guessed), None);
+    }
     use super::*;
     use crate::node::scanner::ScannedFile;
     #[tokio::test]

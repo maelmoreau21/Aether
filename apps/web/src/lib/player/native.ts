@@ -2,6 +2,7 @@ import { waitForStartupBuffer } from './startup-buffer';
 import type { Media, Player, PlaybackState, Source } from './types';
 import { ExternalAudio } from './external-audio';
 import { SegmentedAudio } from './segmented-audio';
+import { ProgressiveVideo } from './progressive-video';
 import { chooseSource } from './source-selection';
 import { AudioSelectionRetainedError } from './errors';
 import { unsupportedAudio } from './compatibility';
@@ -12,6 +13,7 @@ export class NativePlayer implements Player {
   private source?: Source;
   private externalAudio?: ExternalAudio;
   private pendingAudio?: ExternalAudio;
+  private progressiveVideo?: ProgressiveVideo;
   private subtitle: string | null = null;
   private audioOffset = 0;
   private subtitleOffset = 0;
@@ -31,6 +33,7 @@ export class NativePlayer implements Player {
     this.stallTimer = setTimeout(() => {
       this.stallTimer = undefined;
       this.video.pause();
+      this.progressiveVideo?.destroy();this.progressiveVideo=undefined;
       this.onError('Lecture bloquée pendant 10 secondes. Rechargez explicitement la source.');
     }, 10000);
   };
@@ -44,6 +47,7 @@ export class NativePlayer implements Player {
   private mediaError = () => {
     if(this.busy)return;
     this.video.pause();
+    this.progressiveVideo?.destroy();this.progressiveVideo=undefined;
     this.externalAudio?.destroy(); this.externalAudio = undefined;
     this.source = undefined;
     this.onError(`Lecture interrompue : ${this.video.error?.message || 'source indisponible ou codecs/conteneur incompatibles'} (MediaError ${this.video.error?.code ?? '?'})`);
@@ -51,6 +55,7 @@ export class NativePlayer implements Player {
   private audioError = (message: string) => {
     if(this.source)message=`Piste ${this.source.language.toUpperCase()} (${this.source.audioTrackId}) : ${message}`;
     this.pause();
+    this.progressiveVideo?.destroy();this.progressiveVideo=undefined;
     this.externalAudio?.destroy(); this.externalAudio = undefined;
     this.source = undefined;
     this.onError(message);
@@ -102,7 +107,7 @@ export class NativePlayer implements Player {
     const segmented = Boolean(source.audioSegmentUrl && SegmentedAudio.supported());
     const audioUrl = segmented ? source.audioSegmentUrl! : source.externalAudioUrl;
     const createAudio = () => segmented
-      ? new SegmentedAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError)
+      ? new SegmentedAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError, {mode: source.audioSegmentMode, trackId: source.audioTrackId})
       : new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError);
     // Keep the current presentation running while the replacement audio is
     // prepared. A cold Node preparation must not freeze an otherwise healthy
@@ -110,7 +115,7 @@ export class NativePlayer implements Player {
     if (!independentSwitch) { this.pause(); pausedForReplacement = true; }
     try {
       if (source.prepare) {
-        if (source.prepareVideo !== false && previous?.url !== source.url) await this.prepareUrl(source.url);
+        if (!source.videoStreamUrl && source.prepareVideo !== false && previous?.url !== source.url) await this.prepareUrl(source.url);
         if (!segmented && source.externalAudioUrl) await this.prepareUrl(source.externalAudioUrl);
       }
       // Independent Opus track switch: keep the same video element, URL and timeline.
@@ -165,6 +170,7 @@ export class NativePlayer implements Player {
     this.source = undefined;
     const { volume, speed } = this.state();
     this.video.pause();
+    this.progressiveVideo?.destroy();this.progressiveVideo=undefined;
     this.externalAudio?.destroy(); this.externalAudio = undefined;
     this.clearStall();
     // Hide obsolete captions before the new resource is ready.
@@ -235,7 +241,7 @@ export class NativePlayer implements Player {
 
     const loadVideo = async (url: string, timeoutMs: number) => {
       await loadCandidate(url, timeoutMs);
-      if (!source.preparedVideoUrl) return;
+      if (!source.preparedVideoUrl && !source.videoStreamUrl) return;
       // Matroska acceptance must include decoded data at the requested position,
       // not just a MIME hint or a successful container metadata parse.
       const probe = new AbortController(); this.preparations.add(probe);
@@ -248,7 +254,12 @@ export class NativePlayer implements Player {
       // Keep it inactive until both resources are ready; segmented Opus needs the
       // video's duration/index and retains its ordered initialization.
       let audioLoading: Promise<void> | undefined;
-      if (source.externalAudioUrl && !segmented) {
+      if (source.externalAudioUrl && segmented && Number.isFinite(source.durationSeconds) && source.durationSeconds! > 0) {
+        const audio = new SegmentedAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError, {mode: source.audioSegmentMode, duration: source.durationSeconds, trackId: source.audioTrackId});
+        this.externalAudio = audio;
+        audioLoading = audio.preload(audioUrl!, position);
+        void audioLoading.catch(() => {});
+      } else if (source.externalAudioUrl && !segmented) {
         this.externalAudio = createAudio();
         audioLoading = this.externalAudio.load(audioUrl!, false);
         void audioLoading.catch(() => {});
@@ -266,10 +277,22 @@ export class NativePlayer implements Player {
           }
         }
       } catch (originalError) {
-        if (!source.preparedVideoUrl || this.destroyed) throw originalError;
-        this.status('Vidéo originale non lisible sur ce navigateur. Préparation sans réencodage…');
-        await this.prepareUrl(source.preparedVideoUrl);
-        await loadCandidate(source.preparedVideoUrl);
+        if (this.destroyed) throw originalError;
+        if(source.videoStreamUrl && source.videoMime && Number.isFinite(source.durationSeconds) && source.durationSeconds!>0 && ProgressiveVideo.supported(source.videoMime)) {
+          this.status('Vidéo originale non lisible. Lecture progressive sans réencodage…');
+          const progressive=new ProgressiveVideo(this.video,source.videoStreamUrl,source.durationSeconds!,source.videoMime,message=>{
+            this.pause();this.externalAudio?.destroy();this.externalAudio=undefined;this.progressiveVideo?.destroy();this.progressiveVideo=undefined;this.source=undefined;this.onError(message);
+          });
+          this.progressiveVideo=progressive;
+          try {await Promise.race([Promise.all([progressive.load(position),loadCandidate(progressive.url)]),progressive.failure]);progressive.activate();}
+          catch(error){this.cancel?.();progressive.destroy();if(this.progressiveVideo===progressive)this.progressiveVideo=undefined;throw error;}
+        } else {
+          if(source.videoStreamUrl)throw new Error(`La lecture vidéo progressive n’est pas disponible pour ce navigateur ou ce descripteur (${source.videoMime??'codec MSE absent'}). Aucun remux intégral automatique.`);
+          if(!source.preparedVideoUrl)throw originalError;
+          this.status('Vidéo originale non lisible sur ce navigateur. Préparation sans réencodage…');
+          await this.prepareUrl(source.preparedVideoUrl);
+          await loadCandidate(source.preparedVideoUrl);
+        }
       }
       this.source = source;
       if (source.externalAudioUrl) {
@@ -287,6 +310,7 @@ export class NativePlayer implements Player {
       if (!paused) await this.play();
     } catch (error) {
       this.video.pause();
+      this.progressiveVideo?.destroy();this.progressiveVideo=undefined;
       this.externalAudio?.destroy(); this.externalAudio = undefined;
       this.source = undefined;
       throw error;
@@ -381,6 +405,7 @@ export class NativePlayer implements Player {
     for(const controller of this.preparations)controller.abort();this.preparations.clear();
     this.cancel?.();
     this.pendingAudio?.destroy(); this.pendingAudio = undefined;
+    this.progressiveVideo?.destroy();this.progressiveVideo=undefined;
     this.clearStall();
     this.externalAudio?.destroy(); this.externalAudio = undefined;
     this.video.removeEventListener('error', this.mediaError);

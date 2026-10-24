@@ -1,0 +1,165 @@
+{
+  "sourceReport": "baseline-wan-http.json",
+  "sourceSha256": "f75ac4b880b6ffb528113e19916953f70936118b1f873d81ae31ac17937f9498",
+  "method": {
+    "median": "Arithmetic mean of the two central values for even n",
+    "percentiles": "Nearest rank; p99 only if at least 100 observations in this population",
+    "failures": "Never assigned a fabricated finite latency; all raw failures remain in source evidence"
+  },
+  "populations": {
+    "1/cold-app-preparation": {
+      "runs": 1,
+      "sessionAttempts": 1,
+      "observedCompletedOpenings": 1,
+      "failedCells": 0,
+      "failedTrajectories": 0,
+      "historicalLostOpeningMeasurements": 0,
+      "frameMs": {
+        "n": 1,
+        "min": 652.8999999761581,
+        "median": 652.8999999761581,
+        "p95": 652.8999999761581,
+        "p99": null,
+        "max": 652.8999999761581
+      },
+      "pcmMs": {
+        "n": 1,
+        "min": 954.5999999642372,
+        "median": 954.5999999642372,
+        "p95": 954.5999999642372,
+        "p99": null,
+        "max": 954.5999999642372
+      },
+      "switchPcmMs": null,
+      "seekFrameMs": null,
+      "seekPcmMs": null
+    },
+    "1/warm-server-new-browser": {
+      "runs": 1,
+      "sessionAttempts": 1,
+      "observedCompletedOpenings": 1,
+      "failedCells": 0,
+      "failedTrajectories": 0,
+      "historicalLostOpeningMeasurements": 0,
+      "frameMs": {
+        "n": 1,
+        "min": 635.1000000238419,
+        "median": 635.1000000238419,
+        "p95": 635.1000000238419,
+        "p99": null,
+        "max": 635.1000000238419
+      },
+      "pcmMs": {
+        "n": 1,
+        "min": 692.8000000119209,
+        "median": 692.8000000119209,
+        "p95": 692.8000000119209,
+        "p99": null,
+        "max": 692.8000000119209
+      },
+      "switchPcmMs": null,
+      "seekFrameMs": null,
+      "seekPcmMs": null
+    },
+    "4/cold-app-preparation": {
+      "runs": 1,
+      "sessionAttempts": 4,
+      "observedCompletedOpenings": 3,
+      "failedCells": 1,
+      "failedTrajectories": 1,
+      "historicalLostOpeningMeasurements": 0,
+      "frameMs": {
+        "n": 3,
+        "min": 2932,
+        "median": 3101.399999976158,
+        "p95": 3180.699999988079,
+        "p99": null,
+        "max": 3180.699999988079
+      },
+      "pcmMs": {
+        "n": 3,
+        "min": 3359.599999964237,
+        "median": 3399.900000035763,
+        "p95": 3400.099999964237,
+        "p99": null,
+        "max": 3400.099999964237
+      },
+      "switchPcmMs": null,
+      "seekFrameMs": null,
+      "seekPcmMs": null
+    },
+    "4/warm-server-new-browser": {
+      "runs": 1,
+      "sessionAttempts": 4,
+      "observedCompletedOpenings": 4,
+      "failedCells": 0,
+      "failedTrajectories": 0,
+      "historicalLostOpeningMeasurements": 0,
+      "frameMs": {
+        "n": 4,
+        "min": 481.7000000476837,
+        "median": 906.6500000357628,
+        "p95": 1182.7000000476837,
+        "p99": null,
+        "max": 1182.7000000476837
+      },
+      "pcmMs": {
+        "n": 4,
+        "min": 647.9000000357628,
+        "median": 1328.6500000357628,
+        "p95": 2940.7000000476837,
+        "p99": null,
+        "max": 2940.7000000476837
+      },
+      "switchPcmMs": null,
+      "seekFrameMs": null,
+      "seekPcmMs": null
+    }
+  },
+  "http": [
+    {
+      "component": "original",
+      "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+      "attempts": 100,
+      "failures": 0,
+      "headersMs": {
+        "n": 100,
+        "min": 13.287700000000768,
+        "median": 24.10055000000284,
+        "p95": 53.942699999999604,
+        "p99": 100.08620000000519,
+        "max": 138.239699999991
+      },
+      "through64KiBMs": {
+        "n": 100,
+        "min": 15.191900000005262,
+        "median": 26.356100000004517,
+        "p95": 54.79110000000219,
+        "p99": 101.01029999999446,
+        "max": 155.07200000000012
+      }
+    },
+    {
+      "component": "audio",
+      "path": "/api/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/prepared/audio-1-chunk-0",
+      "attempts": 100,
+      "failures": 0,
+      "headersMs": {
+        "n": 100,
+        "min": 19.26249999999709,
+        "median": 32.707249999999476,
+        "p95": 46.92379999998957,
+        "p99": 61.83750000000873,
+        "max": 61.872400000007474
+      },
+      "through64KiBMs": {
+        "n": 100,
+        "min": 20.300799999997253,
+        "median": 34.58999999999651,
+        "p95": 53.727799999993294,
+        "p99": 63.05539999999746,
+        "max": 63.0911000000051
+      }
+    }
+  ]
+}

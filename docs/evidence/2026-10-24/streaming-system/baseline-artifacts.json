@@ -1,0 +1,375 @@
+{
+  "revision": "bd08e05839963afa8c84dbcd5aca067dea7863ad",
+  "sealedAt": "2026-10-23T22:52:17.576Z",
+  "sourceAssociation": "Existing binaries copied before candidate edits. Revision supplied by caller; executable and Web hashes identify tested artifacts, not an embedded build attestation.",
+  "files": {
+    "aether-node.exe": {
+      "bytes": 11003904,
+      "sha256": "7a3b9f033abd5dc38e9afc05175ab87db715dd505cbd20286d4c58179a483d63"
+    },
+    "media-poc.exe": {
+      "bytes": 36713984,
+      "sha256": "221ccf44e83893901f96aa54de1c9245664402a7076a09586524dec9c6e42c57"
+    },
+    "web/admin/libraries/index-bootstrap-0.js": {
+      "bytes": 982,
+      "sha256": "ef9a68ca033c0c805fab1b7d0f7a3cadd80c75a988abb22404fe756cce383807"
+    },
+    "web/admin/libraries/index.html": {
+      "bytes": 2913,
+      "sha256": "b81038d3e628a7d2cc1ce1dbc01c08875272f7d31c4fdad4ad53614a9fc3db38"
+    },
+    "web/auth-transition.css": {
+      "bytes": 408,
+      "sha256": "343d077cdefc64dbcfc5bd85b7b3a7c493c0e4ab11bee8d09a4040b1b1ac1dbc"
+    },
+    "web/downloads/index-bootstrap-0.js": {
+      "bytes": 982,
+      "sha256": "7c7734265a74203ac453c3cbdd6c06b6ee362584a0648e20fd27cb2dcd7956d4"
+    },
+    "web/downloads/index.html": {
+      "bytes": 2442,
+      "sha256": "1b6fc389423033b637baefd576b4bf6e38db7ce1508f3ab4929b150caf78df00"
+    },
+    "web/favicon.svg": {
+      "bytes": 436,
+      "sha256": "8c00030ef2ee51d26f89589e4bd68716096d967fd3aec07c4d666a73038eb97e"
+    },
+    "web/films/index-bootstrap-0.js": {
+      "bytes": 982,
+      "sha256": "dd9867798151c8b8acafef3eb5c654504050eaa8773c8fd6815f31b36b296425"
+    },
+    "web/films/index.html": {
+      "bytes": 3088,
+      "sha256": "ce75856267636776d0941242a43237c02e60e3d8ac632c6226d57de163cb1fff"
+    },
+    "web/icons/app-192.png": {
+      "bytes": 1958,
+      "sha256": "fb3e8a299b86f911de42fc69bb716cf023dc4984ee9d599d4340bdc17b36dee8"
+    },
+    "web/icons/app-512.png": {
+      "bytes": 7192,
+      "sha256": "b3c8aaa741f1fd5dac4c70ef867e6bf05213b81f4bcdbc6aeb0f09deaa12c6e3"
+    },
+    "web/images/brand-mark.svg": {
+      "bytes": 435,
+      "sha256": "56e80786d052adcefc96d7452548c9a0f68f6cf3209c5ee31c229de724b8f358"
+    },
+    "web/images/chevron.svg": {
+      "bytes": 138,
+      "sha256": "6db6c5bb7a31b8aed7aa4fe5b15e15d8bccbf8bad2a29330b9cc9ac2b83d2abf"
+    },
+    "web/images/cinematic-horizon.png": {
+      "bytes": 1996166,
+      "sha256": "9aa3ea0fefea8c633b8ab9e479fa324b433b970c4c3284f0df7aad5f72bf87dd"
+    },
+    "web/images/logo-animated.svg": {
+      "bytes": 740,
+      "sha256": "3af18beb4ce94d6751357c25f8cb6190e7600bd4d5b3685ff3933de8ba0b600b"
+    },
+    "web/images/logo-loading.svg": {
+      "bytes": 1068,
+      "sha256": "52ac8f75f230d0de9d2e285c2cf68c769b45436e40fdf0b074fd4e59b889c44d"
+    },
+    "web/index-bootstrap-0.js": {
+      "bytes": 982,
+      "sha256": "e3983b9efe2325b37267739b8459309eee72ec5af8072feca44061e9e061801f"
+    },
+    "web/index.html": {
+      "bytes": 3088,
+      "sha256": "6b6b8a5dc26101e1fbc0a5ffe356de7ad31cc445657726f2378f695148227454"
+    },
+    "web/lists/index-bootstrap-0.js": {
+      "bytes": 982,
+      "sha256": "edde5f3a7ce0c7151a93e6f00b722fbc9a4d2868b782798164ca6d1ee2ac3a73"
+    },
+    "web/lists/index.html": {
+      "bytes": 2832,
+      "sha256": "f476df682fd6097e590aa0f837ce80ff4d67da037291216161804601550c9cbe"
+    },
+    "web/login/index-bootstrap-0.js": {
+      "bytes": 982,
+      "sha256": "5de931bc1aa64ee4113474e5dd4dd302b15de4e6af0301f53ebe02c26a340567"
+    },
+    "web/login/index.html": {
+      "bytes": 2517,
+      "sha256": "896a0862cf242329b6d738edc73c4fb65c75f36ec7e108e2c54fd557e6a0525a"
+    },
+    "web/manifest.webmanifest": {
+      "bytes": 348,
+      "sha256": "398e988948f35a0e8af83d1bd28859f4f61f31d411932b82ac3587f0c7c8ca49"
+    },
+    "web/music/index-bootstrap-0.js": {
+      "bytes": 982,
+      "sha256": "b87f29a5ddc6701ca7b533dc46feee913fde351d3ee3b73fb3a2c8f24e252121"
+    },
+    "web/music/index.html": {
+      "bytes": 2907,
+      "sha256": "43058d04af054ff08ed54c378ecd2d7f77f6264321af5dbe08a9c8979c3d9018"
+    },
+    "web/search/index-bootstrap-0.js": {
+      "bytes": 982,
+      "sha256": "14bce4896d5f8e8b5987d30944e17c397cc1fa6a27808af4bb5e5f1dec845b74"
+    },
+    "web/search/index.html": {
+      "bytes": 3088,
+      "sha256": "d5126fa2c0660742feee50081b69f6904a9ecc0c919cf11e7fb526842b09b588"
+    },
+    "web/series/index-bootstrap-0.js": {
+      "bytes": 983,
+      "sha256": "d20cbf495b6b262377a3044fd34ae35ae0f99fd066b2bf960a65a3e58e88ff97"
+    },
+    "web/series/index.html": {
+      "bytes": 3089,
+      "sha256": "6742b60564964a900226f0956694a21ac6a75bdab2389f2998478e6c5549d425"
+    },
+    "web/service-worker.js": {
+      "bytes": 6766,
+      "sha256": "cd24189668b0d590708acf5cf1595ad87663f2699a9628d5eaa97d9939d172c9"
+    },
+    "web/settings/index-bootstrap-0.js": {
+      "bytes": 983,
+      "sha256": "98d74bc6d3849513827fb1b03b04ed534d6b7ecf445c29ee85c2b5c31a5459e1"
+    },
+    "web/settings/index.html": {
+      "bytes": 3089,
+      "sha256": "89b32a04322a3421bb7bd56885a8a2d1db707a231d04a6c5a5d7d49260ec7781"
+    },
+    "web/theme-init.js": {
+      "bytes": 231,
+      "sha256": "d9fe9198525ae90e6aa105c5e3cdea2e2cff5bc1dec59812b942b5cd521c3354"
+    },
+    "web/_app/immutable/assets/0.CF0I6C7u.css": {
+      "bytes": 13794,
+      "sha256": "3d2a455944e67c2c51be112c9368555a06ebf5e28aa4d9cc3820023512fc4a32"
+    },
+    "web/_app/immutable/assets/3.Bc1at8Sy.css": {
+      "bytes": 62544,
+      "sha256": "7ec477d17c768e0fff377c9a6a604f8d481d684b4382fba0c4beff7dbc687e9d"
+    },
+    "web/_app/immutable/assets/4.D9f6WyyM.css": {
+      "bytes": 933,
+      "sha256": "657c1e7a9722b097723e408f0e7fdad912fd0f5c473d7d761aec075b8dff0457"
+    },
+    "web/_app/immutable/assets/6.BlMJ9aPC.css": {
+      "bytes": 4955,
+      "sha256": "903276a14eb4b832956c7938d73f0bacd24c022e7820efc6fa90edbe3d2ed07c"
+    },
+    "web/_app/immutable/assets/7.CYjW7PGe.css": {
+      "bytes": 6328,
+      "sha256": "6a4a040e0341a5b2e0643049e7bb48301596efdd66b2dba36504a33b7e951ccd"
+    },
+    "web/_app/immutable/assets/8.MFSB7278.css": {
+      "bytes": 2629,
+      "sha256": "3df7a2191ae75351dd1ce3e16a1668cbe0042a34cc304defc06d7a0a07de64ca"
+    },
+    "web/_app/immutable/assets/Catalog.aovzldBI.css": {
+      "bytes": 26270,
+      "sha256": "2f4aea99f25b5ccbab51706314f80d1fa28ee5a095e795c23fb2b34cd46b4cdc"
+    },
+    "web/_app/immutable/assets/FilmDetail.DplVFrbm.css": {
+      "bytes": 7221,
+      "sha256": "3e21b4f6119770b080b8c0f27f330c05b49bd537888bf60505f9521a174993c8"
+    },
+    "web/_app/immutable/assets/ImageManager.D7qE4K2w.css": {
+      "bytes": 2972,
+      "sha256": "2dbf701bd970e42bfdd9889f5ae2e17f3b57e1c833336ec1854d2e6d75423c5f"
+    },
+    "web/_app/immutable/assets/ImmersivePlayer.DURlV2vc.css": {
+      "bytes": 11292,
+      "sha256": "ce2588f4143fc93f74be2441e82168edd0216d27b8b41dc6791fe4d30a261bb7"
+    },
+    "web/_app/immutable/assets/Navbar.BPH6_lz7.css": {
+      "bytes": 3659,
+      "sha256": "75cc670dc0e1d7275c42e1b3c4fc8ed653defb710eafaab0c2b1a95f8c076489"
+    },
+    "web/_app/immutable/assets/ProfileMenu.BNMx4Zz_.css": {
+      "bytes": 4063,
+      "sha256": "92cf27f5ac8741d6fca08279036165e144c5f322e983bef2cfccfa08baef011b"
+    },
+    "web/_app/immutable/assets/SeriesDetail.DScSAPWU.css": {
+      "bytes": 8461,
+      "sha256": "4acd6419dfb9d57c889d9b238c3ce835906850d7b2de92698cc5e62eefdcefef"
+    },
+    "web/_app/immutable/assets/SettingsView.Bb6FJlov.css": {
+      "bytes": 5343,
+      "sha256": "4400255a7b569913b5ecc98870c251865f09f81211795711cc05d2e49e52eaa0"
+    },
+    "web/_app/immutable/assets/WatchStatus.luUoxOHb.css": {
+      "bytes": 5119,
+      "sha256": "2b36803f1790ef1f5d6b0a3972e6fc6f7fb52f82b4c1ae58a1c3c2aab99ca336"
+    },
+    "web/_app/immutable/chunks/ADxuELBf.js": {
+      "bytes": 13544,
+      "sha256": "1e4188c8bc65882793efebd40bba8316702410827431b3dad9589d2454be182a"
+    },
+    "web/_app/immutable/chunks/Bjy-W4x2.js": {
+      "bytes": 1365,
+      "sha256": "f07424758318dd6b5f32b0fe8de9d2ffb8d97a17c841758626d18ba0faa0456a"
+    },
+    "web/_app/immutable/chunks/BkQHqPJ8.js": {
+      "bytes": 3399,
+      "sha256": "a99e28c9d6648f20cafa5d819f6b26e8ca00e9a49caf7cfd40876dc628f9aba9"
+    },
+    "web/_app/immutable/chunks/BmIhb-wn.js": {
+      "bytes": 53682,
+      "sha256": "8c325f8c1c9cc3cba062d1d831b1ebe1dd1e7d02fec35db69f586fec8a1eb8fa"
+    },
+    "web/_app/immutable/chunks/BoINRATa.js": {
+      "bytes": 5029,
+      "sha256": "08558fdf936071af00651251aecb3f160187d9a95ae5ded5d3b93b35d1699905"
+    },
+    "web/_app/immutable/chunks/BwPz04C6.js": {
+      "bytes": 5662,
+      "sha256": "ffaa480a318a49c5eedce20953a91e66fb35001426921b9312026790bdde19ed"
+    },
+    "web/_app/immutable/chunks/BwWdUFNu.js": {
+      "bytes": 22,
+      "sha256": "73e3ef56a866603b90028a36e2e06e9f6ef690b2412cfb0e542233737789c2b3"
+    },
+    "web/_app/immutable/chunks/CfdbU2p_.js": {
+      "bytes": 16482,
+      "sha256": "c9cc66c3ab5f309c58a89dc78442e743e016f4295b9e125f59e643f7116efa27"
+    },
+    "web/_app/immutable/chunks/CFhRrGG4.js": {
+      "bytes": 28251,
+      "sha256": "81f95f2a75fb714ad7d94385dcf1088fdd0d900b1a4d688df38843b6b9dd8b06"
+    },
+    "web/_app/immutable/chunks/Ck2kqN_s.js": {
+      "bytes": 1119,
+      "sha256": "996075333300496ff60acd3c3ade4cc532fa4b788ac0b67f8c5491ffe56b3253"
+    },
+    "web/_app/immutable/chunks/CK71PeLz.js": {
+      "bytes": 1590,
+      "sha256": "407f78f7341a7c25f9ba54082896c0815b94dc83ff02b3f8e952283dbfe44b5e"
+    },
+    "web/_app/immutable/chunks/CQeVdd8P.js": {
+      "bytes": 18188,
+      "sha256": "6a22e0bcdb1d5a8dd6b4f7728bd9c16bcccfdcfefe6b1a31f4ae8185bebbe699"
+    },
+    "web/_app/immutable/chunks/CRzLMJPS.js": {
+      "bytes": 1534,
+      "sha256": "bcc465e3e61dc3878a69ffa95ccb53cb82d95b1639ada223420b281ebd150048"
+    },
+    "web/_app/immutable/chunks/CxjINrRm.js": {
+      "bytes": 1093,
+      "sha256": "a62158c4a30d1991ca8aafc899a4d2adfee112f19430e5bd1c65e7c6c333199c"
+    },
+    "web/_app/immutable/chunks/C_B6aPnA.js": {
+      "bytes": 22205,
+      "sha256": "fd455a332bb2ef4b947e58a82d7430d6c890cc1d72ee113c35ef27eb92390ba7"
+    },
+    "web/_app/immutable/chunks/C_kwFy6w.js": {
+      "bytes": 220,
+      "sha256": "fc95f6a3208e9afe815d9c40d7bb3c057024a19ed1d700e81d8120576897f68a"
+    },
+    "web/_app/immutable/chunks/D-EggHm-.js": {
+      "bytes": 15376,
+      "sha256": "35a8da8db5a0b45b22c086fca76b91a1fb08c08ba1d0491839c5ddb673ccb3c8"
+    },
+    "web/_app/immutable/chunks/DDKm7rUY.js": {
+      "bytes": 582,
+      "sha256": "04823dd372653861970e9dd5404ce5952329ad3e40facf7cef7edaf8b586f0f5"
+    },
+    "web/_app/immutable/chunks/DdQlu5cH.js": {
+      "bytes": 53153,
+      "sha256": "248f3b3bb602d6720495159d940986aad8c9c1ca603574ed29593906c1786b32"
+    },
+    "web/_app/immutable/chunks/DFHeYniz.js": {
+      "bytes": 9243,
+      "sha256": "9a62796a2af2a97d92092038cd19a7ae12783724494e9ec0b53376d78486bf35"
+    },
+    "web/_app/immutable/chunks/DfKnlLW-.js": {
+      "bytes": 40972,
+      "sha256": "bbd72cae1ccd6edfe5a1a10f40afa0d552c8703f917404eb1f8158ec5ffb9326"
+    },
+    "web/_app/immutable/chunks/Dq4XpSZB.js": {
+      "bytes": 1521,
+      "sha256": "d48250f23096fd2990076926d1b48596ac8d95a7f2b1950a064d46db98266b67"
+    },
+    "web/_app/immutable/chunks/DuBz8qg9.js": {
+      "bytes": 1814,
+      "sha256": "120b387d1cb8af55e1737deece4b27157975f97af663d2ee71a24ec72bc4a196"
+    },
+    "web/_app/immutable/chunks/DYO6MRop.js": {
+      "bytes": 27641,
+      "sha256": "074919046ff96aefd856764f4d875820c159f551c080f99bfad81fe74b393ea6"
+    },
+    "web/_app/immutable/chunks/J0uaNty-.js": {
+      "bytes": 2843,
+      "sha256": "825f338d7cb772a4c67476aab80e22dbc73fdb9d8b65583b30cf66c4a8a5dd1e"
+    },
+    "web/_app/immutable/chunks/xzq5LCjT.js": {
+      "bytes": 52,
+      "sha256": "19689d9e3aa2ffdc73d85ba9e48674bfdc09300d5b8741cb1ccab097d7a1892a"
+    },
+    "web/_app/immutable/chunks/_KQRSfiL.js": {
+      "bytes": 22,
+      "sha256": "69be7f658ee0997868afd93472e26169f4dcf40fbc55a9e5b26cb299cb2e9e6d"
+    },
+    "web/_app/immutable/entry/app.DoCjNYfY.js": {
+      "bytes": 3907,
+      "sha256": "79a84c1c0df92af2ac262f290299abe884b7aac6d40ec7a40354d38c461138a4"
+    },
+    "web/_app/immutable/entry/payload.DSmR2FwN.js": {
+      "bytes": 65,
+      "sha256": "b7cba7b44b2397c7d28f7db4a34ec734a985e64ff27d74ddf8d9645cf814f09f"
+    },
+    "web/_app/immutable/entry/start.C-1wPBhj.js": {
+      "bytes": 640,
+      "sha256": "48024812d8ecddb5b85e75607c55d5bff685e26eab1e330c71766885d14f0c62"
+    },
+    "web/_app/immutable/nodes/0.x0c3hjyR.js": {
+      "bytes": 11329,
+      "sha256": "eb17d3a5389c093d6ddcb354ec8af08e66ce8327605c81aa059ed205ce7668c7"
+    },
+    "web/_app/immutable/nodes/1.D6miDJmV.js": {
+      "bytes": 358,
+      "sha256": "b5573cf91b177bacb26c17a16b752facab608be40fe0ebe7dfc6716009882a5a"
+    },
+    "web/_app/immutable/nodes/10.CqTDyRXb.js": {
+      "bytes": 133,
+      "sha256": "2ab35121c6fe3b790b6db93013caa4c1463647f7a7801a9fe472942b16009b93"
+    },
+    "web/_app/immutable/nodes/11.CxVaFKbi.js": {
+      "bytes": 135,
+      "sha256": "d5132e80feef0040dab0bc92e5297784893223e1aa61b7bfd0f68f9092d5295d"
+    },
+    "web/_app/immutable/nodes/2.NeJFlsPd.js": {
+      "bytes": 117,
+      "sha256": "9d0e4e2a023c77b107d0280ba4c375b87d5d27541682e0f1a5aff5e6ce47f8f5"
+    },
+    "web/_app/immutable/nodes/3.BTOhYi6L.js": {
+      "bytes": 184034,
+      "sha256": "c14488c5a831ba194d109b356e64d025dc146532a9c7beaf6474d51a238245fc"
+    },
+    "web/_app/immutable/nodes/4.ZxMvSQ4C.js": {
+      "bytes": 5268,
+      "sha256": "6550c95cb467acb65b5d6a7badafcc51fa82b1a7c8ea8d78c1ebbc3db1190a63"
+    },
+    "web/_app/immutable/nodes/5.B9dF8Zf1.js": {
+      "bytes": 132,
+      "sha256": "084bd236f5deb8e6829acc865a09ad8c1108e8fa4a0cb786344302ab0f8271bf"
+    },
+    "web/_app/immutable/nodes/6.CcqA3Tjs.js": {
+      "bytes": 15004,
+      "sha256": "6f90c267dfb87c6bab3b9f94d7235fdf989597b833d631efa62a6a6c14ea5359"
+    },
+    "web/_app/immutable/nodes/7.B2T28oMy.js": {
+      "bytes": 14288,
+      "sha256": "3e7ab9632751c21471393512c9ec1028eada3e655bc5a708bec2db0bb0773aa4"
+    },
+    "web/_app/immutable/nodes/8.BD6bnuV6.js": {
+      "bytes": 6896,
+      "sha256": "c94ca4abb8d129c6aacf4f315f103a7fb8589354b2f59984da0d453eef090442"
+    },
+    "web/_app/immutable/nodes/9.5Ar3j5C6.js": {
+      "bytes": 133,
+      "sha256": "b9d84d1fd3735866aa602bdc9b2b76e76896821f50192c51155718dc97f36e42"
+    },
+    "web/_app/version.json": {
+      "bytes": 27,
+      "sha256": "c4e1cb765e3fd8e846dff1bedab6b4de146db29adb543b8429b462169de06c81"
+    }
+  }
+}

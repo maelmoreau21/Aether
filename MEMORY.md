@@ -1,5 +1,35 @@
 # MEMORY.md — État et décisions Aether
 
+## 24 octobre 2026 — Streaming progressif Rust, jalon mesuré et limites
+
+- MP4 Opus validés au scan : fenêtres fMP4 virtuelles depuis les paquets
+  originaux, sans FFmpeg ni cache audio disque. IDs MP4 distincts des ordinaux
+  ffprobe ; timestamps absolus, éditions et pré-roll conservés. Index borné
+  à 32 Mio/8 entrées, moov 16 Mio, lectures 64 Kio. Autres layouts : chemin
+  existant de copie de paquets, aucun réencodage audio implicite.
+- Repli vidéo AV1 continu avec backpressure, annulation et quatre processus
+  maximum, sans remux intégral préalable. Fenêtres vidéo chevauchantes rejetées
+  après blocage réel du décodeur. MSE borné à 128 Mio encodés, pas une garantie
+  de RSS navigateur. Audio initial préparé parallèlement ; identité logique
+  VF/VO transmise explicitement. Préparations FFmpeg identiques regroupées.
+- Signatures des erreurs Node corrigées : longueur fixée avant digest, y
+  compris uplink. Autorisation résolue une fois par demande, droits conservés.
+  Windows : MEDIA_NODE_ROOTS conserve les lettres de lecteur.
+- Vérifications : Node 64 réussis/3 ignorés, Web 150 réussis/check/lint/build,
+  Core 4 tests inventaire + 2 parentaux + 2 intégrations distribuées réussis.
+  POC Native MKV/MP4 GOP15 : seeks et raccords vérifiés avec PCM ; audio préparé
+  annoncé, pas une preuve système à froid.
+- Banc réel Core/SQLite + Node Rust séparé, 336 Mio et 1,76 Go synthétiques,
+  caches applicatifs vides/chauds, comptes distincts, ressources Job Object,
+  profil TCP simulé. Aucun Node physique distant disponible selon l'utilisateur.
+  Rapports et méthode : docs/STREAMING_SYSTEM_BENCHMARK.md et preuves associées.
+- Limite importante : la matrice candidate conserve des expirations audio à
+  quatre sessions. Le p95 de démarrage sur cinq ouvertures chaudes n'améliore
+  pas la référence ; ne pas annoncer 50 ms ni une fiabilité multi-session
+  acquise. Aucun p99 UI estimé sur ces petits lots. Mesures debug Windows,
+  cache OS non purgé, ni NAS ni sortie audio physique validés. L'utilisateur
+  demande une clôture propre faute de quota : pas de campagne supplémentaire.
+
 ## 24 octobre 2026 — CI scanner, fermeture après choix audio validé
 
 - La boucle de réouverture FR/EN attend désormais la sélection Svelte

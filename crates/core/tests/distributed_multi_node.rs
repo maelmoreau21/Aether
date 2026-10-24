@@ -840,6 +840,72 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .await;
         assert_eq!(status, StatusCode::PARTIAL_CONTENT, "remote audio chunk");
         assert_eq!(&bytes[4..8], b"ftyp");
+        let audio_window = format!("{}0", prepared["audioSegmentUrl"].as_str().unwrap());
+        if asset_id == &film_asset_id {
+            assert!(
+                audio_window.contains("/prepared/opus-"),
+                "validated MP4 uses native Opus"
+            );
+            assert_eq!(prepared["audioSegmentMode"], "absolute");
+        }
+        let progressive = format!("{}0", prepared["videoStreamUrl"].as_str().unwrap());
+        for path in [&audio_window, &progressive] {
+            for method in [Method::GET, Method::HEAD] {
+                let (status, _, bytes) = http_request(
+                    &core_origin,
+                    method.clone(),
+                    path,
+                    &[("cookie", &alice_cookie)],
+                    vec![],
+                )
+                .await;
+                assert_eq!(
+                    status,
+                    StatusCode::OK,
+                    "authorized {method} {path}: {}",
+                    String::from_utf8_lossy(&bytes)
+                );
+                if method == Method::HEAD {
+                    assert!(bytes.is_empty());
+                } else {
+                    assert_eq!(&bytes[4..8], b"ftyp");
+                }
+                assert_eq!(
+                    http_request(
+                        &core_origin,
+                        method,
+                        path,
+                        &[("cookie", &bob_cookie)],
+                        vec![]
+                    )
+                    .await
+                    .0,
+                    StatusCode::FORBIDDEN
+                );
+            }
+        }
+        let (status, _, bytes) = http_request(
+            &core_origin,
+            Method::GET,
+            &audio_window,
+            &[("cookie", &alice_cookie), ("range", "bytes=0-31")],
+            vec![],
+        )
+        .await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(&bytes[4..8], b"ftyp");
+        assert_eq!(
+            http_request(
+                &core_origin,
+                Method::GET,
+                &progressive,
+                &[("cookie", &alice_cookie), ("range", "bytes=0-31")],
+                vec![]
+            )
+            .await
+            .0,
+            StatusCode::RANGE_NOT_SATISFIABLE
+        );
         let video = prepared["url"].as_str().unwrap();
         let (status, headers, bytes) = http_request(
             &core_origin,

@@ -1,5 +1,57 @@
 # Modèle média — P0 et suite
 
+## Extraction MP4/Opus en Rust et repli vidéo progressif — 24 octobre 2026
+
+`crates/node/src/mp4_audio.rs` extrait les paquets Opus d'un sous-ensemble
+strict de MP4 non fragmentés, sans FFmpeg ni fichier temporaire. Le scan valide
+les tables avant d'annoncer `native_opus_tracks_v1`. L'URL
+`prepared/opus-{trackId}-chunk-{n}` utilise le vrai `track_ID` du conteneur,
+distinct de l'index ordinal ffprobe des routes historiques `audio-{index}`.
+Ce support ne constitue pas un décodeur universel MP4/MKV ou une preuve de
+lecture pour tous les navigateurs.
+
+Le chemin accepte une description `Opus`/`dOps` à 48 kHz, avec configuration
+mono/stéréo ou famille de mapping 1 jusqu'à huit canaux, une référence locale
+`dref` et une seule édition `elst` de vitesse 1, sans décalage de composition
+non nul. Les tables `stts`, `stsc`, `stsz` et `stco`/`co64` déterminent les
+durées, tailles et positions réelles. Les références externes, éditions
+complexes, sources fragmentées et autres variantes non prises en charge
+échouent explicitement ; elles ne sont pas interprétées approximativement.
+
+Chaque fenêtre couvre dix secondes nominales, avec jusqu'à une seconde avant
+et une seconde après. Les paquets et canaux restent inchangés. Le `tfdt`
+conserve le temps de décodage absolu issu de `stts` ; l'édition `elst` et
+`dOps` sont conservés, sans soustraire deux fois le priming. Les groupes
+`roll` décrivent le pré-roll de 80 ms en tenant compte des durées variables
+des paquets, selon [l'encapsulation Opus en ISO BMFF](https://opus-codec.org/docs/opus_in_isobmff.html).
+L'initialisation contient des tables d'échantillons vides et `mvex` ; les
+fragments contiennent `moof`/`traf`/`tfdt`/`trun` et `mdat`, suivant le
+[format ISO BMFF pour MSE](https://www.w3.org/TR/mse-byte-stream-format-isobmff/).
+Les références `sbgp` locales au fragment commencent à `0x10001`, distinctes
+des descriptions globales de l'initialisation ; ce choix est aussi explicite
+dans [Shaka Packager](https://github.com/shaka-project/shaka-packager/blob/main/packager/media/formats/mp4/fragmenter.cc).
+L'initialisation conserve une description `roll -4` mais ne mappe aucun
+échantillon ; les fragments portent les associations réellement calculées.
+
+Bornes du parseur : `moov` de 16 Mio au maximum, cache d'index de 32 Mio et
+huit entrées, quatre millions d'échantillons et 65 536 runs `stts`/`stsc`.
+Les tables restent compactes, avec préfixes clairsemés ; seul le plan de la
+fenêtre est matérialisé, limité à 8 192 échantillons et 8 Mio de paquets.
+La représentation HTTP est virtuelle : en-têtes fMP4 puis lectures du fichier
+original par blocs de 64 Kio, avec regroupement des lectures contiguës ou
+proches. Aucun tampon de huit Mio n'est réservé pour recopier la fenêtre.
+`HEAD` et les Range simples, y compris `206` et `416`, portent sur cette
+représentation. Ces bornes ne sont pas des mesures de RSS du processus.
+
+Le repli vidéo MSE utilise un flux fMP4 continu unique copié par FFmpeg depuis
+un descripteur confiné, avec backpressure et quatre processus simultanés au
+maximum. Un seek remplace et annule ce flux ; fermeture et annulation arrêtent
+le processus. Cette route n'accepte pas Range ; `HEAD` ne lance pas FFmpeg.
+Les fenêtres vidéo indépendantes chevauchant des GOP ont été rejetées après
+un blocage réel de décodage MSE. Les autres préparations historiques restent
+distinctes ; aucun de ces chemins n'ajoute de réencodage vidéo ou audio.
+Méthode et limites des mesures : [banc système](STREAMING_SYSTEM_BENCHMARK.md).
+
 ## Extension P3 du 18 octobre 2026
 
 Les sources vidéo conservent leur identité existante. Un scan peut leur associer

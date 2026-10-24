@@ -1,0 +1,3383 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-23T23:05:23.423Z",
+  "scope": "Real Rust Core/SQLite and separate Rust Node on loopback TCP; actual built Svelte UI; no route mocks; not two physical machines",
+  "os": "win32 10.0.26300",
+  "buildProfile": "existing debug binaries; executable SHA-256 authoritative",
+  "cells": [
+    {
+      "sessions": 1,
+      "round": 0,
+      "phase": "cold-app-preparation",
+      "trials": [
+        {
+          "open": {
+            "trial": {
+              "kind": "open",
+              "start": 874.1000000238419,
+              "observedSilenceMs": 0,
+              "maxVideoFrameGapMs": 638.6999999761581,
+              "videoLoadsBefore": 0,
+              "dialogOpenMs": 84.79999995231628,
+              "maxPcmPollGapMs": 95.90000003576279,
+              "videoEvents": [
+                {
+                  "name": "loadstart",
+                  "atMs": 143.89999997615814,
+                  "time": 0
+                },
+                {
+                  "name": "loadedmetadata",
+                  "atMs": 573.3999999761581,
+                  "time": 0
+                },
+                {
+                  "name": "playing",
+                  "atMs": 943.6999999880791,
+                  "time": 0.000731
+                }
+              ],
+              "firstFrameMs": 652.8999999761581,
+              "frameMediaTime": 0,
+              "firstAudioMs": 954.5999999642372,
+              "audioSignal": {
+                "hz": 445.3125,
+                "db": -72.54222869873047,
+                "rms": 0.03382870030296023
+              },
+              "driftSeconds": 0.00391
+            },
+            "video": {
+              "position": 0.013855,
+              "paused": false,
+              "seeking": false,
+              "readyState": 4,
+              "source": "http://127.0.0.1:6514/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+              "loads": 1,
+              "frames": 4,
+              "dropped": 0
+            },
+            "audio": {
+              "position": 0.048,
+              "paused": false,
+              "track": "internal-1",
+              "readyState": 4,
+              "signal": {
+                "hz": 445.3125,
+                "db": -35.5511589050293,
+                "rms": 0.08122014871011621
+              }
+            },
+            "notice": "",
+            "loading": false
+          },
+          "actions": []
+        }
+      ],
+      "network": [
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=349077504-",
+          "contentRange": "bytes 349077504-352256544/352256545",
+          "contentLength": "3179041"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=349896704-",
+          "contentRange": "bytes 349896704-352256544/352256545",
+          "contentLength": "2359841"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6512",
+          "path": "/api/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/prepared/audio-1-chunk-0",
+          "status": 200,
+          "method": "GET",
+          "contentLength": "398047"
+        }
+      ],
+      "errors": [],
+      "mediaResponsesBeforeClick": [
+        0
+      ],
+      "observedWallMs": 1380.602899999998,
+      "resources": {
+        "core": {
+          "cpuUser100ns": 781250,
+          "cpuKernel100ns": 468750,
+          "parentCpuUser100ns": 781250,
+          "parentCpuKernel100ns": 468750,
+          "readTransferBytes": 455091,
+          "writeTransferBytes": 8624,
+          "otherTransferBytes": 2012,
+          "parentReadTransferBytes": 455091,
+          "parentWriteTransferBytes": 8624,
+          "processesCreated": 0,
+          "cpuMs": 125,
+          "parentCpuMs": 125,
+          "descendantCpuMs": 0,
+          "rssBeforeBytes": 34525184,
+          "rssAfterBytes": 36065280,
+          "peakObservedRssBytes": 36065280,
+          "rssSamples": 9,
+          "maxRssSampleGapMs": 242
+        },
+        "node": {
+          "cpuUser100ns": 1093750,
+          "cpuKernel100ns": 1406250,
+          "parentCpuUser100ns": 156250,
+          "parentCpuKernel100ns": 1093750,
+          "readTransferBytes": 20270848,
+          "writeTransferBytes": 797719,
+          "otherTransferBytes": 27424,
+          "parentReadTransferBytes": 15804383,
+          "parentWriteTransferBytes": 399672,
+          "processesCreated": 1,
+          "cpuMs": 250,
+          "parentCpuMs": 125,
+          "descendantCpuMs": 125,
+          "rssBeforeBytes": 11816960,
+          "rssAfterBytes": 14196736,
+          "peakObservedRssBytes": 17514496,
+          "rssSamples": 9,
+          "maxRssSampleGapMs": 263
+        }
+      },
+      "cache": {
+        "beforeBytes": 0,
+        "afterBytes": 398047,
+        "newFiles": [
+          {
+            "path": "entry-g0NHsb/content",
+            "bytes": 398047
+          },
+          {
+            "path": "entry-g0NHsb/lease",
+            "bytes": 0
+          }
+        ]
+      },
+      "passed": true
+    },
+    {
+      "sessions": 1,
+      "round": 1,
+      "phase": "warm-server-new-browser",
+      "trials": [
+        {
+          "open": {
+            "trial": {
+              "kind": "open",
+              "start": 1338,
+              "observedSilenceMs": 0,
+              "maxVideoFrameGapMs": 618.0999999999999,
+              "videoLoadsBefore": 0,
+              "dialogOpenMs": 18.200000047683716,
+              "maxPcmPollGapMs": 33.90000003576279,
+              "videoEvents": [
+                {
+                  "name": "loadstart",
+                  "atMs": 71.40000003576279,
+                  "time": 0
+                },
+                {
+                  "name": "loadedmetadata",
+                  "atMs": 534.8000000119209,
+                  "time": 0
+                },
+                {
+                  "name": "playing",
+                  "atMs": 689.3000000119209,
+                  "time": 0.002223
+                }
+              ],
+              "firstFrameMs": 635.1000000238419,
+              "frameMediaTime": 0,
+              "firstAudioMs": 692.8000000119209,
+              "audioSignal": {
+                "hz": 445.3125,
+                "db": -64.23036193847656,
+                "rms": 0.03505257380038145
+              },
+              "driftSeconds": 0.004295
+            },
+            "video": {
+              "position": 0.102761,
+              "paused": false,
+              "seeking": false,
+              "readyState": 4,
+              "source": "http://127.0.0.1:6514/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+              "loads": 1,
+              "frames": 5,
+              "dropped": 0
+            },
+            "audio": {
+              "position": 0.126848,
+              "paused": false,
+              "track": "internal-1",
+              "readyState": 4,
+              "signal": {
+                "hz": 445.3125,
+                "db": -29.55130386352539,
+                "rms": 0.11372466708598393
+              }
+            },
+            "notice": "",
+            "loading": false
+          },
+          "actions": []
+        }
+      ],
+      "network": [
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=349077504-",
+          "contentRange": "bytes 349077504-352256544/352256545",
+          "contentLength": "3179041"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=351240192-",
+          "contentRange": "bytes 351240192-352256544/352256545",
+          "contentLength": "1016353"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6512",
+          "path": "/api/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/prepared/audio-1-chunk-0",
+          "status": 200,
+          "method": "GET",
+          "contentLength": "398047"
+        }
+      ],
+      "errors": [],
+      "mediaResponsesBeforeClick": [
+        0
+      ],
+      "observedWallMs": 1145.8833999999988,
+      "resources": {
+        "core": {
+          "cpuUser100ns": 1250000,
+          "cpuKernel100ns": 156250,
+          "parentCpuUser100ns": 1250000,
+          "parentCpuKernel100ns": 156250,
+          "readTransferBytes": 574062,
+          "writeTransferBytes": 8623,
+          "otherTransferBytes": 75715,
+          "parentReadTransferBytes": 529343,
+          "parentWriteTransferBytes": 8623,
+          "processesCreated": 0,
+          "cpuMs": 140.625,
+          "parentCpuMs": 140.625,
+          "descendantCpuMs": 0,
+          "rssBeforeBytes": 37347328,
+          "rssAfterBytes": 36732928,
+          "peakObservedRssBytes": 37347328,
+          "rssSamples": 7,
+          "maxRssSampleGapMs": 276
+        },
+        "node": {
+          "cpuUser100ns": 625000,
+          "cpuKernel100ns": 156250,
+          "parentCpuUser100ns": 625000,
+          "parentCpuKernel100ns": 156250,
+          "readTransferBytes": 14489377,
+          "writeTransferBytes": 1612,
+          "otherTransferBytes": 17272,
+          "parentReadTransferBytes": 14489377,
+          "parentWriteTransferBytes": 1612,
+          "processesCreated": 0,
+          "cpuMs": 78.125,
+          "parentCpuMs": 78.125,
+          "descendantCpuMs": 0,
+          "rssBeforeBytes": 13500416,
+          "rssAfterBytes": 14131200,
+          "peakObservedRssBytes": 14131200,
+          "rssSamples": 7,
+          "maxRssSampleGapMs": 310
+        }
+      },
+      "cache": {
+        "beforeBytes": 398047,
+        "afterBytes": 398047,
+        "newFiles": []
+      },
+      "passed": true
+    },
+    {
+      "sessions": 4,
+      "round": 0,
+      "phase": "cold-app-preparation",
+      "trials": [
+        {
+          "diagnostic": {
+            "trial": {
+              "kind": "open",
+              "start": 3219.5,
+              "observedSilenceMs": 0,
+              "maxVideoFrameGapMs": 3222.8999999999996,
+              "videoLoadsBefore": 0,
+              "dialogOpenMs": 95.80000001192093,
+              "maxPcmPollGapMs": 124.09999996423721,
+              "videoEvents": [
+                {
+                  "name": "loadstart",
+                  "atMs": 486.80000001192093,
+                  "time": 0
+                },
+                {
+                  "name": "loadedmetadata",
+                  "atMs": 2876.7000000476837,
+                  "time": 0
+                }
+              ],
+              "firstFrameMs": 3227.300000011921,
+              "frameMediaTime": 0
+            },
+            "video": {
+              "position": 0,
+              "paused": true,
+              "seeking": false,
+              "readyState": 4,
+              "source": "http://127.0.0.1:6514/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+              "loads": 1,
+              "frames": 1,
+              "dropped": 0
+            },
+            "audio": {
+              "position": 0,
+              "paused": true,
+              "readyState": 4,
+              "signal": {
+                "hz": 23.4375,
+                "db": null,
+                "rms": 0
+              }
+            },
+            "error": "Lecture interrompuePiste FR (internal-1) : Préparation audio segment 0 : HTTP 502 (source indisponible).Réessayer",
+            "notice": "",
+            "loading": false
+          }
+        },
+        {
+          "open": {
+            "trial": {
+              "kind": "open",
+              "start": 3195.900000035763,
+              "observedSilenceMs": 0,
+              "maxVideoFrameGapMs": 2923.299999964237,
+              "videoLoadsBefore": 0,
+              "dialogOpenMs": 102.5,
+              "maxPcmPollGapMs": 121.5,
+              "videoEvents": [
+                {
+                  "name": "loadstart",
+                  "atMs": 484.39999997615814,
+                  "time": 0
+                },
+                {
+                  "name": "loadedmetadata",
+                  "atMs": 2743.599999964237,
+                  "time": 0
+                },
+                {
+                  "name": "playing",
+                  "atMs": 3355.800000011921,
+                  "time": 0.001187
+                }
+              ],
+              "firstFrameMs": 2932,
+              "frameMediaTime": 0,
+              "firstAudioMs": 3359.599999964237,
+              "audioSignal": {
+                "hz": 445.3125,
+                "db": -64.23036193847656,
+                "rms": 0.03505257380038145
+              },
+              "driftSeconds": 0.004777
+            },
+            "video": {
+              "position": 0.02,
+              "paused": false,
+              "seeking": false,
+              "readyState": 4,
+              "source": "http://127.0.0.1:6514/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+              "loads": 1,
+              "frames": 4,
+              "dropped": 0
+            },
+            "audio": {
+              "position": 0.029333,
+              "paused": false,
+              "track": "internal-1",
+              "readyState": 4,
+              "signal": {
+                "hz": 445.3125,
+                "db": -40.23167037963867,
+                "rms": 0.05644834463854809
+              }
+            },
+            "notice": "",
+            "loading": false
+          },
+          "actions": []
+        },
+        {
+          "open": {
+            "trial": {
+              "kind": "open",
+              "start": 3206,
+              "observedSilenceMs": 0,
+              "maxVideoFrameGapMs": 3081.3,
+              "videoLoadsBefore": 0,
+              "dialogOpenMs": 89.69999998807907,
+              "maxPcmPollGapMs": 118,
+              "videoEvents": [
+                {
+                  "name": "loadstart",
+                  "atMs": 514.5,
+                  "time": 0
+                },
+                {
+                  "name": "loadedmetadata",
+                  "atMs": 2750.5,
+                  "time": 0
+                },
+                {
+                  "name": "playing",
+                  "atMs": 3386.5,
+                  "time": 0.000303
+                }
+              ],
+              "firstFrameMs": 3101.399999976158,
+              "frameMediaTime": 0,
+              "firstAudioMs": 3400.099999964237,
+              "audioSignal": {
+                "hz": 445.3125,
+                "db": -48.83313751220703,
+                "rms": 0.04596688571099789
+              },
+              "driftSeconds": 0.004373
+            },
+            "video": {
+              "position": 0.016913,
+              "paused": false,
+              "seeking": false,
+              "readyState": 4,
+              "source": "http://127.0.0.1:6514/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+              "loads": 1,
+              "frames": 4,
+              "dropped": 0
+            },
+            "audio": {
+              "position": 0.04,
+              "paused": false,
+              "track": "internal-1",
+              "readyState": 4,
+              "signal": {
+                "hz": 445.3125,
+                "db": -37.05198287963867,
+                "rms": 0.07203535911959577
+              }
+            },
+            "notice": "",
+            "loading": false
+          },
+          "actions": []
+        },
+        {
+          "open": {
+            "trial": {
+              "kind": "open",
+              "start": 3188.699999988079,
+              "observedSilenceMs": 0,
+              "maxVideoFrameGapMs": 3180.300000011921,
+              "videoLoadsBefore": 0,
+              "dialogOpenMs": 131,
+              "maxPcmPollGapMs": 157.80000001192093,
+              "videoEvents": [
+                {
+                  "name": "loadstart",
+                  "atMs": 482.60000002384186,
+                  "time": 0
+                },
+                {
+                  "name": "loadedmetadata",
+                  "atMs": 2739.800000011921,
+                  "time": 0
+                },
+                {
+                  "name": "playing",
+                  "atMs": 3387.600000023842,
+                  "time": 0.000659
+                }
+              ],
+              "firstFrameMs": 3180.699999988079,
+              "frameMediaTime": 0,
+              "firstAudioMs": 3399.900000035763,
+              "audioSignal": {
+                "hz": 445.3125,
+                "db": -72.54222869873047,
+                "rms": 0.03382870030296023
+              },
+              "driftSeconds": 0.0053349999999999995
+            },
+            "video": {
+              "position": 0.033419,
+              "paused": false,
+              "seeking": false,
+              "readyState": 4,
+              "source": "http://127.0.0.1:6514/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+              "loads": 1,
+              "frames": 4,
+              "dropped": 0
+            },
+            "audio": {
+              "position": 0.069333,
+              "paused": false,
+              "track": "internal-1",
+              "readyState": 4,
+              "signal": {
+                "hz": 445.3125,
+                "db": -32.631996154785156,
+                "rms": 0.09588025948271874
+              }
+            },
+            "notice": "",
+            "loading": false
+          },
+          "actions": []
+        }
+      ],
+      "network": [
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=349077504-",
+          "contentRange": "bytes 349077504-352256544/352256545",
+          "contentLength": "3179041"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=351174656-",
+          "contentRange": "bytes 351174656-352256544/352256545",
+          "contentLength": "1081889"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6512",
+          "path": "/api/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/prepared/audio-1-chunk-0",
+          "status": 502,
+          "method": "GET",
+          "contentLength": "33"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=349077504-",
+          "contentRange": "bytes 349077504-352256544/352256545",
+          "contentLength": "3179041"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=350781440-",
+          "contentRange": "bytes 350781440-352256544/352256545",
+          "contentLength": "1475105"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6512",
+          "path": "/api/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/prepared/audio-1-chunk-0",
+          "status": 200,
+          "method": "GET",
+          "contentLength": "398047"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=349077504-",
+          "contentRange": "bytes 349077504-352256544/352256545",
+          "contentLength": "3179041"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=351174656-",
+          "contentRange": "bytes 351174656-352256544/352256545",
+          "contentLength": "1081889"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6512",
+          "path": "/api/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/prepared/audio-1-chunk-0",
+          "status": 200,
+          "method": "GET",
+          "contentLength": "398047"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=349077504-",
+          "contentRange": "bytes 349077504-352256544/352256545",
+          "contentLength": "3179041"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=351174656-",
+          "contentRange": "bytes 351174656-352256544/352256545",
+          "contentLength": "1081889"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6512",
+          "path": "/api/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/prepared/audio-1-chunk-0",
+          "status": 200,
+          "method": "GET",
+          "contentLength": "398047"
+        }
+      ],
+      "errors": [
+        "Error: Lecture interrompuePiste FR (internal-1) : Préparation audio segment 0 : HTTP 502 (source indisponible).Réessayer"
+      ],
+      "mediaResponsesBeforeClick": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "observedWallMs": 3813.4943000000058,
+      "resources": {
+        "core": {
+          "cpuUser100ns": 7343750,
+          "cpuKernel100ns": 2187500,
+          "parentCpuUser100ns": 7187500,
+          "parentCpuKernel100ns": 2187500,
+          "readTransferBytes": 2491057,
+          "writeTransferBytes": 18015,
+          "otherTransferBytes": 66136,
+          "parentReadTransferBytes": 2418983,
+          "parentWriteTransferBytes": 18015,
+          "processesCreated": 0,
+          "cpuMs": 953.125,
+          "parentCpuMs": 937.5,
+          "descendantCpuMs": 15.625,
+          "rssBeforeBytes": 42332160,
+          "rssAfterBytes": 44552192,
+          "peakObservedRssBytes": 44552192,
+          "rssSamples": 11,
+          "maxRssSampleGapMs": 678
+        },
+        "node": {
+          "cpuUser100ns": 2656250,
+          "cpuKernel100ns": 2500000,
+          "parentCpuUser100ns": 1875000,
+          "parentCpuKernel100ns": 2343750,
+          "readTransferBytes": 74613669,
+          "writeTransferBytes": 803065,
+          "otherTransferBytes": 86438,
+          "parentReadTransferBytes": 70147204,
+          "parentWriteTransferBytes": 405018,
+          "processesCreated": 1,
+          "cpuMs": 515.625,
+          "parentCpuMs": 421.875,
+          "descendantCpuMs": 93.75,
+          "rssBeforeBytes": 18993152,
+          "rssAfterBytes": 24240128,
+          "peakObservedRssBytes": 54075392,
+          "rssSamples": 11,
+          "maxRssSampleGapMs": 679
+        }
+      },
+      "cache": {
+        "beforeBytes": 0,
+        "afterBytes": 398047,
+        "newFiles": [
+          {
+            "path": "entry-0CjOWM/content",
+            "bytes": 398047
+          },
+          {
+            "path": "entry-0CjOWM/lease",
+            "bytes": 0
+          }
+        ]
+      },
+      "passed": false
+    },
+    {
+      "sessions": 4,
+      "round": 1,
+      "phase": "warm-server-new-browser",
+      "trials": [
+        {
+          "open": {
+            "trial": {
+              "kind": "open",
+              "start": 1395.199999988079,
+              "observedSilenceMs": 0,
+              "maxVideoFrameGapMs": 897.4000000119208,
+              "videoLoadsBefore": 0,
+              "dialogOpenMs": 62.200000047683716,
+              "maxPcmPollGapMs": 75.59999996423721,
+              "videoEvents": [
+                {
+                  "name": "loadstart",
+                  "atMs": 91.30000001192093,
+                  "time": 0
+                },
+                {
+                  "name": "loadedmetadata",
+                  "atMs": 503.80000001192093,
+                  "time": 0
+                },
+                {
+                  "name": "playing",
+                  "atMs": 622.6000000238419,
+                  "time": 0.002142
+                }
+              ],
+              "firstAudioMs": 647.9000000357628,
+              "audioSignal": {
+                "hz": 445.3125,
+                "db": -40.23167037963867,
+                "rms": 0.05644834463854809
+              },
+              "driftSeconds": 0.024336000000000003,
+              "firstFrameMs": 900.7000000476837,
+              "frameMediaTime": 0.25
+            },
+            "video": {
+              "position": 0.785677,
+              "paused": false,
+              "seeking": false,
+              "readyState": 4,
+              "source": "http://127.0.0.1:6514/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+              "loads": 1,
+              "frames": 13,
+              "dropped": 0
+            },
+            "audio": {
+              "position": 0.787708,
+              "paused": false,
+              "track": "internal-1",
+              "readyState": 4,
+              "signal": {
+                "hz": 445.3125,
+                "db": -29.14242172241211,
+                "rms": 0.1231617743801922
+              }
+            },
+            "notice": "",
+            "loading": false
+          },
+          "actions": []
+        },
+        {
+          "open": {
+            "trial": {
+              "kind": "open",
+              "start": 1401.300000011921,
+              "observedSilenceMs": 0,
+              "maxVideoFrameGapMs": 900.799999988079,
+              "videoLoadsBefore": 0,
+              "dialogOpenMs": 119.40000003576279,
+              "maxPcmPollGapMs": 134.60000002384186,
+              "videoEvents": [
+                {
+                  "name": "loadstart",
+                  "atMs": 148.5,
+                  "time": 0
+                },
+                {
+                  "name": "loadedmetadata",
+                  "atMs": 582.1000000238419,
+                  "time": 0
+                },
+                {
+                  "name": "playing",
+                  "atMs": 824.3000000119209,
+                  "time": 0.000919
+                }
+              ],
+              "firstAudioMs": 866.1000000238419,
+              "audioSignal": {
+                "hz": 445.3125,
+                "db": -64.23036193847656,
+                "rms": 0.03505257380038145
+              },
+              "driftSeconds": 0.004310000000000001,
+              "firstFrameMs": 912.6000000238419,
+              "frameMediaTime": 0
+            },
+            "video": {
+              "position": 0.565025,
+              "paused": false,
+              "seeking": false,
+              "readyState": 4,
+              "source": "http://127.0.0.1:6514/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+              "loads": 1,
+              "frames": 12,
+              "dropped": 2
+            },
+            "audio": {
+              "position": 0.581333,
+              "paused": false,
+              "track": "internal-1",
+              "readyState": 4,
+              "signal": {
+                "hz": 445.3125,
+                "db": -29.113651275634766,
+                "rms": 0.11948192147160525
+              }
+            },
+            "notice": "",
+            "loading": false
+          },
+          "actions": []
+        },
+        {
+          "open": {
+            "trial": {
+              "kind": "open",
+              "start": 1420.2999999523163,
+              "observedSilenceMs": 0,
+              "maxVideoFrameGapMs": 1175.500000047684,
+              "videoLoadsBefore": 0,
+              "dialogOpenMs": 130.20000004768372,
+              "maxPcmPollGapMs": 145.89999997615814,
+              "videoEvents": [
+                {
+                  "name": "loadstart",
+                  "atMs": 194.5,
+                  "time": 0
+                },
+                {
+                  "name": "loadedmetadata",
+                  "atMs": 904.1000000238419,
+                  "time": 0
+                },
+                {
+                  "name": "playing",
+                  "atMs": 1092,
+                  "time": 0.001218
+                }
+              ],
+              "firstFrameMs": 1182.7000000476837,
+              "frameMediaTime": 0,
+              "firstAudioMs": 1791.2000000476837,
+              "audioSignal": {
+                "hz": 445.3125,
+                "db": -29.085350036621094,
+                "rms": 0.11946118926712265
+              },
+              "driftSeconds": 0.14795599999999998
+            },
+            "video": {
+              "position": 0.612013,
+              "paused": false,
+              "seeking": false,
+              "readyState": 4,
+              "source": "http://127.0.0.1:6514/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+              "loads": 1,
+              "frames": 13,
+              "dropped": 2
+            },
+            "audio": {
+              "position": 0.454417,
+              "paused": false,
+              "track": "internal-1",
+              "readyState": 4,
+              "signal": {
+                "hz": 445.3125,
+                "db": -29.093585968017578,
+                "rms": 0.12107636050879439
+              }
+            },
+            "notice": "",
+            "loading": false
+          },
+          "actions": []
+        },
+        {
+          "open": {
+            "trial": {
+              "kind": "open",
+              "start": 1323.3999999761581,
+              "observedSilenceMs": 0,
+              "maxVideoFrameGapMs": 462.00000002384195,
+              "videoLoadsBefore": 0,
+              "dialogOpenMs": 98.70000004768372,
+              "maxPcmPollGapMs": 118.90000003576279,
+              "videoEvents": [
+                {
+                  "name": "loadstart",
+                  "atMs": 127.90000003576279,
+                  "time": 0
+                },
+                {
+                  "name": "loadedmetadata",
+                  "atMs": 414.30000001192093,
+                  "time": 0
+                },
+                {
+                  "name": "playing",
+                  "atMs": 485.80000001192093,
+                  "time": 0.003647
+                }
+              ],
+              "firstFrameMs": 481.7000000476837,
+              "frameMediaTime": 0,
+              "firstAudioMs": 2940.7000000476837,
+              "audioSignal": {
+                "hz": 445.3125,
+                "db": -29.143993377685547,
+                "rms": 0.1189242514965847
+              },
+              "driftSeconds": 0.143316
+            },
+            "video": {
+              "position": 2.36,
+              "paused": false,
+              "seeking": false,
+              "readyState": 4,
+              "source": "http://127.0.0.1:6514/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+              "loads": 1,
+              "frames": 33,
+              "dropped": 5
+            },
+            "audio": {
+              "position": 2.248812,
+              "paused": false,
+              "track": "internal-1",
+              "readyState": 4,
+              "signal": {
+                "hz": 445.3125,
+                "db": -29.109542846679688,
+                "rms": 0.1178947348534809
+              }
+            },
+            "notice": "",
+            "loading": false
+          },
+          "actions": []
+        }
+      ],
+      "network": [
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=349077504-",
+          "contentRange": "bytes 349077504-352256544/352256545",
+          "contentLength": "3179041"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=350388224-",
+          "contentRange": "bytes 350388224-352256544/352256545",
+          "contentLength": "1868321"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6512",
+          "path": "/api/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/prepared/audio-1-chunk-0",
+          "status": 200,
+          "method": "GET",
+          "contentLength": "398047"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=349077504-",
+          "contentRange": "bytes 349077504-352256544/352256545",
+          "contentLength": "3179041"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=32768-",
+          "contentRange": "bytes 32768-352256544/352256545",
+          "contentLength": "352223777"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=350846976-",
+          "contentRange": "bytes 350846976-352256544/352256545",
+          "contentLength": "1409569"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6512",
+          "path": "/api/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/prepared/audio-1-chunk-0",
+          "status": 200,
+          "method": "GET",
+          "contentLength": "398047"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=229376-",
+          "contentRange": "bytes 229376-352256544/352256545",
+          "contentLength": "352027169"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=349077504-",
+          "contentRange": "bytes 349077504-352256544/352256545",
+          "contentLength": "3179041"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=351207424-",
+          "contentRange": "bytes 351207424-352256544/352256545",
+          "contentLength": "1049121"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6512",
+          "path": "/api/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/prepared/audio-1-chunk-0",
+          "status": 200,
+          "method": "GET",
+          "contentLength": "398047"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=349077504-",
+          "contentRange": "bytes 349077504-352256544/352256545",
+          "contentLength": "3179041"
+        },
+        {
+          "origin": "http://127.0.0.1:6514",
+          "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+          "status": 206,
+          "method": "GET",
+          "range": "bytes=0-",
+          "contentRange": "bytes 0-352256544/352256545",
+          "contentLength": "352256545"
+        },
+        {
+          "origin": "http://127.0.0.1:6512",
+          "path": "/api/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/prepared/audio-1-chunk-0",
+          "status": 200,
+          "method": "GET",
+          "contentLength": "398047"
+        }
+      ],
+      "errors": [],
+      "mediaResponsesBeforeClick": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "observedWallMs": 3358.1705999999976,
+      "resources": {
+        "core": {
+          "cpuUser100ns": 3437500,
+          "cpuKernel100ns": 468750,
+          "parentCpuUser100ns": 3437500,
+          "parentCpuKernel100ns": 468750,
+          "readTransferBytes": 333516,
+          "writeTransferBytes": 5652,
+          "otherTransferBytes": 155728,
+          "parentReadTransferBytes": 333516,
+          "parentWriteTransferBytes": 5652,
+          "processesCreated": 0,
+          "cpuMs": 390.625,
+          "parentCpuMs": 390.625,
+          "descendantCpuMs": 0,
+          "rssBeforeBytes": 47931392,
+          "rssAfterBytes": 49250304,
+          "peakObservedRssBytes": 49250304,
+          "rssSamples": 9,
+          "maxRssSampleGapMs": 930
+        },
+        "node": {
+          "cpuUser100ns": 2343750,
+          "cpuKernel100ns": 1562500,
+          "parentCpuUser100ns": 2343750,
+          "parentCpuKernel100ns": 1562500,
+          "readTransferBytes": 66673251,
+          "writeTransferBytes": 6709,
+          "otherTransferBytes": 71464,
+          "parentReadTransferBytes": 66673251,
+          "parentWriteTransferBytes": 6709,
+          "processesCreated": 0,
+          "cpuMs": 390.625,
+          "parentCpuMs": 390.625,
+          "descendantCpuMs": 0,
+          "rssBeforeBytes": 21721088,
+          "rssAfterBytes": 24293376,
+          "peakObservedRssBytes": 24293376,
+          "rssSamples": 9,
+          "maxRssSampleGapMs": 841
+        }
+      },
+      "cache": {
+        "beforeBytes": 398047,
+        "afterBytes": 398047,
+        "newFiles": []
+      },
+      "passed": true
+    }
+  ],
+  "resourceMethod": "Win32 Job Object inclusive CPU/logical IO, root-process counters, sampled inclusive working set; cache file byte snapshots. Logical I/O is not physical disk I/O.",
+  "cacheContract": "cold-app-preparation restarts both Rust processes and uses an empty preparation root, with persisted DB/Node inventory; OS disk cache not purged. Warm retains processes and prepared windows. No media content request is made before the timed click.",
+  "harnessSha256": {
+    "streaming-system-benchmark.cjs": "7e692ad08fdd28ba5518d0497c6b5ccc83f37f810aa78ab53cc6104c126c5d6c",
+    "streaming-system-observer.cjs": "3170720dd02eee0877cecbfb01f3490b0e6b18627379860a648846f97336f29b",
+    "streaming-process-metrics.ps1": "af01622f8d97f0b27d057f35e71cb2807ae4f90d27df56c4c13b6ea1c5b5f30c",
+    "streaming-tcp-profile.cjs": "3c4e75a417af2b52ae8cbd8cad6ab7d107fae7df939336c668c9294d23dce32d"
+  },
+  "artifacts": {
+    "revision": "bd08e05839963afa8c84dbcd5aca067dea7863ad",
+    "sealedAt": "2026-10-23T22:52:17.576Z",
+    "sourceAssociation": "Existing binaries copied before candidate edits. Revision supplied by caller; executable and Web hashes identify tested artifacts, not an embedded build attestation.",
+    "files": {
+      "aether-node.exe": {
+        "bytes": 11003904,
+        "sha256": "7a3b9f033abd5dc38e9afc05175ab87db715dd505cbd20286d4c58179a483d63"
+      },
+      "media-poc.exe": {
+        "bytes": 36713984,
+        "sha256": "221ccf44e83893901f96aa54de1c9245664402a7076a09586524dec9c6e42c57"
+      },
+      "web/admin/libraries/index-bootstrap-0.js": {
+        "bytes": 982,
+        "sha256": "ef9a68ca033c0c805fab1b7d0f7a3cadd80c75a988abb22404fe756cce383807"
+      },
+      "web/admin/libraries/index.html": {
+        "bytes": 2913,
+        "sha256": "b81038d3e628a7d2cc1ce1dbc01c08875272f7d31c4fdad4ad53614a9fc3db38"
+      },
+      "web/auth-transition.css": {
+        "bytes": 408,
+        "sha256": "343d077cdefc64dbcfc5bd85b7b3a7c493c0e4ab11bee8d09a4040b1b1ac1dbc"
+      },
+      "web/downloads/index-bootstrap-0.js": {
+        "bytes": 982,
+        "sha256": "7c7734265a74203ac453c3cbdd6c06b6ee362584a0648e20fd27cb2dcd7956d4"
+      },
+      "web/downloads/index.html": {
+        "bytes": 2442,
+        "sha256": "1b6fc389423033b637baefd576b4bf6e38db7ce1508f3ab4929b150caf78df00"
+      },
+      "web/favicon.svg": {
+        "bytes": 436,
+        "sha256": "8c00030ef2ee51d26f89589e4bd68716096d967fd3aec07c4d666a73038eb97e"
+      },
+      "web/films/index-bootstrap-0.js": {
+        "bytes": 982,
+        "sha256": "dd9867798151c8b8acafef3eb5c654504050eaa8773c8fd6815f31b36b296425"
+      },
+      "web/films/index.html": {
+        "bytes": 3088,
+        "sha256": "ce75856267636776d0941242a43237c02e60e3d8ac632c6226d57de163cb1fff"
+      },
+      "web/icons/app-192.png": {
+        "bytes": 1958,
+        "sha256": "fb3e8a299b86f911de42fc69bb716cf023dc4984ee9d599d4340bdc17b36dee8"
+      },
+      "web/icons/app-512.png": {
+        "bytes": 7192,
+        "sha256": "b3c8aaa741f1fd5dac4c70ef867e6bf05213b81f4bcdbc6aeb0f09deaa12c6e3"
+      },
+      "web/images/brand-mark.svg": {
+        "bytes": 435,
+        "sha256": "56e80786d052adcefc96d7452548c9a0f68f6cf3209c5ee31c229de724b8f358"
+      },
+      "web/images/chevron.svg": {
+        "bytes": 138,
+        "sha256": "6db6c5bb7a31b8aed7aa4fe5b15e15d8bccbf8bad2a29330b9cc9ac2b83d2abf"
+      },
+      "web/images/cinematic-horizon.png": {
+        "bytes": 1996166,
+        "sha256": "9aa3ea0fefea8c633b8ab9e479fa324b433b970c4c3284f0df7aad5f72bf87dd"
+      },
+      "web/images/logo-animated.svg": {
+        "bytes": 740,
+        "sha256": "3af18beb4ce94d6751357c25f8cb6190e7600bd4d5b3685ff3933de8ba0b600b"
+      },
+      "web/images/logo-loading.svg": {
+        "bytes": 1068,
+        "sha256": "52ac8f75f230d0de9d2e285c2cf68c769b45436e40fdf0b074fd4e59b889c44d"
+      },
+      "web/index-bootstrap-0.js": {
+        "bytes": 982,
+        "sha256": "e3983b9efe2325b37267739b8459309eee72ec5af8072feca44061e9e061801f"
+      },
+      "web/index.html": {
+        "bytes": 3088,
+        "sha256": "6b6b8a5dc26101e1fbc0a5ffe356de7ad31cc445657726f2378f695148227454"
+      },
+      "web/lists/index-bootstrap-0.js": {
+        "bytes": 982,
+        "sha256": "edde5f3a7ce0c7151a93e6f00b722fbc9a4d2868b782798164ca6d1ee2ac3a73"
+      },
+      "web/lists/index.html": {
+        "bytes": 2832,
+        "sha256": "f476df682fd6097e590aa0f837ce80ff4d67da037291216161804601550c9cbe"
+      },
+      "web/login/index-bootstrap-0.js": {
+        "bytes": 982,
+        "sha256": "5de931bc1aa64ee4113474e5dd4dd302b15de4e6af0301f53ebe02c26a340567"
+      },
+      "web/login/index.html": {
+        "bytes": 2517,
+        "sha256": "896a0862cf242329b6d738edc73c4fb65c75f36ec7e108e2c54fd557e6a0525a"
+      },
+      "web/manifest.webmanifest": {
+        "bytes": 348,
+        "sha256": "398e988948f35a0e8af83d1bd28859f4f61f31d411932b82ac3587f0c7c8ca49"
+      },
+      "web/music/index-bootstrap-0.js": {
+        "bytes": 982,
+        "sha256": "b87f29a5ddc6701ca7b533dc46feee913fde351d3ee3b73fb3a2c8f24e252121"
+      },
+      "web/music/index.html": {
+        "bytes": 2907,
+        "sha256": "43058d04af054ff08ed54c378ecd2d7f77f6264321af5dbe08a9c8979c3d9018"
+      },
+      "web/search/index-bootstrap-0.js": {
+        "bytes": 982,
+        "sha256": "14bce4896d5f8e8b5987d30944e17c397cc1fa6a27808af4bb5e5f1dec845b74"
+      },
+      "web/search/index.html": {
+        "bytes": 3088,
+        "sha256": "d5126fa2c0660742feee50081b69f6904a9ecc0c919cf11e7fb526842b09b588"
+      },
+      "web/series/index-bootstrap-0.js": {
+        "bytes": 983,
+        "sha256": "d20cbf495b6b262377a3044fd34ae35ae0f99fd066b2bf960a65a3e58e88ff97"
+      },
+      "web/series/index.html": {
+        "bytes": 3089,
+        "sha256": "6742b60564964a900226f0956694a21ac6a75bdab2389f2998478e6c5549d425"
+      },
+      "web/service-worker.js": {
+        "bytes": 6766,
+        "sha256": "cd24189668b0d590708acf5cf1595ad87663f2699a9628d5eaa97d9939d172c9"
+      },
+      "web/settings/index-bootstrap-0.js": {
+        "bytes": 983,
+        "sha256": "98d74bc6d3849513827fb1b03b04ed534d6b7ecf445c29ee85c2b5c31a5459e1"
+      },
+      "web/settings/index.html": {
+        "bytes": 3089,
+        "sha256": "89b32a04322a3421bb7bd56885a8a2d1db707a231d04a6c5a5d7d49260ec7781"
+      },
+      "web/theme-init.js": {
+        "bytes": 231,
+        "sha256": "d9fe9198525ae90e6aa105c5e3cdea2e2cff5bc1dec59812b942b5cd521c3354"
+      },
+      "web/_app/immutable/assets/0.CF0I6C7u.css": {
+        "bytes": 13794,
+        "sha256": "3d2a455944e67c2c51be112c9368555a06ebf5e28aa4d9cc3820023512fc4a32"
+      },
+      "web/_app/immutable/assets/3.Bc1at8Sy.css": {
+        "bytes": 62544,
+        "sha256": "7ec477d17c768e0fff377c9a6a604f8d481d684b4382fba0c4beff7dbc687e9d"
+      },
+      "web/_app/immutable/assets/4.D9f6WyyM.css": {
+        "bytes": 933,
+        "sha256": "657c1e7a9722b097723e408f0e7fdad912fd0f5c473d7d761aec075b8dff0457"
+      },
+      "web/_app/immutable/assets/6.BlMJ9aPC.css": {
+        "bytes": 4955,
+        "sha256": "903276a14eb4b832956c7938d73f0bacd24c022e7820efc6fa90edbe3d2ed07c"
+      },
+      "web/_app/immutable/assets/7.CYjW7PGe.css": {
+        "bytes": 6328,
+        "sha256": "6a4a040e0341a5b2e0643049e7bb48301596efdd66b2dba36504a33b7e951ccd"
+      },
+      "web/_app/immutable/assets/8.MFSB7278.css": {
+        "bytes": 2629,
+        "sha256": "3df7a2191ae75351dd1ce3e16a1668cbe0042a34cc304defc06d7a0a07de64ca"
+      },
+      "web/_app/immutable/assets/Catalog.aovzldBI.css": {
+        "bytes": 26270,
+        "sha256": "2f4aea99f25b5ccbab51706314f80d1fa28ee5a095e795c23fb2b34cd46b4cdc"
+      },
+      "web/_app/immutable/assets/FilmDetail.DplVFrbm.css": {
+        "bytes": 7221,
+        "sha256": "3e21b4f6119770b080b8c0f27f330c05b49bd537888bf60505f9521a174993c8"
+      },
+      "web/_app/immutable/assets/ImageManager.D7qE4K2w.css": {
+        "bytes": 2972,
+        "sha256": "2dbf701bd970e42bfdd9889f5ae2e17f3b57e1c833336ec1854d2e6d75423c5f"
+      },
+      "web/_app/immutable/assets/ImmersivePlayer.DURlV2vc.css": {
+        "bytes": 11292,
+        "sha256": "ce2588f4143fc93f74be2441e82168edd0216d27b8b41dc6791fe4d30a261bb7"
+      },
+      "web/_app/immutable/assets/Navbar.BPH6_lz7.css": {
+        "bytes": 3659,
+        "sha256": "75cc670dc0e1d7275c42e1b3c4fc8ed653defb710eafaab0c2b1a95f8c076489"
+      },
+      "web/_app/immutable/assets/ProfileMenu.BNMx4Zz_.css": {
+        "bytes": 4063,
+        "sha256": "92cf27f5ac8741d6fca08279036165e144c5f322e983bef2cfccfa08baef011b"
+      },
+      "web/_app/immutable/assets/SeriesDetail.DScSAPWU.css": {
+        "bytes": 8461,
+        "sha256": "4acd6419dfb9d57c889d9b238c3ce835906850d7b2de92698cc5e62eefdcefef"
+      },
+      "web/_app/immutable/assets/SettingsView.Bb6FJlov.css": {
+        "bytes": 5343,
+        "sha256": "4400255a7b569913b5ecc98870c251865f09f81211795711cc05d2e49e52eaa0"
+      },
+      "web/_app/immutable/assets/WatchStatus.luUoxOHb.css": {
+        "bytes": 5119,
+        "sha256": "2b36803f1790ef1f5d6b0a3972e6fc6f7fb52f82b4c1ae58a1c3c2aab99ca336"
+      },
+      "web/_app/immutable/chunks/ADxuELBf.js": {
+        "bytes": 13544,
+        "sha256": "1e4188c8bc65882793efebd40bba8316702410827431b3dad9589d2454be182a"
+      },
+      "web/_app/immutable/chunks/Bjy-W4x2.js": {
+        "bytes": 1365,
+        "sha256": "f07424758318dd6b5f32b0fe8de9d2ffb8d97a17c841758626d18ba0faa0456a"
+      },
+      "web/_app/immutable/chunks/BkQHqPJ8.js": {
+        "bytes": 3399,
+        "sha256": "a99e28c9d6648f20cafa5d819f6b26e8ca00e9a49caf7cfd40876dc628f9aba9"
+      },
+      "web/_app/immutable/chunks/BmIhb-wn.js": {
+        "bytes": 53682,
+        "sha256": "8c325f8c1c9cc3cba062d1d831b1ebe1dd1e7d02fec35db69f586fec8a1eb8fa"
+      },
+      "web/_app/immutable/chunks/BoINRATa.js": {
+        "bytes": 5029,
+        "sha256": "08558fdf936071af00651251aecb3f160187d9a95ae5ded5d3b93b35d1699905"
+      },
+      "web/_app/immutable/chunks/BwPz04C6.js": {
+        "bytes": 5662,
+        "sha256": "ffaa480a318a49c5eedce20953a91e66fb35001426921b9312026790bdde19ed"
+      },
+      "web/_app/immutable/chunks/BwWdUFNu.js": {
+        "bytes": 22,
+        "sha256": "73e3ef56a866603b90028a36e2e06e9f6ef690b2412cfb0e542233737789c2b3"
+      },
+      "web/_app/immutable/chunks/CfdbU2p_.js": {
+        "bytes": 16482,
+        "sha256": "c9cc66c3ab5f309c58a89dc78442e743e016f4295b9e125f59e643f7116efa27"
+      },
+      "web/_app/immutable/chunks/CFhRrGG4.js": {
+        "bytes": 28251,
+        "sha256": "81f95f2a75fb714ad7d94385dcf1088fdd0d900b1a4d688df38843b6b9dd8b06"
+      },
+      "web/_app/immutable/chunks/Ck2kqN_s.js": {
+        "bytes": 1119,
+        "sha256": "996075333300496ff60acd3c3ade4cc532fa4b788ac0b67f8c5491ffe56b3253"
+      },
+      "web/_app/immutable/chunks/CK71PeLz.js": {
+        "bytes": 1590,
+        "sha256": "407f78f7341a7c25f9ba54082896c0815b94dc83ff02b3f8e952283dbfe44b5e"
+      },
+      "web/_app/immutable/chunks/CQeVdd8P.js": {
+        "bytes": 18188,
+        "sha256": "6a22e0bcdb1d5a8dd6b4f7728bd9c16bcccfdcfefe6b1a31f4ae8185bebbe699"
+      },
+      "web/_app/immutable/chunks/CRzLMJPS.js": {
+        "bytes": 1534,
+        "sha256": "bcc465e3e61dc3878a69ffa95ccb53cb82d95b1639ada223420b281ebd150048"
+      },
+      "web/_app/immutable/chunks/CxjINrRm.js": {
+        "bytes": 1093,
+        "sha256": "a62158c4a30d1991ca8aafc899a4d2adfee112f19430e5bd1c65e7c6c333199c"
+      },
+      "web/_app/immutable/chunks/C_B6aPnA.js": {
+        "bytes": 22205,
+        "sha256": "fd455a332bb2ef4b947e58a82d7430d6c890cc1d72ee113c35ef27eb92390ba7"
+      },
+      "web/_app/immutable/chunks/C_kwFy6w.js": {
+        "bytes": 220,
+        "sha256": "fc95f6a3208e9afe815d9c40d7bb3c057024a19ed1d700e81d8120576897f68a"
+      },
+      "web/_app/immutable/chunks/D-EggHm-.js": {
+        "bytes": 15376,
+        "sha256": "35a8da8db5a0b45b22c086fca76b91a1fb08c08ba1d0491839c5ddb673ccb3c8"
+      },
+      "web/_app/immutable/chunks/DDKm7rUY.js": {
+        "bytes": 582,
+        "sha256": "04823dd372653861970e9dd5404ce5952329ad3e40facf7cef7edaf8b586f0f5"
+      },
+      "web/_app/immutable/chunks/DdQlu5cH.js": {
+        "bytes": 53153,
+        "sha256": "248f3b3bb602d6720495159d940986aad8c9c1ca603574ed29593906c1786b32"
+      },
+      "web/_app/immutable/chunks/DFHeYniz.js": {
+        "bytes": 9243,
+        "sha256": "9a62796a2af2a97d92092038cd19a7ae12783724494e9ec0b53376d78486bf35"
+      },
+      "web/_app/immutable/chunks/DfKnlLW-.js": {
+        "bytes": 40972,
+        "sha256": "bbd72cae1ccd6edfe5a1a10f40afa0d552c8703f917404eb1f8158ec5ffb9326"
+      },
+      "web/_app/immutable/chunks/Dq4XpSZB.js": {
+        "bytes": 1521,
+        "sha256": "d48250f23096fd2990076926d1b48596ac8d95a7f2b1950a064d46db98266b67"
+      },
+      "web/_app/immutable/chunks/DuBz8qg9.js": {
+        "bytes": 1814,
+        "sha256": "120b387d1cb8af55e1737deece4b27157975f97af663d2ee71a24ec72bc4a196"
+      },
+      "web/_app/immutable/chunks/DYO6MRop.js": {
+        "bytes": 27641,
+        "sha256": "074919046ff96aefd856764f4d875820c159f551c080f99bfad81fe74b393ea6"
+      },
+      "web/_app/immutable/chunks/J0uaNty-.js": {
+        "bytes": 2843,
+        "sha256": "825f338d7cb772a4c67476aab80e22dbc73fdb9d8b65583b30cf66c4a8a5dd1e"
+      },
+      "web/_app/immutable/chunks/xzq5LCjT.js": {
+        "bytes": 52,
+        "sha256": "19689d9e3aa2ffdc73d85ba9e48674bfdc09300d5b8741cb1ccab097d7a1892a"
+      },
+      "web/_app/immutable/chunks/_KQRSfiL.js": {
+        "bytes": 22,
+        "sha256": "69be7f658ee0997868afd93472e26169f4dcf40fbc55a9e5b26cb299cb2e9e6d"
+      },
+      "web/_app/immutable/entry/app.DoCjNYfY.js": {
+        "bytes": 3907,
+        "sha256": "79a84c1c0df92af2ac262f290299abe884b7aac6d40ec7a40354d38c461138a4"
+      },
+      "web/_app/immutable/entry/payload.DSmR2FwN.js": {
+        "bytes": 65,
+        "sha256": "b7cba7b44b2397c7d28f7db4a34ec734a985e64ff27d74ddf8d9645cf814f09f"
+      },
+      "web/_app/immutable/entry/start.C-1wPBhj.js": {
+        "bytes": 640,
+        "sha256": "48024812d8ecddb5b85e75607c55d5bff685e26eab1e330c71766885d14f0c62"
+      },
+      "web/_app/immutable/nodes/0.x0c3hjyR.js": {
+        "bytes": 11329,
+        "sha256": "eb17d3a5389c093d6ddcb354ec8af08e66ce8327605c81aa059ed205ce7668c7"
+      },
+      "web/_app/immutable/nodes/1.D6miDJmV.js": {
+        "bytes": 358,
+        "sha256": "b5573cf91b177bacb26c17a16b752facab608be40fe0ebe7dfc6716009882a5a"
+      },
+      "web/_app/immutable/nodes/10.CqTDyRXb.js": {
+        "bytes": 133,
+        "sha256": "2ab35121c6fe3b790b6db93013caa4c1463647f7a7801a9fe472942b16009b93"
+      },
+      "web/_app/immutable/nodes/11.CxVaFKbi.js": {
+        "bytes": 135,
+        "sha256": "d5132e80feef0040dab0bc92e5297784893223e1aa61b7bfd0f68f9092d5295d"
+      },
+      "web/_app/immutable/nodes/2.NeJFlsPd.js": {
+        "bytes": 117,
+        "sha256": "9d0e4e2a023c77b107d0280ba4c375b87d5d27541682e0f1a5aff5e6ce47f8f5"
+      },
+      "web/_app/immutable/nodes/3.BTOhYi6L.js": {
+        "bytes": 184034,
+        "sha256": "c14488c5a831ba194d109b356e64d025dc146532a9c7beaf6474d51a238245fc"
+      },
+      "web/_app/immutable/nodes/4.ZxMvSQ4C.js": {
+        "bytes": 5268,
+        "sha256": "6550c95cb467acb65b5d6a7badafcc51fa82b1a7c8ea8d78c1ebbc3db1190a63"
+      },
+      "web/_app/immutable/nodes/5.B9dF8Zf1.js": {
+        "bytes": 132,
+        "sha256": "084bd236f5deb8e6829acc865a09ad8c1108e8fa4a0cb786344302ab0f8271bf"
+      },
+      "web/_app/immutable/nodes/6.CcqA3Tjs.js": {
+        "bytes": 15004,
+        "sha256": "6f90c267dfb87c6bab3b9f94d7235fdf989597b833d631efa62a6a6c14ea5359"
+      },
+      "web/_app/immutable/nodes/7.B2T28oMy.js": {
+        "bytes": 14288,
+        "sha256": "3e7ab9632751c21471393512c9ec1028eada3e655bc5a708bec2db0bb0773aa4"
+      },
+      "web/_app/immutable/nodes/8.BD6bnuV6.js": {
+        "bytes": 6896,
+        "sha256": "c94ca4abb8d129c6aacf4f315f103a7fb8589354b2f59984da0d453eef090442"
+      },
+      "web/_app/immutable/nodes/9.5Ar3j5C6.js": {
+        "bytes": 133,
+        "sha256": "b9d84d1fd3735866aa602bdc9b2b76e76896821f50192c51155718dc97f36e42"
+      },
+      "web/_app/version.json": {
+        "bytes": 27,
+        "sha256": "c4e1cb765e3fd8e846dff1bedab6b4de146db29adb543b8429b462169de06c81"
+      }
+    }
+  },
+  "fixture": {
+    "path": "tests\\fixtures\\generated\\dual-opus\\dual-opus-long.mp4",
+    "bytes": 352256545,
+    "hardlink": true,
+    "probe": {
+      "streams": [
+        {
+          "index": 0,
+          "codec_name": "av1",
+          "codec_long_name": "Alliance for Open Media AV1",
+          "profile": "Main",
+          "codec_type": "video",
+          "codec_tag_string": "av01",
+          "codec_tag": "0x31307661",
+          "mime_codec_string": "av01.0.08M.10",
+          "width": 1920,
+          "height": 1080,
+          "coded_width": 1920,
+          "coded_height": 1080,
+          "has_b_frames": 0,
+          "sample_aspect_ratio": "1:1",
+          "display_aspect_ratio": "16:9",
+          "pix_fmt": "yuv420p10le",
+          "level": 8,
+          "color_range": "tv",
+          "field_order": "progressive",
+          "id": "0x1",
+          "r_frame_rate": "12/1",
+          "avg_frame_rate": "16121472/1344001",
+          "time_base": "1/12288",
+          "start_pts": 0,
+          "start_time": "0.000000",
+          "duration_ts": 43008032,
+          "duration": "3500.002604",
+          "bit_rate": "220505",
+          "nb_frames": "41983",
+          "extradata_size": 17,
+          "disposition": {
+            "default": 1,
+            "dub": 0,
+            "original": 0,
+            "comment": 0,
+            "lyrics": 0,
+            "karaoke": 0,
+            "forced": 0,
+            "hearing_impaired": 0,
+            "visual_impaired": 0,
+            "clean_effects": 0,
+            "attached_pic": 0,
+            "timed_thumbnails": 0,
+            "non_diegetic": 0,
+            "captions": 0,
+            "descriptions": 0,
+            "metadata": 0,
+            "dependent": 0,
+            "still_image": 0,
+            "multilayer": 0
+          },
+          "tags": {
+            "language": "und",
+            "handler_name": "VideoHandler",
+            "encoder": "Lavc63.1.102 libaom-av1"
+          }
+        },
+        {
+          "index": 1,
+          "codec_name": "opus",
+          "codec_long_name": "Opus (Opus Interactive Audio Codec)",
+          "codec_type": "audio",
+          "codec_tag_string": "Opus",
+          "codec_tag": "0x7375704f",
+          "mime_codec_string": "opus",
+          "sample_fmt": "fltp",
+          "sample_rate": "48000",
+          "channels": 6,
+          "channel_layout": "5.1",
+          "bits_per_sample": 0,
+          "initial_padding": 312,
+          "id": "0x2",
+          "r_frame_rate": "0/0",
+          "avg_frame_rate": "0/0",
+          "time_base": "1/48000",
+          "start_pts": 0,
+          "start_time": "0.000000",
+          "duration_ts": 168000613,
+          "duration": "3500.012771",
+          "bit_rate": "266475",
+          "nb_frames": "175148",
+          "extradata_size": 27,
+          "disposition": {
+            "default": 1,
+            "dub": 0,
+            "original": 0,
+            "comment": 0,
+            "lyrics": 0,
+            "karaoke": 0,
+            "forced": 0,
+            "hearing_impaired": 0,
+            "visual_impaired": 0,
+            "clean_effects": 0,
+            "attached_pic": 0,
+            "timed_thumbnails": 0,
+            "non_diegetic": 0,
+            "captions": 0,
+            "descriptions": 0,
+            "metadata": 0,
+            "dependent": 0,
+            "still_image": 0,
+            "multilayer": 0
+          },
+          "tags": {
+            "language": "fra",
+            "handler_name": "SoundHandler"
+          }
+        },
+        {
+          "index": 2,
+          "codec_name": "opus",
+          "codec_long_name": "Opus (Opus Interactive Audio Codec)",
+          "codec_type": "audio",
+          "codec_tag_string": "Opus",
+          "codec_tag": "0x7375704f",
+          "mime_codec_string": "opus",
+          "sample_fmt": "fltp",
+          "sample_rate": "48000",
+          "channels": 6,
+          "channel_layout": "5.1",
+          "bits_per_sample": 0,
+          "initial_padding": 312,
+          "id": "0x3",
+          "r_frame_rate": "0/0",
+          "avg_frame_rate": "0/0",
+          "time_base": "1/48000",
+          "start_pts": 0,
+          "start_time": "0.000000",
+          "duration_ts": 168000613,
+          "duration": "3500.012771",
+          "bit_rate": "310935",
+          "nb_frames": "175148",
+          "extradata_size": 27,
+          "disposition": {
+            "default": 0,
+            "dub": 0,
+            "original": 0,
+            "comment": 0,
+            "lyrics": 0,
+            "karaoke": 0,
+            "forced": 0,
+            "hearing_impaired": 0,
+            "visual_impaired": 0,
+            "clean_effects": 0,
+            "attached_pic": 0,
+            "timed_thumbnails": 0,
+            "non_diegetic": 0,
+            "captions": 0,
+            "descriptions": 0,
+            "metadata": 0,
+            "dependent": 0,
+            "still_image": 0,
+            "multilayer": 0
+          },
+          "tags": {
+            "language": "eng",
+            "handler_name": "SoundHandler"
+          }
+        }
+      ],
+      "format": {
+        "filename": "C:\\Users\\Mael\\Documents\\GitHub\\Aether\\tests\\fixtures\\generated\\dual-opus\\dual-opus-long.mp4",
+        "nb_streams": 3,
+        "nb_programs": 0,
+        "nb_stream_groups": 0,
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "start_time": "0.000000",
+        "duration": "3500.012771",
+        "size": "352256545",
+        "bit_rate": "805154",
+        "probe_score": 100,
+        "tags": {
+          "major_brand": "isom",
+          "minor_version": "512",
+          "compatible_brands": "isomav01iso2mp41",
+          "encoder": "Lavf63.1.102"
+        }
+      }
+    },
+    "sha256": "bd559e90d168ef519d93268e38ee074048df462294b2b85ac987c9022722eece"
+  },
+  "ffmpeg": "ffmpeg version 9.0.2-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers\r",
+  "origins": {
+    "core": "http://127.0.0.1:6512",
+    "node": "http://127.0.0.1:6514"
+  },
+  "sessionIdentity": "Distinct ordinary user account and server progress/preferences per simultaneous session; administrator used only for setup and separate HTTP probes.",
+  "scan": {
+    "status": "completed",
+    "discovered": 1,
+    "probed": 1,
+    "reused": 0,
+    "errors": [],
+    "errorsCount": 0,
+    "warningsCount": 0
+  },
+  "browser": "155.0.8059.86",
+  "http": [
+    {
+      "component": "original",
+      "path": "/stream/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/content",
+      "scope": "Sequential authorized warm HTTP Range 0..65535; TTFB measured at fetch headers, no browser/UI/decode included; existing HTTP connection pool reused",
+      "samples": [
+        {
+          "headersMs": 138.239699999991,
+          "totalMs": 155.07200000000012,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 100.08620000000519,
+          "totalMs": 101.01029999999446,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 25.301000000006752,
+          "totalMs": 30.281700000006822,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 37.943599999998696,
+          "totalMs": 39.42530000000261,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 23.838199999998324,
+          "totalMs": 25.095799999995506,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 24.598200000007637,
+          "totalMs": 27.293100000009872,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 20.871300000013434,
+          "totalMs": 25.527200000011362,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 22.010899999993853,
+          "totalMs": 23.19409999999334,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 21.42729999999574,
+          "totalMs": 22.516499999997905,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 20.82019999998738,
+          "totalMs": 21.97839999999269,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 34.55600000001141,
+          "totalMs": 36.36740000000282,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 20.70319999998901,
+          "totalMs": 21.711899999994785,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 24.136800000007497,
+          "totalMs": 24.72080000001006,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.391799999997602,
+          "totalMs": 38.82519999999204,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 13.287700000000768,
+          "totalMs": 17.251399999993737,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 17.877600000007078,
+          "totalMs": 18.798300000009476,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 18.375499999994645,
+          "totalMs": 41.18069999999716,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 17.08179999999993,
+          "totalMs": 17.975800000000163,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 18.811799999995856,
+          "totalMs": 19.767399999996996,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.437799999999697,
+          "totalMs": 20.40120000000752,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 15.04330000000482,
+          "totalMs": 31.425499999997555,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 18.88969999999972,
+          "totalMs": 31.256500000003143,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 14.985699999990175,
+          "totalMs": 16.487899999992806,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 33.99619999999413,
+          "totalMs": 35.35969999998633,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 20.988100000002305,
+          "totalMs": 22.40469999999914,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 21.03330000001006,
+          "totalMs": 21.98619999999937,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 14.517400000011548,
+          "totalMs": 15.42850000000908,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 17.26589999999851,
+          "totalMs": 18.206000000005588,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.504100000005565,
+          "totalMs": 22.241200000004028,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 26.120100000000093,
+          "totalMs": 27.13409999999567,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 40.091400000004796,
+          "totalMs": 41.058600000003935,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.749800000005052,
+          "totalMs": 20.31489999999758,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 18.742399999988265,
+          "totalMs": 19.62960000000021,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 27.92269999999553,
+          "totalMs": 28.80559999999241,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 20.12310000001162,
+          "totalMs": 21.104200000001583,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.77969999999914,
+          "totalMs": 20.761899999997695,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 24.064299999998184,
+          "totalMs": 24.93420000000333,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 24.15920000000915,
+          "totalMs": 25.96500000001106,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 72.55969999999797,
+          "totalMs": 77.8289999999979,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 34.19659999999567,
+          "totalMs": 34.93310000000929,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 32.15580000000773,
+          "totalMs": 32.630099999994854,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.61239999999816,
+          "totalMs": 20.581200000000536,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 34.25370000000112,
+          "totalMs": 34.9997000000003,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 27.49310000000696,
+          "totalMs": 28.38440000000992,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 26.828800000002957,
+          "totalMs": 28.561699999991106,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 24.69670000000042,
+          "totalMs": 25.820000000006985,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 25.344800000006217,
+          "totalMs": 26.225300000005518,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 32.029799999989336,
+          "totalMs": 32.77119999998831,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 18.492400000002817,
+          "totalMs": 19.42059999999765,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 20.967399999994086,
+          "totalMs": 22.536099999997532,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 14.834900000001653,
+          "totalMs": 16.233500000002095,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 15.857499999998254,
+          "totalMs": 18.89320000000589,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.575400000001537,
+          "totalMs": 20.116200000004028,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 21.259699999995064,
+          "totalMs": 22.123399999996764,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 35.53819999999541,
+          "totalMs": 36.53740000000107,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 34.058399999994435,
+          "totalMs": 56.73709999999846,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 29.266500000012456,
+          "totalMs": 31.731599999999162,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 53.942699999999604,
+          "totalMs": 54.79110000000219,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 54.82640000000538,
+          "totalMs": 55.61729999999807,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 47.66549999998824,
+          "totalMs": 48.37819999999192,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 42.098099999988335,
+          "totalMs": 43.45089999999618,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 17.992499999993015,
+          "totalMs": 18.691900000005262,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 49.97920000000158,
+          "totalMs": 50.83749999999418,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 53.97530000000552,
+          "totalMs": 54.76559999999881,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 33.65429999999469,
+          "totalMs": 34.42979999999807,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 30.321100000001024,
+          "totalMs": 30.9432000000088,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 24.689099999988684,
+          "totalMs": 25.180799999987357,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 38.770999999993364,
+          "totalMs": 39.87029999999504,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 24.910999999992782,
+          "totalMs": 26.188099999999395,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.45669999999518,
+          "totalMs": 26.590100000001257,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 34.94860000000335,
+          "totalMs": 35.52300000000105,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 37.121100000003935,
+          "totalMs": 37.970900000000256,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 38.989400000005844,
+          "totalMs": 39.90950000000885,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 38.883700000005774,
+          "totalMs": 47.39740000000165,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 47.58079999999609,
+          "totalMs": 48.79649999999674,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 18.432300000000396,
+          "totalMs": 21.41689999999653,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 21.356599999999162,
+          "totalMs": 22.467499999998836,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 21.403699999995297,
+          "totalMs": 22.17379999998957,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 36.086799999990035,
+          "totalMs": 36.8750999999902,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 29.995899999994435,
+          "totalMs": 30.871400000003632,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 31.43869999999879,
+          "totalMs": 33.7957000000024,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 30.043000000005122,
+          "totalMs": 30.85580000000482,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.641199999998207,
+          "totalMs": 20.402000000001863,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 36.63319999999658,
+          "totalMs": 37.514100000000326,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 17.60220000000845,
+          "totalMs": 18.260900000008405,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 37.52249999999185,
+          "totalMs": 38.444599999987986,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 18.441200000001118,
+          "totalMs": 19.203899999993155,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 25.697200000009616,
+          "totalMs": 26.486900000003516,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 17.837099999989732,
+          "totalMs": 18.877499999987776,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 16.226299999994808,
+          "totalMs": 17.00340000000142,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.38869999999588,
+          "totalMs": 20.222299999993993,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 17.990099999995437,
+          "totalMs": 18.690100000007078,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 21.10360000000219,
+          "totalMs": 21.889500000004773,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 16.18420000000333,
+          "totalMs": 16.77070000000822,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.763000000006286,
+          "totalMs": 21.08070000000589,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 14.60800000000745,
+          "totalMs": 15.191900000005262,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 24.669900000008056,
+          "totalMs": 27.536900000006426,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 37.639200000005076,
+          "totalMs": 48.77390000000014,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 20.348299999997835,
+          "totalMs": 27.275500000003376,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 26.25239999999758,
+          "totalMs": 27.230899999995017,
+          "status": 206,
+          "bytes": 65536
+        }
+      ],
+      "headersMs": {
+        "n": 100,
+        "min": 13.287700000000768,
+        "median": 24.136800000007497,
+        "p95": 53.942699999999604,
+        "p99": 100.08620000000519,
+        "p99Scope": "empirical rank; repeat runs still share one machine",
+        "max": 138.239699999991
+      },
+      "totalMs": {
+        "n": 100,
+        "min": 15.191900000005262,
+        "median": 26.486900000003516,
+        "p95": 54.79110000000219,
+        "p99": 101.01029999999446,
+        "p99Scope": "empirical rank; repeat runs still share one machine",
+        "max": 155.07200000000012
+      },
+      "resources": {
+        "core2": {
+          "cpuUser100ns": 10312500,
+          "cpuKernel100ns": 2500000,
+          "parentCpuUser100ns": 10312500,
+          "parentCpuKernel100ns": 2500000,
+          "readTransferBytes": 954368,
+          "writeTransferBytes": 12360,
+          "otherTransferBytes": 25488,
+          "parentReadTransferBytes": 954368,
+          "parentWriteTransferBytes": 12360,
+          "processesCreated": 0,
+          "cpuMs": 1281.25,
+          "parentCpuMs": 1281.25,
+          "descendantCpuMs": 0,
+          "rssBeforeBytes": 40693760,
+          "rssAfterBytes": 40329216,
+          "peakObservedRssBytes": 40763392,
+          "rssSamples": 13,
+          "maxRssSampleGapMs": 530
+        },
+        "node2": {
+          "cpuUser100ns": 3906250,
+          "cpuKernel100ns": 2343750,
+          "parentCpuUser100ns": 3906250,
+          "parentCpuKernel100ns": 2343750,
+          "readTransferBytes": 6553600,
+          "writeTransferBytes": 26302,
+          "otherTransferBytes": 262776,
+          "parentReadTransferBytes": 6553600,
+          "parentWriteTransferBytes": 26302,
+          "processesCreated": 0,
+          "cpuMs": 625,
+          "parentCpuMs": 625,
+          "descendantCpuMs": 0,
+          "rssBeforeBytes": 21905408,
+          "rssAfterBytes": 21917696,
+          "peakObservedRssBytes": 22110208,
+          "rssSamples": 13,
+          "maxRssSampleGapMs": 391
+        }
+      }
+    },
+    {
+      "component": "audio",
+      "path": "/api/v1/assets/4ef97553-0882-49ba-a52a-155ba8c2023e/prepared/audio-1-chunk-0",
+      "scope": "Sequential authorized warm HTTP Range 0..65535; TTFB measured at fetch headers, no browser/UI/decode included; existing HTTP connection pool reused",
+      "samples": [
+        {
+          "headersMs": 29.995999999999185,
+          "totalMs": 30.619999999995343,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 27.728200000012293,
+          "totalMs": 34.03489999999874,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 35.23850000000675,
+          "totalMs": 36.55960000000778,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 61.83750000000873,
+          "totalMs": 63.05539999999746,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 35.59230000000389,
+          "totalMs": 39.328999999997905,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 30.405100000003586,
+          "totalMs": 36.131300000008196,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 42.925600000002305,
+          "totalMs": 44.42919999999867,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 36.123399999996764,
+          "totalMs": 36.81369999999879,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 35.98730000000796,
+          "totalMs": 36.55260000000999,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 34.47839999999269,
+          "totalMs": 42.008600000001024,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 37.2499000000098,
+          "totalMs": 38.525500000003376,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 36.819599999987986,
+          "totalMs": 38.68099999999686,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 24.37149999999383,
+          "totalMs": 25.624100000000908,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 29.39220000000205,
+          "totalMs": 29.97060000000056,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 28.574399999997695,
+          "totalMs": 29.958599999998114,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 21.347999999998137,
+          "totalMs": 22.49189999999362,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 23.256700000012643,
+          "totalMs": 25.71950000000652,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 20.3408000000054,
+          "totalMs": 21.48979999999574,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 21.838300000003073,
+          "totalMs": 23.944100000007893,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 28.76600000000326,
+          "totalMs": 29.923500000004424,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 34.472200000003795,
+          "totalMs": 43.93880000000354,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 33.64800000000105,
+          "totalMs": 36.343599999992875,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 30.133199999996577,
+          "totalMs": 31.341199999995297,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 40.58650000000489,
+          "totalMs": 41.81630000000587,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 35.17609999999695,
+          "totalMs": 37.03620000000228,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 28.547299999991083,
+          "totalMs": 30.448000000003958,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 30.27379999999539,
+          "totalMs": 31.555399999997462,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 46.92379999998957,
+          "totalMs": 48.10639999998966,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 37.89590000000317,
+          "totalMs": 39.79980000000796,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 40.8064999999915,
+          "totalMs": 42.09999999999127,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 26.76249999999709,
+          "totalMs": 31.558399999994435,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 33.66049999999814,
+          "totalMs": 35.449500000002445,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 40.058399999994435,
+          "totalMs": 44.557399999990594,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 44.608600000006845,
+          "totalMs": 51.19090000000142,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 37.777900000000955,
+          "totalMs": 41.479999999995925,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 49.30220000000554,
+          "totalMs": 55.61120000001392,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 28.273000000001048,
+          "totalMs": 34.49310000000696,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 32.636899999997695,
+          "totalMs": 35.618900000001304,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 25.18640000000596,
+          "totalMs": 30.671900000001187,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 35.71379999999772,
+          "totalMs": 36.85330000000249,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 28.43310000000929,
+          "totalMs": 30.811200000011013,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 22.34890000001178,
+          "totalMs": 23.804100000008475,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 24.942599999994854,
+          "totalMs": 26.5055999999895,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 21.20919999999751,
+          "totalMs": 23.781199999997625,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.26249999999709,
+          "totalMs": 20.300799999997253,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 21.968399999997928,
+          "totalMs": 23.102100000003702,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 20.56109999999171,
+          "totalMs": 21.910900000002584,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 29.559500000003027,
+          "totalMs": 30.679100000008475,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 37.384500000000116,
+          "totalMs": 45.068800000008196,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 36.31690000000526,
+          "totalMs": 39.73100000001432,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 30.17389999999432,
+          "totalMs": 31.659700000003795,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 23.979699999996228,
+          "totalMs": 27.52180000000226,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 22.012100000007194,
+          "totalMs": 23.403900000004796,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 22.74790000000212,
+          "totalMs": 23.47400000000198,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 21.164000000004307,
+          "totalMs": 22.32159999999567,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 25.74069999999483,
+          "totalMs": 26.842399999994086,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 23.99539999999979,
+          "totalMs": 25.402499999996508,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 23.97520000000077,
+          "totalMs": 25.241299999994226,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 32.67119999999704,
+          "totalMs": 33.515400000003865,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 43.644699999989825,
+          "totalMs": 49.27880000000005,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 30.063399999999092,
+          "totalMs": 34.6759999999922,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 61.872400000007474,
+          "totalMs": 63.0911000000051,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 37.45690000000468,
+          "totalMs": 38.96490000000631,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 39.47759999999835,
+          "totalMs": 40.812999999994645,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 32.74330000000191,
+          "totalMs": 33.29110000000219,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 44.49969999998575,
+          "totalMs": 50.89579999999842,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 34.66370000000461,
+          "totalMs": 35.94210000000021,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 34.04799999999523,
+          "totalMs": 36.47920000000158,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 34.28029999999853,
+          "totalMs": 37.86329999999725,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 26.85470000001078,
+          "totalMs": 28.255100000009406,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 29.611999999993714,
+          "totalMs": 31.08069999999134,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 40.667700000005425,
+          "totalMs": 42.982600000003,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 26.015700000003562,
+          "totalMs": 27.74330000000191,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 31.56500000000233,
+          "totalMs": 32.09130000000005,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 28.115400000009686,
+          "totalMs": 30.094899999996414,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 30.552599999995437,
+          "totalMs": 31.850800000000163,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 33.007400000002235,
+          "totalMs": 34.21620000000985,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 30.29759999999078,
+          "totalMs": 31.776499999992666,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 37.27279999999155,
+          "totalMs": 39.731099999989965,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 35.95930000000226,
+          "totalMs": 46.68270000000484,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 33.212100000004284,
+          "totalMs": 34.504000000000815,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 33.24499999999534,
+          "totalMs": 35.10589999999502,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 52.25119999999879,
+          "totalMs": 53.727799999993294,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 46.466599999999744,
+          "totalMs": 54.012999999991735,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 38.74510000000009,
+          "totalMs": 48.182300000000396,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 38.08939999999711,
+          "totalMs": 44.8923000000068,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 40.47630000000936,
+          "totalMs": 43.62480000000505,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 31.60339999999269,
+          "totalMs": 33.028999999994994,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 38.3637999999919,
+          "totalMs": 41.00669999999809,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 37.76270000000659,
+          "totalMs": 43.497300000002724,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 55.5966999999946,
+          "totalMs": 58.47920000000158,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 35.012100000007194,
+          "totalMs": 36.79630000000179,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 41.83389999999781,
+          "totalMs": 43.83729999999923,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 20.526700000002165,
+          "totalMs": 21.978100000007544,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 28.1872999999905,
+          "totalMs": 30.48749999998836,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 22.16580000000249,
+          "totalMs": 23.233399999997346,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 19.749900000009802,
+          "totalMs": 20.95560000000114,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 44.851699999999255,
+          "totalMs": 45.438300000008894,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 26.74319999999716,
+          "totalMs": 27.330900000000838,
+          "status": 206,
+          "bytes": 65536
+        },
+        {
+          "headersMs": 21.555999999996857,
+          "totalMs": 22.66370000000461,
+          "status": 206,
+          "bytes": 65536
+        }
+      ],
+      "headersMs": {
+        "n": 100,
+        "min": 19.26249999999709,
+        "median": 32.74330000000191,
+        "p95": 46.92379999998957,
+        "p99": 61.83750000000873,
+        "p99Scope": "empirical rank; repeat runs still share one machine",
+        "max": 61.872400000007474
+      },
+      "totalMs": {
+        "n": 100,
+        "min": 20.300799999997253,
+        "median": 34.6759999999922,
+        "p95": 53.727799999993294,
+        "p99": 63.05539999999746,
+        "p99Scope": "empirical rank; repeat runs still share one machine",
+        "max": 63.0911000000051
+      },
+      "resources": {
+        "core2": {
+          "cpuUser100ns": 18593750,
+          "cpuKernel100ns": 4687500,
+          "parentCpuUser100ns": 18593750,
+          "parentCpuKernel100ns": 4687500,
+          "readTransferBytes": 905216,
+          "writeTransferBytes": 58800,
+          "otherTransferBytes": 4706488,
+          "parentReadTransferBytes": 905216,
+          "parentWriteTransferBytes": 58800,
+          "processesCreated": 0,
+          "cpuMs": 2328.125,
+          "parentCpuMs": 2328.125,
+          "descendantCpuMs": 0,
+          "rssBeforeBytes": 40329216,
+          "rssAfterBytes": 40476672,
+          "peakObservedRssBytes": 40710144,
+          "rssSamples": 16,
+          "maxRssSampleGapMs": 301
+        },
+        "node2": {
+          "cpuUser100ns": 3750000,
+          "cpuKernel100ns": 4687500,
+          "parentCpuUser100ns": 3750000,
+          "parentCpuKernel100ns": 4687500,
+          "readTransferBytes": 6553600,
+          "writeTransferBytes": 54507,
+          "otherTransferBytes": 480128,
+          "parentReadTransferBytes": 6553600,
+          "parentWriteTransferBytes": 54507,
+          "processesCreated": 0,
+          "cpuMs": 843.75,
+          "parentCpuMs": 843.75,
+          "descendantCpuMs": 0,
+          "rssBeforeBytes": 21917696,
+          "rssAfterBytes": 21938176,
+          "peakObservedRssBytes": 22142976,
+          "rssSamples": 16,
+          "maxRssSampleGapMs": 317
+        }
+      }
+    }
+  ],
+  "summary": {
+    "1-cold-app-preparation": {
+      "runs": 1,
+      "sessionObservations": 1,
+      "failures": 0,
+      "clickToFrameMs": {
+        "n": 1,
+        "min": 652.8999999761581,
+        "median": 652.8999999761581,
+        "p95": 652.8999999761581,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 652.8999999761581
+      },
+      "clickToPcmMs": {
+        "n": 1,
+        "min": 954.5999999642372,
+        "median": 954.5999999642372,
+        "p95": 954.5999999642372,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 954.5999999642372
+      },
+      "switchPcmMs": null,
+      "seekFrameMs": null,
+      "seekPcmMs": null
+    },
+    "1-warm-server-new-browser": {
+      "runs": 1,
+      "sessionObservations": 1,
+      "failures": 0,
+      "clickToFrameMs": {
+        "n": 1,
+        "min": 635.1000000238419,
+        "median": 635.1000000238419,
+        "p95": 635.1000000238419,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 635.1000000238419
+      },
+      "clickToPcmMs": {
+        "n": 1,
+        "min": 692.8000000119209,
+        "median": 692.8000000119209,
+        "p95": 692.8000000119209,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 692.8000000119209
+      },
+      "switchPcmMs": null,
+      "seekFrameMs": null,
+      "seekPcmMs": null
+    },
+    "4-cold-app-preparation": {
+      "runs": 1,
+      "sessionObservations": 3,
+      "failures": 1,
+      "clickToFrameMs": {
+        "n": 3,
+        "min": 2932,
+        "median": 3101.399999976158,
+        "p95": 3180.699999988079,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 3180.699999988079
+      },
+      "clickToPcmMs": {
+        "n": 3,
+        "min": 3359.599999964237,
+        "median": 3399.900000035763,
+        "p95": 3400.099999964237,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 3400.099999964237
+      },
+      "switchPcmMs": null,
+      "seekFrameMs": null,
+      "seekPcmMs": null
+    },
+    "4-warm-server-new-browser": {
+      "runs": 1,
+      "sessionObservations": 4,
+      "failures": 0,
+      "clickToFrameMs": {
+        "n": 4,
+        "min": 481.7000000476837,
+        "median": 912.6000000238419,
+        "p95": 1182.7000000476837,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 1182.7000000476837
+      },
+      "clickToPcmMs": {
+        "n": 4,
+        "min": 647.9000000357628,
+        "median": 1791.2000000476837,
+        "p95": 2940.7000000476837,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 2940.7000000476837
+      },
+      "switchPcmMs": null,
+      "seekFrameMs": null,
+      "seekPcmMs": null
+    }
+  },
+  "passed": false,
+  "tcpProfile": {
+    "kind": "transparent TCP proxy",
+    "delayPerDirectionFirstChunkMs": 20,
+    "bytesPerSecondPerDirectionPerConnection": 0,
+    "scope": "Local proxy, no network propagation, TLS or loss. First application chunk of each TCP connection delayed; later keep-alive requests do not incur another artificial RTT. Rate is per connection, not an aggregate WAN link.",
+    "connections": 50,
+    "bytesToNode": 145093,
+    "bytesFromNode": 135192608,
+    "maxConnections": 7,
+    "activeConnections": 0
+  },
+  "artifactsUnchanged": true,
+  "metricsCollectorStderr": ""
+}

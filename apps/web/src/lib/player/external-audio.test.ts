@@ -17,6 +17,11 @@ function setup() {
   return { video, audio, error, bridge };
 }
 describe('independent audio timeline',()=>{
+  it('aligns a preloaded audio window to explicit saved progress before video metadata is available',async()=>{
+    const {video,audio,bridge}=setup();video.duration=NaN;video.currentTime=0;
+    await bridge.load('/audio',false,'audio/mp4; codecs="opus"',6);
+    expect(audio.currentTime).toBe(6);expect(video.muted).toBe(false);bridge.destroy();
+  });
   it('lets the video finish a normal Opus packet tail without a ten-second stall',async()=>{
     vi.useFakeTimers();const {video,audio,error,bridge}=setup();await bridge.load('/audio');
     audio.duration=11.96;video.currentTime=11.96;audio.currentTime=11.96;

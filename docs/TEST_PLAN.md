@@ -1,3 +1,30 @@
+## Flux progressifs et Node Rust — 24 octobre 2026
+
+Méthode et preuves : [STREAMING_SYSTEM_BENCHMARK.md](STREAMING_SYSTEM_BENCHMARK.md).
+Le banc système utilise de vrais Core/SQLite et Node Rust séparés, leurs API
+d'administration, un compte distinct par session et le build Web. Les caches
+applicatifs vides, les caches chauds et les limites du cache disque OS sont
+explicités. Les 100 requêtes HTTP par composant servent au p99 HTTP ; un petit
+nombre de clics ne permet pas d'annoncer un p99 du lecteur.
+
+Vérifications exécutées sur le candidat :
+
+- Node : 64 tests réussis, 3 ignorés, dont nouveaux contrôles des paquets Opus,
+  timestamps, canaux, groupes `roll` locaux avec durées variables, tables
+  invalides, Range/HEAD/416, annulation, concurrence et signatures sur vrai TCP.
+- Core : deux scénarios d'intégration réussis avec deux Nodes et canal sortant,
+  y compris vidéo progressive et audio natif, permissions GET/HEAD et Range.
+  Deux tests parentaux et quatre tests inventaire passent également.
+- Web : 150 tests réussis, check sans erreur ni avertissement, lint et build
+  statique réussis. Le POC NativePlayer MKV/MP4 GOP 15 s vérifie décodage, PCM,
+  seeks 31 → 2 s et frontières 10/20/30 s ; audio préparé annoncé explicitement,
+  ce POC ne prouve pas une ouverture froide du système.
+
+Le lecteur borne les octets encodés soumis au MSE vidéo à 128 Mio ; les tests
+vérifient l'éviction conservative sur keyframes, la remise à zéro au seek et
+l'erreur explicite quand un GOP empêche de libérer de la place. Ce compteur ne
+mesure pas les surfaces du décodeur ni le RSS navigateur.
+
 ## CI scanner, réouverture audio — 24 octobre 2026
 
 La boucle FR/EN de `browser_scanner` attend la piste validée dans le menu

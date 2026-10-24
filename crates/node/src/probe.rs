@@ -46,6 +46,7 @@ pub async fn probe(path: &Path) -> Result<Probe, ProbeError> {
 pub async fn probe_file(mut file: std::fs::File) -> Result<Probe, ProbeError> {
     use std::io::Seek;
     file.rewind()?;
+    let native_file = file.try_clone()?;
     let mut child = Command::new("ffprobe")
         .args([
             "-v",
@@ -97,6 +98,15 @@ pub async fn probe_file(mut file: std::fs::File) -> Result<Probe, ProbeError> {
     result.format.remove("filename");
     if result.streams.is_empty() {
         return Err(ProbeError::Rejected);
+    }
+    // Validate the bounded native extractor during discovery, never infer its
+    // support from codec names or ffprobe stream ordinals alone.
+    if let Ok(Ok(ids)) =
+        tokio::task::spawn_blocking(move || crate::mp4_audio::supported_tracks(native_file)).await
+    {
+        result
+            .format
+            .insert("native_opus_tracks_v1".into(), serde_json::json!(ids));
     }
     Ok(result)
 }

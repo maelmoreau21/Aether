@@ -60,6 +60,8 @@
   let panel = $state<HTMLDivElement>();
   let triggers: HTMLDivElement;
   let hoverTime = $state<number | null>(null);
+  let canSkipIntro = $derived(Boolean(media?.intro && playback.position >= media.intro.start && playback.position < media.intro.end));
+  let canSkipCredits = $derived(Boolean(media?.credits && playback.position >= media.credits.start && playback.position < media.credits.end));
 
   const source = $derived(media.sources.find(source => source.audioTrackId === audio) ?? media.sources[0]);
   const selectableAudio = $derived(audioChoices(media, audio));
@@ -328,6 +330,36 @@
         </div>
       {/if}
     </div>
+  {/if}
+
+  {#if canSkipIntro}
+
+    <div class="skip-marker-overlay">
+
+      <button type="button" class="skip-marker-btn" onclick={() => { onSeek(media.intro!.end); onWake(); }}>
+
+        <span>Passer l'introduction</span>
+
+        <span class="skip-marker-arrow">›</span>
+
+      </button>
+
+    </div>
+
+  {:else if canSkipCredits}
+
+    <div class="skip-marker-overlay">
+
+      <button type="button" class="skip-marker-btn" onclick={() => { onSeek(media.credits!.end); onWake(); }}>
+
+        <span>Passer les crédits</span>
+
+        <span class="skip-marker-arrow">›</span>
+
+      </button>
+
+    </div>
+
   {/if}
 
   <div class="progress-line">
@@ -778,5 +810,37 @@
       bottom: calc(100% - 70px);
       width: min(340px, calc(100vw - 32px));
     }
+  }
+  .skip-marker-overlay {
+    position: absolute;
+    right: 2rem;
+    bottom: 5.5rem;
+    z-index: 40;
+    pointer-events: auto;
+  }
+  .skip-marker-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 9999px;
+    color: #ffffff;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .skip-marker-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.5);
+    transform: scale(1.04);
+  }
+  .skip-marker-arrow {
+    font-size: 1.25rem;
+    line-height: 1;
   }
 </style>

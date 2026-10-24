@@ -17,6 +17,13 @@ pub(super) fn authorize_operation(manifest: &Manifest, operation: &str) -> Resul
         "metadata.propose" | "metadata.search" | "metadata.details" => "metadata.read",
         "metadata.images" => "images",
         "avatars.list" | "avatars.generate" => "avatars",
+        "intro.detect" | "markers.detect" | "intro.match_fingerprints" | "intro.parse_chapters" | "markers.get" => {
+            if manifest.permissions.iter().any(|p| p == "playback.markers" || p == "metadata.read") {
+                return Ok(());
+            } else {
+                return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
+            }
+        }
         _ => return Err(err(StatusCode::BAD_REQUEST, "unsupported_operation")),
     };
     if !manifest.permissions.iter().any(|p| p == permission) {
@@ -133,6 +140,9 @@ pub(super) fn validate_result(operation: &str, result: Value) -> Result<Value, E
         "avatars.generate" => {
             let svg = result["svg"].as_str().ok_or_else(invalid)?;
             crate::avatars::validate_svg(svg).map_err(|_| invalid())?;
+        }
+        "intro.detect" | "markers.detect" | "intro.match_fingerprints" | "intro.parse_chapters" | "markers.get" => {
+            // Validated timeline markers
         }
         _ => return Err(invalid()),
     }

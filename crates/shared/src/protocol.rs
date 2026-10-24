@@ -178,6 +178,8 @@ pub struct HeartbeatPayload {
     pub roots: Vec<String>,
     pub public_url: Option<String>,
     pub active_scans: u32,
+    #[serde(default)]
+    pub active_streams: u32,
     pub indexed_assets: usize,
     pub timestamp: i64,
 }

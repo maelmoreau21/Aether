@@ -10,6 +10,7 @@
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
   import { chooseSource, playbackMime, audioLanguage, audioSelectionNotice } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
+  import { revalidateMediaDescriptor } from '../catalog/api';
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
   let dialog: HTMLDialogElement;
@@ -47,6 +48,8 @@
   let opener: HTMLElement | null = null;
   let scrollPosition = 0;
   let previousVolume = 1;
+  let triedMediaIds = new Set<string>();
+  let failoverInProgress = false;
   function sync() {
     if (!engine || !opened) return;
     const snapshot = engine.state();
@@ -62,9 +65,56 @@
   function wake() { visible = true; armIdle(); }
   $effect(() => { armIdle(); return () => clearTimeout(idle); });
   $effect(() => { if (opened && !visible) surface?.focus(); });
+  async function tryAutomaticFailover(): Promise<boolean> {
+    if (!opened || !engine || !active || failoverInProgress) return false;
+    const current = generation;
+    triedMediaIds.add(active.id);
+    if (active.requestedId) triedMediaIds.add(active.requestedId);
+    if (active.failoverFrom) triedMediaIds.add(active.failoverFrom);
+    const candidates = [
+      ...(active.fallbackMediaIds ?? []),
+      ...catalogue
+        .filter(item => item.available !== false && item.nodeStatus !== 'disconnected' && item.nodeStatus !== 'revoked' && (!active?.workId || !item.workId || item.workId === active.workId))
+        .map(item => item.id)
+    ];
+    const nextId = candidates.find(id => !triedMediaIds.has(id));
+    if (!nextId) return false;
+    triedMediaIds.add(nextId);
+    failoverInProgress = true;
+    try {
+      const snapshot = engine.state();
+      const savedPosition = Math.max(playback.position, snapshot.position || 0, video?.currentTime || 0);
+      const restoreState: PlaybackState = {
+        position: Number.isFinite(savedPosition) ? savedPosition : 0,
+        duration: playback.duration,
+        paused: false,
+        volume: playback.volume,
+        speed: playback.speed
+      };
+      progressTracker?.save(restoreState, true);
+      loadStage = 'Basculement automatique vers un nœud disponible…';
+      let fallbackMedia: Media | undefined;
+      try {
+        fallbackMedia = await revalidateMediaDescriptor(nextId);
+      } catch {
+        fallbackMedia = catalogue.find(item => item.id === nextId);
+      }
+      if (!fallbackMedia || current !== generation || !opened) return false;
+      triedMediaIds.add(fallbackMedia.id);
+      await prepare(fallbackMedia, restoreState, 'Basculement automatique sur un nœud disponible.');
+      return current === generation && !error;
+    } finally {
+      failoverInProgress = false;
+    }
+  }
   function fail(message: string) {
     if (!opened) return;
-    engine?.pause(); error = message; busy = false; sync(); wake();
+    engine?.pause();
+    void tryAutomaticFailover().then(recovered => {
+      if (!recovered && opened) {
+        error = message; busy = false; sync(); wake();
+      }
+    });
   }
   async function action(operation: (player: Player) => void | Promise<void>) {
     if (!engine || busy) return;
@@ -78,9 +128,12 @@
     }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
   }
-  async function prepare(media: Media, restore?: PlaybackState) {
+  async function prepare(media: Media, restore?: PlaybackState, failoverNotice?: string) {
     const current = generation;
     if (!engine) return;
+    triedMediaIds.add(media.id);
+    if (media.requestedId) triedMediaIds.add(media.requestedId);
+    if (media.failoverFrom) triedMediaIds.add(media.failoverFrom);
     busy = true; error = ''; notice = ''; wake();
     try {
       // Preferences are optional: an outage must not prevent authorized playback.
@@ -98,7 +151,8 @@
       const resume = tracker?.load();
       await engine.load(media, source.audioTrackId, restore?.position ?? resume ?? 0);
       if (current !== generation) return;
-      notice = preferenceNotice || audioSelectionNotice(media, source, preferredLanguage);
+      const autoFailoverMsg = failoverNotice || (media.failoverFrom ? 'Basculement automatique sur un nœud disponible.' : '');
+      notice = autoFailoverMsg || preferenceNotice || audioSelectionNotice(media, source, preferredLanguage);
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
@@ -130,6 +184,8 @@
   export function open(media: Media | Promise<Media>) {
     if (opened) return false;
     generation++; const current = generation;
+    triedMediaIds.clear();
+    failoverInProgress = false;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     scrollPosition = window.scrollY;
     statistics = false; loadStage = 'Chargement de votre séance…'; audio = ''; active = media instanceof Promise ? undefined : media; opened = true; busy = true; error = ''; notice = ''; menu = null;
@@ -169,6 +225,8 @@
   export function changeMedia(media: Media, requireOpen = false) {
     if (!opened) { if (!requireOpen) open(media); return; }
     if (!engine || busy) return;
+    triedMediaIds.clear();
+    failoverInProgress = false;
     progressTracker?.save(engine.state(), true);
     progressTracker = undefined;
     active = media;

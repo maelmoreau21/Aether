@@ -190,13 +190,27 @@ pub async fn ingest(
                     .await?;
                 work_id
             };
+            let edition_spec = crate::consolidation::derive_edition_spec(&file.relative_path);
+            let version_spec = crate::consolidation::derive_version_spec(&file.probe, &file.mime);
             let edition_id = query_scalar::<_, String>(
-                "SELECT id FROM inventory_editions WHERE work_id=? LIMIT 1",
+                "SELECT e.id FROM inventory_editions e \
+                 LEFT JOIN inventory_edition_metadata em ON em.edition_id=e.id \
+                 WHERE e.work_id=? AND COALESCE(em.edition_key,'standard')=? LIMIT 1",
             )
             .bind(&work_id)
+            .bind(&edition_spec.key)
             .fetch_optional(&mut *tx)
             .await?;
             let edition_id = if let Some(edition_id) = edition_id {
+                query(
+                    "INSERT INTO inventory_edition_metadata(edition_id,edition_key,label) VALUES(?,?,?) \
+                     ON CONFLICT(edition_id) DO UPDATE SET edition_key=excluded.edition_key,label=excluded.label",
+                )
+                .bind(&edition_id)
+                .bind(&edition_spec.key)
+                .bind(&edition_spec.label)
+                .execute(&mut *tx)
+                .await?;
                 edition_id
             } else {
                 let edition_id = id();
@@ -205,20 +219,61 @@ pub async fn ingest(
                     .bind(&work_id)
                     .execute(&mut *tx)
                     .await?;
+                query(
+                    "INSERT INTO inventory_edition_metadata(edition_id,edition_key,label) VALUES(?,?,?) \
+                     ON CONFLICT(edition_id) DO UPDATE SET edition_key=excluded.edition_key,label=excluded.label",
+                )
+                .bind(&edition_id)
+                .bind(&edition_spec.key)
+                .bind(&edition_spec.label)
+                .execute(&mut *tx)
+                .await?;
                 edition_id
             };
-            let version_id = id();
+            let existing_version_id = query_scalar::<_, String>(
+                "SELECT v.id FROM inventory_versions v \
+                 LEFT JOIN inventory_version_metadata vm ON vm.version_id=v.id \
+                 WHERE v.edition_id=? AND COALESCE(vm.version_key,'default')=? LIMIT 1",
+            )
+            .bind(&edition_id)
+            .bind(&version_spec.key)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let version_id = if let Some(version_id) = existing_version_id {
+                query(
+                    "INSERT INTO inventory_version_metadata(version_id,version_key,label) VALUES(?,?,?) \
+                     ON CONFLICT(version_id) DO UPDATE SET version_key=excluded.version_key,label=excluded.label",
+                )
+                .bind(&version_id)
+                .bind(&version_spec.key)
+                .bind(&version_spec.label)
+                .execute(&mut *tx)
+                .await?;
+                version_id
+            } else {
+                let version_id = id();
+                query("INSERT INTO inventory_versions VALUES(?,?)")
+                    .bind(&version_id)
+                    .bind(&edition_id)
+                    .execute(&mut *tx)
+                    .await?;
+                query(
+                    "INSERT INTO inventory_version_metadata(version_id,version_key,label) VALUES(?,?,?) \
+                     ON CONFLICT(version_id) DO UPDATE SET version_key=excluded.version_key,label=excluded.label",
+                )
+                .bind(&version_id)
+                .bind(&version_spec.key)
+                .bind(&version_spec.label)
+                .execute(&mut *tx)
+                .await?;
+                version_id
+            };
             let source_id = id();
             let asset_id = previous_asset_id.unwrap_or_else(id);
             // A reused physical-path UUID after a root/identity change must not
             // inherit the editorial snapshot of the previous physical source.
             query("DELETE FROM inventory_editorial WHERE asset_id=?")
                 .bind(&asset_id)
-                .execute(&mut *tx)
-                .await?;
-            query("INSERT INTO inventory_versions VALUES(?,?)")
-                .bind(&version_id)
-                .bind(&edition_id)
                 .execute(&mut *tx)
                 .await?;
             query("INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,?,?)")
@@ -865,6 +920,7 @@ pub async fn publish_staged_scan(
                 swid
             };
 
+            affected_work_ids.insert(series_work_id.clone());
             series_work_map.insert(series_key.clone(), series_work_id.clone());
 
             let poster_path: Option<String> = s_row.get("series_poster_path");
@@ -1083,13 +1139,29 @@ pub async fn publish_staged_scan(
                         .await?;
                     }
 
+                    let edition_spec = crate::consolidation::derive_edition_spec(&relative_path);
+                    let parsed_probe = decode(&probe_json).unwrap_or_default();
+                    let version_spec =
+                        crate::consolidation::derive_version_spec(&parsed_probe, &mime);
                     let edition_id = query_scalar::<_, String>(
-                        "SELECT id FROM inventory_editions WHERE work_id=? LIMIT 1",
+                        "SELECT e.id FROM inventory_editions e \
+                         LEFT JOIN inventory_edition_metadata em ON em.edition_id=e.id \
+                         WHERE e.work_id=? AND COALESCE(em.edition_key,'standard')=? LIMIT 1",
                     )
                     .bind(&ep_work_id)
+                    .bind(&edition_spec.key)
                     .fetch_optional(&mut *tx)
                     .await?;
                     let edition_id = if let Some(edition_id) = edition_id {
+                        query(
+                            "INSERT INTO inventory_edition_metadata(edition_id,edition_key,label) VALUES(?,?,?) \
+                             ON CONFLICT(edition_id) DO UPDATE SET edition_key=excluded.edition_key,label=excluded.label",
+                        )
+                        .bind(&edition_id)
+                        .bind(&edition_spec.key)
+                        .bind(&edition_spec.label)
+                        .execute(&mut *tx)
+                        .await?;
                         edition_id
                     } else {
                         let edition_id = id();
@@ -1098,10 +1170,56 @@ pub async fn publish_staged_scan(
                             .bind(&ep_work_id)
                             .execute(&mut *tx)
                             .await?;
+                        query(
+                            "INSERT INTO inventory_edition_metadata(edition_id,edition_key,label) VALUES(?,?,?) \
+                             ON CONFLICT(edition_id) DO UPDATE SET edition_key=excluded.edition_key,label=excluded.label",
+                        )
+                        .bind(&edition_id)
+                        .bind(&edition_spec.key)
+                        .bind(&edition_spec.label)
+                        .execute(&mut *tx)
+                        .await?;
                         edition_id
                     };
 
-                    let version_id = id();
+                    let existing_version_id = query_scalar::<_, String>(
+                        "SELECT v.id FROM inventory_versions v \
+                         LEFT JOIN inventory_version_metadata vm ON vm.version_id=v.id \
+                         WHERE v.edition_id=? AND COALESCE(vm.version_key,'default')=? LIMIT 1",
+                    )
+                    .bind(&edition_id)
+                    .bind(&version_spec.key)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    let version_id = if let Some(version_id) = existing_version_id {
+                        query(
+                            "INSERT INTO inventory_version_metadata(version_id,version_key,label) VALUES(?,?,?) \
+                             ON CONFLICT(version_id) DO UPDATE SET version_key=excluded.version_key,label=excluded.label",
+                        )
+                        .bind(&version_id)
+                        .bind(&version_spec.key)
+                        .bind(&version_spec.label)
+                        .execute(&mut *tx)
+                        .await?;
+                        version_id
+                    } else {
+                        let version_id = id();
+                        query("INSERT INTO inventory_versions VALUES(?,?)")
+                            .bind(&version_id)
+                            .bind(&edition_id)
+                            .execute(&mut *tx)
+                            .await?;
+                        query(
+                            "INSERT INTO inventory_version_metadata(version_id,version_key,label) VALUES(?,?,?) \
+                             ON CONFLICT(version_id) DO UPDATE SET version_key=excluded.version_key,label=excluded.label",
+                        )
+                        .bind(&version_id)
+                        .bind(&version_spec.key)
+                        .bind(&version_spec.label)
+                        .execute(&mut *tx)
+                        .await?;
+                        version_id
+                    };
                     let source_id = id();
                     let is_new_asset = previous_asset_id.is_none();
                     let asset_id = previous_asset_id.unwrap_or_else(id);
@@ -1111,11 +1229,6 @@ pub async fn publish_staged_scan(
                             .execute(&mut *tx)
                             .await?;
                     }
-                    query("INSERT INTO inventory_versions VALUES(?,?)")
-                        .bind(&version_id)
-                        .bind(&edition_id)
-                        .execute(&mut *tx)
-                        .await?;
                     query(
                         "INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,?,?)",
                     )
@@ -1275,13 +1388,29 @@ pub async fn publish_staged_scan(
                         work_id
                     };
 
+                    let edition_spec = crate::consolidation::derive_edition_spec(&relative_path);
+                    let parsed_probe = decode(&probe_json).unwrap_or_default();
+                    let version_spec =
+                        crate::consolidation::derive_version_spec(&parsed_probe, &mime);
                     let edition_id = query_scalar::<_, String>(
-                        "SELECT id FROM inventory_editions WHERE work_id=? LIMIT 1",
+                        "SELECT e.id FROM inventory_editions e \
+                         LEFT JOIN inventory_edition_metadata em ON em.edition_id=e.id \
+                         WHERE e.work_id=? AND COALESCE(em.edition_key,'standard')=? LIMIT 1",
                     )
                     .bind(&work_id)
+                    .bind(&edition_spec.key)
                     .fetch_optional(&mut *tx)
                     .await?;
                     let edition_id = if let Some(edition_id) = edition_id {
+                        query(
+                            "INSERT INTO inventory_edition_metadata(edition_id,edition_key,label) VALUES(?,?,?) \
+                             ON CONFLICT(edition_id) DO UPDATE SET edition_key=excluded.edition_key,label=excluded.label",
+                        )
+                        .bind(&edition_id)
+                        .bind(&edition_spec.key)
+                        .bind(&edition_spec.label)
+                        .execute(&mut *tx)
+                        .await?;
                         edition_id
                     } else {
                         let edition_id = id();
@@ -1290,10 +1419,56 @@ pub async fn publish_staged_scan(
                             .bind(&work_id)
                             .execute(&mut *tx)
                             .await?;
+                        query(
+                            "INSERT INTO inventory_edition_metadata(edition_id,edition_key,label) VALUES(?,?,?) \
+                             ON CONFLICT(edition_id) DO UPDATE SET edition_key=excluded.edition_key,label=excluded.label",
+                        )
+                        .bind(&edition_id)
+                        .bind(&edition_spec.key)
+                        .bind(&edition_spec.label)
+                        .execute(&mut *tx)
+                        .await?;
                         edition_id
                     };
 
-                    let version_id = id();
+                    let existing_version_id = query_scalar::<_, String>(
+                        "SELECT v.id FROM inventory_versions v \
+                         LEFT JOIN inventory_version_metadata vm ON vm.version_id=v.id \
+                         WHERE v.edition_id=? AND COALESCE(vm.version_key,'default')=? LIMIT 1",
+                    )
+                    .bind(&edition_id)
+                    .bind(&version_spec.key)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    let version_id = if let Some(version_id) = existing_version_id {
+                        query(
+                            "INSERT INTO inventory_version_metadata(version_id,version_key,label) VALUES(?,?,?) \
+                             ON CONFLICT(version_id) DO UPDATE SET version_key=excluded.version_key,label=excluded.label",
+                        )
+                        .bind(&version_id)
+                        .bind(&version_spec.key)
+                        .bind(&version_spec.label)
+                        .execute(&mut *tx)
+                        .await?;
+                        version_id
+                    } else {
+                        let version_id = id();
+                        query("INSERT INTO inventory_versions VALUES(?,?)")
+                            .bind(&version_id)
+                            .bind(&edition_id)
+                            .execute(&mut *tx)
+                            .await?;
+                        query(
+                            "INSERT INTO inventory_version_metadata(version_id,version_key,label) VALUES(?,?,?) \
+                             ON CONFLICT(version_id) DO UPDATE SET version_key=excluded.version_key,label=excluded.label",
+                        )
+                        .bind(&version_id)
+                        .bind(&version_spec.key)
+                        .bind(&version_spec.label)
+                        .execute(&mut *tx)
+                        .await?;
+                        version_id
+                    };
                     let source_id = id();
                     let is_new_asset = previous_asset_id.is_none();
                     let asset_id = previous_asset_id.unwrap_or_else(id);
@@ -1303,11 +1478,6 @@ pub async fn publish_staged_scan(
                             .execute(&mut *tx)
                             .await?;
                     }
-                    query("INSERT INTO inventory_versions VALUES(?,?)")
-                        .bind(&version_id)
-                        .bind(&edition_id)
-                        .execute(&mut *tx)
-                        .await?;
                     query(
                         "INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,?,?)",
                     )
@@ -1688,6 +1858,27 @@ pub async fn refresh_editorial_for_works(
             .await?;
         }
     }
+
+    let mut parent_series = std::collections::BTreeSet::new();
+    for wid in work_ids {
+        crate::consolidation::consolidate_work_tx(tx, wid).await?;
+        let s_id: Option<String> = query_scalar(
+            "SELECT s.series_id FROM inventory_episodes ep \
+             JOIN inventory_seasons s ON s.id = ep.season_id \
+             WHERE ep.work_id = ?",
+        )
+        .bind(wid)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if let Some(sid) = s_id
+            && !work_ids.contains(&sid)
+        {
+            parent_series.insert(sid);
+        }
+    }
+    for sid in parent_series {
+        crate::consolidation::consolidate_work_tx(tx, &sid).await?;
+    }
     Ok(())
 }
 
@@ -1821,7 +2012,7 @@ pub async fn editorial_warnings(
     Ok(warnings)
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct CatalogueFilter {
     pub user_id: Option<String>,
     pub genre: Option<String>,
@@ -1830,30 +2021,192 @@ pub struct CatalogueFilter {
     pub codec: Option<String>,
     pub language: Option<String>,
 }
-fn push_catalogue_filters(builder: &mut sqlx::QueryBuilder<sqlx::Any>, filter: &CatalogueFilter) {
+fn push_search_filter(
+    builder: &mut sqlx::QueryBuilder<sqlx::Any>,
+    search_clean: &str,
+    use_fts: bool,
+    fast_avail: bool,
+) {
+    if search_clean.is_empty() {
+        return;
+    }
+    if use_fts && search_clean.chars().count() >= 3 {
+        let fts_query = format!("\"{}\"", search_clean.replace('"', "\"\""));
+        builder
+            .push(" AND w.id IN (SELECT work_id FROM inventory_works_fts WHERE inventory_works_fts.search_text MATCH ")
+            .push_bind(fts_query)
+            .push(") ");
+        return;
+    }
+    if fast_avail {
+        builder
+            .push(" AND instr(w.display_title_sort, ")
+            .push_bind(search_clean.to_owned())
+            .push(") > 0 ");
+    } else {
+        builder
+            .push(" AND instr(CASE WHEN w.display_title_sort != '' THEN w.display_title_sort ELSE lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)) END, ")
+            .push_bind(search_clean.to_owned())
+            .push(") > 0 ");
+    }
+}
+
+fn push_availability_filter(
+    builder: &mut sqlx::QueryBuilder<sqlx::Any>,
+    target_kind: Option<&str>,
+    fast_avail: bool,
+) {
+    if fast_avail {
+        match target_kind {
+            Some("film") => {
+                builder.push(" AND w.kind = 'film' AND w.has_available_asset = 1 ");
+            }
+            Some("series") => {
+                builder.push(" AND w.kind = 'series' AND w.has_available_asset = 1 ");
+            }
+            _ => {
+                builder.push(" AND w.kind IN ('film', 'series') AND w.has_available_asset = 1 ");
+            }
+        }
+    } else {
+        match target_kind {
+            Some("film") => {
+                builder.push(
+                    " AND w.kind = 'film' AND EXISTS ( \
+                       SELECT 1 FROM inventory_editions e \
+                       JOIN inventory_versions v ON v.edition_id=e.id \
+                       JOIN inventory_sources s ON s.version_id=v.id \
+                       JOIN inventory_assets a ON a.source_id=s.id \
+                       JOIN libraries l ON l.id=s.library_id \
+                       JOIN media_nodes n ON n.id=l.node_id \
+                       WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND n.status != 'revoked' AND l.enabled=1 \
+                     ) ",
+                );
+            }
+            Some("series") => {
+                builder.push(
+                    " AND w.kind = 'series' AND EXISTS ( \
+                       SELECT 1 FROM inventory_seasons s \
+                       JOIN inventory_episodes ep ON ep.season_id=s.id \
+                       JOIN inventory_editions e ON e.work_id=ep.work_id \
+                       JOIN inventory_versions v ON v.edition_id=e.id \
+                       JOIN inventory_sources src ON src.version_id=v.id \
+                       JOIN inventory_assets a ON a.source_id=src.id \
+                       JOIN libraries l ON l.id=src.library_id \
+                       JOIN media_nodes n ON n.id=l.node_id \
+                       WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
+                     ) ",
+                );
+            }
+            _ => {
+                builder.push(
+                    " AND ( \
+                       (w.kind = 'film' AND EXISTS ( \
+                          SELECT 1 FROM inventory_editions e \
+                          JOIN inventory_versions v ON v.edition_id=e.id \
+                          JOIN inventory_sources s ON s.version_id=v.id \
+                          JOIN inventory_assets a ON a.source_id=s.id \
+                          JOIN libraries l ON l.id=s.library_id \
+                          JOIN media_nodes n ON n.id=l.node_id \
+                          WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND n.status != 'revoked' AND l.enabled=1 \
+                       )) \
+                       OR \
+                       (w.kind = 'series' AND EXISTS ( \
+                          SELECT 1 FROM inventory_seasons s \
+                          JOIN inventory_episodes ep ON ep.season_id=s.id \
+                          JOIN inventory_editions e ON e.work_id=ep.work_id \
+                          JOIN inventory_versions v ON v.edition_id=e.id \
+                          JOIN inventory_sources src ON src.version_id=v.id \
+                          JOIN inventory_assets a ON a.source_id=src.id \
+                          JOIN libraries l ON l.id=src.library_id \
+                          JOIN media_nodes n ON n.id=l.node_id \
+                          WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
+                       )) \
+                     ) ",
+                );
+            }
+        }
+    }
+}
+
+fn push_catalogue_filters(
+    builder: &mut sqlx::QueryBuilder<sqlx::Any>,
+    filter: &CatalogueFilter,
+    has_parental_policy: bool,
+    fast_avail: bool,
+) {
     if let Some(genre) = &filter.genre {
-        builder.push(" AND instr(lower(json_extract(COALESCE(w.manual_json,w.editorial_json),'$.genres')), ").push_bind(format!("\"{}\"",genre.to_lowercase())).push(")>0 ");
+        let g = genre.trim().to_lowercase();
+        if fast_avail {
+            builder
+                .push(" AND instr(w.genres_csv, ")
+                .push_bind(format!("|{g}|"))
+                .push(")>0 ");
+        } else {
+            builder
+                .push(" AND (instr(w.genres_csv, ")
+                .push_bind(format!("|{g}|"))
+                .push(")>0 OR (w.genres_csv = '|' AND instr(lower(json_extract(COALESCE(w.manual_json,w.editorial_json),'$.genres')), ")
+                .push_bind(format!("\"{g}\""))
+                .push(")>0)) ");
+        }
     }
     if let Some(year) = filter.year {
-        builder
-            .push(" AND COALESCE(CAST(json_extract(w.manual_json,'$.year') AS BIGINT),w.year)=")
-            .push_bind(year)
-            .push(" ");
+        if fast_avail {
+            builder
+                .push(" AND w.effective_year=")
+                .push_bind(year)
+                .push(" ");
+        } else {
+            builder
+                .push(" AND COALESCE(w.effective_year, CAST(json_extract(w.manual_json,'$.year') AS BIGINT), w.year)=")
+                .push_bind(year)
+                .push(" ");
+        }
     }
     if filter.quality.is_some() || filter.codec.is_some() || filter.language.is_some() {
-        builder.push(" AND EXISTS(SELECT 1 FROM inventory_editions fe JOIN inventory_versions fv ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id JOIN inventory_assets fa ON fa.source_id=fs.id JOIN libraries fl ON fl.id=fs.library_id JOIN media_nodes fn ON fn.id=fl.node_id WHERE (fe.work_id=w.id OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep JOIN inventory_seasons fseason ON fseason.id=fep.season_id WHERE fseason.series_id=w.id)) AND fa.available=1 AND fl.enabled=1 AND fn.status!='revoked' AND fs.root_snapshot=fl.root ");
-        if let Some(height) = filter.quality {
-            builder.push(" AND EXISTS(SELECT 1 FROM inventory_tracks ft WHERE ft.asset_id=fa.id AND CAST(json_extract(ft.metadata_json,'$.height') AS BIGINT)>=").push_bind(height).push(") ");
+        if fast_avail {
+            if let Some(height) = filter.quality {
+                builder
+                    .push(" AND (w.max_height >= ")
+                    .push_bind(height)
+                    .push(" OR (w.max_height = 0 AND EXISTS(SELECT 1 FROM inventory_editions fe JOIN inventory_versions fv ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id JOIN inventory_assets fa ON fa.source_id=fs.id JOIN inventory_tracks ft ON ft.asset_id=fa.id WHERE (fe.work_id=w.id OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep JOIN inventory_seasons fseason ON fseason.id=fep.season_id WHERE fseason.series_id=w.id)) AND fa.available=1 AND CAST(json_extract(ft.metadata_json,'$.height') AS BIGINT)>=")
+                    .push_bind(height)
+                    .push("))) ");
+            }
+            if let Some(codec) = &filter.codec {
+                let c = codec.trim().to_ascii_lowercase();
+                builder
+                    .push(" AND (instr(w.codecs_csv, ")
+                    .push_bind(format!(",{c},"))
+                    .push(")>0 OR (w.codecs_csv = ',' AND EXISTS(SELECT 1 FROM inventory_editions fe JOIN inventory_versions fv ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id JOIN inventory_assets fa ON fa.source_id=fs.id JOIN inventory_tracks ft ON ft.asset_id=fa.id WHERE (fe.work_id=w.id OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep JOIN inventory_seasons fseason ON fseason.id=fep.season_id WHERE fseason.series_id=w.id)) AND fa.available=1 AND lower(json_extract(ft.metadata_json,'$.codec_name'))=")
+                    .push_bind(c)
+                    .push("))) ");
+            }
+            if let Some(language) = &filter.language {
+                let l = language.trim().to_ascii_lowercase();
+                builder
+                    .push(" AND (instr(w.languages_csv, ")
+                    .push_bind(format!(",{l},"))
+                    .push(")>0 OR (w.languages_csv = ',' AND EXISTS(SELECT 1 FROM inventory_editions fe JOIN inventory_versions fv ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id JOIN inventory_assets fa ON fa.source_id=fs.id JOIN inventory_tracks ft ON ft.asset_id=fa.id WHERE (fe.work_id=w.id OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep JOIN inventory_seasons fseason ON fseason.id=fep.season_id WHERE fseason.series_id=w.id)) AND fa.available=1 AND lower(json_extract(json_extract(ft.metadata_json,'$.tags'),'$.language'))=")
+                    .push_bind(l)
+                    .push("))) ");
+            }
+        } else {
+            builder.push(" AND EXISTS(SELECT 1 FROM inventory_editions fe JOIN inventory_versions fv ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id JOIN inventory_assets fa ON fa.source_id=fs.id JOIN libraries fl ON fl.id=fs.library_id JOIN media_nodes fn ON fn.id=fl.node_id WHERE (fe.work_id=w.id OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep JOIN inventory_seasons fseason ON fseason.id=fep.season_id WHERE fseason.series_id=w.id)) AND fa.available=1 AND fl.enabled=1 AND fn.status!='revoked' AND fs.root_snapshot=fl.root ");
+            if let Some(height) = filter.quality {
+                builder.push(" AND EXISTS(SELECT 1 FROM inventory_tracks ft WHERE ft.asset_id=fa.id AND CAST(json_extract(ft.metadata_json,'$.height') AS BIGINT)>=").push_bind(height).push(") ");
+            }
+            if let Some(codec) = &filter.codec {
+                builder.push(" AND EXISTS(SELECT 1 FROM inventory_tracks ft WHERE ft.asset_id=fa.id AND lower(json_extract(ft.metadata_json,'$.codec_name'))=").push_bind(codec.to_lowercase()).push(") ");
+            }
+            if let Some(language) = &filter.language {
+                builder.push(" AND EXISTS(SELECT 1 FROM inventory_tracks ft WHERE ft.asset_id=fa.id AND lower(json_extract(json_extract(ft.metadata_json,'$.tags'),'$.language'))=").push_bind(language.to_lowercase()).push(") ");
+            }
+            builder.push(") ");
         }
-        if let Some(codec) = &filter.codec {
-            builder.push(" AND EXISTS(SELECT 1 FROM inventory_tracks ft WHERE ft.asset_id=fa.id AND lower(json_extract(ft.metadata_json,'$.codec_name'))=").push_bind(codec.to_lowercase()).push(") ");
-        }
-        if let Some(language) = &filter.language {
-            builder.push(" AND EXISTS(SELECT 1 FROM inventory_tracks ft WHERE ft.asset_id=fa.id AND lower(json_extract(json_extract(ft.metadata_json,'$.tags'),'$.language'))=").push_bind(language.to_lowercase()).push(") ");
-        }
-        builder.push(") ");
     }
-    if let Some(user) = &filter.user_id {
+    if has_parental_policy && let Some(user) = &filter.user_id {
         builder
             .push(" AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=")
             .push_bind(user)
@@ -1866,33 +2219,41 @@ fn push_catalogue_filters(builder: &mut sqlx::QueryBuilder<sqlx::Any>, filter: &
             .push(")) ");
     }
 }
+
+#[allow(clippy::too_many_arguments)]
 fn push_group_filter(
     builder: &mut sqlx::QueryBuilder<sqlx::Any>,
     filter: &CatalogueFilter,
-    visible: &[String],
+    valid_libs: &[String],
     search: &str,
+    has_groups: bool,
+    has_parental_policy: bool,
+    fast_avail: bool,
+    use_fts: bool,
 ) {
-    let Some(user) = &filter.user_id else {
+    if !has_groups {
         return;
-    };
-    builder.push(" AND (NOT EXISTS(SELECT 1 FROM media_group_members own_group WHERE own_group.work_id=w.id) OR w.id IN (SELECT COALESCE(MIN(CASE WHEN gn.status='connected' THEN w.id END),MIN(w.id)) FROM media_group_members gm JOIN inventory_works w ON w.id=gm.work_id JOIN libraries gl ON gl.id=w.library_id JOIN media_nodes gn ON gn.id=gl.node_id WHERE gl.enabled=1 AND gn.status!='revoked' AND (EXISTS(SELECT 1 FROM users gu WHERE gu.id=").push_bind(user).push(" AND gu.role='administrator') OR EXISTS(SELECT 1 FROM effective_library_permissions gp WHERE gp.library_id=gl.id AND gp.user_id=").push_bind(user).push(")) AND (w.kind!='film' OR EXISTS(SELECT 1 FROM inventory_editions ge JOIN inventory_versions gv ON gv.edition_id=ge.id JOIN inventory_sources gs ON gs.version_id=gv.id JOIN inventory_assets ga ON ga.source_id=gs.id WHERE ge.work_id=w.id AND ga.available=1 AND gs.root_snapshot=gl.root)) ");
+    }
+    builder.push(" AND (NOT EXISTS(SELECT 1 FROM media_group_members own_group WHERE own_group.work_id=w.id) OR w.id IN (SELECT COALESCE(MIN(CASE WHEN gn.status='connected' THEN w.id END),MIN(w.id)) FROM media_group_members gm JOIN inventory_works w ON w.id=gm.work_id JOIN libraries gl ON gl.id=w.library_id JOIN media_nodes gn ON gn.id=gl.node_id WHERE gl.enabled=1 AND gn.status!='revoked' ");
+    if let Some(user) = &filter.user_id {
+        builder.push(" AND (EXISTS(SELECT 1 FROM users gu WHERE gu.id=").push_bind(user).push(" AND gu.role='administrator') OR EXISTS(SELECT 1 FROM effective_library_permissions gp WHERE gp.library_id=gl.id AND gp.user_id=").push_bind(user).push(")) ");
+    }
+    if fast_avail {
+        builder.push(" AND (w.kind!='film' OR w.has_available_asset=1) ");
+    } else {
+        builder.push(" AND (w.kind!='film' OR EXISTS(SELECT 1 FROM inventory_editions ge JOIN inventory_versions gv ON gv.edition_id=ge.id JOIN inventory_sources gs ON gs.version_id=gv.id JOIN inventory_assets ga ON ga.source_id=gs.id WHERE ge.work_id=w.id AND ga.available=1 AND gs.root_snapshot=gl.root)) ");
+    }
     builder.push(" AND w.library_id IN (");
     let mut ids = builder.separated(",");
-    for id in visible {
+    for id in valid_libs {
         ids.push_bind(id);
     }
     ids.push_unseparated(") ");
-    if !search.is_empty() {
-        builder
-            .push(
-                " AND instr(lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)), ",
-            )
-            .push_bind(search.to_owned())
-            .push(")>0 ");
-    }
-    push_catalogue_filters(builder, filter);
+    push_search_filter(builder, search, use_fts, fast_avail);
+    push_catalogue_filters(builder, filter, has_parental_policy, fast_avail);
     builder.push(" GROUP BY gm.group_id)) ");
 }
+
 pub async fn catalogue(
     store: &IdentityStore,
     visible: &[String],
@@ -1914,6 +2275,7 @@ pub async fn catalogue(
     )
     .await
 }
+
 #[allow(clippy::too_many_arguments)]
 pub async fn catalogue_filtered(
     store: &IdentityStore,
@@ -1929,6 +2291,18 @@ pub async fn catalogue_filtered(
         store, visible, kind, search, sort, offset, limit, filter, true,
     )
     .await
+}
+
+static CATALOGUE_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, (String, Value)>>,
+> = std::sync::OnceLock::new();
+
+pub fn invalidate_catalogue_cache() {
+    if let Some(lock) = CATALOGUE_CACHE.get()
+        && let Ok(mut guard) = lock.lock()
+    {
+        guard.clear();
+    }
 }
 
 /// Bounded shelf queries can omit the full-library count and fetch one lookahead row.
@@ -1965,7 +2339,7 @@ pub async fn catalogue_page(
         return Ok(json!({
             "items": [],
             "total": if exact_count { Some(0usize) } else { None },
-                "hasMore": false,
+            "hasMore": false,
             "offset": offset,
             "limit": limit,
             "mode": "local-library",
@@ -1973,86 +2347,158 @@ pub async fn catalogue_page(
         }));
     }
 
-    let search_clean = search.trim().to_lowercase();
-    let has_search = !search_clean.is_empty();
-
-    let mut count_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
-        "SELECT COUNT(*) FROM inventory_works w WHERE w.library_id IN (",
+    let pool_id = format!("{:p}", &store.pool);
+    let cache_key = format!(
+        "{pool_id}|{:?}|{:?}|{}|{}|{}|{}|{:?}|{}",
+        visible, target_kind, search, sort, offset, limit, filter, exact_count
     );
-    let mut separated = count_builder.separated(", ");
+
+    let state_fp: i64 = query_scalar("SELECT gen FROM inventory_cache_generation WHERE id = 1")
+        .fetch_optional(&store.pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(0);
+
+    if state_fp > 0
+        && let Some(lock) = CATALOGUE_CACHE.get()
+        && let Ok(guard) = lock.lock()
+        && let Some((cached_fp, cached_val)) = guard.get(&cache_key)
+        && *cached_fp == state_fp.to_string()
+    {
+        return Ok(cached_val.clone());
+    }
+
+    // 1. Pre-filter visible libraries to enabled libraries on non-revoked nodes matching target_kind.
+    let mut lib_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
+        "SELECT l.id FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND n.status!='revoked' AND l.kind IN ('films','series') ",
+    );
+    match target_kind {
+        Some("film") => {
+            lib_builder.push("AND l.kind='films' ");
+        }
+        Some("series") => {
+            lib_builder.push("AND l.kind='series' ");
+        }
+        _ => {}
+    }
+    lib_builder.push("AND l.id IN (");
+    let mut lib_sep = lib_builder.separated(", ");
     for lib in visible {
+        lib_sep.push_bind(lib);
+    }
+    lib_sep.push_unseparated(")");
+    let lib_sql = crate::database::normalize_sql(lib_builder.sql().as_str());
+    let lib_args = lib_builder
+        .build()
+        .take_arguments()
+        .map_err(sqlx::Error::Encode)?
+        .unwrap_or_default();
+    let valid_libs: Vec<String> =
+        sqlx::query_scalar_with::<sqlx::Any, String, _>(sqlx::AssertSqlSafe(lib_sql), lib_args)
+            .fetch_all(&store.pool)
+            .await?;
+
+    if valid_libs.is_empty() {
+        return Ok(json!({
+            "items": [],
+            "total": if exact_count { Some(0usize) } else { None },
+            "hasMore": false,
+            "offset": offset,
+            "limit": limit,
+            "mode": "local-library",
+            "notice": "Bibliothèques locales indexées"
+        }));
+    }
+
+    // 2. Check if any work in valid_libs has `has_available_asset = 1` (using covering index `inventory_works_lib_avail_sort` in O(1))
+    //    and whether any library root has diverged from its works' sources.
+    let mut fast_check_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
+        "SELECT CAST(EXISTS(SELECT 1 FROM inventory_works w WHERE w.library_id IN (",
+    );
+    let mut fc_sep = fast_check_builder.separated(", ");
+    for lib in &valid_libs {
+        fc_sep.push_bind(lib);
+    }
+    fc_sep.push_unseparated(
+        ") AND w.has_available_asset = 1 LIMIT 1) AS BIGINT) - \
+         2 * CAST(EXISTS(SELECT 1 FROM libraries l WHERE l.id IN (",
+    );
+    let mut fc_sep2 = fast_check_builder.separated(", ");
+    for lib in &valid_libs {
+        fc_sep2.push_bind(lib);
+    }
+    fc_sep2.push_unseparated(
+        ") AND EXISTS(SELECT 1 FROM inventory_sources s WHERE s.library_id = l.id AND s.root_snapshot != l.root LIMIT 1)) AS BIGINT)",
+    );
+    let fc_sql = crate::database::normalize_sql(fast_check_builder.sql().as_str());
+    let fc_args = fast_check_builder
+        .build()
+        .take_arguments()
+        .map_err(sqlx::Error::Encode)?
+        .unwrap_or_default();
+    let fc_val: i64 =
+        sqlx::query_scalar_with::<sqlx::Any, i64, _>(sqlx::AssertSqlSafe(fc_sql), fc_args)
+            .fetch_one(&store.pool)
+            .await
+            .unwrap_or(0);
+    let fast_avail = fc_val > 0;
+
+    // 3. Check if any media groups or parental policies exist.
+    let has_groups: bool = query_scalar::<_, i64>(
+        "SELECT CAST(EXISTS(SELECT 1 FROM media_group_members LIMIT 1) AS BIGINT)",
+    )
+    .fetch_one(&store.pool)
+    .await?
+        != 0;
+
+    let has_parental_policy: bool = if let Some(uid) = &filter.user_id {
+        query_scalar::<_, i64>(
+            "SELECT CAST(EXISTS(SELECT 1 FROM parental_policies WHERE user_id=?) AS BIGINT)",
+        )
+        .bind(uid)
+        .fetch_one(&store.pool)
+        .await?
+            != 0
+    } else {
+        false
+    };
+
+    let use_fts: bool = query_scalar::<_, i64>(
+        "SELECT CAST(EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory_works_fts') AS BIGINT)",
+    )
+    .fetch_one(&store.pool)
+    .await
+    .unwrap_or(0)
+        != 0;
+    let search_clean = search.trim().to_lowercase();
+    let use_fts_index = use_fts && search_clean.chars().count() >= 3;
+
+    let mut count_builder = sqlx::QueryBuilder::<sqlx::Any>::new(if use_fts_index {
+        "SELECT COUNT(*) FROM inventory_works w INDEXED BY inventory_works_fts_sort WHERE w.library_id IN ("
+    } else {
+        "SELECT COUNT(*) FROM inventory_works w WHERE w.library_id IN ("
+    });
+    let mut separated = count_builder.separated(", ");
+    for lib in &valid_libs {
         separated.push_bind(lib);
     }
     separated.push_unseparated(") ");
 
-    if has_search {
-        count_builder.push(
-            "AND instr(lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)), ",
-        );
-        count_builder.push_bind(&search_clean);
-        count_builder.push(") > 0 ");
-    }
+    push_search_filter(&mut count_builder, &search_clean, use_fts, fast_avail);
+    push_availability_filter(&mut count_builder, target_kind, fast_avail);
+    push_catalogue_filters(&mut count_builder, filter, has_parental_policy, fast_avail);
+    push_group_filter(
+        &mut count_builder,
+        filter,
+        &valid_libs,
+        &search_clean,
+        has_groups,
+        has_parental_policy,
+        fast_avail,
+        use_fts,
+    );
 
-    match target_kind {
-        Some("film") => {
-            count_builder.push(
-                "AND w.kind = 'film' AND EXISTS ( \
-                   SELECT 1 FROM inventory_editions e \
-                   JOIN inventory_versions v ON v.edition_id=e.id \
-                   JOIN inventory_sources s ON s.version_id=v.id \
-                   JOIN inventory_assets a ON a.source_id=s.id \
-                   JOIN libraries l ON l.id=s.library_id \
-                   JOIN media_nodes n ON n.id=l.node_id \
-                   WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND n.status != 'revoked' AND l.enabled=1 \
-                 )",
-            );
-        }
-        Some("series") => {
-            count_builder.push(
-                "AND w.kind = 'series' AND EXISTS ( \
-                   SELECT 1 FROM inventory_seasons s \
-                   JOIN inventory_episodes ep ON ep.season_id=s.id \
-                   JOIN inventory_editions e ON e.work_id=ep.work_id \
-                   JOIN inventory_versions v ON v.edition_id=e.id \
-                   JOIN inventory_sources src ON src.version_id=v.id \
-                   JOIN inventory_assets a ON a.source_id=src.id \
-                   JOIN libraries l ON l.id=src.library_id \
-                   JOIN media_nodes n ON n.id=l.node_id \
-                   WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
-                 )",
-            );
-        }
-        _ => {
-            count_builder.push(
-                "AND ( \
-                   (w.kind = 'film' AND EXISTS ( \
-                      SELECT 1 FROM inventory_editions e \
-                      JOIN inventory_versions v ON v.edition_id=e.id \
-                      JOIN inventory_sources s ON s.version_id=v.id \
-                      JOIN inventory_assets a ON a.source_id=s.id \
-                      JOIN libraries l ON l.id=s.library_id \
-                      JOIN media_nodes n ON n.id=l.node_id \
-                      WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND n.status != 'revoked' AND l.enabled=1 \
-                   )) \
-                   OR \
-                   (w.kind = 'series' AND EXISTS ( \
-                      SELECT 1 FROM inventory_seasons s \
-                      JOIN inventory_episodes ep ON ep.season_id=s.id \
-                      JOIN inventory_editions e ON e.work_id=ep.work_id \
-                      JOIN inventory_versions v ON v.edition_id=e.id \
-                      JOIN inventory_sources src ON src.version_id=v.id \
-                      JOIN inventory_assets a ON a.source_id=src.id \
-                      JOIN libraries l ON l.id=src.library_id \
-                      JOIN media_nodes n ON n.id=l.node_id \
-                      WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
-                   )) \
-                 )",
-            );
-        }
-    }
-
-    push_catalogue_filters(&mut count_builder, filter);
-    push_group_filter(&mut count_builder, filter, visible, &search_clean);
     let count_sql = crate::database::normalize_sql(count_builder.sql().as_str());
     let arguments = count_builder
         .build()
@@ -2077,11 +2523,99 @@ pub async fn catalogue_page(
         }));
     }
 
-    // Artwork is resolved once per page by decorate_many below, including hidden
-    // images and manual ordering; correlated per-work image reads are redundant.
+    // Phase 1: Select only matching `w.id`s ordered by the sort key using the covering index
+    // (no table heap fetch or joins to libraries/media_nodes during pagination scan).
+    let mut id_builder = sqlx::QueryBuilder::<sqlx::Any>::new(if use_fts_index {
+        "SELECT w.id FROM inventory_works w INDEXED BY inventory_works_fts_sort WHERE w.library_id IN ("
+    } else {
+        "SELECT w.id FROM inventory_works w WHERE w.library_id IN ("
+    });
+    let mut separated = id_builder.separated(", ");
+    for lib in &valid_libs {
+        separated.push_bind(lib);
+    }
+    separated.push_unseparated(") ");
+
+    push_search_filter(&mut id_builder, &search_clean, use_fts, fast_avail);
+    push_availability_filter(&mut id_builder, target_kind, fast_avail);
+    push_catalogue_filters(&mut id_builder, filter, has_parental_policy, fast_avail);
+    push_group_filter(
+        &mut id_builder,
+        filter,
+        &valid_libs,
+        &search_clean,
+        has_groups,
+        has_parental_policy,
+        fast_avail,
+        use_fts,
+    );
+
+    match sort {
+        "title-desc" => {
+            id_builder.push("ORDER BY w.display_title_sort DESC, w.id DESC ");
+        }
+        "year-asc" => {
+            id_builder.push("ORDER BY w.effective_year IS NULL, w.effective_year ASC, w.display_title_sort ASC, w.id ASC ");
+        }
+        "year-desc" => {
+            id_builder.push("ORDER BY w.effective_year IS NULL, w.effective_year DESC, w.display_title_sort ASC, w.id ASC ");
+        }
+        "added-desc" => {
+            id_builder.push(
+                "ORDER BY w.added_at IS NULL, w.added_at DESC, w.display_title_sort ASC, w.id ASC ",
+            );
+        }
+        "added-asc" => {
+            id_builder.push(
+                "ORDER BY w.added_at IS NULL, w.added_at ASC, w.display_title_sort ASC, w.id ASC ",
+            );
+        }
+        _ => {
+            id_builder.push("ORDER BY w.display_title_sort ASC, w.id ASC ");
+        }
+    }
+
+    id_builder.push("LIMIT ");
+    id_builder.push_bind(limit.saturating_add(usize::from(!exact_count)) as i64);
+    id_builder.push(" OFFSET ");
+    id_builder.push_bind(offset as i64);
+
+    let id_sql = crate::database::normalize_sql(id_builder.sql().as_str());
+    let id_args = id_builder
+        .build()
+        .take_arguments()
+        .map_err(sqlx::Error::Encode)?
+        .unwrap_or_default();
+    let page_ids: Vec<String> =
+        sqlx::query_scalar_with::<sqlx::Any, String, _>(sqlx::AssertSqlSafe(id_sql), id_args)
+            .fetch_all(&store.pool)
+            .await?;
+
+    let has_more = total.map_or(page_ids.len() > limit, |total| {
+        offset.saturating_add(page_ids.len()) < total
+    });
+    let fetch_ids: Vec<&String> = page_ids.iter().take(limit).collect();
+    if fetch_ids.is_empty() {
+        return Ok(json!({
+            "items": [],
+            "total": total,
+            "hasMore": false,
+            "offset": offset,
+            "limit": limit,
+            "mode": "local-library",
+            "notice": "Bibliothèques locales indexées"
+        }));
+    }
+
+    // Phase 2: Fetch full work details only for the <= `limit` selected work IDs.
     let mut data_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
         "SELECT w.*, COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=w.library_id AND f.active=1),w.library_id) AS display_library_id, wl.node_id AS node_id, wn.status AS node_status, \
            CASE WHEN w.kind = 'series' THEN ( \
+             CASE WHEN w.season_count_cached > 0 AND ",
+    );
+    data_builder.push(if fast_avail { "1=1" } else { "1=0" });
+    data_builder.push(
+        " THEN w.season_count_cached ELSE ( \
              SELECT COUNT(DISTINCT s.id) FROM inventory_seasons s \
              JOIN inventory_episodes ep ON ep.season_id=s.id \
              JOIN inventory_editions e ON e.work_id=ep.work_id \
@@ -2091,8 +2625,13 @@ pub async fn catalogue_page(
              JOIN libraries l ON l.id=src.library_id \
              JOIN media_nodes n ON n.id=l.node_id \
              WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
-           ) ELSE NULL END AS season_count, \
+           ) END) ELSE NULL END AS season_count, \
            CASE WHEN w.kind = 'series' THEN ( \
+             CASE WHEN w.episode_count_cached > 0 AND ",
+    );
+    data_builder.push(if fast_avail { "1=1" } else { "1=0" });
+    data_builder.push(
+        " THEN w.episode_count_cached ELSE ( \
              SELECT COUNT(DISTINCT ep.id) FROM inventory_seasons s \
              JOIN inventory_episodes ep ON ep.season_id=s.id \
              JOIN inventory_editions e ON e.work_id=ep.work_id \
@@ -2102,112 +2641,18 @@ pub async fn catalogue_page(
              JOIN libraries l ON l.id=src.library_id \
              JOIN media_nodes n ON n.id=l.node_id \
              WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
-           ) ELSE NULL END AS episode_count, \
+           ) END) ELSE NULL END AS episode_count, \
            CAST(NULL AS TEXT) AS poster_url, CAST(NULL AS TEXT) AS backdrop_url, CAST(NULL AS TEXT) AS logo_url \
          FROM inventory_works w \
          JOIN libraries wl ON wl.id=w.library_id \
          JOIN media_nodes wn ON wn.id=wl.node_id \
-         WHERE w.library_id IN (",
+         WHERE w.id IN (",
     );
-    let mut separated = data_builder.separated(", ");
-    for lib in visible {
-        separated.push_bind(lib);
+    let mut id_sep = data_builder.separated(", ");
+    for id in &fetch_ids {
+        id_sep.push_bind(*id);
     }
-    separated.push_unseparated(") ");
-
-    if has_search {
-        data_builder.push(
-            "AND instr(lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)), ",
-        );
-        data_builder.push_bind(&search_clean);
-        data_builder.push(") > 0 ");
-    }
-
-    match target_kind {
-        Some("film") => {
-            data_builder.push(
-                "AND w.kind = 'film' AND EXISTS ( \
-                   SELECT 1 FROM inventory_editions e \
-                   JOIN inventory_versions v ON v.edition_id=e.id \
-                   JOIN inventory_sources s ON s.version_id=v.id \
-                   JOIN inventory_assets a ON a.source_id=s.id \
-                   JOIN libraries l ON l.id=s.library_id \
-                   JOIN media_nodes n ON n.id=l.node_id \
-                   WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND n.status != 'revoked' AND l.enabled=1 \
-                 ) ",
-            );
-        }
-        Some("series") => {
-            data_builder.push(
-                "AND w.kind = 'series' AND EXISTS ( \
-                   SELECT 1 FROM inventory_seasons s \
-                   JOIN inventory_episodes ep ON ep.season_id=s.id \
-                   JOIN inventory_editions e ON e.work_id=ep.work_id \
-                   JOIN inventory_versions v ON v.edition_id=e.id \
-                   JOIN inventory_sources src ON src.version_id=v.id \
-                   JOIN inventory_assets a ON a.source_id=src.id \
-                   JOIN libraries l ON l.id=src.library_id \
-                   JOIN media_nodes n ON n.id=l.node_id \
-                   WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
-                 ) ",
-            );
-        }
-        _ => {
-            data_builder.push(
-                "AND ( \
-                   (w.kind = 'film' AND EXISTS ( \
-                      SELECT 1 FROM inventory_editions e \
-                      JOIN inventory_versions v ON v.edition_id=e.id \
-                      JOIN inventory_sources s ON s.version_id=v.id \
-                      JOIN inventory_assets a ON a.source_id=s.id \
-                      JOIN libraries l ON l.id=s.library_id \
-                      JOIN media_nodes n ON n.id=l.node_id \
-                      WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.kind='films' AND n.status != 'revoked' AND l.enabled=1 \
-                   )) \
-                   OR \
-                   (w.kind = 'series' AND EXISTS ( \
-                      SELECT 1 FROM inventory_seasons s \
-                      JOIN inventory_episodes ep ON ep.season_id=s.id \
-                      JOIN inventory_editions e ON e.work_id=ep.work_id \
-                      JOIN inventory_versions v ON v.edition_id=e.id \
-                      JOIN inventory_sources src ON src.version_id=v.id \
-                      JOIN inventory_assets a ON a.source_id=src.id \
-                      JOIN libraries l ON l.id=src.library_id \
-                      JOIN media_nodes n ON n.id=l.node_id \
-                      WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
-                   )) \
-                 ) ",
-            );
-        }
-    }
-
-    push_catalogue_filters(&mut data_builder, filter);
-    push_group_filter(&mut data_builder, filter, visible, &search_clean);
-    match sort {
-        "title-desc" => {
-            data_builder.push("ORDER BY lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)) DESC, w.id DESC ");
-        }
-        "year-asc" => {
-            data_builder.push("ORDER BY w.year IS NULL, w.year ASC, w.title_sort, w.id ");
-        }
-        "year-desc" => {
-            data_builder.push("ORDER BY w.year IS NULL, w.year DESC, w.title_sort, w.id ");
-        }
-        "added-desc" => {
-            data_builder.push("ORDER BY w.added_at IS NULL, w.added_at DESC, w.title_sort, w.id ");
-        }
-        "added-asc" => {
-            data_builder.push("ORDER BY w.added_at IS NULL, w.added_at ASC, w.title_sort, w.id ");
-        }
-        _ => {
-            data_builder.push("ORDER BY lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)) ASC, w.id ASC ");
-        }
-    }
-
-    data_builder.push("LIMIT ");
-    data_builder.push_bind(limit.saturating_add(usize::from(!exact_count)) as i64);
-    data_builder.push(" OFFSET ");
-    data_builder.push_bind(offset as i64);
+    id_sep.push_unseparated(")");
 
     let data_sql = crate::database::normalize_sql(data_builder.sql().as_str());
     let arguments = data_builder
@@ -2218,13 +2663,18 @@ pub async fn catalogue_page(
     let rows = sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(data_sql), arguments)
         .fetch_all(&store.pool)
         .await?;
-    let has_more = total.map_or(rows.len() > limit, |total| {
-        offset.saturating_add(rows.len()) < total
-    });
-    let mut items: Vec<Value> = rows.iter().take(limit).map(work).collect();
+    let mut row_map = std::collections::HashMap::with_capacity(rows.len());
+    for row in &rows {
+        let wid: String = row.get("id");
+        row_map.insert(wid, work(row));
+    }
+    let mut items: Vec<Value> = fetch_ids
+        .iter()
+        .filter_map(|id| row_map.remove(*id))
+        .collect();
     crate::product::decorate_many(store, &mut items).await?;
 
-    Ok(json!({
+    let response = json!({
         "items": items,
         "total": total,
         "hasMore": has_more,
@@ -2232,17 +2682,113 @@ pub async fn catalogue_page(
         "limit": limit,
         "mode": "local-library",
         "notice": "Bibliothèques locales indexées"
-    }))
+    });
+
+    if state_fp > 0 {
+        let lock =
+            CATALOGUE_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+        if let Ok(mut guard) = lock.lock() {
+            if guard.len() > 512 {
+                guard.clear();
+            }
+            guard.insert(cache_key, (state_fp.to_string(), response.clone()));
+        }
+    }
+
+    Ok(response)
+}
+
+pub(crate) fn sort_edition_sources_by_score(editions: &mut [Value]) {
+    for edition in editions.iter_mut() {
+        if let Some(versions) = edition["versions"].as_array_mut() {
+            for version in versions.iter_mut() {
+                if let Some(sources) = version["sources"].as_array_mut() {
+                    sources.sort_by(|a, b| {
+                        let sa = a["score"].as_i64().unwrap_or(0);
+                        let sb = b["score"].as_i64().unwrap_or(0);
+                        sb.cmp(&sa).then_with(|| {
+                            let ida = a["id"].as_str().unwrap_or_default();
+                            let idb = b["id"].as_str().unwrap_or_default();
+                            ida.cmp(idb)
+                        })
+                    });
+                }
+            }
+            versions.sort_by(|a, b| {
+                let sa = a["sources"]
+                    .as_array()
+                    .and_then(|s| s.first())
+                    .and_then(|s| s["score"].as_i64())
+                    .unwrap_or(0);
+                let sb = b["sources"]
+                    .as_array()
+                    .and_then(|s| s.first())
+                    .and_then(|s| s["score"].as_i64())
+                    .unwrap_or(0);
+                sb.cmp(&sa).then_with(|| {
+                    let ida = a["id"].as_str().unwrap_or_default();
+                    let idb = b["id"].as_str().unwrap_or_default();
+                    ida.cmp(idb)
+                })
+            });
+        }
+    }
+}
+
+pub(crate) fn refresh_work_availability_from_editions(value: &mut Value) {
+    let best_from_editions = value["editions"].as_array().and_then(|editions| {
+        if editions.is_empty() {
+            return None;
+        }
+        editions
+            .iter()
+            .flat_map(|ed| ed["versions"].as_array().into_iter().flatten())
+            .flat_map(|ver| ver["sources"].as_array().into_iter().flatten())
+            .max_by_key(|src| src["score"].as_i64().unwrap_or(i64::MIN))
+            .map(|best_src| {
+                (
+                    best_src["nodeStatus"]
+                        .as_str()
+                        .unwrap_or("connected")
+                        .to_string(),
+                    best_src["nodeId"].as_str().map(str::to_string),
+                )
+            })
+    });
+    if let Some((best_status, best_nid)) = best_from_editions {
+        let any_connected = best_status == "connected";
+        value["available"] = json!(any_connected);
+        value["nodeStatus"] = json!(best_status);
+        if let Some(nid) = best_nid {
+            value["nodeId"] = json!(nid);
+        }
+    } else if let Some(seasons) = value["seasons"].as_array()
+        && !seasons.is_empty()
+    {
+        let any_ep_available = seasons
+            .iter()
+            .flat_map(|s| s["episodes"].as_array().into_iter().flatten())
+            .any(|ep| ep["available"].as_bool().unwrap_or(false));
+        if any_ep_available {
+            value["available"] = json!(true);
+            value["nodeStatus"] = json!("connected");
+        }
+    }
 }
 
 async fn load_work_editions(
-    pool: &sqlx::AnyPool,
+    store: &IdentityStore,
     work_id: &str,
 ) -> Result<Vec<Value>, sqlx::Error> {
+    crate::nodes::ensure_node_registry_warm(store).await?;
     let rows = query(
-        "SELECT e.id AS edition_id, v.id AS version_id, s.id AS source_id, a.id AS asset_id \
+        "SELECT e.id AS edition_id, COALESCE(em.label, 'Édition locale') AS edition_label, \
+                v.id AS version_id, COALESCE(vm.label, 'Version locale') AS version_label, \
+                s.id AS source_id, a.id AS asset_id, a.mime AS mime, l.node_id AS node_id \
          FROM inventory_editions e \
+         LEFT JOIN inventory_edition_metadata em ON em.edition_id=e.id \
          JOIN inventory_versions v ON v.edition_id=e.id \
+         LEFT JOIN inventory_version_metadata vm ON vm.version_id=v.id \
          JOIN inventory_sources s ON s.version_id=v.id \
          JOIN inventory_assets a ON a.source_id=s.id \
          JOIN libraries l ON l.id=s.library_id \
@@ -2251,84 +2797,109 @@ async fn load_work_editions(
          ORDER BY e.id, v.id, s.id, a.id",
     )
     .bind(work_id)
-    .fetch_all(pool)
+    .fetch_all(&store.pool)
     .await?;
 
+    let now = media_contracts::protocol::unix_now();
     let mut editions = Vec::new();
     let mut current_edition_id = String::new();
+    let mut current_edition_label = String::from("Édition locale");
     let mut current_version_id = String::new();
+    let mut current_version_label = String::from("Version locale");
     let mut current_versions = Vec::new();
     let mut current_sources = Vec::new();
 
     for row in rows {
         let edition_id: String = row.get("edition_id");
+        let edition_label: String = row.get("edition_label");
         let version_id: String = row.get("version_id");
+        let version_label: String = row.get("version_label");
         let source_id: String = row.get("source_id");
         let asset_id: String = row.get("asset_id");
+        let mime: String = row.get("mime");
+        let node_id: String = row.get("node_id");
+
+        let (node_status, conn_mode, score) = match store.node_registry.get(&node_id) {
+            Some(entry) => crate::nodes::score_node_entry(&entry, Some(&mime), None, now),
+            None => ("connected".to_owned(), "local".to_owned(), 12_000),
+        };
 
         if edition_id != current_edition_id {
             if !current_sources.is_empty() {
                 current_versions.push(json!({
                     "id": current_version_id,
-                    "label": "Version locale",
+                    "label": current_version_label,
                     "sources": std::mem::take(&mut current_sources)
                 }));
             }
             if !current_versions.is_empty() {
                 editions.push(json!({
                     "id": current_edition_id,
-                    "label": "Édition locale",
+                    "label": current_edition_label,
                     "versions": std::mem::take(&mut current_versions)
                 }));
             }
             current_edition_id = edition_id;
+            current_edition_label = edition_label;
             current_version_id = version_id.clone();
+            current_version_label = version_label;
         } else if version_id != current_version_id {
             if !current_sources.is_empty() {
                 current_versions.push(json!({
                     "id": current_version_id,
-                    "label": "Version locale",
+                    "label": current_version_label,
                     "sources": std::mem::take(&mut current_sources)
                 }));
             }
             current_version_id = version_id.clone();
+            current_version_label = version_label;
         }
 
         current_sources.push(json!({
             "id": source_id,
             "assetIds": [asset_id.clone()],
-            "playbackMediaId": asset_id
+            "playbackMediaId": asset_id,
+            "nodeId": node_id,
+            "nodeStatus": node_status,
+            "connectionMode": conn_mode,
+            "score": score
         }));
     }
 
     if !current_sources.is_empty() {
         current_versions.push(json!({
             "id": current_version_id,
-            "label": "Version locale",
+            "label": current_version_label,
             "sources": current_sources
         }));
     }
     if !current_versions.is_empty() {
         editions.push(json!({
             "id": current_edition_id,
-            "label": "Édition locale",
+            "label": current_edition_label,
             "versions": current_versions
         }));
     }
 
+    sort_edition_sources_by_score(&mut editions);
     Ok(editions)
 }
 
 async fn load_series_editions(
-    pool: &sqlx::AnyPool,
+    store: &IdentityStore,
     series_id: &str,
 ) -> Result<HashMap<String, Vec<Value>>, sqlx::Error> {
+    crate::nodes::ensure_node_registry_warm(store).await?;
     let rows = query(
-        "SELECT e.work_id, e.id AS edition_id, v.id AS version_id, s.id AS source_id, a.id AS asset_id \
+        "SELECT e.work_id, e.id AS edition_id, COALESCE(em.label, 'Édition locale') AS edition_label, \
+                v.id AS version_id, COALESCE(vm.label, 'Version locale') AS version_label, \
+                s.id AS source_id, a.id AS asset_id, a.mime AS mime, l.node_id AS node_id \
          FROM inventory_seasons se \
          JOIN inventory_episodes ep ON ep.season_id=se.id \
          JOIN inventory_editions e ON e.work_id=ep.work_id \
+         LEFT JOIN inventory_edition_metadata em ON em.edition_id=e.id \
          JOIN inventory_versions v ON v.edition_id=e.id \
+         LEFT JOIN inventory_version_metadata vm ON vm.version_id=v.id \
          JOIN inventory_sources s ON s.version_id=v.id \
          JOIN inventory_assets a ON a.source_id=s.id \
          JOIN libraries l ON l.id=s.library_id \
@@ -2337,95 +2908,118 @@ async fn load_series_editions(
          ORDER BY e.work_id, e.id, v.id, s.id, a.id",
     )
     .bind(series_id)
-    .fetch_all(pool)
+    .fetch_all(&store.pool)
     .await?;
 
+    let now = media_contracts::protocol::unix_now();
     let mut map: HashMap<String, Vec<Value>> = HashMap::new();
     let mut current_work_id = String::new();
     let mut editions = Vec::new();
     let mut current_edition_id = String::new();
+    let mut current_edition_label = String::from("Édition locale");
     let mut current_version_id = String::new();
+    let mut current_version_label = String::from("Version locale");
     let mut current_versions = Vec::new();
     let mut current_sources = Vec::new();
 
     for row in rows {
         let work_id: String = row.get("work_id");
         let edition_id: String = row.get("edition_id");
+        let edition_label: String = row.get("edition_label");
         let version_id: String = row.get("version_id");
+        let version_label: String = row.get("version_label");
         let source_id: String = row.get("source_id");
         let asset_id: String = row.get("asset_id");
+        let mime: String = row.get("mime");
+        let node_id: String = row.get("node_id");
+
+        let (node_status, conn_mode, score) = match store.node_registry.get(&node_id) {
+            Some(entry) => crate::nodes::score_node_entry(&entry, Some(&mime), None, now),
+            None => ("connected".to_owned(), "local".to_owned(), 12_000),
+        };
 
         if work_id != current_work_id {
             if !current_sources.is_empty() {
                 current_versions.push(json!({
                     "id": current_version_id,
-                    "label": "Version locale",
+                    "label": current_version_label,
                     "sources": std::mem::take(&mut current_sources)
                 }));
             }
             if !current_versions.is_empty() {
                 editions.push(json!({
                     "id": current_edition_id,
-                    "label": "Édition locale",
+                    "label": current_edition_label,
                     "versions": std::mem::take(&mut current_versions)
                 }));
             }
             if !editions.is_empty() {
+                sort_edition_sources_by_score(&mut editions);
                 map.insert(current_work_id, std::mem::take(&mut editions));
             }
             current_work_id = work_id;
             current_edition_id = edition_id;
+            current_edition_label = edition_label;
             current_version_id = version_id.clone();
+            current_version_label = version_label;
         } else if edition_id != current_edition_id {
             if !current_sources.is_empty() {
                 current_versions.push(json!({
                     "id": current_version_id,
-                    "label": "Version locale",
+                    "label": current_version_label,
                     "sources": std::mem::take(&mut current_sources)
                 }));
             }
             if !current_versions.is_empty() {
                 editions.push(json!({
                     "id": current_edition_id,
-                    "label": "Édition locale",
+                    "label": current_edition_label,
                     "versions": std::mem::take(&mut current_versions)
                 }));
             }
             current_edition_id = edition_id;
+            current_edition_label = edition_label;
             current_version_id = version_id.clone();
+            current_version_label = version_label;
         } else if version_id != current_version_id {
             if !current_sources.is_empty() {
                 current_versions.push(json!({
                     "id": current_version_id,
-                    "label": "Version locale",
+                    "label": current_version_label,
                     "sources": std::mem::take(&mut current_sources)
                 }));
             }
             current_version_id = version_id.clone();
+            current_version_label = version_label;
         }
 
         current_sources.push(json!({
             "id": source_id,
             "assetIds": [asset_id.clone()],
-            "playbackMediaId": asset_id
+            "playbackMediaId": asset_id,
+            "nodeId": node_id,
+            "nodeStatus": node_status,
+            "connectionMode": conn_mode,
+            "score": score
         }));
     }
 
     if !current_sources.is_empty() {
         current_versions.push(json!({
             "id": current_version_id,
-            "label": "Version locale",
+            "label": current_version_label,
             "sources": current_sources
         }));
     }
     if !current_versions.is_empty() {
         editions.push(json!({
             "id": current_edition_id,
-            "label": "Édition locale",
+            "label": current_edition_label,
             "versions": current_versions
         }));
     }
     if !editions.is_empty() {
+        sort_edition_sources_by_score(&mut editions);
         map.insert(current_work_id, editions);
     }
 
@@ -2516,7 +3110,7 @@ pub async fn detail_window(
         .fetch_all(&store.pool)
         .await?;
 
-        let mut editions_by_work = load_series_editions(&store.pool, work_id).await?;
+        let mut editions_by_work = load_series_editions(store, work_id).await?;
 
         let mut episodes_by_season: HashMap<String, Vec<Value>> = HashMap::new();
         let mut total_episodes = 0;
@@ -2533,6 +3127,7 @@ pub async fn detail_window(
                 ep_val["kind"] = json!("episode");
                 ep_val["number"] = json!(ep_num);
                 ep_val["editions"] = json!(editions);
+                refresh_work_availability_from_editions(&mut ep_val);
                 episodes_by_season
                     .entry(season_id)
                     .or_default()
@@ -2563,10 +3158,12 @@ pub async fn detail_window(
         value["episodeCount"] = json!(total_episodes);
         value["seasons"] = json!(seasons_val);
         value["editions"] = json!([]);
+        refresh_work_availability_from_editions(&mut value);
     } else {
-        let editions = load_work_editions(&store.pool, work_id).await?;
+        let editions = load_work_editions(store, work_id).await?;
         value["editions"] = json!(editions);
         value["seasons"] = json!([]);
+        refresh_work_availability_from_editions(&mut value);
     }
 
     Ok(Some(value))
@@ -2663,7 +3260,8 @@ async fn populate_episode_page(
         episode["kind"] = json!("episode");
         episode["number"] = json!(row.get::<i64, _>("episode_number"));
         episode["seasonNumber"] = json!(row.get::<i64, _>("season_number"));
-        episode["editions"] = json!(load_work_editions(&store.pool, &id).await?);
+        episode["editions"] = json!(load_work_editions(store, &id).await?);
+        refresh_work_availability_from_editions(&mut episode);
         by_season
             .entry(row.get("season_id"))
             .or_default()
@@ -2689,8 +3287,19 @@ pub async fn descriptor(
     asset_id: &str,
     session_hash: &str,
 ) -> Result<Option<Value>, sqlx::Error> {
+    descriptor_for_user(store, asset_id, session_hash, None, None).await
+}
+
+pub async fn descriptor_for_user(
+    store: &IdentityStore,
+    asset_id: &str,
+    session_hash: &str,
+    user_id: Option<&str>,
+    visible_libraries: Option<&[String]>,
+) -> Result<Option<Value>, sqlx::Error> {
+    crate::nodes::ensure_node_registry_warm(store).await?;
     let row = query(
-        "SELECT a.mime, a.probe_json, a.library_id, COALESCE(json_extract(w.manual_json,'$.title'),w.title) AS title, w.id AS work_id, l.node_id, t.subtitles_json, au.audios_json \
+        "SELECT a.id AS asset_id, a.mime, a.probe_json, a.library_id, COALESCE(json_extract(w.manual_json,'$.title'),w.title) AS title, w.id AS work_id, w.kind AS work_kind, l.node_id, t.subtitles_json, au.audios_json \
          FROM inventory_assets a \
          LEFT JOIN inventory_subtitles t ON t.asset_id=a.id \
          LEFT JOIN inventory_audio au ON au.asset_id=a.id \
@@ -2705,25 +3314,178 @@ pub async fn descriptor(
     .bind(asset_id)
     .fetch_optional(&store.pool)
     .await?;
-    let Some(row) = row else { return Ok(None) };
+    let Some(initial_row) = row else {
+        return Ok(None);
+    };
+
+    let initial_work_id: String = initial_row.get("work_id");
+    let initial_work_kind: String = initial_row.get("work_kind");
+    let initial_node_id: String = initial_row.get("node_id");
+    let initial_mime: String = initial_row.get("mime");
+
+    let now = media_contracts::protocol::unix_now();
+    let (initial_node_status, initial_conn_mode, initial_score) =
+        match store.node_registry.get(&initial_node_id) {
+            Some(entry) => crate::nodes::score_node_entry(&entry, Some(&initial_mime), None, now),
+            None => ("connected".to_owned(), "local".to_owned(), 12_000),
+        };
+
+    // Resolve all available sibling copies across multi-location folders and consolidated work groups
+    let sibling_rows = if initial_work_kind == "episode" {
+        query(
+            "SELECT a.id AS asset_id, a.mime, a.library_id, l.node_id, w.id AS work_id \
+             FROM inventory_episodes ep_orig \
+             JOIN inventory_seasons s_orig ON s_orig.id=ep_orig.season_id \
+             JOIN inventory_seasons s_cand ON s_cand.season_number=s_orig.season_number \
+                  AND (s_cand.series_id=s_orig.series_id OR s_cand.series_id IN ( \
+                      SELECT m2.work_id FROM media_group_members m1 \
+                      JOIN media_group_members m2 ON m2.group_id=m1.group_id \
+                      WHERE m1.work_id=s_orig.series_id \
+                  )) \
+             JOIN inventory_episodes ep_cand ON ep_cand.season_id=s_cand.id AND ep_cand.episode_number=ep_orig.episode_number \
+             JOIN inventory_editions e ON e.work_id=ep_cand.work_id \
+             JOIN inventory_versions v ON v.edition_id=e.id \
+             JOIN inventory_sources s ON s.version_id=v.id \
+             JOIN inventory_assets a ON a.source_id=s.id \
+             JOIN inventory_works w ON w.id=e.work_id \
+             JOIN libraries l ON l.id=s.library_id \
+             JOIN media_nodes n ON n.id=l.node_id \
+             WHERE ep_orig.work_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.enabled=1",
+        )
+        .bind(&initial_work_id)
+        .fetch_all(&store.pool)
+        .await
+        .unwrap_or_default()
+    } else {
+        query(
+            "SELECT a.id AS asset_id, a.mime, a.library_id, l.node_id, w.id AS work_id \
+             FROM inventory_editions e \
+             JOIN inventory_versions v ON v.edition_id=e.id \
+             JOIN inventory_sources s ON s.version_id=v.id \
+             JOIN inventory_assets a ON a.source_id=s.id \
+             JOIN inventory_works w ON w.id=e.work_id \
+             JOIN libraries l ON l.id=s.library_id \
+             JOIN media_nodes n ON n.id=l.node_id \
+             WHERE (e.work_id=? OR e.work_id IN ( \
+                 SELECT m2.work_id FROM media_group_members m1 \
+                 JOIN media_group_members m2 ON m2.group_id=m1.group_id \
+                 WHERE m1.work_id=? \
+             )) AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.enabled=1",
+        )
+        .bind(&initial_work_id)
+        .bind(&initial_work_id)
+        .fetch_all(&store.pool)
+        .await
+        .unwrap_or_default()
+    };
+
+    let mut ranked_siblings: Vec<(String, String, i64)> = Vec::new();
+    for srow in sibling_rows {
+        let cand_asset_id: String = srow.get("asset_id");
+        let cand_lib_id: String = srow.get("library_id");
+        let cand_node_id: String = srow.get("node_id");
+        let cand_mime: String = srow.get("mime");
+        let cand_work_id: String = srow.get("work_id");
+
+        if let Some(vis) = visible_libraries
+            && !vis.contains(&cand_lib_id)
+        {
+            continue;
+        }
+        if let Some(uid) = user_id
+            && cand_work_id != initial_work_id
+            && !crate::product::target_allowed(store, uid, "work", &cand_work_id)
+                .await
+                .unwrap_or(false)
+        {
+            continue;
+        }
+
+        let (cand_status, _cand_mode, cand_score) = match store.node_registry.get(&cand_node_id) {
+            Some(entry) => crate::nodes::score_node_entry(&entry, Some(&cand_mime), None, now),
+            None => ("connected".to_owned(), "local".to_owned(), 12_000),
+        };
+        if !ranked_siblings
+            .iter()
+            .any(|(id, _, _)| id == &cand_asset_id)
+        {
+            ranked_siblings.push((cand_asset_id, cand_status, cand_score));
+        }
+    }
+
+    ranked_siblings.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+
+    // If the requested asset is on a disconnected Node and a connected sibling copy exists,
+    // automatically fail over to the best connected copy!
+    let mut active_row = initial_row;
+    let mut effective_asset_id = asset_id.to_owned();
+    let mut failover_from: Option<String> = None;
+    let mut node_status = initial_node_status;
+    let mut conn_mode = initial_conn_mode;
+    let mut node_score = initial_score;
+
+    if node_status != "connected"
+        && let Some((best_alt_id, best_alt_status, _)) = ranked_siblings
+            .iter()
+            .find(|(id, st, _)| id != asset_id && st == "connected")
+        && *best_alt_status == "connected"
+        && let Some(alt_row) = query(
+            "SELECT a.id AS asset_id, a.mime, a.probe_json, a.library_id, COALESCE(json_extract(w.manual_json,'$.title'),w.title) AS title, w.id AS work_id, w.kind AS work_kind, l.node_id, t.subtitles_json, au.audios_json \
+             FROM inventory_assets a \
+             LEFT JOIN inventory_subtitles t ON t.asset_id=a.id \
+             LEFT JOIN inventory_audio au ON au.asset_id=a.id \
+             JOIN inventory_sources s ON s.id=a.source_id \
+             JOIN inventory_versions v ON v.id=s.version_id \
+             JOIN inventory_editions e ON e.id=v.edition_id \
+             JOIN inventory_works w ON w.id=e.work_id \
+             JOIN libraries l ON l.id=s.library_id \
+             JOIN media_nodes n ON n.id=l.node_id \
+             WHERE a.id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.enabled=1",
+        )
+        .bind(best_alt_id)
+        .fetch_optional(&store.pool)
+        .await?
+    {
+        let alt_node_id: String = alt_row.get("node_id");
+        let alt_mime: String = alt_row.get("mime");
+        let (alt_st, alt_cm, alt_sc) = match store.node_registry.get(&alt_node_id) {
+            Some(entry) => crate::nodes::score_node_entry(&entry, Some(&alt_mime), None, now),
+            None => ("connected".to_owned(), "local".to_owned(), 12_000),
+        };
+        effective_asset_id = best_alt_id.clone();
+        failover_from = Some(asset_id.to_owned());
+        node_status = alt_st;
+        conn_mode = alt_cm;
+        node_score = alt_sc;
+        active_row = alt_row;
+    }
+
+    let fallback_media_ids: Vec<String> = ranked_siblings
+        .into_iter()
+        .filter(|(id, st, _)| id != &effective_asset_id && st == "connected")
+        .map(|(id, _, _)| id)
+        .collect();
+
+    let row = active_row;
+    let asset_id = effective_asset_id.as_str();
     let probe = decode(row.get("probe_json"))?;
     let library_id: String = row.get("library_id");
     let node_id: String = row.get("node_id");
     let node_rec = crate::nodes::load_node(store, &node_id).await?;
-    let node_status = node_rec
-        .as_ref()
-        .map(|n| n.status.clone())
-        .unwrap_or_else(|| "connected".to_owned());
-    let direct_info = node_rec.as_ref().and_then(|n| {
-        crate::nodes::build_direct_playback_url(
-            n,
-            &library_id,
-            "asset",
-            asset_id,
-            "stream",
-            session_hash,
-        )
-    });
+    let direct_info = if node_status == "connected" {
+        node_rec.as_ref().and_then(|n| {
+            crate::nodes::build_direct_playback_url(
+                n,
+                &library_id,
+                "asset",
+                asset_id,
+                "stream",
+                session_hash,
+            )
+        })
+    } else {
+        None
+    };
     let mut original_audios = probe
         .streams
         .iter()
@@ -2751,6 +3513,8 @@ pub async fn descriptor(
         "relayUrl": relay_url,
         "nodeId": node_id,
         "nodeStatus": node_status,
+        "connectionMode": conn_mode,
+        "score": node_score,
         "mime": row.get::<String,_>("mime"),
         "tracks": probe.streams
     });
@@ -2943,20 +3707,28 @@ pub async fn descriptor(
         }
     }
 
-    Ok(Some(json!({
+    let mut desc = json!({
         "id": asset_id,
         "title": row.get::<String,_>("title"),
-        "workId": row.get::<String,_>("work_id"),
+        "workId": initial_work_id,
         "synthetic": false,
         "nodeId": node_id,
         "nodeStatus": node_status,
+        "connectionMode": conn_mode,
+        "score": node_score,
         "available": node_status == "connected",
+        "fallbackMediaIds": fallback_media_ids,
         "sources": sources,
         "subtitles": subtitles,
         "chapters": chapter_list.iter().map(|(start, title)| json!({"start": start, "title": title})).collect::<Vec<_>>(),
         "intro": intro_segment,
         "credits": credits_segment
-    })))
+    });
+    if let Some(orig) = failover_from {
+        desc["requestedId"] = json!(orig.clone());
+        desc["failoverFrom"] = json!(orig);
+    }
+    Ok(Some(desc))
 }
 
 /// Authorized, inventory-resolved local preparation; unsupported remote packaging is explicit.

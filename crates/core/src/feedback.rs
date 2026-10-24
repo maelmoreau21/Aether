@@ -31,12 +31,33 @@ pub(crate) async fn authorized(
     if mutation {
         auth.require_csrf(headers, &identity)?;
     }
-    let found: Option<String> = query_scalar("SELECT w.id FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE w.id=? AND w.kind IN ('film','series','episode') AND l.enabled=1 AND n.status != 'revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?))")
-        .bind(work).bind(identity.user.role.as_str()).bind(&identity.user.id).fetch_optional(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let found: Option<String> = query_scalar(
+        "SELECT COALESCE( \
+           (SELECT w.id FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id \
+            WHERE w.id=? AND w.kind IN ('film','series','episode') AND l.enabled=1 AND n.status != 'revoked' \
+              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?))), \
+           (SELECT gw.id FROM media_group_members gm JOIN inventory_works gw ON gw.id=gm.work_id JOIN libraries gl ON gl.id=gw.library_id JOIN media_nodes gn ON gn.id=gl.node_id \
+            WHERE (gm.group_id=? OR gm.group_id=(SELECT m2.group_id FROM media_group_members m2 WHERE m2.work_id=?)) \
+              AND gw.kind IN ('film','series','episode') AND gl.enabled=1 AND gn.status != 'revoked' \
+              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=gl.id AND p.user_id=?)) \
+            ORDER BY gw.id LIMIT 1) \
+         )",
+    )
+    .bind(work)
+    .bind(identity.user.role.as_str())
+    .bind(&identity.user.id)
+    .bind(work)
+    .bind(work)
+    .bind(identity.user.role.as_str())
+    .bind(&identity.user.id)
+    .fetch_optional(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .flatten();
     if found.is_none() {
         return Err(StatusCode::FORBIDDEN);
     }
-    if !crate::product::parental_allowed(&auth.store, &identity.user.id, work).await? {
+    if !crate::product::target_allowed(&auth.store, &identity.user.id, "work", work).await? {
         return Err(StatusCode::FORBIDDEN);
     }
     Ok(identity.user.id)

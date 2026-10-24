@@ -13,6 +13,8 @@ export interface Source {
   tokenExpiresAt?: number;
   nodeId?: string;
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';
+  connectionMode?: string;
+  score?: number;
   mime: string;
   tracks?: CodecTrack[];
   externalAudioUrl?: string;
@@ -38,7 +40,12 @@ export interface Media {
   synthetic?: boolean;
   nodeId?: string;
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';
+  connectionMode?: string;
+  score?: number;
   available?: boolean;
+  fallbackMediaIds?: string[];
+  failoverFrom?: string;
+  requestedId?: string;
   sources: Source[];
   subtitles: Subtitle[];
 }

@@ -49,7 +49,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, RwLock,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
     time::Duration,
 };
@@ -154,8 +154,64 @@ pub struct NodeServerState {
     pub inventory: Arc<RwLock<NodeOperationalInventory>>,
     pub replay_window: Arc<ReplayWindow>,
     pub active_scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    pub active_streams: Arc<AtomicU32>,
     pub local_node: LocalNode,
     preparations: Arc<crate::packaging::Preparations>,
+}
+
+struct ActiveStreamGuard(Arc<AtomicU32>);
+
+impl ActiveStreamGuard {
+    fn enter(counter: &Arc<AtomicU32>) -> Self {
+        counter.fetch_add(1, Ordering::Relaxed);
+        Self(counter.clone())
+    }
+}
+
+impl Drop for ActiveStreamGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+struct TrackedBody {
+    inner: Body,
+    _guard: ActiveStreamGuard,
+}
+
+impl http_body::Body for TrackedBody {
+    type Data = bytes::Bytes;
+    type Error = axum::Error;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        std::pin::Pin::new(&mut self.inner).poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+fn track_stream_body(response: Response, counter: &Arc<AtomicU32>) -> Response {
+    if !response.status().is_success() {
+        return response;
+    }
+    let guard = ActiveStreamGuard::enter(counter);
+    let (parts, body) = response.into_parts();
+    Response::from_parts(
+        parts,
+        Body::new(TrackedBody {
+            inner: body,
+            _guard: guard,
+        }),
+    )
 }
 
 impl NodeServerState {
@@ -227,6 +283,7 @@ impl NodeServerState {
             inventory: Arc::new(RwLock::new(inventory)),
             replay_window: Arc::new(ReplayWindow::new()),
             active_scans: Arc::new(Mutex::new(HashMap::new())),
+            active_streams: Arc::new(AtomicU32::new(0)),
             local_node: LocalNode,
             preparations: Arc::new(crate::packaging::Preparations::default()),
         })
@@ -686,6 +743,7 @@ async fn node_heartbeat(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .len() as u32;
+    let active_streams = state.active_streams.load(Ordering::Relaxed);
     let indexed_assets = state
         .inventory
         .read()
@@ -705,6 +763,7 @@ async fn node_heartbeat(
         roots,
         public_url: identity.public_url.clone(),
         active_scans,
+        active_streams,
         indexed_assets,
         timestamp: unix_now(),
     };
@@ -1420,7 +1479,10 @@ async fn internal_prepared(
             Err(response) => return response,
         };
     let response = prepare_asset(&state, &id, &component, req).await;
-    sign_stream_response(response, &identity, &nonce)
+    track_stream_body(
+        sign_stream_response(response, &identity, &nonce),
+        &state.active_streams,
+    )
 }
 async fn internal_stream_asset(
     State(state): State<NodeServerState>,
@@ -1474,14 +1536,20 @@ async fn internal_stream_asset(
             }
             _ => node_error_response(NodeErrorCode::UnavailableAsset, false),
         };
-        return sign_stream_response(response, &identity, &nonce);
+        return track_stream_body(
+            sign_stream_response(response, &identity, &nonce),
+            &state.active_streams,
+        );
     }
     match state
         .local_node
         .serve_grant_for_node(identity.node_id.clone(), &grant, &req)
         .await
     {
-        Ok(res) => sign_stream_response(convert_stream_response(res, false), &identity, &nonce),
+        Ok(res) => track_stream_body(
+            sign_stream_response(convert_stream_response(res, false), &identity, &nonce),
+            &state.active_streams,
+        ),
         Err(code) => sign_stream_response(node_error_response(code, false), &identity, &nonce),
     }
 }
@@ -1593,7 +1661,7 @@ async fn direct_stream_asset(
         .serve_grant_for_node(identity.node_id.clone(), &grant, &req)
         .await
     {
-        Ok(res) => convert_stream_response(res, true),
+        Ok(res) => track_stream_body(convert_stream_response(res, true), &state.active_streams),
         Err(code) => node_error_response(code, true),
     };
     eprintln!(
@@ -1940,6 +2008,7 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .len() as u32;
+            let active_streams = state.active_streams.load(Ordering::Relaxed);
             let indexed_assets = state
                 .inventory
                 .read()
@@ -1960,6 +2029,7 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                 roots,
                 public_url: identity.public_url.clone(),
                 active_scans,
+                active_streams,
                 indexed_assets,
                 timestamp: unix_now(),
             };
@@ -2091,6 +2161,7 @@ async fn handle_channel_scan(state: NodeServerState, req: RemoteScanStartRequest
 }
 
 async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayRequest) {
+    let _stream_guard = ActiveStreamGuard::enter(&state.active_streams);
     let identity = state
         .identity
         .read()

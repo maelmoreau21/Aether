@@ -1,5 +1,48 @@
 # MEMORY.md — État et décisions Aether
 
+## 24 octobre 2026 — Mission 1 : Plateforme multimédia multi-serveur (jusqu'à 100 Media Nodes)
+
+- **Architecture distribuée Core / Multi-Nodes (`crates/core/src/nodes.rs`, `crates/core/src/inventory.rs`, `crates/node/src/server.rs`)** :
+  - **Registre d'état chaud sans I/O (`NodeRuntimeRegistry`, `NodeRuntimeEntry`, `NodeRuntimeTelemetry`)** : conservé en mémoire Core (`std::sync::RwLock<HashMap<String, NodeRuntimeEntry>>`), alimenté par les heartbeats signés, les scans et les relais, éliminant tout appel HTTP ou requête SQLite séquentielle lors du choix de nœud.
+  - **Fonction de scoring pure O(1) (`score_node_entry`)** : évalue instantanément chaque candidat selon l'état (`connected` +10 000, `disconnected` -100 000, `revoked` -1 000 000), le mode d'acheminement (`local` +2 000, `direct` directUrl +1 500, `inbound` +800, `outbound` +500), la latence RTT mesurée (pénalité continue jusqu'à -1 000), la charge utile active (-120 par flux actif, -200 par scan), et les échecs consécutifs.
+  - **Télémétrie en temps réel des flux (`active_streams`)** : instrumentée côté Media Node via un compteur atomique RAII (`ActiveStreamGuard`, `track_stream_body`), synchronisée au Core dans `HeartbeatPayload`, avec vue d'administration étendue (`AdminNodeView` : `latencyMs`, `activeScans`, `activeStreams`, `indexedAssets`, `selectionScore`).
+  - **Sélection et basculement automatique mid-playback (`descriptor_for_user`, `ImmersivePlayer.svelte`)** :
+    - Résolution de toutes les copies sœurs autorisées (dossiers multi-emplacements, groupes de médias consolidés).
+    - Basculement automatique transparent vers la meilleure copie saine si le nœud primaire est déconnecté (`failoverFrom`), avec liste ordonnée `fallbackMediaIds`.
+    - Sauvegarde et reprise automatique de la progression de lecture (`workId` / `position`) côté client en cas de rupture de flux en direct, sans interruption visible de l'expérience utilisateur.
+- **Résultats des benchmarks et tests de montée en charge (`crates/core/tests/multi_node_scale_and_failover.rs`)** :
+  - **Sélection sur cache chaud (50 itérations par jalon, cible < 50 ms)** :
+    - **1 Nœud simulé** : p50 = `1,46 ms` | p95 = `4,80 ms` | max = `6,37 ms` | Pure score pass = `2,37 µs` | RSS = `25,2 MiB`.
+    - **10 Nœuds simulés** : p50 = `1,23 ms` | p95 = `2,16 ms` | max = `2,61 ms` | Pure score pass = `24,82 µs` | RSS = `26,0 MiB`.
+    - **100 Nœuds simulés** : p50 = `3,85 ms` | p95 = `7,43 ms` | max = `9,74 ms` (**< 10 ms**, très largement sous l'objectif de 50 ms) | Pure score pass = `491,23 µs` | RSS = `28,0 MiB`.
+  - **Basculement automatique dynamique sur 100 Nœuds** : `4,74 ms` lors de la déconnexion de `sim-node-001`, avec re-classement immédiat vers `sim-node-002` puis `sim-node-004` lors d'une surcharge à 25 flux actifs.
+  - **Test d'intégration réel multi-processus TCP (Core + 2 Nodes réels `node-primary` et `node-backup`)** :
+    - Scan multi-dossiers et déduplication catalogue vérifiés.
+    - Streaming direct `206 Partial Content` validé.
+    - Simulation de panne réseau / crash de `node-primary` : détection d'indisponibilité immédiate, basculement vers `node-backup`, reprise exacte de la progression à `42,5 s`.
+    - Concurrence validée : 50 sélections de descripteurs et 50 flux `Range` simultanés servis sans erreur.
+- **Validation qualité** :
+  - `cargo fmt --check` : succès.
+  - `cargo clippy -p media-contracts -p media-node -p media-poc -- -D warnings` : 0 avertissement.
+  - Tests unitaires frontend (`npm --prefix apps/web test`) : 25 fichiers, 152 tests réussis.
+  - Vérification de types Svelte (`npm --prefix apps/web run check`) : 0 erreur, 0 avertissement.
+
+## 24 octobre 2026 — Mission 2 : Catalogue multimédia global consolidé et passage à l'échelle 1 000 000 d'œuvres
+
+- **Modèle hiérarchique et consolidation inter-bibliothèques / inter-Nodes (`0043_global_catalogue_consolidation.sql`, `crates/core/src/consolidation.rs`)** :
+  - Séparation explicite de l'œuvre (`Work`), de l'édition éditoriale (`Edition`, via `inventory_edition_metadata` : `Édition locale`, `Director’s Cut`, `Version longue`, `Édition IMAX`, `Édition remastérisée`, `Édition spéciale`), de la version d'encodage/résolution/conteneur (`MediaVersion`, via `inventory_version_metadata` : ex. `1080p • H.264 • AAC • MP4`, `4K UHD • AV1 • 10-bit • OPUS • MKV`), de la source logique (`MediaSource`), du fichier physique (`Asset`) et des pistes (`Track`).
+  - Reconnaissance automatique des doublons à partir des identifiants externes fiables (`imdb`, `tmdb`, `tvdb`, `wikidata`, `eidr` indexés dans `media_work_external_ids`) lors des ingestions et publications de scans, sans jamais fusionner sur le seul titre.
+  - Détection des correspondances probables / ambiguïtés (`media_match_candidates`) avec score et motif explicite, validation manuelle (`POST /api/v1/admin/media-groups/candidates/{id}/confirm`), rejet persistant (`POST /api/v1/admin/media-groups/candidates/{id}/reject`), séparation d'une œuvre (`ungroup`) et annulation réversible (`POST /api/v1/admin/media-groups/merges/{id}/undo`) restaurée depuis `media_merge_history`.
+  - Unification des films, séries, saisons et épisodes dans `expand_detail` (`crates/core/src/product.rs`) et de la progression (`playback_progress`), des favoris/notes (`work_feedback`) et des listes personnelles sur l'ensemble des membres du groupe, tout en appliquant strictement les permissions de bibliothèques et le contrôle parental (`authorized_group_members`, `crates/core/src/permissions.rs`) et en préservant les métadonnées manuelles (`manual_json`) et affiches personnalisées.
+  - Interface d'administration et d'édition (`apps/web/src/lib/catalog/WorkTools.svelte`) enrichie pour regrouper films et séries, traiter les ambiguïtés candidates et annuler une fusion.
+- **Optimisations SQL et cache pour 100 000 et 1 000 000 d'œuvres (`crates/core/src/inventory.rs`, `docs/SQL_PERFORMANCE.md`)** :
+  - Colonnes de synthèse maintenues par triggers (`display_title_sort`, `effective_year`, `max_height`, `codecs_csv`, `languages_csv`, `genres_csv`, `has_available_asset`), jointure différée en 2 phases sur index couvrants (`inventory_works_lib_avail_sort`, `inventory_works_filter_sort`, `inventory_works_fts_sort`), recherche par trigrammes `FTS5` (`inventory_works_fts` avec `work_id UNINDEXED`) et compteur de génération `inventory_cache_generation` en O(1).
+  - Benchmarks mesurés (`cargo test --package media-poc --test global_catalogue_consolidation -- --nocapture`) :
+    - **1 000 œuvres** : Cold Page 1 (shelf) `31,93 ms` | Warm Cache `0,321 ms` | Cold Page 1 (+COUNT) `8,35 ms` | Cold Search (`'matrix'`) `4,67 ms` | Cold 5-Filter Combo `9,05 ms`.
+    - **10 000 œuvres** : Cold Page 1 (shelf) `9,41 ms` | Warm Cache `0,291 ms` | Cold Page 1 (+COUNT) `10,68 ms` | Cold Search (`'matrix'`) `9,34 ms` | Cold 5-Filter Combo `12,48 ms`.
+    - **100 000 œuvres** : Cold Page 1 (shelf) `7,06 ms` | Warm Cache `0,222 ms` | Cold Page 1 (+COUNT) `14,13 ms` | Cold Search (`'matrix'`) `5,50 ms` | Cold 5-Filter Combo `4,59 ms`.
+    - **1 000 000 d'œuvres** : Cold Page 1 (shelf) `6,41 ms` | Warm Cache `0,242 ms` | Cold Page 1 (+COUNT) `101,59 ms` | Cold Search (`'matrix'`) `39,56 ms` | Cold 5-Filter Combo `5,41 ms`.
+
 ## 24 octobre 2026 — Mission streaming 3.2
 
 - Course audio reproduite dans Chrome : seek 900 s en attente puis seek 2 s

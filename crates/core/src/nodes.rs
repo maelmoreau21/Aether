@@ -138,8 +138,374 @@ pub struct AdminNodeView {
     pub paired_at: i64,
     pub last_seen_at: Option<i64>,
     pub revoked_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u32>,
+    pub active_scans: u32,
+    pub active_streams: u32,
+    pub indexed_assets: usize,
+    pub selection_score: i64,
     pub libraries: Vec<NodeLibraryRef>,
     pub scans: Vec<NodeScanSummary>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct NodeRuntimeTelemetry {
+    pub latency_ms: Option<u32>,
+    pub reported_active_scans: u32,
+    pub reported_active_streams: u32,
+    pub core_active_relays: u32,
+    pub indexed_assets: usize,
+    pub consecutive_failures: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct NodeRuntimeEntry {
+    pub record: MediaNodeRecord,
+    pub telemetry: NodeRuntimeTelemetry,
+}
+
+#[derive(Default)]
+pub struct NodeRuntimeRegistry {
+    entries: std::sync::RwLock<HashMap<String, NodeRuntimeEntry>>,
+    populated: std::sync::atomic::AtomicBool,
+}
+
+impl NodeRuntimeRegistry {
+    pub fn new() -> Self {
+        Self {
+            entries: std::sync::RwLock::new(HashMap::new()),
+            populated: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    pub fn is_populated(&self) -> bool {
+        self.populated.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn get(&self, node_id: &str) -> Option<NodeRuntimeEntry> {
+        let guard = self.entries.read().unwrap_or_else(|e| e.into_inner());
+        guard.get(node_id).cloned()
+    }
+
+    pub fn snapshot_all(&self) -> HashMap<String, NodeRuntimeEntry> {
+        let guard = self.entries.read().unwrap_or_else(|e| e.into_inner());
+        guard.clone()
+    }
+
+    pub fn upsert_record(&self, record: MediaNodeRecord) {
+        let mut guard = self.entries.write().unwrap_or_else(|e| e.into_inner());
+        match guard.get_mut(&record.id) {
+            Some(existing) => {
+                existing.record = record;
+            }
+            None => {
+                let is_local = record.id == "local";
+                guard.insert(
+                    record.id.clone(),
+                    NodeRuntimeEntry {
+                        record,
+                        telemetry: NodeRuntimeTelemetry {
+                            latency_ms: if is_local { Some(0) } else { None },
+                            ..NodeRuntimeTelemetry::default()
+                        },
+                    },
+                );
+            }
+        }
+    }
+
+    pub fn populate_records(&self, records: Vec<MediaNodeRecord>) {
+        let mut guard = self.entries.write().unwrap_or_else(|e| e.into_inner());
+        let mut seen = std::collections::HashSet::with_capacity(records.len());
+        for record in records {
+            seen.insert(record.id.clone());
+            match guard.get_mut(&record.id) {
+                Some(existing) => {
+                    existing.record = record;
+                }
+                None => {
+                    let is_local = record.id == "local";
+                    guard.insert(
+                        record.id.clone(),
+                        NodeRuntimeEntry {
+                            record,
+                            telemetry: NodeRuntimeTelemetry {
+                                latency_ms: if is_local { Some(0) } else { None },
+                                ..NodeRuntimeTelemetry::default()
+                            },
+                        },
+                    );
+                }
+            }
+        }
+        guard.retain(|id, _| seen.contains(id));
+        self.populated
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    pub fn record_heartbeat(
+        &self,
+        node_id: &str,
+        hb: &HeartbeatPayload,
+        rtt_ms: Option<u32>,
+        now: i64,
+    ) {
+        let mut guard = self.entries.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = guard.get_mut(node_id) {
+            if entry.record.status != NodeStatus::Revoked.as_str() {
+                entry.record.status = NodeStatus::Connected.as_str().to_owned();
+                entry.record.last_seen_at = Some(now);
+                if let Some(ref v) = hb.version {
+                    entry.record.version = Some(v.clone());
+                }
+                if let Ok(roots_json) = serde_json::to_string(&hb.roots) {
+                    entry.record.roots_json = roots_json;
+                }
+            }
+            entry.telemetry.reported_active_scans = hb.active_scans;
+            entry.telemetry.reported_active_streams = hb.active_streams;
+            entry.telemetry.indexed_assets = hb.indexed_assets;
+            entry.telemetry.consecutive_failures = 0;
+            if let Some(sample) = rtt_ms {
+                entry.telemetry.latency_ms = Some(match entry.telemetry.latency_ms {
+                    Some(prev) => ((prev as u64 * 3 + sample as u64) / 4) as u32,
+                    None => sample,
+                });
+            }
+        }
+    }
+
+    pub fn record_success(&self, node_id: &str, rtt_ms: Option<u32>, now: i64) {
+        let mut guard = self.entries.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = guard.get_mut(node_id) {
+            if entry.record.status != NodeStatus::Revoked.as_str() {
+                entry.record.status = NodeStatus::Connected.as_str().to_owned();
+                entry.record.last_seen_at = Some(now);
+            }
+            entry.telemetry.consecutive_failures = 0;
+            if let Some(sample) = rtt_ms {
+                entry.telemetry.latency_ms = Some(match entry.telemetry.latency_ms {
+                    Some(prev) => ((prev as u64 * 3 + sample as u64) / 4) as u32,
+                    None => sample,
+                });
+            }
+        }
+    }
+
+    pub fn record_failure(&self, node_id: &str, mark_disconnected: bool) {
+        let mut guard = self.entries.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = guard.get_mut(node_id) {
+            entry.telemetry.consecutive_failures =
+                entry.telemetry.consecutive_failures.saturating_add(1);
+            if mark_disconnected && entry.record.status != NodeStatus::Revoked.as_str() {
+                entry.record.status = NodeStatus::Disconnected.as_str().to_owned();
+            }
+        }
+    }
+
+    pub fn mark_disconnected(&self, node_id: &str) {
+        self.record_failure(node_id, true);
+    }
+
+    pub fn set_telemetry(
+        &self,
+        node_id: &str,
+        latency_ms: Option<u32>,
+        active_scans: u32,
+        active_streams: u32,
+    ) {
+        let mut guard = self.entries.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = guard.get_mut(node_id) {
+            entry.telemetry.latency_ms = latency_ms;
+            entry.telemetry.reported_active_scans = active_scans;
+            entry.telemetry.reported_active_streams = active_streams;
+        }
+    }
+
+    pub fn increment_relay(&self, node_id: &str) {
+        let mut guard = self.entries.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = guard.get_mut(node_id) {
+            entry.telemetry.core_active_relays =
+                entry.telemetry.core_active_relays.saturating_add(1);
+        }
+    }
+
+    pub fn decrement_relay(&self, node_id: &str) {
+        let mut guard = self.entries.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = guard.get_mut(node_id) {
+            entry.telemetry.core_active_relays =
+                entry.telemetry.core_active_relays.saturating_sub(1);
+        }
+    }
+
+    pub fn invalidate(&self) {
+        self.populated
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    pub fn connected_public_origins(&self) -> Vec<String> {
+        let guard = self.entries.read().unwrap_or_else(|e| e.into_inner());
+        let mut out = Vec::new();
+        for entry in guard.values() {
+            if entry.record.kind == "remote"
+                && entry.record.status == NodeStatus::Connected.as_str()
+                && let Some(ref u) = entry.record.public_url
+                && !u.is_empty()
+                && let Ok(parsed) = url::Url::parse(u)
+                && let Some(h) = parsed.host_str()
+            {
+                let scheme = parsed.scheme();
+                let origin_str = if let Some(p) = parsed.port() {
+                    format!("{scheme}://{h}:{p}")
+                } else {
+                    format!("{scheme}://{h}")
+                };
+                if !out.contains(&origin_str) {
+                    out.push(origin_str);
+                }
+            }
+        }
+        out
+    }
+}
+
+struct ActiveCoreRelayGuard {
+    registry: Arc<NodeRuntimeRegistry>,
+    node_id: String,
+}
+
+impl ActiveCoreRelayGuard {
+    fn enter(registry: &Arc<NodeRuntimeRegistry>, node_id: &str) -> Self {
+        registry.increment_relay(node_id);
+        Self {
+            registry: registry.clone(),
+            node_id: node_id.to_owned(),
+        }
+    }
+}
+
+impl Drop for ActiveCoreRelayGuard {
+    fn drop(&mut self) {
+        self.registry.decrement_relay(&self.node_id);
+    }
+}
+
+fn track_core_relay_response(
+    response: Response,
+    registry: &Arc<NodeRuntimeRegistry>,
+    node_id: &str,
+) -> Response {
+    if !response.status().is_success() {
+        return response;
+    }
+    let guard = ActiveCoreRelayGuard::enter(registry, node_id);
+    let (parts, body) = response.into_parts();
+    let wrapped = StreamBody::new(futures_util::stream::unfold(
+        (body, guard),
+        |(mut body, guard)| async move { body.frame().await.map(|frame| (frame, (body, guard))) },
+    ));
+    Response::from_parts(parts, Body::new(wrapped))
+}
+
+pub fn effective_connection_mode(rec: &MediaNodeRecord) -> &'static str {
+    if rec.id == "local" || rec.kind == "local" {
+        "local"
+    } else if rec.public_url.as_deref().is_some_and(|u| !u.is_empty())
+        || rec.connection_mode == "direct"
+    {
+        "direct"
+    } else if rec.connection_mode == "inbound" || rec.base_url.is_some() {
+        "inbound"
+    } else {
+        "outbound"
+    }
+}
+
+/// Pure O(1) warm-cache node & source scoring function.
+/// Never performs network I/O. Computes a deterministic priority score:
+/// - Connected status (+10_000) vs Disconnected (-100_000) vs Revoked (-1_000_000)
+/// - Transport efficiency: Local (+2_000) > Direct Node URL (+1_500, zero Core relay cost) > Inbound Relay (+800) > Outbound Uplink Relay (+500)
+/// - Load & Latency penalties: active streams (-120 each), active scans (-200 each), RTT latency (-1 per ms up to 1000ms), consecutive failures (-300 each)
+/// - Format & Quality bonus: direct-playable MP4/WebM (+300) vs MKV (+150), plus resolution bonus (height / 10).
+pub fn score_node_entry(
+    entry: &NodeRuntimeEntry,
+    mime: Option<&str>,
+    height: Option<u32>,
+    now: i64,
+) -> (String, String, i64) {
+    let rec = &entry.record;
+    let tel = &entry.telemetry;
+    let conn_mode = effective_connection_mode(rec);
+
+    if rec.status == NodeStatus::Revoked.as_str() {
+        return ("revoked".to_owned(), conn_mode.to_owned(), -1_000_000);
+    }
+
+    let stale_limit = std::env::var("MEDIA_NODE_STALE_SECS")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0);
+    let is_stale = stale_limit > 0
+        && rec.id != "local"
+        && rec.kind == "remote"
+        && rec
+            .last_seen_at
+            .is_some_and(|seen| now.saturating_sub(seen) > stale_limit);
+
+    let effective_status = if rec.id == "local" {
+        "connected"
+    } else if rec.status != NodeStatus::Connected.as_str() || is_stale {
+        "disconnected"
+    } else {
+        "connected"
+    };
+
+    if effective_status != "connected" {
+        return (
+            effective_status.to_owned(),
+            conn_mode.to_owned(),
+            -100_000 - (tel.consecutive_failures as i64 * 300),
+        );
+    }
+
+    let mut score: i64 = 10_000;
+    score += match conn_mode {
+        "local" => 2_000,
+        "direct" => 1_500,
+        "inbound" => 800,
+        _ => 500,
+    };
+
+    let active_streams = tel.reported_active_streams.max(tel.core_active_relays) as i64;
+    let active_scans = tel.reported_active_scans as i64;
+    let latency_penalty = match tel.latency_ms {
+        Some(ms) => (ms as i64).min(1_000),
+        None => {
+            if conn_mode == "local" {
+                0
+            } else {
+                15
+            }
+        }
+    };
+
+    score -= active_streams * 120;
+    score -= active_scans * 200;
+    score -= latency_penalty;
+    score -= (tel.consecutive_failures as i64) * 300;
+
+    if let Some(m) = mime {
+        if m == "video/mp4" || m == "video/webm" {
+            score += 300;
+        } else if m == "video/x-matroska" {
+            score += 150;
+        }
+    }
+    if let Some(h) = height {
+        score += (h.min(4320) / 10) as i64;
+    }
+
+    (effective_status.to_owned(), conn_mode.to_owned(), score)
 }
 
 #[derive(Deserialize)]
@@ -243,16 +609,57 @@ fn validate_public_url(raw: &str) -> Result<String, StatusCode> {
     Ok(origin)
 }
 
-pub async fn load_node(
+pub async fn ensure_node_registry_warm(store: &IdentityStore) -> Result<(), sqlx::Error> {
+    if store.node_registry.is_populated() {
+        return Ok(());
+    }
+    let records: Vec<MediaNodeRecord> = crate::database::query_as(
+        "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version, connection_mode FROM media_nodes",
+    )
+    .fetch_all(&store.pool)
+    .await?;
+    store.node_registry.populate_records(records);
+    Ok(())
+}
+
+pub async fn refresh_node_in_registry(
     store: &IdentityStore,
     node_id: &str,
 ) -> Result<Option<MediaNodeRecord>, sqlx::Error> {
-    crate::database::query_as::<_, MediaNodeRecord>(
+    let record = crate::database::query_as::<_, MediaNodeRecord>(
         "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version, connection_mode FROM media_nodes WHERE id=?",
     )
     .bind(node_id)
     .fetch_optional(&store.pool)
-    .await
+    .await?;
+    if let Some(ref rec) = record {
+        store.node_registry.upsert_record(rec.clone());
+    }
+    Ok(record)
+}
+
+pub async fn load_node(
+    store: &IdentityStore,
+    node_id: &str,
+) -> Result<Option<MediaNodeRecord>, sqlx::Error> {
+    if store.node_registry.is_populated()
+        && let Some(entry) = store.node_registry.get(node_id)
+    {
+        return Ok(Some(entry.record));
+    }
+    refresh_node_in_registry(store, node_id).await
+}
+
+pub async fn load_node_entry(
+    store: &IdentityStore,
+    node_id: &str,
+) -> Result<Option<NodeRuntimeEntry>, sqlx::Error> {
+    ensure_node_registry_warm(store).await?;
+    if let Some(entry) = store.node_registry.get(node_id) {
+        return Ok(Some(entry));
+    }
+    let _ = refresh_node_in_registry(store, node_id).await?;
+    Ok(store.node_registry.get(node_id))
 }
 
 pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView>, sqlx::Error> {
@@ -261,6 +668,7 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
     )
     .fetch_all(&store.pool)
     .await?;
+    store.node_registry.populate_records(records.clone());
 
     let libs = crate::database::query(
         "SELECT id, name, kind, node_id, root, enabled FROM libraries ORDER BY name, id",
@@ -274,6 +682,18 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
     .fetch_all(&store.pool)
     .await?;
 
+    let asset_counts: Vec<(String, i64)> = crate::database::query_as(
+        "SELECT l.node_id, COUNT(a.id) FROM inventory_assets a JOIN libraries l ON l.id = a.library_id WHERE a.available=1 AND l.enabled=1 GROUP BY l.node_id",
+    )
+    .fetch_all(&store.pool)
+    .await
+    .unwrap_or_default();
+    let asset_count_map: HashMap<String, usize> = asset_counts
+        .into_iter()
+        .map(|(nid, cnt)| (nid, cnt.max(0) as usize))
+        .collect();
+
+    let now = unix_now();
     let mut views = Vec::with_capacity(records.len());
     for rec in records {
         let roots: Vec<String> = serde_json::from_str(&rec.roots_json).unwrap_or_default();
@@ -288,7 +708,7 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
                 enabled: r.get::<i64, _>("enabled") != 0,
             })
             .collect();
-        let node_scans = scans
+        let node_scans: Vec<NodeScanSummary> = scans
             .iter()
             .filter(|r| r.get::<String, _>("node_id") == rec.id)
             .map(|r| NodeScanSummary {
@@ -302,25 +722,33 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
             })
             .collect();
 
+        let running_db_scans = node_scans
+            .iter()
+            .filter(|s| s.status == "running" || s.status == "queued")
+            .count() as u32;
+
         let node_version = if rec.id == "local" {
             Some(media_contracts::version::current_version().to_string())
         } else {
             rec.version.clone()
         };
 
-        let conn_mode = if rec.id == "local" {
-            "local".to_owned()
-        } else if rec.public_url.is_some() {
-            "direct".to_owned()
-        } else if rec.connection_mode.is_empty() {
-            if rec.base_url.is_some() {
-                "inbound".to_owned()
-            } else {
-                "outbound".to_owned()
-            }
-        } else {
-            rec.connection_mode.clone()
-        };
+        let entry = store
+            .node_registry
+            .get(&rec.id)
+            .unwrap_or_else(|| NodeRuntimeEntry {
+                record: rec.clone(),
+                telemetry: NodeRuntimeTelemetry::default(),
+            });
+        let (effective_status, conn_mode, selection_score) =
+            score_node_entry(&entry, Some("video/mp4"), Some(1080), now);
+        let active_scans = entry.telemetry.reported_active_scans.max(running_db_scans);
+        let active_streams = entry
+            .telemetry
+            .reported_active_streams
+            .max(entry.telemetry.core_active_relays);
+        let db_assets = asset_count_map.get(&rec.id).copied().unwrap_or(0);
+        let indexed_assets = entry.telemetry.indexed_assets.max(db_assets);
 
         views.push(AdminNodeView {
             id: rec.id,
@@ -328,7 +756,7 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
             kind: rec.kind,
             base_url: rec.base_url,
             public_url: rec.public_url,
-            status: rec.status,
+            status: effective_status,
             version: node_version,
             connection_mode: conn_mode,
             key_id: rec.key_id,
@@ -336,6 +764,11 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
             paired_at: rec.paired_at,
             last_seen_at: rec.last_seen_at,
             revoked_at: rec.revoked_at,
+            latency_ms: entry.telemetry.latency_ms,
+            active_scans,
+            active_streams,
+            indexed_assets,
+            selection_score,
             libraries: node_libs,
             scans: node_scans,
         });
@@ -410,11 +843,13 @@ async fn pair_node_admin(
         pairing_proof,
     };
 
+    let pair_started = std::time::Instant::now();
     let body = serde_json::to_vec(&pair_req).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let (status, res_headers, res_bytes) =
         send_plain_json_post(&base_url, "/internal/v1/node/pair", Bytes::from(body))
             .await
             .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    let pair_rtt_ms = pair_started.elapsed().as_millis() as u32;
     if !status.is_success() {
         return Err(StatusCode::BAD_GATEWAY);
     }
@@ -507,6 +942,13 @@ async fn pair_node_admin(
     .execute(&state.auth.store.pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let _ = refresh_node_in_registry(&state.auth.store, pair_res.node_id.as_str()).await;
+    state.auth.store.node_registry.record_success(
+        pair_res.node_id.as_str(),
+        Some(pair_rtt_ms),
+        now,
+    );
 
     // Push existing library inventories for this Node if any exist
     let _ = sync_all_libraries_for_node(&state.auth.store, pair_res.node_id.as_str()).await;
@@ -717,6 +1159,13 @@ async fn enroll_node(
     .await
     .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "database_error" }))))?;
 
+    let _ = refresh_node_in_registry(&state.auth.store, &final_node_id).await;
+    state
+        .auth
+        .store
+        .node_registry
+        .record_success(&final_node_id, Some(1), now);
+
     let res_nonce = random_nonce_hex();
     let mutual_proof = compute_enrollment_mutual_proof(
         &derived_secret,
@@ -781,6 +1230,12 @@ async fn node_channel(
         .bind(&id)
         .execute(&state.auth.store.pool)
         .await;
+        let _ = refresh_node_in_registry(&state.auth.store, &id).await;
+        state
+            .auth
+            .store
+            .node_registry
+            .record_heartbeat(&id, h, Some(1), now);
     } else {
         let _ = crate::database::query(
             "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",
@@ -789,6 +1244,12 @@ async fn node_channel(
         .bind(&id)
         .execute(&state.auth.store.pool)
         .await;
+        let _ = refresh_node_in_registry(&state.auth.store, &id).await;
+        state
+            .auth
+            .store
+            .node_registry
+            .record_success(&id, Some(1), now);
     }
 
     let (tx, mut rx) = mpsc::channel::<NodeCommandEnvelope>(8);
@@ -921,6 +1382,12 @@ async fn reconnect_node(
         .execute(&state.auth.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let _ = refresh_node_in_registry(&state.auth.store, &id).await;
+        state
+            .auth
+            .store
+            .node_registry
+            .record_success(&id, Some(1), now);
 
         let _ = sync_all_libraries_for_node(&state.auth.store, &id).await;
 
@@ -942,6 +1409,8 @@ async fn reconnect_node(
         .execute(&state.auth.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        state.auth.store.node_registry.record_failure(&id, true);
+        let _ = refresh_node_in_registry(&state.auth.store, &id).await;
 
         let views = load_admin_nodes(&state.auth.store)
             .await
@@ -953,6 +1422,7 @@ async fn reconnect_node(
             .ok_or(StatusCode::NOT_FOUND);
     };
 
+    let hb_started = std::time::Instant::now();
     let hb_res = media_node::server::send_signed_http_request(
         base_url,
         "core-to-node",
@@ -965,6 +1435,7 @@ async fn reconnect_node(
         Bytes::from_static(b"{}"),
     )
     .await;
+    let hb_rtt_ms = hb_started.elapsed().as_millis() as u32;
 
     let now = unix_now();
     match hb_res {
@@ -974,6 +1445,7 @@ async fn reconnect_node(
                     serde_json::to_string(&hb.roots).unwrap_or_else(|_| rec.roots_json.clone());
                 let pub_url = hb
                     .public_url
+                    .clone()
                     .or(rec.public_url)
                     .and_then(|u| validate_public_url(&u).ok());
                 crate::database::query(
@@ -987,6 +1459,12 @@ async fn reconnect_node(
                 .execute(&state.auth.store.pool)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                let _ = refresh_node_in_registry(&state.auth.store, &id).await;
+                state
+                    .auth
+                    .store
+                    .node_registry
+                    .record_heartbeat(&id, &hb, Some(hb_rtt_ms), now);
             } else {
                 crate::database::query(
                     "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=?",
@@ -996,6 +1474,12 @@ async fn reconnect_node(
                 .execute(&state.auth.store.pool)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                let _ = refresh_node_in_registry(&state.auth.store, &id).await;
+                state
+                    .auth
+                    .store
+                    .node_registry
+                    .record_success(&id, Some(hb_rtt_ms), now);
             }
             let _ = sync_all_libraries_for_node(&state.auth.store, &id).await;
         }
@@ -1007,6 +1491,8 @@ async fn reconnect_node(
             .execute(&state.auth.store.pool)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            state.auth.store.node_registry.record_failure(&id, true);
+            let _ = refresh_node_in_registry(&state.auth.store, &id).await;
         }
     }
 
@@ -1092,6 +1578,12 @@ async fn rotate_node_secret(
         .execute(&state.auth.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let _ = refresh_node_in_registry(&state.auth.store, &id).await;
+        state
+            .auth
+            .store
+            .node_registry
+            .record_success(&id, Some(1), now);
 
         let views = load_admin_nodes(&state.auth.store)
             .await
@@ -1137,6 +1629,12 @@ async fn rotate_node_secret(
     .execute(&state.auth.store.pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let _ = refresh_node_in_registry(&state.auth.store, &id).await;
+    state
+        .auth
+        .store
+        .node_registry
+        .record_success(&id, None, now);
 
     let views = load_admin_nodes(&state.auth.store)
         .await
@@ -1205,6 +1703,7 @@ async fn revoke_node_admin(
     .execute(&state.auth.store.pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let _ = refresh_node_in_registry(&state.auth.store, &id).await;
 
     // Mark any running scan jobs on this Node's libraries as interrupted
     crate::database::query(
@@ -1313,6 +1812,11 @@ async fn verify_signed_node_call(
     .bind(&rec.id)
     .execute(&state.auth.store.pool)
     .await;
+    state
+        .auth
+        .store
+        .node_registry
+        .record_success(&rec.id, None, now);
 
     Ok((rec, nonce))
 }
@@ -1378,6 +1882,7 @@ async fn receive_node_heartbeat(
             Err(res) => return res,
         };
     if let Ok(hb) = serde_json::from_slice::<HeartbeatPayload>(&body) {
+        let now = unix_now();
         let roots_json =
             serde_json::to_string(&hb.roots).unwrap_or_else(|_| rec.roots_json.clone());
         let _ = crate::database::query(
@@ -1385,10 +1890,16 @@ async fn receive_node_heartbeat(
         )
         .bind(roots_json)
         .bind(hb.version.as_deref())
-        .bind(unix_now())
+        .bind(now)
         .bind(&rec.id)
         .execute(&state.auth.store.pool)
         .await;
+        let _ = refresh_node_in_registry(&state.auth.store, &rec.id).await;
+        state
+            .auth
+            .store
+            .node_registry
+            .record_heartbeat(&rec.id, &hb, Some(1), now);
     }
     signed_core_response(
         &rec,
@@ -1903,13 +2414,16 @@ pub async fn dispatch_remote_scan(
     .await
     {
         Ok(_) => {
+            let now = unix_now();
             let _ = crate::database::query(
                 "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",
             )
-            .bind(unix_now())
+            .bind(now)
             .bind(node_id)
             .execute(&store.pool)
             .await;
+            let _ = refresh_node_in_registry(store, node_id).await;
+            store.node_registry.record_success(node_id, None, now);
             Ok(())
         }
         Err(err) => {
@@ -1919,6 +2433,8 @@ pub async fn dispatch_remote_scan(
             .bind(node_id)
             .execute(&store.pool)
             .await;
+            store.node_registry.record_failure(node_id, true);
+            let _ = refresh_node_in_registry(store, node_id).await;
             Err(format!("Node injoignable: {err}"))
         }
     }
@@ -1975,6 +2491,7 @@ pub async fn relay_from_remote_node(
     if rec.status == NodeStatus::Revoked.as_str() {
         return error(StatusCode::SERVICE_UNAVAILABLE, "node_revoked");
     }
+    let relay_started = std::time::Instant::now();
 
     // Only the response headers are bounded here; the media body remains streamed.
     let component = path_and_query
@@ -2132,11 +2649,23 @@ pub async fn relay_from_remote_node(
                             out.headers_mut().remove(header::CONTENT_RANGE);
                         }
                     }
-                    return out;
+                    let rtt_ms = relay_started.elapsed().as_millis() as u32;
+                    store
+                        .node_registry
+                        .record_success(&rec.id, Some(rtt_ms), unix_now());
+                    return track_core_relay_response(out, &store.node_registry, &rec.id);
                 }
                 _ => {
                     PENDING_STREAMS.lock().await.remove(&stream_id);
                     if rec.base_url.is_none() {
+                        let _ = crate::database::query(
+                            "UPDATE media_nodes SET status='disconnected' WHERE id=? AND status != 'revoked'",
+                        )
+                        .bind(&rec.id)
+                        .execute(&store.pool)
+                        .await;
+                        store.node_registry.record_failure(&rec.id, true);
+                        let _ = refresh_node_in_registry(store, &rec.id).await;
                         return error(StatusCode::GATEWAY_TIMEOUT, "stream_timeout");
                     }
                 }
@@ -2144,6 +2673,14 @@ pub async fn relay_from_remote_node(
         } else {
             PENDING_STREAMS.lock().await.remove(&stream_id);
             if rec.base_url.is_none() {
+                let _ = crate::database::query(
+                    "UPDATE media_nodes SET status='disconnected' WHERE id=? AND status != 'revoked'",
+                )
+                .bind(&rec.id)
+                .execute(&store.pool)
+                .await;
+                store.node_registry.record_failure(&rec.id, true);
+                let _ = refresh_node_in_registry(store, &rec.id).await;
                 return error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
             }
         }
@@ -2180,6 +2717,8 @@ pub async fn relay_from_remote_node(
             .bind(&rec.id)
             .execute(&store.pool)
             .await;
+            store.node_registry.record_failure(&rec.id, true);
+            let _ = refresh_node_in_registry(store, &rec.id).await;
             return error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
         }
     };
@@ -2187,7 +2726,10 @@ pub async fn relay_from_remote_node(
     let io = TokioIo::new(stream);
     let (mut sender, conn) = match hyper::client::conn::http1::handshake(io).await {
         Ok(ok) => ok,
-        Err(_) => return error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable"),
+        Err(_) => {
+            store.node_registry.record_failure(&rec.id, true);
+            return error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
+        }
     };
     tokio::spawn(async move {
         let _ = conn.await;
@@ -2247,10 +2789,13 @@ pub async fn relay_from_remote_node(
             .bind(&rec.id)
             .execute(&store.pool)
             .await;
+                store.node_registry.record_failure(&rec.id, true);
+                let _ = refresh_node_in_registry(store, &rec.id).await;
                 return error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
             }
         };
 
+    let rtt_ms = relay_started.elapsed().as_millis() as u32;
     let _ = crate::database::query(
         "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",
     )
@@ -2258,6 +2803,9 @@ pub async fn relay_from_remote_node(
     .bind(&rec.id)
     .execute(&store.pool)
     .await;
+    store
+        .node_registry
+        .record_success(&rec.id, Some(rtt_ms), now);
 
     let h = upstream_res.headers();
     let response_signature = h
@@ -2309,7 +2857,7 @@ pub async fn relay_from_remote_node(
             out.headers_mut().insert(header_name, val.clone());
         }
     }
-    out
+    track_core_relay_response(out, &store.node_registry, &rec.id)
 }
 
 async fn send_plain_json_post(

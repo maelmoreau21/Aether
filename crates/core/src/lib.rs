@@ -19,6 +19,7 @@ pub mod server_settings;
 use media_contracts::brand;
 pub mod artwork;
 mod catalog;
+pub mod consolidation;
 mod demo;
 pub mod feedback;
 pub mod identity;
@@ -238,10 +239,19 @@ async fn indexed_image(
 
 async fn indexed_descriptor(
     axum::Extension(identity): axum::Extension<auth::Authenticated>,
+    axum::Extension(visible): axum::Extension<permissions::VisibleLibraries>,
     axum::Extension(store): axum::Extension<identity::IdentityStore>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Response {
-    match inventory::descriptor(&store, &id, &identity.token_hash).await {
+    match inventory::descriptor_for_user(
+        &store,
+        &id,
+        &identity.token_hash,
+        Some(&identity.user.id),
+        Some(&visible.0),
+    )
+    .await
+    {
         Ok(Some(media)) => Json(media).into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, "unknown_media"),
         Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
@@ -431,26 +441,12 @@ fn local_security_with_store(
                         extra_origins.push_str(&origin_str);
                     }
                 }
-                if let Some(store) = &store
-                    && let Ok(urls) = sqlx::query_scalar::<_, String>(
-                        "SELECT DISTINCT public_url FROM media_nodes WHERE kind='remote' AND status='connected' AND public_url IS NOT NULL AND public_url != ''",
-                    )
-                    .fetch_all(&store.pool)
-                    .await
-                {
-                    for u in urls {
-                        if let Ok(parsed) = url::Url::parse(&u)
-                            && let Some(h) = parsed.host_str()
-                        {
-                            let scheme = parsed.scheme();
-                            let origin_str = if let Some(p) = parsed.port() {
-                                format!(" {scheme}://{h}:{p}")
-                            } else {
-                                format!(" {scheme}://{h}")
-                            };
-                            if !extra_origins.contains(&origin_str) {
-                                extra_origins.push_str(&origin_str);
-                            }
+                if let Some(store) = &store {
+                    let _ = nodes::ensure_node_registry_warm(store).await;
+                    for origin_url in store.node_registry.connected_public_origins() {
+                        let origin_str = format!(" {origin_url}");
+                        if !extra_origins.contains(&origin_str) {
+                            extra_origins.push_str(&origin_str);
                         }
                     }
                 }

@@ -168,6 +168,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 roots,
                 public_url: id.public_url,
                 active_scans,
+                active_streams: hb_state
+                    .active_streams
+                    .load(std::sync::atomic::Ordering::Relaxed),
                 indexed_assets,
                 timestamp: media_contracts::protocol::unix_now(),
             };

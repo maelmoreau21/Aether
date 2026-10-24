@@ -74,6 +74,7 @@ pub struct User {
 pub struct IdentityStore {
     pub(crate) pool: AnyPool,
     pub(crate) plugins_path: std::path::PathBuf,
+    pub(crate) node_registry: std::sync::Arc<crate::nodes::NodeRuntimeRegistry>,
 }
 fn plugin_path(database: Option<&Path>) -> Result<std::path::PathBuf, IdentityError> {
     let path = std::env::var_os("MEDIA_PLUGINS_PATH")
@@ -108,6 +109,7 @@ impl IdentityStore {
         Ok(Self {
             pool,
             plugins_path: plugin_path(None)?,
+            node_registry: std::sync::Arc::new(crate::nodes::NodeRuntimeRegistry::new()),
         })
     }
 
@@ -212,6 +214,7 @@ impl IdentityStore {
         Ok(Self {
             pool,
             plugins_path: plugin_path(Some(path))?,
+            node_registry: std::sync::Arc::new(crate::nodes::NodeRuntimeRegistry::new()),
         })
     }
 
@@ -230,6 +233,10 @@ impl IdentityStore {
 
     pub fn pool(&self) -> &AnyPool {
         &self.pool
+    }
+
+    pub fn node_registry(&self) -> &crate::nodes::NodeRuntimeRegistry {
+        &self.node_registry
     }
 
     pub async fn bootstrap(

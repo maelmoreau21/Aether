@@ -157,3 +157,46 @@ La suite de tests automatisée valide l'étanchéité et la conformité :
    - L'ordre `title-asc` et `title-desc` produit par SQLite correspond au bit près au tri historique Rust `sort_by_key`.
 5. **Gestion des pages hors limites** :
    - `offset` supérieur au nombre total d'œuvres renvoie `items: []` avec `total` exact, sans erreur SQL.
+
+---
+
+## 6. Consolidation globale du catalogue et passage à l'échelle 1 000 000 d'œuvres (Mission 2)
+
+### 6.1 Modèle hiérarchique consolidé et migration `0043_global_catalogue_consolidation.sql`
+
+La migration additive `0043_global_catalogue_consolidation.sql` complète le modèle hiérarchique `Work -> Edition -> MediaVersion -> MediaSource -> Asset -> Track` sans casser la compatibilité existante :
+- **Distinction explicite `Edition` / `MediaVersion`** :
+  - `inventory_edition_metadata(edition_id, edition_key, label)` : distingue les coupes éditoriales (`Édition locale`, `Director’s Cut`, `Version longue`, `Édition IMAX`, `Édition remastérisée`, `Édition spéciale`).
+  - `inventory_version_metadata(version_id, version_key, label)` : regroupe sous chaque édition les variantes techniques d'encodage/résolution/conteneur (ex. `1080p • H.264 • AAC • MP4`, `4K UHD • AV1 • 10-bit • OPUS • MKV`).
+- **Reconnaissance automatique des doublons et gestion des ambiguïtés** :
+  - `media_work_external_ids(work_id, kind, provider, external_id)` : indexe les identifiants externes fiables (`imdb`, `tmdb`, `tvdb`, `wikidata`, `eidr`) pour fusionner automatiquement et sans doublon les copies réparties sur plusieurs bibliothèques ou Media Nodes, sans jamais fusionner sur le seul titre.
+  - `media_match_candidates` et `media_merge_history` : détectent les correspondances probables (ex. titre normalisé identique + année ±1 an ou durée proche sans identifiant externe commun) avec score et motif explicite, permettant la confirmation manuelle, le rejet persistant, la séparation (`ungroup`) et l'annulation réversible (`undo`) via un instantané complet des membres avant fusion.
+- **Unification multi-bibliothèques et multi-Nodes** :
+  - Les films, séries, saisons et épisodes sont consolidés à l'affichage (`expand_detail`) tout en filtrant strictement les membres d'un groupe selon les bibliothèques autorisées et la politique parentale de l'utilisateur courant. Aucune copie ou métadonnée issue d'une bibliothèque interdite n'est exposée via un groupe partagé.
+  - La progression de lecture (`playback_progress`), les favoris/notes (`work_feedback`) et les listes personnelles résolvent l'ensemble des œuvres membres du groupe (`group_work_ids`).
+
+### 6.2 Optimisations SQL pour 100 000 et 1 000 000 d'œuvres
+
+1. **Colonnes de synthèse maintenues par triggers (`inventory_works`)** :
+   - `display_title_sort`, `effective_year`, `max_height`, `codecs_csv`, `languages_csv`, `genres_csv`, `has_available_asset`, `season_count_cached`, `episode_count_cached`.
+2. **Jointure différée en 2 phases (`Deferred Join`) et index couvrants** :
+   - La phase 1 de `catalogue_page()` sélectionne uniquement les 24 identifiants `w.id` de la page courante (plus 1 ligne de lookahead `hasMore`) en parcourant exclusivement les index couvrants (`inventory_works_lib_avail_sort`, `inventory_works_filter_sort`, `inventory_works_fts_sort`), sans lire les colonnes JSON lourdes (`editorial_json`, `manual_json`) ni évaluer les sous-requêtes d'affiches sur les lignes hors page.
+   - La phase 2 matérialise les métadonnées complètes et l'affiche uniquement pour les `<= 24` identifiants retenus.
+3. **Recherche plein texte et sous-chaîne par trigrammes FTS5 (`inventory_works_fts`)** :
+   - Table virtuelle `FTS5(..., tokenize = 'trigram')` avec `work_id UNINDEXED` et index couvrant `inventory_works_fts_sort`, évitant tout parcours séquentiel sur 1 000 000 d'œuvres lors des recherches >= 3 caractères.
+4. **Validation de cache O(1) (`inventory_cache_generation`)** :
+   - Table mono-ligne incrémentée par triggers SQLite lors des écritures catalogue/permissions/images, permettant de valider le cache mémoire en `~0,2 ms` quelle que soit la volumétrie.
+
+### 6.3 Benchmarks reproductibles sur 1 000, 10 000, 100 000 et 1 000 000 d'œuvres
+
+Exécuté via `cargo test --package media-poc --test global_catalogue_consolidation scale_benchmark_1k_10k_100k_and_1m_works -- --nocapture` :
+
+| Volumétrie | Cold Page 1 (shelf, sans `COUNT`) | Warm Cache serveur | Cold Page 1 (`+COUNT(*)`) | Cold Search (`'matrix'`, FTS5) | Cold 5-Filter Combo (`genre`+`year`+`4K`+`AV1`+`fra`) |
+|---|---|---|---|---|---|
+| **1 000 œuvres** | **31,93 ms** | **0,321 ms** | **8,35 ms** | **4,67 ms** | **9,05 ms** |
+| **10 000 œuvres** | **9,41 ms** | **0,291 ms** | **10,68 ms** | **9,34 ms** | **12,48 ms** |
+| **100 000 œuvres** | **7,06 ms** | **0,222 ms** | **14,13 ms** | **5,50 ms** | **4,59 ms** |
+| **1 000 000 d'œuvres** | **6,41 ms** | **0,242 ms** | **101,59 ms** | **39,56 ms** | **5,41 ms** |
+
+Côté interface Web (`apps/web/src/lib/catalog/page-cache.ts`), la restitution synchrone depuis le cache SWR mémoire/`sessionStorage` (`cachedCatalog`) s'effectue en **< 1 ms** (0 requête réseau superflue sur page déjà connue, bien en deçà de la cible des 50 ms).
+

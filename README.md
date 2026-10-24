@@ -198,6 +198,7 @@ Consultez la [politique de sécurité](SECURITY.md) et les [notes techniques de 
 
 Prérequis de développement : Rust `1.99+` (édition 2024), Node.js compatible avec le frontend, npm, `ffprobe` et les outils nécessaires aux fixtures multimédias des tests.
 
+
 ```bash
 # Qualité du code Rust
 cargo fmt --check

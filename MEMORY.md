@@ -1,5 +1,20 @@
 # MEMORY.md — État et décisions Aether
 
+## 24 octobre 2026 — Correction du test CI browser_scanner pour MP4 native Opus et repli progressif
+
+- Route d'interception audio : l'introduction de l'extraction native Opus ISOBMFF
+  nomme les segments MP4 /prepared/opus-{trackId}-chunk- (ex. opus-2 pour
+  internal-1 et opus-3 pour internal-2) plutôt que audio-{index}.
+  Le test scripts/browser-scanner.cjs interceptait uniquement **/prepared/audio-1*,
+  ce qui laissait passer les requêtes MP4 réelles avec succès et causait un timeout
+  sur l'apparition de l'avis de rétention de piste précédente.
+- Repli vidéo MKV en cas d'échec de lecture directe : depuis l'ajout de
+  ProgressiveVideo via MSE (video-stream-0-...), la vidéo de repli est chargée
+  via une URL blob: plutôt que le remux intégral /prepared/video. L'assertion
+  de lecture de repli accepte désormais blob: en plus de /prepared/video.
+- cargo test --locked --test browser_scanner -- --ignored --nocapture exécuté
+  et réussi avec succès (1 passed, 37.80s, scénarios restart=false et restart=true).
+
 ## 24 octobre 2026 — Streaming progressif Rust, jalon mesuré et limites
 
 - MP4 Opus validés au scan : fenêtres fMP4 virtuelles depuis les paquets

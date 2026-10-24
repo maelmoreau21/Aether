@@ -216,8 +216,8 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
         .await
         .unwrap();
     tokio::fs::copy(
-        &sample_mkv,
-        s1_s01_dir.join("Cosmos Alpha - S01E02 - 1080p.mkv"),
+        &sample_mp4,
+        s1_s01_dir.join("Cosmos Alpha - S01E02 - 1080p.mp4"),
     )
     .await
     .unwrap();

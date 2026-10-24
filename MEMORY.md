@@ -62,6 +62,16 @@
   harnais distingue PCM brut/aligné, dérive initiale et échecs sans censure.
   Aucune promesse p95/p99 Release ou NAS sans campagne réellement terminée.
   État, commandes et preuves : docs/STREAMING_MISSION_3_2.md.
+- Clôture Release : quatre sessions simultanées, un lot froid applicatif puis
+  un lot serveur chaud/nouveaux navigateurs : 8 ouvertures, 16 changements de
+  piste et 32 seeks réussis, aucune erreur dans ce seul essai. À chaud : médiane
+  première image 2252 ms, PCM brut 2375 ms, changement 215 ms, seek image 232 ms.
+  Objectifs 50/100 ms non atteints ; pas de p95/p99 fiable, ni validation de
+  8/16 lecteurs, NAS ou Node physique distant. Node : pic RSS observé ~22 MiB,
+  aucun processus FFmpeg ni fichier cache créé sur ce parcours natif.
+  CPU Node agrégé par lot : 672/844 ms froid/chaud ; pas un coût par session.
+  Exemple allocations compilé sous Linux, pas de mesure allocations exécutée.
+  Preuves : docs/evidence/2026-10-24/streaming-mission-3-2/release-smoke4-summary.json.
 
 ## 24 octobre 2026 — Menu paramètres du lecteur, masquage des détails de nœuds et données de lecture (style Jellyfin)
 
@@ -3867,3 +3877,25 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
   155.0.8059.86 Windows, MP4/MKV, pixels/PCM et régression fin/seek. Rapports
   `target/ci-scanner-tail-regression/`. 124 tests Web, check 0/0, lint/build,
   formatage et Clippy ciblé strict réussis. Linux CI reste à relancer ; aucun push.
+
+## 24 octobre 2026 — Mission 3.2, smoke Release concurrent
+
+- Artefacts Core/Node Release + Web copiés et SHA vérifiés inchangés; source
+  modifiée par d'autres chats après build, donc pas d'attestation exact HEAD.
+- Smoke réel Core/SQLite/NodeTCP/UI Chrome à4comptes :8ouvertures,
+  16switches,32seeks,0échec. Chaud n4 : image médiane2251,9ms,
+  PCM brut2375,3ms; switch médian215,5ms, seek image232,1ms.
+  Objectifs50/100ms non atteints, aucun p99UI, aucun8/16/100 lancé.
+- Node par cellule4sessions complète : CPU671,9/843,8ms froid/chaud,
+  RSS échantillonné21,46/21,76Mio,0FFmpeg et0nouveau cache préparé.
+  Chrome exclu; cacheOS non purgé, pas de NAS ou Node physique distant.
+- LinuxDocker : Nativefinal11pass/1microbenchignoré (cap64/refus65e,
+  exemptionchaud, annulationindex,4/8/16). Vidéo6/confinement6/stream3
+  passés sur snapshotguard précédent. Ancienne suite complète66pass/3fail/
+  4ignored conservée : générationfixtures impossible avecFFmpegLinuxminimal
+  sans encodeurs/filtres. `cargo check` exempleallocations réussi seulement,
+  aucune mesure d'allocationLinux ni preuveLinux navigateur.
+- Docs/preuves : docs/STREAMING_MISSION_3_2.md et
+  docs/evidence/2026-10-24/streaming-mission-3-2/release-smoke4-summary.json.
+  Audit13fichiers sanssecret; processusRust/FFmpeg test nettoyés, aucunpush
+  ou déploiement. Aucun commit effectué par l'agent benchmark.

@@ -2414,22 +2414,22 @@ pub async fn catalogue_page(
     // 2. Check if any work in valid_libs has `has_available_asset = 1` (using covering index `inventory_works_lib_avail_sort` in O(1))
     //    and whether any library root has diverged from its works' sources.
     let mut fast_check_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
-        "SELECT CAST(EXISTS(SELECT 1 FROM inventory_works w WHERE w.library_id IN (",
+        "SELECT (CASE WHEN EXISTS(SELECT 1 FROM inventory_works w WHERE w.library_id IN (",
     );
     let mut fc_sep = fast_check_builder.separated(", ");
     for lib in &valid_libs {
         fc_sep.push_bind(lib);
     }
     fc_sep.push_unseparated(
-        ") AND w.has_available_asset = 1 LIMIT 1) AS BIGINT) - \
-         2 * CAST(EXISTS(SELECT 1 FROM libraries l WHERE l.id IN (",
+        ") AND w.has_available_asset = 1) THEN 1 ELSE 0 END) - \
+         2 * (CASE WHEN EXISTS(SELECT 1 FROM libraries l WHERE l.id IN (",
     );
     let mut fc_sep2 = fast_check_builder.separated(", ");
     for lib in &valid_libs {
         fc_sep2.push_bind(lib);
     }
     fc_sep2.push_unseparated(
-        ") AND EXISTS(SELECT 1 FROM inventory_sources s WHERE s.library_id = l.id AND s.root_snapshot != l.root LIMIT 1)) AS BIGINT)",
+        ") AND EXISTS(SELECT 1 FROM inventory_sources s WHERE s.library_id = l.id AND s.root_snapshot != l.root)) THEN 1 ELSE 0 END)",
     );
     let fc_sql = crate::database::normalize_sql(fast_check_builder.sql().as_str());
     let fc_args = fast_check_builder
@@ -2446,7 +2446,7 @@ pub async fn catalogue_page(
 
     // 3. Check if any media groups or parental policies exist.
     let has_groups: bool = query_scalar::<_, i64>(
-        "SELECT CAST(EXISTS(SELECT 1 FROM media_group_members LIMIT 1) AS BIGINT)",
+        "SELECT CASE WHEN EXISTS(SELECT 1 FROM media_group_members) THEN 1 ELSE 0 END",
     )
     .fetch_one(&store.pool)
     .await?
@@ -2454,7 +2454,7 @@ pub async fn catalogue_page(
 
     let has_parental_policy: bool = if let Some(uid) = &filter.user_id {
         query_scalar::<_, i64>(
-            "SELECT CAST(EXISTS(SELECT 1 FROM parental_policies WHERE user_id=?) AS BIGINT)",
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM parental_policies WHERE user_id=?) THEN 1 ELSE 0 END",
         )
         .bind(uid)
         .fetch_one(&store.pool)
@@ -2465,7 +2465,7 @@ pub async fn catalogue_page(
     };
 
     let use_fts: bool = query_scalar::<_, i64>(
-        "SELECT CAST(EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory_works_fts') AS BIGINT)",
+        "SELECT CASE WHEN EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory_works_fts') THEN 1 ELSE 0 END",
     )
     .fetch_one(&store.pool)
     .await

@@ -124,3 +124,33 @@ Aucun CargoWindows lancé par cet agent. Le runtime FFmpeg minimal laisse trois
 échecs de génération dans le lot complet antérieur; aucun «tous les tests Linux
 passent» n'est revendiqué. La campagne de 100 ouvertures UI est suspendue pour économiser le quota;
 aucun p99 UI Release ne peut être annoncé à ce stade.
+
+## Smoke Release final — 24 octobre 2026
+
+Un seul lot à4sessions est terminé avec succès :4ouvertures froides applicatives,
+4chaudes,16switches et32seeks, aucune erreur. Aucun lot8/16/100 n'a été lancé.
+Les artefacts Core/Node Release et Web ont été copiés puis vérifiés inchangés;
+les sources ayant changé après compilation dans d'autres chats, les SHA des
+artefacts font foi et n'attestent pas un HEAD exact.
+
+Sur les4ouvertures chaudes, médiane/max : première image2251,9/2388,9ms,
+PCM brut2375,3/2408,7ms. Switch PCM aligné215,5/331,7ms (n8), seek image
+232,1/342,1ms (n16), seek PCM aligné293,8/448,4ms. Sur4ouvertures froides
+applicatives, image médiane2667,7ms, PCM brut2472,6ms. Les objectifs50/100ms
+ne sont donc pas atteints dans ce lot concurrent. Aucun p99UI n'est estimé.
+Les horloges proches au premier PCM ne prouvent pas la synchronie physique
+entre premier affichage et premier son.
+
+Pour chaque cellule complète (4ouvertures+8switches+16seeks), Node : CPU total
+671,9ms froid/843,8ms chaud, RSS maximal échantillonné21,46/21,76Mio,
+0processusFFmpeg et0octet de nouveau cache de préparation. Ces compteurs
+n'incluent pas Chrome et l'I/O logique n'est pas une mesure d'écriture physique.
+Pas de comparaison de gain avec les anciens lots debug sous conditions distinctes.
+
+Preuves : `release-smoke4.json`, `release-smoke4-summary.json`,
+`release-artifacts.json` dans le dossier de preuves Mission3.2. CompilationLinux
+de l'exemple d'allocations réussie (`cargo check`,4m31), aucune mesure d'allocation
+exécutée sous Linux. Permissions de bibliothèques/identités réelles conservées.
+Les processus Rust/FFmpeg du smoke ont été arrêtés par le harnais; aucun NAS,
+Node physique distant, reprise préparée ou scénario de panne supplémentaire
+n'a été validé par ce petit smoke. Aucun push ni déploiement.

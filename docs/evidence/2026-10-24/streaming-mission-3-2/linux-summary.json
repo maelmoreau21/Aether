@@ -39,6 +39,17 @@
     "failureStage": "Fixture creation requires absent FFmpeg filters/encoders; FFmpeg local configuration disables both. Failures retained."
   },
   "releaseUI": {
-    "status": "Not yet measured; binaries awaited. No p99 UI asserted."
+    "status": "Smoke passed",
+    "summary": "release-smoke4-summary.json",
+    "openings": 8,
+    "switches": 16,
+    "seeks": 32,
+    "p99": null,
+    "preparedReopen": false,
+    "outage": false
+  },
+  "allocationInstrumentation": {
+    "status": "cargo check succeeded only; no allocation performance run",
+    "log": "linux-allocation-check.log"
   }
 }

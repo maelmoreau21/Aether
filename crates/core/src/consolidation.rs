@@ -433,11 +433,11 @@ pub async fn sync_work_summary_tx(
         (i64::from(episodes > 0), seasons, episodes)
     } else {
         let avail: i64 = query_scalar(
-            "SELECT CAST(EXISTS(SELECT 1 FROM inventory_editions e \
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM inventory_editions e \
              JOIN inventory_versions v ON v.edition_id = e.id \
              JOIN inventory_sources s ON s.version_id = v.id \
              JOIN inventory_assets a ON a.source_id = s.id \
-             WHERE e.work_id = ? AND a.available = 1) AS INTEGER)",
+             WHERE e.work_id = ? AND a.available = 1) THEN 1 ELSE 0 END",
         )
         .bind(work_id)
         .fetch_one(&mut *tx)
@@ -1235,13 +1235,13 @@ pub async fn authorized_group_members(
     let mut allowed = Vec::new();
     for cid in candidates {
         let lib_ok: i64 = query_scalar(
-            "SELECT CAST(EXISTS( \
+            "SELECT CASE WHEN EXISTS( \
                 SELECT 1 FROM inventory_works w \
                 JOIN libraries l ON l.id = w.library_id \
                 JOIN media_nodes n ON n.id = l.node_id \
                 WHERE w.id = ? AND l.enabled = 1 AND n.status != 'revoked' \
                   AND (? = 1 OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id = l.id AND p.user_id = ?)) \
-            ) AS INTEGER)",
+            ) THEN 1 ELSE 0 END",
         )
         .bind(&cid)
         .bind(i64::from(is_admin))

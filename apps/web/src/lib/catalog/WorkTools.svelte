@@ -189,21 +189,70 @@
 
 <!-- Actions bar (Add to playlist + Three dots menu) -->
 <div class="work-tools-container">
-  <!-- Quick Playlist Button -->
-  <button
-    type="button"
-    class="tool-btn icon-btn"
-    aria-label="Ajouter à une playlist"
-    title="Ajouter à une playlist"
-    onclick={() => {
-      listOpen = true;
-      void loadLists();
+  <!-- Quick Playlist Dropdown -->
+  <details
+    class="list-picker"
+    bind:open={listOpen}
+    ontoggle={event => {
+      if (event.currentTarget.open) {
+        void loadLists();
+      }
     }}
   >
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-      <path d="M12 4v16M4 12h16" />
-    </svg>
-  </button>
+    <summary
+      class="tool-btn icon-btn"
+      aria-label="Ajouter à une playlist"
+      title="Ajouter à une playlist"
+    >
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M12 4v16M4 12h16" />
+      </svg>
+    </summary>
+
+    <div class="list-dropdown-menu">
+      <div class="list-dropdown-header">
+        <Icon name="sparkles" size={16} />
+        <strong>Ajouter à une playlist</strong>
+      </div>
+
+      <div class="playlists-grid">
+        {#each lists as list (list.id)}
+          <button
+            type="button"
+            class="playlist-item-btn"
+            disabled={busy}
+            onclick={async () => {
+              await mutate(`/api/v1/lists/${encodeURIComponent(list.id)}/items/${encodeURIComponent(work.id)}`, 'PUT');
+              listOpen = false;
+            }}
+          >
+            <span>{list.name}</span>
+            <Icon name="check" size={16} />
+          </button>
+        {:else}
+          <p class="empty-list-notice">Aucune playlist existante.</p>
+        {/each}
+      </div>
+
+      <form
+        class="new-list-form"
+        onsubmit={event => {
+          event.preventDefault();
+          void createList();
+        }}
+      >
+        <label class="form-field">
+          <span class="field-label">Nouvelle liste</span>
+          <div class="new-list-input-group">
+            <input required bind:value={listName} maxlength="100" placeholder="Nom de la liste" />
+            <button type="submit" class="btn primary-btn" disabled={busy || !listName.trim()}>
+              Créer et ajouter
+            </button>
+          </div>
+        </label>
+      </form>
+    </div>
+  </details>
 
   <!-- Three dots menu trigger -->
   <div class="menu-dropdown-wrapper">
@@ -639,73 +688,7 @@
   </div>
 {/if}
 
-<!-- Modal: Ajouter à une playlist -->
-{#if listOpen}
-  <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="playlist-title">
-    <button
-      type="button"
-      class="modal-backdrop-click"
-      aria-label="Fermer la fenêtre"
-      tabindex="-1"
-      onclick={() => (listOpen = false)}
-    ></button>
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-title-group">
-          <Icon name="sparkles" size={20} />
-          <h3 id="playlist-title">Ajouter à une playlist</h3>
-        </div>
-        <button
-          type="button"
-          class="close-modal-btn"
-          aria-label="Fermer"
-          onclick={() => (listOpen = false)}
-        >
-          <Icon name="close" size={18} />
-        </button>
-      </div>
 
-      <div class="modal-body list-body">
-        <div class="playlists-grid">
-          {#each lists as list (list.id)}
-            <button
-              type="button"
-              class="playlist-item-btn"
-              disabled={busy}
-              onclick={async () => {
-                await mutate(`/api/v1/lists/${encodeURIComponent(list.id)}/items/${encodeURIComponent(work.id)}`, 'PUT');
-                listOpen = false;
-              }}
-            >
-              <span>{list.name}</span>
-              <Icon name="check" size={16} />
-            </button>
-          {:else}
-            <p class="empty-list-notice">Aucune playlist existante.</p>
-          {/each}
-        </div>
-
-        <form
-          class="new-list-form"
-          onsubmit={event => {
-            event.preventDefault();
-            void createList();
-          }}
-        >
-          <label class="form-field">
-            <span class="field-label">Créer une nouvelle playlist</span>
-            <div class="new-list-input-group">
-              <input required bind:value={listName} maxlength="100" placeholder="Nom de la playlist…" />
-              <button type="submit" class="btn primary-btn" disabled={busy || !listName.trim()}>
-                Créer & Ajouter
-              </button>
-            </div>
-          </label>
-        </form>
-      </div>
-    </div>
-  </div>
-{/if}
 
 <style>
   .work-tools-container {
@@ -715,6 +698,54 @@
     position: relative;
     margin-block: 8px;
     vertical-align: middle;
+  }
+
+  /* Details list-picker */
+  details.list-picker {
+    position: relative;
+    display: inline-block;
+  }
+
+  details.list-picker summary {
+    list-style: none;
+  }
+
+  details.list-picker summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .list-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    min-width: 280px;
+    background: rgba(24, 24, 27, 0.95);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-md);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+    padding: 14px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .list-dropdown-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-bright);
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .new-list-form {
+    border-top: 1px solid var(--color-line);
+    padding-top: 10px;
+    margin-top: 4px;
   }
 
   .tool-btn {

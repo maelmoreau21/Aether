@@ -222,7 +222,9 @@ pub(crate) fn is_generic_video_stem(stem: &str) -> bool {
     ) {
         return true;
     }
-    if s.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | ' ' | '_' | '-')) {
+    if s.chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, '.' | ' ' | '_' | '-'))
+    {
         return true;
     }
     for prefix in ["cd", "part", "pt", "disc", "disk", "dvd"] {
@@ -265,7 +267,8 @@ pub(crate) fn identity(relative: &Path) -> (String, Option<u16>, BTreeMap<String
                 || is_generic_video_stem(stem)
                 || parsed_file.0.eq_ignore_ascii_case("untitled")
                 || f_lower == p_lower
-                || (!f_lower.is_empty() && (p_lower.starts_with(&f_lower) || f_lower.starts_with(&p_lower)))
+                || (!f_lower.is_empty()
+                    && (p_lower.starts_with(&f_lower) || f_lower.starts_with(&p_lower)))
         }
         _ => false,
     };
@@ -287,7 +290,10 @@ pub(crate) fn identity(relative: &Path) -> (String, Option<u16>, BTreeMap<String
         };
         let group = format!(
             "folder:{}",
-            parent.unwrap_or(Path::new("")).to_string_lossy().replace('\\', "/")
+            parent
+                .unwrap_or(Path::new(""))
+                .to_string_lossy()
+                .replace('\\', "/")
         );
         (title, year, merged_ids, group)
     } else {
@@ -635,13 +641,12 @@ pub fn parse_series_episode(relative: &Path) -> Option<ParsedSeriesEpisode> {
     // 5. Standalone video file in a folder (e.g. a movie or single episode in a folder)
     if components.len() >= 2 {
         let (file_title, _, _) = metadata_name(stem);
-        let ep_title = if is_generic_video_stem(stem)
-            || file_title.eq_ignore_ascii_case(&series_raw_title)
-        {
-            series_raw_title.clone()
-        } else {
-            file_title
-        };
+        let ep_title =
+            if is_generic_video_stem(stem) || file_title.eq_ignore_ascii_case(&series_raw_title) {
+                series_raw_title.clone()
+            } else {
+                file_title
+            };
         let s = season_from_parent.unwrap_or(1);
         return Some(ParsedSeriesEpisode {
             series_dir,
@@ -876,7 +881,9 @@ where
             });
             continue;
         }
-        if !metadata.is_file() || !matches!(extension.as_str(), "mkv" | "mp4" | "webm" | "m4v" | "mov") {
+        if !metadata.is_file()
+            || !matches!(extension.as_str(), "mkv" | "mp4" | "webm" | "m4v" | "mov")
+        {
             continue;
         }
         report.discovered += 1;

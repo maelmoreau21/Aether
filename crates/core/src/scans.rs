@@ -401,6 +401,7 @@ async fn enqueue_one(
     let task = tokio::spawn(async move {
         let scan_id_err = scan_id.clone();
         let store_err = store.clone();
+        let node_id_err = node_id.clone();
         if node_id != "local" {
             let _ =
                 crate::database::query("UPDATE scan_jobs SET status='running' WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
@@ -451,6 +452,20 @@ async fn enqueue_one(
             if kind == "music" {
                 let count = crate::music::scan_fenced(&store, &job_id, &root, &cancel, Some(&scan_id)).await?;
                 crate::database::query("UPDATE scan_jobs SET status='completed',discovered=?,probed=?,reused=0 WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)").bind(count as i64).bind(count as i64).bind(&job_id).bind(&scan_id).execute(&store.pool).await?;
+                if let Some((task_id, attempt_str)) = scan_id.split_once(':')
+                    && let Ok(attempt) = attempt_str.parse::<i64>()
+                {
+                    let now = media_contracts::protocol::unix_now();
+                    let _ = crate::task_engine::finish(
+                        &store,
+                        task_id,
+                        attempt,
+                        &node_id,
+                        now,
+                        None,
+                    )
+                    .await;
+                }
                 return Ok(());
             }
             let cache = if mode == RefreshMode::Full { Default::default() } else { inventory::load_scan_cache(&store, &job_id).await? };
@@ -511,6 +526,20 @@ async fn enqueue_one(
                 .bind(&job_id).bind(&scan_id)
                 .execute(&store.pool)
                 .await?;
+            if let Some((task_id, attempt_str)) = scan_id.split_once(':')
+                && let Ok(attempt) = attempt_str.parse::<i64>()
+            {
+                let now = media_contracts::protocol::unix_now();
+                let _ = crate::task_engine::finish(
+                    &store,
+                    task_id,
+                    attempt,
+                    &node_id,
+                    now,
+                    if report.complete { None } else { Some("Scan completed with errors") },
+                )
+                .await;
+            }
             Ok(())
         }.await;
         if let Err(e) = &result {
@@ -540,6 +569,20 @@ async fn enqueue_one(
                     .bind(&job_id).bind(&scan_id)
                     .execute(&store.pool)
                     .await;
+            if let Some((task_id, attempt_str)) = scan_id_err.split_once(':')
+                && let Ok(attempt) = attempt_str.parse::<i64>()
+            {
+                let now = media_contracts::protocol::unix_now();
+                let _ = crate::task_engine::finish(
+                    &store_err,
+                    task_id,
+                    attempt,
+                    &node_id_err,
+                    now,
+                    Some(&detailed_msg),
+                )
+                .await;
+            }
         }
         if let Ok(mut tokens) = runner_jobs.cancellations.lock() {
             tokens.remove(&scan_id);

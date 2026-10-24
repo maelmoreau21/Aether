@@ -274,6 +274,44 @@ Voir [le contrat détaillé et les commandes](P2_DOCKER_VALIDATION.md).
 Contrat et limites : [P3/P4](P3_P4_FEATURES.md).
 
 
+## Flux progressifs — 24 octobre 2026
+
+Les sources AV1 exposent `durationSeconds` et `videoStreamUrl`. `videoMime`
+(RFC 6381 réel) n'est ajouté que si la configuration `av1C` est vérifiée.
+Un client sans codec MSE vérifié échoue explicitement si la vidéo originale
+ne se décode pas ; il ne déclenche pas de remux intégral automatique.
+Le suffixe entier de
+`video-stream-{index}-{millisecondes}` identifie la piste AV1 inventoriée et la position demandée, inférieure à 24 h
+et à la durée inventoriée. GET copie les paquets vidéo vers un unique fMP4
+progressif ; aucun fichier vidéo temporaire ni réencodage. Une requête annulée
+tue son processus FFmpeg. HEAD vérifie la source sans lancer FFmpeg. Ce flux
+ne propose pas de Range (416) ; le seek ferme le flux et en ouvre un autre à
+la position voulue. Les assets originaux conservent HEAD/Range/206/416.
+Quatre flux au maximum par service Node ; attente d'admission bornée à 250 ms.
+La sortie est soumise au contrôle de débit du consommateur par blocs de 64 Kio.
+Le lecteur borne les données vidéo encodées à 128 Mio et évince seulement
+avant des keyframes connues. Un GOP empêchant cette éviction produit une erreur
+explicite au plafond ; la mémoire interne du décodeur/navigateur reste distincte.
+
+Pour les MP4 Opus dont les tables et références locales ont été validées au
+scan, `audioSegmentUrl` utilise `opus-{trackId}-chunk-{n}` et
+`audioSegmentMode: "absolute"`. `trackId` est l'identifiant MP4 vérifié, pas
+l'ordinal ffprobe. Ce chemin Rust conserve les paquets, la configuration Opus
+et les timestamps ; HEAD/Range/206/416 portent sur la représentation fMP4
+virtuelle. Aucun processus FFmpeg ni fichier audio temporaire n'est requis.
+Le parseur accepte un sous-ensemble strict, avec moov limité à 16 Mio, cache
+d'index à 32 Mio/8 entrées, fenêtre à 8192 paquets/8 Mio et I/O de 64 Kio.
+Un scan antérieur sans cette validation conserve le chemin FFmpeg jusqu'au
+nouveau scan. Les autres MP4 et MKV gardent les fenêtres audio existantes.
+
+Ces composants suivent les mêmes sessions, permissions, inventaires confinés
+et relais signés Core/Node que les préparations. Ils n'acceptent aucun chemin
+fourni par le navigateur. Un format hors sous-ensemble ou une saturation
+produit une erreur explicite, jamais un transcodage audio implicite.
+Le relais attend leurs en-têtes au maximum 35 s, indépendamment du budget
+des anciennes préparations complètes. Les réponses d'erreur signées fixent
+leur longueur avant calcul du digest, y compris pour le canal sortant.
+
 ## Préparation locale des pistes — 18 octobre 2026
 
 `GET|HEAD /api/v1/assets/{id}/prepared/{component}` : session et droits bibliothèque
@@ -293,8 +331,11 @@ FFmpeg absent, préparation occupée/expirée ou saturation du cache. Les Nodes
 distants utilisent le relais signé existant, y compris HEAD/Range et erreurs.
 Une HEAD peut préparer le cache complet sur les anciens composants (borne
 configurable, 900 s par défaut). Les nouvelles fenêtres passent directement
-par GET borné, sans HEAD longue : travail FFmpeg plafonné à 20 s, deux attentes
-au maximum de 5 s derrière le worker unique. Le frontend ferme et annule ses
+par GET borné, sans HEAD longue : travail FFmpeg plafonné à 20 s, huit attentes
+au maximum de 5 s derrière le worker unique. Les fenêtres identiques rejoignent
+une même préparation avant admission (64 demandes/64 clés au maximum,
+attente bornée à 25 s ; annulation du leader autorise un successeur).
+Le frontend ferme et annule ses
 requêtes à la fermeture du lecteur. Le descripteur
 expose `prepare: true` pour les sources concernées. Dépendance facultative,
 bornes et limites : [préparation](PLAYER_TRACK_PREPARATION.md).
@@ -360,11 +401,12 @@ l'API garde le comptage exact par défaut (`count=true`). Le coût d'une page
 profonde avec `offset` et les filtres complexes peut encore croître avec la
 bibliothèque. Aucun délai navigateur de 50 ms n'est garanti par ce contrat.
 
-Les sources AV1/Opus internes MKV proposent désormais la vidéo originale avec
-l'audio Opus segmenté, et `preparedVideoUrl` pour un repli explicite si le client
-échoue à décoder cette vidéo. Le repli reste une copie vidéo complète validée
-avant publication : aucun fichier de cache partiel n'est exposé. Les fenêtres
-audio évitent aussi une copie audio complète sur ce parcours MKV.
+Les sources AV1/Opus internes MKV proposent la vidéo originale avec l'audio
+Opus segmenté. Depuis le 24 octobre, `videoStreamUrl` fournit le repli progressif
+décrit ci-dessus lorsque la configuration AV1 est connue. Les anciens
+descripteurs sans ce champ conservent `preparedVideoUrl`, une copie complète
+validée avant publication. Les fenêtres audio évitent une copie audio complète
+sur le parcours MKV quand MSE Opus est disponible.
 
 
 ## Détail de série paginé — 23 octobre 2026

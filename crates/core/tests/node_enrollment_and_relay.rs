@@ -471,6 +471,7 @@ async fn test_node_enrollment_outbound_channel_and_streaming_relay() {
         format!("/api/v1/assets/{asset_id}/content"),
         prepared["url"].as_str().unwrap().into(),
         prepared["externalAudioUrl"].as_str().unwrap().into(),
+        format!("{}0", prepared["audioSegmentUrl"].as_str().unwrap()),
     ] {
         let (status, headers, body) = http_request(
             &core_origin,
@@ -527,6 +528,40 @@ async fn test_node_enrollment_outbound_channel_and_streaming_relay() {
             StatusCode::RANGE_NOT_SATISFIABLE
         );
     }
+    let progressive = format!("{}0", prepared["videoStreamUrl"].as_str().unwrap());
+    for method in [Method::GET, Method::HEAD] {
+        let (status, _, bytes) = http_request(
+            &core_origin,
+            method.clone(),
+            &progressive,
+            &[("cookie", session_cookie)],
+            vec![],
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "outbound progressive {method}: {}",
+            String::from_utf8_lossy(&bytes)
+        );
+        if method == Method::HEAD {
+            assert!(bytes.is_empty());
+        } else {
+            assert_eq!(&bytes[4..8], b"ftyp");
+        }
+    }
+    assert_eq!(
+        http_request(
+            &core_origin,
+            Method::GET,
+            &progressive,
+            &[("cookie", session_cookie), ("range", "bytes=0-15")],
+            vec![]
+        )
+        .await
+        .0,
+        StatusCode::RANGE_NOT_SATISFIABLE
+    );
     // Allow channel worker to cycle gracefully after completing stream relay
     tokio::time::sleep(Duration::from_millis(150)).await;
 

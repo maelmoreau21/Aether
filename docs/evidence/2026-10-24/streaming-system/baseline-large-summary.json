@@ -1,0 +1,249 @@
+{
+  "sourceReport": "baseline-large.json",
+  "sourceSha256": "8dc6e6300f305ce5f00829919dcccb88bef9a595274c9ff0004d2b5bfdbe8287",
+  "method": {
+    "median": "Arithmetic mean of the two central values for even n",
+    "percentiles": "Nearest rank; p99 only if at least 100 observations in this population",
+    "failures": "Never assigned a fabricated finite latency; all raw failures remain in source evidence"
+  },
+  "populations": {
+    "1/cold-app-preparation": {
+      "runs": 1,
+      "sessionAttempts": 1,
+      "observedCompletedOpenings": 1,
+      "failedCells": 0,
+      "failedTrajectories": 0,
+      "historicalLostOpeningMeasurements": 0,
+      "frameMs": {
+        "n": 1,
+        "min": 1133.699999988079,
+        "median": 1133.699999988079,
+        "p95": 1133.699999988079,
+        "p99": null,
+        "max": 1133.699999988079
+      },
+      "pcmMs": {
+        "n": 1,
+        "min": 1681.5,
+        "median": 1681.5,
+        "p95": 1681.5,
+        "p99": null,
+        "max": 1681.5
+      },
+      "switchPcmMs": {
+        "n": 2,
+        "min": 58.5,
+        "median": 337.85000002384186,
+        "p95": 617.2000000476837,
+        "p99": null,
+        "max": 617.2000000476837
+      },
+      "seekFrameMs": {
+        "n": 4,
+        "min": 79.19999998807907,
+        "median": 108.84999999403954,
+        "p95": 159,
+        "p99": null,
+        "max": 159
+      },
+      "seekPcmMs": {
+        "n": 4,
+        "min": 190.5,
+        "median": 509.15000000596046,
+        "p95": 579.6999999880791,
+        "p99": null,
+        "max": 579.6999999880791
+      }
+    },
+    "1/warm-server-new-browser": {
+      "runs": 1,
+      "sessionAttempts": 1,
+      "observedCompletedOpenings": 1,
+      "failedCells": 0,
+      "failedTrajectories": 0,
+      "historicalLostOpeningMeasurements": 0,
+      "frameMs": {
+        "n": 1,
+        "min": 793.1000000238419,
+        "median": 793.1000000238419,
+        "p95": 793.1000000238419,
+        "p99": null,
+        "max": 793.1000000238419
+      },
+      "pcmMs": {
+        "n": 1,
+        "min": 828.3999999761581,
+        "median": 828.3999999761581,
+        "p95": 828.3999999761581,
+        "p99": null,
+        "max": 828.3999999761581
+      },
+      "switchPcmMs": {
+        "n": 2,
+        "min": 70.69999998807907,
+        "median": 72.55000001192093,
+        "p95": 74.40000003576279,
+        "p99": null,
+        "max": 74.40000003576279
+      },
+      "seekFrameMs": {
+        "n": 4,
+        "min": 82.39999997615814,
+        "median": 106.2000000178814,
+        "p95": 128.19999998807907,
+        "p99": null,
+        "max": 128.19999998807907
+      },
+      "seekPcmMs": {
+        "n": 4,
+        "min": 91.60000002384186,
+        "median": 117.10000002384186,
+        "p95": 137.5999999642372,
+        "p99": null,
+        "max": 137.5999999642372
+      }
+    },
+    "4/cold-app-preparation": {
+      "runs": 1,
+      "sessionAttempts": 4,
+      "observedCompletedOpenings": 3,
+      "failedCells": 1,
+      "failedTrajectories": 2,
+      "historicalLostOpeningMeasurements": 0,
+      "frameMs": {
+        "n": 3,
+        "min": 872.6999999880791,
+        "median": 1053.8999999761581,
+        "p95": 1196.3999999761581,
+        "p99": null,
+        "max": 1196.3999999761581
+      },
+      "pcmMs": {
+        "n": 3,
+        "min": 1759.6000000238419,
+        "median": 1761,
+        "p95": 1765.3999999761581,
+        "p99": null,
+        "max": 1765.3999999761581
+      },
+      "switchPcmMs": {
+        "n": 5,
+        "min": 64.19999998807907,
+        "median": 658.5999999642372,
+        "p95": 675.1000000238419,
+        "p99": null,
+        "max": 675.1000000238419
+      },
+      "seekFrameMs": {
+        "n": 8,
+        "min": 101.69999998807907,
+        "median": 121.90000000596046,
+        "p95": 169.69999998807907,
+        "p99": null,
+        "max": 169.69999998807907
+      },
+      "seekPcmMs": {
+        "n": 8,
+        "min": 139.9000000357628,
+        "median": 658.8000000119209,
+        "p95": 777.4000000357628,
+        "p99": null,
+        "max": 777.4000000357628
+      }
+    },
+    "4/warm-server-new-browser": {
+      "runs": 1,
+      "sessionAttempts": 4,
+      "observedCompletedOpenings": 4,
+      "failedCells": 1,
+      "failedTrajectories": 2,
+      "historicalLostOpeningMeasurements": 0,
+      "frameMs": {
+        "n": 4,
+        "min": 1457.6000000238419,
+        "median": 1710.300000011921,
+        "p95": 1724.2000000476837,
+        "p99": null,
+        "max": 1724.2000000476837
+      },
+      "pcmMs": {
+        "n": 4,
+        "min": 1290.2000000476837,
+        "median": 1555.4000000059605,
+        "p95": 1635.0999999642372,
+        "p99": null,
+        "max": 1635.0999999642372
+      },
+      "switchPcmMs": {
+        "n": 6,
+        "min": 7.200000047683716,
+        "median": 59.80000001192093,
+        "p95": 854.8999999761581,
+        "p99": null,
+        "max": 854.8999999761581
+      },
+      "seekFrameMs": {
+        "n": 9,
+        "min": 92,
+        "median": 112.90000003576279,
+        "p95": 142,
+        "p99": null,
+        "max": 142
+      },
+      "seekPcmMs": {
+        "n": 9,
+        "min": 103.10000002384186,
+        "median": 133.5,
+        "p95": 157.19999998807907,
+        "p99": null,
+        "max": 157.19999998807907
+      }
+    }
+  },
+  "http": [
+    {
+      "component": "original",
+      "path": "/stream/v1/assets/bb3082e3-6c13-45bb-9621-30f3414bbf20/content",
+      "attempts": 100,
+      "failures": 0,
+      "headersMs": {
+        "n": 100,
+        "min": 11.256400000012945,
+        "median": 14.662199999998847,
+        "p95": 18.221799999999348,
+        "p99": 79.57889999999315,
+        "max": 80.83209999999963
+      },
+      "through64KiBMs": {
+        "n": 100,
+        "min": 11.85549999999057,
+        "median": 15.470600000000559,
+        "p95": 34.77580000000307,
+        "p99": 80.29119999999239,
+        "max": 83.49090000000433
+      }
+    },
+    {
+      "component": "audio",
+      "path": "/api/v1/assets/bb3082e3-6c13-45bb-9621-30f3414bbf20/prepared/audio-1-chunk-0",
+      "attempts": 100,
+      "failures": 0,
+      "headersMs": {
+        "n": 100,
+        "min": 11.809499999988475,
+        "median": 17.52605000000767,
+        "p95": 23.78169999999227,
+        "p99": 61.92289999999048,
+        "max": 77.55740000000515
+      },
+      "through64KiBMs": {
+        "n": 100,
+        "min": 12.306899999995949,
+        "median": 18.69499999999971,
+        "p95": 24.806500000006054,
+        "p99": 62.282299999991665,
+        "max": 79.875
+      }
+    }
+  ]
+}

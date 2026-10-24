@@ -1,0 +1,245 @@
+{
+  "scope": "Preprepared window boundary/seek experiment only, localhost, not Node or cold startup proof",
+  "formats": [
+    {
+      "format": "mkv",
+      "windows": [
+        {
+          "n": 0,
+          "first": {
+            "pts_time": "0.000000",
+            "dts_time": "0.000000",
+            "flags": "K__"
+          },
+          "last": {
+            "pts_time": "9.917000",
+            "dts_time": "9.917000",
+            "flags": "___"
+          },
+          "bytes": 68881
+        },
+        {
+          "n": 1,
+          "first": {
+            "pts_time": "0.000000",
+            "dts_time": "0.000000",
+            "flags": "K__"
+          },
+          "last": {
+            "pts_time": "19.917000",
+            "dts_time": "19.917000",
+            "flags": "___"
+          },
+          "bytes": 134780
+        },
+        {
+          "n": 2,
+          "first": {
+            "pts_time": "15.000000",
+            "dts_time": "15.000000",
+            "flags": "K__"
+          },
+          "last": {
+            "pts_time": "29.917000",
+            "dts_time": "29.917000",
+            "flags": "___"
+          },
+          "bytes": 99194
+        },
+        {
+          "n": 3,
+          "first": {
+            "pts_time": "30.000000",
+            "dts_time": "30.000000",
+            "flags": "K__"
+          },
+          "last": {
+            "pts_time": "33.917000",
+            "dts_time": "33.917000",
+            "flags": "___"
+          },
+          "bytes": 29297
+        }
+      ],
+      "browser": {
+        "playbackError": "Error: Boundary playback timed out",
+        "errors": [],
+        "events": [
+          {
+            "type": "playing",
+            "time": 0.000304,
+            "at": 496.10000002384186
+          },
+          {
+            "type": "playing",
+            "time": 1.113017,
+            "at": 1610.5
+          },
+          {
+            "type": "waiting",
+            "time": 19.908026,
+            "at": 20406.69999998808
+          }
+        ],
+        "appends": [
+          {
+            "n": 0,
+            "time": 0,
+            "ranges": [
+              [
+                0,
+                10
+              ]
+            ]
+          },
+          {
+            "n": 1,
+            "time": 6.040545,
+            "ranges": [
+              [
+                0,
+                20
+              ]
+            ]
+          },
+          {
+            "n": 2,
+            "time": 16.032819,
+            "ranges": [
+              [
+                0,
+                20
+              ]
+            ]
+          }
+        ],
+        "video": {
+          "time": 19.908026,
+          "ready": 2,
+          "seeking": false,
+          "ranges": [
+            [
+              0,
+              20
+            ]
+          ]
+        },
+        "audio": {
+          "time": 19.879003,
+          "ready": 4,
+          "seeking": false,
+          "ranges": [
+            [
+              0,
+              30
+            ]
+          ]
+        },
+        "lastFrames": [
+          {
+            "time": 19.167,
+            "gap": 83.29999999999927
+          },
+          {
+            "time": 19.25,
+            "gap": 83.40000000000146
+          },
+          {
+            "time": 19.333,
+            "gap": 83.29999999999927
+          },
+          {
+            "time": 19.417,
+            "gap": 83.40000000000146
+          },
+          {
+            "time": 19.5,
+            "gap": 83.59999999999854
+          },
+          {
+            "time": 19.583,
+            "gap": 83.10000000000218
+          },
+          {
+            "time": 19.667,
+            "gap": 83.19999999999709
+          },
+          {
+            "time": 19.75,
+            "gap": 83.60000000000218
+          },
+          {
+            "time": 19.833,
+            "gap": 83.09999999999854
+          },
+          {
+            "time": 19.917,
+            "gap": 83.5
+          }
+        ]
+      }
+    },
+    {
+      "format": "mp4",
+      "windows": [
+        {
+          "n": 0,
+          "first": {
+            "pts_time": "0.000000",
+            "dts_time": "0.000000",
+            "flags": "K__"
+          },
+          "last": {
+            "pts_time": "9.917000",
+            "dts_time": "9.917000",
+            "flags": "___"
+          },
+          "bytes": 68901
+        },
+        {
+          "n": 1,
+          "first": {
+            "pts_time": "0.000000",
+            "dts_time": "0.000000",
+            "flags": "K__"
+          },
+          "last": {
+            "pts_time": "19.917000",
+            "dts_time": "19.917000",
+            "flags": "___"
+          },
+          "bytes": 134800
+        },
+        {
+          "n": 2,
+          "first": {
+            "pts_time": "15.000000",
+            "dts_time": "15.000000",
+            "flags": "K__"
+          },
+          "last": {
+            "pts_time": "29.917000",
+            "dts_time": "29.917000",
+            "flags": "___"
+          },
+          "bytes": 99214
+        },
+        {
+          "n": 3,
+          "first": {
+            "pts_time": "30.000000",
+            "dts_time": "30.000000",
+            "flags": "K__"
+          },
+          "last": {
+            "pts_time": "33.917000",
+            "dts_time": "33.917000",
+            "flags": "___"
+          },
+          "bytes": 29317
+        }
+      ]
+    }
+  ],
+  "error": "Error: Boundary proof failed: mkv\n    at C:\\Users\\Mael\\Documents\\GitHub\\Aether\\scripts\\browser-video-window-poc.cjs:87:273"
+}

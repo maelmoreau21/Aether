@@ -26,11 +26,12 @@ describe('segmented audio seek cancellation',()=>{
     vi.spyOn(ExternalAudio.prototype,'load').mockResolvedValue(undefined);
     vi.spyOn(ExternalAudio.prototype,'bufferForPlayback').mockImplementation(()=>new Promise<void>(()=>{}));
     vi.spyOn(ExternalAudio.prototype,'destroy').mockImplementation(()=>{});
-    const audio=new SegmentedAudio(video as unknown as HTMLVideoElement,0,report);
-    const state=audio as unknown as {fill(current?:boolean):Promise<void>;mediaSource:Source};
+    const audio=new SegmentedAudio(video as unknown as HTMLVideoElement,0,report,{trackId:'internal-1'});
+    const state=audio as unknown as {fill(current?:boolean):Promise<void>;mediaSource:Source;audio:{dataset:{internalAudioTrack?:string}}};
     const fill=vi.spyOn(state,'fill').mockResolvedValue(undefined);
-    const loading=audio.load('/audio-1-chunk-',false);
+    const loading=audio.load('/prepared/opus-2-chunk-',false);
     state.mediaSource.dispatchEvent(new Event('sourceopen'));await loading;
+    expect(state.audio.dataset.internalAudioTrack).toBe('internal-1');
     fill.mockRejectedValueOnce(new Error('candidate window HTTP 503'));
     const buffering=expect(audio.bufferForPlayback()).rejects.toThrow('candidate window HTTP 503');
     await vi.advanceTimersByTimeAsync(250);await buffering;
@@ -93,6 +94,15 @@ describe('segmented audio seek cancellation',()=>{
     const fetcher=vi.fn().mockResolvedValue(new Response(new Uint8Array([1,2,3])));vi.stubGlobal('fetch',fetcher);
     await audio.fill(true);
     expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/chunks/2']);
+  });
+  it('prepares an explicit saved position before video metadata and preserves absolute Rust fragment timestamps',async()=>{
+    const {audio}=harness();
+    const state=audio as unknown as {element:{currentTime:number;duration:number};timeline:{duration:number;position:number;mode:string};buffer:{timestampOffset:number;appendWindowStart:number}};
+    state.element={currentTime:0,duration:NaN};state.timeline={duration:60,position:26,mode:'absolute'};
+    const fetcher=vi.fn().mockResolvedValue(new Response(new Uint8Array([1,2,3])));vi.stubGlobal('fetch',fetcher);
+    await audio.fill(true);
+    expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/chunks/2']);
+    expect(state.buffer.timestampOffset).toBe(0);expect(state.buffer.appendWindowStart).toBe(20);
   });
   it('immediately schedules the latest window when preparation outlives a boundary',async()=>{
     const {audio,schedule}=harness();

@@ -6,7 +6,7 @@ use std::{
     io,
     path::Path,
     process::Stdio,
-    sync::Arc,
+    sync::{Arc, Weak},
     time::{Duration, Instant},
 };
 use tokio::{
@@ -93,6 +93,10 @@ pub struct Preparations {
     worker: Semaphore,
     waiters: Semaphore,
     limits: io::Result<Limits>,
+    native_audio: crate::mp4_audio::NativeAudio,
+    video_streams: crate::video_stream::VideoStreams,
+    in_flight: Mutex<HashMap<String, Weak<Mutex<()>>>>,
+    joiners: Semaphore,
 }
 impl Default for Preparations {
     fn default() -> Self {
@@ -103,8 +107,12 @@ impl Default for Preparations {
         Self {
             cache: Mutex::new(Cache::default()),
             worker: Semaphore::new(1),
-            waiters: Semaphore::new(2),
+            waiters: Semaphore::new(8),
             limits: Limits::from_env(),
+            native_audio: crate::mp4_audio::NativeAudio::default(),
+            video_streams: crate::video_stream::VideoStreams::default(),
+            in_flight: Mutex::new(HashMap::new()),
+            joiners: Semaphore::new(64),
         }
     }
 }
@@ -114,6 +122,7 @@ pub enum Component {
     Video,
     Audio(u32),
     AudioChunk(u32, u32),
+    OpusChunk(u32, u32),
     Subtitle(u32),
 }
 impl Component {
@@ -121,7 +130,7 @@ impl Component {
         match self {
             Self::Video => "video/mp4",
             Self::Audio(_) => "audio/ogg",
-            Self::AudioChunk(_, _) => "audio/mp4",
+            Self::AudioChunk(_, _) | Self::OpusChunk(_, _) => "audio/mp4",
             Self::Subtitle(_) => "text/vtt; charset=utf-8",
         }
     }
@@ -129,6 +138,22 @@ impl Component {
 
 pub const AUDIO_CHUNK_SECONDS: u32 = 10;
 impl Component {
+    pub fn opus_chunk(raw: &str) -> Option<Self> {
+        let (track, chunk) = raw.strip_prefix("opus-")?.split_once("-chunk-")?;
+        if track.is_empty()
+            || chunk.is_empty()
+            || !track
+                .bytes()
+                .chain(chunk.bytes())
+                .all(|byte| byte.is_ascii_digit())
+        {
+            return None;
+        }
+        let track = track.parse::<u32>().ok()?;
+        let chunk = chunk.parse::<u32>().ok()?;
+        (track > 0 && chunk < 8640).then_some(Self::OpusChunk(track, chunk))
+    }
+
     pub fn audio_chunk(raw: &str) -> Option<Self> {
         let (index, chunk) = raw.strip_prefix("audio-")?.split_once("-chunk-")?;
         let index = index.parse::<u32>().ok()?;
@@ -159,6 +184,13 @@ impl Drop for PreparationLog {
 /// Cache is process-local, removed at shutdown, capped at 64 entries and configured bytes.
 /// Saturation fails explicitly: no unbounded queue, no eviction of playing files.
 impl Preparations {
+    pub fn native_audio(&self) -> &crate::mp4_audio::NativeAudio {
+        &self.native_audio
+    }
+    pub fn video_streams(&self) -> &crate::video_stream::VideoStreams {
+        &self.video_streams
+    }
+
     pub async fn prepare(
         &self,
         root: &Path,
@@ -206,10 +238,46 @@ impl Preparations {
                 "preparation busy; retry explicitly",
             )
         };
+        // Identical cold windows share a key gate before seeking admission to
+        // the single FFmpeg worker. Followers consume no worker queue slots.
+        // Cancellation drops both guards; if the leader is cancelled, the next
+        // interested request can take over without a detached background job.
+        let (_joined, _key_guard) = if matches!(component, Component::AudioChunk(..)) {
+            drop(cache);
+            let joined = self.joiners.try_acquire().map_err(|_| busy())?;
+            let gate = {
+                let mut keys = self.in_flight.lock().await;
+                keys.retain(|_, gate| gate.strong_count() > 0);
+                if let Some(gate) = keys.get(&key).and_then(Weak::upgrade) {
+                    gate
+                } else {
+                    if keys.len() >= 64 {
+                        return Err(busy());
+                    }
+                    let gate = Arc::new(Mutex::new(()));
+                    keys.insert(key.clone(), Arc::downgrade(&gate));
+                    gate
+                }
+            };
+            let guard = tokio::time::timeout(Duration::from_secs(25), gate.lock_owned())
+                .await
+                .map_err(|_| busy())?;
+            cache = self.cache.lock().await;
+            if let Some(directory) = cache.hit(&key) {
+                drop(cache);
+                let opened =
+                    OpenedFile::open_in_root(directory.path(), Path::new("content")).await?;
+                log.complete = true;
+                return Ok(opened.with_cache_lease(directory));
+            }
+            (Some(joined), Some(guard))
+        } else {
+            (None, None)
+        };
         let _worker = match self.worker.try_acquire() {
             Ok(permit) => permit,
             Err(_) if matches!(component, Component::AudioChunk(..)) => {
-                // Two bounded waiters absorb cancelled seeks/prefetch and coalesce
+                // Eight bounded waiters absorb cancelled seeks/prefetch and coalesce
                 // identical windows. Never hold the cache lock while waiting.
                 drop(cache);
                 let _waiting = self.waiters.try_acquire().map_err(|_| busy())?;
@@ -261,7 +329,9 @@ impl Preparations {
         let limit = remaining.min(match component {
             Component::Video => limits.video,
             Component::Audio(_) => limits.audio,
-            Component::AudioChunk(_, _) => limits.audio.min(16 * 1024 * 1024),
+            Component::AudioChunk(_, _) | Component::OpusChunk(_, _) => {
+                limits.audio.min(16 * 1024 * 1024)
+            }
             Component::Subtitle(_) => 4 * 1024 * 1024,
         });
         let mut file = input.try_clone_std()?;
@@ -288,6 +358,12 @@ impl Preparations {
             "fd:",
         ]);
         match component {
+            Component::OpusChunk(..) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "native Opus chunks require the direct native audio service",
+                ));
+            }
             Component::Video => {
                 command.args([
                     "-map",
@@ -452,6 +528,95 @@ impl Preparations {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn identical_cold_audio_windows_coalesce_without_consuming_worker_waiters() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/generated/representative");
+        let source = OpenedFile::open_in_root(&root, Path::new("representative.mp4"))
+            .await
+            .unwrap();
+        let preparations = Arc::new(Preparations::default());
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            let preparations = preparations.clone();
+            let root = root.clone();
+            let size = source.size();
+            let modified = source.modified_ns().to_owned();
+            tasks.spawn(async move {
+                preparations
+                    .prepare(
+                        &root,
+                        Path::new("representative.mp4"),
+                        size,
+                        &modified,
+                        Component::AudioChunk(1, 0),
+                    )
+                    .await
+                    .unwrap()
+            });
+        }
+        let mut sizes = Vec::new();
+        while let Some(result) = tasks.join_next().await {
+            sizes.push(result.unwrap().size());
+        }
+        assert_eq!(sizes.len(), 8);
+        assert!(sizes.iter().all(|size| *size == sizes[0]));
+        assert_eq!(preparations.cache.lock().await.entries.len(), 1);
+        assert_eq!(preparations.worker.available_permits(), 1);
+        assert_eq!(preparations.waiters.available_permits(), 8);
+        assert_eq!(preparations.joiners.available_permits(), 64);
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_window_leader_allows_an_interested_follower_to_take_over() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/generated/representative");
+        let source = OpenedFile::open_in_root(&root, Path::new("representative.mp4"))
+            .await
+            .unwrap();
+        let preparations = Arc::new(Preparations::default());
+        let held_worker = preparations.worker.acquire().await.unwrap();
+        let start = || {
+            let preparations = preparations.clone();
+            let root = root.clone();
+            let size = source.size();
+            let modified = source.modified_ns().to_owned();
+            tokio::spawn(async move {
+                preparations
+                    .prepare(
+                        &root,
+                        Path::new("representative.mp4"),
+                        size,
+                        &modified,
+                        Component::AudioChunk(1, 0),
+                    )
+                    .await
+            })
+        };
+        let leader = start();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while preparations.waiters.available_permits() == 8 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let follower = start();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while preparations.joiners.available_permits() > 62 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        leader.abort();
+        assert!(leader.await.unwrap_err().is_cancelled());
+        drop(held_worker);
+        assert!(follower.await.unwrap().unwrap().size() > 0);
+        assert_eq!(preparations.worker.available_permits(), 1);
+        assert_eq!(preparations.joiners.available_permits(), 64);
+    }
+
     #[tokio::test]
     async fn cached_output_is_pinned_without_holding_cache_lock_during_open() {
         let directory = Arc::new(crate::cache_dirs::CacheDirectory::new().unwrap());

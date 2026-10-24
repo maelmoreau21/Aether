@@ -36,6 +36,25 @@
 
 # Sécurité du Core local et historique du banc P0
 
+## Streaming natif borné — 24 octobre 2026
+
+L'extracteur Rust MP4/Opus accepte un sous-ensemble validé au scan, avec vrais
+IDs de pistes, tables et éditions contrôlées ; il rejette les références de
+données externes. Il lit uniquement un `OpenedFile` confiné, vérifie taille et
+mtime avant/après indexation et avant la réponse, et conserve les médias en
+lecture seule. Le cache d'index est borné à 32 Mio, le `moov` à 16 Mio et une
+fenêtre virtuelle à 8 Mio de paquets, servis par blocs de 64 Kio sans fichier
+temporaire. Le repli vidéo copie les paquets par un descripteur hérité
+(`fd,pipe`), dans un flux annulable avec quatre processus au maximum ; il ne
+devient pas un décodeur universel ou un encodeur. Les autorisations de
+bibliothèque, sessions, restrictions parentales et preuves HMAC existantes
+restent applicables aux nouvelles routes. Les longueurs HTTP connues sont
+fixées avant signature afin que le framing ajouté par Hyper ne transforme
+pas une erreur Node authentique en réponse invérifiable. Les contrats de
+temps, pré-roll, limites et sources primaires sont détaillés dans
+[MEDIA_FORMATS.md](MEDIA_FORMATS.md#extraction-mp4opus-en-rust-et-repli-vidéo-progressif--24-octobre-2026).
+Ces vérifications ciblées ne constituent pas un audit de sécurité complet.
+
 NFO Films : XML local non fiable, quick-xml sans résolveur, DTD/entités externes
 rejetées, UTF-8 strict, limites1Mio/profondeur16/champs16Kio/64genres, confinement
 symlink/reparse existant et rendu texte échappé. Aucun champ ne devient chemin

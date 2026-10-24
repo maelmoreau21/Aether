@@ -238,6 +238,8 @@ async fn parental_filters_overrides_lists_and_explicit_grouping() {
         "/api/v1/media/adult",
         "/api/v1/assets/adult/content",
         "/api/v1/assets/adult/prepared/video",
+        "/api/v1/assets/adult/prepared/video-stream-0-0",
+        "/api/v1/assets/adult/prepared/opus-2-chunk-0",
     ] {
         for method in ["GET", "HEAD"] {
             assert_eq!(
@@ -813,6 +815,8 @@ async fn granular_parental_tags_schedules_downloads_and_library_images() {
         "/api/v1/assets/asset/content",
         "/api/v1/assets/asset/download",
         "/api/v1/assets/asset/prepared/video",
+        "/api/v1/assets/asset/prepared/video-stream-0-0",
+        "/api/v1/assets/asset/prepared/opus-2-chunk-0",
     ] {
         for method in ["GET", "HEAD"] {
             assert_eq!(

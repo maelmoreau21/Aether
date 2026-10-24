@@ -2,6 +2,7 @@ import { ExternalAudio } from './external-audio';
 
 const MIME = 'audio/mp4; codecs="opus"';
 const SECONDS = 10;
+export interface AudioTimeline { duration?: number; position?: number; mode?: 'absolute' | 'rebased'; trackId?: string }
 
 // The original MP4 supplies the video index. Only short packet-copy audio
 // windows enter MSE; no WebAudio graph, decoding, channel conversion or encoder.
@@ -26,20 +27,31 @@ export class SegmentedAudio extends ExternalAudio {
   private preparationError?: Error;
   private rejectBuffer?: (error: Error) => void;
 
-  constructor(private element: HTMLVideoElement, offset: number, private reportError: (message: string) => void) {
+  constructor(private element: HTMLVideoElement, offset: number, private reportError: (message: string) => void, private timeline?: AudioTimeline) {
     super(element, offset, reportError); this.offsetSeconds = offset;
+  }
+  private position() { return !this.activated && this.timeline?.position !== undefined ? this.timeline.position : this.element.currentTime; }
+  private duration() { return this.timeline?.duration ?? this.element.duration; }
+  async preload(prefix: string, position: number | Promise<number>) {
+    const saved = await position;
+    if (this.closed) throw new Error('Lecteur fermé.');
+    this.timeline = { ...this.timeline, position: Number.isFinite(saved) ? Math.max(0, Math.min(saved, Math.max(0, this.duration() - .05))) : 0 };
+    await this.load(prefix, false);
   }
   override async load(prefix: string, activate = true) {
     this.prefix = prefix;
-    const index = /audio-(\d+)-chunk-$/.exec(prefix)?.[1];
-    if(index)this.audio.dataset.internalAudioTrack=`internal-${index}`;
+    const legacyIndex = /audio-(\d+)-chunk-$/.exec(prefix)?.[1];
+    // MP4 track IDs in opus-{id} are not ffprobe stream indices. Preserve the
+    // descriptor's logical identity instead of inferring it from that URL.
+    const trackId = this.timeline?.trackId ?? (legacyIndex ? `internal-${legacyIndex}` : undefined);
+    if(trackId)this.audio.dataset.internalAudioTrack=trackId;
     const failed = new Promise<never>((_, reject) => { this.rejectLoad = reject; });
     const opened = new Promise<void>((resolve, reject) => {
       this.rejectOpen = reject;
       this.opened = () => {
         try {
           this.buffer = this.mediaSource.addSourceBuffer(MIME);
-          this.mediaSource.duration = this.element.duration;
+          this.mediaSource.duration = this.duration();
           // A replacement track loads while the previous presentation advances.
           // Keep following its current window even before audio metadata/seek
           // completes, otherwise crossing a boundary can deadlock ready().
@@ -53,7 +65,7 @@ export class SegmentedAudio extends ExternalAudio {
     });
     // Set src before waiting for sourceopen. The audio metadata wait completes
     // only once the first bounded window has arrived.
-    const mediaLoad = super.load(this.objectUrl, false, MIME);
+    const mediaLoad = super.load(this.objectUrl, false, MIME, this.timeline?.position);
     try {
       await Promise.race([Promise.all([mediaLoad, (async()=>{await opened;await this.fill(true);})()]), failed]);
       if (this.closed) throw new Error('Lecteur fermé.');
@@ -104,7 +116,7 @@ export class SegmentedAudio extends ExternalAudio {
     if (this.closed || this.filling || !this.buffer || this.mediaSource.readyState === 'closed') return;
     this.filling = true;
     const epoch = this.seekEpoch;
-    const target = Math.max(0, this.element.currentTime - this.offsetSeconds);
+    const target = Math.max(0, this.position() - this.offsetSeconds);
     const current = Math.floor(target / SECONDS);
     try {
       // At most the current window and one ahead; never copy the full episode.
@@ -114,9 +126,9 @@ export class SegmentedAudio extends ExternalAudio {
       for (const chunk of onlyCurrent || !nearingBoundary ? [current] : [current, current + 1]) {
         if (this.closed || epoch !== this.seekEpoch) return;
         const ranges=this.buffer.buffered;
-        const retained=Array.from({length:ranges.length},(_,i)=>i).some(i=>ranges.start(i)<=chunk*SECONDS+.05 && ranges.end(i)>=Math.min(this.element.duration,(chunk+1)*SECONDS)-.05);
+        const retained=Array.from({length:ranges.length},(_,i)=>i).some(i=>ranges.start(i)<=chunk*SECONDS+.05 && ranges.end(i)>=Math.min(this.duration(),(chunk+1)*SECONDS)-.05);
         if(!retained)this.loaded.delete(chunk);
-        if (chunk * SECONDS >= this.element.duration || this.loaded.has(chunk) || this.closed) continue;
+        if (chunk * SECONDS >= this.duration() || this.loaded.has(chunk) || this.closed) continue;
         const controller = new AbortController(); this.controller = controller;
         const timeout = setTimeout(()=>controller.abort(), 20000);
         const started=performance.now();
@@ -145,10 +157,10 @@ export class SegmentedAudio extends ExternalAudio {
         await this.idle();
         if (this.closed || epoch !== this.seekEpoch) return;
         const start = chunk * SECONDS;
-        this.buffer.timestampOffset = Math.max(0, start - 1);
+        this.buffer.timestampOffset = this.timeline?.mode === 'absolute' ? 0 : Math.max(0, start - 1);
         this.buffer.appendWindowEnd = Infinity;
         this.buffer.appendWindowStart = start;
-        this.buffer.appendWindowEnd = Math.min(this.element.duration, start + SECONDS);
+        this.buffer.appendWindowEnd = Math.min(this.duration(), start + SECONDS);
         this.buffer.appendBuffer(bytes);await this.idle();this.loaded.add(chunk);
       }
       // Bound browser buffers even on long episodes and repeated seeks.
@@ -160,7 +172,7 @@ export class SegmentedAudio extends ExternalAudio {
       // Without EOS an Opus packet ending just before the video's final frame
       // looks like an infinite network stall. Appending after a backwards seek
       // reopens an ended MediaSource; do not reject that state above.
-      const last = Math.ceil(this.element.duration / SECONDS) - 1;
+      const last = Math.ceil(this.duration() / SECONDS) - 1;
       if (!this.closed && epoch === this.seekEpoch && this.loaded.has(last) && this.mediaSource.readyState === 'open') {
         await this.idle();
         if (!this.closed && epoch === this.seekEpoch && this.mediaSource.readyState === 'open') this.mediaSource.endOfStream();
@@ -169,7 +181,7 @@ export class SegmentedAudio extends ExternalAudio {
       this.filling=false;
       // A seek may have arrived while fetch or SourceBuffer was finishing.
       // Start the latest position immediately instead of waiting for the timer.
-      const latestWindow = Math.floor(Math.max(0, this.element.currentTime - this.offsetSeconds) / SECONDS);
+      const latestWindow = Math.floor(Math.max(0, this.position() - this.offsetSeconds) / SECONDS);
       if (!this.closed && (epoch !== this.seekEpoch || latestWindow !== current)) this.schedule();
     }
   }

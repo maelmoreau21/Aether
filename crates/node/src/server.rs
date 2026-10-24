@@ -1303,6 +1303,51 @@ async fn prepare_asset(
     {
         return cors_error_response(StatusCode::FORBIDDEN, "root_denied");
     }
+    let native_audio = Component::opus_chunk(component);
+    let video_position = crate::video_stream::position(component);
+    if native_audio.is_some() || video_position.is_some() {
+        let opened = match crate::OpenedFile::open_in_root(
+            Path::new(&entry.root_snapshot),
+            Path::new(&entry.relative_path),
+        )
+        .await
+        {
+            Ok(opened)
+                if opened.size() == entry.size && opened.modified_ns() == entry.modified_ns =>
+            {
+                opened
+            }
+            Ok(_) => {
+                return packet_error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "source_changed_rescan_required",
+                );
+            }
+            Err(error) => return packet_stream_error(&error),
+        };
+        let streamed = if let Some(Component::OpusChunk(track, chunk)) = native_audio {
+            state
+                .preparations
+                .native_audio()
+                .serve(opened, track, chunk, &req)
+                .await
+        } else {
+            state
+                .preparations
+                .video_streams()
+                .serve(
+                    opened,
+                    video_position.map_or(0, |(index, _)| index),
+                    video_position.map_or(0, |(_, position)| position),
+                    &req,
+                )
+                .await
+        };
+        return match streamed {
+            Ok(response) => convert_stream_response(response, false),
+            Err(error) => packet_stream_error(&error),
+        };
+    }
     let selected = if let Some(chunk) = Component::audio_chunk(component) {
         Some(chunk)
     } else if component == "video" {
@@ -1649,6 +1694,43 @@ fn cors_error_response(status: StatusCode, reason: &'static str) -> Response {
     res
 }
 
+fn packet_error_response(status: StatusCode, code: &'static str) -> Response {
+    let mut response = cors_error_response(status, code);
+    response
+        .headers_mut()
+        .insert("x-media-preparation-error", HeaderValue::from_static(code));
+    response
+}
+
+fn packet_stream_error(error: &io::Error) -> Response {
+    let status = match error.kind() {
+        io::ErrorKind::Unsupported | io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => {
+            StatusCode::UNPROCESSABLE_ENTITY
+        }
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    };
+    packet_error_response(status, crate::packaging::preparation_error_code(error))
+}
+
+// Hyper can infer Content-Length from an exact body hint after the handler
+// returns. Include that same length before signing the representation metadata.
+fn normalize_stream_content_length(response: &mut Response) {
+    if response.status().is_informational() || response.status() == StatusCode::NO_CONTENT {
+        response.headers_mut().remove(header::CONTENT_LENGTH);
+        return;
+    }
+    if response.status() == StatusCode::NOT_MODIFIED
+        || response.headers().contains_key(header::CONTENT_LENGTH)
+    {
+        return;
+    }
+    if let Some(length) = http_body::Body::size_hint(response.body()).exact()
+        && let Ok(value) = HeaderValue::from_str(&length.to_string())
+    {
+        response.headers_mut().insert(header::CONTENT_LENGTH, value);
+    }
+}
+
 fn apply_cors_headers(headers: &mut HeaderMap) {
     headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -1666,7 +1748,9 @@ fn apply_cors_headers(headers: &mut HeaderMap) {
     );
     headers.insert(
         header::ACCESS_CONTROL_EXPOSE_HEADERS,
-        HeaderValue::from_static("Accept-Ranges, Content-Length, Content-Range, Content-Type"),
+        HeaderValue::from_static(
+            "Accept-Ranges, Content-Length, Content-Range, Content-Type, x-media-preparation-error",
+        ),
     );
     headers.insert(
         header::HeaderName::from_static("cross-origin-resource-policy"),
@@ -1679,6 +1763,7 @@ fn sign_stream_response(
     identity: &NodeIdentityState,
     request_nonce: &str,
 ) -> Response {
+    normalize_stream_content_length(&mut response);
     let now = unix_now();
     let nonce = random_nonce_hex();
     let digest = crate::transport::stream_metadata_digest(response.headers());
@@ -2159,6 +2244,16 @@ async fn send_stream_uplink_body(
         }
     }
 
+    // This is an HTTP POST upload, even when the original representation was
+    // a bodyless status or HEAD. Sign its actual upload framing, not a header
+    // that Hyper will subsequently infer from the request body's exact size.
+    if !headers_to_send.contains_key(header::CONTENT_LENGTH)
+        && let Some(length) = http_body::Body::size_hint(serve_res.body()).exact()
+        && let Ok(value) = HeaderValue::from_str(&length.to_string())
+    {
+        headers_to_send.insert(header::CONTENT_LENGTH, value);
+    }
+
     let digest = crate::transport::stream_metadata_digest(&headers_to_send);
     let sig = sign_internal_request(
         secret,
@@ -2216,4 +2311,257 @@ async fn send_stream_uplink_error(
     let mut res = Response::new(Body::empty());
     *res.status_mut() = status;
     send_stream_uplink_body(state, core_url, identity, stream_id, res).await
+}
+
+#[cfg(test)]
+mod stream_signature_tests {
+    use super::*;
+    use http_body_util::BodyExt;
+
+    async fn state() -> (tempfile::TempDir, NodeServerState) {
+        let data = tempfile::tempdir().unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/generated/representative");
+        let state = NodeServerState::initialize(NodeServerConfig {
+            data_dir: data.path().to_owned(),
+            allowed_roots: vec![root],
+            ..NodeServerConfig::default()
+        })
+        .await
+        .unwrap();
+        {
+            let mut identity = state.identity.write().unwrap();
+            identity.node_id = NodeId::new("signature-node");
+            identity.key_id = "signature-key".to_owned();
+            identity.shared_secret = Some("test-stream-secret".to_owned());
+        }
+        let root = state.config.allowed_roots[0].clone();
+        let file = crate::OpenedFile::open_in_root(&root, Path::new("representative.mp4"))
+            .await
+            .unwrap();
+        for (id, path, size, modified) in [
+            (
+                "fixture",
+                "representative.mp4",
+                file.size(),
+                file.modified_ns(),
+            ),
+            ("removed", "not-present.mp4", 0, "0"),
+        ] {
+            state.inventory.write().unwrap().assets.insert(
+                id.to_owned(),
+                NodeInventoryAssetEntry {
+                    asset_id: AssetId::new(id),
+                    library_id: media_contracts::ids::LibraryId::new("library"),
+                    root_snapshot: root.to_string_lossy().into_owned(),
+                    relative_path: path.to_owned(),
+                    mime: "video/mp4".to_owned(),
+                    size,
+                    modified_ns: modified.to_owned(),
+                },
+            );
+        }
+        (data, state)
+    }
+
+    async fn request_and_verify(
+        url: &str,
+        method: Method,
+        path: &str,
+    ) -> (StatusCode, HeaderMap, Bytes) {
+        let stream = crate::transport::connect(url).await.unwrap();
+        let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        let now = unix_now();
+        let nonce = random_nonce_hex();
+        let empty = sha256_hex(b"");
+        let signature = sign_internal_request(
+            "test-stream-secret",
+            "core-to-node",
+            method.as_str(),
+            path,
+            "signature-node",
+            "signature-key",
+            now,
+            &nonce,
+            &empty,
+        );
+        let request = hyper::Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::HOST, url.strip_prefix("http://").unwrap())
+            .header(HDR_PROTOCOL, PROTOCOL_VERSION)
+            .header(HDR_NODE_ID, "signature-node")
+            .header(HDR_KEY_ID, "signature-key")
+            .header(HDR_TIMESTAMP, now.to_string())
+            .header(HDR_NONCE, &nonce)
+            .header(HDR_BODY_SHA256, &empty)
+            .header(HDR_SIGNATURE, signature)
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+        let response = tokio::time::timeout(Duration::from_secs(5), sender.send_request(request))
+            .await
+            .unwrap()
+            .unwrap();
+        let status = response.status();
+        let headers = response.headers().clone();
+        // This is the same verification Core applies, using actual headers
+        // received over TCP after Axum/Hyper have applied HTTP body framing.
+        verify_internal_response(
+            "test-stream-secret",
+            &nonce,
+            status.as_u16(),
+            "signature-node",
+            "signature-key",
+            headers[HDR_RES_TIMESTAMP]
+                .to_str()
+                .unwrap()
+                .parse()
+                .unwrap(),
+            headers[HDR_RES_NONCE].to_str().unwrap(),
+            headers[HDR_RES_SIGNATURE].to_str().unwrap(),
+            &crate::transport::stream_metadata_digest(&headers),
+            unix_now(),
+        )
+        .expect("Core must authenticate on-wire Node error metadata");
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (status, headers, bytes)
+    }
+
+    #[tokio::test]
+    async fn real_node_http_errors_and_head_keep_their_signed_framing() {
+        let (_data, state) = state().await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app_with_state(state)).await.unwrap();
+        });
+        for (path, expected, code) in [
+            (
+                "/internal/v1/node/assets/absent/content",
+                StatusCode::NOT_FOUND,
+                None,
+            ),
+            (
+                "/internal/v1/node/assets/removed/prepared/opus-2-chunk-0",
+                StatusCode::SERVICE_UNAVAILABLE,
+                Some("preparation_tool_or_source_unavailable"),
+            ),
+            (
+                "/internal/v1/node/assets/fixture/prepared/opus-1-chunk-0",
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Some("unsupported_preparation"),
+            ),
+        ] {
+            let (status, headers, bytes) = request_and_verify(&url, Method::GET, path).await;
+            assert_eq!(status, expected);
+            assert!(!bytes.is_empty());
+            assert_eq!(headers[header::CONTENT_LENGTH], bytes.len().to_string());
+            if let Some(code) = code {
+                assert_eq!(headers["x-media-preparation-error"], code);
+            }
+        }
+        let (status, headers, bytes) = request_and_verify(
+            &url,
+            Method::HEAD,
+            "/internal/v1/node/assets/fixture/prepared/opus-2-chunk-0",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(bytes.is_empty());
+        assert!(
+            headers[header::CONTENT_LENGTH]
+                .to_str()
+                .unwrap()
+                .parse::<usize>()
+                .unwrap()
+                > 1000
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn real_uplink_post_binds_inferred_json_body_length_before_signing() {
+        let (_data, state) = state().await;
+        let identity = state.identity.read().unwrap().clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let tx = Arc::new(Mutex::new(Some(tx)));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let core = Router::new().route(
+            "/internal/v1/core/nodes/signature-node/stream-uplink/stream",
+            post(move |headers: HeaderMap, uri: Uri, body: Bytes| {
+                let tx = tx.clone();
+                async move {
+                    let digest = crate::transport::stream_metadata_digest(&headers);
+                    let result = verify_internal_request(
+                        "test-stream-secret",
+                        "node-to-core",
+                        "POST",
+                        uri.path(),
+                        "signature-node",
+                        "signature-key",
+                        headers[HDR_TIMESTAMP].to_str().unwrap().parse().unwrap(),
+                        headers[HDR_NONCE].to_str().unwrap(),
+                        &digest,
+                        headers[HDR_SIGNATURE].to_str().unwrap(),
+                        unix_now(),
+                    );
+                    let length = headers[header::CONTENT_LENGTH]
+                        .to_str()
+                        .unwrap()
+                        .parse::<usize>()
+                        .unwrap();
+                    if let Some(tx) = tx.lock().unwrap().take() {
+                        let _ = tx.send((result.is_ok(), length, body.len()));
+                    }
+                    StatusCode::OK
+                }
+            }),
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, core).await.unwrap();
+        });
+        let response =
+            packet_stream_error(&io::Error::new(io::ErrorKind::WouldBlock, "test capacity"));
+        assert!(
+            !response.headers().contains_key(header::CONTENT_LENGTH),
+            "exercise exact Body hint, not an already explicit length"
+        );
+        send_stream_uplink_body(&state, &url, &identity, "stream", response)
+            .await
+            .unwrap();
+        let (verified, length, body) = tokio::time::timeout(Duration::from_secs(5), rx)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(verified);
+        assert_eq!(length, body);
+        assert!(body > 0);
+        server.abort();
+    }
+
+    #[test]
+    fn stream_signing_preserves_head_lengths_and_bodyless_status_rules() {
+        let mut head = Response::new(Body::empty());
+        head.headers_mut()
+            .insert(header::CONTENT_LENGTH, HeaderValue::from_static("12345"));
+        normalize_stream_content_length(&mut head);
+        assert_eq!(head.headers()[header::CONTENT_LENGTH], "12345");
+        for status in [StatusCode::NO_CONTENT, StatusCode::NOT_MODIFIED] {
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = status;
+            normalize_stream_content_length(&mut response);
+            assert!(!response.headers().contains_key(header::CONTENT_LENGTH));
+        }
+        for kind in [io::ErrorKind::WouldBlock, io::ErrorKind::TimedOut] {
+            let response = packet_stream_error(&io::Error::new(kind, "test"));
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert!(response.headers().contains_key("x-media-preparation-error"));
+        }
+    }
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { onMount, tick } from 'svelte';
   import { resolve } from '$app/paths';
   import type { Work } from './api';
   import Poster from './Poster.svelte';
@@ -42,6 +43,28 @@
   const filmCount = $derived(totalFilms ?? films.length);
   const seriesCount = $derived(totalSeries ?? series.length);
   const base = $derived(resolve('/').replace(/\/$/, ''));
+
+  let searchInputRef = $state<HTMLInputElement | null>(null);
+
+  onMount(() => {
+    if (section === 'search') {
+      void tick().then(() => {
+        if (searchInputRef) {
+          searchInputRef.focus();
+          if (searchInputRef.value) {
+            const len = searchInputRef.value.length;
+            searchInputRef.setSelectionRange(len, len);
+          }
+        }
+      });
+    }
+  });
+
+  $effect(() => {
+    if (section === 'search' && searchInputRef) {
+      searchInputRef.focus();
+    }
+  });
 
   // Local genre quick filter
   let activeGenre = $state<string | null>(null);
@@ -115,7 +138,7 @@
             type="button"
             class="clear-search-btn"
             aria-label="Effacer la recherche"
-            onclick={() => (search = '')}
+            onclick={() => { search = ''; searchInputRef?.focus(); }}
           >
             ×
           </button>

@@ -161,10 +161,12 @@ pub async fn secure_app_with_jobs(
             "/api/v1/assets/{id}/image",
             get(indexed_image).head(indexed_image),
         )
-        .layer(axum::Extension(Arc::new(
-            media_node::packaging::Preparations::default(),
-        )))
+        .layer(axum::Extension(jobs.preparations.clone()))
         .layer(axum::Extension(auth.store.clone()))
+        .layer(middleware::from_fn_with_state(
+            jobs.clone(),
+            local_stream_priority,
+        ))
         .route_layer(middleware::from_fn_with_state(
             permissions::MediaAccess {
                 auth: auth.clone(),
@@ -202,6 +204,43 @@ pub async fn secure_app_with_jobs(
         allowed_origins,
     );
     Ok(health_routes(mode).merge(protected))
+}
+
+async fn local_stream_priority(
+    State(jobs): State<Arc<scans::ScanJobs>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    let streamed =
+        path.contains("/content") || path.contains("/audio/") || path.contains("/prepared/");
+    let _demand =
+        streamed.then(|| media_node::server::ActiveStreamGuard::enter(&scans::LOCAL_STREAMS));
+    if streamed {
+        if let Ok(tokens) = jobs.cancellations.lock() {
+            for token in tokens.values() {
+                token.store(true, std::sync::atomic::Ordering::Release);
+            }
+        }
+        if path.contains("/prepared/") || path.contains("/audio/") {
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(250);
+            while jobs
+                .cancellations
+                .lock()
+                .map(|tokens| !tokens.is_empty())
+                .unwrap_or(false)
+                && tokio::time::Instant::now() < deadline
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }
+    }
+    let response = next.run(request).await;
+    if streamed {
+        media_node::server::track_stream_body(response, &scans::LOCAL_STREAMS)
+    } else {
+        response
+    }
 }
 
 async fn indexed_subtitle(
@@ -510,3 +549,6 @@ mod tests {
 }
 
 pub mod extension_storage;
+
+pub mod task_engine;
+mod task_execution;

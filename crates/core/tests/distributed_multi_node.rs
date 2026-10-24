@@ -1136,6 +1136,111 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .await;
         assert_eq!(relay_st, StatusCode::PARTIAL_CONTENT);
         assert_eq!(relay_bytes, r206_bytes);
+
+        // Exercise the production queue worker while real TCP Range requests
+        // continue on the film Node. A separate empty library avoids replacing
+        // the inventory being streamed. This is HTTP isolation, not decoding.
+        if expected_node_url == &node1_url {
+            let load_root = node1_root.join("queue-isolation-empty");
+            tokio::fs::create_dir_all(&load_root).await.unwrap();
+            media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('queue-isolation','Queue isolation','films',?,?,1)")
+                .bind(&node1_id).bind(load_root.to_string_lossy().as_ref()).execute(store.pool()).await.unwrap();
+            let mut tx = store.pool().begin().await.unwrap();
+            let timestamp = unix_now();
+            for index in 0..10_000 {
+                let id = format!("queue-isolation-{index:05}");
+                media_poc::database::query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,created_at,updated_at,available_at) VALUES(?,'queue-isolation','integration',?,?,?,?,?)")
+                    .bind(&id).bind(&id).bind(&node1_id).bind(timestamp).bind(timestamp).bind(timestamp)
+                    .execute(&mut *tx).await.unwrap();
+            }
+            tx.commit().await.unwrap();
+            let scheduler_root = base.join("core-local-empty");
+            media_poc::scheduler::dispatch_once(&auth, &scheduler_root, &jobs, unix_now())
+                .await
+                .unwrap();
+            let scheduler = media_poc::scheduler::Scheduler::start(
+                auth.clone(),
+                scheduler_root.clone(),
+                jobs.clone(),
+            );
+            let mut ranges = tokio::task::JoinSet::new();
+            for _ in 0..32 {
+                let direct_origin = expected_node_url.to_owned();
+                let direct_path = direct_pq.clone();
+                let origin = core_origin.clone();
+                let relay_path = relay_url.to_owned();
+                let cookie = alice_cookie.clone();
+                let expected = r206_bytes.clone();
+                ranges.spawn(async move {
+                    let start = std::time::Instant::now();
+                    let (status, _, bytes) = http_request(
+                        &direct_origin,
+                        Method::GET,
+                        &direct_path,
+                        &[("origin", &origin), ("range", "bytes=0-127")],
+                        vec![],
+                    )
+                    .await;
+                    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+                    assert_eq!(bytes, expected);
+                    let direct_ms = start.elapsed().as_secs_f64() * 1000.0;
+                    let start = std::time::Instant::now();
+                    let (status, _, bytes) = http_request(
+                        &origin,
+                        Method::GET,
+                        &relay_path,
+                        &[("cookie", &cookie), ("range", "bytes=0-127")],
+                        vec![],
+                    )
+                    .await;
+                    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+                    assert_eq!(bytes, expected);
+                    (direct_ms, start.elapsed().as_secs_f64() * 1000.0)
+                });
+            }
+            let mut direct = Vec::with_capacity(32);
+            let mut relay = Vec::with_capacity(32);
+            while let Some(result) = ranges.join_next().await {
+                let (direct_ms, relay_ms) = result.unwrap();
+                direct.push(direct_ms);
+                relay.push(relay_ms);
+            }
+            // Require a real remote scan to finish through the production worker.
+            let mut completed = 0;
+            for _ in 0..100 {
+                completed = media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM durable_tasks WHERE library_id='queue-isolation' AND status='completed'")
+                    .fetch_one(store.pool()).await.unwrap();
+                if completed > 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            assert!(
+                completed > 0,
+                "production worker must complete a remote scan"
+            );
+            // Stop queue admission before later scenarios rescan/revoke this Node.
+            drop(scheduler);
+            media_poc::database::query("UPDATE durable_tasks SET status='cancelled' WHERE library_id='queue-isolation' AND status='queued'")
+                .execute(store.pool()).await.unwrap();
+            for _ in 0..100 {
+                media_poc::scheduler::dispatch_once(&auth, &scheduler_root, &jobs, unix_now())
+                    .await
+                    .unwrap();
+                let active: i64 = media_poc::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE library_id='queue-isolation' AND lease_until IS NOT NULL")
+                    .fetch_one(store.pool()).await.unwrap();
+                if active == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            direct.sort_by(f64::total_cmp);
+            relay.sort_by(f64::total_cmp);
+            println!(
+                "QUEUE_TCP_RANGE_ISOLATION backlog=10000 concurrency=32 real_remote_scans_completed={completed} direct_p50_ms={:.3} direct_p95_ms={:.3} direct_max_ms={:.3} relay_p50_ms={:.3} relay_p95_ms={:.3} relay_max_ms={:.3}; byte-identical206 responses, no browser decode measured",
+                direct[16], direct[30], direct[31], relay[16], relay[30], relay[31]
+            );
+        }
     }
 
     // Also verify poster streaming via Core relay and direct streaming with signed token

@@ -70,6 +70,59 @@
   const videoTracks = $derived((source?.tracks?.some(track => track.codec_type === 'video') ? source.tracks : media.sources[0]?.tracks)?.filter(track => track.codec_type === 'video') ?? []);
   const remainingTime = $derived(Math.max(0, (playback.duration || 0) - (playback.position || 0)));
 
+  let now = $state(Date.now());
+  $effect(() => {
+    const timer = setInterval(() => { now = Date.now(); }, 5000);
+    return () => clearInterval(timer);
+  });
+
+  const projectedEndTime = $derived.by(() => {
+    if (!Number.isFinite(remainingTime) || remainingTime <= 0 || !playback.duration) return '';
+    const speed = playback.speed > 0 ? playback.speed : 1;
+    const end = new Date(now + (remainingTime / speed) * 1000);
+    const hours = end.getHours().toString().padStart(2, '0');
+    const minutes = end.getMinutes().toString().padStart(2, '0');
+    return `${hours}h${minutes}`;
+  });
+
+  function skipChapter(direction: -1 | 1) {
+    const chapters = media?.chapters;
+    if (!chapters || chapters.length === 0) return;
+    const sorted = [...chapters].sort((a, b) => a.start - b.start);
+    const pos = playback.position;
+
+    if (direction === 1) {
+      const next = sorted.find(c => c.start > pos + 1);
+      if (next) {
+        onSeek(next.start);
+      } else if (playback.duration) {
+        onSeek(playback.duration);
+      }
+    } else {
+      let currentIndex = -1;
+      for (let i = 0; i < sorted.length; i++) {
+        if (sorted[i].start <= pos + 0.5) {
+          currentIndex = i;
+        } else {
+          break;
+        }
+      }
+
+      if (currentIndex === -1) {
+        onSeek(0);
+      } else {
+        const currentChapter = sorted[currentIndex];
+        if (pos - currentChapter.start > 3) {
+          onSeek(currentChapter.start);
+        } else if (currentIndex > 0) {
+          onSeek(sorted[currentIndex - 1].start);
+        } else {
+          onSeek(0);
+        }
+      }
+    }
+  }
+
   const title = $derived(
     menu === 'audio'
       ? 'Langue audio'
@@ -387,13 +440,23 @@
   <div class="control-row">
     <div class="left-controls">
       <button
-        class="skip-btn"
+        class="control-btn"
         aria-label="Reculer de 10 secondes"
+        title="Reculer de 10 secondes"
         disabled={busy || !playback.duration}
         onclick={() => onSeek(Math.max(0, playback.position - 10))}
       >
-        <span class="skip-icon">↺</span>
-        <span class="skip-num">10</span>
+        <Icon name="jump-backward" size={22} />
+      </button>
+
+      <button
+        class="control-btn chapter-btn"
+        aria-label="Chapitre précédent"
+        title={media.chapters?.length ? 'Chapitre précédent' : 'Aucun chapitre'}
+        disabled={busy || !media.chapters?.length}
+        onclick={() => skipChapter(-1)}
+      >
+        <Icon name="chapter-prev" size={20} />
       </button>
 
       <button
@@ -406,20 +469,30 @@
       </button>
 
       <button
-        class="skip-btn"
+        class="control-btn chapter-btn"
+        aria-label="Chapitre suivant"
+        title={media.chapters?.length ? 'Chapitre suivant' : 'Aucun chapitre'}
+        disabled={busy || !media.chapters?.length}
+        onclick={() => skipChapter(1)}
+      >
+        <Icon name="chapter-next" size={20} />
+      </button>
+
+      <button
+        class="control-btn"
         aria-label="Avancer de 10 secondes"
+        title="Avancer de 10 secondes"
         disabled={busy || !playback.duration}
         onclick={() => onSeek(Math.min(playback.duration, playback.position + 10))}
       >
-        <span class="skip-icon">↻</span>
-        <span class="skip-num">10</span>
+        <Icon name="jump-forward" size={22} />
       </button>
 
-      <span class="time" aria-label="{clock(playback.position)} sur {clock(playback.duration)}">
+      <span class="time" aria-label="{clock(playback.position)} sur {clock(playback.duration)}{projectedEndTime ? ', fin à ' + projectedEndTime : ''}">
         <span class="current-time">{clock(playback.position)}</span>
         <span class="duration-time"> / {clock(playback.duration)}</span>
-        {#if playback.duration > 0}
-          <span class="remaining-time"> (-{clock(remainingTime)})</span>
+        {#if playback.duration > 0 && projectedEndTime}
+          <span class="remaining-time"> (Fin à {projectedEndTime})</span>
         {/if}
       </span>
     </div>
@@ -573,43 +646,65 @@
     border-color: var(--color-accent-soft);
   }
 
+  .control-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    padding: 0;
+    border-radius: 50%;
+    color: #e2e8f0;
+    background: transparent;
+    border: 1px solid transparent;
+    transition: all var(--transition-fast);
+  }
+  .control-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: scale(1.08);
+  }
+  .control-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+  .control-btn :global(svg) {
+    stroke-width: 2;
+  }
+  .chapter-btn :global(svg) {
+    fill: currentColor;
+    stroke: none;
+  }
+
   .primary.play-btn {
     width: 52px;
     height: 52px;
+    min-width: 52px;
+    min-height: 52px;
     border-radius: 50%;
-    background: var(--color-text-bright);
+    background: #ffffff;
     color: #090a10;
     margin: 0 4px;
+    border: 1px solid transparent;
     box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5), 0 0 16px var(--color-accent-glow);
     transition: all var(--transition-fast);
   }
   .primary.play-btn:hover:not(:disabled) {
     background: #ffffff;
+    color: #090a10;
+    border-color: transparent;
     transform: scale(1.08);
-    box-shadow: 0 6px 24px rgba(255, 255, 255, 0.3), 0 0 24px var(--color-accent-glow);
+    box-shadow: 0 6px 24px rgba(255, 255, 255, 0.35), 0 0 24px var(--color-accent-glow);
+  }
+  .primary.play-btn:active:not(:disabled) {
+    transform: scale(0.96);
   }
   .primary.play-btn :global(svg) {
     fill: currentColor;
     stroke-width: 1.8;
-  }
-
-  .skip-btn {
-    font-size: 11px;
-    position: relative;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.05);
-  }
-  .skip-icon {
-    font-size: 18px;
-    line-height: 1;
-  }
-  .skip-num {
-    font-size: 9px;
-    position: absolute;
-    bottom: 5px;
-    font-weight: 700;
   }
 
   .volume-group {

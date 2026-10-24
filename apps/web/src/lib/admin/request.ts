@@ -29,12 +29,37 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
       extension_timeout: 'Le délai maximal de l’extension est dépassé.',
       rate_limited: 'Le fournisseur limite les requêtes. Réessayez plus tard.',
       image_host_denied: 'Cet hôte d’images ne figure pas dans les domaines approuvés du paquet.',
-      invalid_output: 'La réponse de l’extension ne respecte pas le format attendu.'
+      invalid_output: 'La réponse de l’extension ne respecte pas le format attendu.',
+      incompatible_server_version: 'Cette extension n’est pas compatible avec cette version du serveur.',
+      invalid_package_digest: 'L’empreinte du paquet ne correspond pas au catalogue.',
+      invalid_package: 'Le paquet de l’extension est corrompu ou invalide.',
+      catalogue_package_mismatch: 'Le paquet téléchargé ne correspond pas au catalogue.',
+      invalid_public_key: 'La clé publique de l’éditeur est invalide.',
+      invalid_signature: 'La signature cryptographique de l’extension est invalide.',
+      invalid_manifest: 'Le manifeste de l’extension est invalide.',
+      module_too_large: 'Le module WebAssembly dépasse la taille maximale autorisée (256 Ko).',
+      invalid_module: 'Le module WebAssembly de l’extension est invalide.',
+      invalid_digest: 'L’empreinte SHA-256 du module est invalide.',
+      incompatible_api: 'L’extension utilise une version d’API incompatible.',
+      repository_https_public_host_required: 'L’adresse du dépôt doit être une URL HTTPS publique valide.',
+      repository_address_forbidden: 'L’adresse IP du dépôt est interdite ou privée.',
+      repository_unavailable: 'Le dépôt de plugins est actuellement injoignable.',
+      repository_http_error: 'Le serveur du dépôt a renvoyé une erreur de téléchargement.',
+      repository_response_too_large: 'La réponse du dépôt dépasse la taille autorisée.',
+      repository_limit: 'La limite de dépôts enregistrés est atteinte.',
+      repository_exists: 'Ce dépôt est déjà enregistré.',
+      unknown_repository: 'Dépôt introuvable.',
+      unknown_catalogue_version: 'Cette version de l’extension n’existe pas dans le catalogue.',
+      repository_changed: 'Le catalogue a changé. Veuillez réactualiser les dépôts.',
+      extension_exists: 'Cette extension est déjà installée.',
+      extension_limit: 'La limite de 32 extensions installées est atteinte.',
+      extension_unavailable: 'Cette extension n’est pas disponible.'
     };
     const code = detail?.pluginError ?? detail?.error;
     if (code && messages[code]) throw new Error(messages[code]);
     if (detail?.pluginError) throw new Error(`Extension : ${detail.pluginError}`);
-    throw new Error(response.status === 401 ? 'Session expirée. Reconnectez-vous.' : response.status === 403 ? 'Accès refusé.' : response.status === 409 ? 'Ce nom existe déjà ou la limite du serveur est atteinte.' : response.status === 400 ? 'Vérifiez les champs et les droits sur les bibliothèques sélectionnées.' : 'Opération impossible. Réessayez.');
+    if (detail?.error) throw new Error(`Erreur : ${detail.error}`);
+    throw new Error(response.status === 401 ? 'Session expirée. Reconnectez-vous.' : response.status === 403 ? 'Accès refusé.' : response.status === 409 ? 'Ce nom existe déjà ou la limite du serveur est atteinte.' : response.status === 400 ? 'Requête invalide. Vérifiez les paramètres saisis.' : 'Opération impossible. Réessayez.');
   }
   if (init.method && init.method !== 'GET') {
     const library = path.match(/\/libraries\/([^/]+)/)?.[1];

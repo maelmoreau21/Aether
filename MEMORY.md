@@ -1,5 +1,102 @@
 # MEMORY.md — État et décisions Aether
 
+## 24 octobre 2026 — Reconnaissance et affichage des films et vidéos dans des dossiers
+
+- **Problème résolu** :
+  - Lorsqu'un utilisateur organisait ses films dans des sous-dossiers (ex. `Inception/movie.mkv`, `Film/film.mp4`, `Avatar/cd1.mkv`, ou dossiers sans mention de l'année `(YYYY)` ni identifiant externe `[tmdb-...]`), ou plaçait un dossier de film dans une bibliothèque de type séries :
+    1. Dans les bibliothèques de films, `identity(relative)` ignorait le nom du dossier si celui-ci n'avait pas d'année entre parenthèses ou d'identifiant externe. Si le fichier vidéo s'appelait `movie.mkv`, `film.mp4`, `cd1.mkv` ou `video.mkv`, le film était nommé « movie » ou « cd1 », n'était pas associé au dossier et devenait introuvable sous son vrai nom dans l'interface.
+    2. Dans les bibliothèques de séries, `parse_series_episode(relative)` rejetait avec un avertissement tout fichier ne respectant pas les schémas stricts `SxxExx` ou `1x01` ou `Season \d+`, causant l'exclusion totale du film ou de l'épisode du scan et son absence complète de l'interface.
+    3. Les extensions de conteneurs MP4 courantes `.m4v` et `.mov` étaient ignorées par le scanner.
+- **Modifications apportées** :
+  - `crates/node/src/scanner.rs` :
+    - `is_generic_video_stem` : Détection des noms de fichiers génériques (`movie`, `film`, `video`, `main`, `feature`, `play`, `complete`, numéros de CD/Part/Disc, chiffres seuls `01`, `1`, etc.).
+    - `identity` : Utilisation intelligente du dossier parent pour nommer et regrouper l'œuvre (`folder:...`) même en l'absence d'année ou d'ID externe si le nom du fichier est générique, commence par le nom du dossier, ou correspond au titre du dossier. Normalisation des séparateurs sous Windows (`\`) vers `/` pour la clé d'identité.
+    - `parse_series_episode` : Prise en charge des dossiers de films ou vidéos autonomes placés dans une bibliothèque de séries comme S01E01 sous le titre du dossier/fichier, et détection des numéros d'épisodes en préfixe direct (`01 - Currahee`), garantissant que le média apparaît toujours dans le catalogue et est lisible.
+    - Prise en charge des extensions MP4 `.m4v` et `.mov` en plus de `.mkv`, `.mp4` et `.webm`.
+    - Ajout de tests unitaires dédiés : `identity_handles_movies_in_folders_with_and_without_years` et `parse_series_episode_fallback_for_movies_and_non_standard_folders`.
+- **Validation** :
+  - `cargo test -p media-node` : 88 tests réussis, 0 échec (dont les 2 nouveaux tests unitaires).
+  - `cargo check --all-targets` : 0 avertissement, 0 erreur.
+  - `npm run check --prefix apps/web` : 0 erreur, 0 avertissement.
+  - `npm test --prefix apps/web` : 152 tests réussis, 0 échec.
+
+## 24 octobre 2026 — Ergonomie Catalogue & Fiche Média : Menu Options `...`, Modales Dédiées, Dropdown Saisons et Barre de Recherche
+
+- **Problèmes résolus** :
+  1. **Pollution visuelle de la fiche média** : Présence directe sur la fiche de détails d'un pavé technique (« Provenance : Indexation automatique / Ajouté le ... / Nœud source : local ») et répétition erronée « Média local indexéMédia local indexé » provenant de fallbacks non filtrés.
+  2. **Actions d'administration désordonnées** : Les boutons d'images `▧` et de modification des métadonnées (qui déroulait un grand `<details>` déformant toute la page) nuisaient à la propreté de l'interface.
+  3. **Menu déroulant de saisons disgracieux** : L'ancien `<select>` HTML brut de sélection de saison présentait un rendu natif OS désuet et peu soigné.
+  4. **Champ de recherche sans focus immédiat et loupe chevauchant le texte** :
+     - Accéder à `/search` ne focalisait pas immédiatement le champ de saisie texte.
+     - L'icône loupe SVG (`left: 14px`) chevauchait directement le début du texte saisi en raison d'une règle globale dans `tokens.css` dont la spécificité (`:not():not():not()`) écrasait le `padding-left` de l'input.
+- **Modifications apportées** :
+  - `crates/core/src/inventory.rs` :
+    - Remplacement de `.unwrap_or("Média local indexé")` par `.unwrap_or("")` pour le champ `description`, évitant toute injection de valeur factice lorsqu'aucun synopsis n'existe.
+  - `apps/web/src/lib/ui/Icon.svelte` :
+    - Ajout des icônes vectorielles SVG `more` (trois petits points `...`), `edit` (crayon), `image` (gestion d'images) et `copy` (copie d'identifiant).
+  - `apps/web/src/lib/catalog/WorkTools.svelte` :
+    - Remplacement des boutons disparates par un bouton moderne à trois petits points `...` avec dropdown contextuel flottant.
+    - Ajout d'une modale « **Informations média** » détaillée (Nœud source, statut connecté/hors-ligne, bibliothèque, identifiant copie avec bouton Copier, identité globale, provenance métadonnées, date d'ajout, classification, et specs techniques vidéo/audio/sous-titres/conteneur).
+    - Ajout d'une modale dédiée « **Modifier les métadonnées** » (réservée aux administrateurs) avec tous les champs éditoriaux et le regroupement multi-nœuds.
+    - Intégration soignée de la gestion d'images (`ImageManager`) et de la modale de playlists.
+  - `apps/web/src/lib/catalog/FilmDetail.svelte` & `apps/web/src/lib/catalog/SeriesDetail.svelte` :
+    - Suppression du bloc encombrant `.metadata-footer` (Provenance / Date d'ajout / Nœud source), désormais accessible via le menu `...` > « Informations média ».
+    - Filtrage des mentions factices « Média local indexé » ou « Média local » sur le synopsis et l'outline pour une présentation nette.
+    - Association des flux et specs techniques à `WorkTools` pour affichage dans la modale d'informations.
+  - `apps/web/src/lib/catalog/SeriesDetail.svelte` :
+    - Remplacement du `<select>` par un **sélecteur de saison custom moderne** inspiré des plateformes de streaming : bouton trigger avec saison active, compteur d'épisodes, chevron animé et menu popover sombre avec flou d'arrière-plan, coche de sélection et fermeture au clic/Échap.
+  - `apps/web/src/lib/catalog/CatalogGrid.svelte` & `Navbar.svelte` :
+    - Focus automatique immédiat sur le champ de recherche à l'arrivée sur `/search` (`onMount`, `$effect`, et clic sur la loupe dans la barre de navigation).
+    - Correction définitive du chevauchement de l'icône loupe grâce à `padding: 10px 42px 10px 48px !important;` et masquage des décorations Webkit natives.
+- **Validation** :
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web test` : 25 suites, 152 tests réussis.
+  - `cargo test -p media-poc --lib` : 57 tests réussis, 0 échec.
+
+## 24 octobre 2026 — Correction de l'erreur « Les sauvegardes sont indisponibles. Actualisez pour réessayer »
+
+- **Problème résolu** :
+  - Dans la vue d'administration des tâches (`AdminTasks.svelte`), la requête `GET /api/v1/admin/backups` rejetait la promesse et déclenchait l'alerte d'erreur : *"Les sauvegardes sont indisponibles. Actualisez pour réessayer."*.
+  - En backend (`crates/core/src/admin_backups.rs`), l'endpoint `list()` (`GET /api/v1/admin/backups`) utilisait `validate_directory(&state).await?` avec l'opérateur `?`, provoquant un arrêt immédiat en `409 Conflict` dès que le dossier de sauvegarde était inaccessible, relatif ou refusé par les politiques de sécurité (au lieu de retourner un statut HTTP 200 avec `{ available: false, reason: "..." }`).
+  - De plus, `safe_directory` échouait systématiquement sur les chemins relatifs car `directory.ancestors()` contenait le composant racine vide `""` (rejeté par `check_path_safety`), et `directory.parent()` retournait `""` pour lequel `is_dir()` renvoie `false`.
+  - Côté frontend (`AdminTasks.svelte`), le type `Backup` omettait le champ `reason`, et affichait un motif codé en dur erroné au lieu du motif réel fourni par l'API.
+- **Modifications apportées** :
+  - `crates/core/src/admin_backups.rs` :
+    - `safe_directory` : prise en compte des chemins relatifs (le parent vide `""` est résolu comme le dossier courant `.`) et filtrage des ancêtres vides dans `ancestors().filter(|p| !p.as_os_str().is_empty())`.
+    - `list()` : capture sécurisée de l'échec de validation de répertoire ; au lieu de renvoyer un code HTTP `409 Conflict`, l'API retourne HTTP 200 avec `available: false`, le motif explicite (`reason`) et une liste d'archives vide conformément au contrat d'API.
+  - `apps/web/src/lib/admin/AdminTasks.svelte` :
+    - Ajout de `reason?: string | null` dans l'interface `Backup`.
+    - Affichage de `backup.reason` lorsque les sauvegardes ne sont pas disponibles au lieu d'un message trompeur sur la clé de récupération.
+  - `crates/core/tests/admin_backups.rs` :
+    - Ajout du test d'intégration `backups_list_returns_unavailable_when_directory_refused` garantissant qu'un dossier refusé par la politique renvoie bien HTTP 200 avec `available: false` et un `reason` explicite.
+- **Validation** :
+  - `cargo test -p media-poc --test admin_backups` : 2 tests réussis.
+  - `cargo test -p media-poc --lib admin_backups` : 2 tests réussis.
+  - `cargo clippy -p media-poc --lib -- -D warnings` : 0 avertissement.
+  - `cargo fmt --check` : code formaté.
+  - `npm --prefix apps/web test` : 25 suites, 152 tests réussis.
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+
+## 24 octobre 2026 — Suppression définitive des droits de bibliothèques sur les plugins et correction des erreurs 400
+
+- **Problème résolu** :
+  - Lors de l'installation ou la configuration d'un plugin, une erreur HTTP 400 affichait le message hérité et trompeur : *"Vérifiez les champs et les droits sur les bibliothèques sélectionnées."*, vestige d'une ancienne fonction de restriction par bibliothèque qui devait être supprimée.
+  - La sélection de bibliothèques spécifiques pour les plugins de métadonnées était encore présente dans l'interface (`Utilisation : Toutes les bibliothèques / Certaines bibliothèques`, cases à cocher).
+- **Modifications apportées** :
+  - `apps/web/src/lib/admin/request.ts` :
+    - Remplacement du message d'erreur générique 400 par un message neutre (`Requête invalide. Vérifiez les paramètres saisis.`).
+    - Enregistrement des traductions explicites pour l'ensemble des codes d'erreurs de dépôts et de paquets (`incompatible_server_version`, `invalid_package_digest`, `invalid_package`, `catalogue_package_mismatch`, `invalid_public_key`, `invalid_signature`, `invalid_manifest`, `module_too_large`, `invalid_module`, `invalid_digest`, `incompatible_api`, `repository_https_public_host_required`, `repository_address_forbidden`, `repository_unavailable`, `extension_exists`, etc.).
+    - Affichage direct du code d'erreur serveur `detail.error` si aucun message spécifique n'est défini, empêchant tout masquage d'erreur.
+  - `apps/web/src/lib/admin/AdminExtensions.svelte` :
+    - Suppression complète des contrôles de sélection de bibliothèques pour les plugins (`libraries`, `selected`, `allLibraries`, sélecteur et cases à cocher).
+    - Les plugins sont désormais activés de manière globale sur l'ensemble de la médiathèque (`allLibraries: true`, `libraryIds: []`).
+    - Nettoyage des sélecteurs CSS inutilisés (`fieldset`, `legend`).
+- **Validation** :
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web test` : 25 suites, 152 tests réussis.
+  - `cargo check -p media-contracts -p media-node -p media-poc` : succès.
+
+
 ## 24 octobre 2026 — Mission 1 : Plateforme multimédia multi-serveur (jusqu'à 100 Media Nodes)
 
 - **Architecture distribuée Core / Multi-Nodes (`crates/core/src/nodes.rs`, `crates/core/src/inventory.rs`, `crates/node/src/server.rs`)** :

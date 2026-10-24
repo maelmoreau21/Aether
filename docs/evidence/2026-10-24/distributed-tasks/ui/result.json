@@ -1,0 +1,23 @@
+{
+  "browser": "155.0.8059.86",
+  "mockApi": true,
+  "actions": [
+    "pause",
+    "resume",
+    "cancel"
+  ],
+  "categories": [
+    "scan",
+    "image"
+  ],
+  "onDemandResultReads": 1,
+  "widths": [
+    390,
+    1440
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "pageErrors": []
+}

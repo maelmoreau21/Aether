@@ -66,7 +66,6 @@
       if (!group.entries.some(entry => entry.manifest.version===catalogueVersions[group.key])) catalogueVersions[group.key]=group.entries[0].manifest.version;
     }
   });
-  type Library = { id: string; name: string; enabled: boolean | number };
   type Run = { id: string; extensionId: string; workId: string; status: string; durationMs: number; result: { title?: string; summary?: string; error?: string; pluginError?: string; operation?: string; output?: Record<string, unknown> } };
   type Candidate = { id: string; title: string; year?: number; overview?: string };
   type ProviderImage = { url: string; imageType: string; language?: string; width?: number; height?: number };
@@ -96,16 +95,13 @@
   }
   let installed = $state<Installed[]>([]);
   const categories = $derived([...new Set([...catalogue.map(entry => categoryOf(entry.manifest)), ...installed.map(entry => categoryOf(entry.manifest))])].sort());
-  let libraries = $state<Library[]>([]);
   let runs = $state<Run[]>([]);
   let audit = $state<{ actorId: string; extensionId: string; action: string; createdAt: number }[]>([]);
-  let selected = $state<Record<string, string[]>>({});
   let workIds = $state<Record<string, string>>({});
   let queries = $state<Record<string, string>>({});
   let workOptions = $state<Record<string, { id: string; title: string }[]>>({});
   let purge = $state<Record<string, boolean>>({});
   let editingSettings = $state<Record<string, ExtensionSettings>>({});
-  let allLibraries=$state<Record<string,boolean>>({});
   const managed=$derived(installed.find(extension=>extension.manifest.id===managedId));
   let busy = $state(false);
   let error = $state('');
@@ -143,19 +139,16 @@
     finally { busy = false; }
   }
   async function refresh() {
-    const [extensions, libs, history, journal, sources, available] = await Promise.all([
+    const [extensions, history, journal, sources, available] = await Promise.all([
       adminRequest<{ extensions: Installed[] }>('/api/v1/admin/extensions'),
-      adminRequest<{ libraries: Library[] }>('/api/v1/admin/libraries'),
       adminRequest<{ runs: Run[] }>('/api/v1/admin/extensions/runs'),
       adminRequest<{ audit: typeof audit }>('/api/v1/admin/extensions/audit'),
       adminRequest<{ repositories: Repository[] }>('/api/v1/admin/extensions/repositories'),
       adminRequest<{ entries: CatalogueEntry[] }>('/api/v1/admin/extensions/catalogue')
     ]);
-    installed = extensions.extensions.map(extension=>({...extension,manifest:displayManifest(extension.manifest)})); libraries = libs.libraries; runs = history.runs;
+    installed = extensions.extensions.map(extension=>({...extension,manifest:displayManifest(extension.manifest)})); runs = history.runs;
     audit = journal.audit;
     repositories = sources.repositories; catalogue = available.entries.map(entry=>({...entry,manifest:displayManifest(entry.manifest)}));
-    for (const extension of installed) allLibraries[extension.manifest.id]=extension.allLibraries ?? true;
-    selected = Object.fromEntries(installed.map(e => [e.manifest.id, [...e.libraryIds]]));
 
     for (const ext of installed) {
       if (!editingSettings[ext.manifest.id]) {
@@ -182,7 +175,7 @@
   onMount(() => { void reload(); });
   function configure(extension: Installed, enabled: boolean) {
     return perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`, {
-      method: 'PUT', body: JSON.stringify({ enabled, libraryIds: selected[extension.manifest.id] ?? [], allLibraries: allLibraries[extension.manifest.id] ?? true })
+      method: 'PUT', body: JSON.stringify({ enabled, libraryIds: [], allLibraries: true })
     }), enabled ? 'Permissions enregistrées et extension activée.' : 'Extension désactivée.');
   }
   async function saveSettings(id: string) {
@@ -213,7 +206,7 @@
   async function installFromCatalogue(entry: CatalogueEntry) {
     await perform(async () => {
       await adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(entry.repositoryId)}/install`,{method:'POST',body:JSON.stringify({extensionId:entry.manifest.id,version:entry.manifest.version})});
-      tab='installed'; catalogueId=null; managedId=entry.manifest.id; allLibraries[entry.manifest.id]=true;
+      tab='installed'; catalogueId=null; managedId=entry.manifest.id;
     },'Extension installée. Configurez-la puis activez-la.');
   }
 </script>
@@ -310,10 +303,7 @@
       {@render artwork(extension.manifest)}
       <dl><div><dt>État</dt><dd>{extension.enabled ? "Activée" : "Désactivée"}</dd></div><div><dt>Version</dt><dd>{extension.manifest.version}</dd></div><div><dt>Développeur</dt><dd>{extension.manifest.author}</dd></div></dl>
       {#if extension.manifest.permissions.includes('metadata.read')}
-        <h4>Métadonnées</h4><p>Le Core interroge ce fournisseur pour les œuvres concernées.</p>
-        <label>Utilisation<select aria-label="Utilisation" disabled={busy} bind:value={allLibraries[extension.manifest.id]}><option value={true}>Toutes les bibliothèques</option><option value={false}>Certaines bibliothèques</option></select></label>
-        {#if !allLibraries[extension.manifest.id]}<fieldset disabled={busy}><legend>Bibliothèques</legend>{#each libraries.filter(l=>l.enabled) as library (library.id)}<label class="check"><input type="checkbox" value={library.id} bind:group={selected[extension.manifest.id]} />{library.name}</label>{/each}</fieldset>{/if}
-        <button disabled={busy} onclick={()=>void configure(extension,extension.enabled)}>Enregistrer l’utilisation</button>
+        <h4>Métadonnées</h4><p>Le Core interroge ce fournisseur pour l’ensemble des œuvres de la médiathèque.</p>
       {/if}
       <details><summary>Accès et identité</summary><p>{accessLabels(extension.manifest.permissions)}</p><p>Services contactés : {extension.manifest.httpHosts?.join(', ')||'aucun'}</p><p>Éditeur : {extension.publisherId}</p><code>{extension.sha256}</code></details>
       <details class="uninstall"><summary>Désinstaller</summary><label class="check"><input type="checkbox" bind:checked={purge[extension.manifest.id]} />Supprimer aussi les résultats conservés</label><button disabled={busy} onclick={()=>void perform(async()=>{await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`,{method:'DELETE',body:JSON.stringify({deleteData:purge[extension.manifest.id]??false})});managedId=null;},'Extension désinstallée.')}>Désinstaller cette extension</button></details>
@@ -384,7 +374,7 @@
 
 <style>
   section { min-width:0; }
-  h2,h3,h4,strong,legend,summary { color:var(--text-primary); }
+  h2,h3,h4,strong,summary { color:var(--text-primary); }
   h2 { font-size:1.7rem;letter-spacing:-.03em;margin:0; } h3{font-size:1.05rem;margin:0;} h4{font-size:1.1rem;margin:0;} p{line-height:1.55;color:var(--text-secondary);} small{color:var(--text-secondary);line-height:1.5;}
 
   .heading,.actions,.section-title{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}.heading{justify-content:space-between;}.section-title{margin-top:24px;}
@@ -395,7 +385,7 @@
   .catalogue-search{max-width:420px;margin:20px 0 8px;}.section-help{font-size:13px;margin:12px 0 22px;}.plugins-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr));gap:16px;align-items:start;}.card{border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-surface);min-width:0;}.plugin-card{overflow:hidden;}.catalogue-identity{display:flex;align-items:center;justify-content:space-between;padding:20px 20px 0;}.extension-icon{width:46px;height:46px;display:inline-flex;align-items:center;justify-content:center;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-md);color:var(--accent-primary);flex-shrink:0;}.badge{font-size:11px;background:var(--bg-elevated);padding:4px 8px;border-radius:var(--radius-sm);color:var(--text-secondary);white-space:nowrap;}.badge.success{color:var(--status-success);}.catalogue-content{padding:18px 20px 0;flex:1;}.catalogue-card{display:flex;flex-direction:column;height:100%;box-sizing:border-box;}.plugin-desc{font-size:13px;margin:10px 0;}.catalogue-card .plugin-desc{min-height:4.6em;}.catalogue-actions{display:flex;align-items:end;gap:12px;padding:16px 20px 20px;justify-content:space-between;border-top:1px solid var(--border-subtle);margin-top:16px;}.catalogue-actions label{min-width:75px;max-width:110px;}.catalogue-actions button{flex:1;}
   details{border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:12px;margin:14px 0;min-width:0;}summary{cursor:pointer;font-size:13px;font-weight:600;}.catalogue-pending{display:flex;gap:12px;padding:18px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-md);margin:20px 0;}.catalogue-pending p{font-size:13px;margin:5px 0 0;}
   .repository-form{max-width:760px;grid-template-columns:1fr 2fr auto;align-items:end;padding:20px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md);}.repository-card{padding:20px;margin:16px 0;}.repository-heading{display:flex;align-items:center;gap:12px;margin-bottom:14px;}.repository-heading p{font-size:12px;margin:4px 0;}.repository-heading .badge{margin-left:auto;}.repository-url{display:block;overflow-wrap:anywhere;white-space:normal;font-size:12px;color:var(--text-secondary);}.repository-card .actions{margin:16px 0;}
-  .installed-identity{display:flex;align-items:center;gap:12px;min-width:0;}.plugin-header{padding:20px 20px 0;}.plugin-title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}fieldset{border:1px solid var(--border-subtle);border-radius:var(--radius-sm);display:grid;gap:10px;margin:18px 0;padding:16px;}legend{font-size:13px;}code{overflow-wrap:anywhere;white-space:normal;}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto;font-size:12px;}.execution-history{margin-top:24px;}.execution-history .card{padding:16px;margin-top:12px;}
+  .installed-identity{display:flex;align-items:center;gap:12px;min-width:0;}.plugin-header{padding:20px 20px 0;}.plugin-title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}code{overflow-wrap:anywhere;white-space:normal;}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto;font-size:12px;}.execution-history{margin-top:24px;}.execution-history .card{padding:16px;margin-top:12px;}
   [role=alert],[role=status]{padding:12px 16px;border-radius:var(--radius-sm);background:var(--bg-elevated);font-size:13px;}[role=alert]{border-left:3px solid var(--status-error);} [role=status]{color:var(--text-secondary);}
   @media(max-width:650px){.repository-form{grid-template-columns:1fr;}.heading{align-items:start;}.extension-tabs button{padding:12px 10px;font-size:12px;}.catalogue-actions{padding:14px 16px;}.plugin-header,.catalogue-content{padding-inline:16px;}.repository-heading{flex-wrap:wrap;}}
 .installed-filters{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0;}.installed-filters label:first-child{flex:1;min-width:160px;}.version-label{font-size:12px;color:var(--text-secondary);white-space:nowrap;}.catalogue-card .plugin-desc{min-height:3em;}

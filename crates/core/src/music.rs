@@ -175,6 +175,15 @@ pub async fn scan(
     root: &DiskPath,
     cancel: &AtomicBool,
 ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    scan_fenced(store, library, root, cancel, None).await
+}
+pub(crate) async fn scan_fenced(
+    store: &IdentityStore,
+    library: &str,
+    root: &DiskPath,
+    cancel: &AtomicBool,
+    run: Option<&str>,
+) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
     let patterns: String = query_scalar("SELECT excluded_patterns FROM libraries WHERE id=?")
         .bind(library)
         .fetch_one(&store.pool)
@@ -185,18 +194,32 @@ pub async fn scan(
         .filter(|v| !v.is_empty())
         .map(str::to_owned)
         .collect();
-    let scan = uuid::Uuid::new_v4().to_string();
+    let scan = run
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let fenced = run.is_some();
     let count = media_node::music::scan_with_exclusions(root, cancel, &patterns, |track| {
         let store = store.clone();
         let library = library.to_owned();
         let root = root.to_string_lossy().into_owned();
         let scan = scan.clone();
         async move {
+            let _effects = crate::task_engine::EFFECT_GATE.lock().await;
+            if fenced && !crate::nodes::scan_run_authorized(&store, &library, "local", &scan).await
+            {
+                return Err(std::io::Error::other("Scan attempt fenced"));
+            }
             publish_track(&store, &library, &root, &scan, track).await?;
             Ok(())
         }
     })
     .await?;
+    let _effects = crate::task_engine::EFFECT_GATE.lock().await;
+    if cancel.load(std::sync::atomic::Ordering::Acquire)
+        || (fenced && !crate::nodes::scan_run_authorized(store, library, "local", &scan).await)
+    {
+        return Err("Music scan interrupted".into());
+    }
     query("UPDATE music_tracks SET available=0 WHERE library_id=? AND scan_id!=?")
         .bind(library)
         .bind(scan)

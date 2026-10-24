@@ -34,6 +34,10 @@
   let backdropLoaded = $state(false);
   const episodePageSize = 24;
   let episodeOffset = $state(0);
+  let seasonDropdownOpen = $state(false);
+  const isMeaningless = (s?: string | null) => !s || s.trim() === '' || s.trim() === 'Média local indexé' || s.trim() === 'Média local';
+  const displaySynopsis = $derived(!isMeaningless(work.plot) ? work.plot : !isMeaningless(work.description) ? work.description : 'Synopsis non renseigné.');
+  const showOutline = $derived(Boolean(work.outline && !isMeaningless(work.outline) && work.outline !== work.description && work.outline !== work.plot));
   $effect(() => { void work.id; void season; episodeOffset = 0; });
   const activeSeason = $derived(work.seasons?.find(item => item.number === season) ?? work.seasons?.[0]);
   let pageEpisodes = $state<Work[]>([]);
@@ -144,11 +148,11 @@
           </div>
         {/if}
 
-        {#if work.outline && work.outline !== work.description && work.outline !== work.plot}
+        {#if showOutline}
           <blockquote class="outline-hook">« {work.outline} »</blockquote>
         {/if}
 
-        <p class="synopsis">{work.plot || work.description || 'Synopsis non renseigné.'}</p>
+        <p class="synopsis">{displaySynopsis}</p>
 
         <!-- Offline Node Notice -->
         {#if work.available === false}
@@ -175,19 +179,6 @@
             {/each}
           </div>
         {/if}
-        <!-- Provenance Footer -->
-        <div class="metadata-footer">
-          <span class="prov-tag">
-            Provenance : {work.metadataProvenance === 'nfo' ? 'Fichier NFO local' : 'Indexation automatique'}
-          </span>
-          {#if work.addedAt}
-            <span class="prov-tag">Ajouté le {new Date(work.addedAt * 1000).toLocaleDateString('fr-FR')}</span>
-          {/if}
-          {#if work.premiered}
-            <span class="prov-tag">Date de première diffusion : {work.premiered}</span>
-          {/if}
-          <span class="prov-tag">Nœud source : <code>{work.nodeId ?? 'local'}</code></span>
-        </div>
 
         {#if work.synthetic}
           <p class="detail-note">Fiche de démonstration synthétique pour la validation du lecteur.</p>
@@ -471,24 +462,6 @@
     font-size: 13px;
     line-height: 1.5;
     color: var(--status-error);
-  }
-
-  /* Metadata Footer */
-  .metadata-footer {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 16px;
-    padding-top: 8px;
-    border-top: 1px solid var(--color-line);
-  }
-
-  .prov-tag {
-    font-size: 11.5px;
-    color: var(--color-subtle);
-  }
-
-  .prov-tag code {
-    color: var(--color-muted);
   }
 
   .detail-note {

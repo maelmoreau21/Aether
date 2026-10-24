@@ -31,14 +31,15 @@ use media_contracts::{
         EnrollNodeRequest, EnrollNodeResponse, HDR_BODY_SHA256, HDR_KEY_ID, HDR_NODE_ID, HDR_NONCE,
         HDR_PROTOCOL, HDR_RES_NONCE, HDR_RES_SIGNATURE, HDR_RES_TIMESTAMP, HDR_SIGNATURE,
         HDR_TIMESTAMP, HeartbeatPayload, LibraryInventorySync, NodeCommandEnvelope,
-        NodeCommandType, NodeInventoryAssetEntry, NodeInventoryImageEntry, PROTOCOL_VERSION,
-        PairNodeRequest, PairNodeResponse, RemoteBatchSubmission, RemoteScanCompleteResponse,
-        RemoteScanCompletion, RemoteScanFailure, RemoteScanStartRequest, ReplayWindow,
-        RotateSecretRequest, RotateSecretResponse, StreamRelayRequest,
-        compute_enrollment_mutual_proof, compute_pairing_mutual_proof, compute_pairing_proof,
-        compute_rotation_mutual_proof, constant_time_eq, derive_paired_secret, random_nonce_hex,
-        random_secret_hex, sha256_hex, sign_internal_request, sign_internal_response, unix_now,
-        verify_internal_request, verify_internal_response, verify_playback_token,
+        NodeCommandType, NodeInventoryAssetEntry, NodeInventoryImageEntry, NodeTaskRequest,
+        NodeTaskResult, PROTOCOL_VERSION, PairNodeRequest, PairNodeResponse, RemoteBatchSubmission,
+        RemoteScanCompleteResponse, RemoteScanCompletion, RemoteScanFailure,
+        RemoteScanStartRequest, ReplayWindow, RotateSecretRequest, RotateSecretResponse,
+        StreamRelayRequest, compute_enrollment_mutual_proof, compute_pairing_mutual_proof,
+        compute_pairing_proof, compute_rotation_mutual_proof, constant_time_eq,
+        derive_paired_secret, random_nonce_hex, random_secret_hex, sha256_hex,
+        sign_internal_request, sign_internal_response, unix_now, verify_internal_request,
+        verify_internal_response, verify_playback_token,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -155,14 +156,15 @@ pub struct NodeServerState {
     pub replay_window: Arc<ReplayWindow>,
     pub active_scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub active_streams: Arc<AtomicU32>,
+    pub resources: Arc<crate::resources::Sampler>,
     pub local_node: LocalNode,
     preparations: Arc<crate::packaging::Preparations>,
 }
 
-struct ActiveStreamGuard(Arc<AtomicU32>);
+pub struct ActiveStreamGuard(Arc<AtomicU32>);
 
 impl ActiveStreamGuard {
-    fn enter(counter: &Arc<AtomicU32>) -> Self {
+    pub fn enter(counter: &Arc<AtomicU32>) -> Self {
         counter.fetch_add(1, Ordering::Relaxed);
         Self(counter.clone())
     }
@@ -199,7 +201,7 @@ impl http_body::Body for TrackedBody {
     }
 }
 
-fn track_stream_body(response: Response, counter: &Arc<AtomicU32>) -> Response {
+pub fn track_stream_body(response: Response, counter: &Arc<AtomicU32>) -> Response {
     if !response.status().is_success() {
         return response;
     }
@@ -277,6 +279,9 @@ impl NodeServerState {
         updated_config.allowed_roots = canonical_roots;
 
         Ok(Self {
+            resources: Arc::new(crate::resources::Sampler::new(
+                updated_config.data_dir.clone(),
+            )),
             config: updated_config,
             identity: Arc::new(RwLock::new(identity)),
             identity_changes: Arc::new(tokio::sync::Mutex::new(())),
@@ -350,6 +355,11 @@ pub fn app_with_state(state: NodeServerState) -> Router {
         .route("/internal/v1/node/revoke", post(revoke_node))
         .route("/internal/v1/node/inventory-sync", post(inventory_sync))
         .route("/internal/v1/node/scans", post(start_remote_scan))
+        .route("/internal/v1/node/tasks", post(start_node_task))
+        .route(
+            "/internal/v1/node/scans/{scan_id}/cancel",
+            post(cancel_remote_scan),
+        )
         .route(
             "/internal/v1/node/assets/{id}/prepared/{component}",
             get(internal_prepared).head(internal_prepared),
@@ -756,6 +766,7 @@ async fn node_heartbeat(
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
+    let resource_pressure = Some(state.resources.sample().await);
     let payload = HeartbeatPayload {
         protocol_version: PROTOCOL_VERSION.to_owned(),
         version: Some(media_contracts::version::current_version().to_string()),
@@ -763,7 +774,16 @@ async fn node_heartbeat(
         roots,
         public_url: identity.public_url.clone(),
         active_scans,
+        active_scan_ids: state
+            .active_scans
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .take(64)
+            .cloned()
+            .collect(),
         active_streams,
+        resource_pressure,
         indexed_assets,
         timestamp: unix_now(),
     };
@@ -988,11 +1008,19 @@ async fn start_remote_scan(
         );
     };
 
-    let cancel = Arc::new(AtomicBool::new(false));
-    {
-        let mut scans = state.active_scans.lock().unwrap_or_else(|e| e.into_inner());
-        scans.insert(req.scan_id.as_str().to_owned(), cancel.clone());
-    }
+    let cancel = match register_scan(&state, req.scan_id.as_str()) {
+        Ok(cancel) => cancel,
+        Err(reason) => {
+            return signed_json_response(
+                identity.shared_secret.as_deref().unwrap_or_default(),
+                &identity.node_id,
+                &identity.key_id,
+                &nonce,
+                StatusCode::TOO_MANY_REQUESTS,
+                &serde_json::json!({ "error": reason }),
+            );
+        }
+    };
 
     let bg_state = state.clone();
     let scan_req = req.clone();
@@ -1014,6 +1042,270 @@ async fn start_remote_scan(
             "root_snapshot": canonical_root.to_string_lossy(),
         }),
     )
+}
+
+/// Admission is shared by inbound requests and outbound commands. Cancellation
+/// retains the slot until the old worker has actually stopped.
+fn register_scan(state: &NodeServerState, scan_id: &str) -> Result<Arc<AtomicBool>, &'static str> {
+    let mut scans = state.active_scans.lock().unwrap_or_else(|e| e.into_inner());
+    if scans.contains_key(scan_id) {
+        return Err("duplicate_scan");
+    }
+    if !scans.is_empty() || state.active_streams.load(Ordering::Acquire) > 0 {
+        return Err("node_busy_playback_priority");
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    scans.insert(scan_id.to_owned(), cancel.clone());
+    Ok(cancel)
+}
+
+async fn start_node_task(
+    State(state): State<NodeServerState>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    let pq = uri
+        .path_and_query()
+        .map(|v| v.as_str())
+        .unwrap_or(uri.path());
+    let (identity, nonce) =
+        match verify_signed_core_call(&state, &headers, &Method::POST, pq, &body) {
+            Ok(ok) => ok,
+            Err(response) => return response,
+        };
+    let req: NodeTaskRequest = match serde_json::from_slice(&body) {
+        Ok(req) => req,
+        Err(_) => {
+            return signed_json_response(
+                identity.shared_secret.as_deref().unwrap_or_default(),
+                &identity.node_id,
+                &identity.key_id,
+                &nonce,
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({"error":"invalid_task"}),
+            );
+        }
+    };
+    if req.node_id != identity.node_id || task_grant(&state, &req).is_err() {
+        return signed_json_response(
+            identity.shared_secret.as_deref().unwrap_or_default(),
+            &identity.node_id,
+            &identity.key_id,
+            &nonce,
+            StatusCode::FORBIDDEN,
+            &serde_json::json!({"error":"task_target_denied"}),
+        );
+    }
+    let cancel = match register_scan(&state, &req.run_id) {
+        Ok(cancel) => cancel,
+        Err(reason) => {
+            return signed_json_response(
+                identity.shared_secret.as_deref().unwrap_or_default(),
+                &identity.node_id,
+                &identity.key_id,
+                &nonce,
+                StatusCode::TOO_MANY_REQUESTS,
+                &serde_json::json!({"error":reason}),
+            );
+        }
+    };
+    let bg = state.clone();
+    tokio::spawn(async move {
+        run_node_task(bg, req, cancel).await;
+    });
+    signed_json_response(
+        identity.shared_secret.as_deref().unwrap_or_default(),
+        &identity.node_id,
+        &identity.key_id,
+        &nonce,
+        StatusCode::ACCEPTED,
+        &serde_json::json!({"status":"accepted"}),
+    )
+}
+
+fn task_grant(
+    state: &NodeServerState,
+    req: &NodeTaskRequest,
+) -> io::Result<(ReadGrant, u64, String)> {
+    let denied = || io::Error::new(io::ErrorKind::PermissionDenied, "task_target_denied");
+    if req.node_id != state.node_id()
+        || req.run_id.is_empty()
+        || req.run_id.len() > 200
+        || !req
+            .run_id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"-_:".contains(&c))
+    {
+        return Err(denied());
+    }
+    let inventory = state.inventory.read().unwrap_or_else(|e| e.into_inner());
+    let (grant, size, mtime) = if req.category == "image" {
+        let entry = inventory.images.get(&req.target_id).ok_or_else(denied)?;
+        (
+            inventory
+                .grant_for_image(&req.node_id, &req.target_id)
+                .ok_or_else(denied)?,
+            entry.size,
+            entry.modified_ns.clone(),
+        )
+    } else if matches!(req.category.as_str(), "analyze" | "prepare") {
+        let entry = inventory.assets.get(&req.target_id).ok_or_else(denied)?;
+        (
+            inventory
+                .grant_for_asset(&req.node_id, &req.target_id)
+                .ok_or_else(denied)?,
+            entry.size,
+            entry.modified_ns.clone(),
+        )
+    } else {
+        return Err(denied());
+    };
+    if grant.library_id != req.library_id
+        || !state
+            .config
+            .allowed_roots
+            .iter()
+            .any(|root| Path::new(&grant.root_snapshot).starts_with(root))
+    {
+        return Err(denied());
+    }
+    Ok((grant, size, mtime))
+}
+
+async fn run_node_task(state: NodeServerState, req: NodeTaskRequest, cancel: Arc<AtomicBool>) {
+    let result = async {
+        let (grant, size, mtime) = task_grant(&state, &req)?;
+        crate::tasks::run_task_on_grant(
+            &req.category,
+            &grant,
+            req.component.as_deref(),
+            req.width,
+            &state.preparations,
+            size,
+            &mtime,
+        )
+        .await
+    };
+    let result = scan_with_playback_priority(&state, &cancel, result).await;
+    state
+        .active_scans
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&req.run_id);
+    let (success, result_json, error) = match result {
+        Ok(value) => (true, value, String::new()),
+        Err(error) => (
+            false,
+            serde_json::Value::Null,
+            error.to_string().chars().take(1024).collect(),
+        ),
+    };
+    let path = format!("/internal/v1/core/tasks/{}/complete", req.run_id);
+    let output = NodeTaskResult {
+        run_id: req.run_id,
+        node_id: state.node_id(),
+        library_id: req.library_id,
+        success,
+        result_json,
+        error,
+    };
+    let _ = post_signed_to_core(&state, &path, &output).await;
+}
+
+fn cancel_scan(state: &NodeServerState, scan_id: &str) -> bool {
+    let scans = state.active_scans.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(cancel) = scans.get(scan_id) {
+        cancel.store(true, Ordering::Release);
+        true
+    } else {
+        false
+    }
+}
+
+/// Signal demand before acquiring a preparation worker, so a background warm-up
+/// releases that same worker first. Blocking image decoders remain cooperative.
+async fn yield_background_for_playback(state: &NodeServerState) {
+    {
+        let active = state.active_scans.lock().unwrap_or_else(|e| e.into_inner());
+        for cancel in active.values() {
+            cancel.store(true, Ordering::Release);
+        }
+    }
+    let _ = tokio::time::timeout(Duration::from_millis(250), async {
+        loop {
+            if state
+                .active_scans
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+}
+
+async fn cancel_remote_scan(
+    State(state): State<NodeServerState>,
+    AxumPath(scan_id): AxumPath<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    let pq = uri
+        .path_and_query()
+        .map(|v| v.as_str())
+        .unwrap_or(uri.path());
+    let (identity, nonce) =
+        match verify_signed_core_call(&state, &headers, &Method::POST, pq, &body) {
+            Ok(ok) => ok,
+            Err(response) => return response,
+        };
+    let found = cancel_scan(&state, &scan_id);
+    signed_json_response(
+        identity.shared_secret.as_deref().unwrap_or_default(),
+        &identity.node_id,
+        &identity.key_id,
+        &nonce,
+        StatusCode::OK,
+        &serde_json::json!({ "cancelRequested": found }),
+    )
+}
+
+/// Dropping the scan future also drops any kill-on-drop probe child. The slot
+/// remains registered until this future returns and the caller removes it.
+async fn scan_with_playback_priority<T>(
+    state: &NodeServerState,
+    cancel: &AtomicBool,
+    scan: impl std::future::Future<Output = io::Result<T>>,
+) -> io::Result<T> {
+    tokio::pin!(scan);
+    let mut interval = tokio::time::interval(Duration::from_millis(100));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            biased;
+            _ = interval.tick() => {
+                if state.active_streams.load(Ordering::Acquire) > 0 {
+                    cancel.store(true, Ordering::Release);
+                    return Err(io::Error::new(io::ErrorKind::Interrupted, "scan preempted for playback"));
+                }
+                if cancel.load(Ordering::Acquire) {
+                    return Err(io::Error::new(io::ErrorKind::Interrupted, "scan cancelled"));
+                }
+            }
+            result = &mut scan => {
+                return if cancel.load(Ordering::Acquire) {
+                    Err(io::Error::new(io::ErrorKind::Interrupted, "scan cancelled"))
+                } else {
+                    result
+                };
+            }
+        }
+    }
 }
 
 async fn run_remote_scan_task(
@@ -1043,63 +1335,68 @@ async fn run_remote_scan_task(
         image_cache.insert(img.path.clone(), img);
     }
 
-    let result = if req.kind == "music" {
-        crate::music::scan_with_exclusions(
-            &canonical_root,
-            &cancel,
-            &req.excluded_patterns,
-            |track| {
-                seq += 1;
-                let submission = crate::music::Submission {
-                    library_id: req.library_id.as_str().into(),
-                    scan_id: req.scan_id.as_str().into(),
-                    root_snapshot: root_snapshot.clone(),
-                    track,
-                };
-                let state = state.clone();
-                async move {
-                    post_signed_to_core(&state, "/internal/v1/core/music/tracks", &submission).await
-                }
-            },
-        )
-        .await
-        .map(|count| crate::scanner::ScanReport {
-            discovered: count as u64,
-            probed: count as u64,
-            complete: true,
-            ..Default::default()
-        })
-    } else {
-        state
-            .local_node
-            .scan_library_streaming(
+    let scan = async {
+        if req.kind == "music" {
+            crate::music::scan_with_exclusions(
                 &canonical_root,
-                &req.kind,
-                &scan_cache,
-                &image_cache,
                 &cancel,
-                batch_size,
                 &req.excluded_patterns,
-                |mut batch: InventoryBatch| {
+                |track| {
                     seq += 1;
-                    batch.scan_id = req.scan_id.clone();
-                    batch.sequence = seq;
-                    let state_ref = state.clone();
-                    let scan_id = req.scan_id.clone();
-                    let library_id = req.library_id.clone();
+                    let submission = crate::music::Submission {
+                        library_id: req.library_id.as_str().into(),
+                        scan_id: req.scan_id.as_str().into(),
+                        root_snapshot: root_snapshot.clone(),
+                        track,
+                    };
+                    let state = state.clone();
                     async move {
-                        let submission = RemoteBatchSubmission {
-                            node_id: state_ref.node_id(),
-                            library_id,
-                            batch,
-                        };
-                        let path = format!("/internal/v1/core/scans/{}/batches", scan_id.as_str());
-                        post_signed_to_core(&state_ref, &path, &submission).await
+                        post_signed_to_core(&state, "/internal/v1/core/music/tracks", &submission)
+                            .await
                     }
                 },
             )
             .await
+            .map(|count| crate::scanner::ScanReport {
+                discovered: count as u64,
+                probed: count as u64,
+                complete: true,
+                ..Default::default()
+            })
+        } else {
+            state
+                .local_node
+                .scan_library_streaming(
+                    &canonical_root,
+                    &req.kind,
+                    &scan_cache,
+                    &image_cache,
+                    &cancel,
+                    batch_size,
+                    &req.excluded_patterns,
+                    |mut batch: InventoryBatch| {
+                        seq += 1;
+                        batch.scan_id = req.scan_id.clone();
+                        batch.sequence = seq;
+                        let state_ref = state.clone();
+                        let scan_id = req.scan_id.clone();
+                        let library_id = req.library_id.clone();
+                        async move {
+                            let submission = RemoteBatchSubmission {
+                                node_id: state_ref.node_id(),
+                                library_id,
+                                batch,
+                            };
+                            let path =
+                                format!("/internal/v1/core/scans/{}/batches", scan_id.as_str());
+                            post_signed_to_core(&state_ref, &path, &submission).await
+                        }
+                    },
+                )
+                .await
+        }
     };
+    let result = scan_with_playback_priority(&state, &cancel, scan).await;
 
     {
         let mut scans = state.active_scans.lock().unwrap_or_else(|e| e.into_inner());
@@ -1478,6 +1775,8 @@ async fn internal_prepared(
             Ok(ok) => ok,
             Err(response) => return response,
         };
+    let _demand = ActiveStreamGuard::enter(&state.active_streams);
+    yield_background_for_playback(&state).await;
     let response = prepare_asset(&state, &id, &component, req).await;
     track_stream_body(
         sign_stream_response(response, &identity, &nonce),
@@ -2022,6 +2321,7 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect();
 
+            let resource_pressure = Some(state.resources.sample().await);
             let hb = HeartbeatPayload {
                 protocol_version: PROTOCOL_VERSION.to_owned(),
                 version: Some(media_contracts::version::current_version().to_string()),
@@ -2029,7 +2329,16 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                 roots,
                 public_url: identity.public_url.clone(),
                 active_scans,
+                active_scan_ids: state
+                    .active_scans
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .keys()
+                    .take(64)
+                    .cloned()
+                    .collect(),
                 active_streams,
+                resource_pressure,
                 indexed_assets,
                 timestamp: unix_now(),
             };
@@ -2062,6 +2371,47 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                         };
                         match cmd.command_type {
                             NodeCommandType::Ping => {}
+                            NodeCommandType::Task => {
+                                if let Ok(req) =
+                                    serde_json::from_value::<NodeTaskRequest>(cmd.payload)
+                                {
+                                    match register_scan(&state, &req.run_id) {
+                                        Ok(cancel) => {
+                                            let bg = state.clone();
+                                            tokio::spawn(async move {
+                                                run_node_task(bg, req, cancel).await;
+                                            });
+                                        }
+                                        Err(reason) if reason != "duplicate_scan" => {
+                                            let result = NodeTaskResult {
+                                                run_id: req.run_id.clone(),
+                                                node_id: state.node_id(),
+                                                library_id: req.library_id,
+                                                success: false,
+                                                result_json: serde_json::Value::Null,
+                                                error: reason.into(),
+                                            };
+                                            let path = format!(
+                                                "/internal/v1/core/tasks/{}/complete",
+                                                req.run_id
+                                            );
+                                            let bg = state.clone();
+                                            tokio::spawn(async move {
+                                                let _ =
+                                                    post_signed_to_core(&bg, &path, &result).await;
+                                            });
+                                        }
+                                        Err(_) => {}
+                                    }
+                                }
+                            }
+                            NodeCommandType::CancelScan => {
+                                if let Some(scan_id) =
+                                    cmd.payload.get("scanId").and_then(|v| v.as_str())
+                                {
+                                    cancel_scan(&state, scan_id);
+                                }
+                            }
                             NodeCommandType::Scan => {
                                 if let Ok(scan_req) =
                                     serde_json::from_value::<RemoteScanStartRequest>(cmd.payload)
@@ -2152,11 +2502,28 @@ async fn handle_channel_scan(state: NodeServerState, req: RemoteScanStartRequest
     let Some(canonical_root) = validated_root else {
         return;
     };
-    let cancel = Arc::new(AtomicBool::new(false));
-    {
-        let mut scans = state.active_scans.lock().unwrap_or_else(|e| e.into_inner());
-        scans.insert(req.scan_id.as_str().to_owned(), cancel.clone());
-    }
+    let cancel = match register_scan(&state, req.scan_id.as_str()) {
+        Ok(cancel) => cancel,
+        Err(reason) => {
+            // A repeated delivery must not fail the original live attempt.
+            if reason != "duplicate_scan" {
+                let failure = RemoteScanFailure {
+                    node_id: state.node_id(),
+                    library_id: req.library_id,
+                    failed: ScanFailed {
+                        scan_id: req.scan_id.clone(),
+                        code: NodeErrorCode::StreamError.as_str().to_owned(),
+                        retryable: true,
+                        config_revision: req.config_revision,
+                    },
+                    message: reason.into(),
+                };
+                let path = format!("/internal/v1/core/scans/{}/fail", req.scan_id.as_str());
+                let _ = post_signed_to_core(&state, &path, &failure).await;
+            }
+            return;
+        }
+    };
     run_remote_scan_task(state, req, canonical_root, cancel).await;
 }
 
@@ -2218,6 +2585,7 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
     let synthetic_req = builder.body(Body::empty()).unwrap_or_default();
 
     if let Some(component) = req.target_kind.strip_prefix("prepared:") {
+        yield_background_for_playback(&state).await;
         let mut response = prepare_asset(&state, &req.target_id, component, synthetic_req).await;
         if req.head {
             encode_head_uplink(&mut response);
@@ -2389,6 +2757,164 @@ mod stream_signature_tests {
     use super::*;
     use http_body_util::BodyExt;
 
+    #[tokio::test]
+    async fn background_tasks_resolve_only_owned_inventory_targets() {
+        let (_data, state) = state().await;
+        let mut req = NodeTaskRequest {
+            run_id: "job:1".into(),
+            node_id: state.node_id(),
+            library_id: media_contracts::ids::LibraryId::new("library"),
+            category: "analyze".into(),
+            target_id: "fixture".into(),
+            component: None,
+            width: None,
+            core_base_url: String::new(),
+        };
+        assert!(task_grant(&state, &req).is_ok());
+        req.library_id = media_contracts::ids::LibraryId::new("other");
+        assert!(task_grant(&state, &req).is_err());
+        req.library_id = media_contracts::ids::LibraryId::new("library");
+        req.node_id = NodeId::new("another-node");
+        assert!(task_grant(&state, &req).is_err());
+        req.node_id = state.node_id();
+        req.target_id = "../../outside.mp4".into();
+        assert!(task_grant(&state, &req).is_err());
+        let response = start_node_task(
+            State(state),
+            HeaderMap::new(),
+            "/internal/v1/node/tasks".parse().unwrap(),
+            Bytes::from(serde_json::to_vec(&req).unwrap()),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn scan_admission_preserves_worker_ownership_and_playback_priority() {
+        let (_data, state) = state().await;
+        state.active_streams.store(1, Ordering::Release);
+        assert_eq!(
+            register_scan(&state, "first").unwrap_err(),
+            "node_busy_playback_priority"
+        );
+        state.active_streams.store(0, Ordering::Release);
+        let original = register_scan(&state, "first").unwrap();
+        assert_eq!(
+            register_scan(&state, "first").unwrap_err(),
+            "duplicate_scan"
+        );
+        assert_eq!(
+            register_scan(&state, "second").unwrap_err(),
+            "node_busy_playback_priority"
+        );
+        assert!(!cancel_scan(&state, "unknown"));
+        assert!(cancel_scan(&state, "first"));
+        assert!(original.load(Ordering::Acquire));
+        // Cancellation requests cannot free capacity while the worker is live.
+        assert!(register_scan(&state, "second").is_err());
+        state.active_scans.lock().unwrap().remove("first");
+        assert!(register_scan(&state, "second").is_ok());
+    }
+
+    #[tokio::test]
+    async fn playback_preempts_a_running_scan_and_drops_its_future() {
+        struct Dropped(Arc<AtomicBool>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+        let (_data, state) = state().await;
+        let cancel = AtomicBool::new(false);
+        let dropped = Arc::new(AtomicBool::new(false));
+        let guard = Dropped(dropped.clone());
+        let streams = state.active_streams.clone();
+        let scan = async move {
+            let _guard = guard;
+            streams.store(1, Ordering::Release);
+            std::future::pending::<io::Result<()>>().await
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            scan_with_playback_priority(&state, &cancel, scan),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+        assert!(cancel.load(Ordering::Acquire));
+        assert!(dropped.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn prepared_playback_demand_releases_background_work_before_acquiring_its_slot() {
+        let (_data, state) = state().await;
+        let cancel = register_scan(&state, "warm:1").unwrap();
+        let slot = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = slot.clone().acquire_owned().await.unwrap();
+        let background_state = state.clone();
+        let background_cancel = cancel.clone();
+        let background = tokio::spawn(async move {
+            let result =
+                scan_with_playback_priority(&background_state, &background_cancel, async move {
+                    let _permit = permit;
+                    std::future::pending::<io::Result<()>>().await
+                })
+                .await;
+            background_state
+                .active_scans
+                .lock()
+                .unwrap()
+                .remove("warm:1");
+            result
+        });
+        let demand = ActiveStreamGuard::enter(&state.active_streams);
+        yield_background_for_playback(&state).await;
+        assert!(cancel.load(Ordering::Acquire));
+        assert!(state.active_scans.lock().unwrap().is_empty());
+        assert!(
+            slot.try_acquire().is_ok(),
+            "foreground preparation can acquire the released work slot"
+        );
+        assert_eq!(
+            background.await.unwrap().unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+        drop(demand);
+        assert_eq!(state.active_streams.load(Ordering::Acquire), 0);
+    }
+
+    #[tokio::test]
+    async fn scan_cancel_requires_core_authentication_and_signs_its_response() {
+        let (_data, state) = state().await;
+        let cancel = register_scan(&state, "owned-scan").unwrap();
+        let path = "/internal/v1/node/scans/owned-scan/cancel";
+        let response = cancel_remote_scan(
+            State(state.clone()),
+            AxumPath("owned-scan".into()),
+            HeaderMap::new(),
+            path.parse().unwrap(),
+            Bytes::new(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(!cancel.load(Ordering::Acquire));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let router = app_with_state(state);
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let url = format!("http://{addr}");
+        let (status, _, body) = request_and_verify(&url, Method::POST, path).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap()["cancelRequested"],
+            true
+        );
+        assert!(cancel.load(Ordering::Acquire));
+        server.abort();
+    }
+
     async fn state() -> (tempfile::TempDir, NodeServerState) {
         let data = tempfile::tempdir().unwrap();
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2480,6 +3006,12 @@ mod stream_signature_tests {
             .unwrap();
         let status = response.status();
         let headers = response.headers().clone();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let response_digest = if path.starts_with("/internal/v1/node/scans/") {
+            sha256_hex(&bytes)
+        } else {
+            crate::transport::stream_metadata_digest(&headers)
+        };
         // This is the same verification Core applies, using actual headers
         // received over TCP after Axum/Hyper have applied HTTP body framing.
         verify_internal_response(
@@ -2495,11 +3027,10 @@ mod stream_signature_tests {
                 .unwrap(),
             headers[HDR_RES_NONCE].to_str().unwrap(),
             headers[HDR_RES_SIGNATURE].to_str().unwrap(),
-            &crate::transport::stream_metadata_digest(&headers),
+            &response_digest,
             unix_now(),
         )
         .expect("Core must authenticate on-wire Node error metadata");
-        let bytes = response.into_body().collect().await.unwrap().to_bytes();
         (status, headers, bytes)
     }
 

@@ -16,11 +16,13 @@ pub mod music;
 pub mod nfo;
 pub mod packaging;
 pub mod probe;
+pub mod resources;
 pub mod scanner;
 pub mod server;
 mod sidecar_manifest;
 pub mod stream;
 pub mod subtitles;
+pub mod tasks;
 pub mod transport;
 pub mod video_stream;
 

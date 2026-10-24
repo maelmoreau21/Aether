@@ -354,6 +354,10 @@ pub async fn ingest(
 }
 
 pub async fn clean_staging(store: &IdentityStore, scan_id: &str) -> Result<(), sqlx::Error> {
+    query("DELETE FROM scan_batch_receipts WHERE scan_id=?")
+        .bind(scan_id)
+        .execute(&store.pool)
+        .await?;
     query("DELETE FROM scan_staging_files WHERE scan_id=?")
         .bind(scan_id)
         .execute(&store.pool)
@@ -373,6 +377,18 @@ pub async fn stage_batch(
 ) -> Result<(), sqlx::Error> {
     let mut conn = store.pool.acquire().await?;
     let mut tx = crate::database::begin_write(&mut conn).await?;
+    // A replayed transport batch has no second effect, including issue counters.
+    if query("INSERT INTO scan_batch_receipts(scan_id,sequence) VALUES(?,?) ON CONFLICT DO NOTHING")
+        .bind(scan_id)
+        .bind(batch.sequence.min(i64::MAX as u64) as i64)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+        == 0
+    {
+        tx.commit().await?;
+        return Ok(());
+    }
     let encoded: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
         .bind(library_id)
         .fetch_one(&mut *tx)
@@ -552,6 +568,12 @@ pub async fn stage_batch(
             .await?;
     }
 
+    if let Some((job, attempt)) = scan_id.split_once(':')
+        && let Ok(attempt) = attempt.parse::<i64>()
+    {
+        query("UPDATE durable_tasks SET processed_items=processed_items+? WHERE id=? AND attempt=? AND status='running'")
+            .bind(batch.files.len() as i64).bind(job).bind(attempt).execute(&mut *tx).await?;
+    }
     tx.commit().await
 }
 
@@ -1951,7 +1973,7 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
         "year": metadata["year"].as_i64().or_else(||row.get::<Option<i64>,_>("year")),
         "minimumAge":row.try_get::<Option<i64>,_>("minimum_age").ok().flatten(),
         "addedAt": row.try_get::<Option<i64>,_>("added_at").ok().flatten(),
-        "description": metadata["plot"].as_str().or_else(||metadata["outline"].as_str()).unwrap_or("Média local indexé"),
+        "description": metadata["plot"].as_str().or_else(||metadata["outline"].as_str()).unwrap_or(""),
         "plot": metadata["plot"],
         "genres": metadata["genres"].as_array().cloned().unwrap_or_default(),
         "tags": metadata["tags"].as_array().cloned().unwrap_or_default(),

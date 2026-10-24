@@ -443,7 +443,9 @@ async fn scale_benchmark_1_10_and_100_simulated_nodes_warm_selection() {
                 roots: vec![root_path.clone()],
                 public_url: public_url.clone(),
                 active_scans: 0,
+                active_scan_ids: Vec::new(),
                 active_streams: streams,
+                resource_pressure: None,
                 indexed_assets: 1,
                 timestamp: unix_now(),
             };
@@ -571,7 +573,9 @@ async fn scale_benchmark_1_10_and_100_simulated_nodes_warm_selection() {
         roots: vec!["/mnt/nas-002/films".into()],
         public_url: Some("http://127.0.0.1:4102".into()),
         active_scans: 1,
+        active_scan_ids: Vec::new(),
         active_streams: 25,
+        resource_pressure: None,
         indexed_assets: 1,
         timestamp: unix_now(),
     };
@@ -586,7 +590,9 @@ async fn scale_benchmark_1_10_and_100_simulated_nodes_warm_selection() {
         roots: vec!["/mnt/nas-004/films".into()],
         public_url: Some("http://127.0.0.1:4104".into()),
         active_scans: 0,
+        active_scan_ids: Vec::new(),
         active_streams: 0,
+        resource_pressure: None,
         indexed_assets: 1,
         timestamp: unix_now(),
     };
@@ -904,7 +910,9 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
         roots: vec![node1_reported_root.clone()],
         public_url: Some(node1_url.clone()),
         active_scans: 0,
+        active_scan_ids: Vec::new(),
         active_streams: 0,
+        resource_pressure: None,
         indexed_assets: 1,
         timestamp: unix_now(),
     };
@@ -919,7 +927,9 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
         roots: vec![node2_reported_root.clone()],
         public_url: Some(node2_url.clone()),
         active_scans: 0,
+        active_scan_ids: Vec::new(),
         active_streams: 0,
+        resource_pressure: None,
         indexed_assets: 1,
         timestamp: unix_now(),
     };
@@ -1167,7 +1177,9 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
         roots: vec![node2_reported_root.clone()],
         public_url: Some(node2_url.clone()),
         active_scans: 0,
+        active_scan_ids: Vec::new(),
         active_streams: 7,
+        resource_pressure: None,
         indexed_assets: 1,
         timestamp: unix_now(),
     };

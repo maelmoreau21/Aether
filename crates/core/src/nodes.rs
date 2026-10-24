@@ -150,6 +150,8 @@ pub struct AdminNodeView {
 
 #[derive(Clone, Debug, Default)]
 pub struct NodeRuntimeTelemetry {
+    pub resources: Option<media_contracts::protocol::ResourcePressure>,
+    pub active_scan_ids: Vec<String>,
     pub latency_ms: Option<u32>,
     pub reported_active_scans: u32,
     pub reported_active_streams: u32,
@@ -262,6 +264,8 @@ impl NodeRuntimeRegistry {
                     entry.record.roots_json = roots_json;
                 }
             }
+            entry.telemetry.active_scan_ids = hb.active_scan_ids.iter().take(64).cloned().collect();
+            entry.telemetry.resources = hb.resource_pressure.clone();
             entry.telemetry.reported_active_scans = hb.active_scans;
             entry.telemetry.reported_active_streams = hb.active_streams;
             entry.telemetry.indexed_assets = hb.indexed_assets;
@@ -558,6 +562,10 @@ pub fn router(auth: AuthState, replay_window: Arc<ReplayWindow>) -> Router {
         .route(
             "/internal/v1/core/playback/authorize",
             post(authorize_playback),
+        )
+        .route(
+            "/internal/v1/core/tasks/{scan_id}/complete",
+            post(receive_task_complete),
         )
         .route(
             "/internal/v1/core/scans/{scan_id}/batches",
@@ -1909,6 +1917,203 @@ async fn receive_node_heartbeat(
     )
 }
 
+/// Every result must belong to the current physical scan and, for durable tasks,
+/// to an unexpired running attempt. Legacy scans also receive a unique fence.
+pub(crate) async fn scan_run_authorized(
+    store: &IdentityStore,
+    library: &str,
+    node: &str,
+    scan: &str,
+) -> bool {
+    let valid: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM active_scan_runs r JOIN libraries l ON l.id=r.library_id JOIN media_nodes n ON n.id=l.node_id WHERE r.library_id=? AND r.node_id=? AND r.scan_id=? AND l.enabled=1 AND l.node_id=r.node_id AND n.status!='revoked'")
+        .bind(library).bind(node).bind(scan).fetch_one(&store.pool).await.unwrap_or(0);
+    if valid != 1 {
+        return false;
+    }
+    if let Some((id, attempt)) = scan.split_once(':') {
+        let Ok(attempt) = attempt.parse::<i64>() else {
+            return false;
+        };
+        let live:i64=crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE id=? AND attempt=? AND node_id=? AND library_id=? AND status='running' AND lease_until>?")
+            .bind(id).bind(attempt).bind(node).bind(library).bind(unix_now()).fetch_one(&store.pool).await.unwrap_or(0);
+        return live == 1;
+    }
+    true
+}
+
+pub(crate) async fn dispatch_remote_task(
+    store: &IdentityStore,
+    request: &media_contracts::protocol::NodeTaskRequest,
+) -> Result<(), String> {
+    let node = request.node_id.as_str();
+    let rec = load_node(store, node)
+        .await
+        .map_err(|_| "Node unavailable")?
+        .ok_or("Node unavailable")?;
+    if rec.status == "revoked" {
+        return Err("Node revoked".into());
+    }
+    if let Some(sender) = ACTIVE_CHANNELS.read().await.get(node).cloned() {
+        return sender
+            .try_send(NodeCommandEnvelope {
+                command_id: format!("task-{}", request.run_id),
+                command_type: NodeCommandType::Task,
+                payload: serde_json::to_value(request).map_err(|_| "Task encoding failed")?,
+            })
+            .map_err(|_| "node_busy_playback_priority".into());
+    }
+    let base = rec.base_url.as_deref().ok_or("Node offline")?;
+    let body = serde_json::to_vec(request).map_err(|_| "Task encoding failed")?;
+    media_node::server::send_signed_http_request(
+        base,
+        "core-to-node",
+        Method::POST,
+        "/internal/v1/node/tasks",
+        &request.node_id,
+        &rec.key_id,
+        &rec.shared_secret,
+        None,
+        Bytes::from(body),
+    )
+    .await
+    .map(|_| ())
+    .map_err(|e| {
+        if e.to_string().starts_with("HTTP 429 ") {
+            "node_busy_playback_priority".into()
+        } else {
+            "Node task dispatch failed".into()
+        }
+    })
+}
+
+async fn receive_task_complete(
+    State(state): State<NodesState>,
+    AxumPath(scan_id): AxumPath<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    if body.len() > 70 * 1024 {
+        return error(StatusCode::PAYLOAD_TOO_LARGE, "task_result_too_large");
+    }
+    let pq = uri.path_and_query().map(|v| v.as_str()).unwrap_or("");
+    let (rec, nonce) =
+        match verify_signed_node_call(&state, &headers, &Method::POST, pq, &body).await {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+    let result: media_contracts::protocol::NodeTaskResult = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return error(StatusCode::BAD_REQUEST, "invalid_task_result"),
+    };
+    let _effects = crate::task_engine::EFFECT_GATE.lock().await;
+    if result.node_id.as_str() != rec.id
+        || result.run_id != scan_id
+        || !scan_run_authorized(
+            &state.auth.store,
+            result.library_id.as_str(),
+            &rec.id,
+            &scan_id,
+        )
+        .await
+    {
+        return error(StatusCode::CONFLICT, "stale_task_result");
+    }
+    let Some((id, attempt)) = scan_id.split_once(':') else {
+        return error(StatusCode::BAD_REQUEST, "invalid_task_run");
+    };
+    let Ok(attempt) = attempt.parse::<i64>() else {
+        return error(StatusCode::BAD_REQUEST, "invalid_task_run");
+    };
+    let job_category: Option<String> =
+        crate::database::query_scalar("SELECT category FROM durable_tasks WHERE id=?")
+            .bind(id)
+            .fetch_optional(&state.auth.store.pool)
+            .await
+            .ok()
+            .flatten();
+    if !matches!(
+        job_category.as_deref(),
+        Some("analyze" | "prepare" | "image")
+    ) {
+        return error(StatusCode::CONFLICT, "invalid_task_category");
+    }
+    if result.success
+        && !crate::task_engine::record_result(
+            &state.auth.store,
+            id,
+            attempt,
+            &rec.id,
+            unix_now(),
+            &result.result_json,
+        )
+        .await
+        .unwrap_or(false)
+    {
+        return error(StatusCode::CONFLICT, "task_result_denied");
+    }
+    let failure = (!result.success).then(|| result.error.chars().take(1024).collect::<String>());
+    if crate::task_execution::set_scan_result(
+        &state.auth.store,
+        result.library_id.as_str(),
+        &scan_id,
+        failure.as_deref(),
+    )
+    .await
+    .is_err()
+    {
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "task_result_failed");
+    }
+    crate::task_engine::WAKE.notify_one();
+    signed_core_response(
+        &rec,
+        &nonce,
+        StatusCode::OK,
+        &serde_json::json!({"accepted":true}),
+    )
+}
+
+pub(crate) async fn cancel_remote_scan(
+    store: &IdentityStore,
+    node: &str,
+    scan: &str,
+) -> Result<(), String> {
+    let rec = load_node(store, node)
+        .await
+        .map_err(|_| "Node unavailable")?
+        .ok_or("Node unavailable")?;
+    if rec.status == "revoked" {
+        return Err("Node revoked".into());
+    }
+    if let Some(sender) = ACTIVE_CHANNELS.read().await.get(node).cloned() {
+        sender
+            .try_send(NodeCommandEnvelope {
+                command_id: format!("cancel-{scan}"),
+                command_type: NodeCommandType::CancelScan,
+                payload: serde_json::json!({"scanId":scan}),
+            })
+            .map_err(|_| "Node channel busy")?;
+        // Sending is not an execution acknowledgement: retain capacity until expiry.
+        return Err("Cancellation sent; awaiting worker expiry".into());
+    }
+    let base = rec.base_url.as_deref().ok_or("Node offline")?;
+    media_node::server::send_signed_http_request(
+        base,
+        "core-to-node",
+        Method::POST,
+        &format!("/internal/v1/node/scans/{scan}/cancel"),
+        &NodeId::new(node),
+        &rec.key_id,
+        &rec.shared_secret,
+        None,
+        Bytes::new(),
+    )
+    .await
+    .map_err(|_| "Cancel failed")?;
+    // Node cooperatively stops at its next scan boundary; fencing already rejects results.
+    Ok(())
+}
+
 async fn receive_music_track(
     State(state): State<NodesState>,
     headers: HeaderMap,
@@ -1925,6 +2130,17 @@ async fn receive_music_track(
         Ok(value) => value,
         Err(_) => return error(StatusCode::BAD_REQUEST, "invalid_music_track"),
     };
+    let _effects = crate::task_engine::EFFECT_GATE.lock().await;
+    if !scan_run_authorized(
+        &state.auth.store,
+        &submission.library_id,
+        &rec.id,
+        &submission.scan_id,
+    )
+    .await
+    {
+        return error(StatusCode::CONFLICT, "stale_scan_attempt");
+    }
     let valid:i64=crate::database::query_scalar("SELECT COUNT(*) FROM libraries l JOIN music_scan_runs run ON run.library_id=l.id WHERE l.id=? AND l.node_id=? AND l.kind='music' AND l.enabled=1 AND l.root=? AND run.scan_id=?").bind(&submission.library_id).bind(&rec.id).bind(&submission.root_snapshot).bind(&submission.scan_id).fetch_one(&state.auth.store.pool).await.unwrap_or(0);
     let path = std::path::Path::new(&submission.track.relative_path);
     if valid != 1
@@ -1973,6 +2189,18 @@ async fn receive_scan_batch(
         Ok(s) => s,
         Err(_) => return error(StatusCode::BAD_REQUEST, "invalid_batch_payload"),
     };
+    let _effects = crate::task_engine::EFFECT_GATE.lock().await;
+    if sub.node_id.as_str() != rec.id
+        || !scan_run_authorized(
+            &state.auth.store,
+            sub.library_id.as_str(),
+            &rec.id,
+            &scan_id,
+        )
+        .await
+    {
+        return error(StatusCode::CONFLICT, "stale_scan_attempt");
+    }
     if sub.node_id.as_str() != rec.id || sub.batch.scan_id.as_str() != scan_id {
         return error(StatusCode::FORBIDDEN, "scan_identity_mismatch");
     }
@@ -2026,6 +2254,18 @@ async fn receive_scan_complete(
         Ok(c) => c,
         Err(_) => return error(StatusCode::BAD_REQUEST, "invalid_completion_payload"),
     };
+    let _effects = crate::task_engine::EFFECT_GATE.lock().await;
+    if comp.node_id.as_str() != rec.id
+        || !scan_run_authorized(
+            &state.auth.store,
+            comp.library_id.as_str(),
+            &rec.id,
+            &scan_id,
+        )
+        .await
+    {
+        return error(StatusCode::CONFLICT, "stale_scan_attempt");
+    }
     if comp.node_id.as_str() != rec.id || comp.finished.scan_id.as_str() != scan_id {
         return error(StatusCode::FORBIDDEN, "scan_identity_mismatch");
     }
@@ -2137,6 +2377,18 @@ async fn receive_scan_fail(
         Ok(f) => f,
         Err(_) => return error(StatusCode::BAD_REQUEST, "invalid_failure_payload"),
     };
+    let _effects = crate::task_engine::EFFECT_GATE.lock().await;
+    if fail.node_id.as_str() != rec.id
+        || !scan_run_authorized(
+            &state.auth.store,
+            fail.library_id.as_str(),
+            &rec.id,
+            &scan_id,
+        )
+        .await
+    {
+        return error(StatusCode::CONFLICT, "stale_scan_attempt");
+    }
     let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
     let err_json = serde_json::to_string(&vec![format!("Scan Node échoué: {}", fail.message)])
         .unwrap_or_else(|_| "[\"Scan Node échoué\"]".to_owned());
@@ -2375,14 +2627,8 @@ pub async fn dispatch_remote_scan(
             command_type: NodeCommandType::Scan,
             payload: serde_json::to_value(&start_req).unwrap_or_default(),
         };
-        let sent = {
-            let channels = ACTIVE_CHANNELS.read().await;
-            if let Some(sender) = channels.get(node_id) {
-                sender.send(cmd).await.is_ok()
-            } else {
-                false
-            }
-        };
+        let sender = ACTIVE_CHANNELS.read().await.get(node_id).cloned();
+        let sent = sender.is_some_and(|sender| sender.try_send(cmd).is_ok());
         if sent {
             let _ = crate::database::query(
                 "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",
@@ -2425,6 +2671,9 @@ pub async fn dispatch_remote_scan(
             let _ = refresh_node_in_registry(store, node_id).await;
             store.node_registry.record_success(node_id, None, now);
             Ok(())
+        }
+        Err(err) if err.to_string().starts_with("HTTP 429 ") => {
+            Err("node_busy_playback_priority".into())
         }
         Err(err) => {
             let _ = crate::database::query(
@@ -3091,6 +3340,78 @@ async fn authorize_playback(
 #[cfg(test)]
 mod transport_policy_tests {
     use super::*;
+    #[tokio::test]
+    async fn scan_results_require_current_node_library_and_live_attempt() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("fencing.sqlite"))
+            .await
+            .unwrap();
+        crate::libraries::initialize_local(&store).await.unwrap();
+        crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic-root',1)").execute(store.pool()).await.unwrap();
+        crate::database::query("INSERT INTO active_scan_runs(library_id,node_id,scan_id) VALUES('films','local','legacy-current')").execute(store.pool()).await.unwrap();
+        assert!(scan_run_authorized(&store, "films", "local", "legacy-current").await);
+        assert!(!scan_run_authorized(&store, "films", "local", "legacy-old").await);
+        assert!(!scan_run_authorized(&store, "films", "wrong-node", "legacy-current").await);
+        assert!(!scan_run_authorized(&store, "wrong-library", "local", "legacy-current").await);
+        let now = unix_now();
+        let job =
+            crate::task_engine::enqueue(&store, "films", "administrator", "fence-proof", 100, now)
+                .await
+                .unwrap();
+        let claimed = crate::task_engine::claim(&store, "local", now, 30, 1)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(job.id, claimed.id);
+        let scan = format!("{}:{}", job.id, claimed.attempt);
+        crate::database::query("UPDATE active_scan_runs SET scan_id=? WHERE library_id='films'")
+            .bind(&scan)
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert!(scan_run_authorized(&store, "films", "local", &scan).await);
+        assert!(!scan_run_authorized(&store, "films", "local", &format!("{}:0", job.id)).await);
+        crate::database::query("UPDATE durable_tasks SET lease_until=? WHERE id=?")
+            .bind(now)
+            .bind(&job.id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert!(!scan_run_authorized(&store, "films", "local", &scan).await);
+        crate::database::query("UPDATE durable_tasks SET lease_until=? WHERE id=?")
+            .bind(now + 30)
+            .bind(&job.id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert!(
+            crate::task_engine::control(&store, &job.id, "cancel", now)
+                .await
+                .unwrap()
+        );
+        assert!(!scan_run_authorized(&store, "films", "local", &scan).await);
+        crate::database::query(
+            "UPDATE active_scan_runs SET scan_id='legacy-current' WHERE library_id='films'",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        crate::database::query("UPDATE libraries SET enabled=0 WHERE id='films'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert!(!scan_run_authorized(&store, "films", "local", "legacy-current").await);
+        crate::database::query("UPDATE libraries SET enabled=1 WHERE id='films'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        crate::database::query("UPDATE media_nodes SET status='revoked' WHERE id='local'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert!(!scan_run_authorized(&store, "films", "local", "legacy-current").await);
+        store.close().await;
+    }
     #[test]
     fn relay_pending_is_bounded_and_reclaims_cancelled_receivers() {
         let mut pending = HashMap::new();

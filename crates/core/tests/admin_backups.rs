@@ -408,3 +408,44 @@ async fn backups_authorization_csrf_consistency_download_and_unknown_ids() {
     );
     store.close().await;
 }
+
+#[tokio::test]
+async fn backups_list_returns_unavailable_when_directory_refused() {
+    let temp = tempfile::tempdir().unwrap();
+    let media = temp.path().join("media");
+    std::fs::create_dir(&media).unwrap();
+    let store = IdentityStore::open(&temp.path().join("live.sqlite3"))
+        .await
+        .unwrap();
+    database::query("INSERT INTO users(id,role) VALUES('admin','administrator')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let token = "c".repeat(64);
+    database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?, 'admin', unixepoch(), unixepoch(), unixepoch()+3600)")
+        .bind(format!("{:x}", Sha256::digest(token.as_bytes())))
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let cookie = format!("media_session={token}");
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    // Directory placed inside media root is refused by policy
+    let app = admin_backups::router_with_configuration(
+        auth,
+        media.clone(),
+        Some(media.join("forbidden-backups")),
+        None,
+        std::collections::BTreeMap::new(),
+    )
+    .await
+    .unwrap();
+    let list = request(&app, "GET", "/api/v1/admin/backups", Some(&cookie), None).await;
+    assert_eq!(list.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(list.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(body["available"], false);
+    assert!(body["reason"].as_str().is_some());
+    store.close().await;
+}

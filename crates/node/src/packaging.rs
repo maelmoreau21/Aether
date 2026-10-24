@@ -80,6 +80,21 @@ struct Cache {
     bytes: u64,
 }
 impl Cache {
+    fn evict_idle(&mut self) -> bool {
+        let victim = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| Arc::strong_count(&entry.directory) == 1)
+            .min_by_key(|(_, entry)| (!entry.chunk, entry.used))
+            .map(|(key, _)| key.clone());
+        let Some(victim) = victim else {
+            return false;
+        };
+        if let Some(entry) = self.entries.remove(&victim) {
+            self.bytes -= entry.size;
+        }
+        true
+    }
     fn hit(&mut self, key: &str) -> Option<Arc<crate::cache_dirs::CacheDirectory>> {
         let entry = self.entries.get_mut(key)?;
         entry.used = Instant::now();
@@ -303,17 +318,8 @@ impl Preparations {
             Err(_) => return Err(busy()),
         };
         while cache.entries.len() >= 64 || cache.bytes >= limits.cache {
-            let victim = cache
-                .entries
-                .iter()
-                .filter(|(_, entry)| entry.chunk && Arc::strong_count(&entry.directory) == 1)
-                .min_by_key(|(_, entry)| entry.used)
-                .map(|(key, _)| key.clone());
-            let Some(victim) = victim else {
+            if !cache.evict_idle() {
                 break;
-            };
-            if let Some(entry) = cache.entries.remove(&victim) {
-                cache.bytes -= entry.size;
             }
         }
         if cache.entries.len() >= 64 || cache.bytes >= limits.cache {
@@ -528,6 +534,60 @@ impl Preparations {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn idle_full_preparations_evict_but_playing_handles_remain_pinned() {
+        let directory = Arc::new(crate::cache_dirs::CacheDirectory::new().unwrap());
+        std::fs::write(directory.path().join("content"), b"prepared").unwrap();
+        let playing = OpenedFile::open_in_root(directory.path(), Path::new("content"))
+            .await
+            .unwrap()
+            .with_cache_lease(directory.clone());
+        let mut cache = Cache::default();
+        cache.entries.insert(
+            "full".into(),
+            Entry {
+                directory: directory.clone(),
+                size: 8,
+                used: Instant::now(),
+                chunk: false,
+            },
+        );
+        cache.bytes = 8;
+        drop(directory);
+        assert!(
+            !cache.evict_idle(),
+            "an open playback handle must pin the full preparation"
+        );
+        drop(playing);
+        assert!(
+            cache.evict_idle(),
+            "idle full preparations must not fill the cache forever"
+        );
+        assert_eq!(cache.bytes, 0);
+        assert!(cache.entries.is_empty());
+    }
+
+    #[test]
+    fn idle_chunks_evict_before_full_preparations() {
+        let mut cache = Cache::default();
+        for (name, chunk) in [("full", false), ("chunk", true)] {
+            let directory = Arc::new(crate::cache_dirs::CacheDirectory::new().unwrap());
+            cache.entries.insert(
+                name.into(),
+                Entry {
+                    directory,
+                    size: 1,
+                    used: Instant::now(),
+                    chunk,
+                },
+            );
+            cache.bytes += 1;
+        }
+        assert!(cache.evict_idle());
+        assert!(cache.entries.contains_key("full"));
+        assert!(!cache.entries.contains_key("chunk"));
+    }
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn identical_cold_audio_windows_coalesce_without_consuming_worker_waiters() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))

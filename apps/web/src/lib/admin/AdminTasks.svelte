@@ -1,6 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
+  import DistributedTasks from './DistributedTasks.svelte';
   import { adminRequest } from './request';
   import type { AdminNode, Library, Scan } from './types';
   import { scanLabels } from './types';
@@ -9,7 +10,7 @@
     onscan: (library: Library) => void; selectedId?: string | null; active?: boolean;
   } = $props();
   type Schedule = { libraryId: string; intervalMinutes: number; enabled: number; nextRunAt: number; lastRunAt: number | null; lastOutcome: string };
-  type Backup = { available: boolean; running: boolean; schedule: { enabled: boolean; intervalMinutes: number; nextDueAt: number; lastStartedAt: number | null; lastCompletedAt: number | null; lastOutcome: string } };
+  type Backup = { available: boolean; reason?: string | null; running: boolean; schedule: { enabled: boolean; intervalMinutes: number; nextDueAt: number; lastStartedAt: number | null; lastCompletedAt: number | null; lastOutcome: string } };
   type Task = { id: string; name: string; description: string; library?: Library; category: string; running: boolean; reason: string | null; plan: { enabled: boolean; interval: number; next: number; last: number | null; outcome: string } | null };
   let schedules = $state<Record<string, Schedule>>({});
   let backup = $state<Backup | null>(null);
@@ -36,7 +37,7 @@
     { id: 'backup', name: 'Sauvegarder le serveur', category: 'Maintenance',
       description: 'Crée une archive chiffrée de la base et de la configuration du serveur. Les fichiers médias ne sont pas inclus.',
       running: creatingBackup || backup?.running === true,
-      reason: backupError ? 'État des sauvegardes indisponible.' : !backup ? 'Chargement des sauvegardes…' : !backup.available ? 'Configurez la clé de récupération dans les paramètres de sauvegarde.' : null,
+      reason: backupError ? 'État des sauvegardes indisponible.' : !backup ? 'Chargement des sauvegardes…' : !backup.available ? (backup.reason ?? 'Sauvegardes indisponibles.') : null,
       plan: backup ? { enabled: backup.schedule.enabled, interval: backup.schedule.intervalMinutes, next: backup.schedule.nextDueAt, last: backup.schedule.lastStartedAt, outcome: backup.schedule.lastOutcome } : null }
   ]);
   const selected = $derived(tasks.find(task => task.id === selectedId));
@@ -133,6 +134,7 @@
         <button class="run" aria-label={task.library ? `Scanner ${task.library.name}` : 'Créer une sauvegarde'} title="Exécuter maintenant" disabled={task.running || !!task.reason || !loaded} onclick={() => void run(task)}><Icon name={task.running ? 'refresh' : 'play'} size={22} /></button>
       </div>{:else}<p class="no-trigger">Ajoutez une bibliothèque pour planifier son indexation.</p>{/each}
     </div></div>{/each}
+    <DistributedTasks {active} {libraries} {nodes} />
   {/if}
   {#if scanError}<p class="feedback error" role="alert">{scanError}</p>{/if}
   {#if backupError}<p class="feedback error" role="alert">{backupError}</p>{/if}

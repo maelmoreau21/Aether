@@ -1748,7 +1748,9 @@ fn apply_cors_headers(headers: &mut HeaderMap) {
     );
     headers.insert(
         header::ACCESS_CONTROL_EXPOSE_HEADERS,
-        HeaderValue::from_static("Accept-Ranges, Content-Length, Content-Range, Content-Type"),
+        HeaderValue::from_static(
+            "Accept-Ranges, Content-Length, Content-Range, Content-Type, x-media-preparation-error",
+        ),
     );
     headers.insert(
         header::HeaderName::from_static("cross-origin-resource-policy"),

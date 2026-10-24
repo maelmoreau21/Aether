@@ -3095,20 +3095,42 @@ pub async fn prepared(
     if remote_id != "local" {
         return match crate::nodes::load_node(store, &remote_id).await {
             Ok(Some(node)) => {
-                let response = crate::nodes::relay_from_remote_node(
+                let mut response = crate::nodes::relay_from_remote_node(
                     store,
                     &node,
                     &format!("/internal/v1/node/assets/{asset_id}/prepared/{component}"),
                     request,
                 )
                 .await;
+                if !response.status().is_success()
+                    && !response.headers().contains_key("x-media-preparation-error")
+                {
+                    let code = if response.status() == StatusCode::SERVICE_UNAVAILABLE {
+                        "node_unavailable"
+                    } else if response.status() == StatusCode::GATEWAY_TIMEOUT {
+                        "preparation_timeout"
+                    } else {
+                        "preparation_failed"
+                    };
+                    response.headers_mut().insert(
+                        "x-media-preparation-error",
+                        axum::http::HeaderValue::from_static(code),
+                    );
+                }
                 eprintln!(
                     "{}",
                     json!({"event":"prepared_remote_response","asset":asset_id,"node":remote_id,"component":component,"status":response.status().as_u16(),"elapsed_ms":request_started.elapsed().as_millis()})
                 );
                 response
             }
-            _ => crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable"),
+            _ => {
+                let mut response = crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable");
+                response.headers_mut().insert(
+                    "x-media-preparation-error",
+                    axum::http::HeaderValue::from_static("node_unavailable"),
+                );
+                response
+            }
         };
     }
     if let Component::Audio(index) | Component::AudioChunk(index, _) = selected
@@ -3133,10 +3155,15 @@ pub async fn prepared(
                 opened
             }
             _ => {
-                return crate::error(
+                let mut response = crate::error(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "asset_changed_rescan_required",
                 );
+                response.headers_mut().insert(
+                    "x-media-preparation-error",
+                    axum::http::HeaderValue::from_static("asset_changed_rescan_required"),
+                );
+                return response;
             }
         };
         let streamed = if let Component::OpusChunk(id, chunk) = selected {

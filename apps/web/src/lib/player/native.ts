@@ -78,15 +78,28 @@ export class NativePlayer implements Player {
     try {
       const response = await fetch(url, { method: 'HEAD', signal: controller.signal });
       if (!response.ok) {
+        let detail = response.headers?.get('x-media-preparation-error');
+        if (!detail) {
+          try {
+            const body = await response.clone().json();
+            if (body && typeof body.error === 'string') detail = body.error;
+          } catch {}
+        }
         const messages: Record<string, string> = {
+          node_unavailable: 'Media Node indisponible ou déconnecté',
+          node_revoked: 'Media Node révoqué',
+          asset_changed_rescan_required: 'Fichier source introuvable ou modifié sur disque (réanalyse requise)',
+          source_changed_rescan_required: 'Fichier source modifié sur disque (réanalyse requise)',
           preparation_busy: 'Le Media Node prépare déjà une autre piste. Réessayez une fois cette préparation terminée.',
           preparation_cache_limit_reached: 'La préparation dépasse la capacité du cache du Media Node. Augmentez sa limite ou libérez son cache.',
           preparation_timeout: 'La préparation a dépassé le délai configuré sur le Media Node.',
           preparation_tool_or_source_unavailable: 'FFmpeg ou la source est introuvable sur le Media Node.',
           unsupported_preparation: 'Le Media Node ne peut pas préparer ce format sans réencodage.',
-          preparation_configuration_invalid: 'La configuration de préparation du Media Node est invalide.'
+          preparation_configuration_invalid: 'La configuration de préparation du Media Node est invalide.',
+          video_stream_capacity_reached: 'Capacité de flux vidéo simultanés atteinte'
         };
-        throw new Error(`Préparation impossible : ${messages[response.headers?.get('x-media-preparation-error') ?? ''] ?? 'source indisponible, format incompatible ou cache occupé/plein. Réessayez explicitement.'}`);
+        const hint = messages[detail ?? ''] ?? detail ?? 'source indisponible, format incompatible ou cache occupé/plein. Réessayez explicitement.';
+        throw new Error(`Préparation impossible : ${hint}`);
       }
     } finally { clearTimeout(timeout); this.preparations.delete(controller); }
     if (this.destroyed) throw new Error('Lecteur fermé.');
@@ -285,7 +298,17 @@ export class NativePlayer implements Player {
           });
           this.progressiveVideo=progressive;
           try {await Promise.race([Promise.all([progressive.load(position),loadCandidate(progressive.url)]),progressive.failure]);progressive.activate();}
-          catch(error){this.cancel?.();progressive.destroy();if(this.progressiveVideo===progressive)this.progressiveVideo=undefined;throw error;}
+          catch(error){
+            this.cancel?.();progressive.destroy();if(this.progressiveVideo===progressive)this.progressiveVideo=undefined;
+            if(source.preparedVideoUrl && !this.destroyed) {
+              console.warn('[media playback] Progressive video failed, falling back to prepared remux:', error);
+              this.status('Lecture progressive indisponible. Préparation sans réencodage…');
+              await this.prepareUrl(source.preparedVideoUrl);
+              await loadCandidate(source.preparedVideoUrl);
+            } else {
+              throw error;
+            }
+          }
         } else {
           if(source.videoStreamUrl)throw new Error(`La lecture vidéo progressive n’est pas disponible pour ce navigateur ou ce descripteur (${source.videoMime??'codec MSE absent'}). Aucun remux intégral automatique.`);
           if(!source.preparedVideoUrl)throw originalError;

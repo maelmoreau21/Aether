@@ -87,7 +87,29 @@ export class ProgressiveVideo {
       });
       if(!current())return;
       const response=await fetch(`${this.prefix}${Math.min(86399999,Math.max(0,Math.floor(position*1000)))}`,{signal});
-      if(!response.ok)throw new Error(`Préparation vidéo progressive : HTTP ${response.status} (${response.headers.get('x-media-preparation-error')??'Media Node indisponible'}).`);
+      if(!response.ok) {
+        let detail = response.headers.get('x-media-preparation-error');
+        if (!detail) {
+          try {
+            const body = await response.clone().json();
+            if (body && typeof body.error === 'string') detail = body.error;
+          } catch {}
+        }
+        const messages: Record<string, string> = {
+          node_unavailable: 'Media Node indisponible ou déconnecté',
+          node_revoked: 'Media Node révoqué',
+          asset_changed_rescan_required: 'Fichier source introuvable ou modifié sur disque (réanalyse requise)',
+          source_changed_rescan_required: 'Fichier source modifié sur disque (réanalyse requise)',
+          preparation_tool_or_source_unavailable: 'FFmpeg ou fichier source introuvable sur le Media Node',
+          preparation_busy: 'Media Node occupé',
+          preparation_cache_limit_reached: 'Limite du cache de préparation atteinte',
+          preparation_timeout: 'Délai de préparation dépassé',
+          unsupported_preparation: 'Format non supporté sans réencodage',
+          video_stream_capacity_reached: 'Capacité de flux vidéo simultanés atteinte'
+        };
+        const hint = messages[detail ?? ''] ?? detail ?? 'Media Node indisponible';
+        throw new Error(`Préparation vidéo progressive : HTTP ${response.status} (${hint}).`);
+      }
       const reader=response.body?.getReader();if(!reader)throw new Error('Flux vidéo progressif vide.');
       let offset: number|undefined,scale=0,prefix=new Uint8Array(),appended=false,received=0,complete=false,raps:{time:number;start:number}[]=[];
       const index=new Mp4Fragments((type,bytes,start)=>{

@@ -1,5 +1,23 @@
 # MEMORY.md — État et décisions Aether
 
+## 24 octobre 2026 — Diagnostic et résilience de l'erreur 503 sur la préparation vidéo progressive
+
+- **Cause racine de l'erreur "Préparation vidéo progressive : HTTP 503 (Media Node indisponible)"** :
+  - Sur navigateur ne décodant pas le MKV en direct (ex. Chromium/Chrome/Edge), le lecteur tente le flux progressif MSE (`ProgressiveVideo`).
+  - Si Core ou Node renvoyait HTTP 503 (`node_unavailable`, `asset_changed_rescan_required`, ou indisponibilité FFmpeg), l'en-tête `x-media-preparation-error` n'était pas toujours inclus ou n'était pas exposé par CORS (`ACCESS_CONTROL_EXPOSE_HEADERS`), et le client web masquait le code JSON `{ error: ... }` en affichant le texte par défaut "Media Node indisponible".
+  - En outre, en cas d'échec du flux progressif MSE, le lecteur abandonnait immédiatement sans tenter le repli vers la préparation intégrale `preparedVideoUrl` (`/prepared/video`).
+- **Correctifs apportés** :
+  - `crates/core/src/inventory.rs` : injection systématique de `x-media-preparation-error` sur les erreurs `node_unavailable`, `asset_changed_rescan_required` et sur les relais distants défaillants.
+  - `crates/node/src/server.rs` : ajout de `x-media-preparation-error` dans `ACCESS_CONTROL_EXPOSE_HEADERS`.
+  - `apps/web/src/lib/player/progressive-video.ts` et `native.ts` : extraction de l'erreur depuis l'en-tête OU le corps JSON avec messages explicites en français (ex. fichier source modifié, FFmpeg manquant, nœud déconnecté).
+  - `apps/web/src/lib/player/native.ts` : basculement automatique sur `source.preparedVideoUrl` si le flux progressif MSE échoue au lieu d'interrompre brutalement la lecture.
+- **Vérifications réelles** :
+  - `npm --prefix apps/web test` : 25 fichiers de tests passés, 150 tests réussis.
+  - `npm --prefix apps/web run build` : compilation Vite/SvelteKit réussie.
+  - `cargo check --all-targets` : 0 avertissement bloquant.
+  - `cargo test -p media-node --lib -- -q` : 64 passed, 0 failed, 3 ignored.
+  - `cargo test -p media-poc --lib -- -q` : 55 passed, 0 failed, 1 ignored.
+
 ## 24 octobre 2026 — Correction du test CI browser_scanner pour MP4 native Opus et repli progressif
 
 - Route d'interception audio : l'introduction de l'extraction native Opus ISOBMFF

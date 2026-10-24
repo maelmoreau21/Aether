@@ -121,8 +121,7 @@ fn memory_field(text: &str, name: &str) -> Option<u64> {
 }
 #[cfg(target_os = "linux")]
 fn read_os(scratch: &Path) -> Raw {
-    let mut raw = Raw::default();
-    raw.cpu = bounded("/proc/stat").and_then(|text| {
+    let cpu = bounded("/proc/stat").and_then(|text| {
         let mut parts = text.lines().next()?.split_whitespace();
         if parts.next()? != "cpu" {
             return None;
@@ -142,20 +141,22 @@ fn read_os(scratch: &Path) -> Raw {
             parts[3].checked_add(parts.get(4).copied().unwrap_or(0))?,
         ))
     });
+    let mut total = None;
+    let mut available = None;
     if let Some(mem) = bounded("/proc/meminfo") {
-        raw.total = memory_field(&mem, "MemTotal:");
-        raw.available = memory_field(&mem, "MemAvailable:");
+        total = memory_field(&mem, "MemTotal:");
+        available = memory_field(&mem, "MemAvailable:");
     }
     // Respect unified cgroup RAM limits when the common container mount exposes them.
     if let (Some(max), Some(current)) = (
         bounded("/sys/fs/cgroup/memory.max").and_then(|s| s.trim().parse::<u64>().ok()),
         bounded("/sys/fs/cgroup/memory.current").and_then(|s| s.trim().parse::<u64>().ok()),
     ) {
-        raw.total = Some(raw.total.map_or(max, |total| total.min(max)));
-        let available = max.saturating_sub(current);
-        raw.available = Some(raw.available.map_or(available, |host| host.min(available)));
+        total = Some(total.map_or(max, |tot| tot.min(max)));
+        let avail = max.saturating_sub(current);
+        available = Some(available.map_or(avail, |host| host.min(avail)));
     }
-    raw.network = bounded("/proc/net/dev").and_then(|text| {
+    let network = bounded("/proc/net/dev").and_then(|text| {
         let mut total = 0u64;
         let mut seen = false;
         for line in text.lines().skip(2) {
@@ -171,7 +172,7 @@ fn read_os(scratch: &Path) -> Raw {
         }
         seen.then_some(total)
     });
-    raw.io = bounded("/proc/pressure/io").and_then(|text| {
+    let io = bounded("/proc/pressure/io").and_then(|text| {
         let line = text.lines().find(|line| line.starts_with("some "))?;
         let avg = line
             .split_whitespace()
@@ -181,10 +182,17 @@ fn read_os(scratch: &Path) -> Raw {
         avg.is_finite()
             .then_some(avg.clamp(0.0, 100.0).round() as u8)
     });
-    raw.disk = rustix::fs::statvfs(scratch)
+    let disk = rustix::fs::statvfs(scratch)
         .ok()
         .and_then(|stat| stat.f_bavail.checked_mul(stat.f_frsize));
-    raw
+    Raw {
+        cpu,
+        network,
+        available,
+        total,
+        disk,
+        io,
+    }
 }
 
 #[cfg(windows)]

@@ -241,15 +241,10 @@
           void createList();
         }}
       >
-        <label class="form-field">
-          <span class="field-label">Nouvelle liste</span>
-          <div class="new-list-input-group">
-            <input required bind:value={listName} maxlength="100" placeholder="Nom de la liste" />
-            <button type="submit" class="btn primary-btn" disabled={busy || !listName.trim()}>
-              Créer et ajouter
-            </button>
-          </div>
-        </label>
+        <label>Nouvelle liste<input required bind:value={listName} maxlength="100" placeholder="Nom de la liste" /></label>
+        <button type="submit" class="btn primary-btn" disabled={busy || !listName.trim()}>
+          Créer et ajouter
+        </button>
       </form>
     </div>
   </details>
@@ -746,6 +741,21 @@
     border-top: 1px solid var(--color-line);
     padding-top: 10px;
     margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .new-list-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--color-muted);
+  }
+
+  .new-list-form label input {
+    width: 100%;
   }
 
   .tool-btn {
@@ -1203,15 +1213,7 @@
     background: var(--color-surface-hover);
   }
 
-  .new-list-input-group {
-    display: flex;
-    gap: 8px;
-    margin-top: 4px;
-  }
 
-  .new-list-input-group input {
-    flex: 1;
-  }
 
   .empty-list-notice {
     color: var(--color-muted);

@@ -1,0 +1,9 @@
+{
+  "scope": "Frozen final Native cold64 admission and blocking guard; 11 tests passed, 1 CPU microbenchmark ignored",
+  "sourceSha256": {
+    "Cargo.toml": "fad0a5ec8962bd7692a68b0125c46548ab4e6ef977013edde5a66dc91914803c",
+    "Cargo.lock": "d97e29446b94b9409fce4527f33c5d5e12b31bf82d3c1dcf1c0084d0eabda68c",
+    "crates/node/src/mp4_audio.rs": "304e27e01a3dabe5b61d014a1bf335a1db0e7a423f58a83cf0f2a76c715b8cfe",
+    "crates/node/src/video_stream.rs": "2ef47deef580c7641be0e231537c6ea28be91d071b1bc099332181b0cb371749"
+  }
+}

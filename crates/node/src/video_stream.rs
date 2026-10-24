@@ -389,4 +389,60 @@ mod tests {
             .await;
         assert_eq!(response.unwrap_err().kind(), io::ErrorKind::InvalidInput);
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn saturated_video_admission_stays_bounded_for_four_eight_and_sixteen_requests() {
+        for requests in [4, 8, 16] {
+            let streams = Arc::new(VideoStreams::default());
+            let held = streams.slots.clone().acquire_many_owned(4).await.unwrap();
+            let mut tasks = tokio::task::JoinSet::new();
+            for _ in 0..requests {
+                let streams = streams.clone();
+                tasks.spawn(async move {
+                    let error = streams
+                        .serve(opened("mp4").await, 0, 0, &Request::new(()))
+                        .await
+                        .unwrap_err();
+                    assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+                });
+            }
+            while let Some(result) = tasks.join_next().await {
+                result.unwrap();
+            }
+            assert_eq!(streams.slots.available_permits(), 0);
+            drop(held);
+            assert_eq!(streams.slots.available_permits(), 4);
+        }
+    }
+
+    #[tokio::test]
+    async fn rejected_media_releases_the_child_slot_and_a_later_valid_stream_succeeds() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("broken.mp4"), b"not a media container").unwrap();
+        let streams = VideoStreams::default();
+        let source = OpenedFile::open_in_root(temp.path(), Path::new("broken.mp4"))
+            .await
+            .unwrap();
+        let error = streams
+            .serve(source, 0, 0, &Request::new(()))
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert_eq!(streams.slots.available_permits(), 4);
+        let response = streams
+            .serve(opened("mp4").await, 0, 0, &Request::new(()))
+            .await
+            .unwrap();
+        assert!(
+            response
+                .into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .len()
+                > 0
+        );
+        assert_eq!(streams.slots.available_permits(), 4);
+    }
 }

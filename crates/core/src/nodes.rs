@@ -60,6 +60,22 @@ pub static ACTIVE_CHANNELS: LazyLock<RwLock<HashMap<String, mpsc::Sender<NodeCom
 pub static PENDING_STREAMS: LazyLock<Mutex<HashMap<String, oneshot::Sender<RelayStreamResponse>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+fn register_pending_stream(
+    pending: &mut HashMap<String, oneshot::Sender<RelayStreamResponse>>,
+    id: String,
+    sender: oneshot::Sender<RelayStreamResponse>,
+) -> bool {
+    // A disconnected browser can drop the receiver before Node sends headers.
+    // Reap those entries before admitting another request, keeping abandoned
+    // metadata requests bounded even when the Node is slow or disconnected.
+    pending.retain(|_, sender| !sender.is_closed());
+    if pending.len() >= 64 {
+        return false;
+    }
+    pending.insert(id, sender);
+    true
+}
+
 #[derive(Clone)]
 pub struct NodesState {
     pub auth: AuthState,
@@ -2010,7 +2026,9 @@ pub async fn relay_from_remote_node(
             .map(str::to_owned);
         let stream_id = format!("str-{}", uuid::Uuid::new_v4().simple());
         let (tx, rx) = tokio::sync::oneshot::channel::<RelayStreamResponse>();
-        PENDING_STREAMS.lock().await.insert(stream_id.clone(), tx);
+        if !register_pending_stream(&mut *PENDING_STREAMS.lock().await, stream_id.clone(), tx) {
+            return error(StatusCode::SERVICE_UNAVAILABLE, "node_relay_busy");
+        }
 
         let is_outbound = rec.base_url.is_none();
         let mut sent = false;
@@ -2525,6 +2543,35 @@ async fn authorize_playback(
 #[cfg(test)]
 mod transport_policy_tests {
     use super::*;
+    #[test]
+    fn relay_pending_is_bounded_and_reclaims_cancelled_receivers() {
+        let mut pending = HashMap::new();
+        let mut receivers = Vec::new();
+        for index in 0..64 {
+            let (sender, receiver) = oneshot::channel();
+            receivers.push(receiver);
+            assert!(register_pending_stream(
+                &mut pending,
+                index.to_string(),
+                sender
+            ));
+        }
+        let (sender, _receiver) = oneshot::channel();
+        assert!(!register_pending_stream(
+            &mut pending,
+            "overflow".into(),
+            sender
+        ));
+        assert_eq!(pending.len(), 64);
+        receivers.clear();
+        let (sender, _receiver) = oneshot::channel();
+        assert!(register_pending_stream(
+            &mut pending,
+            "after-cancel".into(),
+            sender
+        ));
+        assert_eq!(pending.len(), 1);
+    }
     #[test]
     fn playback_bearers_require_https_except_local_loopback() {
         for raw in [

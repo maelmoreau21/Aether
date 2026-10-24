@@ -91,7 +91,11 @@ export class ExternalAudio {
     if (target < 0 || (Number.isFinite(this.audio.duration) && target >= this.audio.duration)) {
       this.audio.pause(); return false;
     }
-    if (!this.audio.seeking && Math.abs(this.audio.currentTime - target) > (force ? .001 : .08)) this.audio.currentTime = target;
+    // A user seek supersedes an unfinished audio seek. The previous target's
+    // window can already have been cancelled, so waiting for its seeked event
+    // would deadlock both clocks. Periodic drift correction still avoids seeks
+    // while one is pending.
+    if ((force || !this.audio.seeking) && Math.abs(this.audio.currentTime - target) > (force ? .001 : .08)) this.audio.currentTime = target;
     return true;
   }
   private resync = () => {

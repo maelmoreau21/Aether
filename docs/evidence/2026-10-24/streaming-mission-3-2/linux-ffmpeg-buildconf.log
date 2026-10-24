@@ -1,0 +1,20 @@
+
+  configuration:
+    --prefix=/probe
+    --disable-autodetect
+    --disable-network
+    --disable-programs
+    --enable-ffmpeg
+    --enable-ffprobe
+    --disable-doc
+    --disable-debug
+    --enable-small
+    --disable-avdevice
+    --disable-devices
+    --disable-hwaccels
+    --disable-swscale
+    --disable-encoders
+    --enable-encoder=webvtt
+    --disable-filters
+
+Exiting with exit code 0

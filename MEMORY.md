@@ -1,5 +1,25 @@
 # MEMORY.md — État et décisions Aether
 
+## 24 octobre 2026 — Mission streaming 3.2
+
+- Course audio reproduite dans Chrome : seek 900 s en attente puis seek 2 s
+  ignoré. Un seek explicite remplace désormais le précédent : 4/4 échecs avant,
+  12/12 essais après avec les mêmes paquets Rust et le même retard réseau.
+  Web : 151 tests, check et build réussis ; lint lecteur ciblé réussi.
+- Native Opus : offsets calculés par curseur de chunk, historique de pré-roll
+  variable conservé ; garde d'indexation maintenue dans le travail bloquant
+  malgré annulation HTTP. Admission froide limitée à 64, attente 10 s ; hits
+  chauds exemptés. Relais Core limité à 64 en-têtes en attente et purge des
+  receivers annulés. Les processus vidéo progressifs restent plafonnés à quatre.
+- Linux Docker : natif final 11 tests réussis (dont 4/8/16 requêtes, annulation,
+  limite 64 et Range), autres modules vidéo/confinement/stream 15 réussis.
+  Trois générations de fixtures échouent avec le FFmpeg sans encodeurs du
+  conteneur ; conserver cette limite. Ce ne sont pas 16 lectures navigateur.
+- Instrumentation d'allocations séparée dans l'exemple streaming_allocations ;
+  harnais distingue PCM brut/aligné, dérive initiale et échecs sans censure.
+  Aucune promesse p95/p99 Release ou NAS sans campagne réellement terminée.
+  État, commandes et preuves : docs/STREAMING_MISSION_3_2.md.
+
 ## 24 octobre 2026 — Menu paramètres du lecteur, masquage des détails de nœuds et données de lecture (style Jellyfin)
 
 - **Demande utilisateur** :

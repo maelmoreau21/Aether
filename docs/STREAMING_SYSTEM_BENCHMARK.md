@@ -192,3 +192,11 @@ réussis. Clippy strict a réussi avant les derniers petits changements de
 budget de relais/tests ; format et diff vérifiés après. Exécutables debug Windows,
 cache OS non purgé ; aucun NAS, build release ou Node physique distant validé.
 Aucun déploiement ni push effectué. Les processus Rust/FFmpeg de test sont arrêtés.
+
+## Suite Mission 3.2
+
+Le protocole Release4/8/16, l'oracle PCM brut distinct du PCM aligné et les
+scénarios de panne sont décrits dans [STREAMING_MISSION_3_2.md](STREAMING_MISSION_3_2.md).
+Ces nouvelles vérifications ne remplacent ni les échecs ni les limites des lots
+historiques ci-dessus. Les exports audio exacts destinés au POC de concurrence
+sont des entrées de diagnostic, pas des mesures froides.

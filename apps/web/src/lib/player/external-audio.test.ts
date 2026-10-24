@@ -17,6 +17,12 @@ function setup() {
   return { video, audio, error, bridge };
 }
 describe('independent audio timeline',()=>{
+  it('replaces an unfinished audio seek when the user seeks back to a retained window',async()=>{
+    const {video,audio,bridge}=setup();video.duration=3500;audio.duration=3500;await bridge.load('/audio');
+    video.currentTime=900;video.dispatchEvent(new Event('seeked'));expect(audio.currentTime).toBe(900);
+    audio.seeking=true;video.currentTime=2;video.dispatchEvent(new Event('seeked'));
+    expect(audio.currentTime).toBe(2);bridge.destroy();
+  });
   it('aligns a preloaded audio window to explicit saved progress before video metadata is available',async()=>{
     const {video,audio,bridge}=setup();video.duration=NaN;video.currentTime=0;
     await bridge.load('/audio',false,'audio/mp4; codecs="opus"',6);

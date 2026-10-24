@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import { asset } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
   import PlayerControls, { type Menu } from './PlayerControls.svelte';
@@ -48,7 +49,7 @@
   let opener: HTMLElement | null = null;
   let scrollPosition = 0;
   let previousVolume = 1;
-  let triedMediaIds = new Set<string>();
+  let triedMediaIds = new SvelteSet<string>();
   let failoverInProgress = false;
   function sync() {
     if (!engine || !opened) return;

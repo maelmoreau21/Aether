@@ -34,7 +34,6 @@
   let backdropLoaded = $state(false);
   const episodePageSize = 24;
   let episodeOffset = $state(0);
-  let seasonDropdownOpen = $state(false);
   const isMeaningless = (s?: string | null) => !s || s.trim() === '' || s.trim() === 'Média local indexé' || s.trim() === 'Média local';
   const displaySynopsis = $derived(!isMeaningless(work.plot) ? work.plot : !isMeaningless(work.description) ? work.description : 'Synopsis non renseigné.');
   const showOutline = $derived(Boolean(work.outline && !isMeaningless(work.outline) && work.outline !== work.description && work.outline !== work.plot));

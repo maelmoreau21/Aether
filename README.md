@@ -129,7 +129,7 @@ Aether sépare trois responsabilités, même dans le conteneur autonome :
                   ▼
           ┌───────────────┐
           │  Aether Core  │
-          │ API · Auth    │
+          │  API · Auth   │
           │ Catalogue     │
           └──────┬────────┘
                  │
@@ -197,7 +197,6 @@ Consultez la [politique de sécurité](SECURITY.md) et les [notes techniques de 
 ## Développement
 
 Prérequis de développement : Rust `1.99+` (édition 2024), Node.js compatible avec le frontend, npm, `ffprobe` et les outils nécessaires aux fixtures multimédias des tests.
-
 
 ```bash
 # Qualité du code Rust

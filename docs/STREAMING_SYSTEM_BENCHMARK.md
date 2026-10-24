@@ -162,3 +162,33 @@ avant qu'une notification ultérieure les masque. Aucun rejet n'est supprimé ou
 relancé silencieusement. `--http-samples 100` ajoute des requêtes Range autorisées
 sur les URLs vraiment utilisées par le lecteur, avec p99 HTTP distinct du clic,
 du décodage et du premier PCM.
+
+## Clôture du jalon — 24 octobre 2026
+
+Le candidat est compilé et figé dans
+`target/streaming-system-artifacts/candidate-native-v1`. La matrice complète
+est conservée dans `target/streaming-system-candidate-full/report.json`.
+Le smoke natif utilise réellement `opus-2-chunk-0`, sans FFmpeg ni fichier
+de préparation créé. Les médias originaux ne sont pas modifiés.
+
+Sur cinq ouvertures chaudes, une session : première image médiane 291,6 ms,
+p95 383,6 ms ; PCM aligné médian 322,4 ms, p95 391,8 ms. Aucun gain de démarrage
+n'est démontré face à la référence. Les vingt seeks chauds ont un p95 image
+94,1 ms et PCM aligné 100,5 ms ; dix switches ont un p95 PCM aligné 102,8 ms.
+Ces petits lots ne permettent pas d'estimer un p99 UI. `firstAudioMs` observe
+un PCM audible avec horloges alignées à 150 ms, pas le premier son physique
+ni une preuve que tout PCM antérieur était silencieux.
+
+La matrice à quatre sessions conserve trois cellules en erreur : expiration
+audio initiale, candidat refusé avec ancienne piste conservée, puis interruption
+audio. La fiabilité concurrente n'est donc pas acquise. Le lot candidat sur
+1,76 Go a quatre cellules sauvegardées mais aucune conclusion finale ; il reste
+incomplet et ne constitue pas une validation réussie. Les campagnes supplémentaires
+ont été arrêtées à la demande de l'utilisateur pour économiser son quota.
+
+Vérifications : 64 tests Node réussis/3 ignorés ; 150 tests Web, check, lint,
+build ; quatre tests inventaire, deux parentaux, deux intégrations Core/Nodes
+réussis. Clippy strict a réussi avant les derniers petits changements de
+budget de relais/tests ; format et diff vérifiés après. Exécutables debug Windows,
+cache OS non purgé ; aucun NAS, build release ou Node physique distant validé.
+Aucun déploiement ni push effectué. Les processus Rust/FFmpeg de test sont arrêtés.

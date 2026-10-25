@@ -21,6 +21,7 @@
   } = $props();
 
   let imagesOpen = $state(false);
+  let imagesChanged = $state(false);
   let metadataOpen = $state(false);
   let infoOpen = $state(false);
   let listOpen = $state(false);
@@ -180,10 +181,14 @@
   <ImageManager
     title={work.title}
     workId={work.id}
-    onclose={() => (imagesOpen = false)}
-    onchanged={async () => {
-      window.dispatchEvent(new CustomEvent('media-artwork-updated', { detail: { id: work.id } }));
+    onclose={() => {
+      imagesOpen = false;
+      if (imagesChanged) {
+        imagesChanged = false;
+        window.dispatchEvent(new CustomEvent('media-artwork-updated', { detail: { id: work.id } }));
+      }
     }}
+    onchanged={async () => { imagesChanged = true; }}
   />
 {/if}
 

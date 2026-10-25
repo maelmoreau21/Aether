@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { session } from '../auth/session';
+  import { selectArtwork } from './artwork-selection';
   import WorkTools from './WorkTools.svelte';
   import OfflineDownload from './OfflineDownload.svelte';
   import { bestVersion } from '../player/version-choice';
@@ -39,6 +41,7 @@
   const currentSelectedMedia = $derived(
     playableMedia.find(item => item.id === selected) ?? playableMedia[0]
   );
+  const artwork = $derived(selectArtwork(work, $session));
   let backdropLoaded = $state(false);
   const isMeaningless = (s?: string | null) => !s || s.trim() === '' || s.trim() === 'Média local indexé' || s.trim() === 'Média local';
   const displaySynopsis = $derived(!isMeaningless(work.plot) ? work.plot : !isMeaningless(work.description) ? work.description : 'Synopsis non renseigné.');
@@ -57,13 +60,13 @@
 <div class="film-detail-view">
   <!-- Backdrop Banner -->
   <div class="detail-hero">
-    {#if work.artwork?.backdrop || work.posterUrl}
+    {#if artwork.backdrop || work.posterUrl}
       <div class="backdrop-art-container" aria-hidden="true">
         <img
           class="backdrop-art-image"
-          class:artwork={!!work.artwork?.backdrop}
+          class:artwork={!!artwork.backdrop}
           class:loaded={backdropLoaded}
-          src={imagePreviewUrl(work.artwork?.backdrop || work.posterUrl, 1280)}
+          src={imagePreviewUrl(artwork.backdrop || work.posterUrl, 1280)}
           alt=""
           loading="eager"
           decoding="async"
@@ -106,7 +109,7 @@
           {/if}
         </div>
 
-        {#if work.artwork?.logo}<img class="title-logo" src={imagePreviewUrl(work.artwork.logo, 640)} alt="" decoding="async" />{/if}
+        {#if artwork.logo}<img class="title-logo" src={imagePreviewUrl(artwork.logo, 640)} alt="" decoding="async" />{/if}
         <h1>{work.title}</h1>
         {#if !work.synthetic}<PersonalFeedback workId={work.id} />{/if}
         {#if !work.synthetic}<WorkTools {work} selectedMedia={currentSelectedMedia} />{/if}
@@ -243,10 +246,10 @@
           </div>
         {/if}
 
-        {#if work.artwork?.illustration || work.artwork?.landscape}
-          <div class="artwork-gallery" aria-label="Illustrations locales">
+        {#if artwork.illustration || artwork.landscape}
+          <div class="artwork-gallery" aria-label="Illustrations">
             {#each ['illustration','landscape'] as role (role)}
-              {#if work.artwork?.[role]}<img src={imagePreviewUrl(work.artwork[role], 640)} alt={role === 'illustration' ? `Illustration de ${work.title}` : `Visuel de ${work.title}`} loading="lazy" decoding="async" />{/if}
+              {#if artwork[role]}<img src={imagePreviewUrl(artwork[role], 640)} alt={role === 'illustration' ? `Illustration de ${work.title}` : `Visuel de ${work.title}`} loading="lazy" decoding="async" />{/if}
             {/each}
           </div>
         {/if}

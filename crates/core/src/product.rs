@@ -929,6 +929,12 @@ pub async fn decorate_many(store: &IdentityStore, values: &mut [Value]) -> Resul
         value["posterUrl"] = artwork.get("poster").cloned().unwrap_or(Value::Null);
         value["thumbUrl"] = artwork.get("thumb").cloned().unwrap_or(Value::Null);
         value["artwork"] = Value::Object(artwork);
+        value["imageVariants"] = json!(
+            images
+                .iter()
+                .filter(|e| e.work_id == id)
+                .collect::<Vec<_>>()
+        );
     }
     Ok(())
 }

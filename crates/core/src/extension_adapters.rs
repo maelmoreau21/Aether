@@ -81,11 +81,20 @@ pub(super) fn metadata_input(
     let mut value = json!({"apiVersion":1,"workId":work,"libraryId":context.library_id,
         "title":editorial["title"].as_str().unwrap_or(&context.title),
         "year":editorial["year"].as_i64().or(context.year),"mediaType":media_type,"externalIds":ids});
+    if let Some(language) = input.get("language").and_then(Value::as_str) {
+        if !super::image_collection::valid_language(language) {
+            return Err(err(StatusCode::BAD_REQUEST, "invalid_language"));
+        }
+        value["language"] = json!(language);
+    }
     if operation == "metadata.details" || operation == "metadata.images" {
         let id = input
             .get("id")
             .and_then(Value::as_str)
-            .filter(|s| !s.is_empty() && s.len() <= 256)
+            .filter(|s| {
+                s.len() <= 256
+                    && (!s.is_empty() || (operation == "metadata.images" && !ids.is_empty()))
+            })
             .ok_or_else(|| err(StatusCode::BAD_REQUEST, "candidate_required"))?;
         value["id"] = json!(id);
     }
@@ -319,9 +328,13 @@ pub(super) async fn avatar_operation(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ImportImage {
-    work_id: String,
-    url: String,
-    kind: String,
+    pub(super) work_id: String,
+    pub(super) url: String,
+    pub(super) kind: String,
+    #[serde(default)]
+    pub(super) language: Option<String>,
+    #[serde(default)]
+    pub(super) append: bool,
 }
 pub(super) async fn import_image(
     State(auth): State<AuthState>,
@@ -332,9 +345,16 @@ pub(super) async fn import_image(
     admin(&auth, &headers, true).await?;
     if !matches!(
         input.kind.as_str(),
-        "poster" | "backdrop" | "logo" | "banner" | "thumb" | "illustration" | "disc"
+        "poster" | "backdrop" | "logo" | "banner" | "thumb" | "illustration" | "disc" | "landscape"
     ) {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_image_kind"));
+    }
+    if input
+        .language
+        .as_deref()
+        .is_some_and(|v| !super::image_collection::valid_language(v))
+    {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_language"));
     }
     let library: Option<String> = query_scalar("SELECT library_id FROM inventory_works WHERE id=?")
         .bind(&input.work_id)
@@ -441,7 +461,13 @@ pub(super) async fn import_image(
     let (_, result) = crate::artwork::upload(
         State(auth),
         Path((input.work_id, input.kind)),
-        Query(Default::default()),
+        Query(crate::artwork::ImageQuery {
+            append: input.append,
+            language: input.language,
+            provider: Some(id),
+            source_url_hash: Some(format!("{:x}", Sha256::digest(input.url.as_bytes()))),
+            ..Default::default()
+        }),
         headers,
         bytes.0.into(),
     )

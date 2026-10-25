@@ -168,3 +168,59 @@ async fn password_sessions_revocation_and_csrf() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn persistent_session_survives_return_and_expires_after_seven_days() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("persistent.db"))
+        .await
+        .unwrap();
+    store
+        .bootstrap("admin", Zeroizing::new(PASSWORD.into()))
+        .await
+        .unwrap();
+    let pool = store.pool().clone();
+    let auth = AuthState::new(store, ORIGIN.into()).await.unwrap();
+    let app = auth::router(auth.clone()).merge(account::router(auth));
+    let response = req(
+        &app,
+        "/api/v1/auth/login",
+        "POST",
+        "",
+        "",
+        json!({"login":"admin","password":PASSWORD}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let cookie = response.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(cookie.contains("Max-Age=2592000"));
+    let cookie = cookie.split(';').next().unwrap();
+    sqlx::query("UPDATE sessions SET last_seen_at=unixepoch()-86400")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let listed = req(
+        &app,
+        "/api/v1/account/sessions",
+        "GET",
+        cookie,
+        "",
+        json!(null),
+    )
+    .await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    assert_eq!(body(listed).await["sessions"].as_array().unwrap().len(), 1);
+    sqlx::query("UPDATE sessions SET last_seen_at=unixepoch()-604801")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        req(&app, "/api/v1/auth/me", "GET", cookie, "", json!(null))
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+}

@@ -20,6 +20,7 @@ export interface Work {
   description: string; libraryId: string; synthetic: boolean; number?: number;
   posterUrl?: string | null;
   artwork?: Record<string, string | null>;
+  imageVariants?: { id: string; kind: string; url: string; origin: string; position: number; language?: string | null; provider?: string | null }[];
   addedAt?: number | null;
   nodeId?: string;
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';

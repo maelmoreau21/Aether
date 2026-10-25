@@ -265,6 +265,131 @@ async fn call(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn image_collection_uses_only_enabled_providers_and_skips_known_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "image-admin",
+            Zeroizing::new("synthetic collection password".into()),
+        )
+        .await
+        .unwrap();
+    media_poc::libraries::initialize_local(&store)
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
+    media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','films','work','Film','{\"test.metadata\":\"known\"}')").execute(store.pool()).await.unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = extensions::router(auth.clone()).merge(auth::router(auth));
+    let (_, login, cookie) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        "",
+        json!({"login":"image-admin","password":"synthetic collection password"}),
+    )
+    .await;
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let signing = key();
+    let output = json!({"apiVersion":1,"result":[{"url":"https://images.example.org/known.png","imageType":"poster","language":"fr","isPrimary":false}]}).to_string();
+    let data = output
+        .bytes()
+        .map(|b| format!("\\{b:02x}"))
+        .collect::<String>();
+    let wasm = wat::parse_str(format!(
+        r#"(module (memory (export "memory") 1 256) (data (i32.const 4096) "{data}")
+        (func (export "media_alloc") (param i32) (result i32) i32.const 1024)
+        (func (export "media_run") (param i32 i32) (result i64) i64.const {}))"#,
+        (4096u64 << 32) | output.len() as u64
+    ))
+    .unwrap();
+    let mut p = package(&signing, wasm);
+    p.manifest.permissions = vec!["images".into(), "metadata.write".into()];
+    p.manifest.http_hosts = vec!["images.example.org".into()];
+    p.signature = STANDARD.encode(signing.sign(&p.signing_bytes().unwrap()).as_ref());
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/publishers",
+            &cookie,
+            csrf,
+            json!({"id":"test","publicKey":STANDARD.encode(signing.public_key().as_ref())})
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions",
+            &cookie,
+            csrf,
+            serde_json::to_value(p).unwrap()
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    let endpoint = "/api/v1/admin/extensions/images/collect";
+    let request = json!({"workId":"work","languages":["fr","en"]});
+    let (status, result, _) = call(&app, "POST", endpoint, &cookie, csrf, request.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(result["providers"], 0);
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            "/api/v1/admin/extensions/test.metadata",
+            &cookie,
+            csrf,
+            json!({"enabled":true,"libraryIds":["films"]})
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    media_poc::database::query("INSERT INTO work_image_entries(id,work_id,kind,position,width,height) VALUES('known-image','work','poster',0,12,18)").execute(store.pool()).await.unwrap();
+    let hash = format!(
+        "{:x}",
+        Sha256::digest(b"https://images.example.org/known.png")
+    );
+    media_poc::database::query("INSERT INTO artwork_image_sources(work_id,source_url_hash,image_id) VALUES('work',?,'known-image')").bind(hash).execute(store.pool()).await.unwrap();
+    let (status, result, _) = call(&app, "POST", endpoint, &cookie, csrf, request.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["providers"], 1, "{result}");
+    assert_eq!(result["skipped"], 1, "{result}");
+    assert_eq!(
+        result["attempts"], 0,
+        "No request may reach the synthetic external host: {result}"
+    );
+    assert_eq!(result["errors"], json!([]), "{result}");
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            "/api/v1/admin/extensions/test.metadata",
+            &cookie,
+            csrf,
+            json!({"enabled":false,"libraryIds":["films"]})
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, result, _) = call(&app, "POST", endpoint, &cookie, csrf, request).await;
+    assert_eq!(result["providers"], 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn signed_package_real_worker_live_permissions_persistence_and_lifecycle() {
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("db.sqlite"))

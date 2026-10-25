@@ -55,7 +55,7 @@ fn public_id(token_hash: &str) -> String {
 }
 async fn sessions(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<Value>, Error> {
     let actor = actor(&auth, &headers, false).await?;
-    let rows: Vec<(String,String,i64,i64,i64)> = query_as("SELECT token_hash,device_label,created_at,last_seen_at,expires_at FROM sessions WHERE user_id=? AND expires_at>unixepoch() AND last_seen_at>unixepoch()-1800 ORDER BY last_seen_at DESC LIMIT 200")
+    let rows: Vec<(String,String,i64,i64,i64)> = query_as("SELECT token_hash,device_label,created_at,last_seen_at,expires_at FROM sessions WHERE user_id=? AND expires_at>unixepoch() AND last_seen_at>unixepoch()-604800 ORDER BY last_seen_at DESC LIMIT 200")
         .bind(&actor.user.id).fetch_all(&auth.store.pool).await.map_err(db)?;
     Ok(Json(
         json!({"sessions":rows.into_iter().map(|(key,device,created,last,expires)|json!({"id":public_id(&key),"device":device,"createdAt":created,"lastSeenAt":last,"expiresAt":expires,"current":key==actor.token_hash})).collect::<Vec<_>>()}),
@@ -147,7 +147,7 @@ async fn password(
     let replacement = crate::admin_users::hash_password(&auth, input.new_password).await?;
     let mut conn = auth.store.pool.acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
-    let changed = query("UPDATE local_credentials SET password_hash=?,updated_at=unixepoch() WHERE user_id=? AND password_hash=? AND EXISTS(SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.user_id=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-1800 AND u.disabled_at IS NULL)")
+    let changed = query("UPDATE local_credentials SET password_hash=?,updated_at=unixepoch() WHERE user_id=? AND password_hash=? AND EXISTS(SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.user_id=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-604800 AND u.disabled_at IS NULL)")
         .bind(replacement).bind(&actor.user.id).bind(encoded).bind(&actor.token_hash).bind(&actor.user.id).execute(&mut *tx).await.map_err(db)?;
     if changed.rows_affected() != 1 {
         return Err(failure(StatusCode::CONFLICT, "credentials_changed"));

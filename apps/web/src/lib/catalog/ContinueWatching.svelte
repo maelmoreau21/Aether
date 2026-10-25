@@ -5,9 +5,10 @@
   import { history, loadHistory } from './watch-state';
   import Icon from '../ui/Icon.svelte';
   import type { Work } from './api';
+  import { selectArtwork } from './artwork-selection';
   import { imagePreviewUrl } from './image-url';
   let { works = [] }: { works?: Work[] } = $props();
-  function thumbnail(id: string, seriesId?: string) { const work=works.find(work=>work.id===(seriesId || id)); return imagePreviewUrl(work?.artwork?.backdrop || work?.posterUrl,640); }
+  function thumbnail(id: string, seriesId?: string) { const work=works.find(work=>work.id===(seriesId || id)); const artwork=selectArtwork(work, $session); return imagePreviewUrl(artwork.thumb || artwork.landscape || artwork.backdrop || artwork.poster,640); }
 
   let error = $state('');
   let track = $state<HTMLDivElement>();

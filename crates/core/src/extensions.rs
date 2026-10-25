@@ -35,6 +35,8 @@ static EXECUTIONS: Semaphore = Semaphore::const_new(1);
 mod adapters;
 #[path = "extension_avatar_collections.rs"]
 mod collections;
+#[path = "extension_image_collection.rs"]
+mod image_collection;
 #[path = "extension_repositories.rs"]
 mod repositories;
 
@@ -162,6 +164,10 @@ pub fn router(auth: AuthState) -> Router {
         )
         .route("/api/v1/admin/extensions/runs", get(runs))
         .route("/api/v1/admin/extensions/audit", get(audit_log))
+        .route(
+            "/api/v1/admin/extensions/images/collect",
+            axum::routing::post(image_collection::collect),
+        )
         .route(
             "/api/v1/admin/extensions/{id}",
             put(configure).delete(uninstall),
@@ -552,6 +558,7 @@ async fn get_settings(
     let settings: Value = settings_str
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(|| json!({}));
+
     Ok(Json(json!({
         "apiVersion": 1,
         "extensionId": id,
@@ -801,10 +808,13 @@ async fn run(
             .fetch_optional(auth.store.pool())
             .await
             .map_err(db)?;
-    let settings: Value = settings_str
+    let mut settings: Value = settings_str
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(|| json!({}));
 
+    if input.operation == "metadata.images" {
+        image_collection::apply_language_settings(&input.input, &mut settings)?;
+    }
     adapters::authorize_operation(&package.manifest, &input.operation)?;
     let mut payload =
         adapters::metadata_input(&context, &input.work_id, &input.operation, &input.input)?;

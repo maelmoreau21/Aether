@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { session } from '../auth/session';
+  import { selectArtwork } from '../catalog/artwork-selection';
   import { resolve } from '$app/paths';
   import type { Work } from '../catalog/api';
   import Icon from './Icon.svelte';
@@ -24,7 +26,8 @@
       : resolve('films/')
   );
 
-  const imageUrl = $derived(imagePreviewUrl(featured?.artwork?.backdrop,1280));
+  const artwork = $derived(selectArtwork(featured, $session));
+  const imageUrl = $derived(imagePreviewUrl(artwork.backdrop,1280));
   let loadedUrl = $state('');
 
   $effect(() => {
@@ -48,7 +51,7 @@
       class="backdrop-art"
       style:background-image="radial-gradient(ellipse at 75% 40%, var(--color-accent-soft), transparent 65%)"
     ></div>
-    {#if featured?.artwork?.backdrop}
+    {#if artwork.backdrop}
       <img
         class="backdrop-img"
         class:loaded={loadedUrl === imageUrl}
@@ -100,7 +103,7 @@
 
     <h1 class="hero-title">
       {#if featured}
-        {featured.title}
+        {#if artwork.logo}<img class="hero-title-logo" src={imagePreviewUrl(artwork.logo, 640)} alt={featured.title} decoding="async" />{:else}{featured.title}{/if}
       {:else}
         Une envie de cinéma.<br />
         <span class="hero-title-accent">Une place pour chaque histoire.</span>
@@ -172,6 +175,7 @@
 </section>
 
 <style>
+  .hero-title-logo { display:block;max-width:min(100%,440px);max-height:160px;object-fit:contain;object-position:left; }
   .hero-banner {
     position: relative;
     min-height: clamp(350px, 30vw, 480px);

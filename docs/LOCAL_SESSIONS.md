@@ -34,7 +34,7 @@ si un acteur épuise le budget ; elle ne constitue pas une défense réseau dist
 À chaque connexion, nouveau jeton aléatoire composé de deux UUID v4 OS
 (244 bits aléatoires). SQLite ne conserve que SHA-256 du jeton, user_id et dates.
 Cookie `media_session`, `Path=/`, `HttpOnly`, `SameSite=Strict`, durée maximale
-12 heures ; `Secure` pour une origine HTTPS. HTTP est limité au loopback.
+30 jours ; `Secure` pour une origine HTTPS. HTTP est limité au loopback.
 L'origine locale par défaut est `http://127.0.0.1:MEDIA_PORT` (3000 par défaut).
 `MEDIA_PUBLIC_URL` permet de déclarer une origine exacte sans chemin, par exemple
 `https://media.example.test` ; Host et Origin doivent correspondre à cette
@@ -42,7 +42,7 @@ configuration. Les en-têtes Forwarded/X-Forwarded-* ne sont pas utilisés pour
 décider des cookies. Le Core ne termine pas TLS et reste lié au loopback :
 HTTPS nécessite une terminaison TLS de confiance avec Host conservé, à valider
 dans un futur jalon de déploiement. Aucun proxy n'a été installé ou publié ici.
-Expiration absolue 12 h (`43 200 s`) et expiration par inactivité après 30 min (`1 800 s`)
+Expiration absolue 30 jours (`2 592 000 s`) et expiration par inactivité après 7 jours (`604 800 s`)
 sans requête authentifiée, contrôlées à chaque requête directement dans SQLite via un
 `SELECT` joint (`sessions`, `users`, `local_credentials`) en mode WAL sans verrou d'écriture ;
 aucun cache d'autorisation positif n'est utilisé, de sorte qu'une déconnexion, révocation,
@@ -53,7 +53,7 @@ La mise à jour d'activité (`last_seen_at`) est découplée de la lecture d'aut
 - Un worker unique par `AuthState` regroupe les rafraîchissements par lots (`TOUCH_BATCH_SIZE = 64`)
   depuis une file en mémoire bornée (`MAX_PENDING_TOUCHES = 4096`) avec cadence de coalescence
   par session (`TOUCH_INTERVAL_SECONDS = 60 s`) et micro-fenêtre de regroupement (`20 ms`).
-- L'`UPDATE` SQLite est strictement conditionnel (`expires_at > unixepoch() AND last_seen_at > unixepoch() - 1800 AND disabled_at IS NULL`) :
+- L'`UPDATE` SQLite est strictement conditionnel (`expires_at > unixepoch() AND last_seen_at > unixepoch() - 604800 AND disabled_at IS NULL`) :
   une session déjà expirée ou révoquée ne peut jamais être prolongée ni ressuscitée.
 - Sous verrou d'écriture SQLite prolongé (ex. `BEGIN IMMEDIATE` maintenu 30 s lors d'une publication),
   le worker utilise un `busy_timeout` court (`15 ms`) et un backoff (`150 ms`) sans immobiliser
@@ -61,7 +61,7 @@ La mise à jour d'activité (`last_seen_at`) est découplée de la lecture d'aut
   streaming Range) répondent immédiatement sur le snapshot WAL.
 - **Compromis explicite sur l'expiration glissante (choix fail-closed)** : en raison du seuil de
   coalescence de 60 s et de la persistance différée, un arrêt brutal avant flush ou un verrou
-  d'écriture SQLite couvrant les toutes dernières secondes des 30 minutes d'inactivité ne prolonge
+  d'écriture SQLite couvrant les toutes dernières secondes des 7 jours d'inactivité ne prolonge
   pas la session en mémoire au-delà du `last_seen_at` commité dans SQLite. Ce choix fail-closed
   peut avancer l'expiration inactive d'au plus 60 s (ou de la durée du verrou si la session était
   déjà à moins de 30 s de l'échéance), mais garantit qu'aucune session expirée ou révoquée n'est
@@ -144,3 +144,7 @@ même processus de test : il positionne le répertoire courant pour ServeDir.
 `core_restart` démarre réellement trois processus du binaire : session conservée
 après arrêt/reprise, puis révocation conservée après un second redémarrage.
 Les fixtures et les bases réelles de l'opérateur ne sont pas modifiées.
+
+## Appareils personnels
+
+Paramètres > Sécurité et appareils : sessions du navigateur, dates de connexion, activité et expiration absolue, session courante, révocation individuelle ou globale. GET /api/v1/account/sessions liste uniquement les sessions du compte. DELETE sur cette route ou /api/v1/account/sessions/{id} exige propriétaire et CSRF. Une reconnexion est nécessaire pour obtenir la nouvelle expiration absolue.

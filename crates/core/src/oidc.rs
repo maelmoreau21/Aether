@@ -658,7 +658,7 @@ impl Oidc {
         let mut conn = self.auth.store.pool.acquire().await.map_err(db)?;
         let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
         let linked_user: Option<String> = if let Some(ref session_hash) = flow.link_session_hash {
-            Some(crate::database::query_scalar("SELECT s.user_id FROM sessions s JOIN users u ON u.id=s.user_id JOIN local_credentials c ON c.user_id=u.id WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-1800 AND u.disabled_at IS NULL")
+            Some(crate::database::query_scalar("SELECT s.user_id FROM sessions s JOIN users u ON u.id=s.user_id JOIN local_credentials c ON c.user_id=u.id WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-604800 AND u.disabled_at IS NULL")
                 .bind(session_hash).fetch_optional(&mut *tx).await.map_err(db)?
                 .ok_or_else(|| deny(StatusCode::UNAUTHORIZED,"link_session_expired"))?)
         } else {
@@ -761,7 +761,7 @@ impl Oidc {
             }
         };
         let raw = auth::random_token();
-        let created=crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+43200 FROM users WHERE id=? AND disabled_at IS NULL").bind(auth::hash(&raw)).bind(&user).execute(&mut *tx).await.map_err(db)?;
+        let created=crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+2592000 FROM users WHERE id=? AND disabled_at IS NULL").bind(auth::hash(&raw)).bind(&user).execute(&mut *tx).await.map_err(db)?;
         crate::database::query("UPDATE sessions SET device_label=? WHERE token_hash=?")
             .bind(auth::device_label(headers))
             .bind(auth::hash(&raw))
@@ -786,7 +786,8 @@ impl Oidc {
         let mut response = Html(include_str!("oidc_complete.html")).into_response();
         response.headers_mut().append(
             header::SET_COOKIE,
-            HeaderValue::from_str(&self.auth.cookie(&raw, 43200)).map_err(|_| invalid())?,
+            HeaderValue::from_str(&self.auth.cookie(&raw, auth::ABSOLUTE_SECONDS))
+                .map_err(|_| invalid())?,
         );
         Ok(response)
     }

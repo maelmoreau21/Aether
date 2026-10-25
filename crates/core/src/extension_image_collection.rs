@@ -1,0 +1,328 @@
+//! Bounded explicit harvesting; providers remain optional sandboxed extensions.
+use super::*;
+use media_extension_sdk::{ImageType, MediaImage};
+use std::collections::HashSet;
+
+pub(super) fn valid_language(value: &str) -> bool {
+    let mut parts = value.split('-');
+    value.len() <= 35
+        && parts.next().is_some_and(|p| {
+            (2..=8).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_alphabetic())
+        })
+        && parts
+            .all(|p| !p.is_empty() && p.len() <= 8 && p.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+fn languages(input: &Value) -> Result<Vec<String>, Error> {
+    let Some(raw) = input.get("languages") else {
+        return Ok(vec!["fr".into(), "en".into()]);
+    };
+    let values = raw
+        .as_array()
+        .filter(|v| !v.is_empty() && v.len() <= 5)
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid_languages"))?;
+    let mut result = Vec::new();
+    for value in values {
+        let language = value
+            .as_str()
+            .filter(|v| valid_language(v))
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid_languages"))?
+            .to_ascii_lowercase();
+        if !result.contains(&language) {
+            result.push(language);
+        }
+    }
+    Ok(result)
+}
+
+pub(super) fn apply_language_settings(input: &Value, settings: &mut Value) -> Result<(), Error> {
+    if input.get("languages").is_none() {
+        return Ok(());
+    }
+    let ordered = languages(input)?;
+    let target = settings
+        .as_object_mut()
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid_settings"))?;
+    target.insert("language".into(), json!(ordered[0]));
+    target.insert("fallbackLanguages".into(), json!(&ordered[1..]));
+    target.insert(
+        "includeNeutral".into(),
+        json!(input["includeNeutral"].as_bool().unwrap_or(true)),
+    );
+    Ok(())
+}
+
+fn rank(language: Option<&str>, ordered: &[String], neutral: bool) -> Option<usize> {
+    let Some(language) = language.filter(|v| !v.is_empty() && *v != "00" && *v != "und") else {
+        return neutral.then_some(ordered.len() * 2);
+    };
+    let language = language.to_ascii_lowercase();
+    ordered.iter().enumerate().find_map(|(i, preferred)| {
+        if &language == preferred {
+            Some(i * 2)
+        } else if language.split('-').next() == preferred.split('-').next() {
+            Some(i * 2 + 1)
+        } else {
+            None
+        }
+    })
+}
+
+fn kind(value: ImageType) -> &'static str {
+    match value {
+        ImageType::Poster => "poster",
+        ImageType::Backdrop => "backdrop",
+        ImageType::Banner => "banner",
+        ImageType::Logo => "logo",
+        ImageType::ClearArt => "illustration",
+        ImageType::Thumb => "thumb",
+        ImageType::DiscArt => "disc",
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct Collect {
+    work_id: String,
+    #[serde(default = "default_languages")]
+    languages: Vec<String>,
+    #[serde(default = "yes")]
+    include_neutral: bool,
+    #[serde(default = "default_max")]
+    max_images: usize,
+}
+fn default_languages() -> Vec<String> {
+    vec!["fr".into(), "en".into()]
+}
+fn default_max() -> usize {
+    12
+}
+fn yes() -> bool {
+    true
+}
+
+pub(super) async fn collect(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Json(input): Json<Collect>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, true).await?;
+    if input.max_images == 0 || input.max_images > 12 {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_limit"));
+    }
+    let ordered = languages(&json!({"languages":input.languages}))?;
+    let context: Option<adapters::WorkContext> = query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
+        .bind(&input.work_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
+    let context = context.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    // Use corrected identifiers from the same canonical context as manual metadata operations.
+    let payload =
+        adapters::metadata_input(&context, &input.work_id, "metadata.search", &json!({}))?;
+    let ids = payload["externalIds"]
+        .as_object()
+        .filter(|ids| !ids.is_empty())
+        .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "external_ids_required"))?;
+    crate::feedback::authorized(&auth, &headers, &input.work_id, false)
+        .await
+        .map_err(|s| err(s, "work_denied"))?;
+    let rows: Vec<(String,String,String)> = query_as("SELECT e.id,e.package_json,e.generation FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.enabled=1 AND p.active=1 ORDER BY e.id LIMIT 65")
+        .fetch_all(auth.store.pool()).await.map_err(db)?;
+    if rows.len() > 64 {
+        return Err(err(StatusCode::CONFLICT, "too_many_providers"));
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(55);
+    let mut candidates = Vec::new();
+    let mut errors = Vec::new();
+    let mut providers = 0;
+    let mut partial = false;
+    for (id, stored, generation) in rows {
+        let package: Package = serde_json::from_str(&stored)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
+        if !["images", "metadata.write"]
+            .iter()
+            .all(|p| package.manifest.permissions.iter().any(|v| v == p))
+        {
+            continue;
+        }
+        if !permitted(&auth, &headers, &id, &context.library_id, &generation).await? {
+            continue;
+        }
+        let provider_id = ids.get(&id).and_then(Value::as_str).unwrap_or("");
+        let request = Run {
+            work_id: input.work_id.clone(),
+            operation: "metadata.images".into(),
+            input: json!({"id":provider_id,"languages":ordered,"includeNeutral":input.include_neutral}),
+        };
+        providers += 1;
+        let provider_deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(15));
+        let result = tokio::time::timeout_at(
+            provider_deadline,
+            super::run(
+                State(auth.clone()),
+                headers.clone(),
+                Path(id.clone()),
+                Json(request),
+            ),
+        )
+        .await;
+        match result {
+            Ok(Ok(result)) => {
+                let images: Vec<MediaImage> = serde_json::from_value(result.0["proposal"].clone())
+                    .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
+                for image in images {
+                    if let Some(priority) =
+                        rank(image.language.as_deref(), &ordered, input.include_neutral)
+                    {
+                        candidates.push((priority, id.clone(), image));
+                    }
+                }
+            }
+            Ok(Err((status, _))) => errors.push(json!({"provider":id,"status":status.as_u16()})),
+            Err(_) => {
+                partial = true;
+                errors.push(json!({"provider":id,"status":408}));
+                if tokio::time::Instant::now() >= deadline {
+                    break;
+                }
+            }
+        }
+    }
+    // Interleave roles/providers at equal language rank so one poster list cannot fill the whole pool.
+    candidates
+        .sort_by(|a, b| (a.0, kind(a.2.image_type), &a.1).cmp(&(b.0, kind(b.2.image_type), &b.1)));
+    let mut buckets: std::collections::BTreeMap<
+        (usize, String, String),
+        std::collections::VecDeque<MediaImage>,
+    > = std::collections::BTreeMap::new();
+    for (priority, provider, image) in candidates {
+        buckets
+            .entry((priority, kind(image.image_type).into(), provider))
+            .or_default()
+            .push_back(image);
+    }
+    let mut queue = Vec::new();
+    while !buckets.is_empty() {
+        buckets.retain(|(_, _, provider), images| {
+            if let Some(image) = images.pop_front() {
+                queue.push((provider.clone(), image));
+            }
+            !images.is_empty()
+        });
+    }
+    let mut downloaded = 0;
+    let mut duplicates = 0;
+    let mut skipped = 0;
+    let mut attempts = 0;
+    let mut seen = HashSet::new();
+    let counts: Vec<(String, i64)> =
+        query_as("SELECT kind,COUNT(*) FROM work_image_entries WHERE work_id=? GROUP BY kind")
+            .bind(&input.work_id)
+            .fetch_all(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let mut counts: std::collections::HashMap<String, i64> = counts.into_iter().collect();
+    let mut total: i64 = counts.values().sum();
+    for (provider, image) in queue {
+        let image_kind = kind(image.image_type);
+        if total >= 64 || counts.get(image_kind).copied().unwrap_or(0) >= 12 {
+            skipped += 1;
+            continue;
+        }
+        if downloaded >= input.max_images
+            || attempts >= 24
+            || tokio::time::Instant::now() >= deadline
+        {
+            partial = true;
+            break;
+        }
+        let hash = format!("{:x}", Sha256::digest(image.url.as_bytes()));
+        if !seen.insert(hash.clone()) {
+            skipped += 1;
+            continue;
+        }
+        let known: i64 = query_scalar(
+            "SELECT COUNT(*) FROM artwork_image_sources WHERE work_id=? AND source_url_hash=?",
+        )
+        .bind(&input.work_id)
+        .bind(&hash)
+        .fetch_one(auth.store.pool())
+        .await
+        .map_err(db)?;
+        if known > 0 {
+            skipped += 1;
+            continue;
+        }
+        attempts += 1;
+        let request = adapters::ImportImage {
+            work_id: input.work_id.clone(),
+            url: image.url,
+            kind: kind(image.image_type).into(),
+            language: image
+                .language
+                .filter(|v| !v.is_empty() && v != "00" && v != "und"),
+            append: true,
+        };
+        match tokio::time::timeout_at(
+            deadline,
+            adapters::import_image(
+                State(auth.clone()),
+                headers.clone(),
+                Path(provider.clone()),
+                Json(request),
+            ),
+        )
+        .await
+        {
+            Ok(Ok(result)) => {
+                if result.0["duplicate"].as_bool() == Some(true) {
+                    duplicates += 1;
+                } else {
+                    downloaded += 1;
+                    total += 1;
+                    *counts.entry(image_kind.into()).or_default() += 1;
+                }
+            }
+            Ok(Err((status, _))) => {
+                errors.push(json!({"provider":provider,"status":status.as_u16()}))
+            }
+            Err(_) => {
+                partial = true;
+                break;
+            }
+        }
+    }
+    Ok(Json(
+        json!({"providers":providers,"downloaded":downloaded,"duplicates":duplicates,"skipped":skipped,"attempts":attempts,"errors":errors,"partial":partial}),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn language_order_keeps_regions_and_explicit_neutral_policy() {
+        let ordered = vec!["fr-ca".into(), "en".into()];
+        assert_eq!(rank(Some("fr-CA"), &ordered, true), Some(0));
+        assert_eq!(rank(Some("fr"), &ordered, true), Some(1));
+        assert_eq!(rank(Some("en"), &ordered, true), Some(2));
+        assert_eq!(rank(None, &ordered, true), Some(4));
+        assert_eq!(rank(None, &ordered, false), None);
+        assert_eq!(rank(Some("de"), &ordered, true), None);
+        assert!(valid_language("zh-Hant-TW"));
+        assert!(!valid_language("fr&api_key=secret"));
+        assert!(!valid_language("-fr"));
+    }
+    #[test]
+    fn language_overrides_cannot_replace_private_credentials() {
+        let mut settings = json!({"apiKey":"private","language":"de"});
+        apply_language_settings(
+            &json!({"languages":["fr-CA","en"],"includeNeutral":false}),
+            &mut settings,
+        )
+        .unwrap();
+        assert_eq!(settings["apiKey"], "private");
+        assert_eq!(settings["language"], "fr-ca");
+        assert_eq!(settings["fallbackLanguages"], json!(["en"]));
+        assert_eq!(settings["includeNeutral"], false);
+        assert!(languages(&json!({"languages":[]})).is_err());
+    }
+}

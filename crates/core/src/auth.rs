@@ -25,8 +25,8 @@ use std::{
 use tokio::sync::{Notify, Semaphore};
 use zeroize::Zeroizing;
 
-const ABSOLUTE_SECONDS: i64 = 12 * 60 * 60;
-const IDLE_SECONDS: i64 = 30 * 60;
+pub(crate) const ABSOLUTE_SECONDS: i64 = 30 * 24 * 60 * 60;
+pub(crate) const IDLE_SECONDS: i64 = 7 * 24 * 60 * 60;
 const TOUCH_INTERVAL_SECONDS: i64 = 60;
 const MAX_PENDING_TOUCHES: usize = 4096;
 const TOUCH_BATCH_SIZE: usize = 64;
@@ -1456,10 +1456,10 @@ mod tests {
         assert_eq!(state.touch_stats().write_batches_succeeded, 0);
         assert_eq!(state.touch_stats().pending_count, 0);
 
-        // 2. Activity near idle expiration boundary (last_seen_at = now - 1795s, 5s before 1800s limit):
+        // 2. Activity near idle expiration boundary (last_seen_at = now - 604795s, 5s before 604800s limit):
         // 30 concurrent requests from the same user coalesce into 1 single SQLite write batch.
         crate::database::query(
-            "UPDATE sessions SET last_seen_at = unixepoch() - 1795 WHERE token_hash = ?",
+            "UPDATE sessions SET last_seen_at = unixepoch() - 604795 WHERE token_hash = ?",
         )
         .bind(&token_hash)
         .execute(&store.pool)
@@ -1508,7 +1508,7 @@ mod tests {
         let expired_hash = hash(&expired_raw);
         crate::database::query(
             "INSERT INTO sessions(token_hash, user_id, created_at, last_seen_at, expires_at) \
-             VALUES(?, ?, unixepoch() - 2000, unixepoch() - 1790, unixepoch() + 3600)",
+             VALUES(?, ?, unixepoch() - 2000, unixepoch() - 604790, unixepoch() + 3600)",
         )
         .bind(&expired_hash)
         .bind(&admin_id)
@@ -1523,15 +1523,15 @@ mod tests {
             header::COOKIE,
             HeaderValue::from_str(&format!("{COOKIE}={expired_raw}")).unwrap(),
         )]);
-        // Still valid during the lock (1790 < 1800) -> queues touch in memory
+        // Still valid during the lock (604790 < 604800) -> queues touch in memory
         assert!(state.authenticate(&exp_headers).await.is_ok());
         assert_eq!(state.touch_stats().pending_count, 1);
         lock_tx.rollback().await.unwrap();
         drop(lock_conn);
 
-        // Simulate session crossing the 1800s boundary before worker flushes
+        // Simulate session crossing the 604800s boundary before worker flushes
         crate::database::query(
-            "UPDATE sessions SET last_seen_at = unixepoch() - 1805 WHERE token_hash = ?",
+            "UPDATE sessions SET last_seen_at = unixepoch() - 604805 WHERE token_hash = ?",
         )
         .bind(&expired_hash)
         .execute(&store.pool)
@@ -1625,7 +1625,7 @@ mod tests {
             HeaderValue::from_str(&restart_cookie).unwrap(),
         )]);
         crate::database::query(
-            "UPDATE sessions SET last_seen_at = unixepoch() - 1790 WHERE token_hash = ?",
+            "UPDATE sessions SET last_seen_at = unixepoch() - 604790 WHERE token_hash = ?",
         )
         .bind(&restart_hash)
         .execute(&store.pool)
@@ -1662,7 +1662,7 @@ mod tests {
             persisted_before_restart, persisted_after_restart,
             "Unpersisted in-memory touch is discarded on abrupt restart"
         );
-        // Because persisted last_seen_at is still < 1800s old, session remains valid after restart
+        // Because persisted last_seen_at is still < 604800s old, session remains valid after restart
         assert!(reopened_state.authenticate(&restart_headers).await.is_ok());
     }
 

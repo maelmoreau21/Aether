@@ -129,6 +129,8 @@ pub struct Entry {
     pub height: Option<i64>,
     pub url: String,
     pub origin: String,
+    pub language: Option<String>,
+    pub provider: Option<String>,
 }
 pub fn router(auth: AuthState) -> Router {
     Router::new()
@@ -170,9 +172,9 @@ pub async fn entries(store: &IdentityStore, ids: &[String]) -> Result<Vec<Entry>
     }
     let mut result = vec![];
     for sql in [
-        "SELECT e.id,e.work_id,e.kind,COALESCE(o.position,e.position) AS position,e.width,e.height,'/api/v1/works/'||e.work_id||'/images/'||e.id AS url,'manual' AS origin FROM work_image_entries e LEFT JOIN work_image_order o ON o.work_id=e.work_id AND o.image_id=e.id WHERE e.work_id IN (",
-        "SELECT i.id,i.work_id,i.role AS kind,COALESCE(o.position,10000+i.priority) AS position,CAST(NULL AS BIGINT) AS width,CAST(NULL AS BIGINT) AS height,'/api/v1/assets/'||i.id||'/image?v='||i.modified_ns||'-'||i.size AS url,'local' AS origin FROM inventory_images i JOIN libraries l ON l.id=i.library_id JOIN media_nodes n ON n.id=l.node_id LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id LEFT JOIN work_image_order o ON o.work_id=i.work_id AND o.image_id=i.id WHERE i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND n.status='connected' AND h.image_id IS NULL AND i.role IN ('poster','thumb','logo','illustration','backdrop','banner','disc','landscape') AND i.work_id IN (",
-        "SELECT 'legacy-poster' AS id,p.work_id,'poster' AS kind,5000 AS position,CAST(NULL AS BIGINT) AS width,CAST(NULL AS BIGINT) AS height,'/api/v1/works/'||p.work_id||'/poster' AS url,'legacy' AS origin FROM work_posters p WHERE p.work_id IN (",
+        "SELECT e.id,e.work_id,e.kind,COALESCE(o.position,e.position) AS position,e.width,e.height,'/api/v1/works/'||e.work_id||'/images/'||e.id AS url,CASE WHEN e.provider IS NULL THEN 'manual' ELSE 'provider' END AS origin,e.language,e.provider FROM work_image_entries e LEFT JOIN work_image_order o ON o.work_id=e.work_id AND o.image_id=e.id WHERE e.work_id IN (",
+        "SELECT i.id,i.work_id,i.role AS kind,COALESCE(o.position,10000+i.priority) AS position,CAST(NULL AS BIGINT) AS width,CAST(NULL AS BIGINT) AS height,'/api/v1/assets/'||i.id||'/image?v='||i.modified_ns||'-'||i.size AS url,'local' AS origin,CAST(NULL AS TEXT) AS language,CAST(NULL AS TEXT) AS provider FROM inventory_images i JOIN libraries l ON l.id=i.library_id JOIN media_nodes n ON n.id=l.node_id LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id LEFT JOIN work_image_order o ON o.work_id=i.work_id AND o.image_id=i.id WHERE i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND n.status='connected' AND h.image_id IS NULL AND i.role IN ('poster','thumb','logo','illustration','backdrop','banner','disc','landscape') AND i.work_id IN (",
+        "SELECT 'legacy-poster' AS id,p.work_id,'poster' AS kind,5000 AS position,CAST(NULL AS BIGINT) AS width,CAST(NULL AS BIGINT) AS height,'/api/v1/works/'||p.work_id||'/poster' AS url,'legacy' AS origin,CAST(NULL AS TEXT) AS language,CAST(NULL AS TEXT) AS provider FROM work_posters p WHERE p.work_id IN (",
     ] {
         let mut builder = sqlx::QueryBuilder::<sqlx::Any>::new(sql);
         let mut values = builder.separated(",");
@@ -203,19 +205,24 @@ async fn list(
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
     allowed(&auth, &headers, &work, false).await?;
-    let mut seen = std::collections::HashSet::new();
     let images: Vec<_> = entries(&auth.store, &[work])
         .await
         .map_err(db)?
         .into_iter()
-        .filter(|e| e.kind == "backdrop" || seen.insert(e.kind.clone()))
         .collect();
     Ok(Json(json!({"images":images})))
 }
 #[derive(Default, Deserialize)]
 pub(crate) struct ImageQuery {
-    width: Option<u32>,
-    replace: Option<String>,
+    pub(crate) width: Option<u32>,
+    pub(crate) replace: Option<String>,
+    #[serde(default)]
+    pub(crate) append: bool,
+    pub(crate) language: Option<String>,
+    #[serde(skip)]
+    pub(crate) provider: Option<String>,
+    #[serde(skip)]
+    pub(crate) source_url_hash: Option<String>,
 }
 async fn read(
     State(auth): State<AuthState>,
@@ -266,10 +273,110 @@ async fn read(
     )
         .into_response())
 }
+
+fn valid_language(value: &str) -> bool {
+    value.len() <= 35
+        && value.split('-').enumerate().all(|(index, part)| {
+            (if index == 0 {
+                (2..=8).contains(&part.len())
+            } else {
+                !part.is_empty() && part.len() <= 8
+            }) && part.bytes().all(|b| {
+                if index == 0 {
+                    b.is_ascii_alphabetic()
+                } else {
+                    b.is_ascii_alphanumeric()
+                }
+            })
+        })
+}
+struct Fingerprint(String);
+impl Fingerprint {
+    fn of(image: &image::DynamicImage) -> Self {
+        // Composite only tiny samples; preserve alpha without another full-size image allocation.
+        let sample = |width, height| {
+            let rgba = image
+                .resize_exact(width, height, image::imageops::FilterType::Triangle)
+                .to_rgba8();
+            image::RgbImage::from_fn(width, height, |x, y| {
+                let pixel = rgba.get_pixel(x, y);
+                let alpha = u32::from(pixel[3]);
+                image::Rgb(std::array::from_fn(|index| {
+                    ((u32::from(pixel[index]) * alpha + 128 * (255 - alpha)) / 255) as u8
+                }))
+            })
+        };
+        let pixels = sample(9, 8);
+        let mut hash = 0u64;
+        for y in 0..8 {
+            for x in 0..8 {
+                let luma = |p: &image::Rgb<u8>| {
+                    299u32 * u32::from(p[0]) + 587 * u32::from(p[1]) + 114 * u32::from(p[2])
+                };
+                hash = (hash << 1)
+                    | u64::from(luma(pixels.get_pixel(x, y)) > luma(pixels.get_pixel(x + 1, y)));
+            }
+        }
+        let colors = sample(4, 4);
+        Self(format!(
+            "{hash:016x}:{}",
+            colors
+                .as_raw()
+                .iter()
+                .map(|v| format!("{v:02x}"))
+                .collect::<String>()
+        ))
+    }
+    fn similar(
+        &self,
+        other: &str,
+        width: i64,
+        height: i64,
+        other_width: i64,
+        other_height: i64,
+    ) -> bool {
+        // A crop or a different aspect ratio may change the composition substantially.
+        if height <= 0
+            || other_height <= 0
+            || ((width as f64 / height as f64) / (other_width as f64 / other_height as f64) - 1.0)
+                .abs()
+                > 0.04
+        {
+            return false;
+        }
+        let parse = |value: &str| -> Option<(u64, Vec<u8>)> {
+            let (hash, colors) = value.split_once(':')?;
+            if colors.len() != 96 {
+                return None;
+            }
+            Some((
+                u64::from_str_radix(hash, 16).ok()?,
+                (0..48)
+                    .map(|i| u8::from_str_radix(&colors[i * 2..i * 2 + 2], 16))
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()?,
+            ))
+        };
+        let (Some((hash, colors)), Some((other_hash, other_colors))) =
+            (parse(&self.0), parse(other))
+        else {
+            return false;
+        };
+        (hash ^ other_hash).count_ones() <= 5
+            && colors
+                .iter()
+                .zip(other_colors)
+                .map(|(a, b)| u32::from(a.abs_diff(b)))
+                .sum::<u32>()
+                <= 48 * 10
+    }
+}
+
 struct Encoded {
     width: i64,
     height: i64,
     variants: Vec<(i64, &'static str, Vec<u8>)>,
+    fingerprint: Fingerprint,
 }
 fn normalize(bytes: Bytes, content: &str) -> Result<Encoded, StatusCode> {
     let mut reader = ImageReader::new(Cursor::new(bytes))
@@ -297,6 +404,7 @@ fn normalize(bytes: Bytes, content: &str) -> Result<Encoded, StatusCode> {
     }
     let image =
         image::DynamicImage::from_decoder(decoder).map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
+    let fingerprint = Fingerprint::of(&image);
     let mut variants = vec![];
     for width in [0, 320, 640, 1280] {
         let resized = if width == 0 {
@@ -329,6 +437,7 @@ fn normalize(bytes: Bytes, content: &str) -> Result<Encoded, StatusCode> {
         width: i64::from(image.width()),
         height: i64::from(image.height()),
         variants,
+        fingerprint,
     })
 }
 pub(crate) async fn upload(
@@ -339,9 +448,16 @@ pub(crate) async fn upload(
     bytes: Bytes,
 ) -> Result<(StatusCode, Json<Value>), StatusCode> {
     allowed(&auth, &headers, &work, true).await?;
-    if !ROLES.contains(&kind.as_str()) {
+    if !ROLES.contains(&kind.as_str())
+        || options
+            .language
+            .as_ref()
+            .is_some_and(|v| !valid_language(v))
+        || (options.append && options.replace.is_some())
+    {
         return Err(StatusCode::BAD_REQUEST);
     }
+    let language = options.language.as_ref().map(|v| v.to_ascii_lowercase());
     let existing = entries(&auth.store, std::slice::from_ref(&work))
         .await
         .map_err(db)?;
@@ -369,6 +485,32 @@ pub(crate) async fn upload(
     let mut tx = crate::database::begin_write(&mut connection)
         .await
         .map_err(db)?;
+    if options.append {
+        let candidates: Vec<(String, String, i64, i64)> = query_as("SELECT id,fingerprint,width,height FROM work_image_entries WHERE work_id=? AND kind=? AND COALESCE(language,'')=COALESCE(?,'') AND fingerprint IS NOT NULL")
+            .bind(&work).bind(&kind).bind(&language).fetch_all(&mut *tx).await.map_err(db)?;
+        if let Some((id, _, _, _)) = candidates.iter().find(|(_, fingerprint, width, height)| {
+            encoded
+                .fingerprint
+                .similar(fingerprint, encoded.width, encoded.height, *width, *height)
+        }) {
+            if let Some(source) = &options.source_url_hash {
+                query("INSERT INTO artwork_image_sources(work_id,source_url_hash,image_id) VALUES(?,?,?) ON CONFLICT(work_id,source_url_hash) DO UPDATE SET image_id=excluded.image_id")
+                    .bind(&work).bind(source).bind(id).execute(&mut *tx).await.map_err(db)?;
+            }
+            tx.commit().await.map_err(db)?;
+            return Ok((StatusCode::OK, Json(json!({"id":id,"duplicate":true}))));
+        }
+        let same_kind: i64 =
+            query_scalar("SELECT COUNT(*) FROM work_image_entries WHERE work_id=? AND kind=?")
+                .bind(&work)
+                .bind(&kind)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db)?;
+        if same_kind >= 12 {
+            return Err(StatusCode::CONFLICT);
+        }
+    }
     let count: i64 = query_scalar("SELECT COUNT(*) FROM work_image_entries WHERE work_id=?")
         .bind(&work)
         .fetch_one(&mut *tx)
@@ -406,8 +548,8 @@ pub(crate) async fn upload(
             .await
             .map_err(db)?;
     }
-    if kind != "backdrop" {
-        query("DELETE FROM work_image_entries WHERE work_id=? AND kind=?")
+    if kind != "backdrop" && !options.append && options.provider.is_none() {
+        query("DELETE FROM work_image_entries WHERE work_id=? AND kind=? AND provider IS NULL")
             .bind(&work)
             .bind(&kind)
             .execute(&mut *tx)
@@ -419,22 +561,30 @@ pub(crate) async fn upload(
         .fetch_one(&mut *tx)
         .await
         .map_err(db)?;
-    if remaining >= 16 {
+    if remaining >= 64 {
         return Err(StatusCode::CONFLICT);
     }
     let id = uuid::Uuid::new_v4().to_string();
     query(
-        "INSERT INTO work_image_entries(id,work_id,kind,position,width,height) VALUES(?,?,?,?,?,?)",
+        "INSERT INTO work_image_entries(id,work_id,kind,position,width,height,language,provider,fingerprint,source_url_hash) VALUES(?,?,?,?,?,?,?,?,?,?)",
     )
     .bind(&id)
     .bind(&work)
     .bind(kind)
-    .bind(count)
+    .bind(if options.provider.is_none() { -1 } else { count })
     .bind(encoded.width)
     .bind(encoded.height)
+    .bind(language)
+    .bind(options.provider)
+    .bind(encoded.fingerprint.0)
+    .bind(&options.source_url_hash)
     .execute(&mut *tx)
     .await
     .map_err(db)?;
+    if let Some(source) = &options.source_url_hash {
+        query("INSERT INTO artwork_image_sources(work_id,source_url_hash,image_id) VALUES(?,?,?) ON CONFLICT(work_id,source_url_hash) DO UPDATE SET image_id=excluded.image_id")
+            .bind(&work).bind(source).bind(&id).execute(&mut *tx).await.map_err(db)?;
+    }
     for (width, mime, data) in encoded.variants {
         query("INSERT INTO work_image_data(image_id,width,mime,image_data) VALUES(?,?,?,?)")
             .bind(&id)
@@ -446,7 +596,10 @@ pub(crate) async fn upload(
             .map_err(db)?;
     }
     tx.commit().await.map_err(db)?;
-    Ok((StatusCode::CREATED, Json(json!({"id":id}))))
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({"id":id,"duplicate":false})),
+    ))
 }
 async fn remove(
     State(auth): State<AuthState>,
@@ -525,6 +678,55 @@ async fn order(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn perceptual_signature_compares_decoded_pixels_and_preserves_language() {
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(120, 180, |x, y| {
+            image::Rgb([(x * 2) as u8, y as u8, 80])
+        }));
+        let signature = Fingerprint::of(&image);
+        let resized = image.resize_exact(240, 360, image::imageops::FilterType::Triangle);
+        assert!(signature.similar(&Fingerprint::of(&resized).0, 120, 180, 240, 360));
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 70)
+            .encode_image(&image)
+            .unwrap();
+        let recompressed = image::load_from_memory(&jpeg).unwrap();
+        assert!(signature.similar(&Fingerprint::of(&recompressed).0, 120, 180, 120, 180));
+        let opaque = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            120,
+            180,
+            image::Rgba([255, 255, 255, 255]),
+        ));
+        let transparent = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            120,
+            180,
+            image::Rgba([255, 255, 255, 0]),
+        ));
+        assert!(!Fingerprint::of(&opaque).similar(
+            &Fingerprint::of(&transparent).0,
+            120,
+            180,
+            120,
+            180
+        ));
+        let blue = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            120,
+            180,
+            image::Rgb([0, 0, 255]),
+        ));
+        let red = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            120,
+            180,
+            image::Rgb([255, 0, 0]),
+        ));
+        assert!(!Fingerprint::of(&blue).similar(&Fingerprint::of(&red).0, 120, 180, 120, 180));
+        assert!(!signature.similar(&signature.0, 120, 180, 180, 120));
+        assert!(!signature.similar("invalid", 120, 180, 120, 180));
+        assert!(valid_language("fr-CA"));
+        assert!(valid_language("zh-Hant-TW"));
+        assert!(!valid_language("fr--CA"));
+        assert!(!valid_language("fr<script>"));
+    }
     #[test]
     fn bounded_representations_preserve_dimensions_and_reduce_transfer() {
         let mut state = 17u32;

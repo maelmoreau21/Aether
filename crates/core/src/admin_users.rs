@@ -230,7 +230,7 @@ async fn recheck_actor(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     actor: &Authenticated,
 ) -> Result<(), ApiError> {
-    let valid:i64=query_scalar("SELECT COUNT(*) FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.id=? AND u.role='administrator' AND u.disabled_at IS NULL AND s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-1800").bind(&actor.user.id).bind(&actor.token_hash).fetch_one(&mut **tx).await.map_err(db)?;
+    let valid:i64=query_scalar("SELECT COUNT(*) FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.id=? AND u.role='administrator' AND u.disabled_at IS NULL AND s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-604800").bind(&actor.user.id).bind(&actor.token_hash).fetch_one(&mut **tx).await.map_err(db)?;
     if valid != 1 {
         return Err(error(StatusCode::FORBIDDEN, "administrator_required"));
     }

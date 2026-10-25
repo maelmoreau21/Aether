@@ -1,5 +1,8 @@
 # Extensions API v1 — premier parcours local
 
+> Images multiples et collecte bornée du25octobre : [contrat actuel](ARTWORK_ROTATION.md).
+> Fournisseurs optionnels conservés ; stockage/déduplication et rotation par session natifs.
+
 > Mise à jour du 23 octobre : aucune approbation d’éditeur ou de dépôt n’est requise.
 > Les signatures restent vérifiées avec la clé du catalogue. Configuration dédiée,
 > Toutes les bibliothèques et import d’avatars : [contrat actuel](PLUGIN_SETTINGS_AND_COLLECTIONS.md).

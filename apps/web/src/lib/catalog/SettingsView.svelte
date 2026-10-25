@@ -44,6 +44,7 @@
   }
   const pages = [
     { id: 'account', label: 'Compte', icon: 'profile' },
+    { id: 'security', label: 'Sécurité et appareils', icon: 'shield' },
     { id: 'appearance', label: 'Apparence', icon: 'sun' },
     { id: 'playback', label: 'Lecture', icon: 'play' },
     { id: 'sso', label: 'Connexion SSO', icon: 'shield' }
@@ -113,9 +114,9 @@
         </div>
       </div>
 
-      <AccountSecurity />
     </section>
       </div>
+      <div hidden={current !== 'security'}><section class="card"><h2>Sécurité et appareils</h2><AccountSecurity /></section></div>
       <div hidden={current !== 'appearance'}><section class="card" aria-labelledby="appearance-heading"><h2 id="appearance-heading">Apparence</h2><p class="muted">Personnalisez le thème et la langue de l’interface.</p>
       <div class="pref-fields">
         <label>

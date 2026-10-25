@@ -1,3 +1,11 @@
+
+## 25 octobre 2026 - Sessions persistantes et appareils personnels
+
+- Diagnostic statique : expiration inactive de 30 minutes et absolue de 12 heures. Nouvelle politique commune locale/SSO : 7 jours sans activite et 30 jours maximum ; cookie HttpOnly persistant, controles serveur conserves. Les sessions existantes gardent leur ancienne expiration absolue.
+- Parametres : rubrique Securite et appareils, liste existante rendue accessible, dates de connexion/activite/expiration, actualisation, deconnexion individuelle ou globale. Une entree correspond a une session navigateur, sans identification materielle fiable.
+- Verification : cargo test -p media-poc --lib auth::tests : 5 tests passes (expiration, revocation, redemarrage, CSRF et Origine). cargo test -p media-poc --test account : 2 tests passes (cookie 30 jours, retour apres un jour, expiration apres sept jours, revocation et CSRF). npm --prefix apps/web run check : 0 erreur, 6 avertissements hors fichiers modifies ; npm --prefix apps/web run lint : succes.
+- cargo fmt --all --check signale un ecart dans artwork.rs, fichier modifie en parallele hors de ce jalon. Aucun deploiement ni parcours navigateur reel valide ; reconstruire/redemarrer le serveur puis se reconnecter une fois pour beneficier de la nouvelle echeance.
+
 # MEMORY.md — État et décisions Aether
 
 ## 25 octobre 2026 — Refonte minimaliste de l'en-tête de catalogue, autofocus et correction de la recherche
@@ -4134,3 +4142,13 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
   pas de preuve Release/NAS/PostgreSQL/100 machines. Redistribution entre copies,
   checkpoints par fichier, budgets administratifs et métadonnées via extensions restent ouverts.
   Rapport et commandes : docs/DISTRIBUTED_TASKS.md ; preuves docs/evidence/2026-10-25/distributed-tasks/.
+
+## 25 octobre 2026 — Images multiples et rotation native par visite
+
+- Décision réalisée : pools privés, déduplication et sélection natifs ; découverte des images par les extensions optionnelles existantes. Audit du Poster Rotator Jellyfin au commit6640be2 : son hash sur octets compressés n'est pas réutilisé.
+- Migration0045 SQLite/PostgreSQL : langue, fournisseur, empreinte pixels et alias de hash URL. Imports ajoutés conservés, déduplication dHash/couleurs/proportions/alpha, plafond64 images/œuvre et12/type ; choix manuel prioritaire avec réserve fournisseur conservée. Originaux locaux/anciens imports sans empreinte non rétroanalysés.
+- Collecte administrateur/CSRF par œuvre depuis Modifier les images, fournisseurs actifs/grants vérifiés, identifiants externes connus obligatoires, langues et secours, neutres facultatifs. Bornes12 nouveaux imports,24 tentatives,55s globales ; URL déjà traitées/doublons mémorisés. Pas de collecte automatique de toute la bibliothèque.
+- Web : variantes dans catalogue, choix commun affiches/fonds/logos/illustrations/vignettes ; stabilité au reload, exclusion du choix précédent à la nouvelle visite si alternative. Historique512 couples œuvre/type par compte ; session de navigation distincte des connexions longues, aucune synchronisation interappareil.
+- Sources Aether-Plugins TMDb/fanart/API adaptées : logos, fallback/langues régionales, résolution externe et TVDB séries fanart, plafond200 images/60Kio avec répartition rôles/langues. Paquets signés installés inchangés : reconstruction/signature requises pour distribution.
+- Vérifications : Core2 tests artwork+2 collecte+2 adaptateurs, intégration artwork1, intégrations extensions ciblées2 réussies ; Clippy Core lib/tests strict et formatage réussis. Web9 tests ciblés, ESLint/check (0 erreur,6 avertissements préexistants)/build réussis. Chrome155 Windows avec API simulée : images décodées, nouvelle visite sans reconnexion, stabilité/reconnexion, collecte/CSRF/partiel et1440/390px. Plugins20 tests et Clippy strict réussis.
+- Limites : aucune preuve réseau fournisseur avec clés réelles, PostgreSQL/NAS/déploiement ; déduplication heuristique. Aucun push, publication, changement de médias ou modification du dépôt Jellyfin. Rapport/commandes : docs/ARTWORK_ROTATION.md ; captures/rapport target/artwork-rotation-ui/. Prochain jalon : collecte durable planifiée avec budgets par bibliothèque/fournisseur.

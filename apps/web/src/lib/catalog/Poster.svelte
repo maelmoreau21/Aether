@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { session } from '../auth/session';
+  import { selectArtwork } from './artwork-selection';
   import type { Work } from './api';
   import { history } from './watch-state';
   import Icon from '../ui/Icon.svelte';
@@ -17,8 +19,9 @@
     eager?: boolean;
   } = $props();
 
-  const previewUrl = $derived(imagePreviewUrl(work.posterUrl,showMetadata ? 320 : 640));
-  const imageUrl = $derived([previewUrl,work.posterUrl ?? ''].find(url => url && !failedUrls.includes(url)) ?? '');
+  const posterUrl = $derived(selectArtwork(work, $session).poster);
+  const previewUrl = $derived(imagePreviewUrl(posterUrl,showMetadata ? 320 : 640));
+  const imageUrl = $derived([previewUrl,posterUrl ?? ''].find(url => url && !failedUrls.includes(url)) ?? '');
   let loadedUrl = $state('');
 
   $effect(() => {

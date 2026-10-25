@@ -480,3 +480,7 @@ et contrôle leur préparation Core. `allow_text` reconnaît `subrip`, `webvtt`,
 `422 embedded_subtitle_disabled`, avant le traitement local ou le relais distant.
 Les pistes externes sont conservées. Le fichier original Direct Play contient
 toujours ses pistes internes : cette préférence n'en retire pas les octets.
+
+### Sessions personnelles (25 octobre 2026)
+
+`GET /api/v1/account/sessions` retourne `{sessions:[{id,device,createdAt,lastSeenAt,expiresAt,current}]}` pour le compte courant uniquement. `DELETE /api/v1/account/sessions/{id}` révoque une session du compte (`404` si absente ou appartenant à un autre compte) ; `DELETE /api/v1/account/sessions` les révoque toutes. Mutations : Origin/CSRF requis (`403`), session valide requise (`401`), succès `204`. Dates Unix en secondes, identifiants publics distincts des secrets. Connexion locale/SSO : cookie persistant 30 jours, inactivité maximale 7 jours. Les sessions antérieures conservent leur expiration absolue. Voir [sessions](LOCAL_SESSIONS.md).

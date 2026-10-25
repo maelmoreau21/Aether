@@ -72,7 +72,10 @@ pub async fn router(auth: AuthState, media_root: PathBuf) -> Result<Router, sqlx
             "/api/v1/admin/tasks/system/{id}/schedule",
             put(update_schedule),
         )
-        .route("/api/v1/admin/tasks/system/{id}/run", post(run_task_endpoint))
+        .route(
+            "/api/v1/admin/tasks/system/{id}/run",
+            post(run_task_endpoint),
+        )
         .layer(DefaultBodyLimit::max(4096))
         .with_state(state))
 }
@@ -120,7 +123,7 @@ async fn update_schedule(
 
     let next_due = now() + (input.interval_minutes * 60);
     let changed = crate::database::query(
-        "UPDATE system_task_schedules SET interval_minutes=?, enabled=?, next_due_at=? WHERE id=?"
+        "UPDATE system_task_schedules SET interval_minutes=?, enabled=?, next_due_at=? WHERE id=?",
     )
     .bind(input.interval_minutes)
     .bind(if input.enabled { 1 } else { 0 })
@@ -144,13 +147,12 @@ async fn run_task_endpoint(
 ) -> Result<StatusCode, StatusCode> {
     authorize(&state.auth, &headers, true).await?;
 
-    let exists: i64 = crate::database::query_scalar(
-        "SELECT COUNT(*) FROM system_task_schedules WHERE id=?",
-    )
-    .bind(&id)
-    .fetch_one(&state.auth.store.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let exists: i64 =
+        crate::database::query_scalar("SELECT COUNT(*) FROM system_task_schedules WHERE id=?")
+            .bind(&id)
+            .fetch_one(&state.auth.store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if exists == 0 {
         return Err(StatusCode::NOT_FOUND);
@@ -213,12 +215,11 @@ pub async fn execute_task(state: &SystemTasksState, id: &str) -> Result<(), Stat
 
 /// 1. update-extensions: Refresh extension repositories and catalogs
 async fn task_update_extensions(state: &SystemTasksState) -> Result<(), StatusCode> {
-    let repos: Vec<(String, String)> = crate::database::query_as(
-        "SELECT id, url FROM extension_repositories ORDER BY id",
-    )
-    .fetch_all(&state.auth.store.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let repos: Vec<(String, String)> =
+        crate::database::query_as("SELECT id, url FROM extension_repositories ORDER BY id")
+            .fetch_all(&state.auth.store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     for (id, url) in repos {
         if let Ok(bytes) = crate::extensions::repositories::fetch(&url, 1024 * 1024).await {
@@ -227,7 +228,7 @@ async fn task_update_extensions(state: &SystemTasksState) -> Result<(), StatusCo
                 Err(_) => continue,
             };
             let _ = crate::database::query(
-                "UPDATE extension_repositories SET manifest_json=?, refreshed_at=? WHERE id=?"
+                "UPDATE extension_repositories SET manifest_json=?, refreshed_at=? WHERE id=?",
             )
             .bind(manifest_str)
             .bind(now())
@@ -265,21 +266,17 @@ async fn task_clean_sessions(state: &SystemTasksState) -> Result<(), StatusCode>
     // Inactivity threshold: 30 days
     let inactivity_threshold = current_time - (30 * 86400);
 
-    let _ = crate::database::query(
-        "DELETE FROM sessions WHERE expires_at<=? OR last_seen_at<=?"
-    )
-    .bind(current_time)
-    .bind(inactivity_threshold)
-    .execute(&state.auth.store.pool)
-    .await;
+    let _ = crate::database::query("DELETE FROM sessions WHERE expires_at<=? OR last_seen_at<=?")
+        .bind(current_time)
+        .bind(inactivity_threshold)
+        .execute(&state.auth.store.pool)
+        .await;
 
     // Purge expired oidc flows if table exists
-    let _ = crate::database::query(
-        "DELETE FROM oidc_flows WHERE created_at<=?"
-    )
-    .bind(current_time - 3600)
-    .execute(&state.auth.store.pool)
-    .await;
+    let _ = crate::database::query("DELETE FROM oidc_flows WHERE created_at<=?")
+        .bind(current_time - 3600)
+        .execute(&state.auth.store.pool)
+        .await;
 
     Ok(())
 }
@@ -288,7 +285,7 @@ async fn task_clean_sessions(state: &SystemTasksState) -> Result<(), StatusCode>
 async fn task_clean_cache(state: &SystemTasksState) -> Result<(), StatusCode> {
     // Delete poster_previews for works that no longer have a poster or no longer exist
     let _ = crate::database::query(
-        "DELETE FROM poster_previews WHERE work_id NOT IN (SELECT work_id FROM work_posters)"
+        "DELETE FROM poster_previews WHERE work_id NOT IN (SELECT work_id FROM work_posters)",
     )
     .execute(&state.auth.store.pool)
     .await;
@@ -312,14 +309,14 @@ async fn task_clean_cache(state: &SystemTasksState) -> Result<(), StatusCode> {
 async fn task_clean_playlists(state: &SystemTasksState) -> Result<(), StatusCode> {
     // Remove personal_list_items for works that do not exist in inventory or works table
     let _ = crate::database::query(
-        "DELETE FROM personal_list_items WHERE work_id NOT IN (SELECT id FROM works)"
+        "DELETE FROM personal_list_items WHERE work_id NOT IN (SELECT id FROM works)",
     )
     .execute(&state.auth.store.pool)
     .await;
 
     // Remove playlist_music_items for tracks that no longer exist
     let _ = crate::database::query(
-        "DELETE FROM playlist_music_items WHERE track_id NOT IN (SELECT id FROM music_tracks)"
+        "DELETE FROM playlist_music_items WHERE track_id NOT IN (SELECT id FROM music_tracks)",
     )
     .execute(&state.auth.store.pool)
     .await;
@@ -343,13 +340,11 @@ async fn scheduled_tick(state: &SystemTasksState) {
 
     for (id, interval_minutes) in due_tasks {
         let next_due = current_time + (interval_minutes * 60);
-        let _ = crate::database::query(
-            "UPDATE system_task_schedules SET next_due_at=? WHERE id=?"
-        )
-        .bind(next_due)
-        .bind(&id)
-        .execute(&state.auth.store.pool)
-        .await;
+        let _ = crate::database::query("UPDATE system_task_schedules SET next_due_at=? WHERE id=?")
+            .bind(next_due)
+            .bind(&id)
+            .execute(&state.auth.store.pool)
+            .await;
 
         let _ = execute_task(state, &id).await;
     }
@@ -376,8 +371,12 @@ mod tests {
     async fn test_system_tasks_seeded_and_claimable() {
         let temp = tempfile::tempdir().unwrap();
         let db_path = temp.path().join("test.sqlite3");
-        let store = crate::identity::IdentityStore::open(&db_path).await.unwrap();
-        let auth = AuthState::new(store.clone(), "http://localhost:3000".to_string()).await.unwrap();
+        let store = crate::identity::IdentityStore::open(&db_path)
+            .await
+            .unwrap();
+        let auth = AuthState::new(store.clone(), "http://localhost:3000".to_string())
+            .await
+            .unwrap();
 
         let tasks: Vec<SystemTaskSchedule> = crate::database::query_as(
             "SELECT id, name, description, category, interval_minutes, enabled, next_due_at, last_started_at, last_completed_at, last_outcome FROM system_task_schedules ORDER BY id"
@@ -387,11 +386,31 @@ mod tests {
         .unwrap();
 
         assert_eq!(tasks.len(), 5);
-        assert!(tasks.iter().any(|t| t.id == "update-extensions" && t.enabled == 1));
-        assert!(tasks.iter().any(|t| t.id == "optimize-database" && t.enabled == 1));
-        assert!(tasks.iter().any(|t| t.id == "clean-sessions" && t.enabled == 1));
-        assert!(tasks.iter().any(|t| t.id == "clean-cache" && t.enabled == 1));
-        assert!(tasks.iter().any(|t| t.id == "clean-playlists" && t.enabled == 1));
+        assert!(
+            tasks
+                .iter()
+                .any(|t| t.id == "update-extensions" && t.enabled == 1)
+        );
+        assert!(
+            tasks
+                .iter()
+                .any(|t| t.id == "optimize-database" && t.enabled == 1)
+        );
+        assert!(
+            tasks
+                .iter()
+                .any(|t| t.id == "clean-sessions" && t.enabled == 1)
+        );
+        assert!(
+            tasks
+                .iter()
+                .any(|t| t.id == "clean-cache" && t.enabled == 1)
+        );
+        assert!(
+            tasks
+                .iter()
+                .any(|t| t.id == "clean-playlists" && t.enabled == 1)
+        );
 
         let state = SystemTasksState {
             auth,
@@ -414,4 +433,3 @@ mod tests {
         assert!(updated.last_completed_at.is_some());
     }
 }
-

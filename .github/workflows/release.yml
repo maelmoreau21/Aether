@@ -54,12 +54,14 @@ jobs:
           # Vérifier si le tag existe déjà sur git
           if git rev-parse "$NEXT_TAG" >/dev/null 2>&1; then
             echo "Le tag $NEXT_TAG existe déjà sur git. Aucune nouvelle release requise."
-            echo "has_release=false" >> $GITHUB_OUTPUT
+            echo "has_release=false" >> "$GITHUB_OUTPUT"
           else
-            echo "has_release=true" >> $GITHUB_OUTPUT
-            echo "next_tag=$NEXT_TAG" >> $GITHUB_OUTPUT
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-            echo "series=$SERIES" >> $GITHUB_OUTPUT
+            {
+              echo "has_release=true"
+              echo "next_tag=$NEXT_TAG"
+              echo "version=$VERSION"
+              echo "series=$SERIES"
+            } >> "$GITHUB_OUTPUT"
             
             # Sauvegarder le changelog pour l'étape de création de release
             jq -r '.changelog' release_info.json > changelog.md

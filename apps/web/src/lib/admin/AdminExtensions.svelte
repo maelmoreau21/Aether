@@ -356,6 +356,7 @@
             {#if extension.manifest.repository}
               <div class="meta-row">
                 <span class="meta-label">Dépôt</span>
+                <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- External link -->
                 <span class="meta-value"><a href={extension.manifest.repository} target="_blank" rel="noreferrer">{displayName(extension.manifest.name)}</a></span>
               </div>
             {/if}

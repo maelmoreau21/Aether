@@ -16,6 +16,7 @@ pub mod oidc;
 pub mod postgres_backup;
 pub mod scheduler;
 pub mod server_settings;
+pub mod system_tasks;
 use media_contracts::brand;
 pub mod artwork;
 mod catalog;
@@ -194,6 +195,7 @@ pub async fn secure_app_with_jobs(
             .merge(admin_users::router(auth.clone()))
             .merge(admin_backups::router(auth.clone(), root.clone()).await?)
             .merge(scheduler::router(auth.clone()).await?)
+            .merge(system_tasks::router(auth.clone(), root.clone()).await?)
             .merge(groups::router(auth.clone()))
             .merge(api_keys::router(auth.clone()))
             .merge(extensions::router(auth.clone()))

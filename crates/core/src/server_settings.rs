@@ -19,6 +19,11 @@ pub struct Settings {
     pub welcome_message: String,
     #[serde(default = "default_sso_button_label")]
     pub sso_button_label: String,
+    #[serde(default = "default_block_sso_local")]
+    pub block_sso_local_accounts: bool,
+}
+fn default_block_sso_local() -> bool {
+    true
 }
 fn default_sso_button_label() -> String {
     "Se connecter avec SSO".into()
@@ -30,6 +35,7 @@ struct SettingsInput {
     server_name: String,
     welcome_message: String,
     sso_button_label: Option<String>,
+    block_sso_local_accounts: Option<bool>,
 }
 
 impl Default for Settings {
@@ -38,6 +44,7 @@ impl Default for Settings {
             server_name: media_contracts::brand::DEFAULT_NAME.into(),
             welcome_message: String::new(),
             sso_button_label: default_sso_button_label(),
+            block_sso_local_accounts: true,
         }
     }
 }
@@ -92,6 +99,9 @@ async fn write(
     administrator(&auth, &headers, true).await?;
     let previous = load(&auth.store).await?;
     let input = Settings {
+        block_sso_local_accounts: input
+            .block_sso_local_accounts
+            .unwrap_or(previous.block_sso_local_accounts),
         server_name: input.server_name.trim().to_owned(),
         welcome_message: input.welcome_message.trim().to_owned(),
         sso_button_label: input

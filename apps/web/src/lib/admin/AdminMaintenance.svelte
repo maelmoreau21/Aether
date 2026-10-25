@@ -81,16 +81,15 @@
 <a href={`/api/v1/admin/backups/${archive.id}/download`} download>Télécharger</a></li>{/each}</ul>{/if}</article>
     {/if}
   {/if}
-  <aside><h3>Restaurer en sécurité</h3><p>Arrêtez le Core avant une restauration. Déchiffrez votre archive dans un nouvel emplacement vide avec media-recover, puis restaurez la base extraite avec media-restore. Pour PostgreSQL, choisissez une base cible vide. Rétablissez la configuration extraite, adaptez les chemins à la nouvelle machine et vérifiez le redémarrage.</p><p>La restauration Web, la suppression et la rétention automatique des sauvegardes ne sont pas disponibles.</p><p>Ces archives contiennent la base complète (comptes, groupes, accès, tâches et catalogue) et les variables de configuration MEDIA_* et OIDC_* du processus, avec leurs secrets. Les certificats internes et PostgreSQL configurés sont inclus. Les médias et les données propres aux Media Nodes restent à conserver séparément.</p></aside>
 </section>
 
 <style>
   .maintenance { display: grid; gap: 1.5rem; }
-  header p, article p, aside p { color: var(--text-secondary); line-height: 1.65; }
+  header p, article p { color: var(--text-secondary); line-height: 1.65; }
   h2, h3 { color: var(--text-primary); margin: 0 0 .75rem; }
   h2 { font-size: 1.5rem; }
   .eyebrow { font-size: .7rem; letter-spacing: .15em; font-weight: 700; }
-  article, aside, .notice { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 16px; padding: 1.5rem; min-width: 0; }
+  article, .notice { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 16px; padding: 1.5rem; min-width: 0; }
   .notice { border-inline-start: 3px solid var(--accent-primary); }
   .notice p { color: var(--text-secondary); }
   form { display: grid; gap: 1rem; }
@@ -103,7 +102,7 @@
   li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--border-subtle); }
   small { display: block; margin-top: .35rem; color: var(--text-secondary); overflow-wrap: anywhere; }
   .error { color: var(--status-error); }
-  @media (max-width: 650px) { li { align-items: start; flex-direction: column; } article, aside, .notice { padding: 1.1rem; } }
+  @media (max-width: 650px) { li { align-items: start; flex-direction: column; } article, .notice { padding: 1.1rem; } }
 </style>
 
 

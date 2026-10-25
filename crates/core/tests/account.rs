@@ -224,3 +224,179 @@ async fn persistent_session_survives_return_and_expires_after_seven_days() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn sso_local_credentials_policy_csrf_and_recent_login() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("policy.db"))
+        .await
+        .unwrap();
+    store
+        .bootstrap("admin", Zeroizing::new(PASSWORD.into()))
+        .await
+        .unwrap();
+    let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
+    let app = auth::router(auth.clone())
+        .merge(account::router(auth.clone()))
+        .merge(media_poc::server_settings::router(auth));
+    let (cookie, csrf) = login(&app, PASSWORD).await;
+    let user: String = media_poc::database::query_scalar(
+        "SELECT user_id FROM local_credentials WHERE login='admin'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    media_poc::database::query("INSERT INTO oidc_identities(issuer,subject,user_id) VALUES('https://idp.invalid','synthetic',?)").bind(&user).execute(store.pool()).await.unwrap();
+    media_poc::database::query("DELETE FROM local_credentials WHERE user_id=?")
+        .bind(&user)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let path = "/api/v1/account/local-credentials";
+    let input = json!({"login":"new-local","password":"new synthetic local password"});
+    assert_eq!(
+        req(&app, path, "POST", &cookie, &csrf, input.clone())
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        req(
+            &app,
+            "/api/v1/admin/settings",
+            "PUT",
+            &cookie,
+            &csrf,
+            json!({"serverName":"Test","welcomeMessage":"","blockSsoLocalAccounts":false})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        body(req(&app, path, "GET", &cookie, "", json!(null)).await).await["canCreate"],
+        true
+    );
+    assert_eq!(
+        req(&app, path, "POST", &cookie, "", input.clone())
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    media_poc::database::query("UPDATE sessions SET created_at=unixepoch()-301 WHERE user_id=?")
+        .bind(&user)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        req(&app, path, "POST", &cookie, &csrf, input.clone())
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    media_poc::database::query("UPDATE sessions SET created_at=unixepoch() WHERE user_id=?")
+        .bind(&user)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        req(&app, path, "POST", &cookie, &csrf, input.clone())
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        req(&app, path, "POST", &cookie, &csrf, input)
+            .await
+            .status(),
+        StatusCode::CONFLICT
+    );
+}
+
+#[tokio::test]
+async fn avatar_policy_enforced_for_active_plugins() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("avatar-policy.db"))
+        .await
+        .unwrap();
+    store
+        .bootstrap("admin", Zeroizing::new(PASSWORD.into()))
+        .await
+        .unwrap();
+    let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
+    let app = auth::router(auth.clone()).merge(media_poc::avatars::router(auth));
+    let (cookie, csrf) = login(&app, PASSWORD).await;
+    let path = "/api/v1/account/avatar/policy";
+    assert_eq!(
+        req(&app, path, "GET", "", "", json!(null)).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        body(req(&app, path, "GET", &cookie, "", json!(null)).await).await,
+        json!({"uploadAllowed":true,"removeAllowed":true})
+    );
+    let package = media_extension_sdk::Package {
+        manifest: media_extension_sdk::Manifest {
+            permissions: vec!["avatars".into()],
+            ..Default::default()
+        },
+        publisher_id: "fixture".into(),
+        sha256: String::new(),
+        wasm: String::new(),
+        signature: String::new(),
+    };
+    media_poc::database::query(
+        "INSERT INTO extension_publishers(id,public_key) VALUES('fixture','synthetic')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    media_poc::database::query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture','fixture',?,1,'fixture')").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
+    media_poc::database::query(
+        "INSERT INTO extension_settings(extension_id,settings_json) VALUES('fixture',?)",
+    )
+    .bind(json!({"disallow_custom_avatars":true,"force_random_on_creation":true}).to_string())
+    .execute(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        body(req(&app, path, "GET", &cookie, "", json!(null)).await).await,
+        json!({"uploadAllowed":false,"removeAllowed":false})
+    );
+    for method in ["PUT", "DELETE"] {
+        assert_eq!(
+            req(
+                &app,
+                "/api/v1/account/avatar",
+                method,
+                &cookie,
+                &csrf,
+                json!(null)
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    media_poc::database::query("UPDATE extensions SET enabled=0")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        body(req(&app, path, "GET", &cookie, "", json!(null)).await).await,
+        json!({"uploadAllowed":true,"removeAllowed":true})
+    );
+    assert_eq!(
+        req(
+            &app,
+            "/api/v1/account/avatar",
+            "DELETE",
+            &cookie,
+            &csrf,
+            json!(null)
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+}

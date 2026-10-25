@@ -1,13 +1,35 @@
 <script lang="ts">
+  import { adminRequest } from '../admin/request';
   import { session } from '../auth/session';
   import { avatarRevision } from '../auth/avatar';
   let busy = $state(false), error = $state(''), notice = $state('');
-  type Extension = { id: string; name: string };
-  type Pack = { id: string; name: string };
-  let extensions = $state<Extension[]>([]), packs = $state<Pack[]>([]);
-  let extensionId = $state(''), packId = $state(''), seed = $state('');
-  let preview = $state('');
+  let uploadAllowed=$state(false),removeAllowed=$state(false),showGallery=$state(false);
+  let fileInput = $state<HTMLInputElement>();
+  let gravatarAllowed=$state(false),gravatarEmail=$state('');
+  async function importGravatar(){busy=true;error='';notice='';try{await adminRequest('/api/v1/account/avatar/gravatar',{method:'POST',body:JSON.stringify({email:gravatarEmail})});avatarRevision.update(value=>value+1);notice='Gravatar importé.';gravatarEmail='';}catch(e){error=e instanceof Error?e.message:'Import impossible.';}finally{busy=false;}}
   let collections=$state<{id:string;name:string;count:number}[]>([]),collectionId=$state('');
+  let extensions=$state<{id:string;name:string}[]>([]), proposals=$state<{extension:string;pack:string;seed:string;url:string}[]>([]);
+  async function choosePhotos() {
+    showGallery=!showGallery;
+    if(!showGallery || proposals.length || !extensions.length)return;
+    busy=true;error='';
+    try {
+      const images=[];
+      for(const extension of extensions){
+        const listed=await adminRequest<{result:{id:string;name:string}[]}>(`/api/v1/account/avatar/extensions/${encodeURIComponent(extension.id)}`,{method:'POST',body:JSON.stringify({operation:'avatars.list'})});
+        for(const pack of listed.result.slice(0,8)) {
+          const seed=crypto.randomUUID();
+          const generated=await adminRequest<{result:{svg:string}}>(`/api/v1/account/avatar/extensions/${encodeURIComponent(extension.id)}`,{method:'POST',body:JSON.stringify({operation:'avatars.generate',pack:pack.id,seed})});
+          images.push({extension:extension.id,pack:pack.id,seed,url:`data:image/svg+xml;charset=utf-8,${encodeURIComponent(generated.result.svg)}`});
+        }
+      }
+      proposals=images;
+    }catch(cause){error=cause instanceof Error?cause.message:'Photos indisponibles.';}finally{busy=false;}
+  }
+  async function applyProposal(item:{extension:string;pack:string;seed:string}){
+    busy=true;error='';
+    try{await adminRequest(`/api/v1/account/avatar/extensions/${encodeURIComponent(item.extension)}`,{method:'POST',body:JSON.stringify({operation:'avatars.generate',pack:item.pack,seed:item.seed,apply:true})});avatarRevision.update(v=>v+1);notice='Image de profil enregistrée.';}catch(cause){error=cause instanceof Error?cause.message:'Modification impossible.';}finally{busy=false;}
+  }
   let collectionImages=$state<{id:string;name:string;url:string}[]>([]);
   async function gallery(path:string,method='GET') {
     const current=$session;if(!current)return;
@@ -22,40 +44,21 @@
   }
   $effect(() => {
     const userId = $session?.user.id;
-    extensions=[];collections=[];collectionImages=[];collectionId='';packs=[];extensionId='';packId='';preview='';
+    uploadAllowed=false;removeAllowed=false;showGallery=false;
+    extensions=[];proposals=[];
+    collections=[];collectionImages=[];collectionId='';
+    gravatarAllowed=false;gravatarEmail='';
     if (!userId) return;
     const controller = new AbortController();
+    void fetch('/api/v1/account/avatar/extensions',{credentials:'same-origin',cache:'no-store',signal:controller.signal}).then(r=>r.ok?r.json():{extensions:[]}).then(v=>{if($session?.user.id===userId)extensions=v.extensions;}).catch(()=>{});
+    void fetch('/api/v1/account/avatar/policy',{credentials:'same-origin',cache:'no-store',signal:controller.signal}).then(r=>{if(!r.ok)throw new Error();return r.json();}).then(v=>{if($session?.user.id===userId){uploadAllowed=v.uploadAllowed;removeAllowed=v.removeAllowed;}}).catch(()=>{error='Impossible de charger les autorisations de l’image de profil.';});
+    void fetch('/api/v1/account/avatar/gravatar',{credentials:'same-origin',cache:'no-store',signal:controller.signal}).then(async response=>response.ok?response.json():{allowed:false}).then(value=>{if($session?.user.id===userId)gravatarAllowed=value.allowed;}).catch(()=>{});
     void fetch('/api/v1/account/avatar/collections',{credentials:'same-origin',cache:'no-store',signal:controller.signal})
       .then(async response=>response.ok?response.json():{packs:[]})
-      .then(value=>{if($session?.user.id===userId)collections=value.packs;}).catch(()=>{});
+      .then(value=>{if($session?.user.id===userId){collections=value.packs;collectionId=collections[0]?.id??'';if(collectionId)void gallery(`/api/v1/account/avatar/collections/${encodeURIComponent(collectionId)}`);}}).catch(()=>{});
 
-    void fetch('/api/v1/account/avatar/extensions', { credentials:'same-origin', cache:'no-store', signal:controller.signal })
-      .then(async response => { if (!response.ok) throw new Error('Extensions indisponibles.'); return response.json() as Promise<{extensions:Extension[]}>; })
-      .then(value => { if ($session?.user.id === userId) extensions=value.extensions; })
-      .catch(() => {});
     return () => controller.abort();
   });
-  async function plugin(operation: string, apply = false) {
-    const current=$session; if (!current || busy || !extensionId) return;
-    if (operation === 'avatars.generate' && !seed) seed=crypto.randomUUID();
-    busy=true; error=''; notice='';
-    try {
-      const response=await fetch(`/api/v1/account/avatar/extensions/${encodeURIComponent(extensionId)}`, {
-        method:'POST',credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(70000),
-        headers:{'content-type':'application/json','x-csrf-token':current.csrfToken},
-        body:JSON.stringify({operation,pack:packId || null,seed:seed || null,apply})
-      });
-      const value=await response.json() as {result: Pack[] | {svg:string}; error?:string; pluginError?:string};
-      if (!response.ok) throw new Error(value.pluginError ?? value.error ?? 'Extension indisponible.');
-      if ($session?.user.id !== current.user.id) return;
-      if (operation==='avatars.list') { packs=value.result as Pack[]; packId=packs[0]?.id ?? ''; preview=''; }
-      else {
-        preview=`data:image/svg+xml;charset=utf-8,${encodeURIComponent((value.result as {svg:string}).svg)}`;
-        if (apply) { avatarRevision.update(value=>value+1); notice='Avatar enregistré.'; }
-      }
-    } catch(cause) { if ($session?.user.id===current.user.id) error=cause instanceof Error ? cause.message : 'Extension indisponible.'; }
-    finally { busy=false; }
-  }
   async function update(file?: File) {
     const current = $session; if (!current || busy) return;
     error = ''; notice = '';
@@ -71,26 +74,21 @@
   }
 </script>
 <div class="avatar-editor">
-  <label>Image de profil<input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onchange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void update(file); event.currentTarget.value = ''; }} /></label>
-  <p>PNG, JPEG ou WebP · 2 Mo maximum. L’image est recadrée au centre et enregistrée au format carré.</p>
-  {#if extensions.length}
-    <label>Extension d’avatars<select bind:value={extensionId} disabled={busy} onchange={() => { packs=[]; packId=''; preview=''; if (extensionId) void plugin('avatars.list'); }}><option value="">Choisir une extension</option>{#each extensions as extension (extension.id)}<option value={extension.id}>{extension.name}</option>{/each}</select></label>
-    {#if packs.length}
-      <label>Pack<select bind:value={packId} disabled={busy} onchange={() => preview=''}>{#each packs as pack (pack.id)}<option value={pack.id}>{pack.name}</option>{/each}</select></label>
-      <label>Variante<input bind:value={seed} maxlength="128" placeholder="Un nom ou un numéro" disabled={busy} oninput={() => preview=''} /></label>
-      <button type="button" disabled={busy} onclick={() => void plugin('avatars.generate')}>Aperçu</button>
-      <button type="button" disabled={busy} onclick={() => void plugin('avatars.generate', true)}>Utiliser cet avatar</button>
-      {#if preview}<img src={preview} alt="Aperçu de l’avatar proposé" width="128" height="128" />{/if}
-    {/if}
-  {/if}
-  {#if collections.length}
+  <div class="avatar-actions">
+    {#if uploadAllowed}<input class="file-input" bind:this={fileInput} type="file" accept="image/png,image/jpeg,image/webp" aria-label="Importer une image de profil" disabled={busy} onchange={(event) => { const file=event.currentTarget.files?.[0];if(file)void update(file);event.currentTarget.value=''; }} /><button disabled={busy} onclick={()=>fileInput?.click()}>Importer une image</button>{/if}
+    {#if removeAllowed}<button disabled={busy} onclick={()=>void update()}>Supprimer l’image de profil</button>{/if}
+    {#if collections.length || extensions.length}<button disabled={busy} aria-expanded={showGallery} onclick={()=>void choosePhotos()}>Choisir une photo de profil</button>{/if}
+  </div>
+  {#if showGallery && proposals.length}<div class="avatar-gallery">{#each proposals as item (item.seed)}<button disabled={busy} aria-label={`Choisir la photo ${item.pack}`} onclick={()=>void applyProposal(item)}><img src={item.url} alt={`Photo ${item.pack}`} width="80" height="80" /></button>{/each}</div>{/if}
+  {#if showGallery && collections.length}
     <label>Collections du serveur<select disabled={busy} bind:value={collectionId} onchange={()=>{collectionImages=[];if(collectionId)void gallery(`/api/v1/account/avatar/collections/${encodeURIComponent(collectionId)}`);}}><option value="">Choisir une collection</option>{#each collections as collection (collection.id)}<option value={collection.id}>{collection.name} · {collection.count}</option>{/each}</select></label>
     <div class="avatar-gallery">{#each collectionImages as item (item.id)}<button type="button" disabled={busy} aria-label={`Choisir ${item.name}`} onclick={()=>void gallery(item.url,'POST')}><img src={item.url} alt={item.name} width="80" height="80" loading="lazy" /></button>{/each}</div>
   {/if}
-  <button type="button" disabled={busy} onclick={() => void update()}>Retirer l’image</button>
+  {#if showGallery && gravatarAllowed}<form onsubmit={event=>{event.preventDefault();void importGravatar();}}><label>Adresse e-mail Gravatar<input type="email" required maxlength="254" bind:value={gravatarEmail} disabled={busy} /></label><button disabled={busy}>Importer mon Gravatar</button><p>L’adresse n’est pas conservée. Son empreinte est envoyée à Gravatar pour télécharger votre image.</p></form>{/if}
   {#if busy}<p role="status">Enregistrement…</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}{#if error}<p role="alert">{error}</p>{/if}
 </div>
 <style>
+  .file-input { display:none; }.avatar-actions { display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px; }
   .avatar-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:10px;max-height:420px;overflow:auto;margin:16px 0;}.avatar-gallery button{padding:4px;}.avatar-gallery img{width:100%;height:auto;aspect-ratio:1;object-fit:cover;border-radius:6px;}
   .avatar-editor { margin-bottom: 28px; padding-bottom: 24px; border-bottom: 1px solid var(--border-subtle); }
   label { display: grid; gap: 12px; font-size: 14px; }

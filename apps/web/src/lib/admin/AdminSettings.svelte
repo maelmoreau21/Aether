@@ -4,12 +4,13 @@
   import PlaylistPolicy from './PlaylistPolicy.svelte';
   let { section }: { section: string } = $props();
   let name = $state(''), welcome = $state(''), ssoLabel = $state('Se connecter avec SSO'), error = $state(''), notice = $state('');
+  let blockSsoLocalAccounts=$state(true);
   let loading = $state(true), saving = $state(false);
   let network = $state<{ publicUrl: string; secureCookies: boolean; webPath: string; apiPath: string } | null>(null);
   async function load(target: string) {
     loading = true; error = ''; notice = '';
     try {
-      if (target === '#general-section') { const data = await adminRequest<{ serverName: string; welcomeMessage: string; ssoButtonLabel: string }>('/api/v1/admin/settings'); name = data.serverName; welcome = data.welcomeMessage; ssoLabel = data.ssoButtonLabel ?? 'Se connecter avec SSO'; }
+      if (target === '#general-section') { const data = await adminRequest<{ serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean }>('/api/v1/admin/settings'); blockSsoLocalAccounts=data.blockSsoLocalAccounts; name = data.serverName; welcome = data.welcomeMessage; ssoLabel = data.ssoButtonLabel ?? 'Se connecter avec SSO'; }
       else network = await adminRequest('/api/v1/admin/network');
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Chargement impossible.'; }
     finally { loading = false; }
@@ -18,9 +19,9 @@
   async function save(event: SubmitEvent) {
     event.preventDefault(); if (saving) return; saving = true; error = ''; notice = '';
     try {
-      await adminRequest('/api/v1/admin/settings', { method: 'PUT', body: JSON.stringify({ serverName: name, welcomeMessage: welcome, ssoButtonLabel: ssoLabel }) });
-      const saved = await adminRequest<{ serverName: string; welcomeMessage: string; ssoButtonLabel: string }>('/api/v1/admin/settings');
-      name = saved.serverName; welcome = saved.welcomeMessage; ssoLabel = saved.ssoButtonLabel; serverPresentation.set(saved); notice = 'Paramètres enregistrés.';
+      await adminRequest('/api/v1/admin/settings', { method: 'PUT', body: JSON.stringify({ serverName: name, welcomeMessage: welcome, ssoButtonLabel: ssoLabel, blockSsoLocalAccounts }) });
+      const saved = await adminRequest<{ serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean }>('/api/v1/admin/settings');
+      blockSsoLocalAccounts=saved.blockSsoLocalAccounts; name = saved.serverName; welcome = saved.welcomeMessage; ssoLabel = saved.ssoButtonLabel; serverPresentation.set(saved); notice = 'Paramètres enregistrés.';
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Enregistrement impossible.'; }
     finally { saving = false; }
   }
@@ -31,6 +32,7 @@
     <label>Nom du serveur<input bind:value={name} required maxlength="80" autocomplete="off" /></label>
     <label>Message d’accueil<textarea bind:value={welcome} maxlength="500" rows="3"></textarea></label>
     <label>Texte du bouton de connexion SSO<input bind:value={ssoLabel} required maxlength="80" placeholder="Se connecter avec Authentik" /></label>
+    <label class="policy-toggle"><input type="checkbox" bind:checked={blockSsoLocalAccounts} />Empêcher les utilisateurs SSO de créer des identifiants locaux</label>
     <button type="submit">{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
   </fieldset></form>
   <PlaylistPolicy />
@@ -46,6 +48,7 @@
   {#if loading}<p role="status">Chargement…</p>{/if}{#if error}<p role="alert">{error}</p><button disabled={loading} onclick={() => void load(section)}>Réessayer</button>{/if}{#if notice}<p role="status">{notice}</p>{/if}
 {/if}
 <style>
+  .policy-toggle { display:flex;align-items:center;gap:12px; }.policy-toggle input { width:20px;min-height:20px; }
   h2 { font-size: 28px; font-weight: 400; margin: 0 0 32px; }
   form { max-width: 850px; } fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   label { display: grid; gap: 12px; margin-top: 24px; font-size: 15px; }

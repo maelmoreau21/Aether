@@ -115,7 +115,7 @@ fn public_ip(ip: IpAddr) -> bool {
         }
     }
 }
-pub(super) async fn fetch(raw: &str, maximum: usize) -> Result<Vec<u8>, Error> {
+pub(crate) async fn fetch(raw: &str, maximum: usize) -> Result<Vec<u8>, Error> {
     let url = safe_url(raw)?;
     #[cfg(test)]
     if let Some(bytes) = test_documents().lock().unwrap().get(raw).cloned() {

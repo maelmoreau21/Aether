@@ -862,11 +862,19 @@ async fn browser_extension_installs_and_executes_real_rust_module() {
     let p = package(&key, wasm);
     let path = temp.path().join("package.json");
     std::fs::write(&path, serde_json::to_vec(&p).unwrap()).unwrap();
+    let mut avatars = package(&key, STANDARD.decode(&p.wasm).unwrap());
+    avatars.manifest.id = "test.avatars".into();
+    avatars.manifest.name = "Avatars de test".into();
+    avatars.manifest.permissions = vec!["avatars".into()];
+    avatars.signature = STANDARD.encode(key.sign(&avatars.signing_bytes().unwrap()).as_ref());
+    let avatar_path = temp.path().join("avatar-package.json");
+    std::fs::write(&avatar_path, serde_json::to_vec(&avatars).unwrap()).unwrap();
     let status = tokio::process::Command::new("node")
         .arg("scripts/test-extensions-live.mjs")
         .current_dir(root.join("apps/web"))
         .env("MEDIA_TEST_ORIGIN", origin)
         .env("MEDIA_TEST_PACKAGE", path)
+        .env("MEDIA_TEST_AVATAR_PACKAGE", avatar_path)
         .env(
             "MEDIA_TEST_PUBLIC_KEY",
             STANDARD.encode(key.public_key().as_ref()),

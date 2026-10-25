@@ -98,7 +98,7 @@ le même UUID et ses permissions, même si l'email change. Un changement d'issue
 est une nouvelle identité et nécessite une liaison explicite.
 
 Pour conserver un compte local existant : se connecter localement, ouvrir
-**Paramètres → Connexion SSO → Lier mon compte local au SSO**, confirmer le mot
+**Paramètres → Sécurité → Connexion SSO → Lier mon compte local au SSO**, confirmer le mot
 de passe local puis s'authentifier auprès de l'IdP. L'opération nécessite session,
 Origin, CSRF, mot de passe correct et OIDC valide. Le callback revalide la session
 locale d'origine dans la transaction SQL. Une identité déjà liée à un autre
@@ -259,3 +259,9 @@ Le callback enregistré et le groupe utilisateur doivent encore être confirmés
 Corriger l'application/provider associé au slug `aether` et vérifier le Client ID
 avant un nouvel essai. Ceci ne valide pas le secret ni la connexion SSO réelle.
 Voir [prévalidation sans secrets](evidence/2026-10-18/oidc/real-provider-preflight.json).
+
+## Comptes SSO et identifiants locaux — 25 octobre 2026
+
+Administration → Général propose « Empêcher les utilisateurs SSO de créer des identifiants locaux », activé par défaut et persisté dans `blockSsoLocalAccounts` via GET/PUT `/api/v1/admin/settings`. Omettre le champ conserve le réglage existant. Les credentials locaux déjà présents restent utilisables.
+
+GET `/api/v1/account/local-credentials` nécessite une session et retourne `{canCreate}`. POST sur cette route accepte `{login,password}` : session et CSRF obligatoires, politique serveur autorisant la création, connexion de moins de cinq minutes, identité OIDC existante et absence de credentials locaux. Identifiant ASCII en minuscules ou chiffres avec `._-`, 3–64 octets ; mot de passe conforme au validateur Argon2 commun. Échecs 400 (format), 403 (politique/connexion récente/CSRF), 409 (identifiant pris ou credentials existants). Aucun compte supplémentaire n’est créé : les credentials sont attachés au même utilisateur et conservent ses droits.

@@ -1,3 +1,42 @@
+## 25 octobre 2026 — Ajout des tâches système planifiées (style Jellyfin)
+
+- **Architecture & persistance (`crates/core/migrations/0048_system_tasks.sql`, `crates/core/src/system_tasks.rs`)** :
+  - Création de la table `system_task_schedules` (SQLite et PostgreSQL) pré-peuplée avec des déclencheurs périodiques par défaut :
+    - `update-extensions` (Mise à jour des plugins & catalogues - vérifie les dépôts distants et actualise les manifests d'extensions, toutes les 24h).
+    - `optimize-database` (Optimiser la base de données - exécute `PRAGMA optimize` et `PRAGMA wal_checkpoint(PASSIVE)` sur SQLite ou `ANALYZE` sur PostgreSQL, toutes les 24h).
+    - `clean-sessions` (Nettoyer les sessions expirées - purge les sessions expirées et tokens inactifs de plus de 30 jours, toutes les 6h).
+    - `clean-cache` (Nettoyer le cache et fichiers temporaires - supprime les prévisualisations de posters orphelines et fichiers temporaires `.tmp`/`.part`, toutes les 24h).
+    - `clean-playlists` (Nettoyer les listes et collections - retire des listes personnelles les vidéos ou morceaux supprimés du catalogue, toutes les 24h).
+  - Worker en tâche de fond dans Core (`scheduled_tick`) avec mutex de concurrence (`gate`), enregistrement atomique des démarrages/fins (`last_started_at`, `last_completed_at`, `last_outcome`) et calcul de l'échéance suivante sans tempête de rattrapage.
+  - Endpoints REST sécurisés sous `/api/v1/admin/tasks/system` (authentification administrateur + CSRF) pour lister les tâches, modifier les déclencheurs (intervalles/activation) et déclencher manuellement une tâche (`POST /run`).
+- **Interface utilisateur (`apps/web/src/lib/admin/AdminTasks.svelte`)** :
+  - Intégration transparente dans la vue des tâches d'administration avec regroupement par catégorie (`Bibliothèques`, `Extensions`, `Maintenance`).
+  - Prise en charge des déclencheurs périodiques éditables (fréquence et unité en minutes, heures ou jours).
+  - Bouton d'exécution manuelle immédiate avec retour visuel d'état en cours et historique du dernier résultat / durée d'exécution.
+- **Vérifications réelles** :
+  - `cargo test -p media-poc --lib -- system_tasks` : 1 test réussi (`test_system_tasks_seeded_and_claimable` : validation du seeding des 5 tâches par défaut, exécution complète et persistance du résultat `succeeded`).
+  - `npm test --prefix apps/web` : 29 fichiers de tests passés (171 tests).
+  - `npm run check --prefix apps/web` : 0 erreur Svelte/TypeScript.
+
+## 25 octobre 2026 — Découverte et affichage des pochettes d'albums musicaux
+
+- **Découverte de pochettes dans le scanner musical (`crates/node/src/music.rs`)** :
+  - Découverte des fichiers d'affiches/pochettes locales dans les dossiers musicaux (`folder`, `cover`, `album`, `poster`, `front` en `.jpg`, `.jpeg`, `.png`, `.webp`) via `crate::images::discover_named`.
+  - Cache en mémoire par dossier pendant la traversée pour éviter de revalider la même pochette à chaque piste d'un même album.
+  - Enrichissement de la structure `MusicTrack` avec `cover_path`, `cover_size`, `cover_modified_ns` et `cover_mime`.
+- **Persistance et endpoint HTTP Core (`crates/core/src/music.rs`, migrations `0047_music_cover.sql`)** :
+  - Migration SQL `0047_music_cover.sql` (SQLite & PostgreSQL) ajoutant les colonnes de cover à la table `music_tracks`.
+  - Mise à jour de `publish_track` pour enregistrer les métadonnées de pochette.
+  - Ajout de la route sécurisée `/api/v1/music/tracks/{id}/cover` (avec vérification des permissions de bibliothèque et streaming borné du fichier local ou relai nœud distant).
+  - Exposition de `coverUrl` dans les listes de pistes (`/api/v1/music`) et le détail (`/api/v1/music/tracks/{id}`).
+- **Interface Web (`apps/web/src/routes/music/+page.svelte`, `MusicPlayer.svelte`, `queue.ts`)** :
+  - Affichage de la vraie image de pochette dans la vue par Albums (`groups`) au lieu d'une pastille textuelle.
+  - Vignette miniature sur chaque piste dans la liste des morceaux.
+  - Affichage de la pochette dans la barre de lecture du lecteur audio en bas de page (`MusicPlayer.svelte`).
+- **Vérifications** :
+  - `cargo test -p media-poc --lib product_tests::music_scan_metadata_stable_identity_and_range` : succès complet avec création d'image, scan, détection de `coverUrl` et vérification de la réponse HTTP 200 `image/jpeg`.
+  - `npm --prefix apps/web run check` : 0 erreur Svelte/TypeScript.
+
 ## 25 octobre 2026 - Releases manuelles et UID NAS personnalise
 
 - Decision : aucun nouveau numero de release sur simple push/merge. Release Aether et Release Plugin uniquement via workflow_dispatch sur main, choix PATCH (defaut), MINOR ou MAJOR ; images develop/latest et CI conservees. Calcul explicite Aether prioritaire sur classification des commits. Release manuelle plugin limitee au seul plugin choisi, ajout PATCH.
@@ -4165,3 +4204,47 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
 - Sources Aether-Plugins TMDb/fanart/API adaptées : logos, fallback/langues régionales, résolution externe et TVDB séries fanart, plafond200 images/60Kio avec répartition rôles/langues. Paquets signés installés inchangés : reconstruction/signature requises pour distribution.
 - Vérifications : Core2 tests artwork+2 collecte+2 adaptateurs, intégration artwork1, intégrations extensions ciblées2 réussies ; Clippy Core lib/tests strict et formatage réussis. Web9 tests ciblés, ESLint/check (0 erreur,6 avertissements préexistants)/build réussis. Chrome155 Windows avec API simulée : images décodées, nouvelle visite sans reconnexion, stabilité/reconnexion, collecte/CSRF/partiel et1440/390px. Plugins20 tests et Clippy strict réussis.
 - Limites : aucune preuve réseau fournisseur avec clés réelles, PostgreSQL/NAS/déploiement ; déduplication heuristique. Aucun push, publication, changement de médias ou modification du dépôt Jellyfin. Rapport/commandes : docs/ARTWORK_ROTATION.md ; captures/rapport target/artwork-rotation-ui/. Prochain jalon : collecte durable planifiée avec budgets par bibliothèque/fournisseur.
+
+
+## 25 octobre 2026 — Extensions simplifiées, galerie et vue d’ensemble
+
+- Les réglages d’extensions ouvrent un écran séparé, avec retour à la fiche.
+  Retrait des tests fournisseur, historiques, journal et panneaux techniques.
+  Fanart.tv expose seulement API Key ; adresses officielles préremplies pour les
+  fournisseurs connus. La langue de bibliothèque est appliquée côté Core aux
+  fournisseurs ; l’ABI historique des propositions simples sans configuration
+  reste compatible. Les URL vides historiques sont ignorées à l’exécution pour
+  rétablir le défaut du fournisseur (test de non-régression réussi). Activation
+  conserve les grants existants.
+- Avatars : trois préférences (aléatoire, Gravatar, verrouillage), galerie des
+  imports, ajout local/GitHub, renommage de collection, suppression d’image et
+  attribution idempotente aux comptes sans photo. Attribution automatique locale
+  et OIDC depuis les collections actives. Gravatar est explicite, désactivé par
+  défaut, normalisé et bloqué par le verrouillage ; pas d’adresse conservée.
+  Le profil présente directement les collections, sans générateur/variante.
+- Administration sans fragment : Vue d’ensemble par défaut. Activité récente,
+  appareils, lecteurs vidéo ouverts et progression via signalement borné avec
+  sessions/CSRF/droits/propriété/expiration ; migration additive0046 SQLite et
+  PostgreSQL. Erreurs du dernier scan détaillées par bibliothèque. Aucune cause
+  du vrai compteur356 sur le serveur utilisateur n’est établie sans ses messages.
+- Vérifications : Web12 tests ciblés, lint/check/build ; Core tests ciblés activité
+  et collections (dont Gravatar simulé et attribution), parcours Chrome155 Windows
+ 1440/390px et inspection des captures réussis. Import GitHub réel :7 collections
+  détectées,26 Sonny normalisés en SQLite temporaire. Plugins13 tests ciblés et
+  compilation workspace lib réussis. Clippy strict a rencontré un avertissement
+  dans music.rs hors de ce périmètre. Rapport/commandes : docs/ADMIN_OVERVIEW.md.
+- Limites : PostgreSQL/NAS et Gravatar avec un compte réel non validés ; présence
+  vidéo Web seulement, pas le lecteur musical global ni les anciens clients.
+  Sources de schémas simplifiées dans Aether-Plugins ; paquets signés existants
+  inchangés. Catalogue distant vérifié sans Intro Skipper : prochaine étape,
+  construire/signature/publication puis actualiser. Aucun push ni déploiement.
+
+
+## 25 octobre 2026 — Compte, sécurité, appareils et navigation admin
+
+- Compte regroupe profil, thème et langue ; Sécurité regroupe mot de passe et SSO ; Appareils présente les sessions et leur révocation. Rubriques Apparence/SSO séparées et note générique d’enregistrement supprimées. Anciens fragments redirigés vers les rubriques regroupées.
+- Avatar : trois actions principales import/suppression/choix ; autorisations chargées via GET `/api/v1/account/avatar/policy`, contrôles PUT/DELETE côté Core. Plugins actifs avec permission avatars : `disallow_custom_avatars` masque/refuse import ; `force_random_on_creation` ou `require_avatar` masque/refuse suppression, administrateurs inclus. Collections et propositions des extensions accessibles derrière le bouton de choix.
+- Administration → Général : `blockSsoLocalAccounts`, activé par défaut. GET/POST `/api/v1/account/local-credentials` pour permettre la création sur le même compte SSO seulement si politique autorisée, CSRF et connexion récente (<5 min). Pas de suppression des credentials existants. Logo puis Menu et Retour dans le bandeau ; logo vers accueil et Retour dans le tiroir.
+- Validation : `cargo test --locked -p media-poc --test account -j 1` : 4 tests réussis (dont politique avatar avec extension active/désactivée et refus serveur, SSO/CSRF/connexion récente). `cargo fmt --all --check`, check/lint/build Web réussis ; dernier check sans erreur avec avertissements hors périmètre (CatalogGrid et AdminUsers modifié en parallèle). Clé de boucle manquante et espaces finaux AdminUsers corrigés pendant la vérification du lint. Chrome headless local avec API simulées : navigation, galerie et boutons masqués réussis, capture `target/account-devices-smoke.png` inspectée. Aucune validation NAS/SSO réel ni déploiement ; reconstruction et déploiement restent nécessaires.
+
+- Dernière relance Rust : avertissement Windows de cache incrémental inaccessible (os error 5), compilation terminée et tests exécutés. Le second essai navigateur étendu à l’en-tête admin n’a pas abouti et a été arrêté ; seul le premier parcours compte/appareils à API simulées est retenu comme preuve navigateur.

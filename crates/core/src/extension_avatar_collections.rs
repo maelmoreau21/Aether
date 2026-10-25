@@ -23,7 +23,23 @@ pub(super) fn router() -> Router<AuthState> {
         )
         .route(
             "/api/v1/admin/extensions/{id}/avatar-packs/{pack}",
-            axum::routing::delete(remove),
+            axum::routing::delete(remove).put(rename),
+        )
+        .route(
+            "/api/v1/admin/extensions/{id}/avatar-packs/{pack}/images",
+            get(admin_images),
+        )
+        .route(
+            "/api/v1/admin/extensions/{id}/avatar-packs/{pack}/images/{image}",
+            get(admin_image).delete(remove_image),
+        )
+        .route(
+            "/api/v1/admin/extensions/{id}/avatars/assign-missing",
+            axum::routing::post(assign_missing),
+        )
+        .route(
+            "/api/v1/account/avatar/gravatar",
+            get(gravatar_policy).post(gravatar),
         )
         .route("/api/v1/account/avatar/collections", get(account_packs))
         .route("/api/v1/account/avatar/collections/{pack}", get(images))
@@ -426,6 +442,204 @@ async fn remove(
         .map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Rename {
+    name: String,
+}
+async fn rename(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path((id, pack)): Path<(String, String)>,
+    Json(input): Json<Rename>,
+) -> Result<StatusCode, Error> {
+    admin(&auth, &headers, true).await?;
+    if input.name.trim().is_empty()
+        || input.name.len() > 100
+        || input.name.chars().any(char::is_control)
+    {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_avatar_pack"));
+    }
+    let _lock = MUTATIONS.lock().await;
+    check(&auth, &id).await?;
+    query("UPDATE extension_avatar_packs SET name=? WHERE id=? AND extension_id=?")
+        .bind(input.name.trim())
+        .bind(pack)
+        .bind(id)
+        .execute(auth.store.pool())
+        .await
+        .map_err(db)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn admin_images(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path((id, pack)): Path<(String, String)>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, false).await?;
+    check(&auth, &id).await?;
+    let rows:Vec<(String,String)>=query_as("SELECT i.id,i.name FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.id=? AND p.extension_id=? ORDER BY i.name LIMIT 500").bind(&pack).bind(&id).fetch_all(auth.store.pool()).await.map_err(db)?;
+    Ok(Json(
+        json!({"images":rows.into_iter().map(|(image,name)|json!({"id":image,"name":name,"url":format!("/api/v1/admin/extensions/{id}/avatar-packs/{pack}/images/{image}")})).collect::<Vec<_>>()}),
+    ))
+}
+async fn admin_image(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path((id, pack, image)): Path<(String, String, String)>,
+) -> Result<axum::response::Response, Error> {
+    admin(&auth, &headers, false).await?;
+    check(&auth, &id).await?;
+    let bytes:Vec<u8>=query_scalar("SELECT i.image_data FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? AND p.id=? AND i.id=?").bind(id).bind(pack).bind(image).fetch_optional(auth.store.pool()).await.map_err(db)?.ok_or_else(||err(StatusCode::NOT_FOUND,"avatar_not_found"))?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "private, no-store"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+async fn remove_image(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path((id, pack, image)): Path<(String, String, String)>,
+) -> Result<StatusCode, Error> {
+    admin(&auth, &headers, true).await?;
+    let _lock = MUTATIONS.lock().await;
+    check(&auth, &id).await?;
+    query("DELETE FROM extension_avatar_images WHERE id=? AND pack_id=? AND EXISTS(SELECT 1 FROM extension_avatar_packs p WHERE p.id=? AND p.extension_id=?)").bind(image).bind(&pack).bind(pack).bind(id).execute(auth.store.pool()).await.map_err(db)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn assign_missing(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, true).await?;
+    let _lock = MUTATIONS.lock().await;
+    check(&auth, &id).await?;
+    let images:Vec<Vec<u8>>=query_scalar("SELECT i.image_data FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? LIMIT 500").bind(id).fetch_all(auth.store.pool()).await.map_err(db)?;
+    if images.is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "avatar_gallery_empty"));
+    }
+    let mut tx = auth.store.pool().begin().await.map_err(db)?;
+    let users:Vec<String>=query_scalar("SELECT id FROM users WHERE disabled_at IS NULL AND NOT EXISTS(SELECT 1 FROM user_avatars a WHERE a.user_id=users.id) LIMIT 10000").fetch_all(&mut *tx).await.map_err(db)?;
+    let mut count = 0;
+    for user in users {
+        let index = (uuid::Uuid::new_v4().as_u128() % images.len() as u128) as usize;
+        count+=query("INSERT INTO user_avatars(user_id,image_data) VALUES(?,?) ON CONFLICT(user_id) DO NOTHING").bind(user).bind(&images[index]).execute(&mut *tx).await.map_err(db)?.rows_affected();
+    }
+    tx.commit().await.map_err(db)?;
+    Ok(Json(json!({"count":count})))
+}
+// Used by local and OIDC account creation; existing user photos are never overwritten.
+pub(crate) async fn assign_new_user(auth: &AuthState, user: &str) -> Result<(), Error> {
+    let rows:Vec<(String,String,String)>=query_as("SELECT e.id,e.package_json,COALESCE(s.settings_json,'{}') FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id LEFT JOIN extension_settings s ON s.extension_id=e.id WHERE e.enabled=1 AND p.active=1 ORDER BY e.id").fetch_all(auth.store.pool()).await.map_err(db)?;
+    for (id, package, settings) in rows {
+        let package: Package = serde_json::from_str(&package)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
+        let settings: Value = serde_json::from_str(&settings).unwrap_or_else(|_| json!({}));
+        if adapters::authorize_operation(&package.manifest, "avatars.list").is_err()
+            || settings["force_random_on_creation"].as_bool() == Some(false)
+        {
+            continue;
+        }
+        let images:Vec<String>=query_scalar("SELECT i.id FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? LIMIT 16000").bind(id).fetch_all(auth.store.pool()).await.map_err(db)?;
+        if images.is_empty() {
+            continue;
+        }
+        let index = (uuid::Uuid::new_v4().as_u128() % images.len() as u128) as usize;
+        query("INSERT INTO user_avatars(user_id,image_data) SELECT ?,image_data FROM extension_avatar_images WHERE id=? ON CONFLICT(user_id) DO NOTHING").bind(user).bind(&images[index]).execute(auth.store.pool()).await.map_err(db)?;
+        break;
+    }
+    Ok(())
+}
+async fn allows_gravatar(auth: &AuthState) -> Result<bool, Error> {
+    let rows:Vec<(String,String)>=query_as("SELECT e.package_json,s.settings_json FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id JOIN extension_settings s ON s.extension_id=e.id WHERE e.enabled=1 AND p.active=1").fetch_all(auth.store.pool()).await.map_err(db)?;
+    let mut allowed = false;
+    for (package, settings) in rows {
+        let package: Package = serde_json::from_str(&package)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
+        if adapters::authorize_operation(&package.manifest, "avatars.list").is_err() {
+            continue;
+        }
+        let settings: Value = serde_json::from_str(&settings).unwrap_or_else(|_| json!({}));
+        if settings["disallow_custom_avatars"].as_bool() == Some(true) {
+            return Ok(false);
+        }
+        allowed |= settings["allow_gravatar"].as_bool() == Some(true);
+    }
+    Ok(allowed)
+}
+async fn gravatar_policy(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, Error> {
+    auth.authenticate(&headers)
+        .await
+        .map_err(|s| err(s, "authentication_required"))?;
+    Ok(Json(json!({"allowed":allows_gravatar(&auth).await?})))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Gravatar {
+    email: String,
+}
+async fn gravatar(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Json(input): Json<Gravatar>,
+) -> Result<StatusCode, Error> {
+    let actor = auth
+        .authenticate(&headers)
+        .await
+        .map_err(|s| err(s, "authentication_required"))?;
+    auth.require_csrf(&headers, &actor)
+        .map_err(|s| err(s, "csrf_required"))?;
+    if !allows_gravatar(&auth).await? {
+        return Err(err(StatusCode::FORBIDDEN, "gravatar_disabled"));
+    }
+    let email = input.email.trim().to_lowercase();
+    if email.len() > 254 || !email.contains('@') || email.chars().any(char::is_control) {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_email"));
+    }
+    let _slot = IMPORTS
+        .try_acquire()
+        .map_err(|_| err(StatusCode::CONFLICT, "avatar_import_busy"))?;
+    let digest = Sha256::digest(email.as_bytes());
+    let hash = digest
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    let data = repositories::fetch(
+        &format!("https://www.gravatar.com/avatar/{hash}?s=256&d=404"),
+        IMAGE_MAX,
+    )
+    .await?;
+    let data = tokio::task::spawn_blocking(move || {
+        let mime = match image::guess_format(&data) {
+            Ok(image::ImageFormat::Png) => "image/png",
+            Ok(image::ImageFormat::Jpeg) => "image/jpeg",
+            Ok(image::ImageFormat::WebP) => "image/webp",
+            _ => return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE),
+        };
+        crate::avatars::normalize(data.into(), mime)
+    })
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "avatar_decode_failed"))?
+    .map_err(|s| err(s, "invalid_avatar_image"))?;
+    let _lock = MUTATIONS.lock().await;
+    if !allows_gravatar(&auth).await? {
+        return Err(err(StatusCode::FORBIDDEN, "gravatar_disabled"));
+    }
+    auth.authenticate(&headers)
+        .await
+        .map_err(|s| err(s, "authentication_required"))?;
+    query("INSERT INTO user_avatars(user_id,image_data) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET image_data=excluded.image_data").bind(actor.user.id).bind(data).execute(auth.store.pool()).await.map_err(db)?;
+    Ok(StatusCode::NO_CONTENT)
+}
 async fn account_packs(
     State(auth): State<AuthState>,
     headers: HeaderMap,
@@ -560,7 +774,7 @@ mod tests {
         let auth = AuthState::new(store.clone(), "http://localhost".into())
             .await
             .unwrap();
-        let app = crate::auth::router(auth.clone()).merge(super::super::router(auth));
+        let app = crate::auth::router(auth.clone()).merge(super::super::router(auth.clone()));
         let (status, body, headers) = call(
             &app,
             "/api/v1/auth/login",
@@ -842,6 +1056,203 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(image::load_from_memory(&data).unwrap().width(), 256);
+        // The administrator can curate a disabled extension's gallery.
+        let image_list = format!("{endpoint}/{pack}/images");
+        assert_eq!(
+            call(&app, &image_list, "GET", "", "", json!(null)).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+        let (status, body, _) = call(&app, &image_list, "GET", cookie, "", json!(null)).await;
+        assert_eq!(status, StatusCode::OK);
+        let listed: Value = serde_json::from_slice(&body).unwrap();
+        let gallery_url = listed["images"][0]["url"].as_str().unwrap();
+        assert_eq!(
+            call(&app, gallery_url, "GET", cookie, "", json!(null))
+                .await
+                .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            call(
+                &app,
+                &format!("{endpoint}/{pack}"),
+                "PUT",
+                cookie,
+                csrf,
+                json!({"name":"Renamed gallery"})
+            )
+            .await
+            .0,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            call(
+                &app,
+                &format!("{endpoint}/{pack}"),
+                "PUT",
+                cookie,
+                csrf,
+                json!({"name":""})
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+        query("INSERT INTO users(id,role) VALUES('missing-avatar','user')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let assign = "/api/v1/admin/extensions/any-author-avatar/avatars/assign-missing";
+        assert_eq!(
+            call(&app, assign, "POST", cookie, "", json!(null)).await.0,
+            StatusCode::FORBIDDEN
+        );
+        let (status, body, _) = call(&app, assign, "POST", cookie, csrf, json!(null)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["count"], 1);
+        let (_, body, _) = call(&app, assign, "POST", cookie, csrf, json!(null)).await;
+        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["count"], 0);
+        assert_eq!(
+            call(
+                &app,
+                "/api/v1/account/avatar/gravatar",
+                "POST",
+                cookie,
+                csrf,
+                json!({"email":"fixture@example.invalid"})
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN
+        );
+
+        assert_eq!(
+            call(
+                &app,
+                "/api/v1/admin/extensions/any-author-avatar",
+                "PUT",
+                cookie,
+                csrf,
+                json!({"enabled":true})
+            )
+            .await
+            .0,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            call(
+                &app,
+                "/api/v1/admin/extensions/any-author-avatar/settings",
+                "PUT",
+                cookie,
+                csrf,
+                json!({"allow_gravatar":true})
+            )
+            .await
+            .0,
+            StatusCode::NO_CONTENT
+        );
+        query("INSERT INTO users(id,role) VALUES('automatic-avatar','user')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assign_new_user(&auth, "automatic-avatar").await.unwrap();
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM user_avatars WHERE user_id='automatic-avatar'"
+            )
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+            1
+        );
+        let gravatar_url = format!(
+            "https://www.gravatar.com/avatar/{:x}?s=256&d=404",
+            Sha256::digest(b"fixture@example.invalid")
+        );
+        let mut jpeg = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::load_from_memory(&data).unwrap().to_rgb8())
+            .write_to(&mut jpeg, image::ImageFormat::Jpeg)
+            .unwrap();
+        repositories::test_documents()
+            .lock()
+            .unwrap()
+            .insert(gravatar_url.clone(), jpeg.into_inner());
+        assert_eq!(
+            call(
+                &app,
+                "/api/v1/account/avatar/gravatar",
+                "POST",
+                cookie,
+                "",
+                json!({"email":"fixture@example.invalid"})
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            call(
+                &app,
+                "/api/v1/account/avatar/gravatar",
+                "POST",
+                cookie,
+                csrf,
+                json!({"email":" Fixture@Example.Invalid "})
+            )
+            .await
+            .0,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            call(
+                &app,
+                "/api/v1/admin/extensions/any-author-avatar/settings",
+                "PUT",
+                cookie,
+                csrf,
+                json!({"allow_gravatar":true,"disallow_custom_avatars":true})
+            )
+            .await
+            .0,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            call(
+                &app,
+                "/api/v1/account/avatar/gravatar",
+                "POST",
+                cookie,
+                csrf,
+                json!({"email":"fixture@example.invalid"})
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN
+        );
+        repositories::test_documents()
+            .lock()
+            .unwrap()
+            .remove(&gravatar_url);
+        assert_eq!(
+            call(&app, gallery_url, "DELETE", cookie, "", json!(null))
+                .await
+                .0,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            call(&app, gallery_url, "DELETE", cookie, csrf, json!(null))
+                .await
+                .0,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            call(&app, gallery_url, "GET", cookie, "", json!(null))
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
+
         assert_eq!(
             call(
                 &app,

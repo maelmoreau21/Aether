@@ -780,6 +780,12 @@ impl Oidc {
                 .map_err(db)?;
         }
         tx.commit().await.map_err(db)?;
+        if crate::extensions::collections::assign_new_user(&self.auth, &user)
+            .await
+            .is_err()
+        {
+            eprintln!("Automatic avatar assignment failed");
+        }
         // End the cross-site redirect chain on a Core document. A same-origin
         // external script starts a new navigation so Strict session cookies and
         // the existing cross-site guards both remain effective on /app/.

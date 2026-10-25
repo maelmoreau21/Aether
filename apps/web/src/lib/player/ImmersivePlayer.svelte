@@ -8,6 +8,7 @@
   import { preferredSubtitle, type SubtitlePreference } from './subtitle-preference';
   import { subtitleStyleToCss, type SubtitleStyle } from './subtitle-style';
   import { ProgressTracker } from './progress';
+  import { PlaybackPresence } from './presence';
   import { getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
   import { chooseSource, playbackMime, audioLanguage, audioSelectionNotice } from './source-selection';
@@ -21,6 +22,7 @@
   let controls = $state<PlayerControls>();
   let engine: Player | undefined;
   let progressTracker: ProgressTracker | undefined;
+  let presence: PlaybackPresence | undefined;
   let opened = $state(false);
   let active = $state<Media | undefined>();
   let busy = $state(false);
@@ -164,6 +166,8 @@
       if (restore) { engine.setVolume(restore.volume); engine.setSpeed(restore.speed); }
       if (current !== generation) return;
       active = media;
+      presence?.stop();presence=undefined;
+      if(media.workId&&!media.synthetic)presence=new PlaybackPresence(media.workId,()=>engine?.state());
       if (!restore || !restore.paused) await engine.play();
     } catch (e) { if (current === generation) fail(e instanceof Error ? e.message : String(e)); }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
@@ -211,6 +215,7 @@
     if (!opened) return;
     if (engine) progressTracker?.save(engine.state(), true);
     progressTracker = undefined;
+    presence?.stop();presence=undefined;
     opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null;
     const returnTarget = opener;
     const restoreNavigation = () => {
@@ -234,6 +239,7 @@
     failoverInProgress = false;
     progressTracker?.save(engine.state(), true);
     progressTracker = undefined;
+    presence?.stop();presence=undefined;
     active = media;
     // Keep the dialog, focus context and fullscreen through episode transitions.
     void prepare(media);

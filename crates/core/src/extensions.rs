@@ -34,13 +34,26 @@ static EXECUTIONS: Semaphore = Semaphore::const_new(1);
 #[path = "extension_adapters.rs"]
 mod adapters;
 #[path = "extension_avatar_collections.rs"]
-mod collections;
+pub(crate) mod collections;
 #[path = "extension_image_collection.rs"]
 mod image_collection;
 #[path = "extension_repositories.rs"]
-mod repositories;
+pub(crate) mod repositories;
 
-fn metadata_input_with_settings(input: Value, settings: Value) -> Value {
+fn metadata_input_with_settings(input: Value, mut settings: Value) -> Value {
+    // Historical forms saved an empty endpoint. Omit it so the provider can use
+    // its official default rather than attempting a request against an empty URL.
+    if let Some(fields) = settings.as_object_mut() {
+        for key in ["base_url", "baseUrl"] {
+            if fields
+                .get(key)
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.trim().is_empty())
+            {
+                fields.remove(key);
+            }
+        }
+    }
     // Configuration belongs only to this installed extension. It travels over the
     // private worker pipe and is never included in package files or run history.
     let mut value = input;
@@ -604,6 +617,9 @@ async fn put_settings(
     if exists.is_none() {
         return Err(err(StatusCode::NOT_FOUND, "extension_not_found"));
     }
+    if !settings.is_object() {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_settings"));
+    }
     let settings_str = serde_json::to_string(&settings)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_settings"))?;
     if settings_str.len() > 65_536 {
@@ -835,12 +851,38 @@ async fn run(
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(|| json!({}));
 
+    if !settings.is_object() {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_settings"));
+    }
+    // The work's library owns metadata language, including historical plugin settings.
+    let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
+        .bind(&library)
+        .fetch_one(auth.store.pool())
+        .await
+        .map_err(db)?;
+    let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_library_options"))?;
+    // The first ABI's simple proposal rejects any extra field, including config.
+    // Keep that no-settings payload compatible; provider operations receive the library language.
+    let simple_legacy = input.operation == "metadata.propose"
+        && package
+            .manifest
+            .config_schema
+            .as_ref()
+            .is_none_or(Vec::is_empty)
+        && settings.as_object().is_some_and(|fields| fields.is_empty());
+    if !simple_legacy {
+        settings["language"] = json!(options.preferred_metadata_language);
+    }
     if input.operation == "metadata.images" {
         image_collection::apply_language_settings(&input.input, &mut settings)?;
     }
     adapters::authorize_operation(&package.manifest, &input.operation)?;
     let mut payload =
         adapters::metadata_input(&context, &input.work_id, &input.operation, &input.input)?;
+    if input.operation != "metadata.propose" {
+        payload["language"] = settings["language"].clone();
+    }
     payload = metadata_input_with_settings(payload, settings);
     let operation = input.operation.clone();
     let invocation = crate::extension_runtime::Invocation {
@@ -1020,6 +1062,20 @@ async fn audit_log(
 mod configuration_tests {
     use super::*;
     use media_extension_sdk::MetadataInput;
+    #[test]
+    fn historical_empty_endpoint_keeps_provider_default_and_credentials() {
+        let value = metadata_input_with_settings(
+            json!({"title":"Fixture"}),
+            json!({"api_key":"synthetic","base_url":"  "}),
+        );
+        assert!(value["config"].get("base_url").is_none());
+        assert_eq!(value["config"]["api_key"], "synthetic");
+        let value = metadata_input_with_settings(
+            json!({}),
+            json!({"base_url":"https://custom.example/api"}),
+        );
+        assert_eq!(value["config"]["base_url"], "https://custom.example/api");
+    }
 
     #[test]
     fn worker_receives_only_the_selected_extensions_configuration() {

@@ -44,10 +44,9 @@
   }
   const pages = [
     { id: 'account', label: 'Compte', icon: 'profile' },
-    { id: 'security', label: 'Sécurité et appareils', icon: 'shield' },
-    { id: 'appearance', label: 'Apparence', icon: 'sun' },
-    { id: 'playback', label: 'Lecture', icon: 'play' },
-    { id: 'sso', label: 'Connexion SSO', icon: 'shield' }
+    { id: 'security', label: 'Sécurité', icon: 'shield' },
+    { id: 'devices', label: 'Appareils', icon: 'server' },
+    { id: 'playback', label: 'Lecture', icon: 'play' }
   ] as const;
   onMount(() => {
     let disposed = false;
@@ -61,7 +60,7 @@
         subtitleStyle = { ...DEFAULT_SUBTITLE_STYLE, ...sanitizeSubtitleStyle(saved.subtitleStyle) };
       }
     }).catch(() => {});
-    const sync = () => { const id = window.location.hash.slice(1); current = pages.some(page => page.id === id) ? id : 'account'; };
+    const sync = () => { const hash = window.location.hash.slice(1); const id = hash === 'appearance' ? 'account' : hash === 'sso' ? 'security' : hash; current = pages.some(page => page.id === id) ? id : 'account'; };
     sync(); window.addEventListener('hashchange', sync);
     return () => { disposed = true; window.removeEventListener('hashchange', sync); };
   });
@@ -115,10 +114,7 @@
       </div>
 
     </section>
-      </div>
-      <div hidden={current !== 'security'}><section class="card"><h2>Sécurité et appareils</h2><AccountSecurity /></section></div>
-      <div hidden={current !== 'appearance'}><section class="card" aria-labelledby="appearance-heading"><h2 id="appearance-heading">Apparence</h2><p class="muted">Personnalisez le thème et la langue de l’interface.</p>
-      <div class="pref-fields">
+<section class="card"><h2>Préférences de l’interface</h2>      <div class="pref-fields">
         <label>
           <span><Icon name="sun" size={14} /> {$t('theme')}</span>
           <select
@@ -143,7 +139,10 @@
         </label>
 
       </div>
-      </section></div>
+</section>
+      </div>
+      <div hidden={current !== 'security'}><section class="card"><h2>Sécurité</h2><AccountSecurity mode="security" /><h3>Connexion SSO</h3><OidcSettings embedded /></section></div>
+      <div hidden={current !== 'devices'}><section class="card"><h2>Appareils</h2><AccountSecurity mode="devices" /></section></div>
       <div hidden={current !== 'playback'}><section class="card" aria-labelledby="playback-heading"><h2 id="playback-heading">Lecture</h2><p class="muted">Ces préférences s’appliquent à votre compte.</p>
       <div class="pref-fields">
         <label>
@@ -276,14 +275,6 @@
           </div>
         </section>
       </section></div>
-      <div hidden={current !== 'sso'}>
-    <section class="card oidc-card" aria-labelledby="sso-settings-heading">
-      <h2 id="sso-settings-heading" class="card-title">Connexion SSO</h2>
-      <OidcSettings embedded />
-    </section>
-
-      </div>
-      <p class="save-note">Les modifications sont enregistrées dans votre compte. Un échec d’enregistrement est signalé en haut de la page.</p>
     </div>
   </div>
 </div>
@@ -308,8 +299,7 @@
   .info-row { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--border-subtle); font-size: 14px; }
   .label { color: var(--text-secondary); }
   .val code { overflow-wrap: anywhere; }
-  .muted, .save-note { color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
-  .save-note { margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--border-subtle); font-size: 12px; }
+  .muted { color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
   .pref-fields, .offsets { display: grid; gap: 24px; margin-top: 24px; }
   label { display: grid; gap: 10px; font-size: 14px; }
   label > span { display: flex; align-items: center; gap: 8px; }

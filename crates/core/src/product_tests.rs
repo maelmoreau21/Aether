@@ -606,6 +606,40 @@ async fn music_scan_metadata_stable_identity_and_range() {
             .len(),
         16
     );
+    let mut jpg = vec![];
+    image::DynamicImage::new_rgb8(2, 3)
+        .write_to(
+            &mut std::io::Cursor::new(&mut jpg),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
+    std::fs::write(root.join("folder.jpg"), &jpg).unwrap();
+    crate::music::scan(&store, "music", &root, &cancel)
+        .await
+        .unwrap();
+    let listed_cover =
+        value(request(&app, "/api/v1/music?q=Une", "GET", &cookie, "", Value::Null).await).await;
+    assert_eq!(
+        listed_cover["items"][0]["coverUrl"],
+        format!("/api/v1/music/tracks/{id}/cover")
+    );
+    let cover_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/music/tracks/{id}/cover"))
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cover_res.status(), StatusCode::OK);
+    assert_eq!(
+        cover_res.headers().get("content-type").unwrap(),
+        "image/jpeg"
+    );
+
     std::fs::remove_file(root.join("track.opus")).unwrap();
     crate::music::scan(&store, "music", &root, &cancel)
         .await

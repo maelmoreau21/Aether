@@ -224,6 +224,12 @@ async fn create(
         }
     }
     tx.commit().await.map_err(db)?;
+    if crate::extensions::collections::assign_new_user(&auth, &id)
+        .await
+        .is_err()
+    {
+        eprintln!("Automatic avatar assignment failed");
+    }
     Ok((StatusCode::CREATED, Json(serde_json::json!({"id":id}))))
 }
 async fn recheck_actor(

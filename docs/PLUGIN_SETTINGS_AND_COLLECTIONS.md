@@ -16,9 +16,16 @@ Le Core envoie le contexte de l’œuvre et reçoit une proposition ; aucun acc�
 direct du plugin aux chemins/fichiers médias. Certaines bibliothèques reste
 facultatif. Les avatars ne présentent aucun contrôle de bibliothèque.
 
-Paramètres : page dédiée, configuration principale, interrupteur d’activation,
-accès/identité et désinstallation séparés, outils de test repliés. Le schéma signé
-produit les champs sans code spécifique à l’auteur. Modèle indépendant :
+Paramètres : écran dédié accessible depuis la fiche ou le bouton de la carte.
+Activation et désinstallation restent dans la fiche. Les panneaux de test,
+l’historique d’exécution, le journal et les détails techniques d’identité ne sont
+plus affichés. Les routes d’exécution restent disponibles aux outils existants.
+Fanart.tv présente uniquement API Key. Les fournisseurs connus présentent leur
+adresse officielle par défaut ; la langue des métadonnées appartient à la
+bibliothèque et est appliquée par le Core avant invocation. Une sélection
+explicite de langues pour une recherche d’images reste possible.
+La présentation des anciens paquets signés est adaptée sans modifier leurs octets.
+Le schéma des futurs paquets est simplifié dans le dépôt Aether-Plugins. Modèle indépendant :
 `../Aether-Plugins/templates/metadata-provider`, guide CREATING_PLUGINS.md.
 
 ## Encodage
@@ -147,3 +154,47 @@ Validation finale après verrouillage des dépendances multipart : les deux test
 collections passent à nouveau ; Clippy all-targets strict et cargo fmt --check
 passent. Le build Web, les 113 tests Web et le scénario navigateur final sont
 réussis. Aucun push, déploiement ou média personnel modifié.
+
+## Galerie et préférences — 25 octobre 2026
+
+L’écran Avatars présente trois interrupteurs : avatar aléatoire pour les nouveaux
+utilisateurs (`force_random_on_creation`), import Gravatar (`allow_gravatar`,
+désactivé par défaut), verrouillage des imports utilisateurs
+(`disallow_custom_avatars`). Le verrouillage interdit aussi Gravatar. Les images
+importées sont visibles dans une galerie filtrée par collection, y compris
+lorsque l’extension est désactivée pour les utilisateurs. Ajout d’images,
+renommage d’une collection et suppression individuelle sont disponibles.
+Retirer une image de la galerie conserve les photos déjà choisies par les comptes.
+
+Nouveaux contrats administrateur, avec contrôle administrator et CSRF en mutation :
+- PUT `.../avatar-packs/{pack}` : `{name}`, 1 à 100 caractères sans contrôle.
+- GET `.../avatar-packs/{pack}/images` : au plus 500 images et URLs authentifiées.
+- GET/DELETE `.../avatar-packs/{pack}/images/{image}` : aperçu PNG / retrait.
+- POST `/api/v1/admin/extensions/{id}/avatars/assign-missing` : attribution
+  aléatoire aux comptes actifs sans photo, au plus 10 000 comptes par appel ;
+  `{count}` indique le nombre modifié. Répéter est sans effet sur les photos existantes.
+
+L’attribution automatique utilise les images importées d’une extension active
+ayant la permission avatars. Elle s’applique lors de la création locale et à
+l’entrée OIDC d’un compte sans photo, sans écraser une image choisie. Sans images,
+aucun avatar n’est inventé. Le bouton d’attribution fonctionne pour préparer une
+galerie avant activation de l’extension.
+
+GET `/api/v1/account/avatar/gravatar` expose `{allowed}`. POST à cette URL accepte
+`{email}` pour le compte courant seulement, avec session/CSRF. L’adresse est
+normalisée et hachée en SHA-256 puis oubliée ; le Core télécharge uniquement
+l’URL Gravatar construite, avec le broker HTTPS public borné existant, sans
+redirections ni URL fournie par le client. PNG/JPEG/WebP sont normalisés en PNG
+256×256, 2 Mio maximum à l’entrée. Le réglage est revérifié avant sauvegarde.
+Aucune recherche automatique de photo sur un service tiers.
+
+Références consultées :
+- [Bibliothèques et langue Jellyfin](https://jellyfin.org/docs/general/post-install/setup-wizard/).
+- [GetAvatar, galerie et import de packs](https://github.com/cedev-1/jellyfin-plugin-GetAvatar).
+- [Collections cedev-1](https://github.com/cedev-1/jellyfin-avatars).
+- [Identifiant SHA-256 Gravatar](https://docs.gravatar.com/rest/hash/).
+
+Les paquets déjà signés ne sont pas réécrits. Les nouveaux schémas dans
+Aether-Plugins nécessitent construction, signature et publication pour apparaître
+dans un catalogue distant. Intro Skipper demeure absent du catalogue signé local ;
+l’interface explique son absence lorsque le dépôt préconfiguré ne le propose pas.

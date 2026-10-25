@@ -23,6 +23,7 @@ pub fn router(auth: AuthState) -> Router {
             "/api/v1/account/avatar",
             get(read).put(write).delete(remove),
         )
+        .route("/api/v1/account/avatar/policy", get(policy))
         .layer(DefaultBodyLimit::max(MAX_UPLOAD))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
             axum::http::header::CACHE_CONTROL,
@@ -207,6 +208,33 @@ async fn read(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Respo
     )
         .into_response())
 }
+async fn permissions(auth: &AuthState) -> Result<(bool, bool), StatusCode> {
+    let rows: Vec<(String,String)> = crate::database::query_as("SELECT es.settings_json,e.package_json FROM extension_settings es JOIN extensions e ON e.id=es.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.enabled=1 AND p.active=1").fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let (mut upload, mut remove) = (true, true);
+    for (settings, package) in rows {
+        let package: media_extension_sdk::Package =
+            serde_json::from_str(&package).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if !package.manifest.permissions.iter().any(|p| p == "avatars") {
+            continue;
+        }
+        let settings: serde_json::Value =
+            serde_json::from_str(&settings).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        upload &= settings["disallow_custom_avatars"].as_bool() != Some(true);
+        remove &= settings["force_random_on_creation"].as_bool() != Some(true)
+            && settings["require_avatar"].as_bool() != Some(true);
+    }
+    Ok((upload, remove))
+}
+async fn policy(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+    auth.authenticate(&headers).await?;
+    let (upload, remove) = permissions(&auth).await?;
+    Ok(axum::Json(
+        serde_json::json!({"uploadAllowed":upload,"removeAllowed":remove}),
+    ))
+}
 async fn write(
     State(auth): State<AuthState>,
     headers: HeaderMap,
@@ -214,32 +242,8 @@ async fn write(
 ) -> Result<StatusCode, StatusCode> {
     let user = auth.authenticate(&headers).await?;
     auth.require_csrf(&headers, &user)?;
-    if user.user.role != crate::identity::Role::Administrator {
-        let rows: Vec<(String, String)> = crate::database::query_as(
-            "SELECT es.settings_json,e.package_json FROM extension_settings es \
-             JOIN extensions e ON e.id = es.extension_id \
-             JOIN extension_publishers p ON p.id=e.publisher_id \
-             WHERE e.enabled = 1 AND p.active=1",
-        )
-        .fetch_all(&auth.store.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        for (json_str, package) in rows {
-            let package: media_extension_sdk::Package =
-                serde_json::from_str(&package).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            if !package.manifest.permissions.iter().any(|p| p == "avatars") {
-                continue;
-            }
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
-                && val
-                    .get("disallow_custom_avatars")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false)
-            {
-                return Err(StatusCode::FORBIDDEN);
-            }
-        }
+    if !permissions(&auth).await?.0 {
+        return Err(StatusCode::FORBIDDEN);
     }
     if bytes.is_empty() {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
@@ -267,6 +271,9 @@ async fn remove(
 ) -> Result<StatusCode, StatusCode> {
     let user = auth.authenticate(&headers).await?;
     auth.require_csrf(&headers, &user)?;
+    if !permissions(&auth).await?.1 {
+        return Err(StatusCode::FORBIDDEN);
+    }
     query("DELETE FROM user_avatars WHERE user_id=?")
         .bind(user.user.id)
         .execute(&auth.store.pool)

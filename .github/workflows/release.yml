@@ -1,16 +1,14 @@
 name: Release
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
-      force_patch:
-        description: 'Forcer un incrément PATCH minimal si indéterminé'
-        required: false
-        type: boolean
-        default: true
+      bump_type:
+        description: 'Increment choisi pour cette release uniquement'
+        required: true
+        type: choice
+        options: [PATCH, MINOR, MAJOR]
+        default: PATCH
 
 permissions:
   contents: write
@@ -22,6 +20,7 @@ concurrency:
 
 jobs:
   calculate-and-tag:
+    if: github.ref == 'refs/heads/main'
     name: Calcul SemVer & Tagging
     runs-on: ubuntu-latest
     outputs:
@@ -43,8 +42,10 @@ jobs:
 
       - name: Déterminer la version et générer le Changelog
         id: calc
+        env:
+          RELEASE_BUMP: ${{ inputs.bump_type }}
         run: |
-          python scripts/calculate_release.py --json > release_info.json
+          python scripts/calculate_release.py --json --bump "$RELEASE_BUMP" > release_info.json
           cat release_info.json
           
           NEXT_TAG=$(jq -r '.next_tag' release_info.json)

@@ -1,3 +1,13 @@
+## Versions publiees sur decision explicite - 25 octobre 2026
+
+Un push ou une fusion sur main/develop ne declenche plus de release numerotee.
+Les workflows CI et les images Docker develop/latest continuent leur parcours
+habituel, avec un identifiant de commit distinct. Pour publier une version,
+ouvrir GitHub Actions, choisir Release (Aether) ou Release Plugin (extensions),
+Run workflow sur main, puis PATCH, MINOR ou MAJOR. PATCH est le choix par defaut.
+Une nouvelle release publiee garde un numero unique ; les versions deja publiees
+ne sont pas ecrasees. Chaque plugin garde son versionnement independant.
+
 # Gouvernance, Sécurité des Branches & Guide de Migration Organisation GitHub
 
 Ce document détaille les paramètres de sécurité et la stratégie de migration vers une organisation GitHub dédiée (ex. `AetherMedia`), sans impacter les utilisateurs existants ni rompre l'intégrité de la plateforme.

@@ -1,3 +1,9 @@
+## 25 octobre 2026 - Releases manuelles et UID NAS personnalise
+
+- Decision : aucun nouveau numero de release sur simple push/merge. Release Aether et Release Plugin uniquement via workflow_dispatch sur main, choix PATCH (defaut), MINOR ou MAJOR ; images develop/latest et CI conservees. Calcul explicite Aether prioritaire sur classification des commits. Release manuelle plugin limitee au seul plugin choisi, ajout PATCH.
+- Tests locaux : scripts/test-release-policy.py (2 tests et 3 choix d'increment), test-release-policy.py des plugins (1 test, 3 choix et isolation du plugin), syntaxe YAML et diff verifies. Pas de release, tag ni image publies par cette intervention.
+- NAS : utilisateur annonce 1039:65539 face au volume /data 10001:10001 mode 750 explique le refus sans droits supplementaires. Garder l'UID NAS exige d'aligner les proprietaires des seuls volumes applicatifs ; cap_drop ALL conserve. Correction sur le NAS non executee localement.
+
 ## 25 octobre 2026 — Catalogue plugins : bannières et diagnostic installation
 
 - Bannières affichées intégralement avec contain dans AdminExtensions. Stockage : comparaison de paquets désérialisés, évitant les faux conflits dus à la mise en forme JSON ; conflit de version et altération Wasm toujours refusés. Erreurs HTTP/UI distinctes pour permissions, conflit, intégrité et fichier absent ; cause système journalisée aussi au démarrage.

@@ -1,3 +1,20 @@
+## UID/GID personnalises et volumes applicatifs
+
+`user: "1039:65539"` remplace l'utilisateur de l'image (10001:10001), mais ne
+change pas les proprietaires des fichiers dans les volumes Docker existants.
+Un /data appartenant a 10001:10001 en mode 750 refuse donc l'acces a 1039:65539
+sans droit supplementaire. Le montage rw ne contourne pas les droits Unix/ACL.
+
+Conserver l'UID/GID NAS peut etre utile pour lire les medias. Arreter le conteneur,
+relever les sources exactes de /data et /backups avec `docker inspect`, puis
+aligner leur proprietaire sur l'UID/GID choisi depuis l'hote NAS. Cette operation
+concerne exclusivement les volumes applicatifs identifies, jamais les dossiers
+Films/Series/Music ou ceux de Jellyfin. Ne pas appliquer chmod 777. Un chown dans
+le conteneur avec cap_drop ALL peut echouer, meme via docker exec -u root.
+Redemarrer puis verifier l'identite et l'ecriture en tant qu'utilisateur normal
+dans /data, /data/plugins, /data/preparation-cache et /backups. Si un refus reste
+present apres alignement, examiner les ACL DSM des volumes concernes.
+
 > Mise à jour sécurité P2 du 17 octobre : lire [le contrat et les preuves](P2_DOCKER_VALIDATION.md).
 > Les anciennes affirmations de sécurité distribuée ne prouvent pas HTTPS entre machines.
 

@@ -12,7 +12,7 @@ Règles :
 - Préfixe de tag : 'v' (ex: v0.1.1).
 """
 
-import sys
+import argparse
 import subprocess
 import re
 import json
@@ -43,6 +43,10 @@ def parse_semver(tag_str):
         return (0, 1, 0)
 
 def main():
+    parser = argparse.ArgumentParser(description="Prepare a release without modifying Git")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--bump", choices=["AUTO", "PATCH", "MINOR", "MAJOR"], default="AUTO")
+    args = parser.parse_args()
     latest_tag = get_latest_tag()
     major, minor, patch = parse_semver(latest_tag)
 
@@ -109,8 +113,14 @@ def main():
             if subject:
                 others.append(f"- {subject} (`{commit_hash[:7]}`)")
 
-    # Incrémentation SemVer
-    if major == 0:
+    # Explicit release choices take precedence over commit classifications.
+    if args.bump == "MAJOR":
+        next_version = f"{major + 1}.0.0"
+    elif args.bump == "MINOR":
+        next_version = f"{major}.{minor + 1}.0"
+    elif args.bump == "PATCH":
+        next_version = f"{major}.{minor}.{patch + 1}"
+    elif major == 0:
         # En phase 0.x :
         # breaking change ou feature -> minor (0.2.0)
         # fix ou aucun changement conventionnel -> patch (0.1.1)
@@ -154,7 +164,7 @@ def main():
         "changelog": changelog_str
     }
 
-    if len(sys.argv) > 1 and sys.argv[1] == "--json":
+    if args.json:
         print(json.dumps(result, indent=2))
     else:
         print(f"NEXT_TAG={next_tag}")

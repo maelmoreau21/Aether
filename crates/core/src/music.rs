@@ -203,10 +203,10 @@ async fn cover(
     )
     .await
     .map_err(|_| StatusCode::NOT_FOUND)?;
-    if let Some(expected_size) = row.get::<Option<i64>, _>("cover_size") {
-        if opened.size() != expected_size as u64 {
-            return Err(StatusCode::CONFLICT);
-        }
+    if let Some(expected_size) = row.get::<Option<i64>, _>("cover_size")
+        && opened.size() != expected_size as u64
+    {
+        return Err(StatusCode::CONFLICT);
     }
     let response = media_node::serve_opened(opened, &request, &cover_mime)
         .await

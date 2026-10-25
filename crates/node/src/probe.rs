@@ -16,7 +16,7 @@
 //!    - Strictly bounded memory allocations (`-max_alloc 67108864`).
 //!    - Bounded analysis windows (`-probesize 5000000`, `-analyzeduration 5000000`).
 //!    - Hard process execution timeouts (`10 seconds`) with `kill_on_drop(true)`.
-//!    - Maximum output stdout capture limit (`take(8_388_609)` / 8 MiB).
+//!    - Maximum output stdout capture limit (`take(1_048_577)` / 1 MiB).
 //!    - File handle identity verification before and after execution (`OpenedFile::verify_unchanged_sync`).
 pub use media_contracts::media::{Probe, Track};
 use std::{io, path::Path, process::Stdio, time::Duration};
@@ -30,7 +30,7 @@ pub enum ProbeError {
     Io(#[from] io::Error),
     #[error("probe timeout (10 seconds)")]
     Timeout,
-    #[error("probe output exceeds 8 MiB")]
+    #[error("probe output exceeds 1 MiB")]
     TooLarge,
     #[error("invalid or unsupported media (ffprobe rejected input)")]
     Rejected,
@@ -64,6 +64,7 @@ pub async fn probe_file(mut file: std::fs::File) -> Result<Probe, ProbeError> {
             "-show_streams",
             "-show_format",
             "-show_chapters",
+            "-show_data",
             "-of",
             "json",
             "-",
@@ -77,11 +78,11 @@ pub async fn probe_file(mut file: std::fs::File) -> Result<Probe, ProbeError> {
         .stdout
         .take()
         .ok_or(ProbeError::Rejected)?
-        .take(8_388_609);
+        .take(1_048_577);
     let mut bytes = Vec::new();
     let outcome = tokio::time::timeout(Duration::from_secs(10), async {
         stdout.read_to_end(&mut bytes).await?;
-        if bytes.len() > 8_388_608 {
+        if bytes.len() > 1_048_576 {
             return Err(ProbeError::TooLarge);
         }
         if !child.wait().await?.success() {

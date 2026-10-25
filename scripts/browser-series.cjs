@@ -597,14 +597,14 @@ fs.mkdirSync(out, {recursive: true});
     report.results.concurrentLoginsSequencedCorrectly = true;
 
     // Personal security UI: change the current password, revoke another live device and revoke all.
-    await page.goto(origin+'/app/settings/#account');
+    await page.goto(origin+'/app/settings/#security');
     await page.waitForURL('**/app/login/**');
     await page.locator('input[autocomplete="username"]').fill('series-user-b');
     await page.locator('input[autocomplete="current-password"]').fill('disposable series user-b password');
     await page.locator('button[type="submit"]').click();await page.waitForURL(origin+'/app/');
     const otherDevice=await browser.newContext();
     const loginOther=await otherDevice.request.post(origin+'/api/v1/auth/login',{headers:{origin},data:{login:'series-user-b',password:'disposable series user-b password'}});assert.equal(loginOther.status(),200);
-    await page.goto(origin+'/app/settings/#account');await page.getByRole('heading',{name:'Appareils connectés'}).waitFor();
+    await page.goto(origin+'/app/settings/#security');await page.getByRole('heading',{name:'Appareils connectés'}).waitFor();
     for(const width of [390,1440]){await page.setViewportSize({width,height:900});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:`${out}/account-security-${width}.png`,fullPage:true});}
     await page.getByLabel('Mot de passe actuel',{exact:true}).fill('disposable series user-b password');
     await page.getByLabel('Nouveau mot de passe',{exact:true}).fill('changed disposable user-b password');
@@ -614,7 +614,7 @@ fs.mkdirSync(out, {recursive: true});
     await otherDevice.close();
     await page.locator('input[autocomplete="username"]').fill('series-user-b');
     await page.locator('input[autocomplete="current-password"]').fill('changed disposable user-b password');await page.locator('button[type="submit"]').click();await page.waitForURL(origin+'/app/');
-    await page.goto(origin+'/app/settings/#account');
+    await page.goto(origin+'/app/settings/#security');
     await page.getByRole('button',{name:'Déconnecter tous les appareils',exact:true}).click();await page.waitForURL('**/app/login/**');
     report.results.personalPasswordAndDeviceRevocation=true;
     assert.deepEqual(errors, []);

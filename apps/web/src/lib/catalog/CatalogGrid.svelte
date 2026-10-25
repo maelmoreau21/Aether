@@ -58,7 +58,6 @@
   );
   const filmCount = $derived(totalFilms ?? films.length);
   const seriesCount = $derived(totalSeries ?? series.length);
-  const base = $derived(resolve('/').replace(/\/$/, ''));
 
   const countText = $derived.by(() => {
     if (section === 'films') {

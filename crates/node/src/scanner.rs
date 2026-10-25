@@ -63,7 +63,8 @@ impl FolderVideos {
             }
             if p.extension().and_then(|s| s.to_str()).is_some_and(|s| {
                 [
-                    "mkv", "mp4", "webm", "m4v", "mov", "obu", "opus", "ogg", "srt", "vtt", "ass", "ssa",
+                    "mkv", "mp4", "webm", "m4v", "mov", "obu", "opus", "ogg", "srt", "vtt", "ass",
+                    "ssa",
                 ]
                 .iter()
                 .any(|e| s.eq_ignore_ascii_case(e))

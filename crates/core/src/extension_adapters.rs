@@ -303,7 +303,7 @@ pub(super) async fn avatar_operation(
     let invocation = crate::extension_runtime::Invocation::new(
         crate::extension_storage::wasm(&auth.store, &package)
             .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "plugin_storage_failed"))?,
+            .map_err(super::storage_error)?,
         ExtensionRequest {
             api_version: 1,
             operation: input.operation,

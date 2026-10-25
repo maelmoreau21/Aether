@@ -54,6 +54,29 @@ fn metadata_input_with_settings(input: Value, settings: Value) -> Value {
 }
 
 type Error = (StatusCode, Json<Value>);
+pub(super) fn storage_error(error: std::io::Error) -> Error {
+    eprintln!(
+        "Plugin storage operation failed ({:?}): {}",
+        error.kind(),
+        error
+    );
+    let (status, code) = match error.kind() {
+        std::io::ErrorKind::PermissionDenied => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "plugin_storage_permission_denied",
+        ),
+        std::io::ErrorKind::AlreadyExists => (StatusCode::CONFLICT, "plugin_storage_conflict"),
+        std::io::ErrorKind::InvalidData => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "plugin_storage_integrity_failed",
+        ),
+        std::io::ErrorKind::NotFound => {
+            (StatusCode::INTERNAL_SERVER_ERROR, "plugin_storage_missing")
+        }
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "plugin_storage_failed"),
+    };
+    err(status, code)
+}
 fn err(status: StatusCode, code: &str) -> Error {
     (status, Json(json!({"error": code})))
 }
@@ -482,7 +505,7 @@ async fn install_with_key(
     .await?;
     crate::extension_storage::persist(&auth.store, &package)
         .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "plugin_storage_failed"))?;
+        .map_err(storage_error)?;
     tx.commit().await.map_err(db)?;
     Ok((
         StatusCode::CREATED,
@@ -637,7 +660,7 @@ async fn uninstall(
     tx.commit().await.map_err(db)?;
     crate::extension_storage::remove(&auth.store, &id)
         .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "plugin_storage_failed"))?;
+        .map_err(storage_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 #[derive(Deserialize)]
@@ -823,7 +846,7 @@ async fn run(
     let invocation = crate::extension_runtime::Invocation {
         wasm: crate::extension_storage::wasm(&auth.store, &package)
             .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "plugin_storage_failed"))?,
+            .map_err(storage_error)?,
         input: ExtensionRequest {
             api_version: 1,
             operation: operation.clone(),

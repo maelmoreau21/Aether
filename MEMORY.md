@@ -1,3 +1,10 @@
+## 25 octobre 2026 — Catalogue plugins : bannières et diagnostic installation
+
+- Bannières affichées intégralement avec contain dans AdminExtensions. Stockage : comparaison de paquets désérialisés, évitant les faux conflits dus à la mise en forme JSON ; conflit de version et altération Wasm toujours refusés. Erreurs HTTP/UI distinctes pour permissions, conflit, intégrité et fichier absent ; cause système journalisée aussi au démarrage.
+- Aether-Plugins : IntroSkipper est absent du catalogue signé local (8 paquets). La détection automatique de release inclut désormais les plugins absents ; jobs séquentiels depuis main, SVG incorporé avant signature. Aucun push, signature production, release ni déploiement effectué.
+- Validation réelle : cargo test --locked -p media-poc --lib extension_storage::tests -j 1 (1 succès, incluant JSON formaté et conflit de version) ; cargo test --locked -p media-poc --lib repository_catalogue_install_preserves_trust_signature_and_persistence -j 1 (1 succès HTTP catalogue/installation). cargo fmt --all --check, npm --prefix apps/web run lint réussis ; npm --prefix apps/web run check : 0 erreur, 6 avertissements existants. Détection avec --base-ref HEAD : IntroSkipper seul sélectionné ; node ../Aether-Plugins/scripts/test-repository.cjs : 8 signatures/empreintes valides.
+- Journaux fournis : Docker sur NAS Synology, stockage plugins indisponible au démarrage et cache média refusé avec Permission denied (os error 13). Les droits des volumes sont une piste étayée ; chemin effectif, UID et propriétaires à vérifier sur le NAS. Erreur plugins non reproduite localement. Les correctifs nécessitent reconstruction/déploiement ; IntroSkipper nécessite une publication signée avant actualisation du dépôt. Aucune validation NAS ni navigateur réel supplémentaire.
+
 
 ## 25 octobre 2026 - Sessions persistantes et appareils personnels
 

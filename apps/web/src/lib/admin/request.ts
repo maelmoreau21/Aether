@@ -12,7 +12,11 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
   if (!response.ok) {
     const detail = await response.json().catch(() => null) as { error?: string; pluginError?: string } | null;
     const messages: Record<string,string> = {
-      plugin_storage_failed: 'Le dossier data/plugins est indisponible ou un fichier installé est altéré. Vérifiez les droits du volume.',
+      plugin_storage_failed: 'Le serveur ne peut pas enregistrer cette extension. Consultez les journaux du serveur pour connaître la cause exacte.',
+      plugin_storage_permission_denied: 'Le serveur ne peut pas accéder au stockage des extensions. Vérifiez les droits du dossier configuré par MEDIA_PLUGINS_PATH.',
+      plugin_storage_conflict: 'Une autre version du paquet existe déjà sur disque. Désinstallez cette extension avant de la réinstaller. Si elle est absente des Installées, consultez les journaux du serveur.',
+      plugin_storage_integrity_failed: 'Un fichier du paquet installé est altéré ou invalide. Désinstallez puis réinstallez cette extension.',
+      plugin_storage_missing: 'Un fichier de l’extension manque sur le serveur. Désinstallez puis réinstallez cette extension.',
       invalid_avatar_upload: 'Choisissez un nom et des images PNG, JPEG ou WebP pour cette collection.',
       github_avatar_repository_required: 'Collez le lien racine d’un dépôt GitHub public, sans /tree/ ni paramètre.',
       avatar_import_busy: 'Une collection est déjà en cours d’import.',

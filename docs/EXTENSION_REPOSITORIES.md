@@ -1,3 +1,25 @@
+## Correctifs du 25 octobre 2026
+
+Les bannières du catalogue et des extensions installées sont affichées en entier
+(`object-fit: contain`), sans découper les logos des visuels panoramiques.
+
+Le stockage compare les paquets JSON après désérialisation : une différence
+indolore de mise en forme ou de champs optionnels omis ne bloque plus une
+réinstallation identique. Un paquet différent et un module altéré restent refusés.
+Les réponses distinguent `plugin_storage_permission_denied`,
+`plugin_storage_conflict`, `plugin_storage_integrity_failed` et
+`plugin_storage_missing`. Les erreurs non classées conservent
+`plugin_storage_failed`. Le Core journalise la cause système ; le navigateur
+ne reçoit aucun chemin interne. Aucune réparation destructive automatique.
+
+IntroSkipper existe dans Aether-Plugins mais le catalogue signé local contient
+encore huit paquets sans IntroSkipper. La détection de release inclut désormais
+les plugins absents du catalogue sur les exécutions automatiques. Les publications
+sont séquentielles et récupèrent main pour éviter les conflits entre leurs commits
+de catalogue. Les SVG locaux sont incorporés avant signature. La signature avec
+la clé de production et la publication restent nécessaires avant actualisation
+du catalogue sur un serveur ; aucun paquet signé fictif n'est ajouté.
+
 # Dépôts et catalogue d’extensions
 
 > Mise à jour du 23 octobre : aucune approbation d’éditeur ou de dépôt n’est requise.

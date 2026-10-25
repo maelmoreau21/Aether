@@ -93,8 +93,12 @@ pub async fn persist(store: &IdentityStore, package: &Package) -> io::Result<()>
             400000,
         )
         .await?;
-        if stored != bytes {
-            return Err(io::Error::other(
+        // Compare normalized packages, not JSON formatting or legacy omitted defaults.
+        let stored: Package = serde_json::from_slice(&stored)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        if serde_json::to_vec(&stored).map_err(io::Error::other)? != bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
                 "plugin artifact conflicts with installed snapshot",
             ));
         }
@@ -105,13 +109,19 @@ pub async fn persist(store: &IdentityStore, package: &Package) -> io::Result<()>
         )
         .await?;
         if format!("{:x}", Sha256::digest(module)) != package.sha256 {
-            return Err(io::Error::other("plugin artifact integrity failure"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "plugin artifact integrity failure",
+            ));
         }
         return Ok(());
     }
     let module = STANDARD.decode(&package.wasm).map_err(io::Error::other)?;
     if module.len() > MAX_MODULE || format!("{:x}", Sha256::digest(&module)) != package.sha256 {
-        return Err(io::Error::other("plugin artifact integrity failure"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "plugin artifact integrity failure",
+        ));
     }
     let staging = store
         .plugins_path()
@@ -146,7 +156,10 @@ pub async fn wasm(store: &IdentityStore, package: &Package) -> io::Result<String
     )
     .await?;
     if format!("{:x}", Sha256::digest(&module)) != package.sha256 {
-        return Err(io::Error::other("plugin module integrity failure"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "plugin module integrity failure",
+        ));
     }
     Ok(STANDARD.encode(module))
 }
@@ -199,6 +212,20 @@ mod tests {
         };
         persist(&store, &package).await.unwrap();
         assert_eq!(wasm(&store, &package).await.unwrap(), package.wasm);
+        // Existing snapshots may have been pretty-printed by backup/recovery tools.
+        tokio::fs::write(
+            store.plugins_path().join("independent.plugin/package.json"),
+            serde_json::to_vec_pretty(&package).unwrap(),
+        )
+        .await
+        .unwrap();
+        persist(&store, &package).await.unwrap();
+        let mut different = package.clone();
+        different.manifest.version = "2.0.0".into();
+        assert_eq!(
+            persist(&store, &different).await.unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
         let directory = store.plugins_path().join("independent.plugin");
         assert!(directory.join("manifest.json").exists());
         assert!(directory.join("package.json").exists());

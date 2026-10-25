@@ -145,7 +145,6 @@
   {#if topRated.length >= 2}
     <MediaShelf
       title="Les mieux notés · Coups de cœur"
-      count={topRated.length}
     >
       {#each topRated as work, index (work.id)}
         <Poster {work} href={detailUrl(work)} eager={index < 4} />
@@ -157,7 +156,6 @@
   {#if films.length > 0}
     <MediaShelf
       title="Films récemment ajoutés"
-      count={totalFilms || undefined}
       viewAllHref={resolve('films/')}
       viewAllLabel="Tout voir →"
     >
@@ -171,7 +169,6 @@
   {#if series.length > 0}
     <MediaShelf
       title="Séries récemment ajoutées"
-      count={totalSeries || undefined}
       viewAllHref={resolve('series/')}
       viewAllLabel="Tout voir →"
     >
@@ -185,7 +182,6 @@
   {#if classics.length >= 2}
     <MediaShelf
       title="Grands classiques & Cinéma d'époque"
-      count={classics.length}
     >
       {#each classics as work (work.id)}
         <Poster {work} href={detailUrl(work)} />
@@ -197,7 +193,6 @@
   {#if shortSeries.length >= 2}
     <MediaShelf
       title="Séries à dévorer · Formats courts"
-      count={shortSeries.length}
     >
       {#each shortSeries as work (work.id)}
         <Poster {work} href={detailUrl(work)} />
@@ -207,7 +202,7 @@
 
   <!-- Rotating Diverse Genre Rows -->
   {#each rotatingGenres as [genreName, genreWorks] (genreName)}
-    <MediaShelf title={`Genre · ${genreName}`} count={genreWorks.length}>
+    <MediaShelf title={`Genre · ${genreName}`}>
       {#each genreWorks as work (work.id)}
         <Poster {work} href={detailUrl(work)} />
       {/each}

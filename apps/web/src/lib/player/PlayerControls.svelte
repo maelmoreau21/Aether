@@ -275,11 +275,9 @@
             </button>
           {/each}
         </div>
-        <button role="menuitem" tabindex="-1" disabled={busy} onclick={() => panel?.querySelector<HTMLInputElement>('input')?.focus()}>Régler le décalage des sous-titres</button>
         <label class="offset-control">Décalage sous-titres (s)
-          <input aria-label="Décalage sous-titres en secondes" type="number" min="-30" max="30" step="0.05" value={subtitleOffset} disabled={busy} onchange={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} />
+          <input aria-label="Décalage sous-titres en secondes" type="number" min="-30" max="30" step="0.05" value={subtitleOffset} disabled={busy} oninput={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} onchange={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} />
         </label>
-        <p class="menu-note">Positif : retarder. ASS/SSA : texte, styles avancés non reproduits.</p>
       {:else if menu === 'video'}
         <div role="group" aria-label="Piste vidéo de la source active">
           <p class="menu-section" role="presentation">Piste vidéo active</p>

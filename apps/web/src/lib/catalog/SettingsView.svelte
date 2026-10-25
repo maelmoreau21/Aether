@@ -10,6 +10,7 @@
   import Icon from '../ui/Icon.svelte';
   import { t, locale, setLocale } from '../i18n';
   import { themeMode, setTheme, type ThemeMode } from '../theme';
+  import { DEFAULT_SUBTITLE_STYLE, sanitizeSubtitleStyle, subtitleStyleToCss, type SubtitleStyle } from '../player/subtitle-style';
 
   let {
     prefAudio = $bindable('fr'),
@@ -30,6 +31,17 @@
   let audioOffset = $state(preferences().offsets?.audio ?? 0);
   let subtitleOffset = $state(preferences().offsets?.subtitle ?? 0);
   let offsetsEdited = false;
+
+  let subtitleStyle = $state<Required<SubtitleStyle>>({
+    ...DEFAULT_SUBTITLE_STYLE,
+    ...sanitizeSubtitleStyle(preferences().subtitleStyle)
+  });
+  const previewSubtitleCss = $derived(subtitleStyleToCss(subtitleStyle));
+
+  function updateSubtitleStyle<K extends keyof Required<SubtitleStyle>>(key: K, value: Required<SubtitleStyle>[K]) {
+    subtitleStyle = { ...subtitleStyle, [key]: value };
+    savePreferences({ subtitleStyle: { ...subtitleStyle } });
+  }
   const pages = [
     { id: 'account', label: 'Compte', icon: 'profile' },
     { id: 'appearance', label: 'Apparence', icon: 'sun' },
@@ -39,9 +51,14 @@
   onMount(() => {
     let disposed = false;
     void ensurePreferences().then(saved => {
-      if (disposed || offsetsEdited || !saved) return;
-      audioOffset = saved.offsets?.audio ?? 0;
-      subtitleOffset = saved.offsets?.subtitle ?? 0;
+      if (disposed || !saved) return;
+      if (!offsetsEdited) {
+        audioOffset = saved.offsets?.audio ?? 0;
+        subtitleOffset = saved.offsets?.subtitle ?? 0;
+      }
+      if (saved.subtitleStyle) {
+        subtitleStyle = { ...DEFAULT_SUBTITLE_STYLE, ...sanitizeSubtitleStyle(saved.subtitleStyle) };
+      }
     }).catch(() => {});
     const sync = () => { const id = window.location.hash.slice(1); current = pages.some(page => page.id === id) ? id : 'account'; };
     sync(); window.addEventListener('hashchange', sync);
@@ -160,6 +177,103 @@
           <label>Décalage des sous-titres (secondes)<input type="number" min="-30" max="30" step="0.1" required bind:value={subtitleOffset} oninput={() => { offsetsEdited = true; }} /></label>
           <button type="submit">Enregistrer les décalages</button>
         </form>
+
+        <section class="subtitles-appearance" aria-labelledby="subtitles-style-heading">
+          <h3 id="subtitles-style-heading">Style des sous-titres</h3>
+          <p class="muted">Personnalisez l’affichage des sous-titres dans le lecteur vidéo.</p>
+
+          <div class="subtitle-preview-box" aria-hidden="true">
+            <span
+              class="subtitle-preview-text"
+              style:color={previewSubtitleCss.color}
+              style:font-size={previewSubtitleCss.fontSize}
+              style:font-family={previewSubtitleCss.fontFamily}
+              style:background-color={previewSubtitleCss.backgroundColor}
+              style:text-shadow={previewSubtitleCss.textShadow}
+            >
+              Exemple de sous-titre affiché
+            </span>
+          </div>
+
+          <div class="pref-fields">
+            <label>
+              <span>Taille de la police</span>
+              <select
+                value={subtitleStyle.fontSize}
+                onchange={(e) => updateSubtitleStyle('fontSize', e.currentTarget.value as 'small' | 'medium' | 'large')}
+              >
+                <option value="small">Petite</option>
+                <option value="medium">Moyenne (par défaut)</option>
+                <option value="large">Grande</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Police d’écriture</span>
+              <select
+                value={subtitleStyle.fontFamily}
+                onchange={(e) => updateSubtitleStyle('fontFamily', e.currentTarget.value as 'sans-serif' | 'serif' | 'monospace')}
+              >
+                <option value="sans-serif">Sans empattement (Moderne / Sans-serif)</option>
+                <option value="serif">Avec empattement (Classique / Serif)</option>
+                <option value="monospace">Chasse fixe (Monospace)</option>
+              </select>
+            </label>
+
+            <div class="color-row">
+              <label>
+                <span>Couleur du texte</span>
+                <div class="color-picker-wrap">
+                  <input
+                    type="color"
+                    value={subtitleStyle.textColor}
+                    onchange={(e) => updateSubtitleStyle('textColor', e.currentTarget.value)}
+                  />
+                  <span>{subtitleStyle.textColor.toUpperCase()}</span>
+                </div>
+              </label>
+
+              <label>
+                <span>Couleur d’arrière-plan</span>
+                <div class="color-picker-wrap">
+                  <input
+                    type="color"
+                    value={subtitleStyle.backgroundColor}
+                    onchange={(e) => updateSubtitleStyle('backgroundColor', e.currentTarget.value)}
+                  />
+                  <span>{subtitleStyle.backgroundColor.toUpperCase()}</span>
+                </div>
+              </label>
+            </div>
+
+            <label>
+              <span>Opacité de l’arrière-plan ({subtitleStyle.backgroundOpacity} %)</span>
+              <div class="slider-wrap">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="5"
+                  value={subtitleStyle.backgroundOpacity}
+                  oninput={(e) => updateSubtitleStyle('backgroundOpacity', Number(e.currentTarget.value))}
+                />
+              </div>
+              <small class="muted">À 0 %, aucun fond opaque ne vient masquer la vidéo.</small>
+            </label>
+
+            <label>
+              <span>Contour et ombre du texte</span>
+              <select
+                value={subtitleStyle.textShadow}
+                onchange={(e) => updateSubtitleStyle('textShadow', e.currentTarget.value as 'none' | 'outline' | 'drop-shadow')}
+              >
+                <option value="drop-shadow">Ombre portée nette (par défaut)</option>
+                <option value="outline">Contour noir renforcé</option>
+                <option value="none">Aucun contour / ombre</option>
+              </select>
+            </label>
+          </div>
+        </section>
       </section></div>
       <div hidden={current !== 'sso'}>
     <section class="card oidc-card" aria-labelledby="sso-settings-heading">
@@ -203,6 +317,53 @@
   button { justify-self: start; min-height: 44px; padding: 12px 20px; border: 0; border-radius: 4px; background: var(--color-play); color: var(--color-on-accent); }
   .offsets { padding-top: 28px; border-top: 1px solid var(--border-subtle); }
   .offsets p { margin: 0; }
+  .subtitles-appearance { margin-top: 36px; padding-top: 28px; border-top: 1px solid var(--border-subtle); }
+  .subtitles-appearance h3 { margin-bottom: 8px; }
+  .subtitle-preview-box {
+    margin: 20px 0;
+    padding: 36px 20px;
+    background: linear-gradient(135deg, #181926 0%, #0d0e15 100%);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 120px;
+    overflow: hidden;
+  }
+  .subtitle-preview-text {
+    padding: 4px 10px;
+    border-radius: 4px;
+    display: inline-block;
+    max-width: 90%;
+    word-break: break-word;
+    transition: all 0.15s ease-out;
+  }
+  .color-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+  }
+  .color-picker-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .color-picker-wrap input[type="color"] {
+    width: 48px;
+    height: 44px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    border: 1px solid var(--border-subtle);
+    background: transparent;
+    cursor: pointer;
+  }
+  .slider-wrap input[type="range"] {
+    width: 100%;
+    max-width: 520px;
+    accent-color: var(--color-play);
+  }
   @media (max-width: 760px) {
     .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 28px; }
     .settings-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }

@@ -365,7 +365,7 @@ export class NativePlayer implements Player {
       for (const cue of Array.from(track.track.cues ?? [])) {
         this.cueTimes.set(cue, [cue.startTime, cue.endTime]);
         this.shiftCue(cue);
-        if (typeof VTTCue !== 'undefined' && cue instanceof VTTCue) { cue.snapToLines = false; cue.line = 70; }
+        if (typeof VTTCue !== 'undefined' && cue instanceof VTTCue) { cue.snapToLines = false; cue.line = 90; }
       }
     }, { once: true });
     track.addEventListener('error', () => this.onError('Échec du chargement des sous-titres WebVTT.'), { once: true });

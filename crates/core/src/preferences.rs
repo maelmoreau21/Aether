@@ -25,6 +25,8 @@ struct Preferences {
     offsets: Option<Offsets>,
     #[serde(skip_serializing_if = "Option::is_none")]
     subtitle_preference: Option<SubtitlePreference>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subtitle_style: Option<SubtitleStyle>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -38,6 +40,23 @@ struct Offsets {
     audio: f64,
     subtitle: f64,
 }
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SubtitleStyle {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    font_size: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    font_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    background_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    background_opacity: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text_shadow: Option<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SubtitlePreference {
@@ -54,6 +73,11 @@ fn language(value: &str) -> bool {
         && value
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+fn hex_color(value: &str) -> bool {
+    value.len() == 7
+        && value.starts_with('#')
+        && value[1..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 impl Preferences {
     fn valid(&self) -> bool {
@@ -83,6 +107,21 @@ impl Preferences {
                 .subtitle_preference
                 .as_ref()
                 .is_none_or(|v| v.language.as_deref().is_none_or(language))
+            && self.subtitle_style.as_ref().is_none_or(|s| {
+                s.font_size
+                    .as_deref()
+                    .is_none_or(|v| matches!(v, "small" | "medium" | "large"))
+                    && s.font_family
+                        .as_deref()
+                        .is_none_or(|v| matches!(v, "sans-serif" | "serif" | "monospace"))
+                    && s.text_color.as_deref().is_none_or(hex_color)
+                    && s.background_color.as_deref().is_none_or(hex_color)
+                    && s.background_opacity
+                        .is_none_or(|v| v.is_finite() && (0.0..=100.0).contains(&v))
+                    && s.text_shadow
+                        .as_deref()
+                        .is_none_or(|v| matches!(v, "none" | "outline" | "drop-shadow"))
+            })
     }
 }
 pub fn router(auth: AuthState) -> Router {

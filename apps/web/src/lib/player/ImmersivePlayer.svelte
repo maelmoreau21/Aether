@@ -6,6 +6,7 @@
   import PlayerControls, { type Menu } from './PlayerControls.svelte';
   import type { Media, Player, PlayerFactory, PlaybackState } from './types';
   import { preferredSubtitle, type SubtitlePreference } from './subtitle-preference';
+  import { subtitleStyleToCss, type SubtitleStyle } from './subtitle-style';
   import { ProgressTracker } from './progress';
   import { getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
@@ -36,6 +37,8 @@
   let subtitleOffset = $state(0);
   let subtitle = $state<string | null>(null);
   let subtitlePreference: SubtitlePreference | undefined;
+  let subtitleStyle = $state<SubtitleStyle | undefined>();
+  const activeSubtitleCss = $derived(subtitleStyleToCss(subtitleStyle));
   let menu = $state<Menu>(null);
   let fullscreen = $state(false);
   let visible = $state(true);
@@ -180,6 +183,7 @@
       if (initialSubtitles === 'off') subtitlePreference = { enabled: false };
       else if (initialSubtitles === 'always') subtitlePreference = { enabled: true, language: 'fr', forced: false };
       else subtitlePreference = undefined;
+      subtitleStyle = account.subtitleStyle;
     } catch { /* Preferences are optional when browser storage is unavailable. */ }
   }
   export function open(media: Media | Promise<Media>) {
@@ -339,7 +343,23 @@
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = true; wake(); }} onkeydown={keyboard}
     onpointermove={event => { if (event.pointerType !== 'touch') wake(); }} onpointerdown={() => { keyboardPinned = false; surface?.focus(); }}>
-    <video bind:this={video} playsinline preload="auto" loop={repeat} style:object-fit={aspectRatio} ontimeupdate={sync} ondurationchange={sync} onplay={sync} onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }} onended={ended}><track kind="captions" /></video>
+    <video
+      bind:this={video}
+      playsinline
+      preload="auto"
+      loop={repeat}
+      style:object-fit={aspectRatio}
+      style:--sub-color={activeSubtitleCss.color}
+      style:--sub-size={activeSubtitleCss.fontSize}
+      style:--sub-font={activeSubtitleCss.fontFamily}
+      style:--sub-bg={activeSubtitleCss.backgroundColor}
+      style:--sub-shadow={activeSubtitleCss.textShadow}
+      ontimeupdate={sync}
+      ondurationchange={sync}
+      onplay={sync}
+      onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }}
+      onended={ended}
+    ><track kind="captions" /></video>
     {#if active?.chapters?.length && visible}<label class="chapters">Chapitres<select aria-label="Chapitres vidéo" disabled={busy} onchange={event => seek(Number(event.currentTarget.value))}><option value="" disabled selected>Choisir un chapitre</option>{#each active.chapters as chapter,i (`${chapter.start}-${i}`)}<option value={chapter.start}>{i+1}. {chapter.title}</option>{/each}</select></label>{/if}
     <button class="video-interaction" tabindex="-1" aria-label="Afficher ou masquer les commandes" onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
@@ -387,7 +407,14 @@
   .stream-statistics dd { margin:0; } .stream-statistics dt, .stream-statistics p { color:#bbb8ca; }
 
   .chapters { position:absolute;top:90px;right:24px;z-index:4;display:grid;gap:6px;max-width:70%; } .chapters select { padding:10px;max-width:100%;color:var(--color-text);background:var(--color-surface);border:1px solid var(--color-line);border-radius:6px; }
-  video::cue { color:#fff; background:rgba(0,0,0,.8); text-shadow:0 1px 2px #000; font-size:clamp(18px,2vw,30px); }
+  video::cue {
+    color: var(--sub-color, #ffffff);
+    background: var(--sub-bg, transparent);
+    text-shadow: var(--sub-shadow, 0 2px 4px rgba(0, 0, 0, 0.9));
+    font-size: var(--sub-size, clamp(18px, 2.2vw, 30px));
+    font-family: var(--sub-font, system-ui, -apple-system, sans-serif);
+    line-height: 1.35;
+  }
   .next-episode { margin-left:auto; max-width:50%; font-size:12px; } .next-episode label { display:flex; align-items:center; gap:8px; }
   .title { min-width:0; flex:1; } .title>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   :global(body.immersive-open) { overflow: hidden; }

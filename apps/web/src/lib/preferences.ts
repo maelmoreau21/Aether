@@ -1,11 +1,13 @@
 import { get, writable } from 'svelte/store';
 import { session, getSessionGeneration, onSessionGenerationChange } from './auth/session';
 import type { SubtitlePreference } from './player/subtitle-preference';
+import { sanitizeSubtitleStyle, type SubtitleStyle } from './player/subtitle-style';
 
 export type Preferences = {
   theme?: 'light' | 'dark' | 'system'; locale?: 'fr' | 'en'; audioLanguage?: string;
   subtitles?: 'forced' | 'always' | 'off'; audioTrack?: { mediaId: string; trackId: string };
   offsets?: { audio: number; subtitle: number }; subtitlePreference?: SubtitlePreference;
+  subtitleStyle?: SubtitleStyle;
 };
 let current: Preferences = {};
 let owner: string | null = null;
@@ -31,7 +33,8 @@ function mirror(value: Preferences, userId: string) {
       [`media_audio_${userId}`]: value.audioLanguage,
       [`media_audio_track_${userId}`]: value.audioTrack ? JSON.stringify(value.audioTrack) : undefined,
       [`media_offsets_${userId}`]: value.offsets ? JSON.stringify(value.offsets) : undefined,
-      [`media_subtitle_${userId}`]: value.subtitlePreference ? JSON.stringify(value.subtitlePreference) : undefined
+      [`media_subtitle_${userId}`]: value.subtitlePreference ? JSON.stringify(value.subtitlePreference) : undefined,
+      [`media_subtitle_style_${userId}`]: value.subtitleStyle ? JSON.stringify(value.subtitleStyle) : undefined
     };
     for (const [key, content] of Object.entries(values)) {
       if (content === undefined) localStorage.removeItem(key); else localStorage.setItem(key, content);
@@ -71,6 +74,13 @@ function legacyPreferences(userId: string, loaded: Preferences): Preferences {
       if (language(subtitle.language)) patch.subtitlePreference.language = subtitle.language;
       if (typeof subtitle.forced === 'boolean') patch.subtitlePreference.forced = subtitle.forced;
       if (typeof subtitle.sdh === 'boolean') patch.subtitlePreference.sdh = subtitle.sdh;
+    }
+  }
+  if (loaded.subtitleStyle === undefined) {
+    const styleObj = object(`media_subtitle_style_${userId}`);
+    if (styleObj) {
+      const sanitized = sanitizeSubtitleStyle(styleObj);
+      if (Object.keys(sanitized).length > 0) patch.subtitleStyle = sanitized;
     }
   }
   return patch;

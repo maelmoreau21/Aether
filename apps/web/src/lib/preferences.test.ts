@@ -45,7 +45,7 @@ describe('account preferences', () => {
   });
 
   it('migrates only validated scoped settings missing on the server', async () => {
-    const values: Record<string, string> = { media_audio_a: 'en', media_audio_b: 'de', media_offsets_a: '{"audio":0.5,"subtitle":-1}', media_audio_track_a: '{"mediaId":"m","trackId":"t"}', media_subtitle_a: '{"enabled":true,"language":"fr","forced":true}', media_pref_audio: 'es' };
+    const values: Record<string, string> = { media_audio_a: 'en', media_audio_b: 'de', media_offsets_a: '{"audio":0.5,"subtitle":-1}', media_audio_track_a: '{"mediaId":"m","trackId":"t"}', media_subtitle_a: '{"enabled":true,"language":"fr","forced":true}', media_subtitle_style_a: '{"fontSize":"large","textColor":"#ffff00"}', media_pref_audio: 'es' };
     const storage = { getItem: vi.fn((key: string) => values[key] ?? null), setItem: vi.fn(), removeItem: vi.fn() };
     vi.stubGlobal('localStorage', storage); session.set(account('a'));
     const fetch = vi.fn().mockResolvedValueOnce(Response.json({ audioLanguage: 'fr' })).mockResolvedValueOnce(new Response(null, { status: 204 }));
@@ -57,6 +57,7 @@ describe('account preferences', () => {
     expect(patch.audioLanguage).toBeUndefined();
     expect(patch.audioTrack).toEqual({ mediaId: 'm', trackId: 't' });
     expect(patch.subtitlePreference).toEqual({ enabled: true, language: 'fr', forced: true });
+    expect(patch.subtitleStyle).toEqual({ fontSize: 'large', textColor: '#ffff00' });
     expect(fetch.mock.calls[1][1].headers['x-csrf-token']).toBe('csrf-a');
     expect(storage.getItem).not.toHaveBeenCalledWith('media_audio_b');
     expect(storage.getItem).not.toHaveBeenCalledWith('media_pref_audio');

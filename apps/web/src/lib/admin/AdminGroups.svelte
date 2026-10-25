@@ -241,7 +241,7 @@
                   <table class="dsm-table">
                     <thead>
                       <tr>
-                        <th style="width: 48px;">
+                        <th class="col-check">
                           <input
                             type="checkbox"
                             checked={users.length > 0 && users.every(u => userIds.includes(u.id))}
@@ -264,7 +264,7 @@
                           </td>
                           <td>
                             <strong>{user.displayName || user.login}</strong>
-                            <span class="text-muted" style="margin-left: 8px;">({user.login})</span>
+                            <span class="text-muted user-login-paren">({user.login})</span>
                           </td>
                           <td>
                             {#if user.role === 'administrator'}
@@ -292,7 +292,7 @@
                 <table class="dsm-table">
                   <thead>
                     <tr>
-                      <th style="width: 48px;">
+                      <th class="col-check">
                         <input
                           type="checkbox"
                           checked={libraries.length > 0 && libraries.every(l => libraryIds.includes(l.id))}
@@ -405,7 +405,7 @@
     <table class="dsm-table main-table">
       <thead>
         <tr>
-          <th style="width: 40px; text-align: center;">
+          <th class="col-check-center">
             <input type="checkbox" checked={allSelected} onchange={toggleSelectAll} aria-label="Sélectionner tous les groupes" />
           </th>
           <th class="sortable" onclick={() => handleSort('name')}>
@@ -429,7 +429,7 @@
             class:selected={isSelected}
             ondblclick={() => edit(group)}
           >
-            <td style="text-align: center;">
+            <td class="cell-center">
               <input
                 type="checkbox"
                 checked={isSelected}
@@ -959,4 +959,10 @@
       gap: 6px;
     }
   }
+
+  .col-check { width: 48px; }
+  .col-check-center { width: 40px; text-align: center; }
+  .cell-center { text-align: center; }
+  .user-login-paren { margin-left: 8px; }
+
 </style>

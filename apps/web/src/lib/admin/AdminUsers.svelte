@@ -401,7 +401,7 @@
                 <table class="dsm-table">
                   <thead>
                     <tr>
-                      <th style="width: 48px;"></th>
+                      <th class="col-check"></th>
                       <th>Groupe</th>
                       <th>Type</th>
                       <th>Bibliothèques accessibles</th>
@@ -463,7 +463,7 @@
                   <table class="dsm-table">
                     <thead>
                       <tr>
-                        <th style="width: 48px;">
+                        <th class="col-check">
                           <input
                             type="checkbox"
                             checked={libraries.length > 0 && libraries.every(l => libraryIds.includes(l.id))}
@@ -532,7 +532,7 @@
                     <span class="row-label">Nouveau mot de passe</span>
                     <div class="row-field">
                       <input type="password" required minlength="15" maxlength="128" bind:value={newPassword} placeholder="15 caractères minimum" />
-                      <button type="button" class="btn btn-warning" style="margin-top: 10px;" disabled={busy || newPassword.length < 15} onclick={() => save(true)}>
+                      <button type="button" class="btn btn-warning mt-10" disabled={busy || newPassword.length < 15} onclick={() => save(true)}>
                         Appliquer et révoquer les sessions
                       </button>
                     </div>
@@ -630,7 +630,7 @@
     <table class="dsm-table main-table">
       <thead>
         <tr>
-          <th style="width: 40px; text-align: center;">
+          <th class="col-check-center">
             <input type="checkbox" checked={allSelected} onchange={toggleSelectAll} aria-label="Sélectionner tous les utilisateurs" />
           </th>
           <th class="sortable" onclick={() => handleSort('name')}>
@@ -658,7 +658,7 @@
             class:row-disabled={user.disabledAt != null}
             ondblclick={() => edit(user)}
           >
-            <td style="text-align: center;">
+            <td class="cell-center">
               <input
                 type="checkbox"
                 checked={isSelected}
@@ -1297,4 +1297,10 @@
       gap: 6px;
     }
   }
+
+  .col-check { width: 48px; }
+  .col-check-center { width: 40px; text-align: center; }
+  .cell-center { text-align: center; }
+  .mt-10 { margin-top: 10px; }
+
 </style>

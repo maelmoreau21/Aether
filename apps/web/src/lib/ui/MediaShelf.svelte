@@ -226,7 +226,7 @@
     gap: 16px;
     overflow-x: auto;
     scroll-behavior: smooth;
-    padding: 8px 4px 16px;
+    padding: 8px 8px 16px;
     scrollbar-width: none;
     -ms-overflow-style: none;
     scroll-snap-type: x mandatory;

@@ -1,6 +1,6 @@
 # Moteur de tâches distribué — 24 octobre 2026
 
-Le Core possède désormais une file persistante de scans. Il admet les tâches,
+Le Core possède désormais une file persistante de travaux multimédias. Il admet les tâches,
 attribue un lease au Node qui possède la bibliothèque, suit leur exécution et
 refuse les résultats d'une ancienne tentative. Le scanner Node existant effectue
 le travail : découverte incrémentale, analyse technique, NFO et images locales
@@ -35,12 +35,18 @@ consultés sont bornés. Des index distincts couvrent les candidats, les leases,
 leur expiration et les bibliothèques.
 
 Le worker cherche au maximum 100 Nodes candidats par passe. La concurrence
-de production est limitée à un scan par Node et à une exécution physique par
+de production est limitée à une tâche de fond par Node et à une exécution physique par
 bibliothèque. La priorité est un entier de 0 à 1 000, les valeurs élevées
 passent d'abord ; à priorité égale, la date puis l'identifiant départagent les
 tâches. Une transaction d'écriture sérialise l'admission et empêche le
 dépassement de capacité par des claimers concurrents. Cela reste une
 architecture à Core unique.
+Les mutations de la file attendent leur tour avant d'acquérir une connexion
+SQL : elles ne monopolisent pas les quatre connexions SQLite en attendant le
+verrou d'écriture. Une passe de production attribue jusqu'à 100 leases dans
+une seule transaction, avant de lancer les exécuteurs. Les contrôles DB
+restent nécessaires si plusieurs connexions tentent de réclamer le même job.
+
 
 Un scan reste attaché au Node qui possède son dossier. Une bibliothèque
 désactivée ou un Node révoqué ne reçoit plus de tâche. Un Node hors ligne
@@ -240,6 +246,7 @@ Commandes ciblées, à exécuter séquentiellement sous Windows :
 cargo test -p media-poc -j 1 --test distributed_tasks --test task_engine_http --test scheduler --test task_operations -- --test-threads=1
 cargo test -p media-node -j 1 resources -- --test-threads=1
 cargo test -p media-poc -j 1 --test distributed_tasks ten_thousand_jobs_on_one_hundred_simulated_nodes -- --ignored --nocapture --test-threads=1
+cargo test -p media-poc -j 1 --features query-metrics --test distributed_tasks_scale -- --ignored --nocapture --test-threads=1
 ```
 
 Le benchmark de file est une simulation SQLite de 10 000 jobs et 100 Nodes.
@@ -255,7 +262,80 @@ planches de miniatures vidéo et budgets administratifs propres à chaque
 catégorie ; choix entre plusieurs Nodes équivalents et
 redistribution sûre ; checkpoint de staging par fichier ; intégration des
 extensions ; configuration administrative des budgets ; purge de
-l'historique ; mesure des allocations et accès SQL ; comparaisons CPU/RSS,
+l'historique ; profilage des allocations et des I/O physiques SQLite ; comparaisons CPU/RSS,
 navigation et décodage AV1/Opus avec et sans scans concurrents ; preuve sur
 réseau et machines réels. La présence des garde-fous et des tests de file ne
 remplace pas ces mesures.
+
+La feature facultative `query-metrics`, désactivée par défaut, compte les
+constructions de requêtes via les wrappers SQL partagés et les frontières
+BEGIN/COMMIT instrumentées du moteur. `statementCalls` décrit ces appels ;
+il ne compte pas les pages disque SQLite, les I/O du système ou les appels
+SQLx bruts externes aux wrappers. Les chiffres CPU/RSS des bancs concernent
+le processus de test Windows, pas un NAS ni un processus Node distant.
+
+`MEDIA_TEST_TASK_BACKLOG=1` ajoute au scénario navigateur `browser_scanner`
+une file persistante de 10 000 scans de bibliothèque vide, avant ses deux
+parcours MP4/MKV et le vrai redémarrage du Core. La vidéo AV1 et l'audio Opus
+restent soumis aux assertions de pixels, PCM, seeks et synchronisation du
+scénario existant. Le test exige du travail réellement terminé et aucune
+perte de jobs après redémarrage. Ce banc isole la pression de la file et du
+scheduler : il ne représente pas 10 000 probes vidéo ni une charge disque
+massive. `MEDIA_REPORT_DIR` sélectionne le dossier des preuves.
+
+## Résultats observés le 25 octobre 2026
+
+Preuves brutes et synthèse : [dossier de validation](evidence/2026-10-25/distributed-tasks/summary.json).
+Hôte Windows 11, Core Ultra 7 256V, 8 processeurs logiques, Rust 1.99.1,
+profil `test` non optimisé, SQLite WAL. Les 100 Nodes de charge sont des
+identités simulées. Les limites de ces mesures s'appliquent aux chiffres suivants.
+
+| Scénario | Résultat mesuré |
+|---|---|
+| 10 000 admissions réelles et durables | 49,95 s ; 200,2 jobs/s ; p50 4,45 ms ; p95 7,34 ms ; max 132,12 ms |
+| Liste administrateur pendant ces admissions | 1 752 requêtes ; p95 16,05 ms ; max 56,47 ms |
+| CPU et mémoire de ce processus de test | CPU agrégé 55,45 s ; RSS final 19,52 Mio ; instantané, pas un pic |
+| Appels SQL instrumentés pendant admissions + navigation | 73 510 appels, incluant les transactions instrumentées et la navigation |
+| Attribution unitaire sur 10 000 tâches / 100 Nodes | p50 5,83 ms ; p95 9,13 ms ; p99 21,58 ms ; max 201,96 ms |
+| Attribution groupée des 100 Nodes | p50 213,99 ms ; p95 383,89 ms ; max 818,06 ms |
+| 100 claimers concurrents, 1 000 jobs exécutés | 65,36 jobs/s ; claim p95 1 639,69 ms ; navigation p95 17,27 ms |
+
+La réserve de connexions pour les lecteurs a corrigé une contention observée :
+la liste administrateur était à p95 959,43 ms dans le premier essai concurrent,
+puis à 17,27 ms dans l'essai final. Ces essais locaux ne constituent pas une
+comparaison matérielle contrôlée ni une garantie de latence.
+
+**L'objectif de 50 ms n'est pas atteint pour l'attribution groupée à 100 Nodes
+ni sous contention maximale.** Le p95 unitaire est inférieur à 50 ms ; les
+valeurs maximales restent supérieures. Aucun résultat Release, PostgreSQL,
+NAS ou 100 machines physiques n'est annoncé.
+
+Vérifications fonctionnelles terminées :
+
+- 15 scénarios Core d'intégration ciblés réussis : états, retries, pause/reprise,
+  annulation, doublons, courses d'attribution, dossiers regroupés, scans et
+  opérations réelles standalone, Core + deux Nodes sur TCP local et canal sortant.
+- 8 tests Core ciblés réussis : autorisations/fencing/configuration modifiée,
+  SQL normalisé et arrêt du runner. 84 tests unitaires Node réussis ; 4 tests
+  auxiliaires ou bancs optionnels ignorés. Les trois bancs de charge explicites
+  ont été lancés séparément et réussissent.
+- Chrome 155 headless : vrais pixels AV1 et PCM Opus, MP4 puis MKV après
+  redémarrage, seek/pause/pistes/sous-titres/progression et récupération sur erreur.
+  Le backlog de 10 000 jobs est conservé : 138 scans de bibliothèque vide
+  terminés avant redémarrage, 256 après. Cela valide la pression de la file,
+  sans représenter une campagne de 10 000 probes média.
+- 32 lectures HTTP Range directes/relais sous backlog, octets identiques aux
+  témoins, pendant un scan distant réellement terminé. Cela reste distinct
+  du décodage navigateur et ne mesure pas le débit d'un NAS.
+- Web : 152 tests réussis, Svelte/TypeScript sans erreur ni avertissement,
+  ESLint ciblé et build statique réussis. UI réelle avec API simulée : actions,
+  catégories, résultat JSON échappé, clair/sombre et largeurs 390/1440.
+- Clippy tous targets avec avertissements refusés : réussi.
+
+Les Core et Nodes doivent être mis à jour ensemble pour les nouvelles
+commandes et les identifiants d'exécution annoncés par heartbeat. Les jobs
+restent liés au Node propriétaire de leur emplacement ; une redistribution
+entre copies, un checkpoint de staging par fichier, des budgets administratifs
+configurables et les tâches de métadonnées d'extensions restent des jalons
+suivants. Les catégories analyse/préparation ciblent actuellement les assets
+films/séries ; les scans incluent aussi les bibliothèques musicales.

@@ -385,7 +385,7 @@ async fn enqueue_one(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
     let library: Option<(String, String, String, String)> = crate::database::query_as(
-        "SELECT l.root, l.kind, l.node_id, l.excluded_patterns FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND (l.enabled=1 OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.kind IN ('films', 'series', 'music') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
+        "SELECT l.root, l.kind, l.node_id, l.excluded_patterns FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.kind IN ('films', 'series', 'music') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
     )
     .bind(&id)
     .fetch_optional(&state.auth.store.pool)

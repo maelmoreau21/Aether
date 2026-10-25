@@ -1925,7 +1925,7 @@ pub(crate) async fn scan_run_authorized(
     node: &str,
     scan: &str,
 ) -> bool {
-    let valid: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM active_scan_runs r JOIN libraries l ON l.id=r.library_id JOIN media_nodes n ON n.id=l.node_id WHERE r.library_id=? AND r.node_id=? AND r.scan_id=? AND l.enabled=1 AND l.node_id=r.node_id AND n.status!='revoked'")
+    let valid: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM active_scan_runs r JOIN libraries l ON l.id=r.library_id JOIN media_nodes n ON n.id=l.node_id WHERE r.library_id=? AND r.node_id=? AND r.scan_id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.node_id=r.node_id AND n.status!='revoked'")
         .bind(library).bind(node).bind(scan).fetch_one(&store.pool).await.unwrap_or(0);
     if valid != 1 {
         return false;
@@ -1964,7 +1964,7 @@ pub(crate) async fn dispatch_remote_task(
     }
     let base = rec.base_url.as_deref().ok_or("Node offline")?;
     let body = serde_json::to_vec(request).map_err(|_| "Task encoding failed")?;
-    media_node::server::send_signed_http_request(
+    let response = media_node::server::send_signed_http_request(
         base,
         "core-to-node",
         Method::POST,
@@ -1975,15 +1975,24 @@ pub(crate) async fn dispatch_remote_task(
         None,
         Bytes::from(body),
     )
-    .await
-    .map(|_| ())
-    .map_err(|e| {
-        if e.to_string().starts_with("HTTP 429 ") {
-            "node_busy_playback_priority".into()
-        } else {
-            "Node task dispatch failed".into()
+    .await;
+    match response {
+        Ok(_) => Ok(()),
+        Err(error) if error.to_string().starts_with("HTTP 429 ") => {
+            Err("node_busy_playback_priority".into())
         }
-    })
+        Err(error) if error.to_string().starts_with("HTTP ") => Err("Node task rejected".into()),
+        Err(_) => {
+            let _ = crate::database::query(
+                "UPDATE media_nodes SET status='disconnected' WHERE id=? AND status!='revoked'",
+            )
+            .bind(node)
+            .execute(&store.pool)
+            .await;
+            store.node_registry.record_failure(node, true);
+            Err("Node task unavailable; waiting for reconnection".into())
+        }
+    }
 }
 
 async fn receive_task_complete(
@@ -2141,7 +2150,7 @@ async fn receive_music_track(
     {
         return error(StatusCode::CONFLICT, "stale_scan_attempt");
     }
-    let valid:i64=crate::database::query_scalar("SELECT COUNT(*) FROM libraries l JOIN music_scan_runs run ON run.library_id=l.id WHERE l.id=? AND l.node_id=? AND l.kind='music' AND l.enabled=1 AND l.root=? AND run.scan_id=?").bind(&submission.library_id).bind(&rec.id).bind(&submission.root_snapshot).bind(&submission.scan_id).fetch_one(&state.auth.store.pool).await.unwrap_or(0);
+    let valid:i64=crate::database::query_scalar("SELECT COUNT(*) FROM libraries l JOIN music_scan_runs run ON run.library_id=l.id WHERE l.id=? AND l.node_id=? AND l.kind='music' AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.root=? AND run.scan_id=?").bind(&submission.library_id).bind(&rec.id).bind(&submission.root_snapshot).bind(&submission.scan_id).fetch_one(&state.auth.store.pool).await.unwrap_or(0);
     let path = std::path::Path::new(&submission.track.relative_path);
     if valid != 1
         || path.is_absolute()
@@ -2207,7 +2216,7 @@ async fn receive_scan_batch(
 
     // Verify library belongs to this Node
     let owns_lib: i64 = crate::database::query_scalar(
-        "SELECT CAST(EXISTS(SELECT 1 FROM libraries WHERE id=? AND node_id=? AND enabled=1) AS INTEGER)",
+        "SELECT CAST(EXISTS(SELECT 1 FROM libraries l WHERE l.id=? AND l.node_id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))) AS INTEGER)",
     )
     .bind(sub.library_id.as_str())
     .bind(&rec.id)
@@ -2273,7 +2282,7 @@ async fn receive_scan_complete(
 
     // Update library root to canonical root_snapshot reported by the Node if needed
     let lib_row: Option<(String,)> = crate::database::query_as(
-        "SELECT root FROM libraries WHERE id=? AND node_id=? AND enabled=1",
+        "SELECT root FROM libraries l WHERE l.id=? AND l.node_id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))",
     )
     .bind(lib_id)
     .bind(&rec.id)
@@ -2281,9 +2290,18 @@ async fn receive_scan_complete(
     .await
     .ok()
     .flatten();
-    if lib_row.is_none() {
+    let Some((configured_root,)) = lib_row else {
         let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
         return error(StatusCode::FORBIDDEN, "library_not_owned_by_node");
+    };
+    if comp.config_revision != format!("{lib_id}:{configured_root}") {
+        // A scan started on the previous configuration cannot undo an admin edit.
+        let errors =
+            serde_json::json!(["Library configuration changed; retry required"]).to_string();
+        let _=crate::database::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1 WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
+            .bind(errors).bind(lib_id).bind(&scan_id).execute(&state.auth.store.pool).await;
+        let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
+        return error(StatusCode::CONFLICT, "scan_configuration_changed");
     }
 
     if !comp.root_snapshot.is_empty() {
@@ -3405,11 +3423,141 @@ mod transport_policy_tests {
             .execute(store.pool())
             .await
             .unwrap();
+        crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('child','Child','films','local','child-root',0)").execute(store.pool()).await.unwrap();
+        crate::database::query(
+            "INSERT INTO library_folders(library_id,parent_id,active) VALUES('child','films',1)",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        crate::database::query("INSERT INTO active_scan_runs(library_id,node_id,scan_id) VALUES('child','local','child-current')").execute(store.pool()).await.unwrap();
+        assert!(scan_run_authorized(&store, "child", "local", "child-current").await);
+        // A historical enabled flag cannot override the parent or removed folder.
+        crate::database::query("UPDATE libraries SET enabled=1 WHERE id='child'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        crate::database::query("UPDATE libraries SET enabled=0 WHERE id='films'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert!(!scan_run_authorized(&store, "child", "local", "child-current").await);
+        crate::database::query("UPDATE libraries SET enabled=1 WHERE id='films'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        crate::database::query("UPDATE library_folders SET active=0 WHERE library_id='child'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert!(!scan_run_authorized(&store, "child", "local", "child-current").await);
         crate::database::query("UPDATE media_nodes SET status='revoked' WHERE id='local'")
             .execute(store.pool())
             .await
             .unwrap();
         assert!(!scan_run_authorized(&store, "films", "local", "legacy-current").await);
+        store.close().await;
+    }
+    #[tokio::test]
+    async fn old_scan_completion_cannot_revert_a_changed_library_root() {
+        use tower::ServiceExt;
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("changed-root.sqlite"))
+            .await
+            .unwrap();
+        let secret = "synthetic-test-node-secret-not-a-deployment-secret";
+        crate::database::query("INSERT INTO media_nodes(id,name,kind,status,key_id,shared_secret) VALUES('config-node','Config','remote','connected','test-key',?)").bind(secret).execute(store.pool()).await.unwrap();
+        crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('config-library','Config','films','config-node','new-root',1)").execute(store.pool()).await.unwrap();
+        crate::database::query(
+            "INSERT INTO scan_jobs(library_id,status) VALUES('config-library','running')",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        crate::database::query("INSERT INTO active_scan_runs(library_id,scan_id,node_id) VALUES('config-library','old-config-scan','config-node')").execute(store.pool()).await.unwrap();
+        let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+        let app = router(auth, Arc::new(ReplayWindow::new()));
+        let path = "/internal/v1/core/scans/old-config-scan/complete";
+        let body=serde_json::to_vec(&serde_json::json!({"nodeId":"config-node","libraryId":"config-library","rootSnapshot":"old-root","configRevision":"config-library:old-root","finished":{"scan_id":"old-config-scan","last_sequence":0,"discovered":0,"probed":0,"reused":0,"complete":true}})).unwrap();
+        let now = unix_now();
+        let nonce = random_nonce_hex();
+        let digest = sha256_hex(&body);
+        let signature = sign_internal_request(
+            secret,
+            "node-to-core",
+            "POST",
+            path,
+            "config-node",
+            "test-key",
+            now,
+            &nonce,
+            &digest,
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(path)
+                    .header(HDR_PROTOCOL, PROTOCOL_VERSION)
+                    .header(HDR_NODE_ID, "config-node")
+                    .header(HDR_KEY_ID, "test-key")
+                    .header(HDR_TIMESTAMP, now.to_string())
+                    .header(HDR_NONCE, nonce)
+                    .header(HDR_BODY_SHA256, digest)
+                    .header(HDR_SIGNATURE, signature)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let root: String =
+            crate::database::query_scalar("SELECT root FROM libraries WHERE id='config-library'")
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(root, "new-root");
+        let status: String = crate::database::query_scalar(
+            "SELECT status FROM scan_jobs WHERE library_id='config-library'",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        assert_eq!(status, "error");
+        store.close().await;
+    }
+    #[tokio::test]
+    async fn unavailable_task_node_is_not_retried_until_reconnected() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("offline-task.sqlite"))
+            .await
+            .unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        drop(listener);
+        crate::database::query("INSERT INTO media_nodes(id,name,kind,status,base_url) VALUES('offline-task','Offline','remote','connected',?)").bind(base).execute(store.pool()).await.unwrap();
+        let request = media_contracts::protocol::NodeTaskRequest {
+            run_id: "test:1".into(),
+            node_id: NodeId::new("offline-task"),
+            library_id: LibraryId::new("scope"),
+            category: "analyze".into(),
+            target_id: "asset".into(),
+            component: None,
+            width: None,
+            core_base_url: "http://127.0.0.1:3000".into(),
+        };
+        assert_eq!(
+            dispatch_remote_task(&store, &request).await.unwrap_err(),
+            "Node task unavailable; waiting for reconnection"
+        );
+        let status: String =
+            crate::database::query_scalar("SELECT status FROM media_nodes WHERE id='offline-task'")
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(status, "disconnected");
         store.close().await;
     }
     #[test]

@@ -1,3 +1,5 @@
+> Le moteur persistant décrit dans [DISTRIBUTED_TASKS.md](DISTRIBUTED_TASKS.md) remplace le dispatch globalement sériel historique : leases par Node, reprises bornées, priorités, états persistants et suivi collectif des dossiers. Les routes des plans ci-dessous sont conservées.
+
 # Scans planifiés — 19 octobre 2026
 
 Le Core possède un plan persistant par bibliothèque Films/Séries, locale ou distante.

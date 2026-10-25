@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.64s
+     Running unittests src\lib.rs (target\debug\deps\media_poc-efa80f9de9e5071d.exe)
+
+running 2 tests
+test database::tests::placeholders_preserve_comments ... ok
+test database::tests::placeholders_preserve_literals ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 58 filtered out; finished in 0.00s
+

@@ -957,6 +957,21 @@ mod tests {
             read_local_nfo: false,
             fetch_logo: false,
             automatic_refresh_interval_days: 30,
+            prefer_embedded_titles: true,
+            embedded_subtitle_policy: crate::library_options::EmbeddedSubtitlePolicy::AllowText,
+            metadata_providers: vec![crate::library_options::ProviderPreference {
+                id: "tmdb".into(),
+                enabled: true,
+            }],
+            subtitle_providers: vec![crate::library_options::ProviderPreference {
+                id: "opensubtitles".into(),
+                enabled: true,
+            }],
+            trickplay_enabled: true,
+            trickplay_width: 640,
+            subtitle_languages: vec!["fr-CA".into(), "en".into()],
+            intro_detection_enabled: true,
+            subtitle_download_enabled: true,
             ..Default::default()
         });
         save(&state, "fixture-films".into(), configured, true)
@@ -997,7 +1012,19 @@ mod tests {
         assert!(!films.options.read_local_nfo);
         assert!(!films.options.fetch_logo);
         assert_eq!(films.options.automatic_refresh_interval_days, 30);
-        // Unsafe writers / unsupported features cannot be silently accepted as active.
+        assert!(films.options.prefer_embedded_titles);
+        assert!(films.options.trickplay_enabled);
+        assert!(films.options.intro_detection_enabled);
+        assert!(films.options.subtitle_download_enabled);
+        assert_eq!(films.options.trickplay_width, 640);
+        assert_eq!(films.options.subtitle_languages, ["fr-CA", "en"]);
+        assert_eq!(films.options.metadata_providers[0].id, "tmdb");
+        assert_eq!(films.options.subtitle_providers[0].id, "opensubtitles");
+        assert_eq!(
+            films.options.embedded_subtitle_policy,
+            crate::library_options::EmbeddedSubtitlePolicy::AllowText
+        );
+        // Unknown legacy names remain rejected; reserved settings use explicit names.
         assert!(
             serde_json::from_value::<crate::library_options::LibraryOptions>(
                 serde_json::json!({"saveLocalNfo":true})

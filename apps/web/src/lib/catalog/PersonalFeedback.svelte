@@ -62,6 +62,6 @@ button:focus-visible { outline:2px solid var(--accent-primary);outline-offset:1p
 .stars { display:flex; } .star { position:relative;display:flex;width:40px;height:44px;font-size:32px;line-height:44px; }
 .outline,.fill { position:absolute;inset:0;pointer-events:none;text-align:center; }.outline { color:var(--text-secondary);opacity:.5; }
 .fill { color:var(--color-accent);clip-path:inset(0 100% 0 0); }.fill.full { clip-path:inset(0); }.fill.half-filled { clip-path:inset(0 50% 0 0); }
-.half { z-index:1;width:50%;height:100%;padding:0; }.half:hover { background:var(--color-accent-soft); }
+.half { z-index:1;width:50%;height:100%;padding:0;background:transparent; }
 .rating-value { min-width:42px;font-size:12px;color:var(--color-muted); } span[role="alert"] { flex-basis:100%;color:var(--status-error); }
 </style>

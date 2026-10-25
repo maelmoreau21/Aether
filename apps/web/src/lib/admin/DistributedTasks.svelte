@@ -6,7 +6,7 @@
   let { active, libraries, nodes }: { active: boolean; libraries: Library[]; nodes: AdminNode[] } = $props();
   type Job = {
     id: string; libraryId: string; owner: string; nodeId: string; status: string;
-    category: string; priority: number; attempt: number; maxAttempts: number; progress: number; processedItems?: number;
+    category: string; priority: number; attempt: number; failureCount?: number; maxAttempts: number; progress: number; processedItems?: number;
     targetId?: string; resultJson?: string;
     createdAt: number; updatedAt: number; startedAt: number | null; finishedAt: number | null;
     leaseUntil: number | null; error: string;
@@ -39,7 +39,12 @@
     loading = true;
     try {
       const page = await adminRequest<Page>(`/api/v1/admin/tasks/jobs?limit=${limit}&offset=${nextOffset}`);
-      jobs = page.jobs; offset = nextOffset; observedAt = Math.floor(Date.now() / 1000); loaded = true; error = '';
+      jobs = page.jobs;
+      const visible = new Set(jobs.map(job => job.id));
+      results = Object.fromEntries(Object.entries(results).filter(([id]) => visible.has(id)));
+      resultErrors = Object.fromEntries(Object.entries(resultErrors).filter(([id]) => visible.has(id)));
+      resultLoading = Object.fromEntries(Object.entries(resultLoading).filter(([id]) => visible.has(id)));
+      offset = nextOffset; observedAt = Math.floor(Date.now() / 1000); loaded = true; error = '';
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Le suivi des tâches est indisponible.'; }
     finally { loading = false; }
   }
@@ -82,7 +87,7 @@
     resultLoading[job.id] = true; resultErrors[job.id] = '';
     try {
       const detail = await adminRequest<Job>(`/api/v1/admin/tasks/jobs/${encodeURIComponent(job.id)}`);
-      results[job.id] = detail.resultJson ?? '{}';
+      if (jobs.some(item => item.id === job.id)) results[job.id] = detail.resultJson ?? '{}';
     } catch (cause) { resultErrors[job.id] = cause instanceof Error ? cause.message : 'Résultat indisponible.'; }
     finally { resultLoading[job.id] = false; }
   }
@@ -116,7 +121,7 @@
             <div><dt>Propriétaire</dt><dd>{job.owner}</dd></div>
             <div><dt>Nœud exécutant</dt><dd>{nodes.find(node => node.id === job.nodeId)?.name ?? (job.nodeId === 'local' ? 'Nœud local' : job.nodeId || 'En attente d’attribution')}</dd></div>
             <div><dt>Durée</dt><dd>{duration(job)}</dd></div>
-            <div><dt>Tentative</dt><dd>{job.attempt} / {job.maxAttempts}</dd></div>
+            <div><dt>Tentatives</dt><dd>{job.attempt}</dd></div><div><dt>Échecs</dt><dd>{job.failureCount ?? '—'} / {job.maxAttempts}</dd></div>
           </dl>
           {#if job.processedItems === undefined || job.progress === 100}<div class="progress"><progress max="100" value={job.progress} aria-label="Progression de la tâche"></progress><span>{job.progress} %</span></div>{/if}
           {#if job.processedItems !== undefined}<p class="processed">{job.processedItems} éléments traités{job.progress < 100 ? ' · Total encore inconnu' : ''}</p>{/if}

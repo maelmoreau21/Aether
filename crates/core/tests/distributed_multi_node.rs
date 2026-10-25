@@ -282,10 +282,13 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .await
         .expect("auth state");
     let jobs = Arc::new(ScanJobs::default());
+    let scheduler_root = core_empty_local.clone();
     let inventory = Inventory::local(core_empty_local).await.expect("local inv");
     let core_app = secure_app_with_jobs(inventory, core_port, auth.clone(), jobs.clone())
         .await
         .expect("distributed core app");
+    let _process_scheduler =
+        media_poc::scheduler::Scheduler::start(auth.clone(), scheduler_root.clone(), jobs.clone());
 
     let (core_shutdown_tx, core_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
@@ -1141,6 +1144,68 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         // continue on the film Node. A separate empty library avoids replacing
         // the inventory being streamed. This is HTTP isolation, not decoding.
         if expected_node_url == &node1_url {
+            // Real signed Node execution and callback with persisted results.
+            let track: i64 = media_poc::database::query_scalar("SELECT stream_index FROM inventory_tracks WHERE asset_id=? AND json_extract(metadata_json,'$.codec_type')='audio' ORDER BY stream_index LIMIT 1")
+                .bind(asset_id).fetch_one(store.pool()).await.unwrap();
+            let mut operations = vec![
+                ("analyze", asset_id.clone(), String::new(), 640),
+                ("prepare", asset_id.clone(), format!("audio-{track}"), 640),
+            ];
+            let image: Option<String> = media_poc::database::query_scalar(
+                "SELECT id FROM inventory_images WHERE library_id=? AND available=1 LIMIT 1",
+            )
+            .bind(&lib1_id)
+            .fetch_optional(store.pool())
+            .await
+            .unwrap();
+            if let Some(image) = image {
+                operations.push(("image", image, String::new(), 320));
+            }
+            for (category, target, component, width) in operations {
+                let task = media_poc::task_engine::enqueue_task(
+                    &store,
+                    &lib1_id,
+                    "integration",
+                    &format!("remote-{category}"),
+                    300,
+                    unix_now(),
+                    category,
+                    &target,
+                    &component,
+                    width,
+                )
+                .await
+                .unwrap();
+                let finished = tokio::time::timeout(Duration::from_secs(30), async {
+                    loop {
+                        let row = media_poc::task_engine::get(&store, &task.id)
+                            .await
+                            .unwrap()
+                            .unwrap();
+                        if row.status == "completed" {
+                            break row;
+                        }
+                        assert_ne!(row.status, "error", "remote {category}: {}", row.error);
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                })
+                .await
+                .expect("remote task completion");
+                let result: Value = serde_json::from_str(&finished.result_json).unwrap();
+                if category == "analyze" {
+                    assert!(
+                        result["streams"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|s| s["codec_name"] == "av1")
+                    );
+                } else {
+                    assert_eq!(result["cacheWarm"], true);
+                    assert!(result["size"].as_u64().unwrap() > 0);
+                }
+                assert_eq!(finished.failure_count, 0, "{}", finished.error);
+            }
             let load_root = node1_root.join("queue-isolation-empty");
             tokio::fs::create_dir_all(&load_root).await.unwrap();
             media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('queue-isolation','Queue isolation','films',?,?,1)")
@@ -1158,11 +1223,6 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
             media_poc::scheduler::dispatch_once(&auth, &scheduler_root, &jobs, unix_now())
                 .await
                 .unwrap();
-            let scheduler = media_poc::scheduler::Scheduler::start(
-                auth.clone(),
-                scheduler_root.clone(),
-                jobs.clone(),
-            );
             let mut ranges = tokio::task::JoinSet::new();
             for _ in 0..32 {
                 let direct_origin = expected_node_url.to_owned();
@@ -1220,7 +1280,6 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
                 "production worker must complete a remote scan"
             );
             // Stop queue admission before later scenarios rescan/revoke this Node.
-            drop(scheduler);
             media_poc::database::query("UPDATE durable_tasks SET status='cancelled' WHERE library_id='queue-isolation' AND status='queued'")
                 .execute(store.pool()).await.unwrap();
             for _ in 0..100 {

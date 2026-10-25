@@ -171,6 +171,7 @@ async fn backlog_and_one_hundred_claimers_preserve_admin_http_responsiveness() {
     let seed_ms = seed_start.elapsed().as_secs_f64() * 1000.0;
 
     let (cpu_before, rss_before) = process_usage();
+    let statements_before = media_poc::database::statement_calls();
     let wall = Instant::now();
     let mut workers = tokio::task::JoinSet::new();
     for node in 0..100 {
@@ -257,6 +258,9 @@ async fn backlog_and_one_hundred_claimers_preserve_admin_http_responsiveness() {
     let (mut navigation, mut health) = reader.await.unwrap();
     let elapsed = wall.elapsed().as_secs_f64();
     let (cpu_after, rss_after) = process_usage();
+    let statement_calls = media_poc::database::statement_calls()
+        .zip(statements_before)
+        .map(|(after, before)| after - before);
     let completed: i64 =
         query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE status='completed'")
             .fetch_one(store.pool())
@@ -271,10 +275,10 @@ async fn backlog_and_one_hundred_claimers_preserve_admin_http_responsiveness() {
     assert_eq!(total, 10_100);
     println!(
         "{}",
-        json!({"benchmark":"SIMULATED_QUEUE_HTTP_CONTENTION","simulatedNodes":100,"fixtureJobs":10000,"fixtureSeedMs":seed_ms,"httpEnqueues":100,"completedJobs":1000,"wallMs":elapsed*1000.0,"completedJobsPerSecond":1000.0/elapsed,"processCpuMs":cpu_after.zip(cpu_before).map(|(after,before)|after-before),"rssBeforeBytes":rss_before,"rssAfterBytes":rss_after,"measurements":[timings("claim_under_contention", &mut claims),timings("authenticated_http_enqueue", &mut enqueues),timings("authenticated_admin_page_50", &mut navigation),timings("synthetic_health_no_database", &mut health)]})
+        json!({"benchmark":"SIMULATED_QUEUE_HTTP_CONTENTION","simulatedNodes":100,"fixtureJobs":10000,"fixtureSeedMs":seed_ms,"httpEnqueues":100,"completedJobs":1000,"wallMs":elapsed*1000.0,"completedJobsPerSecond":1000.0/elapsed,"statementCalls":statement_calls,"processCpuMs":cpu_after.zip(cpu_before).map(|(after,before)|after-before),"rssBeforeBytes":rss_before,"rssAfterBytes":rss_after,"measurements":[timings("claim_under_contention", &mut claims),timings("authenticated_http_enqueue", &mut enqueues),timings("authenticated_admin_page_50", &mut navigation),timings("synthetic_health_no_database", &mut health)]})
     );
     println!(
-        "In-process Axum requests, SQLite, 100 simulated node identities; no sockets, scan work, media, browser, NAS or video stability measured. SQL access counts are not instrumented; 1000 actual claim transactions, 1000 finishes and 100 authenticated HTTP enqueues were executed; seed cost is reported separately."
+        "In-process Axum requests, SQLite, 100 simulated node identities; no sockets, scan work, media, browser, NAS or video stability measured. Optional query-metrics counts shared-wrapper statement calls and engine transaction boundaries, not SQLite page I/O; 1000 actual claim transactions, 1000 finishes and 100 authenticated HTTP enqueues were executed; seed cost is reported separately."
     );
     store.close().await;
     let reopened = IdentityStore::open(&path).await.unwrap();
@@ -385,6 +389,7 @@ async fn ten_thousand_real_admissions_keep_authenticated_navigation_served() {
         samples
     });
     let (cpu_before, rss_before) = process_usage();
+    let statements_before = media_poc::database::statement_calls();
     let wall = Instant::now();
     let mut admission = Vec::with_capacity(10_000);
     for index in 0..10_000 {
@@ -406,6 +411,9 @@ async fn ten_thousand_real_admissions_keep_authenticated_navigation_served() {
     finished.store(true, Ordering::Release);
     let mut navigation = reader.await.unwrap();
     let (cpu_after, rss_after) = process_usage();
+    let statement_calls = media_poc::database::statement_calls()
+        .zip(statements_before)
+        .map(|(after, before)| after - before);
     let admitted: i64 = query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE status='queued'")
         .fetch_one(store.pool())
         .await
@@ -413,10 +421,10 @@ async fn ten_thousand_real_admissions_keep_authenticated_navigation_served() {
     assert_eq!(admitted, 10_000);
     println!(
         "{}",
-        json!({"benchmark":"REAL_10000_ADMISSIONS_WITH_ADMIN_HTTP","simulatedNodes":100,"actualDurableAdmissions":admitted,"nodeLibrarySetupMs":setup_ms,"admissionDurationMs":duration*1000.0,"admissionsPerSecond":10_000.0/duration,"processCpuMs":cpu_after.zip(cpu_before).map(|(after,before)|after-before),"rssBeforeBytes":rss_before,"rssAfterBytes":rss_after,"measurements":[timings("real_enqueue", &mut admission),timings("authenticated_admin_empty_baseline", &mut baseline),timings("authenticated_admin_during_all_admissions", &mut navigation)]})
+        json!({"benchmark":"REAL_10000_ADMISSIONS_WITH_ADMIN_HTTP","simulatedNodes":100,"actualDurableAdmissions":admitted,"nodeLibrarySetupMs":setup_ms,"admissionDurationMs":duration*1000.0,"admissionsPerSecond":10_000.0/duration,"statementCalls":statement_calls,"processCpuMs":cpu_after.zip(cpu_before).map(|(after,before)|after-before),"rssBeforeBytes":rss_before,"rssAfterBytes":rss_after,"measurements":[timings("real_enqueue", &mut admission),timings("authenticated_admin_empty_baseline", &mut baseline),timings("authenticated_admin_during_all_admissions", &mut navigation)]})
     );
     println!(
-        "All 10,000 jobs use engine::enqueue including per-job validation, idempotency, pending-capacity check and durable commit; no direct task seeding. HTTP navigation runs throughout admission in the same Tokio runtime. SQL statement counts are not instrumented. No sockets, real scans, physical nodes or media decoding measured."
+        "All 10,000 jobs use engine::enqueue including per-job validation, idempotency, pending-capacity check and durable commit; no direct task seeding. HTTP navigation runs throughout admission in the same Tokio runtime. Optional query-metrics counts shared-wrapper statement calls and engine transaction boundaries; arbitrary raw SQLx and SQLite page I/O are excluded. No sockets, real scans, physical nodes or media decoding measured."
     );
     store.close().await;
     let reopened = IdentityStore::open(&path).await.unwrap();

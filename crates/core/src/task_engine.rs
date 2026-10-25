@@ -174,6 +174,9 @@ async fn enqueue_spec(
     {
         return Err(EngineError::Invalid);
     }
+    // Queue behind the sole writer before taking a pooled connection. This leaves
+    // connections available to authentication, navigation and playback in WAL mode.
+    let _writer = store.task_writes.lock().await;
     let mut conn = store.pool().acquire().await?;
     let mut tx = begin_write(&mut conn).await?;
     let existing: Option<Job> =
@@ -193,11 +196,11 @@ async fn enqueue_spec(
         {
             return Err(EngineError::Conflict);
         }
-        tx.commit().await?;
+        crate::database::commit(tx).await?;
         return Ok(job);
     }
-    let node: Option<String>=query_scalar("SELECT l.node_id FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND (l.enabled=1 OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.kind IN ('films','series','music') AND n.status!='revoked' AND l.id NOT IN ('fixture-films','fixture-series')").bind(library_id).fetch_optional(&mut *tx).await?;
-    let node = node.ok_or(EngineError::Unavailable)?;
+    let node_target: Option<(String,i64)>=query_as("SELECT l.node_id,CAST(CASE WHEN (n.id='local' OR n.status='connected') AND NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=l.node_id AND busy.lease_until IS NOT NULL) THEN 1 ELSE 0 END AS BIGINT) FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.kind IN ('films','series','music') AND n.status!='revoked' AND l.id NOT IN ('fixture-films','fixture-series')").bind(library_id).fetch_optional(&mut *tx).await?;
+    let (node, can_wake) = node_target.ok_or(EngineError::Unavailable)?;
     if category != "scan" {
         let sql = if category == "image" {
             "SELECT COUNT(*) FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.library_id=? AND i.available=1 AND i.root_snapshot=l.root"
@@ -247,8 +250,12 @@ async fn enqueue_spec(
         .bind(id)
         .fetch_one(&mut *tx)
         .await?;
-    tx.commit().await?;
-    WAKE.notify_one();
+    crate::database::commit(tx).await?;
+    // Busy/offline Nodes cannot accept this job yet; completion/heartbeat ticks
+    // will retry without a dispatch pass for every queued submission.
+    if can_wake != 0 {
+        WAKE.notify_one();
+    }
     Ok(job)
 }
 
@@ -276,6 +283,7 @@ pub async fn record_result(
     if encoded.len() > 64 * 1024 {
         return Ok(false);
     }
+    let _writer = store.task_writes.lock().await;
     Ok(query("UPDATE durable_tasks SET result_json=?,processed_items=1,updated_at=? WHERE id=? AND attempt=? AND node_id=? AND status='running' AND lease_until>?").bind(encoded).bind(now).bind(id).bind(attempt).bind(node).bind(now).execute(store.pool()).await?.rows_affected()==1)
 }
 
@@ -303,25 +311,83 @@ pub async fn claim(
     if !(1..=100).contains(&node_limit) || !(1..=3600).contains(&lease_seconds) {
         return Ok(None);
     }
+    // Queue behind the sole writer before taking a pooled connection. This leaves
+    // connections available to authentication, navigation and playback in WAL mode.
+    let _writer = store.task_writes.lock().await;
     let mut conn = store.pool().acquire().await?;
     let mut tx = begin_write(&mut conn).await?;
+    let job = claim_in_transaction(&mut tx, node_id, now, lease_seconds, node_limit).await?;
+    crate::database::commit(tx).await?;
+    Ok(job)
+}
+
+/// Bounded production admission: one commit covers up to 100 ready Nodes.
+/// No worker starts before this transaction has committed every returned lease.
+pub async fn claim_batch(
+    store: &IdentityStore,
+    nodes: &[String],
+    now: i64,
+    lease_seconds: i64,
+) -> Result<Vec<Job>, sqlx::Error> {
+    if nodes.len() > 100 || !(1..=3600).contains(&lease_seconds) {
+        return Err(sqlx::Error::Protocol("Invalid task dispatch batch".into()));
+    }
+    if nodes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let _writer = store.task_writes.lock().await;
+    let mut conn = store.pool().acquire().await?;
+    let mut tx = begin_write(&mut conn).await?;
+    // Select one indexed candidate per ready Node inside SQLite/PostgreSQL. Materialize
+    // before UPDATE so changing status cannot cause a second candidate on the same Node.
+    // Only placeholder syntax is generated; Node identifiers remain bound values.
+    let mut sql = String::with_capacity(2600 + nodes.len() * 4);
+    sql.push_str("WITH ready(node_id) AS (VALUES ");
+    for index in 0..nodes.len() {
+        if index > 0 {
+            sql.push(',');
+        }
+        sql.push_str("(?)");
+    }
+    sql.push_str(") , candidates AS MATERIALIZED (SELECT (SELECT j.id FROM durable_tasks j JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.node_id=ready.node_id AND j.status='queued' AND j.lease_until IS NULL AND j.available_at<=? AND j.failure_count<j.max_attempts AND l.node_id=j.node_id AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1) AS id FROM ready WHERE NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=ready.node_id AND busy.lease_until IS NOT NULL)) UPDATE durable_tasks SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 WHERE id IN (SELECT id FROM candidates WHERE id IS NOT NULL) AND status='queued' AND lease_until IS NULL RETURNING *");
+    let mut mutation = query_as::<sqlx::Any, Job>(sqlx::AssertSqlSafe(sql));
+    for node in nodes {
+        mutation = mutation.bind(node);
+    }
+    let claimed = mutation
+        .bind(now)
+        .bind(now.saturating_add(lease_seconds))
+        .bind(now)
+        .bind(now)
+        .fetch_all(&mut *tx)
+        .await?;
+    crate::database::commit(tx).await?;
+    Ok(claimed)
+}
+
+async fn claim_in_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    node_id: &str,
+    now: i64,
+    lease_seconds: i64,
+    node_limit: i64,
+) -> Result<Option<Job>, sqlx::Error> {
     let active: i64 = query_scalar(
         "SELECT COUNT(*) FROM durable_tasks WHERE node_id=? AND lease_until IS NOT NULL",
     )
     .bind(node_id)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
     if active >= node_limit {
         return Ok(None);
     }
-    let id:Option<String>=query_scalar("SELECT j.id FROM durable_tasks j JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.node_id=? AND j.status='queued' AND j.lease_until IS NULL AND j.available_at<=? AND j.failure_count<j.max_attempts AND l.node_id=j.node_id AND (l.enabled=1 OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1").bind(node_id).bind(now).fetch_optional(&mut *tx).await?;
+    let id:Option<String>=query_scalar("SELECT j.id FROM durable_tasks j JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.node_id=? AND j.status='queued' AND j.lease_until IS NULL AND j.available_at<=? AND j.failure_count<j.max_attempts AND l.node_id=j.node_id AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1").bind(node_id).bind(now).fetch_optional(&mut **tx).await?;
     let Some(id) = id else { return Ok(None) };
-    query("UPDATE durable_tasks SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 WHERE id=? AND status='queued'").bind(now.saturating_add(lease_seconds)).bind(now).bind(now).bind(&id).execute(&mut *tx).await?;
+    query("UPDATE durable_tasks SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 WHERE id=? AND status='queued'").bind(now.saturating_add(lease_seconds)).bind(now).bind(now).bind(&id).execute(&mut **tx).await?;
     let job = query_as("SELECT * FROM durable_tasks WHERE id=?")
         .bind(id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
-    tx.commit().await?;
     Ok(Some(job))
 }
 
@@ -337,6 +403,7 @@ pub async fn renew(
     if !(1..=3600).contains(&lease_seconds) || !(0..=100).contains(&progress) {
         return Ok(false);
     }
+    let _writer = store.task_writes.lock().await;
     Ok(query("UPDATE durable_tasks SET lease_until=?,updated_at=?,progress=CASE WHEN progress>? THEN progress ELSE ? END WHERE id=? AND attempt=? AND node_id=? AND status='running' AND lease_until>?").bind(now.saturating_add(lease_seconds)).bind(now).bind(progress).bind(progress).bind(id).bind(attempt).bind(node_id).bind(now).execute(store.pool()).await?.rows_affected()==1)
 }
 
@@ -357,6 +424,7 @@ pub async fn finish(
     } else {
         attempt.saturating_mul(5).min(300)
     };
+    let _writer = store.task_writes.lock().await;
     let changed=query("UPDATE durable_tasks SET status=CASE WHEN status IN ('paused','cancelled') THEN status WHEN ?='' THEN 'completed' WHEN failure_count+? >= max_attempts THEN 'error' ELSE 'queued' END,failure_count=failure_count+CASE WHEN status='running' THEN ? ELSE 0 END,progress=CASE WHEN status='running' AND ?='' THEN 100 ELSE progress END,lease_until=NULL,updated_at=?,finished_at=CASE WHEN status='cancelled' OR (status='running' AND (?='' OR failure_count+? >= max_attempts)) THEN ? ELSE NULL END,available_at=CASE WHEN status IN ('paused','cancelled') THEN ? ELSE ? END,error=? WHERE id=? AND attempt=? AND node_id=? AND lease_until>? AND status IN ('running','paused','cancelled')").bind(&error).bind(failed).bind(failed).bind(&error).bind(now).bind(&error).bind(failed).bind(now).bind(now).bind(now.saturating_add(delay)).bind(error).bind(id).bind(attempt).bind(node_id).bind(now).execute(store.pool()).await?.rows_affected()==1;
     if changed {
         WAKE.notify_one();
@@ -366,7 +434,15 @@ pub async fn finish(
 
 /// Expiry fences prior attempts. Restart only requeues work after the lease expires.
 pub async fn recover_expired(store: &IdentityStore, now: i64) -> Result<u64, sqlx::Error> {
+    let expired: i64 = query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE lease_until<=?")
+        .bind(now)
+        .fetch_one(store.pool())
+        .await?;
+    if expired == 0 {
+        return Ok(0);
+    }
     let _effects = EFFECT_GATE.lock().await;
+    let _writer = store.task_writes.lock().await;
     Ok(query("UPDATE durable_tasks SET status=CASE WHEN status IN ('paused','cancelled') THEN status WHEN failure_count+1>=max_attempts THEN 'error' ELSE 'queued' END,failure_count=failure_count+CASE WHEN status='running' THEN 1 ELSE 0 END,lease_until=NULL,updated_at=?,available_at=?,finished_at=CASE WHEN (status='running' AND failure_count+1>=max_attempts) OR status='cancelled' THEN ? ELSE NULL END,error='Worker lease expired; retry fenced' WHERE lease_until<=?").bind(now).bind(now.saturating_add(5)).bind(now).bind(now).execute(store.pool()).await?.rows_affected())
 }
 
@@ -378,6 +454,7 @@ pub async fn control(
     now: i64,
 ) -> Result<bool, sqlx::Error> {
     let _effects = EFFECT_GATE.lock().await;
+    let _writer = store.task_writes.lock().await;
     let sql = match action {
         "pause" => {
             "UPDATE durable_tasks SET status='paused',updated_at=? WHERE id=? AND status IN ('queued','running')"

@@ -1,5 +1,31 @@
 //! Small shared SQL surface; values always remain bound parameters.
 use sqlx::{Any, AnyConnection, Connection, Database, FromRow, SqlSafeStr};
+use std::fmt::Write as _;
+
+#[cfg(feature = "query-metrics")]
+static STATEMENT_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[inline]
+fn count_statement() {
+    #[cfg(feature = "query-metrics")]
+    STATEMENT_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+/// Statement construction calls plus instrumented engine transaction boundaries.
+/// This is not a SQLite page-I/O counter; arbitrary raw SQLx calls are excluded.
+pub fn statement_calls() -> Option<u64> {
+    #[cfg(feature = "query-metrics")]
+    {
+        Some(STATEMENT_CALLS.load(std::sync::atomic::Ordering::Relaxed))
+    }
+    #[cfg(not(feature = "query-metrics"))]
+    {
+        None
+    }
+}
+
+pub async fn commit(tx: sqlx::Transaction<'_, Any>) -> Result<(), sqlx::Error> {
+    count_statement();
+    tx.commit().await
+}
 
 /// Number anonymous bind markers, ignoring quoted strings and comments.
 /// Both PostgreSQL and SQLite accept numbered `$n` parameters.
@@ -47,7 +73,7 @@ pub fn normalize_sql(sql: &str) -> String {
             out.push(c);
         } else if c == '?' {
             index += 1;
-            out.push_str(&format!("${index}"));
+            let _ = write!(&mut out, "${index}");
         } else {
             out.push(c);
         }
@@ -56,6 +82,7 @@ pub fn normalize_sql(sql: &str) -> String {
 }
 
 pub fn query<'q, DB: Database>(sql: impl SqlSafeStr) -> sqlx::query::Query<'q, DB, DB::Arguments> {
+    count_statement();
     sqlx::query(sqlx::AssertSqlSafe(normalize_sql(
         sql.into_sql_str().as_str(),
     )))
@@ -67,6 +94,7 @@ pub fn query_as<'q, DB: Database, O>(
 where
     O: for<'r> FromRow<'r, DB::Row>,
 {
+    count_statement();
     sqlx::query_as(sqlx::AssertSqlSafe(normalize_sql(
         sql.into_sql_str().as_str(),
     )))
@@ -78,6 +106,7 @@ pub fn query_scalar<'q, DB: Database, O>(
 where
     (O,): for<'r> FromRow<'r, DB::Row>,
 {
+    count_statement();
     sqlx::query_scalar(sqlx::AssertSqlSafe(normalize_sql(
         sql.into_sql_str().as_str(),
     )))
@@ -87,6 +116,7 @@ where
 pub async fn begin_write(
     conn: &mut AnyConnection,
 ) -> Result<sqlx::Transaction<'_, Any>, sqlx::Error> {
+    count_statement();
     if conn.backend_name() == "SQLite" {
         conn.begin_with("BEGIN IMMEDIATE").await
     } else {

@@ -3304,6 +3304,17 @@ async fn populate_episode_page(
     Ok(())
 }
 
+// Folder scopes inherit the live configuration of their logical library.
+async fn playback_library_options(
+    store: &IdentityStore,
+    library_id: &str,
+) -> Result<crate::library_options::LibraryOptions, sqlx::Error> {
+    let encoded: String = query_scalar("SELECT COALESCE(parent.options_json,l.options_json) FROM libraries l LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 LEFT JOIN libraries parent ON parent.id=f.parent_id WHERE l.id=?")
+        .bind(library_id).fetch_one(&store.pool).await?;
+    serde_json::from_str(&encoded)
+        .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))
+}
+
 pub async fn descriptor(
     store: &IdentityStore,
     asset_id: &str,
@@ -3493,6 +3504,7 @@ pub async fn descriptor_for_user(
     let probe = decode(row.get("probe_json"))?;
     let library_id: String = row.get("library_id");
     let node_id: String = row.get("node_id");
+    let library_options = playback_library_options(store, &library_id).await?;
     let node_rec = crate::nodes::load_node(store, &node_id).await?;
     let direct_info = if node_status == "connected" {
         node_rec.as_ref().and_then(|n| {
@@ -3633,6 +3645,8 @@ pub async fn descriptor_for_user(
         }
         for track in probe.streams.iter().filter(|t| {
             t.codec_type.as_deref() == Some("subtitle")
+                && library_options.embedded_subtitle_allowed(t.codec_name.as_deref())
+                // Even allow_all only offers formats that preparation supports.
                 && matches!(
                     t.codec_name.as_deref(),
                     Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text")
@@ -3822,7 +3836,7 @@ pub async fn prepared(
 ) -> axum::response::Response {
     use axum::{body::Body, http::StatusCode, response::Response};
     use media_node::packaging::Component;
-    let row = query("SELECT a.relative_path,a.size,a.modified_ns,a.probe_json,l.root,l.node_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND n.status != 'revoked'")
+    let row = query("SELECT a.relative_path,a.size,a.modified_ns,a.probe_json,a.library_id,l.root,l.node_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND n.status != 'revoked'")
         .bind(asset_id).fetch_optional(&store.pool).await;
     let row = match row {
         Ok(Some(row)) => row,
@@ -3839,6 +3853,35 @@ pub async fn prepared(
         Ok(probe) => probe,
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
     };
+    if let Some(index) = component
+        .strip_prefix("subtitle-")
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        let options = match playback_library_options(
+            store,
+            row.get::<String, _>("library_id").as_str(),
+        )
+        .await
+        {
+            Ok(options) => options,
+            Err(_) => {
+                return crate::error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "library_options_unavailable",
+                );
+            }
+        };
+        if probe.streams.iter().any(|track| {
+            track.index == index
+                && track.codec_type.as_deref() == Some("subtitle")
+                && !options.embedded_subtitle_allowed(track.codec_name.as_deref())
+        }) {
+            return crate::error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "embedded_subtitle_disabled",
+            );
+        }
+    }
     let stream_position = media_node::video_stream::position(component);
     let selected = if let Some((index, position)) = stream_position {
         let duration = probe
@@ -4512,6 +4555,104 @@ mod tests {
     }
     use super::*;
     use crate::node::scanner::ScannedFile;
+    #[tokio::test]
+    async fn embedded_subtitle_preferences_apply_locally_and_before_remote_relay() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("subtitle-options.sqlite"))
+            .await
+            .unwrap();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','Films','films','local','/movies',1)")
+            .execute(&store.pool).await.unwrap();
+        let file = ScannedFile {
+            relative_path: "film.mp4".into(), size: 42, modified_ns: "1".into(),
+            title: "Film".into(), identity_key: "film".into(), mime: "video/mp4".into(),
+            probe: serde_json::from_value(json!({"streams":[
+                {"index":0,"codec_type":"video","codec_name":"av1"},
+                {"index":1,"codec_type":"subtitle","codec_name":"subrip","tags":{"language":"fr"}}
+            ],"format":{}})).unwrap(),
+            subtitles: vec![serde_json::from_value(json!({"language":"en","label":"External","forced":false,"sdh":false,"source_format":"webvtt","webvtt":"WEBVTT\n\n"})).unwrap()],
+            ..Default::default()
+        };
+        ingest(
+            &store,
+            "lib",
+            Path::new("/movies"),
+            &ScanReport {
+                files: vec![file],
+                complete: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let asset: String = query_scalar("SELECT id FROM inventory_assets")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        // The legacy ingest fixture helper predates sidecars; publish their
+        // snapshot explicitly as the staged scanner publication does.
+        query("INSERT INTO inventory_subtitles(asset_id,subtitles_json) VALUES(?,?)")
+            .bind(&asset)
+            .bind(json!([{"language":"en","label":"External","forced":false,"sdh":false,"source_format":"webvtt","webvtt":"WEBVTT\n\n"}]).to_string())
+            .execute(&store.pool).await.unwrap();
+        query("INSERT INTO media_nodes(id,name,kind) VALUES('remote','Remote','remote')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let preparations = media_node::packaging::Preparations::default();
+        for node in ["local", "remote"] {
+            query("UPDATE libraries SET node_id=? WHERE id='lib'")
+                .bind(node)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            for (policy, expected) in [("allow_all", 2), ("allow_text", 2), ("block_all", 1)] {
+                query("UPDATE libraries SET options_json=? WHERE id='lib'")
+                    .bind(json!({"embeddedSubtitlePolicy":policy}).to_string())
+                    .execute(&store.pool)
+                    .await
+                    .unwrap();
+                let descriptor = descriptor(&store, &asset, "synthetic-session")
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let subtitles = descriptor["subtitles"].as_array().unwrap();
+                assert_eq!(subtitles.len(), expected, "node {node}, policy {policy}");
+                assert!(
+                    subtitles
+                        .iter()
+                        .any(|subtitle| subtitle["label"] == "External")
+                );
+            }
+            let request = axum::extract::Request::builder()
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let response = prepared(&store, &preparations, &asset, "subtitle-1", request).await;
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY
+            );
+            let body = axum::body::to_bytes(response.into_body(), 1024)
+                .await
+                .unwrap();
+            assert!(String::from_utf8_lossy(&body).contains("embedded_subtitle_disabled"));
+        }
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES('folder','Folder','films','local','/child',0,'{}')")
+            .execute(&store.pool).await.unwrap();
+        query("INSERT INTO library_folders(library_id,parent_id) VALUES('folder','lib')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let inherited = playback_library_options(&store, "folder").await.unwrap();
+        assert!(!inherited.embedded_subtitle_allowed(Some("subrip")));
+        query("UPDATE library_folders SET active=0 WHERE library_id='folder'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let detached = playback_library_options(&store, "folder").await.unwrap();
+        assert!(detached.embedded_subtitle_allowed(Some("subrip")));
+    }
+
     #[tokio::test]
     async fn editorial_migration_preserves_existing_0004_works() {
         sqlx::any::install_default_drivers();

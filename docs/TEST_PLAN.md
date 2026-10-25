@@ -1,3 +1,5 @@
+> Mission 4 : scénarios réels standalone/Core + deux Nodes, interruption/reprise, idempotence, contrôles et bancs explicites 10 000 tâches / 100 Nodes simulés : [méthode et résultats du moteur distribué](DISTRIBUTED_TASKS.md). Les essais HTTP Range restent distincts du décodage navigateur et des machines physiques.
+
 ## Flux progressifs et Node Rust — 24 octobre 2026
 
 Méthode et preuves : [STREAMING_SYSTEM_BENCHMARK.md](STREAMING_SYSTEM_BENCHMARK.md).

@@ -27,7 +27,7 @@
 #       - aether-net
 #
 #   aether-core:
-#     image: ghcr.io/maelmoreau21/aether-core:develop
+#     image: ${AETHER_IMAGE_PREFIX:-ghcr.io/maelmoreau21}/aether-core:develop
 #     container_name: aether-core
 #     restart: unless-stopped
 #     depends_on:
@@ -83,7 +83,7 @@
 # ------------------------------------------------------------------------------
 # services:
 #   aether-node:
-#     image: ghcr.io/maelmoreau21/aether-node:develop
+#     image: ${AETHER_IMAGE_PREFIX:-ghcr.io/maelmoreau21}/aether-node:develop
 #     container_name: aether-node
 #     restart: unless-stopped
 #     security_opt:

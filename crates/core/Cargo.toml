@@ -68,6 +68,7 @@ path = "src/bin/restore.rs"
 
 [features]
 fixture-bench = []
+query-metrics = []
 
 [[test]]
 name = "p0"

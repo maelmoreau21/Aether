@@ -1,0 +1,122 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.96s
+     Running tests\browser_scanner.rs (target\debug\deps\browser_scanner-8763b167f8e79a29.exe)
+
+running 1 test
+test browser_scanner_persists_and_plays_after_core_restart ... scan HTTP 200 {"status":"queued","discovered":0,"probed":0,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}
+scan HTTP 202 {"discovered":0,"errors":[],"errorsCount":0,"probed":0,"reused":0,"status":"queued","warningsCount":0}
+scan HTTP 200 {"status":"running","discovered":0,"probed":0,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}
+scan HTTP 200 {"status":"queued","discovered":0,"probed":0,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}
+scan HTTP 200 {"status":"running","discovered":0,"probed":0,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}
+scan HTTP 200 {"status":"queued","discovered":0,"probed":0,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}
+scan HTTP 200 {"status":"completed","discovered":2,"probed":2,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}
+scan HTTP 200 {"status":"queued","discovered":0,"probed":0,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}
+scan HTTP 202 {"discovered":0,"errors":[],"errorsCount":0,"probed":0,"reused":0,"status":"queued","warningsCount":0}
+scan HTTP 200 {"status":"running","discovered":0,"probed":0,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}
+scan HTTP 200 {"status":"queued","discovered":0,"probed":0,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}
+scan HTTP 200 {"status":"completed","discovered":2,"probed":0,"reused":2,"errors":[],"errorsCount":0,"warningsCount":0}
+scan HTTP 200 {"status":"queued","discovered":0,"probed":0,"reused":0,"errors":[],"errorsCount":0,"warningsCount":0}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","event":"media_http_start","method":"GET","node":"local","range":true}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","content_length":766638,"content_range_present":true,"elapsed_ms":12,"event":"media_http_response","method":"GET","node":"local","range":true,"status":206}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"opus-2-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"opus-3-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"opus-2-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"opus-3-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"opus-3-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"opus-3-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"opus-2-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"opus-2-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"opus-2-chunk-1","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"opus-3-chunk-1","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"opus-3-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"subtitle-4","event":"prepared_http_start","method":"HEAD","node":"local","range":false}
+{"attempt":"fc2babb9-8cd6-4c2d-a955-27c22e6bb61d","component":"Subtitle(4)","event":"preparation_requested","source_bytes":766638}
+{"attempt":"fc2babb9-8cd6-4c2d-a955-27c22e6bb61d","bytes":167,"component":"Subtitle(4)","elapsed_ms":96,"event":"preparation_ready"}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","bytes":167,"component":"subtitle-4","elapsed_ms":98,"event":"prepared_http_ready"}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","component":"subtitle-4","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"attempt":"0719d4fc-8e95-4bce-ac27-885c91c2b108","component":"Subtitle(4)","event":"preparation_requested","source_bytes":766638}
+{"attempt":"0719d4fc-8e95-4bce-ac27-885c91c2b108","component":"Subtitle(4)","elapsed_ms":2,"event":"preparation_cache_hit"}
+{"asset":"11978080-cfa1-4def-848f-fe45843c42d5","bytes":167,"component":"subtitle-4","elapsed_ms":3,"event":"prepared_http_ready"}
+{"browser":"155.0.8059.86","os":"10.0.26300","headless":true,"restart":false,"results":{"scan":true,"incremental":true,"startupMs":742.588099999999,"defaultFrench":true,"internalSwitches":[{"id":"internal-1","frequency":662.109375,"db":-64.5851821899414,"url":"http://127.0.0.1:59521/api/v1/assets/11978080-cfa1-4def-848f-fe45843c42d5/content","time":1.273574,"fullscreen":true,"decodedColors":569,"decodedFrames":35},{"id":"internal-2","frequency":990.234375,"db":-50.02434158325195,"url":"http://127.0.0.1:59521/api/v1/assets/11978080-cfa1-4def-848f-fe45843c42d5/content","time":2.572799,"fullscreen":true,"decodedColors":837,"decodedFrames":66},{"id":"internal-1","frequency":662.109375,"db":-64.5829849243164,"url":"http://127.0.0.1:59521/api/v1/assets/11978080-cfa1-4def-848f-fe45843c42d5/content","time":3.558085,"fullscreen":true,"decodedColors":745,"decodedFrames":90},{"id":"internal-2","frequency":990.234375,"db":-70.03880310058594,"url":"http://127.0.0.1:59521/api/v1/assets/11978080-cfa1-4def-848f-fe45843c42d5/content","time":4.477136,"fullscreen":true,"decodedColors":576,"decodedFrames":112}],"failedLanguageRetainedWithoutPause":true,"reopenedAudio":[{"id":"internal-2","language":"en","passed":true},{"id":"internal-1","language":"fr","passed":true}],"finalAudioWindowAndBackwardSeek":true,"assTextFallback":true,"integratedSubtitleAndNegativeOffset":true,"signedOffsets":true,"externalTracks":{"container":"MP4","srtRendered":true,"webvttRendered":true,"externalOpusPcm":0.048405617475509644,"audioVideoSync":true,"pausedSeek":true,"subtitlesOff":true},"progress":{"saved":true,"resumed":true,"manualWatched":true,"manualUnwatched":true},"catalogue":true,"singleWorkTwoVersions":true,"playback":true,"seek":true,"pause":true,"cspErrors":[],"clickTimings":[{"start":1132.5,"audioScope":"playing event only; not PCM or physical onset","dialogOpenMs":14.699999988079071,"firstFrameMs":285.2999999523163,"frameMediaTime":0,"videoPlayingMs":329.0999999642372},{"start":6977.199999988079,"audioScope":"playing event only; not PCM or physical onset","dialogOpenMs":8.300000011920929,"firstFrameMs":223.69999998807907,"frameMediaTime":1,"videoPlayingMs":242.30000001192093},{"start":8147.599999964237,"audioScope":"playing event only; not PCM or physical onset","dialogOpenMs":8.199999988079071,"firstFrameMs":166.69999998807907,"frameMediaTime":1,"videoPlayingMs":196.19999998807907},{"start":13327.799999952316,"audioScope":"playing event only; not PCM or physical onset","dialogOpenMs":5.5,"videoPlayingMs":69.70000004768372,"firstFrameMs":91.60000002384186,"frameMediaTime":0}]},"captionLayout":{"line":70,"snapToLines":false},"passed":true}
+BROWSER_TASK_BACKLOG {"browserFlowPassed":true,"completed":138,"completedBeforeRestart":0,"fixtureBacklog":10000,"restart":false,"scope":"real browser image and PCM assertions from browser-scanner.cjs; backlog consists of empty-library scans, not 10000 media probes"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","event":"media_http_start","method":"GET","node":"local","range":true}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","content_length":762049,"content_range_present":true,"elapsed_ms":3,"event":"media_http_response","method":"GET","node":"local","range":true,"status":206}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-2-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":2,"codec":"opus","event":"prepared_audio_track","index":2,"language":"eng"}
+{"attempt":"036b4ab2-8834-4d57-9cf6-d2ee79b5a00f","component":"AudioChunk(2, 0)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"036b4ab2-8834-4d57-9cf6-d2ee79b5a00f","bytes":222862,"component":"AudioChunk(2, 0)","elapsed_ms":198,"event":"preparation_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":222862,"component":"audio-2-chunk-0","elapsed_ms":199,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-1-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":6,"codec":"opus","event":"prepared_audio_track","index":1,"language":"fra"}
+{"attempt":"92326630-90eb-4468-99a6-d3b49451e79f","component":"AudioChunk(1, 0)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"92326630-90eb-4468-99a6-d3b49451e79f","bytes":394032,"component":"AudioChunk(1, 0)","elapsed_ms":131,"event":"preparation_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":394032,"component":"audio-1-chunk-0","elapsed_ms":133,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-2-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":2,"codec":"opus","event":"prepared_audio_track","index":2,"language":"eng"}
+{"attempt":"4ed024da-0efa-4f8f-bc96-81a3d40b92b4","component":"AudioChunk(2, 0)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"4ed024da-0efa-4f8f-bc96-81a3d40b92b4","component":"AudioChunk(2, 0)","elapsed_ms":2,"event":"preparation_cache_hit"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":222862,"component":"audio-2-chunk-0","elapsed_ms":3,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-1-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":6,"codec":"opus","event":"prepared_audio_track","index":1,"language":"fra"}
+{"attempt":"7a312d5e-a9ca-4f1b-be26-8aa5794ebe09","component":"AudioChunk(1, 0)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"7a312d5e-a9ca-4f1b-be26-8aa5794ebe09","component":"AudioChunk(1, 0)","elapsed_ms":3,"event":"preparation_cache_hit"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":394032,"component":"audio-1-chunk-0","elapsed_ms":5,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-2-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":2,"codec":"opus","event":"prepared_audio_track","index":2,"language":"eng"}
+{"attempt":"56528c94-37b3-46e0-a7c9-7537ec60ac7b","component":"AudioChunk(2, 0)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"56528c94-37b3-46e0-a7c9-7537ec60ac7b","component":"AudioChunk(2, 0)","elapsed_ms":4,"event":"preparation_cache_hit"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":222862,"component":"audio-2-chunk-0","elapsed_ms":7,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-2-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":2,"codec":"opus","event":"prepared_audio_track","index":2,"language":"eng"}
+{"attempt":"9b587a18-a375-4170-b8f8-a34495fa6a52","component":"AudioChunk(2, 0)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"9b587a18-a375-4170-b8f8-a34495fa6a52","component":"AudioChunk(2, 0)","elapsed_ms":4,"event":"preparation_cache_hit"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":222862,"component":"audio-2-chunk-0","elapsed_ms":5,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-1-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":6,"codec":"opus","event":"prepared_audio_track","index":1,"language":"fra"}
+{"attempt":"150381a4-58a4-4da1-886b-979fd4bec8e6","component":"AudioChunk(1, 0)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"150381a4-58a4-4da1-886b-979fd4bec8e6","component":"AudioChunk(1, 0)","elapsed_ms":4,"event":"preparation_cache_hit"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":394032,"component":"audio-1-chunk-0","elapsed_ms":6,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-1-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":6,"codec":"opus","event":"prepared_audio_track","index":1,"language":"fra"}
+{"attempt":"ed0c8d50-2126-41a9-9cd0-ca804d44b065","component":"AudioChunk(1, 0)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"ed0c8d50-2126-41a9-9cd0-ca804d44b065","component":"AudioChunk(1, 0)","elapsed_ms":7,"event":"preparation_cache_hit"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":394032,"component":"audio-1-chunk-0","elapsed_ms":9,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-1-chunk-1","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":6,"codec":"opus","event":"prepared_audio_track","index":1,"language":"fra"}
+{"attempt":"50f25099-d25d-483c-9777-884b46044a2e","component":"AudioChunk(1, 1)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"50f25099-d25d-483c-9777-884b46044a2e","bytes":106746,"component":"AudioChunk(1, 1)","elapsed_ms":94,"event":"preparation_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":106746,"component":"audio-1-chunk-1","elapsed_ms":96,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-2-chunk-1","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":2,"codec":"opus","event":"prepared_audio_track","index":2,"language":"eng"}
+{"attempt":"ca3673f0-d142-407f-b7fd-6a565893b79b","component":"AudioChunk(2, 1)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"ca3673f0-d142-407f-b7fd-6a565893b79b","bytes":56609,"component":"AudioChunk(2, 1)","elapsed_ms":162,"event":"preparation_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":56609,"component":"audio-2-chunk-1","elapsed_ms":164,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-2-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":2,"codec":"opus","event":"prepared_audio_track","index":2,"language":"eng"}
+{"attempt":"e1263ee5-a776-4890-9a92-775fd50697c0","component":"AudioChunk(2, 0)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"e1263ee5-a776-4890-9a92-775fd50697c0","component":"AudioChunk(2, 0)","elapsed_ms":5,"event":"preparation_cache_hit"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":222862,"component":"audio-2-chunk-0","elapsed_ms":8,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"subtitle-4","event":"prepared_http_start","method":"HEAD","node":"local","range":false}
+{"attempt":"2c7d820b-efdf-4ac8-a25b-22d4a9ec1713","component":"Subtitle(4)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"2c7d820b-efdf-4ac8-a25b-22d4a9ec1713","bytes":167,"component":"Subtitle(4)","elapsed_ms":141,"event":"preparation_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":167,"component":"subtitle-4","elapsed_ms":142,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"subtitle-4","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"attempt":"4c9e6287-50df-47c1-a7c5-ee3d41a14d68","component":"Subtitle(4)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"4c9e6287-50df-47c1-a7c5-ee3d41a14d68","component":"Subtitle(4)","elapsed_ms":2,"event":"preparation_cache_hit"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":167,"component":"subtitle-4","elapsed_ms":4,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-1-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":6,"codec":"opus","event":"prepared_audio_track","index":1,"language":"fra"}
+{"attempt":"d2448b69-3d0a-423f-8273-59b16a939b19","component":"AudioChunk(1, 0)","event":"preparation_requested","source_bytes":762049}
+{"attempt":"d2448b69-3d0a-423f-8273-59b16a939b19","component":"AudioChunk(1, 0)","elapsed_ms":4,"event":"preparation_cache_hit"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":394032,"component":"audio-1-chunk-0","elapsed_ms":7,"event":"prepared_http_ready"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"audio-1-chunk-0","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","channels":6,"codec":"opus","event":"prepared_audio_track","index":1,"language":"fra"}
+{"attempt":"c78396b0-c6ad-44fe-b9f4-9456614dc601","component":"AudioChunk(1, 0)","event":"preparation_requested","source_bytes":762049}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","component":"video-stream-0-434","event":"prepared_http_start","method":"GET","node":"local","range":false}
+{"attempt":"c78396b0-c6ad-44fe-b9f4-9456614dc601","component":"AudioChunk(1, 0)","elapsed_ms":3,"event":"preparation_cache_hit"}
+{"asset":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","bytes":394032,"component":"audio-1-chunk-0","elapsed_ms":6,"event":"prepared_http_ready"}
+{"browser":"155.0.8059.86","os":"10.0.26300","headless":true,"restart":true,"results":{"startupMs":935.3173000000006,"internalSwitches":[{"id":"internal-1","frequency":662.109375,"db":-64.57150268554688,"url":"http://127.0.0.1:59521/api/v1/assets/baa4000b-0f9f-4a42-b2f9-5249a54dc670/content","time":1.325914,"fullscreen":true,"decodedColors":557,"decodedFrames":35},{"id":"internal-2","frequency":990.234375,"db":-50.01083755493164,"url":"http://127.0.0.1:59521/api/v1/assets/baa4000b-0f9f-4a42-b2f9-5249a54dc670/content","time":2.574013,"fullscreen":true,"decodedColors":861,"decodedFrames":66},{"id":"internal-1","frequency":662.109375,"db":-64.5760726928711,"url":"http://127.0.0.1:59521/api/v1/assets/baa4000b-0f9f-4a42-b2f9-5249a54dc670/content","time":3.483782,"fullscreen":true,"decodedColors":747,"decodedFrames":89},{"id":"internal-2","frequency":990.234375,"db":-70.02915954589844,"url":"http://127.0.0.1:59521/api/v1/assets/baa4000b-0f9f-4a42-b2f9-5249a54dc670/content","time":4.38772,"fullscreen":true,"decodedColors":567,"decodedFrames":110}],"failedLanguageRetainedWithoutPause":true,"reopenedAudio":[{"id":"internal-2","language":"en","passed":true},{"id":"internal-1","language":"fr","passed":true}],"finalAudioWindowAndBackwardSeek":true,"assTextFallback":true,"integratedSubtitleAndNegativeOffset":true,"signedOffsets":true,"externalTracks":{"container":"MKV","srtRendered":true,"webvttRendered":true,"externalOpusPcm":0.04840671271085739,"audioVideoSync":true,"pausedSeek":true,"subtitlesOff":true},"progress":{"saved":true,"resumed":true,"manualWatched":true,"manualUnwatched":true},"catalogue":true,"singleWorkTwoVersions":true,"playback":true,"seek":true,"pause":true,"cspErrors":[],"fallbackPreferenceBeforeClose":{"mediaId":"baa4000b-0f9f-4a42-b2f9-5249a54dc670","trackId":"internal-1"},"nativeFailurePreparedFallback":true,"clickTimings":[{"start":753.6999999880791,"audioScope":"playing event only; not PCM or physical onset","dialogOpenMs":14,"firstFrameMs":254.80000001192093,"frameMediaTime":0,"videoPlayingMs":645.7000000476837},{"start":6725.199999988079,"audioScope":"playing event only; not PCM or physical onset","dialogOpenMs":9.300000011920929,"videoPlayingMs":95.10000002384186,"firstFrameMs":99.30000001192093,"frameMediaTime":1},{"start":7451.900000035763,"audioScope":"playing event only; not PCM or physical onset","dialogOpenMs":7.5,"firstFrameMs":104.39999997615814,"frameMediaTime":1,"videoPlayingMs":117.29999995231628},{"start":12833.199999988079,"audioScope":"playing event only; not PCM or physical onset","dialogOpenMs":6.5,"videoPlayingMs":83.60000002384186,"firstFrameMs":96,"frameMediaTime":0},{"start":18136.19999998808,"audioScope":"playing event only; not PCM or physical onset","dialogOpenMs":7,"videoPlayingMs":87,"firstFrameMs":91.80000001192093,"frameMediaTime":0},{"start":18802.600000023842,"audioScope":"playing event only; not PCM or physical onset","dialogOpenMs":7.800000011920929,"videoPlayingMs":231.39999997615814,"firstFrameMs":236.5999999642372,"frameMediaTime":0.417}]},"captionLayout":{"line":70,"snapToLines":false},"passed":true}
+BROWSER_TASK_BACKLOG {"browserFlowPassed":true,"completed":256,"completedBeforeRestart":138,"fixtureBacklog":10000,"restart":true,"scope":"real browser image and PCM assertions from browser-scanner.cjs; backlog consists of empty-library scans, not 10000 media probes"}
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 64.93s
+

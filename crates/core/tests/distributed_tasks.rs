@@ -151,6 +151,29 @@ async fn ten_thousand_jobs_on_one_hundred_simulated_nodes() {
         durations[9900],
         durations[9999]
     );
+    query("UPDATE durable_tasks SET status='queued',lease_until=NULL,available_at=100,attempt=0,failure_count=0").execute(store.pool()).await.unwrap();
+    let ready: Vec<String> = (0..100).map(|i| format!("sim-node-{i:03}")).collect();
+    let mut batches = Vec::with_capacity(100);
+    let mut batch_ids = HashSet::with_capacity(10_000);
+    for _ in 0..100 {
+        let start = Instant::now();
+        let claimed = engine::claim_batch(&store, &ready, 100, 30).await.unwrap();
+        batches.push(start.elapsed().as_secs_f64() * 1000.0);
+        assert_eq!(claimed.len(), 100);
+        for job in claimed {
+            assert!(batch_ids.insert(job.id.clone()));
+            assert!(
+                engine::finish(&store, &job.id, job.attempt, &job.node_id, 101, None)
+                    .await
+                    .unwrap()
+            );
+        }
+    }
+    batches.sort_by(f64::total_cmp);
+    println!(
+        "PRODUCTION_BATCH_ADMISSION nodes=100 jobs=10000 transactions=100 batch_p50_ms={:.3} batch_p95_ms={:.3} batch_max_ms={:.3}; each timing covers admission of all 100 Nodes, fixture requeue excluded",
+        batches[50], batches[95], batches[99]
+    );
     println!(
         "Fixture insertion uses one transaction; execution performs 10,000 real claim transactions plus 10,000 finish statements. CPU/RSS, HTTP latency and video playback are not measured by this queue-only test."
     );
@@ -162,6 +185,46 @@ async fn setup(store: &IdentityStore) {
     for id in ["one", "two"] {
         query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,'films','local','synthetic-root',1)").bind(id).bind(id).execute(store.pool()).await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn batch_claims_deduplicate_nodes_and_preserve_live_capacity() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("batch.sqlite"))
+        .await
+        .unwrap();
+    setup(&store).await;
+    let a = engine::enqueue(&store, "two", "test", "batch-a", 10, 100)
+        .await
+        .unwrap();
+    let b = engine::enqueue(&store, "one", "test", "batch-b", 20, 100)
+        .await
+        .unwrap();
+    let ready = vec!["local".to_owned(), "local".to_owned()];
+    let claimed = engine::claim_batch(&store, &ready, 100, 30).await.unwrap();
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].id, b.id);
+    assert!(
+        engine::claim_batch(&store, &ready, 101, 30)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        engine::claim_batch(&store, &vec!["local".to_owned(); 101], 101, 30)
+            .await
+            .is_err()
+    );
+    assert!(
+        engine::finish(&store, &b.id, claimed[0].attempt, "local", 101, None)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        engine::claim_batch(&store, &ready, 102, 30).await.unwrap()[0].id,
+        a.id
+    );
+    store.close().await;
 }
 
 #[tokio::test]
@@ -380,9 +443,18 @@ async fn concurrent_claims_never_overbook_or_run_same_library() {
         .await
         .unwrap();
     }
-    let claims = futures_util::future::join_all(
-        (0..20).map(|_| engine::claim(&store, "local", 1000, 30, 10)),
-    )
+    let claims = futures_util::future::join_all((0..20).map(|index| {
+        let store = &store;
+        async move {
+            if index % 2 == 0 {
+                engine::claim(store, "local", 1000, 30, 10).await
+            } else {
+                engine::claim_batch(store, &["local".into(), "local".into()], 1000, 30)
+                    .await
+                    .map(|jobs| jobs.into_iter().next())
+            }
+        }
+    }))
     .await;
     assert_eq!(
         claims

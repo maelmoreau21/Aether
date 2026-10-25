@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      force_patch:
+        description: 'Forcer un incrément PATCH minimal si indéterminé'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  calculate-and-tag:
+    name: Calcul SemVer & Tagging
+    runs-on: ubuntu-latest
+    outputs:
+      next_tag: ${{ steps.calc.outputs.next_tag }}
+      version: ${{ steps.calc.outputs.version }}
+      series: ${{ steps.calc.outputs.series }}
+      has_release: ${{ steps.calc.outputs.has_release }}
+      changelog: ${{ steps.calc.outputs.changelog }}
+    steps:
+      - name: Récupérer le code source complet (avec historique et tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Déterminer la version et générer le Changelog
+        id: calc
+        run: |
+          python scripts/calculate_release.py --json > release_info.json
+          cat release_info.json
+          
+          NEXT_TAG=$(jq -r '.next_tag' release_info.json)
+          VERSION=$(jq -r '.version' release_info.json)
+          SERIES=$(jq -r '.minor' release_info.json)
+          
+          # Vérifier si le tag existe déjà sur git
+          if git rev-parse "$NEXT_TAG" >/dev/null 2>&1; then
+            echo "Le tag $NEXT_TAG existe déjà sur git. Aucune nouvelle release requise."
+            echo "has_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_release=true" >> $GITHUB_OUTPUT
+            echo "next_tag=$NEXT_TAG" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "series=$SERIES" >> $GITHUB_OUTPUT
+            
+            # Sauvegarder le changelog pour l'étape de création de release
+            jq -r '.changelog' release_info.json > changelog.md
+          fi
+
+      - name: Téléverser le changelog généré en artifact de job
+        if: steps.calc.outputs.has_release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-changelog
+          path: changelog.md
+          retention-days: 1
+
+  publish-docker:
+    name: Publication Docker GHCR (${{ needs.calculate-and-tag.outputs.version }})
+    needs: [calculate-and-tag]
+    if: needs.calculate-and-tag.outputs.has_release == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish.yml
+    with:
+      version: ${{ needs.calculate-and-tag.outputs.version }}
+      series: ${{ needs.calculate-and-tag.outputs.series }}
+      is_release: true
+
+  create-github-release:
+    name: Création de la GitHub Release & Git Tag
+    needs: [calculate-and-tag, publish-docker]
+    if: needs.calculate-and-tag.outputs.has_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Télécharger le changelog
+        uses: actions/download-artifact@v4
+        with:
+          name: release-changelog
+
+      - name: Créer le tag Git et la Release GitHub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.calculate-and-tag.outputs.next_tag }}
+          VERSION: ${{ needs.calculate-and-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Configurer git bot
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Poser et pousser le tag git
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+          
+          # Créer la GitHub Release
+          gh release create "$TAG" \
+            --title "Aether $TAG" \
+            --notes-file changelog.md

@@ -132,7 +132,6 @@
   {#if randomPicks.length >= 2}
     <MediaShelf
       title="Pépites au hasard · À découvrir"
-      count={randomPicks.length}
       onAction={reRollRandom}
       actionLabel="Mélanger"
     >

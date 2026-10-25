@@ -22,3 +22,6 @@
 
 # Internal AI agent logs and teamwork artifacts
 /.agents/
+
+# Local first-run authentication secret
+.bootstrap_token

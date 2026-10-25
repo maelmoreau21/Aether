@@ -125,14 +125,29 @@
         {#if !work.synthetic}<PersonalFeedback workId={work.id} />{/if}
         {#if !work.synthetic}<WorkTools {work} />{/if}
         {#if work.seasons?.length}
-          <nav class="season-shortcuts" aria-label="Saisons disponibles">
-            {#each work.seasons as item (item.id)}
-              <button class:chosen={activeSeason?.number === item.number} onclick={() => selectSeason(item.number)}>
-                {#if work.artwork?.[`season${item.number}`]}<img src={imagePreviewUrl(work.artwork[`season${item.number}`], 320)} alt="" loading="lazy" decoding="async" width="80" height="120" />{:else}<span class="season-placeholder" aria-hidden="true">{item.number === 0 ? '★' : item.number}</span>{/if}
-                {item.number === 0 ? 'Hors-série' : `Saison ${item.number}`} · {item.episodeCount ?? item.episodes.length} {(item.episodeCount ?? item.episodes.length) > 1 ? 'épisodes' : 'épisode'}
-              </button>
-            {/each}
-          </nav>
+          <div class="seasons-section">
+            <h2 class="seasons-section-title">Saisons</h2>
+            <nav class="season-shortcuts" aria-label="Saisons disponibles">
+              {#each work.seasons as item (item.id)}
+                {@const count = item.episodeCount ?? item.episodes.length}
+                <button class="season-card" class:chosen={activeSeason?.number === item.number} onclick={() => selectSeason(item.number)}>
+                  <div class="season-card-poster">
+                    {#if work.artwork?.[`season${item.number}`]}
+                      <img src={imagePreviewUrl(work.artwork[`season${item.number}`], 320)} alt="" loading="lazy" decoding="async" />
+                    {:else if work.posterUrl}
+                      <img src={imagePreviewUrl(work.posterUrl, 320)} alt="" loading="lazy" decoding="async" />
+                    {:else}
+                      <span class="season-placeholder" aria-hidden="true">{item.number === 0 ? '★' : item.number}</span>
+                    {/if}
+                    {#if count > 0}
+                      <span class="season-episodes-badge">{count}</span>
+                    {/if}
+                  </div>
+                  <span class="season-title">{item.title || (item.number === 0 ? 'Hors-série' : `Saison ${item.number}`)}</span>
+                </button>
+              {/each}
+            </nav>
+          </div>
         {/if}
 
         {#if work.originalTitle && work.originalTitle !== work.title}
@@ -257,12 +272,80 @@
 
   .title-logo { max-width:min(340px,100%); max-height:110px; object-fit:contain; object-position:left; }
 
-  .season-placeholder { display:grid;place-items:center;width:80px;aspect-ratio:2/3;background:var(--bg-elevated);border-radius:var(--radius-md);font-size:32px;color:var(--text-secondary); }
-  .season-shortcuts img { display:block; width:80px; aspect-ratio:2/3; object-fit:cover; margin-bottom:8px; border-radius:var(--radius-md); }
+  .seasons-section { display: flex; flex-direction: column; gap: 12px; margin-block: 8px 16px; }
+  .seasons-section-title { font-size: 20px; font-weight: 700; color: var(--color-text-bright); margin: 0; }
+  .season-shortcuts { display: flex; gap: 16px; overflow-x: auto; max-width: 100%; padding: 4px 2px 12px; }
+  .season-card {
+    flex: 0 0 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-align: center;
+    transition: transform var(--transition-fast);
+  }
+  .season-card:hover { transform: translateY(-4px); }
+  .season-card-poster {
+    position: relative;
+    width: 140px;
+    aspect-ratio: 2/3;
+    border-radius: 16px;
+    overflow: hidden;
+    background: var(--bg-elevated);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    border: 2px solid transparent;
+    transition: all var(--transition-fast);
+  }
+  .season-card.chosen .season-card-poster {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-primary), 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .season-card-poster img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .season-placeholder {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    font-size: 36px;
+    color: var(--text-secondary);
+  }
+  .season-episodes-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #2563eb;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+  }
+  .season-title {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.3;
+  }
+  .season-card.chosen .season-title {
+    color: var(--accent-primary);
+    font-weight: 700;
+  }
   .episode-thumb { height:auto; width:240px; max-width:25vw; aspect-ratio:16/9; object-fit:cover; border-radius:var(--radius-md); }
-  .season-shortcuts { display:flex; gap:8px; overflow-x:auto; max-width:100%; padding:2px; }
-  .season-shortcuts button { flex:0 0 150px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;padding:10px 14px; border:1px solid var(--border-subtle); background:var(--bg-surface); color:var(--text-primary); border-radius:6px; }
-  .season-shortcuts .chosen { border-color:var(--accent-primary); color:var(--accent-primary); }
   #episodes-shelf-title { scroll-margin-top:110px; }
 
   .series-detail-view {

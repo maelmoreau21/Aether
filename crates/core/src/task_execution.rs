@@ -26,10 +26,10 @@ pub(crate) async fn dispatch(
 ) -> Result<(), sqlx::Error> {
     let run = format!("{}:{}", job.id, job.attempt);
     let row: Option<(String, String, String, i64, String, String)> = if job.category == "image" {
-        query_as("SELECT i.root_snapshot,i.relative_path,i.mime,i.size,i.modified_ns,l.node_id FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.library_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1")
+        query_as("SELECT i.root_snapshot,i.relative_path,i.mime,i.size,i.modified_ns,l.node_id FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.library_id=? AND i.available=1 AND i.root_snapshot=l.root AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))")
             .bind(&job.target_id).bind(&job.library_id).fetch_optional(auth.store.pool()).await?
     } else {
-        query_as("SELECT s.root_snapshot,a.relative_path,a.mime,a.size,a.modified_ns,l.node_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id WHERE a.id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.enabled=1")
+        query_as("SELECT s.root_snapshot,a.relative_path,a.mime,a.size,a.modified_ns,l.node_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id WHERE a.id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))")
             .bind(&job.target_id).bind(&job.library_id).fetch_optional(auth.store.pool()).await?
     };
     let Some((snapshot, relative, mime, size, modified, node)) = row else {
@@ -106,7 +106,7 @@ pub(crate) async fn dispatch(
                 tokio::pin!(future);
                 let mut interval=tokio::time::interval(std::time::Duration::from_millis(100));
                 loop { tokio::select! {
-                    result=&mut future=>return result.map_err(|_|"Task operation failed".to_owned()),
+                    result=&mut future=>return result.map_err(|error| operation_error(&error,&job.category)),
                     _=interval.tick()=> {
                         if cancel.load(Ordering::Acquire)||jobs_task.is_cancelled() { return Err("Task cancelled".to_owned()); }
                         if crate::scans::LOCAL_STREAMS.load(Ordering::Relaxed)>0 { return Err("preempted for playback".to_owned()); }
@@ -155,4 +155,14 @@ pub(crate) async fn set_scan_result(
     query("UPDATE scan_jobs SET status=?,errors_json=?,errors_count=?,discovered=1,probed=1 WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
         .bind(if error.is_some(){"error"}else{"completed"}).bind(errors).bind(i64::from(error.is_some())).bind(library).bind(run).execute(store.pool()).await?;
     Ok(())
+}
+
+fn operation_error(error: &std::io::Error, category: &str) -> String {
+    if error.to_string() == "source_changed_rescan_required" {
+        return "source_changed_rescan_required".into();
+    }
+    if category == "prepare" {
+        return media_node::packaging::preparation_error_code(error).into();
+    }
+    format!("task_operation_failed:{:?}", error.kind())
 }

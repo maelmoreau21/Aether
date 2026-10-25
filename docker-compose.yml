@@ -12,8 +12,8 @@
 #   in MKV and MP4 containers.
 #
 # Image Tags:
-# - Default: latest (ghcr.io/maelmoreau21/aether:latest) -> stable release from main
-# - Development: develop (ghcr.io/maelmoreau21/aether:develop) -> latest develop branch
+# - Default: latest (${AETHER_IMAGE_PREFIX:-ghcr.io/maelmoreau21}/aether:latest) -> stable release from main
+# - Development: develop (${AETHER_IMAGE_PREFIX:-ghcr.io/maelmoreau21}/aether:develop) -> latest develop branch
 # - Override with AETHER_TAG env variable: AETHER_TAG=develop docker compose up -d
 # - Local developer build: docker compose build OR docker compose up -d --build
 #
@@ -40,7 +40,7 @@
 
 services:
   aether:
-    image: ghcr.io/maelmoreau21/aether:${AETHER_TAG:-latest}
+    image: ${AETHER_IMAGE_PREFIX:-ghcr.io/maelmoreau21}/aether:${AETHER_TAG:-latest}
     build:
       context: .
       target: runtime

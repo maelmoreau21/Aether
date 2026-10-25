@@ -43,7 +43,8 @@
     | 'jump-backward'
     | 'jump-forward'
     | 'chapter-prev'
-    | 'chapter-next';
+    | 'chapter-next'
+    | 'trash';
 
   const paths: Record<IconName, string> = {
     menu: 'M4 6h16M4 12h16M4 18h16',
@@ -89,7 +90,8 @@
     'jump-backward': 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11',
     'jump-forward': 'm15 14 5-5-5-5M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13',
     'chapter-prev': 'M11 19 4 12l7-7v14ZM20 19 13 12l7-7v14Z',
-    'chapter-next': 'M4 5l7 7-7 7V5ZM13 5l7 7-7 7V5Z'
+    'chapter-next': 'M4 5l7 7-7 7V5ZM13 5l7 7-7 7V5Z',
+    trash: 'M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-6 5v6m4-6v6'
   };
 </script>
 <script lang="ts">

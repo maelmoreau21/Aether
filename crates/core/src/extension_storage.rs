@@ -155,7 +155,12 @@ pub async fn remove(store: &IdentityStore, id: &str) -> io::Result<()> {
     if !tokio::fs::try_exists(store.plugins_path()).await? {
         return Ok(());
     }
-    root(store).await?;
+    // Only validate that plugin root is a real directory if it exists
+    if let Ok(metadata) = tokio::fs::symlink_metadata(store.plugins_path()).await
+        && !real_directory(&metadata)
+    {
+        return Err(io::Error::other("plugin root must be a real directory"));
+    }
     clean_known(&directory).await
 }
 pub async fn sync_installed(store: &IdentityStore) -> io::Result<usize> {
@@ -216,6 +221,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(wasm(&reopened, &package).await.unwrap(), package.wasm);
+        // Uninstalling when the directory does not exist must succeed cleanly
+        remove(&store, "nonexistent.plugin").await.unwrap();
         for id in ["..", ".", "../outside", "a/b", "a\\b", "end."] {
             assert!(directory_for_test(&store, id).is_err());
         }

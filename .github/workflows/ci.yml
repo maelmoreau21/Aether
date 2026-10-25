@@ -416,10 +416,12 @@ jobs:
   # Les pull requests non fiables ne publient jamais d'image.
   # =========================================================================
   publish:
-    name: Publication Docker GHCR
+    name: Publication Docker GHCR (develop)
     needs: [workflows, rust, security-audit, frontend, browser, images]
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.base_ref == 'develop' || github.base_ref == 'main')
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/develop' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'))
     permissions:
       contents: read
       packages: write
     uses: ./.github/workflows/publish.yml
+    with:
+      is_release: false

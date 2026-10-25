@@ -1,3 +1,5 @@
+> Moteur de tâches à Core unique (25 octobre 2026) : file SQLite/PostgreSQL persistante, décisions Core, exécution confinée dans les Media Nodes appairés et dans le Node standalone, leases/tentatives et priorité à la lecture. Les travaux distribués n’exigent pas plusieurs Core ni un broker externe. Contrat réel et limites : [DISTRIBUTED_TASKS.md](docs/DISTRIBUTED_TASKS.md).
+
 > PostgreSQL 18 optionnel en cours de validation : moteur explicite, migrations indépendantes et premier contrat HTTP commun réussi sur SQLite et PostgreSQL. Voir [PostgreSQL](docs/POSTGRESQL.md) et MEMORY.md ; P2 reste ouvert.
 
 > CI/GHCR (18 octobre 2026) : validation YAML réparée localement, publication

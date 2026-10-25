@@ -1,5 +1,77 @@
 # MEMORY.md — État et décisions Aether
 
+## 25 octobre 2026 — Releases automatiques et Versioning indépendant des extensions Aether
+
+- **Découplage des versions dans `Aether-Plugins`** :
+  - Remplacement de `version.workspace = true` par des versions explicites et autonomes `version = "0.1.0"` dans le `Cargo.toml` de chaque extension (`Avatar`, `Discogs`, `fanart.tv`, `IMDb`, `IntroSkipper`, `LrcLib`, `MusicBrainz`, `OMDb`, `TMDb`).
+  - Validation complète de la chaîne de compilation : `cargo fmt`, `cargo clippy`, `cargo test --workspace` (tous les tests d'intégration et unitaires passent).
+- **Détection ciblée des extensions modifiées (`scripts/detect_changed_plugins.py`)** :
+  - Détection automatique basée sur `git diff --name-only <base>..HEAD` isolant chaque sous-dossier de plugin.
+  - Exclusion des modifications documentaires (`.md`, `docs/`) pour éviter les releases superflues.
+  - Déclenchement automatique de tous les plugins dépendants si le crate commun `crates/aether-plugin-api` est modifié.
+  - Support du dispatch manuel avec choix du plugin et forçage d'une release `MAJOR` (ex: `1.12.0 → 2.0.0`) ou `MINOR`.
+- **Mise à jour atomique du catalogue (`scripts/update_catalog_entry.py`)** :
+  - Met à jour ou ajoute une entrée de plugin dans `repository/manifest.json` avec calcul frais du SHA-256 du paquet signé.
+  - Conserve toutes les entrées, signatures et clés publiques existantes sans régression.
+  - Contrôle strict du respect de la limite de taille de 256 Kio.
+- **Workflow de Release GitHub (`.github/workflows/release-plugins.yml`)** :
+  - Déclenchement sur `push` vers `main` ou `workflow_dispatch` manuel.
+  - Utilise l'environnement GitHub `production` restreint à `main` avec le secret `ED25519_PRIVATE_KEY` (avec arrêt immédiat et explicite si absent).
+  - Compilation Wasm optimisée (`opt-level = "z"`), packaging, signature Ed25519, vérification de l'intégrité du catalogue (`test-manifests.cjs`, `test-repository.cjs`).
+  - Création du tag indépendant (ex: `tmdb-v0.2.0`), publication de la GitHub Release avec l'archive `.package.json` en asset téléchargeable, et commit automatisé du catalogue sur `main`.
+  - Idempotence complète : aucun tag ou release en double si déjà publié.
+- **CI et SDK (`.github/workflows/ci.yml`)** :
+  - Récupération du SDK Aether alignée sur la branche stable `main` (`${{ github.repository_owner }}/Aether`).
+  - Tolérance propre dans `test-manifests.cjs` pour les nouveaux plugins en cours de développement dans le workspace (comme `IntroSkipper`) en attente de leur première signature.
+- **Documentation (`README.md`)** :
+  - Explication des règles de calcul de version, de la signature sécurisée en CI, du dispatch manuel des versions majeures et de la restauration d'anciennes versions.
+- **Vérifications réelles** :
+  - `detect_changed_plugins.py` testé en scénarios automatique et manuel (`MAJOR`/`MINOR`).
+  - `update_catalog_entry.py` testé avec succès sur `tmdb-0.1.0.package.json`.
+  - `node scripts/test-manifests.cjs` et `node scripts/test-repository.cjs` validés avec succès (8 paquets vérifiés).
+  - Aucun push distant, aucun tag distant créé ni clé privée exposée.
+
+## 25 octobre 2026 — Automatisation des Releases SemVer, GHCR et Architecture Écosystème
+
+- **Audit et Professionnalisation CI/CD & GitHub Actions** :
+  - Audit complet de l'infrastructure de publication de `Aether` et `Aether-Plugins`.
+  - Mise en place du versioning automatique Semantic Versioning piloté par Conventional Commits (`scripts/calculate_release.py`) : incréments PATCH pour fix/perf/secours, MINOR pour feat, MAJOR (ou MINOR en 0.x) pour breaking changes.
+  - Création du workflow `.github/workflows/release.yml` sur `main` : calcul de version sans boucle infinie, vérification d'existence du tag Git, publication Docker avec tags SemVer (`0.x.y`, `0.x`, `latest`, commit SHA), puis création du tag Git et de la GitHub Release officielle avec notes automatiques.
+  - Sécurisation de `.github/workflows/ci.yml` et `publish.yml` : interdiction stricte de publication d'images Docker depuis les Pull Requests (`github.event_name != 'pull_request'`), suppression des références GitHub en dur (`github.repository_owner` dynamique).
+  - Paramétrage configurable du préfixe des registres de conteneurs dans `docker-compose.yml` et `compose.*.yaml` via `${AETHER_IMAGE_PREFIX:-ghcr.io/maelmoreau21}` pour assurer la transition sans rupture lors du transfert dans une organisation.
+- **Documentation et Gouvernance** :
+  - Rédaction de `docs/GITHUB_GOVERNANCE_AND_MIGRATION.md` : matrice des règles de protection des branches `main` et `develop`, permissions GitHub Actions, guide de transfert vers une organisation dédiée (ex. `AetherMedia`) préservant l'historique et les signatures de paquets.
+  - Rédaction de `docs/FUTURE_PLUGIN_ARCHITECTURE.md` : feuille de route de découplage du SDK `media-extension-sdk`, gestion de la compatibilité ABI, et flux d'enregistrement automatisé dans le catalogue centralisé d'extensions.
+- **Vérifications** :
+  - Test unitaire et fonctionnel de `calculate_release.py` (`python scripts/calculate_release.py --json`) : détection correcte de la version suivante `v0.2.0`, extraction et formatage Markdown du changelog depuis l'historique Git.
+  - Compilation syntaxique Python (`py_compile`) vérifiée.
+  - Aucune modification distante (aucun push Git, aucun tag créé, aucune release ni transfert de dépôt déclenché).
+
+
+## 25 octobre 2026 — Navigation dossiers et refonte de l'éditeur de bibliothèque
+
+- Correction Web de `PathPickerModal.svelte` : l'effet d'ouverture suivait le chemin
+  courant et réinitialisait la navigation vers le dossier initial, notamment
+  `/tmp/aether-core-empty-local-root`. Initialisation isolée avec `untrack`,
+  navigation parent/racines explicite, annulation des requêtes précédentes et
+  confirmation limitée à un chemin résolu sans erreur. Backend inchangé.
+- `AdminLibraries.svelte` utilise une fenêtre jusqu'à 1200 px, en-tête/actions
+  persistants et sections général/dossiers/options ; adaptation téléphone.
+  `LibraryOptions.svelte` présente métadonnées/langues, images et fournisseurs
+  avec les seuls réglages déjà raccordés. Suppression de l'annonce obsolète
+  « multi-dossiers à implémenter ». Médias conservés en lecture seule.
+- Validation : `npm run check --prefix apps/web` (0 erreur, 5 avertissements CSS
+  dans AdminExtensions), `npm run build --prefix apps/web` réussi ; ESLint ciblé
+  sur les trois composants réussi. `npm run lint --prefix apps/web` échoue sur
+  l'erreur préexistante `AdminExtensions.svelte:359` (lien sans `resolve`).
+- Test Chrome synthétique : `node scripts/test-library-editor-ui.mjs` depuis
+  `apps/web`, navigation parent stable, racines, chemin saisi, ajout d'un second
+  dossier et payload des réglages vérifiés ; absence de débordement à 1440/390 px,
+  thèmes sombre/clair. Captures : `docs/evidence/2026-10-25/library-editor/`.
+  API simulée : aucune preuve supplémentaire de déploiement Docker/NAS ou d'accès
+  disque réel. Un Node distant ne présente toujours que ses racines déclarées.
+
+
 ## 25 octobre 2026 — Correction des tests d'intégration CI Shards 1 et 2 (Preemption Playback et Multi-Folder Scan)
 
 - **Problèmes résolus** :
@@ -4017,3 +4089,28 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
   docs/evidence/2026-10-24/streaming-mission-3-2/release-smoke4-summary.json.
   Audit13fichiers sanssecret; processusRust/FFmpeg test nettoyés, aucunpush
   ou déploiement. Aucun commit effectué par l'agent benchmark.
+
+
+## 25 octobre 2026 — Mission 4 : moteur de tâches distribué et validation finale
+
+- File durable `task_engine`, scheduler existant réutilisé, catégories scan/analyze/prepare/image ;
+  leases de 60 s et tentatives monotones, budget d'échecs distinct, idempotence,
+  annulation/pause/reprise, concurrence bornée par Node et publication soumise au fencing.
+  Aucune nouvelle infrastructure obligatoire ; standalone et médias en lecture seule conservés.
+- Admission bornée et priorité lecture ; pression CPU/RAM/disque/I/O et réseau optionnel.
+  Les écritures attendent avant d'acquérir une connexion SQL. Attribution jusqu'à 100 Nodes
+  dans une transaction et une mise à jour SQL, sans exécuteur par tâche en attente.
+- Résultats de jobs limités à 64 Kio et chargés au détail ; UI paginée, propriétaire/Node,
+  durée, erreurs, compteurs et contrôles. Réponses périmées et ancienne configuration de racine
+  refusées ; un sous-dossier ne contourne pas la désactivation de son parent.
+- Validation : 15 intégrations Core ciblées + 8 tests Core ciblés réussis ; Node 84 réussis/4 ignorés ;
+  Web 152 réussis, check 0/0, ESLint ciblé et build réussis ; Clippy tous targets réussi.
+  Trois bancs explicites réussis. Chrome réel AV1/Opus MP4/MKV avec backlog 10 000 et
+  redémarrage : pixels/PCM/seek/pause vérifiés, 138 puis 256 jobs terminés, aucune perte des 10 000.
+- Mesures Windows/debug/SQLite : 10 000 admissions en 49,95 s (200,2/s), p95 admission 7,34 ms,
+  navigation p95 16,05 ms, RSS final processus de test 19,52 Mio. Attribution unitaire p95 9,13 ms ;
+  attribution groupée 100 Nodes p95 383,89 ms : cible 50 ms non atteinte pour ce cas et la contention.
+- Limites : Nodes de charge simulés, backlog navigateur composé de scans de dossier vide ;
+  pas de preuve Release/NAS/PostgreSQL/100 machines. Redistribution entre copies,
+  checkpoints par fichier, budgets administratifs et métadonnées via extensions restent ouverts.
+  Rapport et commandes : docs/DISTRIBUTED_TASKS.md ; preuves docs/evidence/2026-10-25/distributed-tasks/.

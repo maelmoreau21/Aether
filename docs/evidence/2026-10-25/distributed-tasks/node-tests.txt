@@ -1,0 +1,2 @@
+    Blocking waiting for file lock on build directory
+   Compiling media-node v0.1.0 (C:\Users\Mael\Documents\GitHub\Aether\crates\node)

@@ -74,6 +74,7 @@ pub struct User {
 pub struct IdentityStore {
     pub(crate) pool: AnyPool,
     pub(crate) plugins_path: std::path::PathBuf,
+    pub(crate) task_writes: std::sync::Arc<tokio::sync::Mutex<()>>,
     pub(crate) node_registry: std::sync::Arc<crate::nodes::NodeRuntimeRegistry>,
 }
 fn plugin_path(database: Option<&Path>) -> Result<std::path::PathBuf, IdentityError> {
@@ -109,6 +110,7 @@ impl IdentityStore {
         Ok(Self {
             pool,
             plugins_path: plugin_path(None)?,
+            task_writes: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             node_registry: std::sync::Arc::new(crate::nodes::NodeRuntimeRegistry::new()),
         })
     }
@@ -214,6 +216,7 @@ impl IdentityStore {
         Ok(Self {
             pool,
             plugins_path: plugin_path(Some(path))?,
+            task_writes: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             node_registry: std::sync::Arc::new(crate::nodes::NodeRuntimeRegistry::new()),
         })
     }

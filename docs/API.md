@@ -1,3 +1,5 @@
+> Moteur de tâches (25 octobre 2026) : API administrateur persistante `GET/POST /api/v1/admin/tasks/jobs`, détail `GET /api/v1/admin/tasks/jobs/{id}` et contrôles `POST /api/v1/admin/tasks/jobs/{id}/{pause|resume|cancel}`. Session administrateur et CSRF pour les mutations ; catégories scan/analyze/prepare/image et cibles inventoriées. Contrat, limites et validation : [tâches distribuées](DISTRIBUTED_TASKS.md).
+
 > Bibliothèques avec plusieurs dossiers/nœuds : [contrat du 22 octobre](LIBRARY_FOLDERS.md).
 > Navigation par bibliothèque et images multiples : [contrat du 21 octobre](RESPONSIVENESS_AND_ARTWORK.md).
 
@@ -428,3 +430,53 @@ Les comptes et offsets concernent donc les épisodes admissibles, sans sauter de
 éléments autorisés après un épisode interdit. Le compte exact par saison nécessite
 encore une requête agrégée ; seule l'hydratation des détails est bornée à la page.
 Sans `episodeLimit`, le contrat historique complet est conservé.
+
+## Réglages avancés de bibliothèque — 25 octobre 2026
+
+Les routes administrateur `GET /api/v1/admin/libraries`,
+`POST /api/v1/admin/libraries` et `PUT /api/v1/admin/libraries/{id}` utilisent
+l'objet `options` décrit dans [LIBRARY_OPTIONS.md](LIBRARY_OPTIONS.md).
+Session administrateur requise ; Origin et CSRF pour POST/PUT. Les préférences
+avancées utilisent le même stockage JSON SQLite/PostgreSQL, sans nouvelle table.
+
+| Champs `options` | Valeur par défaut / limites |
+| --- | --- |
+| `preferEmbeddedTitles` | `false` |
+| `embeddedSubtitlePolicy` | `allow_all` ; choix `allow_all`, `allow_text`, `block_all` |
+| `metadataProviders`, `imageProviders`, `similarItemsProviders`, `segmentProviders`, `subtitleProviders` | `[]` ; listes ordonnées de `{id, enabled}`, maximum 32 entrées chacune |
+| `onlineRefreshIntervalDays` | `0` ; valeurs 0, 30, 60, 90 |
+| `realtimeMonitoring`, `automaticCollections`, `introDetectionEnabled` | `false` |
+| `saveNfoToMedia`, `saveImagesToMedia`, `saveSubtitlesToMedia` | `false` |
+| `trickplayEnabled`, `trickplayDuringScan`, `trickplaySaveToMedia` | `false` |
+| `trickplayIntervalSeconds` | `10` ; entier de 1 à 60 |
+| `trickplayWidth` | `320` ; entier de 160 à 1920 |
+| `chapterImagesEnabled`, `chapterImagesDuringScan`, `chapterImagesSaveToMedia` | `false` |
+| `subtitleLanguages` | `["fr"]` ; maximum 16 codes de langue distincts |
+| `subtitleOnlyMissing`, `subtitleRequireHash` | `true` |
+| `subtitleDownloadEnabled`, `subtitleMatchAudio` | `false` |
+
+Les identifiants de fournisseurs sont uniques dans chaque liste, de 1 à 100
+caractères ASCII alphanumériques ou `._-`. Leur position est conservée comme
+priorité ; un identifiant enregistré ne prouve pas que l'extension est installée
+ou exécutable. Les codes de langue suivent la même validation structurelle que
+`preferredMetadataLanguage` : 2 à 35 caractères, premier sous-tag alphabétique
+de 2 à 8 caractères, sous-tags alphanumériques de 1 à 8 caractères séparés par `-`.
+
+Champs inconnus et valeurs invalides sont rejetés ; les valeurs manquantes dans
+un objet `options` reçoivent leurs valeurs par défaut. Un PUT omettant entièrement
+`options` conserve l'objet existant. Les paramètres réservés sont sauvegardés
+mais ne lancent aucun moteur de surveillance, collection, enrichissement Internet,
+extraction trickplay/chapitres ou téléchargement de sous-titres. Les préférences
+de sauvegarde dans les médias ne constituent pas une autorisation d'écriture :
+les médias restent en lecture seule.
+
+`preferEmbeddedTitles` agit au scan sur le titre du fichier, en repli lorsque
+le NFO activé ne fournit pas de titre ; il ne change pas l'identité du média.
+Le tag `title` du conteneur est limité à 512 caractères sans caractères de contrôle.
+
+`embeddedSubtitlePolicy` filtre les sous-titres intégrés proposés par le lecteur
+et contrôle leur préparation Core. `allow_text` reconnaît `subrip`, `webvtt`,
+`ass`, `ssa`, `mov_text` ; `block_all` refuse une préparation intégrée avec
+`422 embedded_subtitle_disabled`, avant le traitement local ou le relais distant.
+Les pistes externes sont conservées. Le fichier original Direct Play contient
+toujours ses pistes internes : cette préférence n'en retire pas les octets.

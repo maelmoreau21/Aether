@@ -185,7 +185,7 @@
   }
 
   .media-card:hover .poster {
-    transform: translateY(-2px) scale(1.025);
+    transform: translateY(-2px) scale(1.02);
     border-color: var(--accent-primary);
     box-shadow: var(--shadow-card-hover);
   }

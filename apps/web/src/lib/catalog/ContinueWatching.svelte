@@ -40,7 +40,7 @@
   }
 </script>
 
-{#if error || $history.length}
+{#if error || continuing.length}
 <section class="continue-shelf" aria-label="Continuer à regarder">
   <div class="shelf-header">
     <div class="title-group">
@@ -148,29 +148,6 @@
         </a>
       {/each}
     </div>
-  {/if}
-
-  {#if $history.length}
-    <details class="history-details">
-      <summary>
-        <span class="summary-content">
-          <Icon name="clock" size={16} />
-          <span>Historique récent ({$history.length} séance{$history.length > 1 ? 's' : ''})</span>
-        </span>
-      </summary>
-      <ul class="history-list">
-        {#each $history.slice(0, 20) as item (item.workId)}
-          <li class="history-item">
-            <a href={resolve(`${item.kind === 'episode' ? 'series/' : 'films/'}?work=${encodeURIComponent(item.seriesId ?? item.workId)}`)}>
-              <span class="history-title">{item.title}</span>
-            </a>
-            <span class="history-status" class:watched={item.watched}>
-              {item.watched ? '✓ Vu' : '⏱ En cours'}
-            </span>
-          </li>
-        {/each}
-      </ul>
-    </details>
   {/if}
 </section>
 {/if}
@@ -460,74 +437,4 @@
     color: var(--color-subtle);
   }
 
-  /* History details accordion */
-  .history-details {
-    margin-top: 22px;
-    border-radius: var(--radius-sm);
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--color-line);
-    overflow: hidden;
-  }
-
-  summary {
-    padding: 12px 18px;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--color-muted);
-    transition: color var(--transition-fast), background var(--transition-fast);
-  }
-
-  summary:hover {
-    color: var(--color-text-bright);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .summary-content {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .history-list {
-    list-style: none;
-    margin: 0;
-    padding: 8px 18px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .history-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    font-size: 13px;
-    padding: 6px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  }
-
-  .history-item:last-child {
-    border-bottom: none;
-  }
-
-  .history-item a {
-    color: var(--color-text);
-    transition: color var(--transition-fast);
-  }
-
-  .history-item a:hover {
-    color: var(--color-accent);
-  }
-
-  .history-status {
-    font-size: 11px;
-    color: var(--color-muted);
-  }
-
-  .history-status.watched {
-    color: var(--color-success);
-    font-weight: 600;
-  }
 </style>

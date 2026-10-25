@@ -343,6 +343,7 @@ pub async fn dispatch_once(
                         if preempted
                             || errors.contains("preempted for playback")
                             || errors.contains("node_busy_playback_priority")
+                            || errors.contains("preparation_busy")
                             || errors.contains("cancelled")
                             || errors.contains("Scan arrêté")
                             || errors.contains("Music scan interrupted")
@@ -390,6 +391,7 @@ pub async fn dispatch_once(
         .execute(&auth.store.pool).await?;
     let nodes: Vec<String> = crate::database::query_scalar("SELECT DISTINCT node_id FROM durable_tasks WHERE status='queued' AND lease_until IS NULL AND available_at<=? LIMIT 100")
         .bind(timestamp).fetch_all(&auth.store.pool).await?;
+    let mut ready = Vec::with_capacity(nodes.len());
     for node in nodes {
         if node == "local"
             && resource_pressure_blocks(
@@ -428,38 +430,17 @@ pub async fn dispatch_once(
         {
             continue;
         }
-        if let Some(job) = crate::task_engine::claim(&auth.store, &node, timestamp, 60, 1).await? {
-            jobs.engine_busy
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            let scan = format!("{}:{}", job.id, job.attempt);
-            if job.category != "scan" {
-                if crate::task_execution::dispatch(auth, root, jobs, &job)
-                    .await
-                    .is_err()
-                {
-                    crate::task_engine::finish(
-                        &auth.store,
-                        &job.id,
-                        job.attempt,
-                        &node,
-                        timestamp,
-                        Some("Task operation admission failed"),
-                    )
-                    .await?;
-                }
-                continue;
-            }
-            if crate::scans::execute_leased(
-                auth,
-                root.to_owned(),
-                jobs.clone(),
-                job.library_id.clone(),
-                scan,
-                serde_json::from_value(serde_json::Value::String(job.refresh_mode.clone()))
-                    .map_err(|_| sqlx::Error::Protocol("Invalid task refresh mode".into()))?,
-            )
-            .await
-            .is_err()
+        ready.push(node);
+    }
+    for job in crate::task_engine::claim_batch(&auth.store, &ready, timestamp, 60).await? {
+        let node = job.node_id.clone();
+        jobs.engine_busy
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let scan = format!("{}:{}", job.id, job.attempt);
+        if job.category != "scan" {
+            if crate::task_execution::dispatch(auth, root, jobs, &job)
+                .await
+                .is_err()
             {
                 crate::task_engine::finish(
                     &auth.store,
@@ -467,10 +448,33 @@ pub async fn dispatch_once(
                     job.attempt,
                     &node,
                     timestamp,
-                    Some("Scan admission failed"),
+                    Some("Task operation admission failed"),
                 )
                 .await?;
             }
+            continue;
+        }
+        if crate::scans::execute_leased(
+            auth,
+            root.to_owned(),
+            jobs.clone(),
+            job.library_id.clone(),
+            scan,
+            serde_json::from_value(serde_json::Value::String(job.refresh_mode.clone()))
+                .map_err(|_| sqlx::Error::Protocol("Invalid task refresh mode".into()))?,
+        )
+        .await
+        .is_err()
+        {
+            crate::task_engine::finish(
+                &auth.store,
+                &job.id,
+                job.attempt,
+                &node,
+                timestamp,
+                Some("Scan admission failed"),
+            )
+            .await?;
         }
     }
     Ok(())

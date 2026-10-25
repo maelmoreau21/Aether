@@ -73,13 +73,22 @@
     </article>{:else}<p>Ajoutez votre première bibliothèque de films ou de séries.</p>{/each}
   </div>
 </section>
-<dialog bind:this={editor} aria-labelledby="library-form" oncancel={(event) => { if (saving) event.preventDefault(); }}>
-  <h2 id="library-form">{editing ? 'Modifier la bibliothèque' : 'Ajouter une bibliothèque'}</h2>
+<dialog class="library-editor" bind:this={editor} aria-labelledby="library-form" oncancel={(event) => { if (saving) event.preventDefault(); }}>
+  <header class="editor-header"><div><p class="eyebrow">Configuration de la bibliothèque</p><h2 id="library-form">{editing ? 'Modifier la bibliothèque' : 'Ajouter une bibliothèque'}</h2></div><button type="button" disabled={saving} aria-label="Fermer les réglages de la bibliothèque" onclick={() => editor?.close()}>✕</button></header>
   <form onsubmit={submit}><fieldset disabled={saving}>
+    <div class="editor-content">
+    <section class="identity-section" aria-labelledby="library-general-heading">
+    <h3 id="library-general-heading">Général</h3>
+    <div class="identity-fields"><div>
     <label for="library-name">Nom de la bibliothèque</label><input id="library-name" bind:value={name} required maxlength="100" autocomplete="off" />
+    </div><div>
     <label for="library-kind">Type de contenu</label><select id="library-kind" bind:value={kind}><option value="films">Films</option><option value="series">Séries</option><option value="music">Musique</option></select>
+    </div></div>
+    <label class="check"><input type="checkbox" bind:checked={enabled} /> Bibliothèque active</label>
+    <p class="field-hint">Une bibliothèque désactivée est masquée du catalogue et ne peut pas être lue.</p>
+    </section>
     <section class="folders" aria-labelledby="folders-heading">
-      <h3 id="folders-heading">Dossiers de la bibliothèque</h3>
+      <div class="section-heading"><h3 id="folders-heading">Dossiers de la bibliothèque</h3><span>{folders.length} / 32</span></div>
       <p>Regroupez vos dossiers de plusieurs serveurs, par exemple dans Films_UHD. Les accès et les réglages s’appliquent à toute la bibliothèque.</p>
       <ul>{#each folders as folder, index (`${folder.nodeId}:${folder.root}`)}
         <li><div><strong>{nodes.find(node => node.id === folder.nodeId)?.name ?? folder.nodeId}</strong><span>{folder.root}</span></div><button type="button" aria-label={`Retirer ${folder.root}`} onclick={() => folders = folders.filter((_, i) => i !== index)}>Retirer</button></li>
@@ -122,12 +131,12 @@
     <label for="library-excluded">Dossiers ou motifs à exclure (séparés par des virgules)</label>
     <input id="library-excluded" bind:value={excludedPatterns} placeholder="ex: bonus, trailers, #recycle" autocomplete="off" />
     <p class="field-hint">Les dossiers système (#recycle, @eaDir, dossiers cachés) et les dossiers contenant un fichier .nomedia ou .ignore sont exclus automatiquement.</p>
-    <label class="check"><input type="checkbox" bind:checked={enabled} /> Bibliothèque active</label>
     <LibraryOptionsForm bind:options {kind} />
-    <p>Les accès se règlent dans Utilisateurs et Groupes. Les médias restent en lecture seule.</p>
-    <div class="actions"><button type="button" onclick={() => editor?.close()}>Annuler</button><button class="primary" type="submit" disabled={folders.length === 0}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div>
+    <aside class="access-note"><strong>Accès et protection des médias</strong><p>Gérez les autorisations dans Utilisateurs et Groupes. Ajouter ou retirer un dossier modifie le catalogue ; les fichiers d’origine restent en lecture seule.</p></aside>
+    {#if error}<p role="alert">{error}</p>{/if}
+    </div>
+    <div class="actions editor-actions"><p>Les changements d’import seront appliqués au prochain scan.</p><button type="button" onclick={() => editor?.close()}>Annuler</button><button class="primary" type="submit" disabled={folders.length === 0 && !root.trim()}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div>
   </fieldset></form>
-  {#if error}<p role="alert">{error}</p>{/if}
 </dialog>
 <dialog bind:this={refresher} aria-labelledby="refresh-heading" oncancel={(event) => { if (refreshing) event.preventDefault(); }}>
   <form onsubmit={refresh}>
@@ -155,6 +164,20 @@
   />
 {/if}
 <style>
+  dialog.library-editor { width:min(1200px, calc(100vw - 40px)); max-width:calc(100vw - 40px); padding:0; }
+  .editor-header { position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:24px 32px;background:var(--bg-main);border-bottom:1px solid var(--border-subtle); }
+  .editor-header h2 { margin:4px 0 0;font-size:26px; }
+  .eyebrow { margin:0;font-size:12px;color:var(--text-secondary); }
+  .editor-header button { flex-shrink:0; }
+  .editor-content { padding:28px 32px; }
+  .identity-fields { display:grid;grid-template-columns:2fr 1fr;gap:24px; }
+  .identity-section h3 { font-size:20px; }
+  .section-heading { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+  .section-heading span { color:var(--text-secondary);font-size:13px; }
+  .access-note { margin-top:28px;padding:20px;border:1px solid var(--border-subtle);border-radius:var(--radius-md); }
+  .access-note p { margin:8px 0 0; }
+  .editor-actions { position:sticky;bottom:0;z-index:2;margin:0;padding:16px 32px;background:var(--bg-main);border-top:1px solid var(--border-subtle);align-items:center; }
+  .editor-actions p { flex:1;margin:0;font-size:12px; }
   .folder-count { margin:0; padding:0 18px 18px; font-size:12px; }
   .folders { margin:24px 0; padding:20px; border:1px solid var(--border-subtle); border-radius:12px; background:var(--bg-elevated); }
   .folders h3 { margin:0 0 8px; } .folders p { font-size:13px; line-height:1.6; color:var(--text-secondary); }
@@ -202,5 +225,5 @@
   .folder-input-row input { flex: 1; min-width: 0; }
   .browse-btn { flex-shrink: 0; white-space: nowrap; height: 44px; }
   .add-folder-btn { margin-top: 10px; width: 100%; }
-  @media(max-width: 600px) { .library-grid { grid-template-columns: minmax(0, 1fr); } dialog { padding: 20px; } }
+  @media(max-width: 600px) { .library-grid { grid-template-columns: minmax(0, 1fr); } dialog { padding: 20px; } dialog.library-editor { width:calc(100vw - 16px);max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px); } .editor-header,.editor-content { padding:20px 16px; } .editor-header h2 { font-size:22px; } .identity-fields { grid-template-columns:1fr;gap:0; } .folders { padding:14px; } .folder-input-row { flex-wrap:wrap; } .folder-input-row input { flex-basis:100%; } .browse-btn { width:100%; } .editor-actions { padding:14px 16px; } .editor-actions p { flex-basis:100%; } }
 </style>

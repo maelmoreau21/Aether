@@ -345,7 +345,7 @@
     return () => { document.body.style.overflow = previous; };
   });
   let selectedTaskId = $state<string | null>(null);
-  let currentHash = $state('#overview');
+  let currentHash = $state('#libraries-section');
   const sectionTitle = $derived(({
     '#overview': $t('admin_nav_overview'), '#general-section': 'Général', '#network-section': 'Réseau', '#libraries-section': $t('admin_nav_libraries'),
     '#nodes-section': $t('admin_nav_nodes'), '#users-section': $t('admin_nav_users'),
@@ -363,7 +363,7 @@
   const sections = new Set(['#overview', '#general-section', '#network-section', '#libraries-section', '#nodes-section', '#users-section', '#tasks-section', '#backups-section', '#groups-section', '#api-keys-section', '#extensions-section']);
   function selectedSection() {
     const section = window.location.hash.split('?')[0];
-    return sections.has(section) ? section : '#overview';
+    return sections.has(section) ? section : '#libraries-section';
   }
 
   onMount(() => {

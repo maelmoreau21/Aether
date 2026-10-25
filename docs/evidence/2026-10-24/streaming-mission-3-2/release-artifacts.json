@@ -1,0 +1,754 @@
+{
+  "revision": "bd08e05839963afa8c84dbcd5aca067dea7863ad",
+  "sealedAt": "2026-10-24T18:46:44.452Z",
+  "sourceAssociation": "Artifacts supplied by caller; revision and observed source hashes are not an embedded build attestation. Executable/Web hashes identify the tested artifacts.",
+  "observedCheckoutHead": "12fe3fb38eb271f652258f950a391ed222b84260",
+  "observedDirtyPatchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "observedSourceSha256": {
+    "Cargo.lock": "d97e29446b94b9409fce4527f33c5d5e12b31bf82d3c1dcf1c0084d0eabda68c",
+    "Cargo.toml": "fad0a5ec8962bd7692a68b0125c46548ab4e6ef977013edde5a66dc91914803c",
+    "apps/web/package-lock.json": "8bc74c1eae155156d2810a2f633ed9bdd8e092eea0b5f01cba7d970114da7d6e",
+    "apps/web/package.json": "de846dd50568753dd5150da54c0268633a59216a5e2cb632201231e7b7f9a3b9",
+    "apps/web/src/app.css": "87d215c02eebefd47268af232b7cc6f8025a653e23cfdab3678d0ec750de533b",
+    "apps/web/src/app.html": "776b732e2956680462d1e311996bca92eb590c855d51c6c0b327e675d501c703",
+    "apps/web/src/lib/admin/AdminApiKeys.svelte": "79e5d4848ef398d1e83e1809acb67196f59699caa0a94fa008ec9e1752de81b7",
+    "apps/web/src/lib/admin/AdminCapabilities.svelte": "f6dbf8d6c0c4ad0a68ca5b9bf0a213cdac16c2cf43a974e0a41a10149416eca7",
+    "apps/web/src/lib/admin/AdminExtensions.svelte": "51fbd42a69c61d3caa1025ce8e6eda57ed322b63e3d949c07dd4587d6c193616",
+    "apps/web/src/lib/admin/AdminGroups.svelte": "04ed0f73147c8546d9244376b5f0e757635bde97b397caed70a642b07d7a1488",
+    "apps/web/src/lib/admin/AdminLibraries.svelte": "f42c3bcbb336c8c7b3701d6d35407624c33f434ca42005d2f610c0104297e82f",
+    "apps/web/src/lib/admin/AdminMaintenance.svelte": "6874844d48c2ccdc627ec9cc35439e639830f64afba1f18ae356ccd3b0639a03",
+    "apps/web/src/lib/admin/AdminNodes.svelte": "7edd35a99745c1e5f43298f9c8abd9b588fb64566d8866055d7b0f3a3cbeabae",
+    "apps/web/src/lib/admin/AdminOidc.svelte": "0bb3d621c513cddf9ff841ffc3c062e1f215ec937509a58b1cfea1463f7f7bc5",
+    "apps/web/src/lib/admin/AdminOverview.svelte": "42cb68eca88d5d61b89ae667bc8ae962d10ee6396a7598d8c70dcc1b95e0f080",
+    "apps/web/src/lib/admin/AdminSettings.svelte": "7490c352d6119127ae14b944ae9efd3edfd37da80231f5ede9395284dbfc1e72",
+    "apps/web/src/lib/admin/AdminTasks.svelte": "8c715d73a1ae280998e2151bc137b7123000d17f9da5aa50b865e6778c3df331",
+    "apps/web/src/lib/admin/AdminUsers.svelte": "f5940886d83759b27575b595f87f5f883b15b42cf39839e0230d1f918744eea0",
+    "apps/web/src/lib/admin/AvatarCollections.svelte": "9c3e89d0319e654b863471ce1368d8fee4059da35d9accde6123f7d301b92460",
+    "apps/web/src/lib/admin/ExtensionSettings.svelte": "234777f15b5ad5f917c4a0b8a5e4040dec3ccdcd6cbc8688b8fa3837a56226ab",
+    "apps/web/src/lib/admin/LibraryImages.svelte": "72a0f0e09306bef24c2662626c8b750079cda3125bd068e39d2f0c30cbe292a3",
+    "apps/web/src/lib/admin/LibraryOptions.svelte": "4856af6de719499c75f053b5158792cf046e6ad18abc993292b9cae61e0ec9ac",
+    "apps/web/src/lib/admin/ParentalPolicy.svelte": "feeec47b561504a405b50c75f99e6a7061d50506498e1fc26fd7abe66611dd74",
+    "apps/web/src/lib/admin/PathPickerModal.svelte": "45cd8e08800b824bb872c98ab022f33c4073e219655b214893a00d7482b97375",
+    "apps/web/src/lib/admin/PlaylistPolicy.svelte": "a0a241be0df00b17450ec8953f221b73945165a95cbfd73fc7080064bb1cc29f",
+    "apps/web/src/lib/admin/UserMediaPolicy.svelte": "f6e50b2d4677733d23e18a99a6d3aefd0b64edb3c3f934bc98866294e4d7f622",
+    "apps/web/src/lib/admin/plugin-text.test.ts": "614b5f872ef7136fdc5c204a1b74d5a47d5d6d542104723f77bdf37c346aa793",
+    "apps/web/src/lib/admin/plugin-text.ts": "e3794e895a3fd6517bb56f205fe49f6b014ecf4b470259fb7b20c7bef2f75749",
+    "apps/web/src/lib/admin/request.ts": "a0850698efd560e8c6d3d2b4dcfb0e8c4999b9fccded2349c6f91d86b876d4d9",
+    "apps/web/src/lib/admin/types.ts": "4ccafa38f266d6c09e15595884b7a476267e293301fdbfab7c2dee8824d98afc",
+    "apps/web/src/lib/auth/AccountSecurity.svelte": "559ffafe7b65f712e8d82958cf8180e9c96a4fdf37cef428c4c3ec50baee1569",
+    "apps/web/src/lib/auth/OidcSettings.svelte": "c1201519d4985cea3e4b67da2c293e578c37b56735cfb3a10da819c20336363b",
+    "apps/web/src/lib/auth/avatar.ts": "dd9f593b414bcfd7b5dbb982908bb96f4b39856486826c85cf8053d80bf8d839",
+    "apps/web/src/lib/auth/session.test.ts": "ac03e06f0d11eb1090e587ce5ffbaceb0ba551ec02b442826881b943612e6ca7",
+    "apps/web/src/lib/auth/session.ts": "52fa928bd00fcd7d73f1eb17a1adadb21b8dd3fed373bdaf0b192b032f63af6f",
+    "apps/web/src/lib/catalog/AvatarEditor.svelte": "4195857917c49acd172575d41786801743f3d22deca9f14607dc89c320748866",
+    "apps/web/src/lib/catalog/Catalog.svelte": "c4c4e253ac6c9f79ae311e5572716c29ae173cc113751880db83193d95d98c1e",
+    "apps/web/src/lib/catalog/CatalogFilters.svelte": "81ae50e538a4c422beec4252550c4d4458066eb8a133ad01f6b1bc0034ea1489",
+    "apps/web/src/lib/catalog/CatalogGrid.svelte": "e9a4818cf1989dcd6152e7990e943e37b44e4619600d1c0e1c7a4132d817415a",
+    "apps/web/src/lib/catalog/CatalogHome.svelte": "fcf2fefc917ae495682352afc68ec3264199ffabdae4989eb771cbdb113784d5",
+    "apps/web/src/lib/catalog/CatalogSkeleton.svelte": "7440aa83df2c32508cab1d4099b06bfd8f6659941f09490da0df64556296ec70",
+    "apps/web/src/lib/catalog/ContinueWatching.svelte": "f7f5294dbe8879f79d3c5428645ca7f295b56f77465e6e47eb31386dfc52db5c",
+    "apps/web/src/lib/catalog/EditorialCredits.svelte": "da05b98588dcf7890b678eac0bc3f9e43d34873b4eab7921258a02c281bbdca2",
+    "apps/web/src/lib/catalog/EpisodePlayer.svelte": "ecdc39f65b5774b862a57b9a91819e724d287c28f5bd11fe2bb0c8f71c993175",
+    "apps/web/src/lib/catalog/FilmDetail.svelte": "cba2875c461809f87ab304d66e4f6ab03005a08a9e83ef4f478705f7d0e75359",
+    "apps/web/src/lib/catalog/ImageManager.svelte": "c718f480fceb5c63cb965c2f5ef704f6114faf28f67f045fcb07dcaf31697129",
+    "apps/web/src/lib/catalog/OfflineDownload.svelte": "0b1fe00e4bc52f5aa7c84b5fa5e7256f0f813fdc014292e43fa632512521cc64",
+    "apps/web/src/lib/catalog/PersonalFeedback.svelte": "78968dbfe354a5d5aa4ea9977adeacacafbd960fd3135a19b27f5da9ca5df1c1",
+    "apps/web/src/lib/catalog/Poster.svelte": "cef710d2316d12f862e5816f65c4aeecc775d808eb60b28d14710dfb1a4a0182",
+    "apps/web/src/lib/catalog/SeriesDetail.svelte": "78bc73a7e91c18bab87678bbad1884fc9261d3eec8dffae3982007e00fca60e1",
+    "apps/web/src/lib/catalog/SettingsView.svelte": "d4c845b4221702699dd2926ab1245a55a72846197c259354e33c93313d0be565",
+    "apps/web/src/lib/catalog/WatchStatus.svelte": "80a7d6fcbc917fc621c57f30a4465be124c493cebf414db32da55edd63fdeeb2",
+    "apps/web/src/lib/catalog/WorkTools.svelte": "145a4f7f66eff1c8a718d996efbe23fe44384addbcda77aac279197b7d2789d3",
+    "apps/web/src/lib/catalog/api.test.ts": "2edef7185ae7e3f1059615a897a23b1f3b4f8acc90a0d07f0528d63b3421baad",
+    "apps/web/src/lib/catalog/api.ts": "f56f3273cd822eaac80d7bff311a191b6012b9439f569d3542646cac7cf706fe",
+    "apps/web/src/lib/catalog/descriptor-sharing.test.ts": "cd2725a64dc8bea7997299363e7224fc2c245c68b8337240b2ead4bd61c385c8",
+    "apps/web/src/lib/catalog/image-url.test.ts": "2149dd9b382ae6c56270ea8a5eaf3c7bf01ecb8f468c04aa4da41a8469305a7d",
+    "apps/web/src/lib/catalog/image-url.ts": "e8a76f9c26588fe0bbdd14bfee0dffcdd55336dd3805af5691f995ba97fe8558",
+    "apps/web/src/lib/catalog/libraries.ts": "31c69a6babdbc13ce02998444c42b96480d9be1594b66f29983ae867eafc173e",
+    "apps/web/src/lib/catalog/page-cache.test.ts": "e7926f6c6d6914f657c8aa7204fa03c85f282529a4a17883543a63ed54384a29",
+    "apps/web/src/lib/catalog/page-cache.ts": "2ef177c0ce182b3fb886f6296c0e66c92304bb43445e7572efd9e131dd62638d",
+    "apps/web/src/lib/catalog/watch-state.ts": "37fe635f371940235d4f8c0f463751a8973c726908b97d5bf13e487641f32af8",
+    "apps/web/src/lib/config/brand.ts": "64e1617d310073b842d0f97265b5cb1122ae440336d42ce8be64df7ab693af3d",
+    "apps/web/src/lib/config/presentation.ts": "1dbb9b3fad500bccfbbc9ed0f4004ef40a45368e13c7b529d7f284541982b1ca",
+    "apps/web/src/lib/download-url.test.ts": "ecaa4705b2496b978300816818f0e76854d854264377680aec70a6520e283728",
+    "apps/web/src/lib/download-url.ts": "a2bd65f6e5304f22c75ca3f90262b361881db263cf8867fe298c1f2937766b45",
+    "apps/web/src/lib/i18n/index.ts": "42e9207449a2d14e6ff3fcd7f899756e62c1633b50fbb8d7c48a230ac69aa7d3",
+    "apps/web/src/lib/music/AddToPlaylist.svelte": "849e07a75f2c8dff214533308c008f60f9fec44d532d557043a05b656eaf851a",
+    "apps/web/src/lib/music/MusicPlayer.svelte": "2194f6d5d613b846875431a539597224a87fad772deaedf0ccc500b8ef073193",
+    "apps/web/src/lib/music/lyrics.test.ts": "e6f496a7800c6e3e9768e1b957d75ca52315a7cfe57f3d6050552f4b42dd90f3",
+    "apps/web/src/lib/music/lyrics.ts": "5ab09c6a291658f10ed287a52ffd530d5fcd7f289fb0f38bd18c825c9a92fe33",
+    "apps/web/src/lib/music/playlists.ts": "ed00a9185e480bb6930bf8376bd3127f5f5628d1d9c4938d79c6d87b21683446",
+    "apps/web/src/lib/music/queue.test.ts": "f921bb15192989c2f4d32ce1e403f2e2bae66d431472e87cc429f29efc016ab8",
+    "apps/web/src/lib/music/queue.ts": "78125359c2ac15073bae2223876c009f89210788d345752a59680bcfb8a54d03",
+    "apps/web/src/lib/offline-vault.ts": "921a10c4b9885017e32adf77eb93b7e27d2fd68be6c513a982e9dc747235c104",
+    "apps/web/src/lib/player/ImmersivePlayer.svelte": "5c9e50691ec7cb75779a70f3e5570e0f6d2b0c590e74d1e54d5338fe292212a1",
+    "apps/web/src/lib/player/PlayerControls.svelte": "29efc65e2d5b6e7a477f6b87a4467bc4ea2a417c70a9424db24b5ac0b8c12249",
+    "apps/web/src/lib/player/available-audio.test.ts": "1fb6362500c524da15d4083c39baabb88e03d33f953a90af1c8beced06e7b5a9",
+    "apps/web/src/lib/player/available-audio.ts": "9b061f1716b77f467841b2ba0bbceb5d83fca44abd27b419dda5d551c65dc887",
+    "apps/web/src/lib/player/compatibility.test.ts": "9c38907551ebd08ea0f03a2e75a1443920e0e4c95eb38bd3233d3511f773cc21",
+    "apps/web/src/lib/player/compatibility.ts": "6f08e129ca3b31501f4ff020b0c1c42bf0d4dbc2d3383d8c4cc96508b638f4a1",
+    "apps/web/src/lib/player/encoded-video-buffer.test.ts": "d405d71bc8097214660ac2f394a14e6c910faf4ed469d41d80fda83a7b73505c",
+    "apps/web/src/lib/player/encoded-video-buffer.ts": "a071a25ef710a932fcb79ea1432d315a4f3440989d48afed081743902e56cff4",
+    "apps/web/src/lib/player/errors.ts": "1293ff176a30a4560ad32ce81c5d4894be24d276f6640936e6444ca0a6aa2ff2",
+    "apps/web/src/lib/player/external-audio.test.ts": "72d1e4a2c9d06534e04b190c6d7869aff4df11ea608b613af61b2e2db0f74d2e",
+    "apps/web/src/lib/player/external-audio.ts": "35ec9898a61ecacaec4aec512f0e3a1f8bd8ef230dc9c0ad59585be5373b5542",
+    "apps/web/src/lib/player/mp4-fragments.test.ts": "4d67687d17e58914cf23e7ce6a898a2c260dba3095e9e7f60728aa0aa911983f",
+    "apps/web/src/lib/player/mp4-fragments.ts": "2bcc1b67b67e4019bd139dc1869c97d19d6ea90ca4cc238988a4bf03882ed7e7",
+    "apps/web/src/lib/player/mp4-timeline.test.ts": "1075b0399edffbf027f732f467a2195f985a631ea9d5e5be40351d3f344d83ef",
+    "apps/web/src/lib/player/mp4-timeline.ts": "21a5dc4f15a047df6fb1e96ad1fb5800153f73d3081e0f9f4128293731048c51",
+    "apps/web/src/lib/player/native.test.ts": "477a2c60a832696d96371e6cffd4a5ee41e9efe5d30edb98597356710df2a6b3",
+    "apps/web/src/lib/player/native.ts": "fa48fe21beeb5e49aedb0ef8c9c0fa70e132b84f0c42cfe7dddec8725ef074ef",
+    "apps/web/src/lib/player/progress.test.ts": "1848a17966299a3bb7342df1bf98d32c766a2918d4c238d904c677995b1d67a0",
+    "apps/web/src/lib/player/progress.ts": "88fd56d698e247f622f9946e1c89546cb58ae28ef589ed8b2e39fb9e45503841",
+    "apps/web/src/lib/player/progressive-video.test.ts": "a75f0c6226699fbfe10dfeefcd9e3dca8dd71beed6f3977313e3cc8544d7c75d",
+    "apps/web/src/lib/player/progressive-video.ts": "2e55998d64ee6e217e51fe908f77f3dbfe5e209ac14e684339384b57d79c355f",
+    "apps/web/src/lib/player/segmented-audio.test.ts": "bede06c2f266ad08e9d0611a17e90b4e421b5d774325f367a007a6672b5a7917",
+    "apps/web/src/lib/player/segmented-audio.ts": "aa210bc9fa794d2ba401115dea9992e5d5f8b930c6799c994fcd881b06ffc612",
+    "apps/web/src/lib/player/source-selection.test.ts": "b3a36b87e9c38ec78d5b62e530d1a19cdbb1cd384c54ecb3f7f3bc6a589c2090",
+    "apps/web/src/lib/player/source-selection.ts": "74c294da523a4ab7b89f19199adf48d77ed43812ca85f155ec20e4709cde391d",
+    "apps/web/src/lib/player/startup-buffer.test.ts": "7b3751ebae325e0ab5da142fe4bb1d941cfee570ce29cf2df61930982fe40c1a",
+    "apps/web/src/lib/player/startup-buffer.ts": "475baffe45641fa79318c5a0cba2ee6fff5d41c26a17428dd4a91c72192d333d",
+    "apps/web/src/lib/player/subtitle-preference.test.ts": "8bf08250fcb940023b128e920ee8b5cc96c925a828e3c59a05b652b54edd9707",
+    "apps/web/src/lib/player/subtitle-preference.ts": "d3d4f36d9c84bdfff2c508e3376ab3872ebc6a728e0393a34098014a2cbad6c8",
+    "apps/web/src/lib/player/track-labels.test.ts": "84a654ea18d94b85d2e064e208b0203ed135b9e9785d55bd7f751b29b29c929b",
+    "apps/web/src/lib/player/track-labels.ts": "9cfc262f4ff379f156f8b1afd78c5a351b0eafb1743cadd1fe3ca6d6daf47056",
+    "apps/web/src/lib/player/types.ts": "7fbb23e44ba98d3c3ac70696df8bb351aa8e26d41536df0420616af2af3f06f4",
+    "apps/web/src/lib/player/version-choice.test.ts": "00697d08de79b9d9b1719bcf719d738f4649530f77ed5eea067bffb450fc7460",
+    "apps/web/src/lib/player/version-choice.ts": "7f8ff87ed3a1da096a0fea0b69ff41d68f82de50a3d8c83a92f43b255b2aae96",
+    "apps/web/src/lib/preferences.test.ts": "e912b2bc5e594b0f8421a35839606053fc7bddd7011a58956009898f7caaeaac",
+    "apps/web/src/lib/preferences.ts": "308e01245fa8b83264bf3ca827a862c579f0a54761aa6cab8c7f0608419c5d17",
+    "apps/web/src/lib/styles/tokens.css": "a4bf2a745d3417573d2196a3edda853dffbe62b29f9d52b9a6ac1819cb179003",
+    "apps/web/src/lib/theme/index.ts": "65ba3e133ae59db1856009997713c5af61340bce29b5a9821fb1a06d3fde442a",
+    "apps/web/src/lib/ui/Badge.svelte": "1a86f25e9f96e5e98af17cff7569d68d58df2ad930897466918083e9527337ce",
+    "apps/web/src/lib/ui/Button.svelte": "a5a729c82579546071b267cd0995ec0373e8de2ce71dfbc5198b5696ead5fec5",
+    "apps/web/src/lib/ui/Field.svelte": "d6a4dfc01f102e06041a67377433ae20581c1e45792131d603f6ee5f5968cb27",
+    "apps/web/src/lib/ui/HeroBanner.svelte": "3b66d645f23168ad194a9b80bcd18eaedb589d9f9851689f21c16ac117401e31",
+    "apps/web/src/lib/ui/Icon.svelte": "35ca83baf66ef4949e5aad0544d0c176101e3bc00f00bd942f6a8ea75c9d8027",
+    "apps/web/src/lib/ui/LanguageLabel.svelte": "6a2f8d9533535656164f089bfdb307ebfc1516295380c74d31059e5818e923d8",
+    "apps/web/src/lib/ui/MediaCard.svelte": "7f95a79441cd838b59b28f384aa22b24f7679c929fc86d8d9bec11b415d905e6",
+    "apps/web/src/lib/ui/MediaShelf.svelte": "4b985743c03dcc99d4dbd500ab7abcb2191e20e6ad5270bc57df087f38b947c4",
+    "apps/web/src/lib/ui/Navbar.svelte": "5b0b86f48cb63af938ef0e511c74dcc134a1f7a43cc1c4fae80f2a8742000387",
+    "apps/web/src/lib/ui/ProfileAvatar.svelte": "7f51e7c5236b73a07af3f400fc97f061cbfe39aebe47b5225db81e9792c907c2",
+    "apps/web/src/lib/ui/ProfileMenu.svelte": "cf2a69d7d18ffd27483b7a8e0272f6bcb2b48df2fa3138c1dcef70cc638ae7ea",
+    "apps/web/src/lib/ui/Skeleton.svelte": "4b3fe7140c61e9fc54da7c6d0cb314646327fcbecc21a09b337bb6425b5c402e",
+    "apps/web/src/routes/+layout.svelte": "49b2662e423c0999900da2b3b4ec926cdad63736f661e01d97056d0696638837",
+    "apps/web/src/routes/+layout.ts": "9b5237415028d0a48c9ceda9de1cd9d8f7c37703ac950ec88254751e51e72263",
+    "apps/web/src/routes/+page.svelte": "b72aa389b5f3d6d30926db8d058c82029a7364dbe277ee10bac05f5dfb33dec4",
+    "apps/web/src/routes/admin/libraries/+page.svelte": "ec50c1cea8cebee48e70b14148c12cf05bd73582d22386af4edc3711b04ab7f2",
+    "apps/web/src/routes/downloads/+page.svelte": "b5bcd6947f6be4e392e7c87bf7081b3b6e9b3e7654b88b6a2dabe4c761b54c32",
+    "apps/web/src/routes/films/+page.svelte": "c60975bd759104aac3f719c938585a18687696257a5a7a261c5355324986e598",
+    "apps/web/src/routes/lists/+page.svelte": "7085e472a6317d1f3f2863518833524fdc0923629452fe0dfb3dfbf5c1a55018",
+    "apps/web/src/routes/login/+page.svelte": "e445533c0d62c0c4c399a95197439fe9ecea10bdfe078e918887344c3bda56f9",
+    "apps/web/src/routes/manifest.webmanifest/+server.ts": "ea20294b2f3c65eb33578f3d18cc5e7d3602900dbe42947077724ab21cc32a43",
+    "apps/web/src/routes/music/+page.svelte": "fe50927f4edb6ecce2cd0dff58d220128ea8820becfe8030840eb152521103e9",
+    "apps/web/src/routes/search/+page.svelte": "783c6bc6530860942b55d8af8a49b8aff1a925e201f0779976b4f444969c26da",
+    "apps/web/src/routes/series/+page.svelte": "be2e0f222c574232ba4985b0b544d02e0a7d15af5b3fbfc399f039bc6d5573a5",
+    "apps/web/src/routes/settings/+page.svelte": "67bfb2bad104342bc35604513d5cf4f83b2d9066e224c2060447f5d4f7b7d76f",
+    "apps/web/src/service-worker/index.ts": "7a68ea8e3ce8fb91bbd2a6cc5b4d3f25deb42ceba8729631ee928fc012a0529b",
+    "apps/web/src/service-worker/tsconfig.json": "00af12b2542b28753ae12974cd3473a04f617a503908a1e00e3af56cbed320bd",
+    "crates/core/Cargo.toml": "bae8e6a4dbb9c158144f71844f7eec9eab45985d167ecaeae65abbd6323367c4",
+    "crates/core/build.rs": "89aa5d03f4de7cc7573343d2d13f2eb6a1cac0c61c237d5906f90b50cd71622e",
+    "crates/core/migrations-postgres/0001_identity.sql": "6ec52a825ba184f6ceadc23077097fdacac39edb71a9d103ba94106ff7397f29",
+    "crates/core/migrations-postgres/0002_sessions.sql": "00c1a5dff8c6d361a012608285afe1bcb5ec39b3dc5595e4dbd42a15ba84e07a",
+    "crates/core/migrations-postgres/0003_libraries.sql": "4057bdd212a6acc9f24d21ae5cc7437caac216d930795de58202d36a4746f516",
+    "crates/core/migrations-postgres/0004_inventory.sql": "b3cfc6281bd1d23727222d7ac4da3c267c20bb6915f907f959aca0dddb4cc578",
+    "crates/core/migrations-postgres/0005_film_editorial.sql": "dd34d4555a0f4d0bffc851ef25670bc1e0d4f2e57c859b3e7ad02c1b65024bfd",
+    "crates/core/migrations-postgres/0006_local_posters.sql": "3282b98fa2f4f28a8a2160fdc5a603349c8bd5e9f5079ed57c14e51f492ef456",
+    "crates/core/migrations-postgres/0007_catalogue_indexes.sql": "f7042273537b13ad4b168b315717e8556f4ce634549b056b5813629a8cb4a0cc",
+    "crates/core/migrations-postgres/0008_catalogue_unicode_sort.sql": "e61351c28613ff4fe8224a35600a56973382982d0fa9bd8f85ee000123309545",
+    "crates/core/migrations-postgres/0009_scan_staging.sql": "f1d5d4d86c5f89e99ce87464a4331b1c45383782148e6c2baa7ffa24ae6fd675",
+    "crates/core/migrations-postgres/0010_scan_diagnostics.sql": "d2bfa39b874fe79b1d2b4b838978f1ccadd1202fa408f8295cb2265de4f6236f",
+    "crates/core/migrations-postgres/0011_series.sql": "a51d3f9d98245e905b1846a95e9576aa062fd63465622224e42e23b560e05a57",
+    "crates/core/migrations-postgres/0012_distributed_nodes.sql": "08286eee0c4d81c6b0bd5c791f9de7ba428eebab8b460ccfbe1376e6aa1ed8fe",
+    "crates/core/migrations-postgres/0013_oidc.sql": "d1fdde89bc13160cc49e52fa5735bb6e20bfae73c74b0ac3cff73152f0befd98",
+    "crates/core/migrations-postgres/0014_external_subtitles.sql": "246324ec9801b584556913773bf152713660ba9ab24f555e5c1d41ea49a6dc27",
+    "crates/core/migrations-postgres/0015_playback_progress.sql": "51c4e43671415256316866c130b7991361867c2d442e9b274053fe98f4fdb84a",
+    "crates/core/migrations-postgres/0016_catalogue_added_at.sql": "94c19f9973a49bd175ac070d9924572ba4d570162d3ce246ae98760658b503fc",
+    "crates/core/migrations-postgres/0017_node_version.sql": "231dffcfc98b41d06a86609aa7c193aedaab6b5ac5181edc0a1baccc8f648844",
+    "crates/core/migrations-postgres/0018_node_enrollment.sql": "e570abcd71e410a0fa8f9b13f34a8fe7fb37e526fba8e337e8207449589dee19",
+    "crates/core/migrations-postgres/0019_user_display_name_and_oidc.sql": "791a0acdef2d114a2a6e4cdf76b43c21e47b9e9c49c0b5188dc0130e2744889d",
+    "crates/core/migrations-postgres/0020_user_sso_username.sql": "4a4c8d9850b288d2c3831554f13aab7e20674c0c1904bbc6e0f4ad8d7d444707",
+    "crates/core/migrations-postgres/0021_scheduled_tasks.sql": "fbe83f268cbd2fd9c2f7865718c7a0854a29c9299aa078cfa12bd36328a67eb2",
+    "crates/core/migrations-postgres/0022_user_groups.sql": "a92f718518d1ef3214fa0d6490e124115f9052d3995be798a85baefb9bbe93d1",
+    "crates/core/migrations-postgres/0023_api_keys.sql": "2691179a03abece5ff2dab97efaa172a9e20f476b8dbe2bcdc7a80a8ecf0cae0",
+    "crates/core/migrations-postgres/0024_backup_schedule.sql": "98931e0173be4817b4404599ee9b0dafc0edb8a8a1bac9dc6904dbd1f362a246",
+    "crates/core/migrations-postgres/0025_user_preferences.sql": "743f135e9a5b7727df6a9605c7498998e02c1650aebc8e035949115d8863c429",
+    "crates/core/migrations-postgres/0026_login_throttle_scoped.sql": "8fc58cb33effb6d6fc12e8bdadf634965cc66bd6de34808d65bc5c89c8dea833",
+    "crates/core/migrations-postgres/0027_server_settings_avatars_refresh.sql": "f857b7a13b4bbbc3a2e1e9aa1cdb0116e98fa1c64970c776399f796e12211ec7",
+    "crates/core/migrations-postgres/0028_default_groups_and_library_exclusions.sql": "d7a1c8377a402d571277de94f0ba594ce0548da465fbe9515bc97ae7fc577b66",
+    "crates/core/migrations-postgres/0029_work_feedback.sql": "39ff2ecd41bf3b03a44b4a3644f4875549ee0b0383c7582a6464a33ca1df275f",
+    "crates/core/migrations-postgres/0030_half_star_feedback.sql": "b9e5250ee4ac5a5620dcd9263edaeabef2a7e1a7ae7663fe1a537b80e83d32a7",
+    "crates/core/migrations-postgres/0031_extensions.sql": "e5b1e1d89eaaca38af11308f13f7aacc698f8cff5bc96777cfa7ab95432804d9",
+    "crates/core/migrations-postgres/0032_session_devices.sql": "42e04f0514c22cbe9dae92597906be34d302c5eaa8db0f36850e7cf843219016",
+    "crates/core/migrations-postgres/0033_music.sql": "151c5b334744117bafc504c0e4220ea3836952cc5a46b86e19ca5b2bf94711e5",
+    "crates/core/migrations-postgres/0034_personal_catalogue.sql": "abf5906e3862a6a7e7e6d21a0f572d809d4491bc01a8691613ed27e8fb73c782",
+    "crates/core/migrations-postgres/0035_extension_settings.sql": "14801f584995f12e8cc2d26abfc7e545cc4f7bc355f3895fc2b4a62f6d6c50e6",
+    "crates/core/migrations-postgres/0036_extension_repositories.sql": "15eb5957559cc8894b3d5b07514db8c50d83539b17b98cda1ddc81acf2f1a9eb",
+    "crates/core/migrations-postgres/0037_library_options.sql": "7f04b832c3108b1d18bc98192c9dd06b48051241c83ea6271829a077a8233f8b",
+    "crates/core/migrations-postgres/0038_work_images.sql": "e6752cfc2c1412a0808664ab90b2cf0d7941566936c264bf1ab56edd6e61af6c",
+    "crates/core/migrations-postgres/0039_playlists_lyrics.sql": "814f23ca73f36c155d0210f5c9be001c68c17a85ce0378db3daaa7f9cd15cf03",
+    "crates/core/migrations-postgres/0040_library_folders.sql": "71c3cfab386b9debafd1f98fce828c7c4c027d507bc3ed2dba34568514a94cab",
+    "crates/core/migrations-postgres/0041_default_extension_repository.sql": "8ed57a2f622016f79d7372276c4f925f6eca32b6822047888e8eee076e158a4b",
+    "crates/core/migrations-postgres/0042_extension_collections.sql": "20224a67bd99d2da037fbc96bc1bfa2c0a797c9b47d000eaf4031f21b7a80e3b",
+    "crates/core/migrations-postgres/0043_global_catalogue_consolidation.sql": "afbdca9a8c3482d665c0cd5fa1ae5ec1d43f1a704daac3c05effa2ad701e9dad",
+    "crates/core/migrations/0001_identity.sql": "1b17de445fab9fd2cb6e629603276f6c6799d32d504104897490dc9207a69caa",
+    "crates/core/migrations/0002_sessions.sql": "28b93dc80702848e10352a3db452c1d200eb7f2a26e1fefcc7bd2f9ed3b82824",
+    "crates/core/migrations/0003_libraries.sql": "479c996c1b43a0d481589037fa0ff850d04d105f24f1c2a3489aa3d0b1cda900",
+    "crates/core/migrations/0004_inventory.sql": "9175e1b4934317ee89921b164d18a048211a7d5aa4e1b28fd4d3a9d1a5c13e6f",
+    "crates/core/migrations/0005_film_editorial.sql": "3fd5df006a14d7bf8a6412a8afc01268f93324358a2c673e173ffb8bf129ca16",
+    "crates/core/migrations/0006_local_posters.sql": "4a0f68dd2d627331dee31d4e37ea0a39c4d2ccf57ab4ccdd47ff0dddb37ea753",
+    "crates/core/migrations/0007_catalogue_indexes.sql": "f7042273537b13ad4b168b315717e8556f4ce634549b056b5813629a8cb4a0cc",
+    "crates/core/migrations/0008_catalogue_unicode_sort.sql": "67bd5e9267c6c9df84b89e3b3382cbcb012d4508497f625b70f841e6bf077e57",
+    "crates/core/migrations/0009_scan_staging.sql": "ad02341feb8ed5f51bd46620c97ab9854a34cd1fea1d7288de1897e110271f05",
+    "crates/core/migrations/0010_scan_diagnostics.sql": "5aed9261141da110dec652a666a987ee620b29b3c48d76cef3658d7c734882b3",
+    "crates/core/migrations/0011_series.sql": "d05b7a2b8f61c4eff33489f0c5e07f754bc9b04bf88a9c9bf83771fd81cf4f7b",
+    "crates/core/migrations/0012_distributed_nodes.sql": "fdf75e2a072c72fced2b8d1bdb73570f6801bc30499137cd5599bba846ae6059",
+    "crates/core/migrations/0013_oidc.sql": "23486cfb4eed09ba3d2f7c75c83efbbf9886d62c4947c20827659e31c34c1ad2",
+    "crates/core/migrations/0014_external_subtitles.sql": "246324ec9801b584556913773bf152713660ba9ab24f555e5c1d41ea49a6dc27",
+    "crates/core/migrations/0015_playback_progress.sql": "51c4e43671415256316866c130b7991361867c2d442e9b274053fe98f4fdb84a",
+    "crates/core/migrations/0016_catalogue_added_at.sql": "5b7e21e80c446bce02c869eff31aafbe21399a7cd8170203348a89a51366d0d0",
+    "crates/core/migrations/0017_node_version.sql": "231dffcfc98b41d06a86609aa7c193aedaab6b5ac5181edc0a1baccc8f648844",
+    "crates/core/migrations/0018_node_enrollment.sql": "50d11c617cd6b3967782fe09ef448110dc364e1538082e8c0567fbd1768f8aa0",
+    "crates/core/migrations/0019_user_display_name_and_oidc.sql": "791a0acdef2d114a2a6e4cdf76b43c21e47b9e9c49c0b5188dc0130e2744889d",
+    "crates/core/migrations/0020_user_sso_username.sql": "4a4c8d9850b288d2c3831554f13aab7e20674c0c1904bbc6e0f4ad8d7d444707",
+    "crates/core/migrations/0021_scheduled_tasks.sql": "fbe83f268cbd2fd9c2f7865718c7a0854a29c9299aa078cfa12bd36328a67eb2",
+    "crates/core/migrations/0022_user_groups.sql": "74719a4d54b7741802cf6728321a4faa365b4d5b2eb6ee8f3c7c7081f25cb2a0",
+    "crates/core/migrations/0023_api_keys.sql": "93aaabad66f8b167b9294e9ee18f3393587a01778c3fb0d38915f0a0c9a022b7",
+    "crates/core/migrations/0024_backup_schedule.sql": "98931e0173be4817b4404599ee9b0dafc0edb8a8a1bac9dc6904dbd1f362a246",
+    "crates/core/migrations/0025_user_preferences.sql": "743f135e9a5b7727df6a9605c7498998e02c1650aebc8e035949115d8863c429",
+    "crates/core/migrations/0026_login_throttle_scoped.sql": "8de81dc090827ef948fe75a8e67283d60176d86bfbc44bc5f5ad160d3f801d0c",
+    "crates/core/migrations/0027_server_settings_avatars_refresh.sql": "460344dac3016f964e91a5dcaa01ced2e49ec61b17e559bfa6a2bf044f9d3e5b",
+    "crates/core/migrations/0028_default_groups_and_library_exclusions.sql": "1231d6ff35d88c9bf695c270cc82afcd1bed1a0cf92399e7d9bd4263d0058ea8",
+    "crates/core/migrations/0029_work_feedback.sql": "39ff2ecd41bf3b03a44b4a3644f4875549ee0b0383c7582a6464a33ca1df275f",
+    "crates/core/migrations/0030_half_star_feedback.sql": "1c06aedc2d7b44ab06cea50d1fdb0009e254ce4f819b8ff0b98c4e3e3520dee7",
+    "crates/core/migrations/0031_extensions.sql": "e5b1e1d89eaaca38af11308f13f7aacc698f8cff5bc96777cfa7ab95432804d9",
+    "crates/core/migrations/0032_session_devices.sql": "42e04f0514c22cbe9dae92597906be34d302c5eaa8db0f36850e7cf843219016",
+    "crates/core/migrations/0033_music.sql": "a4ca9bb43f4c8a652a14b5346966ceb359f28ac179dedf4748116217d584c861",
+    "crates/core/migrations/0034_personal_catalogue.sql": "44ab6a64a75e2ef17c55558550ac2aaee7cb2aa5ff0d7c7928b2b6d41adf287d",
+    "crates/core/migrations/0035_extension_settings.sql": "14801f584995f12e8cc2d26abfc7e545cc4f7bc355f3895fc2b4a62f6d6c50e6",
+    "crates/core/migrations/0036_extension_repositories.sql": "4a728494087bc5f471019fb195008e146bde75dfa9d33041db4907086860e789",
+    "crates/core/migrations/0037_library_options.sql": "07f9adb908e27fcb59bf2ec520d4d4cf40a318fb92e100013f177d9ad1a299a7",
+    "crates/core/migrations/0038_work_images.sql": "4f9f48b575494cb74c0c41fc4066d2de227ad0d1646f3c9ce7afecb3c98c824c",
+    "crates/core/migrations/0039_playlists_lyrics.sql": "b4247c40b8bc057c92ef45b6814c27239d07f1f15e104ac88168d546432743fe",
+    "crates/core/migrations/0040_library_folders.sql": "07e3eb22b0f36849e7f83a13068adc53d5b2e754b4f35089ba1af36233ed4fc2",
+    "crates/core/migrations/0041_default_extension_repository.sql": "8ed57a2f622016f79d7372276c4f925f6eca32b6822047888e8eee076e158a4b",
+    "crates/core/migrations/0042_extension_collections.sql": "9ee64a25ba6241d1fad05041828f288c175f878f5850e22aa1bc0b6d28351a02",
+    "crates/core/migrations/0043_global_catalogue_consolidation.sql": "ee971c6572530d1dd44abac1e6dbc914a4eac7245e5ca5a0afdf753e568a3933",
+    "crates/core/src/account.rs": "bf4394b6b0bfec6dccea44d2fc2c06d9dded1ec0cde877bc03d8da7bd64c5539",
+    "crates/core/src/admin_backups.rs": "123f0c2e788cddcd93308db4f4dc4aebf707c553ce4f187d5a817f6113258e62",
+    "crates/core/src/admin_users.rs": "0c74acff7292693a6e34344e47f360992952c3b842113955a913693523808c60",
+    "crates/core/src/api_keys.rs": "fc1e9a843c5861263eb3622fb46dd1ddbd948fc06fa62df7e21f5054c8b5cc29",
+    "crates/core/src/artwork.rs": "a53b29e4406ecebf9306470ff97cc2dbb636de5938057fceb42ce974091a7cf4",
+    "crates/core/src/audio-seek-policy.js": "0aeb366224ccb997e050de92661400e90ca761b1c11bd8f9d3994c14086adde4",
+    "crates/core/src/auth.rs": "0dc7118bf780f7d5db5eff3d93b0c2bd8cccf7ca128e777c5b67b31f9bbc6099",
+    "crates/core/src/avatars.rs": "e50932f85e6f4cc873f8af20f1a79c5ae1cfd32946704a6f27a5a374523c2edc",
+    "crates/core/src/backup.rs": "8f6bbc60e6d1ad9b7fd8b83a7824d67007cc78b66ff7b7c6fe778ee912b32e54",
+    "crates/core/src/backup_bundle.rs": "f235ac8d6d0b1e11509f8b3f98c67e2a020d4e83eb0805c4d2b83f5d03b48fa0",
+    "crates/core/src/bench.html": "c1cda1a73382d8a667f7e18c1c533855e0b8b0df55bd5a666f7eeca412727d01",
+    "crates/core/src/bench.js": "2518430ef649a1c00a8af9982cd4b388b2727c23d77625cdc4205f0670a6f8f1",
+    "crates/core/src/bin/aether-core.rs": "09e6ca79417342bfb5d854488e13d72e24c5b323d48976435de1b6d74d0dd947",
+    "crates/core/src/bin/backup.rs": "64e50df9d73dc0210b82ec8ab37f659a589e8ef602e52938dbedc66d5c5a0003",
+    "crates/core/src/bin/extension-pack.rs": "bd72194cf78ff8ee5485bd9cbedde3355235842346b2865486bc17cc8d4466a1",
+    "crates/core/src/bin/extension-worker.rs": "5e633837d0f2c39eb582dd442e3fb75cc2896f09adf78dc7d89dce08b51b6d18",
+    "crates/core/src/bin/recover.rs": "437a2e5762775b7d613da71e18cfa0e14f151e536b1284d184c76ac95e56c79c",
+    "crates/core/src/bin/restore.rs": "a93ee629bea57a34a78aab3262077a91edccbab8fb856efe0cca2e6c6deafb6c",
+    "crates/core/src/bootstrap.rs": "a6dd9546c33491050222a1a3373644224fcd1404cf32d104ae8d48cfddb54170",
+    "crates/core/src/catalog.rs": "cddb6350f5214147f70eab3c8be048f7c9c867458b26da95d646a0eb91cdcc83",
+    "crates/core/src/consolidation.rs": "82235aacf4886fedbdef9e99ef522e08261eeeb3a21ca590a4a17f8b12b2b969",
+    "crates/core/src/database.rs": "23312c29db94d944f4f9c887f51bc52f2ebab0958b08241502c27cd5eff5cc32",
+    "crates/core/src/demo.rs": "605dc7357d66046793e05d6f07939e09119f5aa9ecc3d84956c3b4cba4a8e098",
+    "crates/core/src/extension_adapters.rs": "fa25489b1249cfcc7fea8691d9debc5192bbf6d6bcec7f919a943825564de0b0",
+    "crates/core/src/extension_avatar_collections.rs": "a8428ac193547aabce227e769b24bb4e4e819cfbbb7906c2ec3a019549084a3a",
+    "crates/core/src/extension_files.rs": "67653da9fd1cc84c641def88d980aed0a6be3cf441ecf3768341e1fce5ef48f2",
+    "crates/core/src/extension_repositories.rs": "fa714f97c18fd78c2674defc29f887aef7b31600b6617d1630b13d40b53b5f00",
+    "crates/core/src/extension_runtime.rs": "fe65fdedf0f3d0d77ad90581b2a85ebc286eeba9d61853a8b0a089b42413e182",
+    "crates/core/src/extension_storage.rs": "9b4682f6e2e844e102e79736cf5b10440c876fbf2cb5ba17d6087f963367eedd",
+    "crates/core/src/extensions.rs": "999793421d2d65693c611e86bf20f4850847c8b7a58c05aa3b17b2919fa338b0",
+    "crates/core/src/feedback.rs": "85849c3dad37aef7d4e0ca99ca42f37faa2f82fc66e26e94f2f526a5d27818fd",
+    "crates/core/src/groups.rs": "48eb33723b6c7161035e417d49bd83002add8676f7a76f9f2dd868e8af83d82a",
+    "crates/core/src/identity.rs": "c8e4ebbb6d50e93f270a8f6ca1493a7a7c65893bfb00ae28bdee4fd51817a515",
+    "crates/core/src/inventory.rs": "9e9907f639cbf1790c737cdd75ca845fd692ff0f09c33dc7de75c7d87cd6934b",
+    "crates/core/src/lib.rs": "a843e9e469360559eafd0acb836583cd191d574415a4d8bf3c4c8c75d999d0d6",
+    "crates/core/src/libraries.rs": "906875db10905a5706eb367a33dba0c9188f63640e74a53611ff6671c1cc7c4d",
+    "crates/core/src/library_options.rs": "9ea4f3644a58c1ffd366f12ce5a02cf8726dd50b6163949dcb6794107d920028",
+    "crates/core/src/local_mounts.rs": "c752f81e75d15c4334ff5dbab5ce282381e8b64ecffc2ff55c321c10028c7c28",
+    "crates/core/src/main.rs": "9c5b11c5d0e982c7d35c80f52a23805ca3dc3b7806315cba9ed7e1b2abd7f671",
+    "crates/core/src/media.rs": "615c032467a2875999507fa383d6fb3c6d3806940b509f06223f6d083bba274f",
+    "crates/core/src/mse.html": "ca1eaa6506e8a178b4283911395b50874e3b83f4c8f10c82b7f721ed58f2e164",
+    "crates/core/src/mse.js": "119791086178247aae1210d44ae70a0a95b3438cab639c74dac7ab2b75e2554f",
+    "crates/core/src/music.rs": "c63980c2562f493e51f4b8dc37d71ebc85fb99af72bf13f60c3ef69fe185a9d0",
+    "crates/core/src/node.rs": "8f2014acfd5b38f5b05774baf2064f1a976876bdd3b3f257d267c964041c242a",
+    "crates/core/src/nodes.rs": "501d33837334b871f712955ea644d37fa92b0f39a4086543269b5316dcb9d31a",
+    "crates/core/src/oidc.rs": "37bcea26ee00dceb161d9af742a09dee4be4a52cb936d077702cf12dbc74ea20",
+    "crates/core/src/oidc_complete.html": "2a28704663c2989ef92bbaa51a82f5e13150821752a5b685cf0a768cfc773451",
+    "crates/core/src/permissions.rs": "25e4832241e6d696e92ecd9d485d904fe8e098cd122742194e0b751b722c206f",
+    "crates/core/src/playlists.rs": "934163fe7156376071c889f1e3de343e1fb1a50cdddeed433e47b5b8fd19331e",
+    "crates/core/src/postgres_backup.rs": "fef86d7ee3577a6b3237cbd7cf4e05b745f68d338e8d3494afe1aacee8a7d4bd",
+    "crates/core/src/preferences.rs": "90a9b9f547b949b796c664d7159a48f1793911e5dc9803e702fd43adffa698eb",
+    "crates/core/src/product.rs": "ffa8ccc37dd259bf4e9dd6b5f09049ad270c7f4f30d4ee0ada30f092382d18a5",
+    "crates/core/src/product_tests.rs": "bb89ee25d45a7ebacb322d083e2881ea4561929fd2edaf171f9dfcdb1ab15aa8",
+    "crates/core/src/progress.rs": "a5dc9a5718e9acb82127372ddefe32ecb5660a256d477c8c98b35bb08c729260",
+    "crates/core/src/scans.rs": "8780b7bac1435b68b1b3837b0c72284c9e76c8f1bf1bcb2e4b2e8153f801dfcb",
+    "crates/core/src/scheduler.rs": "22991840e8f08ccd2492b6395b8775648d4f56a0b749e9d7aa87a113d35b78bc",
+    "crates/core/src/server_settings.rs": "4470a4ac9b7ae1919eaa2a5cc4d5b5f1ddcf329c0b1c1403d284c846b2d01571",
+    "crates/core/src/shaka.html": "34283b995ed8af0e9a27229230a13ba140b5b98cce8d890d9bfc482764b68e6d",
+    "crates/core/src/shaka.js": "adc2dad8cf66a10af3e42c2760a6f48bde1fe897d09a75a1691d48f61b1396a8",
+    "crates/core/src/user_media_policy.rs": "c946d1e9e03627c1a863c777528ffbcce4c47452d5d8eaf77fc6f6c789694eb2",
+    "crates/core/tests/account.rs": "75e43d026a00ed876ee58b77f99fb6c281942b211e6a7ea2a9376c8b335c7088",
+    "crates/core/tests/admin_access.rs": "b9389d6cde90710ea80339542cc6f2c8775946a41972a4c9c4f3a2688c3e901b",
+    "crates/core/tests/admin_backups.rs": "684c67ff5fe7c505687d09856815e1c03f341a2c9236323a465a2d32a9bda980",
+    "crates/core/tests/admin_postgres.rs": "63ad0d64e6d0b2c1577092d0ca61402ba178242448466f9ccd36c42715902103",
+    "crates/core/tests/admin_users.rs": "1e00b46486bbeea2fb1054435930e7f4bb7fa08132948a9f4bbf41b0615f69c9",
+    "crates/core/tests/adversarial_challenge.rs": "91f978018a2e0e43e03da9132789e885a0cc6c659f385944f8b7700aebbaa4d8",
+    "crates/core/tests/auth_under_sqlite_lock.rs": "0f5e3531169069846326187fe7660be0f55022b854d0092cc3ed99db5035d108",
+    "crates/core/tests/backup_bundle.rs": "64b98185c36623f854dc56213bb9dcd643a7463e23712a63fe10cb75bca57cee",
+    "crates/core/tests/backup_restore.rs": "bcc76abc997737f564437ff43ddb3ecdba84aae1b070769328d15c4b74c635fd",
+    "crates/core/tests/browser_admin.rs": "fbbb7d8ad1d5e92dadfcb86884b8e427ca0c3b3f24dd404bbf4f04ec3dfbd814",
+    "crates/core/tests/browser_auth.rs": "f5ac453eb08ba3b5ec7db79a777cc7e6462e8f8f491364f2d5011fb08b9ac439",
+    "crates/core/tests/browser_nfo.rs": "c436f1d5c620a9de5ef39ece7368fa668c40f984f281ecc21fa62ae87deed68e",
+    "crates/core/tests/browser_posters.rs": "a7a60dc1f51a4e1295f6270bc4cdf6eacb4615900d3ff0a8073e74965725512f",
+    "crates/core/tests/browser_scanner.rs": "c36e56ecbc745cebbfc332968504391a6ef0abc0ecb4270c1cf808e77a1724a8",
+    "crates/core/tests/browser_series.rs": "2071367d828c58b33fe5cb4e7f64000d0dbb6c4d4bca765cc9a31649c3108748",
+    "crates/core/tests/catalog.rs": "171a40499fbafe47811551771af1a71d4338fceb8eea1180c34d8a47b097111a",
+    "crates/core/tests/catalog_performance.rs": "99097a8cd140c11933611a851532a812b64cf705cd12302c4f05e070e8a0aa82",
+    "crates/core/tests/catalog_responsiveness.rs": "23370e0469943a84ab0b957312d56a2cb85b92c7b8ebeccd70d9da55955656ad",
+    "crates/core/tests/challenger_security_challenge.rs": "1c5722e85c26e8c5d6e37a23d331cd128f7472c6b4dd6aab48677a35b2d212c3",
+    "crates/core/tests/concurrency_writes_during_publication.rs": "0db9029cbf1803b09511344fe53a30f736d575a2876bf3ce9e3a0ff481a35d0a",
+    "crates/core/tests/core_restart.rs": "9072881ad2dd4739b985f96ed1d1c58a69661acecba237a0b15318080e6b2e45",
+    "crates/core/tests/distributed_multi_node.rs": "e3a3f49e7b99ef1d7ed4c1e2d18a6f4204a981b8e069b3d18e17455983581ad8",
+    "crates/core/tests/extensions.rs": "48dce47909913666be6893432e1e5455a1766eafcb6269474cdc651c36e8ab9b",
+    "crates/core/tests/fixtures/oidc/jwks1.json": "eb708cd4f235654d825b523bb51889935eeb39b6fb53c501e62e14f40524c2c1",
+    "crates/core/tests/fixtures/oidc/jwks2.json": "408c36371130e2a0afb407262f28d7e2b61bbe190aca5b2c835da651bbc30cc4",
+    "crates/core/tests/fixtures/oidc/key1.pem": "cb2d44096f4ca60e4b4de1c3c70957ffdd1bbd1d12d8f0c1caceaea17551c1ae",
+    "crates/core/tests/fixtures/oidc/key2.pem": "11c37c4a818d1d74047e48b4114ab3e089e4915236f69171df7cc25d3bb44c39",
+    "crates/core/tests/global_catalogue_consolidation.rs": "84e5f0c1d497d4c7b55289a8d8fdd987f7d1f0ec883ab1e023203fcfa222114e",
+    "crates/core/tests/healthcheck_resilience.rs": "0ed32e8ab1f4d8ee8a7b3798e78022746f568e4e3de8e629bbb1a2424d964839",
+    "crates/core/tests/identity.rs": "c40e4e6c5bde346689b9bd6cebe0d5fe5d0d1aa6972da3af8e864121b4186150",
+    "crates/core/tests/multi_node_scale_and_failover.rs": "14afa818bbb0e93b3dc40e0731b10fb554034d6dbeab15d4d926422b9ff3c554",
+    "crates/core/tests/nfo_flow.rs": "0c03842c3736e4bb6f442a22629195bb9d2f6cd5d16cb6ebf6a85e1edd0daf3f",
+    "crates/core/tests/node_enrollment_and_relay.rs": "5e866235246d39c8c7b8ddbb4a975d2e4d8f47391e6e34ced65c940a0535b5ad",
+    "crates/core/tests/p0.rs": "bfc832278672cb922c8473ba90f809d9cd17c1ba17034f20c595990f03ab7385",
+    "crates/core/tests/permissions.rs": "3e0091c6ce04e7bfa9bf014365a9ecb9e5834fdb2881fd362d13a4422684ce0c",
+    "crates/core/tests/posters_flow.rs": "e74aee6c8009281160c9be07826d7a3e52bd4183a7ea74c4842ba02f29320cfb",
+    "crates/core/tests/postgres.rs": "9444d21dd0a7993f6ee76b74062e0b21e40d074ab2046e5749ab01455a1b9ed3",
+    "crates/core/tests/preferences.rs": "ec5a85ecbf49584834b56d4d7df2a108c483f57e6b0295fb43d111b604e0b2ba",
+    "crates/core/tests/scan_diagnostics.rs": "eb41488f6756bd7c2f4c51b3525cdbaae41c4fa14bc9c785421403a67422bf0d",
+    "crates/core/tests/scanner_flow.rs": "58040da4119acbc3cdcb26d204fa0a6b242146c8338f878034da7912adc36b7e",
+    "crates/core/tests/scanner_performance.rs": "a936d3b4298d57281fa362acc6c32b3b620931fb7bba633c4440dedd3db681e5",
+    "crates/core/tests/scheduler.rs": "eec2f2cb30c827b76e6ba5379549186ffc7e370db9e0bba8c6c5594fc6d03cbf",
+    "crates/core/tests/series_flow.rs": "4271c8471582049f6846d66215b60e8fe8058e46c2b1895eb935fb4642c7490d",
+    "crates/core/tests/series_performance.rs": "2695b9adf9cc0cc0cf8f3693d3579d32e151c75ee011f284b833d2c04d6a59d8",
+    "crates/core/tests/series_responsiveness.rs": "101a4c488c37dd9722dfc56c45d0c21fb77bd408c65bec29a948ed4e38117e2f",
+    "crates/core/tests/settings_avatars.rs": "0331b49da1f11c8c67c80f609d689889d2a851e1d40b39846bc42892cc1a2ac8",
+    "crates/core/tests/static_web.rs": "d7e02b41a8e9eb4ef50994beb08a91f2f168dea03337a6a149bd5e6c1625b21a",
+    "crates/core/tests/version_and_nodes.rs": "6541911d5fde272664b10aa4aad97a55f74de736c2cf5f8eab8af1a7c8cde5df",
+    "crates/extension-sdk/Cargo.toml": "6affe48c8bc1a02eaf33228070251e01a0b4d2de7acd27dc18bc5ea11eb37016",
+    "crates/extension-sdk/README.md": "53f44d7f4a38c60ab68227a0daee04b2f93a72331358f4184c870d6e37e724c0",
+    "crates/extension-sdk/src/lib.rs": "9e53df99f03fd0fed11a7fdab8a7b96b227fd309e1db1100980a60d5fe43f31d",
+    "crates/extension-sdk/tests/contracts_test.rs": "916bd1302556634d29796324a89c65854076b1b29cf0fa85eff6b533024a1d13",
+    "crates/node/Cargo.toml": "b144a0e710639869be3d9337794c13e6ffe756de9270f41f8d0691d20108996e",
+    "crates/node/examples/streaming_allocations.rs": "3aaeadc5066e722d50098744a08074e55da9e172187cc5702f12f4da5846851b",
+    "crates/node/src/bin/aether-node.rs": "ff1a47dd730b16f23ffe6a7ed700024f8ab36ab0ae33ecea5ee2ce06bf4a6501",
+    "crates/node/src/cache_dirs.rs": "64719a18ed93a2ea6cc5d91df059427586d2935f3ac82e1d50385330b7ec2c17",
+    "crates/node/src/external_audio.rs": "55b4d17a17960c67b0348ee2d93780ed56811b58b392b86cb16be847b419594f",
+    "crates/node/src/files.rs": "f376614726e45da65f3168fbecf6d4aae4f6b58359cbfe7e0bcc9e9a08ca7707",
+    "crates/node/src/image_preview.rs": "d0b430c2b79ab68f57eda6c2d08d70fcb13ab47aecebf915d1c8f17f1e28f85c",
+    "crates/node/src/images.rs": "c4178b8f15faeca342c030c22597a49ac38cb773735302409cd25d121300923b",
+    "crates/node/src/inventory.rs": "87199e89e75f0f0fcb9bb0bcd191a8794ea821b225e2065afa894cdf89e642c9",
+    "crates/node/src/lib.rs": "0aa6969f520c0d7e33606c06cd0ef318e32943e3c3ec93c26a9167fc88975c84",
+    "crates/node/src/mp4_audio.rs": "90b3bafa4be213c8a6c44298fc34e6b206666961b160d884e63dc58524afa8e0",
+    "crates/node/src/music.rs": "d00612472fdff035a343baed55291f11ea3b81c55f00dc40e7f8a197d7d833b0",
+    "crates/node/src/nfo.rs": "84aef9cc1a4ca8d8b2a3b874f282cf6312b09371090f217c6e56cdde69bcca53",
+    "crates/node/src/packaging.rs": "de3435ad3103f110254883238d431d2680f4d4291e0468b4a5e05d7b21c54380",
+    "crates/node/src/probe.rs": "f7ac89bd1a15866e053b9c0cf89357dd824c335411fde40b5d9ef469884b16e3",
+    "crates/node/src/scanner.rs": "f8b5139307e8e9a950527298fcac7dc275c30f7f91bcbbe0fc16ff381c692a80",
+    "crates/node/src/server.rs": "1a89cc1fd10f9a272dcfe555f7476b556893bbcdd5d1c84102e122631698439f",
+    "crates/node/src/sidecar_manifest.rs": "663493316bc830b2c351dacd60d20d59e9d5ce41e1ee97d7b5d1f7ed65fbf3f3",
+    "crates/node/src/stream.rs": "920bef62adfd093eb706f82458cae753d8fa158bc300967f7702e9a5b01d3dff",
+    "crates/node/src/subtitles.rs": "eb19c7ca08e8aa1234d20d69f12317fc341e71f8fd686d073337d16d8b02d64c",
+    "crates/node/src/transport.rs": "36ce603b6c95ccad78790eed3c28222c8fed3117c546bfaed5b7c331ce91d1c4",
+    "crates/node/src/video_stream.rs": "1aed4a7f1fbc168cfac502cf49d16a37e92d9d6f5a81e309d99e11534a062ba3",
+    "crates/node/tests/internal_transport.rs": "9b969b15b53076109e6ff9cd6ef750e9b4fecfca1b1fd51bd4dbf0e316130eb8",
+    "crates/node/tests/preparation_admission.rs": "53cb62949de055820bf2e0b1b611a18f20df1b88df27975e29a237e9070aceb0",
+    "crates/shared/Cargo.toml": "25ef86ef081632e5712e3619989b2c26f2e94736d33f368e618bd6f93089a2b3",
+    "crates/shared/build.rs": "db14d1740bbb530665ff670ea8b70a39e1d89be5c8c57f20c7b0522a7a33fea5",
+    "crates/shared/src/brand.rs": "4c2b040023b3f798f49bc883a6230c7bf110ae8f0455797b6855ee3d8f1c51db",
+    "crates/shared/src/errors.rs": "f884a0afb2b79ad4a05ec8b635338520f9e4b68036f1fc7f64abff476d368d9d",
+    "crates/shared/src/ids.rs": "40c0a80cd1f509094ff745d50d3fb5970e8d99c74b78b39ae5558c383a703cc4",
+    "crates/shared/src/inventory.rs": "f6b4db43842d9015c8eef0f1fa96d48b49ab6ecd8ba69cd5e25cdde37dae4e0c",
+    "crates/shared/src/lib.rs": "805b5c75a1fa370fe59ecf030a92a92d05fca584ae7d7dc33458a5a6dc1e4bd2",
+    "crates/shared/src/media.rs": "09c18c06fb5d7e0d9ab079f58a13497bafcf5b110f11e37838d1455c939ee346",
+    "crates/shared/src/protocol.rs": "4e35323840d525f49af1929f3aadcfa18becd392b59ed0576077d0bbffca2fb9",
+    "crates/shared/src/version.rs": "805b138813163255fde10681d4e4688b8a12dc42ac12c43e3fcc9a78f35ec71a",
+    "crates/shared/src/version_policy.rs": "014374d556572d6096ab640b144862b6b8256f420ad849724316c18c307948cc"
+  },
+  "files": {
+    "aether-node.exe": {
+      "bytes": 3600384,
+      "sha256": "44a51e1f7b52a313924405a53535efb7e9f22308bfefc7bddba48bcf16eca759"
+    },
+    "media-poc.exe": {
+      "bytes": 14992384,
+      "sha256": "fef1cc43b29057454da23991235768e92ef24a0cac82227c2c3bfb9d849d01fe"
+    },
+    "web/admin/libraries/index-bootstrap-0.js": {
+      "bytes": 980,
+      "sha256": "48af9fd3ed93879e6fb031750fa4d3952cbad0d3f57d9b42c370751d98b3aba7"
+    },
+    "web/admin/libraries/index.html": {
+      "bytes": 2913,
+      "sha256": "14946c4f148443c70de6cd01c1b84da258cb48854e4ffd3bbb68f8f829e90a6a"
+    },
+    "web/auth-transition.css": {
+      "bytes": 408,
+      "sha256": "343d077cdefc64dbcfc5bd85b7b3a7c493c0e4ab11bee8d09a4040b1b1ac1dbc"
+    },
+    "web/downloads/index-bootstrap-0.js": {
+      "bytes": 980,
+      "sha256": "9e327faccbfbe3805f67ab6c303f7bee905f8ab683c858d962810e00e007e523"
+    },
+    "web/downloads/index.html": {
+      "bytes": 2442,
+      "sha256": "3554e33e1a08e1755bba3ee99d58fd0817714400124a5abe7ffeb9301f40a274"
+    },
+    "web/favicon.svg": {
+      "bytes": 436,
+      "sha256": "8c00030ef2ee51d26f89589e4bd68716096d967fd3aec07c4d666a73038eb97e"
+    },
+    "web/films/index-bootstrap-0.js": {
+      "bytes": 980,
+      "sha256": "14210a2f03249abf635fce6e38df6458fcf8efc7f5ef14a755d23ffd4345a27c"
+    },
+    "web/films/index.html": {
+      "bytes": 3088,
+      "sha256": "6dd73f291bcbf3cba5369f723f6e2325a1c5ea792a5a86726e6746ed85670485"
+    },
+    "web/icons/app-192.png": {
+      "bytes": 1958,
+      "sha256": "fb3e8a299b86f911de42fc69bb716cf023dc4984ee9d599d4340bdc17b36dee8"
+    },
+    "web/icons/app-512.png": {
+      "bytes": 7192,
+      "sha256": "b3c8aaa741f1fd5dac4c70ef867e6bf05213b81f4bcdbc6aeb0f09deaa12c6e3"
+    },
+    "web/images/brand-mark.svg": {
+      "bytes": 435,
+      "sha256": "56e80786d052adcefc96d7452548c9a0f68f6cf3209c5ee31c229de724b8f358"
+    },
+    "web/images/chevron.svg": {
+      "bytes": 138,
+      "sha256": "6db6c5bb7a31b8aed7aa4fe5b15e15d8bccbf8bad2a29330b9cc9ac2b83d2abf"
+    },
+    "web/images/cinematic-horizon.png": {
+      "bytes": 1996166,
+      "sha256": "9aa3ea0fefea8c633b8ab9e479fa324b433b970c4c3284f0df7aad5f72bf87dd"
+    },
+    "web/images/logo-animated.svg": {
+      "bytes": 740,
+      "sha256": "3af18beb4ce94d6751357c25f8cb6190e7600bd4d5b3685ff3933de8ba0b600b"
+    },
+    "web/images/logo-loading.svg": {
+      "bytes": 1068,
+      "sha256": "52ac8f75f230d0de9d2e285c2cf68c769b45436e40fdf0b074fd4e59b889c44d"
+    },
+    "web/index-bootstrap-0.js": {
+      "bytes": 980,
+      "sha256": "20f5e5ef3eed1b30593bb552d42976fc14c484d055308cf4b86e294feb463d1c"
+    },
+    "web/index.html": {
+      "bytes": 3088,
+      "sha256": "5da92f3f881b9961e69d8fd89772b31dd2a2be2ed15071183c86b1d7bf668251"
+    },
+    "web/lists/index-bootstrap-0.js": {
+      "bytes": 980,
+      "sha256": "93428b121bc15b19f500f9bd957befa53f48366d9730fbed9e12999db925bf7b"
+    },
+    "web/lists/index.html": {
+      "bytes": 2832,
+      "sha256": "6e98b8ae56ddf98d1f97c100cdf47261b7eded93593dab13bd3ab0586d8c49db"
+    },
+    "web/login/index-bootstrap-0.js": {
+      "bytes": 980,
+      "sha256": "8f2bcbbc424bfa09bfc48fb02134f3538c90d87c4507b7b3a67c0bf7813d944c"
+    },
+    "web/login/index.html": {
+      "bytes": 2517,
+      "sha256": "c09c3a8500740f3fded6f2d28014ce2a07adb1416cc2f0a933ffbdc9d4c07b28"
+    },
+    "web/manifest.webmanifest": {
+      "bytes": 348,
+      "sha256": "398e988948f35a0e8af83d1bd28859f4f61f31d411932b82ac3587f0c7c8ca49"
+    },
+    "web/music/index-bootstrap-0.js": {
+      "bytes": 980,
+      "sha256": "0476a76bd3c707e87a91a7d0e6343ccdd42306ca5d96bfd167c9d0c112380728"
+    },
+    "web/music/index.html": {
+      "bytes": 2907,
+      "sha256": "fafeba3c591e70f92563f21fa82145b69a03777bad020cd73322e894bf03156b"
+    },
+    "web/search/index-bootstrap-0.js": {
+      "bytes": 980,
+      "sha256": "d20dc9009be37b92817aab035094dcc2d846b3bebdd553348b69ee46e7a14e35"
+    },
+    "web/search/index.html": {
+      "bytes": 3088,
+      "sha256": "3235507dbd5852bb5873aa4906761e8ae66d2e9cc541127ed6df06a36e64cd64"
+    },
+    "web/series/index-bootstrap-0.js": {
+      "bytes": 981,
+      "sha256": "05f6cf871c0202b991fb336b5929ad5ec0e1b1827af8a75a53222f35cff56e85"
+    },
+    "web/series/index.html": {
+      "bytes": 3089,
+      "sha256": "7e05fff50b7f64abf0f77d2597449e06223ab3ec9a7459af8167a4ae3d0086eb"
+    },
+    "web/service-worker.js": {
+      "bytes": 6764,
+      "sha256": "72fdbe8cef05418407473b3f7586eb14c415ffe32e124e6d8b0417a1c73ead7c"
+    },
+    "web/settings/index-bootstrap-0.js": {
+      "bytes": 981,
+      "sha256": "5ce0b212dc1eafaf331e2c2a1b85e83a5569fb31240710332dd3d91b13d843d5"
+    },
+    "web/settings/index.html": {
+      "bytes": 3089,
+      "sha256": "b274c9ee3eb05a371189260c48b2729593060d205e9bbecdb937b91ee997aa38"
+    },
+    "web/theme-init.js": {
+      "bytes": 231,
+      "sha256": "d9fe9198525ae90e6aa105c5e3cdea2e2cff5bc1dec59812b942b5cd521c3354"
+    },
+    "web/_app/immutable/assets/0.CF0I6C7u.css": {
+      "bytes": 13794,
+      "sha256": "3d2a455944e67c2c51be112c9368555a06ebf5e28aa4d9cc3820023512fc4a32"
+    },
+    "web/_app/immutable/assets/3.DGEJfFJv.css": {
+      "bytes": 66120,
+      "sha256": "4862264ee06e59e06985f4101f40ec4ad3c1c38da7882cb5e5f61e05999a67e1"
+    },
+    "web/_app/immutable/assets/4.D9f6WyyM.css": {
+      "bytes": 933,
+      "sha256": "657c1e7a9722b097723e408f0e7fdad912fd0f5c473d7d761aec075b8dff0457"
+    },
+    "web/_app/immutable/assets/6.BlMJ9aPC.css": {
+      "bytes": 4955,
+      "sha256": "903276a14eb4b832956c7938d73f0bacd24c022e7820efc6fa90edbe3d2ed07c"
+    },
+    "web/_app/immutable/assets/7.CYjW7PGe.css": {
+      "bytes": 6328,
+      "sha256": "6a4a040e0341a5b2e0643049e7bb48301596efdd66b2dba36504a33b7e951ccd"
+    },
+    "web/_app/immutable/assets/8.MFSB7278.css": {
+      "bytes": 2629,
+      "sha256": "3df7a2191ae75351dd1ce3e16a1668cbe0042a34cc304defc06d7a0a07de64ca"
+    },
+    "web/_app/immutable/assets/Catalog.aovzldBI.css": {
+      "bytes": 26270,
+      "sha256": "2f4aea99f25b5ccbab51706314f80d1fa28ee5a095e795c23fb2b34cd46b4cdc"
+    },
+    "web/_app/immutable/assets/FilmDetail.DplVFrbm.css": {
+      "bytes": 7221,
+      "sha256": "3e21b4f6119770b080b8c0f27f330c05b49bd537888bf60505f9521a174993c8"
+    },
+    "web/_app/immutable/assets/ImageManager.D7qE4K2w.css": {
+      "bytes": 2972,
+      "sha256": "2dbf701bd970e42bfdd9889f5ae2e17f3b57e1c833336ec1854d2e6d75423c5f"
+    },
+    "web/_app/immutable/assets/ImmersivePlayer.nYV7795L.css": {
+      "bytes": 12256,
+      "sha256": "97cb0bf0408bab52ec403a0a7c20903a2c710cb5fedbf0e26ae1a238164977d8"
+    },
+    "web/_app/immutable/assets/Navbar.BPH6_lz7.css": {
+      "bytes": 3659,
+      "sha256": "75cc670dc0e1d7275c42e1b3c4fc8ed653defb710eafaab0c2b1a95f8c076489"
+    },
+    "web/_app/immutable/assets/ProfileMenu.BNMx4Zz_.css": {
+      "bytes": 4063,
+      "sha256": "92cf27f5ac8741d6fca08279036165e144c5f322e983bef2cfccfa08baef011b"
+    },
+    "web/_app/immutable/assets/SeriesDetail.DScSAPWU.css": {
+      "bytes": 8461,
+      "sha256": "4acd6419dfb9d57c889d9b238c3ce835906850d7b2de92698cc5e62eefdcefef"
+    },
+    "web/_app/immutable/assets/SettingsView.Bb6FJlov.css": {
+      "bytes": 5343,
+      "sha256": "4400255a7b569913b5ecc98870c251865f09f81211795711cc05d2e49e52eaa0"
+    },
+    "web/_app/immutable/assets/WatchStatus.luUoxOHb.css": {
+      "bytes": 5119,
+      "sha256": "2b36803f1790ef1f5d6b0a3972e6fc6f7fb52f82b4c1ae58a1c3c2aab99ca336"
+    },
+    "web/_app/immutable/chunks/B7IihTu5.js": {
+      "bytes": 18246,
+      "sha256": "0d08522b219f83124f554a0326932a885cc9afdd64dc7f090a680b17186e3005"
+    },
+    "web/_app/immutable/chunks/BAsBD3ya.js": {
+      "bytes": 31574,
+      "sha256": "c7fd8a6b3d90867ad988b7deb374921d077a6d55710230744f80171dc9a2f7cb"
+    },
+    "web/_app/immutable/chunks/BcsnbQf0.js": {
+      "bytes": 53712,
+      "sha256": "e34341b31c3cf20ee6e6b313acc12f2ac07549c223ccb1cd5793e7915f652221"
+    },
+    "web/_app/immutable/chunks/Bjy-W4x2.js": {
+      "bytes": 1365,
+      "sha256": "f07424758318dd6b5f32b0fe8de9d2ffb8d97a17c841758626d18ba0faa0456a"
+    },
+    "web/_app/immutable/chunks/BkQHqPJ8.js": {
+      "bytes": 3399,
+      "sha256": "a99e28c9d6648f20cafa5d819f6b26e8ca00e9a49caf7cfd40876dc628f9aba9"
+    },
+    "web/_app/immutable/chunks/BwWdUFNu.js": {
+      "bytes": 22,
+      "sha256": "73e3ef56a866603b90028a36e2e06e9f6ef690b2412cfb0e542233737789c2b3"
+    },
+    "web/_app/immutable/chunks/BzufYsZb.js": {
+      "bytes": 42157,
+      "sha256": "0bfa07e1a02163b03f9997c3ba4942b96cf3d2ef0ee6289c68b4975d17765763"
+    },
+    "web/_app/immutable/chunks/CfB9lNQ4.js": {
+      "bytes": 22205,
+      "sha256": "f10bccd4d73de77c541903a8edf0352d687981e8a6d80c793f90a10df12d00f9"
+    },
+    "web/_app/immutable/chunks/Ck2kqN_s.js": {
+      "bytes": 1119,
+      "sha256": "996075333300496ff60acd3c3ade4cc532fa4b788ac0b67f8c5491ffe56b3253"
+    },
+    "web/_app/immutable/chunks/CK71PeLz.js": {
+      "bytes": 1590,
+      "sha256": "407f78f7341a7c25f9ba54082896c0815b94dc83ff02b3f8e952283dbfe44b5e"
+    },
+    "web/_app/immutable/chunks/CqUBG7US.js": {
+      "bytes": 15376,
+      "sha256": "af2cd9619177a8a15fbcd4026bcfef6685423ba177175c8c8e11e794facd124c"
+    },
+    "web/_app/immutable/chunks/CRzLMJPS.js": {
+      "bytes": 1534,
+      "sha256": "bcc465e3e61dc3878a69ffa95ccb53cb82d95b1639ada223420b281ebd150048"
+    },
+    "web/_app/immutable/chunks/CVCk3GfC.js": {
+      "bytes": 5662,
+      "sha256": "74b5365bdf9ef0e34a2d58ffcd51f41ce07389cfd578c6b04d84f7343e86700e"
+    },
+    "web/_app/immutable/chunks/CxjINrRm.js": {
+      "bytes": 1093,
+      "sha256": "a62158c4a30d1991ca8aafc899a4d2adfee112f19430e5bd1c65e7c6c333199c"
+    },
+    "web/_app/immutable/chunks/C_kwFy6w.js": {
+      "bytes": 220,
+      "sha256": "fc95f6a3208e9afe815d9c40d7bb3c057024a19ed1d700e81d8120576897f68a"
+    },
+    "web/_app/immutable/chunks/DDKm7rUY.js": {
+      "bytes": 582,
+      "sha256": "04823dd372653861970e9dd5404ce5952329ad3e40facf7cef7edaf8b586f0f5"
+    },
+    "web/_app/immutable/chunks/DdQlu5cH.js": {
+      "bytes": 53153,
+      "sha256": "248f3b3bb602d6720495159d940986aad8c9c1ca603574ed29593906c1786b32"
+    },
+    "web/_app/immutable/chunks/DEns_tKj.js": {
+      "bytes": 13544,
+      "sha256": "f4f9f0e6e4538554a52b687f51741eff85bf41dc35f72781bb97d2a2809319c1"
+    },
+    "web/_app/immutable/chunks/DFHeYniz.js": {
+      "bytes": 9243,
+      "sha256": "9a62796a2af2a97d92092038cd19a7ae12783724494e9ec0b53376d78486bf35"
+    },
+    "web/_app/immutable/chunks/DfKnlLW-.js": {
+      "bytes": 40972,
+      "sha256": "bbd72cae1ccd6edfe5a1a10f40afa0d552c8703f917404eb1f8158ec5ffb9326"
+    },
+    "web/_app/immutable/chunks/Dq4XpSZB.js": {
+      "bytes": 1521,
+      "sha256": "d48250f23096fd2990076926d1b48596ac8d95a7f2b1950a064d46db98266b67"
+    },
+    "web/_app/immutable/chunks/DRbIbpVq.js": {
+      "bytes": 18114,
+      "sha256": "ca51dd1bfdd185678158eb9b7fd6933920021692bd7481bf9794ad43054e8b38"
+    },
+    "web/_app/immutable/chunks/DSvEN_7Y.js": {
+      "bytes": 5029,
+      "sha256": "168d899ae7df47e4018a6cf5aa0b117df705ae6f993e0b181bbee8e7f821d457"
+    },
+    "web/_app/immutable/chunks/DuBz8qg9.js": {
+      "bytes": 1814,
+      "sha256": "120b387d1cb8af55e1737deece4b27157975f97af663d2ee71a24ec72bc4a196"
+    },
+    "web/_app/immutable/chunks/J0uaNty-.js": {
+      "bytes": 2843,
+      "sha256": "825f338d7cb772a4c67476aab80e22dbc73fdb9d8b65583b30cf66c4a8a5dd1e"
+    },
+    "web/_app/immutable/chunks/xzq5LCjT.js": {
+      "bytes": 52,
+      "sha256": "19689d9e3aa2ffdc73d85ba9e48674bfdc09300d5b8741cb1ccab097d7a1892a"
+    },
+    "web/_app/immutable/chunks/_KQRSfiL.js": {
+      "bytes": 22,
+      "sha256": "69be7f658ee0997868afd93472e26169f4dcf40fbc55a9e5b26cb299cb2e9e6d"
+    },
+    "web/_app/immutable/entry/app.BPx-UoVa.js": {
+      "bytes": 3907,
+      "sha256": "5b9231d0f9b5f255532ef8ae1221a782a7fdf24e3d87ab34690b83a63316f81b"
+    },
+    "web/_app/immutable/entry/payload.DSmR2FwN.js": {
+      "bytes": 65,
+      "sha256": "b7cba7b44b2397c7d28f7db4a34ec734a985e64ff27d74ddf8d9645cf814f09f"
+    },
+    "web/_app/immutable/entry/start.C-1wPBhj.js": {
+      "bytes": 640,
+      "sha256": "48024812d8ecddb5b85e75607c55d5bff685e26eab1e330c71766885d14f0c62"
+    },
+    "web/_app/immutable/nodes/0.DhrcaRnA.js": {
+      "bytes": 11329,
+      "sha256": "f46750b95cb693d335ea8dc5c7f559061225f44bd96c7eee27b1193495fa253f"
+    },
+    "web/_app/immutable/nodes/1.D6miDJmV.js": {
+      "bytes": 358,
+      "sha256": "b5573cf91b177bacb26c17a16b752facab608be40fe0ebe7dfc6716009882a5a"
+    },
+    "web/_app/immutable/nodes/10.Bd5f_dRF.js": {
+      "bytes": 133,
+      "sha256": "3d45d6944f8b7fba2b672bcf3752c8425ed8b91e58ea70824687e432b9b2babe"
+    },
+    "web/_app/immutable/nodes/11.CVRpfe70.js": {
+      "bytes": 135,
+      "sha256": "b6e27dea1ff28b9948bb7a2cc45205dff9385f35161ab785475a7dd8ad99e7c5"
+    },
+    "web/_app/immutable/nodes/2.DfS8sz7u.js": {
+      "bytes": 117,
+      "sha256": "fa3fe37930f1e0f8d682f1220a7dd2fcd5aba9671f7fc5ca1d160711ce8e77a7"
+    },
+    "web/_app/immutable/nodes/3.DoW5_i08.js": {
+      "bytes": 187441,
+      "sha256": "747f6184b81adc5531267b4b027a43ca49c88a8e8a8d6ae45a1c148576a7a814"
+    },
+    "web/_app/immutable/nodes/4.ZxMvSQ4C.js": {
+      "bytes": 5268,
+      "sha256": "6550c95cb467acb65b5d6a7badafcc51fa82b1a7c8ea8d78c1ebbc3db1190a63"
+    },
+    "web/_app/immutable/nodes/5.DO9n_7iw.js": {
+      "bytes": 132,
+      "sha256": "03f0e5f70c1c60fc2442759e970b49c932420a30f5081f4e2c5d82fca53994c6"
+    },
+    "web/_app/immutable/nodes/6.Dj79GF7M.js": {
+      "bytes": 15004,
+      "sha256": "2c9b2d3d8570fd28b032308e864edd5112755ac4f501aba2348dfe86c58b727b"
+    },
+    "web/_app/immutable/nodes/7.B2T28oMy.js": {
+      "bytes": 14288,
+      "sha256": "3e7ab9632751c21471393512c9ec1028eada3e655bc5a708bec2db0bb0773aa4"
+    },
+    "web/_app/immutable/nodes/8.BJQVAPcN.js": {
+      "bytes": 6896,
+      "sha256": "00513ca4ed96abc52eee81a1da76be651d2fa9199be75d182822ffdae0f9bacb"
+    },
+    "web/_app/immutable/nodes/9.CoClV2Px.js": {
+      "bytes": 133,
+      "sha256": "ce4cfce718a542c97d095b1caddc6125b248127ec38b8cb626a90d0f1be799e2"
+    },
+    "web/_app/version.json": {
+      "bytes": 27,
+      "sha256": "c2f6975e936771937a830272ec29fc5f7f38c69c8c87234c1b149b40790af1ea"
+    }
+  }
+}

@@ -19,6 +19,7 @@ pub mod server_settings;
 use media_contracts::brand;
 pub mod artwork;
 mod catalog;
+pub mod consolidation;
 mod demo;
 pub mod feedback;
 pub mod identity;
@@ -160,10 +161,12 @@ pub async fn secure_app_with_jobs(
             "/api/v1/assets/{id}/image",
             get(indexed_image).head(indexed_image),
         )
-        .layer(axum::Extension(Arc::new(
-            media_node::packaging::Preparations::default(),
-        )))
+        .layer(axum::Extension(jobs.preparations.clone()))
         .layer(axum::Extension(auth.store.clone()))
+        .layer(middleware::from_fn_with_state(
+            jobs.clone(),
+            local_stream_priority,
+        ))
         .route_layer(middleware::from_fn_with_state(
             permissions::MediaAccess {
                 auth: auth.clone(),
@@ -203,6 +206,41 @@ pub async fn secure_app_with_jobs(
     Ok(health_routes(mode).merge(protected))
 }
 
+async fn local_stream_priority(
+    State(jobs): State<Arc<scans::ScanJobs>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    let is_prepared_or_audio = path.contains("/prepared/") || path.contains("/audio/");
+    let streamed = path.contains("/content") || is_prepared_or_audio;
+    let _demand =
+        streamed.then(|| media_node::server::ActiveStreamGuard::enter(&scans::LOCAL_STREAMS));
+    if is_prepared_or_audio {
+        if let Ok(tokens) = jobs.cancellations.lock() {
+            for token in tokens.values() {
+                token.store(true, std::sync::atomic::Ordering::Release);
+            }
+        }
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(250);
+        while jobs
+            .cancellations
+            .lock()
+            .map(|tokens| !tokens.is_empty())
+            .unwrap_or(false)
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+    let response = next.run(request).await;
+    if streamed {
+        media_node::server::track_stream_body(response, &scans::LOCAL_STREAMS)
+    } else {
+        response
+    }
+}
+
 async fn indexed_subtitle(
     axum::Extension(store): axum::Extension<identity::IdentityStore>,
     axum::extract::Path((id, index)): axum::extract::Path<(String, usize)>,
@@ -238,10 +276,19 @@ async fn indexed_image(
 
 async fn indexed_descriptor(
     axum::Extension(identity): axum::Extension<auth::Authenticated>,
+    axum::Extension(visible): axum::Extension<permissions::VisibleLibraries>,
     axum::Extension(store): axum::Extension<identity::IdentityStore>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Response {
-    match inventory::descriptor(&store, &id, &identity.token_hash).await {
+    match inventory::descriptor_for_user(
+        &store,
+        &id,
+        &identity.token_hash,
+        Some(&identity.user.id),
+        Some(&visible.0),
+    )
+    .await
+    {
         Ok(Some(media)) => Json(media).into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, "unknown_media"),
         Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
@@ -431,26 +478,12 @@ fn local_security_with_store(
                         extra_origins.push_str(&origin_str);
                     }
                 }
-                if let Some(store) = &store
-                    && let Ok(urls) = sqlx::query_scalar::<_, String>(
-                        "SELECT DISTINCT public_url FROM media_nodes WHERE kind='remote' AND status='connected' AND public_url IS NOT NULL AND public_url != ''",
-                    )
-                    .fetch_all(&store.pool)
-                    .await
-                {
-                    for u in urls {
-                        if let Ok(parsed) = url::Url::parse(&u)
-                            && let Some(h) = parsed.host_str()
-                        {
-                            let scheme = parsed.scheme();
-                            let origin_str = if let Some(p) = parsed.port() {
-                                format!(" {scheme}://{h}:{p}")
-                            } else {
-                                format!(" {scheme}://{h}")
-                            };
-                            if !extra_origins.contains(&origin_str) {
-                                extra_origins.push_str(&origin_str);
-                            }
+                if let Some(store) = &store {
+                    let _ = nodes::ensure_node_registry_warm(store).await;
+                    for origin_url in store.node_registry.connected_public_origins() {
+                        let origin_str = format!(" {origin_url}");
+                        if !extra_origins.contains(&origin_str) {
+                            extra_origins.push_str(&origin_str);
                         }
                     }
                 }
@@ -514,3 +547,6 @@ mod tests {
 }
 
 pub mod extension_storage;
+
+pub mod task_engine;
+mod task_execution;

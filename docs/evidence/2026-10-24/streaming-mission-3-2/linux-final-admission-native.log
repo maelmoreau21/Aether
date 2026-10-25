@@ -1,0 +1,21 @@
+   Compiling media-contracts v0.1.0 (/source/crates/shared)
+   Compiling media-node v0.1.0 (/source/crates/node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 41s
+     Running unittests src/lib.rs (/build/debug/deps/media_node-23db89da21a856e5)
+
+running 12 tests
+test mp4_audio::tests::a_seek_retains_preroll_history_across_short_timing_runs ... ok
+test mp4_audio::tests::benchmark_native_sample_offsets ... ignored, CPU microbenchmark; warm moov metadata only, no browser or disk latency
+test mp4_audio::tests::cancelling_index_request_retains_admission_until_blocking_work_finishes ... ok
+test mp4_audio::tests::cold_index_admission_rejects_sixty_fifth_and_releases_cancelled_waiters ... ok
+test mp4_audio::tests::concurrent_native_windows_share_one_index_without_a_preparation_worker ... ok
+test mp4_audio::tests::malformed_concurrent_requests_do_not_poison_the_native_index_service ... ok
+test mp4_audio::tests::native_windows_preserve_opus_packets_timestamps_channels_and_track_ids ... ok
+test mp4_audio::tests::rejects_malformed_boxes_huge_moov_external_references_and_invalid_tables ... ok
+test mp4_audio::tests::sample_offsets_match_reference_across_variable_sizes_and_chunk_runs ... ok
+test mp4_audio::tests::unsupported_tracks_out_of_bounds_windows_and_changed_sources_fail ... ok
+test mp4_audio::tests::variable_packet_durations_resolve_fragment_local_roll_descriptions ... ok
+test mp4_audio::tests::virtual_ranges_match_full_representation_head_and_cancellation ... ok
+
+test result: ok. 11 passed; 0 failed; 1 ignored; 0 measured; 63 filtered out; finished in 1.50s
+

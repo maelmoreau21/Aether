@@ -188,7 +188,17 @@ fn valid_id(id: &str) -> bool {
 // Walk every existing ancestor, including Windows junctions, before touching disk.
 fn safe_directory(directory: &DiskPath, media_root: &DiskPath) -> Result<(), StatusCode> {
     // Refuse missing intermediate parents: policy must resolve the destination before mkdir.
-    if !directory.exists() && !directory.parent().is_some_and(DiskPath::is_dir) {
+    let parent_is_dir = directory
+        .parent()
+        .map(|p| {
+            if p.as_os_str().is_empty() {
+                DiskPath::new(".").is_dir()
+            } else {
+                p.is_dir()
+            }
+        })
+        .unwrap_or(false);
+    if !directory.exists() && !parent_is_dir {
         return Err(StatusCode::CONFLICT);
     }
     #[cfg(unix)]
@@ -198,7 +208,7 @@ fn safe_directory(directory: &DiskPath, media_root: &DiskPath) -> Result<(), Sta
             return Err(StatusCode::CONFLICT);
         }
     }
-    for ancestor in directory.ancestors() {
+    for ancestor in directory.ancestors().filter(|p| !p.as_os_str().is_empty()) {
         crate::backup::check_path_safety(ancestor, "backup directory")
             .map_err(|_| StatusCode::CONFLICT)?;
     }
@@ -234,59 +244,83 @@ async fn list(
     headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     administrator(&state, &headers, false).await?;
-    let available = state.source.is_some() || state.postgres_url.is_some();
-    let archives = if available {
-        let directory = validate_directory(&state).await?;
-        tokio::task::spawn_blocking(move || -> Result<Vec<Archive>, StatusCode> {
-            let entries = match std::fs::read_dir(&directory) {
-                Ok(entries) => entries,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-                Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
-            };
-            let mut archives = Vec::new();
-            for entry in entries.take(10_000).flatten() {
-                let name = entry.file_name();
-                let Some(id) = name
-                    .to_str()
-                    .and_then(|name| name.strip_suffix(".media-backup"))
-                else {
-                    continue;
-                };
-                if !valid_id(id) {
-                    continue;
-                }
-                if let Ok(file) =
-                    media_node::OpenedFile::open_in_root_sync(&directory, DiskPath::new(&name))
-                {
-                    let metadata = std::fs::symlink_metadata(entry.path())
-                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                    let created_at = metadata
-                        .modified()
-                        .ok()
-                        .and_then(|date| date.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map_or(0, |duration| duration.as_secs());
-                    archives.push(Archive {
-                        id: id.into(),
-                        size: file.size(),
-                        created_at,
-                    });
+    let db_available = state.source.is_some() || state.postgres_url.is_some();
+    let (available, reason, archives) = if !db_available {
+        let reason = if state.postgres_url.is_some() {
+            "PostgreSQL requires pg_dump 18 on the server."
+        } else {
+            "Database is unavailable."
+        };
+        (false, Some(reason), Vec::new())
+    } else {
+        match validate_directory(&state).await {
+            Ok(directory) => {
+                let listing_result =
+                    tokio::task::spawn_blocking(move || -> Result<Vec<Archive>, StatusCode> {
+                        let entries = match std::fs::read_dir(&directory) {
+                            Ok(entries) => entries,
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                                return Ok(Vec::new());
+                            }
+                            Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+                        };
+                        let mut archives = Vec::new();
+                        for entry in entries.take(10_000).flatten() {
+                            let name = entry.file_name();
+                            let Some(id) = name
+                                .to_str()
+                                .and_then(|name| name.strip_suffix(".media-backup"))
+                            else {
+                                continue;
+                            };
+                            if !valid_id(id) {
+                                continue;
+                            }
+                            if let Ok(file) = media_node::OpenedFile::open_in_root_sync(
+                                &directory,
+                                DiskPath::new(&name),
+                            ) {
+                                let metadata = std::fs::symlink_metadata(entry.path())
+                                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                                let created_at = metadata
+                                    .modified()
+                                    .ok()
+                                    .and_then(|date| {
+                                        date.duration_since(std::time::UNIX_EPOCH).ok()
+                                    })
+                                    .map_or(0, |duration| duration.as_secs());
+                                archives.push(Archive {
+                                    id: id.into(),
+                                    size: file.size(),
+                                    created_at,
+                                });
+                            }
+                        }
+                        archives
+                            .sort_by(|a, b| b.created_at.cmp(&a.created_at).then(a.id.cmp(&b.id)));
+                        archives.truncate(1000);
+                        Ok(archives)
+                    })
+                    .await;
+                match listing_result {
+                    Ok(Ok(archives)) => (true, None, archives),
+                    _ => (
+                        false,
+                        Some("Impossible de lire les archives de sauvegarde."),
+                        Vec::new(),
+                    ),
                 }
             }
-            archives.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(a.id.cmp(&b.id)));
-            archives.truncate(1000);
-            Ok(archives)
-        })
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??
-    } else {
-        Vec::new()
+            Err(_) => (
+                false,
+                Some(
+                    "Le dossier de sauvegarde n'est pas accessible ou son emplacement est refusé.",
+                ),
+                Vec::new(),
+            ),
+        }
     };
     let schedule = load_schedule(&state).await?;
-    let reason = (!available).then_some(if state.postgres_url.is_some() {
-        "PostgreSQL requires pg_dump 18 on the server."
-    } else {
-        "Database is unavailable."
-    });
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(Listing {
@@ -636,6 +670,7 @@ mod tests {
         assert!(safe_directory(&temp.path().join("missing").join("backups"), &media).is_err());
         assert!(safe_directory(&temp.path().join("..").join("backups"), &media).is_err());
         assert!(safe_directory(&temp.path().join("backups"), &media).is_ok());
+        assert!(safe_directory(DiskPath::new("backups"), &media).is_ok());
         assert!(!valid_id("../secret"));
         assert!(!valid_id("00000000-0000-0000-0000-000000000000"));
         assert!(valid_id(&uuid::Uuid::new_v4().to_string()));

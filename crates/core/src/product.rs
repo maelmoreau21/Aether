@@ -38,6 +38,22 @@ pub fn router(auth: AuthState) -> Router {
         )
         .route("/api/v1/admin/media-groups", axum::routing::post(group))
         .route(
+            "/api/v1/admin/media-groups/candidates",
+            get(list_candidates),
+        )
+        .route(
+            "/api/v1/admin/media-groups/candidates/{id}/confirm",
+            axum::routing::post(confirm_candidate),
+        )
+        .route(
+            "/api/v1/admin/media-groups/candidates/{id}/reject",
+            axum::routing::post(reject_candidate),
+        )
+        .route(
+            "/api/v1/admin/media-groups/merges/{id}/undo",
+            axum::routing::post(undo_merge),
+        )
+        .route(
             "/api/v1/admin/media-groups/{work}",
             axum::routing::delete(ungroup),
         )
@@ -144,16 +160,27 @@ async fn list(
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     // List presentation needs summaries, not recursive series details and all their assets.
-    // Apply library authorization in this batch; parental policy still applies per work.
+    // Apply library authorization in this batch (including via group member works); parental policy still applies per work.
     let works: Vec<(String, i64, String, String, String, Option<String>)> = query_as(
         "SELECT w.id,i.position,w.title,w.kind,w.editorial_json,w.manual_json FROM personal_list_items i \
-         JOIN inventory_works w ON w.id=i.work_id \
-         JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id \
-         WHERE i.list_id=? AND w.kind IN ('film','series','episode') AND l.enabled=1 AND n.status!='revoked' \
-         AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) \
+         JOIN inventory_works w ON w.id = COALESCE( \
+           (SELECT dw.id FROM inventory_works dw JOIN libraries dl ON dl.id=dw.library_id JOIN media_nodes dn ON dn.id=dl.node_id \
+            WHERE dw.id=i.work_id AND dl.enabled=1 AND dn.status!='revoked' \
+              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=dl.id AND p.user_id=?))), \
+           (SELECT gw.id FROM media_group_members gm JOIN inventory_works gw ON gw.id=gm.work_id JOIN libraries gl ON gl.id=gw.library_id JOIN media_nodes gn ON gn.id=gl.node_id \
+            WHERE (gm.group_id=i.work_id OR gm.group_id=(SELECT m2.group_id FROM media_group_members m2 WHERE m2.work_id=i.work_id)) \
+              AND gl.enabled=1 AND gn.status!='revoked' \
+              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=gl.id AND p.user_id=?)) \
+            ORDER BY gw.id LIMIT 1) \
+         ) \
+         WHERE i.list_id=? AND w.kind IN ('film','series','episode') \
          ORDER BY i.position,w.id LIMIT 1000",
     )
-    .bind(&id).bind(actor.user.role.as_str()).bind(&actor.user.id)
+    .bind(actor.user.role.as_str())
+    .bind(&actor.user.id)
+    .bind(actor.user.role.as_str())
+    .bind(&actor.user.id)
+    .bind(&id)
     .fetch_all(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut items = Vec::new();
     let mut entries = Vec::new();
@@ -221,9 +248,10 @@ async fn add_item(
 ) -> Result<StatusCode, Error> {
     owner(&auth, &headers, &id, true).await?;
     crate::feedback::authorized(&auth, &headers, &work, true).await?;
-    if !parental_allowed(
+    if !target_allowed(
         &auth.store,
         &auth.authenticate(&headers).await?.user.id,
+        "work",
         &work,
     )
     .await?
@@ -239,9 +267,11 @@ async fn remove_item(
     Path((id, work)): Path<(String, String)>,
 ) -> Result<StatusCode, Error> {
     owner(&auth, &headers, &id, true).await?;
-    query("DELETE FROM personal_list_items WHERE list_id=? AND work_id=?")
+    let canonical = canonical_work(&auth.store, &work).await?;
+    query("DELETE FROM personal_list_items WHERE list_id=? AND (work_id=? OR work_id=?)")
         .bind(id)
-        .bind(work)
+        .bind(&work)
+        .bind(&canonical)
         .execute(&auth.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -324,16 +354,32 @@ async fn metadata(
         "backdrop_url": input.backdrop_url,
         "provenance": "extension"
     });
+    let mut conn = auth
+        .store
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let result = query("UPDATE inventory_works SET manual_json=?,minimum_age=? WHERE id=?")
         .bind(value.to_string())
         .bind(input.minimum_age)
-        .bind(work)
-        .execute(&auth.store.pool)
+        .bind(&work)
+        .execute(&mut *tx)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if result.rows_affected() == 0 {
         return Err(StatusCode::NOT_FOUND);
     }
+    crate::consolidation::consolidate_work_tx(&mut tx, &work)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::inventory::invalidate_catalogue_cache();
     Ok(StatusCode::NO_CONTENT)
 }
 async fn reset_metadata(
@@ -342,11 +388,25 @@ async fn reset_metadata(
     Path(work): Path<String>,
 ) -> Result<StatusCode, Error> {
     admin(&auth, &headers, true).await?;
-    query("UPDATE inventory_works SET manual_json=NULL,minimum_age=NULL WHERE id=?")
-        .bind(work)
-        .execute(&auth.store.pool)
+    let mut conn = auth
+        .store
+        .pool
+        .acquire()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    query("UPDATE inventory_works SET manual_json=NULL,minimum_age=NULL WHERE id=?")
+        .bind(&work)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let _ = crate::consolidation::consolidate_work_tx(&mut tx, &work).await;
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::inventory::invalidate_catalogue_cache();
     Ok(StatusCode::NO_CONTENT)
 }
 async fn upload_poster(
@@ -372,6 +432,7 @@ async fn upload_poster(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
     query("INSERT INTO work_posters(work_id,image_data,revision) VALUES(?,?,?) ON CONFLICT(work_id) DO UPDATE SET image_data=excluded.image_data,revision=excluded.revision").bind(work).bind(image).bind(uuid::Uuid::new_v4().to_string()).execute(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::inventory::invalidate_catalogue_cache();
     Ok(StatusCode::NO_CONTENT)
 }
 async fn remove_poster(
@@ -385,6 +446,7 @@ async fn remove_poster(
         .execute(&auth.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::inventory::invalidate_catalogue_cache();
     Ok(StatusCode::NO_CONTENT)
 }
 async fn poster(
@@ -514,6 +576,7 @@ async fn set_parental(
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::inventory::invalidate_catalogue_cache();
     Ok(StatusCode::NO_CONTENT)
 }
 async fn reset_parental(
@@ -527,6 +590,7 @@ async fn reset_parental(
         .execute(&auth.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::inventory::invalidate_catalogue_cache();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -575,9 +639,46 @@ pub async fn target_allowed(
         "image"=>query_scalar("SELECT work_id FROM inventory_images WHERE id=?").bind(target).fetch_optional(&store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?,
         _=>query_scalar("SELECT e.work_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id WHERE a.id=?").bind(target).fetch_optional(&store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?,
     };
-    match work {
-        Some(work) => parental_allowed(store, user, &work).await,
-        None => Ok(false),
+    let Some(work) = work else {
+        return Ok(false);
+    };
+    if kind == "work" {
+        if parental_allowed(store, user, &work).await? {
+            return Ok(true);
+        }
+        // If `work` is part of a group, allow opening the unified work card as long as at least
+        // one member work in an authorized library is parental-allowed (expand_detail will swap
+        // out the restricted base work metadata and exclude restricted editions/sources).
+        let role_str: Option<String> = query_scalar("SELECT role FROM users WHERE id=?")
+            .bind(user)
+            .fetch_optional(&store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let role = role_str.as_deref().unwrap_or("user");
+        let members: Vec<String> = query_scalar(
+            "SELECT gm.work_id FROM media_group_members gm \
+             JOIN inventory_works w ON w.id = gm.work_id \
+             JOIN libraries l ON l.id = w.library_id \
+             JOIN media_nodes n ON n.id = l.node_id \
+             WHERE (gm.group_id = ? OR gm.group_id = (SELECT m2.group_id FROM media_group_members m2 WHERE m2.work_id = ?)) \
+               AND l.enabled = 1 AND n.status != 'revoked' \
+               AND (? = 'administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id = l.id AND lp.user_id = ?))",
+        )
+        .bind(&work)
+        .bind(&work)
+        .bind(role)
+        .bind(user)
+        .fetch_all(&store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        for member in members {
+            if parental_allowed(store, user, &member).await? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    } else {
+        parental_allowed(store, user, &work).await
     }
 }
 #[derive(Deserialize)]
@@ -607,7 +708,6 @@ async fn group(
     {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let id = canonical_work(&auth.store, &input.work_ids[0]).await?;
     let mut conn = auth
         .store
         .pool
@@ -617,28 +717,37 @@ async fn group(
     let mut tx = crate::database::begin_write(&mut conn)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    query("INSERT INTO media_groups(id,label) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET label=excluded.label")
-        .bind(&id)
-        .bind(input.label)
-        .execute(&mut *tx)
+    let mut kinds = std::collections::BTreeSet::new();
+    for work in &input.work_ids {
+        let kind: Option<String> = query_scalar(
+            "SELECT kind FROM inventory_works WHERE id=? AND kind IN ('film','series','episode')",
+        )
+        .bind(work)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    for work in input.work_ids {
-        let found: i64 =
-            query_scalar("SELECT COUNT(*) FROM inventory_works WHERE id=? AND kind='film'")
-                .bind(&work)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        if found != 1 {
+        let Some(kind) = kind else {
             return Err(StatusCode::BAD_REQUEST);
-        }
-        query("INSERT INTO media_group_members(work_id,group_id) VALUES(?,?) ON CONFLICT(work_id) DO UPDATE SET group_id=excluded.group_id").bind(work).bind(&id).execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+        };
+        kinds.insert(kind);
     }
+    if kinds.len() != 1 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let (id, merge_id) = crate::consolidation::merge_works_tx(
+        &mut tx,
+        &input.work_ids,
+        &input.label,
+        "manual",
+        None,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(json!({"id":id})))
+    crate::inventory::invalidate_catalogue_cache();
+    Ok(Json(json!({"id": id, "mergeId": merge_id})))
 }
 async fn ungroup(
     State(auth): State<AuthState>,
@@ -646,13 +755,135 @@ async fn ungroup(
     Path(work): Path<String>,
 ) -> Result<StatusCode, Error> {
     admin(&auth, &headers, true).await?;
-    query("DELETE FROM media_group_members WHERE work_id=?")
-        .bind(work)
-        .execute(&auth.store.pool)
+    let mut conn = auth
+        .store
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::consolidation::ungroup_work_tx(&mut tx, &work)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::inventory::invalidate_catalogue_cache();
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Default, Deserialize)]
+struct CandidateQuery {
+    status: Option<String>,
+}
+
+async fn list_candidates(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Query(params): Query<CandidateQuery>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, false).await?;
+    let candidates =
+        crate::consolidation::list_match_candidates(&auth.store, params.status.as_deref())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let merges = crate::consolidation::list_merge_history(&auth.store)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(json!({
+        "candidates": candidates,
+        "merges": merges
+    })))
+}
+
+async fn confirm_candidate(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, true).await?;
+    let mut conn = auth
+        .store
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = crate::consolidation::confirm_candidate_tx(&mut tx, &id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some((group_id, merge_id)) = result else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::inventory::invalidate_catalogue_cache();
+    Ok(Json(json!({
+        "id": group_id,
+        "mergeId": merge_id
+    })))
+}
+
+async fn reject_candidate(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode, Error> {
+    admin(&auth, &headers, true).await?;
+    let mut conn = auth
+        .store
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rejected = crate::consolidation::reject_candidate_tx(&mut tx, &id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !rejected {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+async fn undo_merge(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode, Error> {
+    admin(&auth, &headers, true).await?;
+    let mut conn = auth
+        .store
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let undone = crate::consolidation::undo_merge_tx(&mut tx, &id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !undone {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::inventory::invalidate_catalogue_cache();
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn decorate(store: &IdentityStore, value: &mut Value) -> Result<(), sqlx::Error> {
     decorate_many(store, std::slice::from_mut(value)).await
 }
@@ -702,12 +933,111 @@ pub async fn decorate_many(store: &IdentityStore, values: &mut [Value]) -> Resul
     Ok(())
 }
 
+fn merge_edition_arrays(target: &mut Vec<Value>, incoming: &[Value]) {
+    for inc_ed in incoming {
+        let inc_label = inc_ed["label"].as_str().unwrap_or("Édition locale");
+        if let Some(existing_ed) = target
+            .iter_mut()
+            .find(|ed| ed["label"].as_str().unwrap_or("Édition locale") == inc_label)
+        {
+            if let (Some(target_versions), Some(inc_versions)) = (
+                existing_ed["versions"].as_array_mut(),
+                inc_ed["versions"].as_array(),
+            ) {
+                for inc_ver in inc_versions {
+                    let inc_ver_label = inc_ver["label"].as_str().unwrap_or("Version locale");
+                    if let Some(existing_ver) = target_versions
+                        .iter_mut()
+                        .find(|v| v["label"].as_str().unwrap_or("Version locale") == inc_ver_label)
+                    {
+                        if let (Some(target_sources), Some(inc_sources)) = (
+                            existing_ver["sources"].as_array_mut(),
+                            inc_ver["sources"].as_array(),
+                        ) {
+                            for src in inc_sources {
+                                let src_id = src["id"].as_str().unwrap_or_default();
+                                if !target_sources
+                                    .iter()
+                                    .any(|s| s["id"].as_str() == Some(src_id))
+                                {
+                                    target_sources.push(src.clone());
+                                }
+                            }
+                        }
+                    } else {
+                        target_versions.push(inc_ver.clone());
+                    }
+                }
+            }
+        } else {
+            target.push(inc_ed.clone());
+        }
+    }
+    crate::inventory::sort_edition_sources_by_score(target);
+}
+
 pub async fn expand_detail(
     store: &IdentityStore,
     user: &str,
     visible: &[String],
     value: &mut Value,
 ) -> Result<(), StatusCode> {
+    let current_id = value["id"].as_str().unwrap_or_default().to_owned();
+    let current_lib = value["libraryId"].as_str().unwrap_or_default().to_owned();
+    let current_authorized = !current_id.is_empty()
+        && visible.contains(&current_lib)
+        && parental_allowed(store, user, &current_id).await?;
+
+    let group = if let Some(g) = value["globalMediaId"].as_str() {
+        Some(g.to_owned())
+    } else {
+        let g: Option<String> =
+            query_scalar("SELECT group_id FROM media_group_members WHERE work_id=? LIMIT 1")
+                .bind(&current_id)
+                .fetch_optional(&store.pool)
+                .await
+                .ok()
+                .flatten();
+        if let Some(ref gid) = g {
+            value["globalMediaId"] = json!(gid);
+        }
+        g
+    };
+
+    // If the requested work itself is not authorized for this user (e.g. accessed via group ID
+    // where the canonical work is in a library the user cannot see or is parental-restricted),
+    // swap the base work payload with the first authorized member of the group so no restricted
+    // metadata, libraryId, or editions leak.
+    if !current_authorized {
+        let group_opt = group.clone().or_else(|| Some(current_id.clone()));
+        let mut replacement = None;
+        if let Some(group) = group_opt {
+            let siblings: Vec<(String, String)> = query_as(
+                "SELECT w.id,w.library_id FROM media_group_members member JOIN inventory_works w ON w.id=member.work_id WHERE member.group_id=? ORDER BY w.id",
+            )
+            .bind(&group)
+            .fetch_all(&store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            for (sib_id, sib_lib) in siblings {
+                if visible.contains(&sib_lib)
+                    && parental_allowed(store, user, &sib_id).await?
+                    && let Some(detail) = crate::inventory::detail(store, &sib_id)
+                        .await
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                {
+                    replacement = Some(detail);
+                    break;
+                }
+            }
+        }
+        if let Some(detail) = replacement {
+            *value = detail;
+        } else {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
+
     if let Some(seasons) = value["seasons"].as_array_mut() {
         for season in seasons {
             if let Some(episodes) = season["episodes"].as_array_mut() {
@@ -726,27 +1056,109 @@ pub async fn expand_detail(
             }
         }
     }
-    let Some(group) = value["globalMediaId"].as_str().map(str::to_owned) else {
+    let Some(group) = group else {
         return Ok(());
     };
     let original = value["id"].as_str().unwrap_or_default().to_owned();
-    let siblings:Vec<(String,String)>=query_as("SELECT w.id,w.library_id FROM media_group_members member JOIN inventory_works w ON w.id=member.work_id WHERE member.group_id=? AND w.id!=? ORDER BY w.id").bind(group).bind(original).fetch_all(&store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let siblings: Vec<(String, String)> = query_as(
+        "SELECT w.id,w.library_id FROM media_group_members member JOIN inventory_works w ON w.id=member.work_id WHERE member.group_id=? AND w.id!=? ORDER BY w.id",
+    )
+    .bind(group)
+    .bind(original)
+    .fetch_all(&store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     for (id, library) in siblings {
         if visible.contains(&library)
             && parental_allowed(store, user, &id).await?
             && let Some(detail) = crate::inventory::detail(store, &id)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            && let Some(editions) = detail["editions"].as_array()
         {
             if detail["available"] == true {
                 value["available"] = json!(true);
             }
-            if let Some(target) = value["editions"].as_array_mut() {
-                target.extend(editions.iter().cloned());
+            if let (Some(target), Some(editions)) = (
+                value["editions"].as_array_mut(),
+                detail["editions"].as_array(),
+            ) {
+                merge_edition_arrays(target, editions);
+            }
+            // Merge seasons and episodes across grouped series works
+            if let (Some(target_seasons), Some(inc_seasons)) = (
+                value["seasons"].as_array_mut(),
+                detail["seasons"].as_array(),
+            ) {
+                for inc_season in inc_seasons {
+                    let s_num = inc_season["number"].as_i64().unwrap_or(0);
+                    let mut clean_season = inc_season.clone();
+                    if let Some(eps) = clean_season["episodes"].as_array_mut() {
+                        let mut allowed_eps = Vec::new();
+                        for ep in eps.drain(..) {
+                            if let Some(ep_id) = ep["id"].as_str()
+                                && parental_allowed(store, user, ep_id).await?
+                            {
+                                allowed_eps.push(ep);
+                            }
+                        }
+                        crate::product::decorate_many(store, &mut allowed_eps)
+                            .await
+                            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                        *eps = allowed_eps;
+                    }
+                    if let Some(existing_season) = target_seasons
+                        .iter_mut()
+                        .find(|s| s["number"].as_i64().unwrap_or(-1) == s_num)
+                    {
+                        if let (Some(target_eps), Some(inc_eps)) = (
+                            existing_season["episodes"].as_array_mut(),
+                            clean_season["episodes"].as_array(),
+                        ) {
+                            for inc_ep in inc_eps {
+                                let ep_num = inc_ep["number"]
+                                    .as_i64()
+                                    .or_else(|| inc_ep["episodeNumber"].as_i64())
+                                    .unwrap_or(0);
+                                if let Some(existing_ep) = target_eps.iter_mut().find(|e| {
+                                    e["number"]
+                                        .as_i64()
+                                        .or_else(|| e["episodeNumber"].as_i64())
+                                        .unwrap_or(-1)
+                                        == ep_num
+                                }) {
+                                    if let (Some(t_eds), Some(i_eds)) = (
+                                        existing_ep["editions"].as_array_mut(),
+                                        inc_ep["editions"].as_array(),
+                                    ) {
+                                        merge_edition_arrays(t_eds, i_eds);
+                                    }
+                                } else {
+                                    target_eps.push(inc_ep.clone());
+                                }
+                            }
+                            target_eps.sort_by_key(|e| {
+                                e["number"]
+                                    .as_i64()
+                                    .or_else(|| e["episodeNumber"].as_i64())
+                                    .unwrap_or(0)
+                            });
+                        }
+                    } else {
+                        target_seasons.push(clean_season);
+                    }
+                }
+                target_seasons.sort_by_key(|s| s["number"].as_i64().unwrap_or(0));
+                let season_count = target_seasons.len();
+                let episode_count: usize = target_seasons
+                    .iter()
+                    .map(|s| s["episodes"].as_array().map_or(0, Vec::len))
+                    .sum();
+                value["seasonCount"] = json!(season_count);
+                value["episodeCount"] = json!(episode_count);
             }
         }
     }
+    crate::inventory::refresh_work_availability_from_editions(value);
     Ok(())
 }
 

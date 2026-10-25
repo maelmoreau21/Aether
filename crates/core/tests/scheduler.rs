@@ -39,6 +39,30 @@ async fn call(
         .await
         .unwrap()
 }
+async fn settle(
+    store: &IdentityStore,
+    auth: &AuthState,
+    root: &std::path::Path,
+    jobs: &Arc<ScanJobs>,
+    timestamp: i64,
+) {
+    for _ in 0..500 {
+        scheduler::dispatch_once(auth, root, jobs, timestamp)
+            .await
+            .unwrap();
+        let active: i64 = media_poc::database::query_scalar(
+            "SELECT COUNT(*) FROM durable_tasks WHERE lease_until IS NOT NULL",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        if active == 0 {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("durable scan did not settle");
+}
 #[tokio::test]
 async fn metadata_refresh_is_durable_bounded_and_reuses_the_scan_runner() {
     let temp = tempfile::tempdir().unwrap();
@@ -60,13 +84,27 @@ async fn metadata_refresh_is_durable_bounded_and_reuses_the_scan_runner() {
     let jobs = Arc::new(ScanJobs::default());
     scheduler::run_due(&auth, &root, &jobs, 999).await.unwrap();
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM scan_jobs")
+        media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM durable_tasks")
             .fetch_one(store.pool())
             .await
             .unwrap(),
         0
     );
     scheduler::run_due(&auth, &root, &jobs, 1000).await.unwrap();
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM durable_tasks WHERE status='queued'"
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap(),
+        1
+    );
+    let worker_now = media_contracts::protocol::unix_now();
+    scheduler::dispatch_once(&auth, &root, &jobs, worker_now)
+        .await
+        .unwrap();
+    settle(&store, &auth, &root, &jobs, worker_now + 1).await;
     jobs.shutdown().await;
     assert_eq!(
         media_poc::database::query_scalar::<_, i64>(
@@ -258,7 +296,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     scheduler::run_due(&auth, &root, &jobs, due - 1)
         .await
         .unwrap();
-    let count: i64 = media_poc::database::query_scalar("SELECT COUNT(*) FROM scan_jobs")
+    let count: i64 = media_poc::database::query_scalar("SELECT COUNT(*) FROM durable_tasks")
         .fetch_one(store.pool())
         .await
         .unwrap();
@@ -277,6 +315,19 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
         .await
         .unwrap();
     scheduler::run_due(&auth, &root, &jobs, due).await.unwrap();
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM durable_tasks WHERE status IN ('queued','running','completed','error')"
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap(),
+        1
+    );
+    scheduler::dispatch_once(&auth, &root, &jobs, due)
+        .await
+        .unwrap();
+    settle(&store, &auth, &root, &jobs, due + 1).await;
     jobs.shutdown().await;
     scheduler::run_due(&auth, &root, &jobs, due + 1)
         .await
@@ -325,10 +376,13 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     .await
     .unwrap();
     assert!(matches!(recovered_outcome.as_str(), "completed" | "error"));
-    media_poc::database::query("UPDATE scheduled_scans SET last_outcome='dispatching'")
-        .execute(reopened.pool())
-        .await
-        .unwrap();
+    // An old schedule without a durable request key retains the legacy recovery rule.
+    media_poc::database::query(
+        "UPDATE scheduled_scans SET last_outcome='dispatching',last_request_key=''",
+    )
+    .execute(reopened.pool())
+    .await
+    .unwrap();
     let restarted_auth = AuthState::new(reopened.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
@@ -372,4 +426,91 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
         .unwrap();
     assert_eq!(count, 0);
     reopened.close().await;
+}
+
+#[tokio::test]
+async fn schedule_reconciliation_tracks_all_durable_scopes_and_pending_retries() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("aggregate.sqlite"))
+        .await
+        .unwrap();
+    media_poc::libraries::initialize_local(&store)
+        .await
+        .unwrap();
+    for id in ["one", "two"] {
+        media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,'films','local','synthetic-root',1)")
+            .bind(id).bind(id).execute(store.pool()).await.unwrap();
+        media_poc::task_engine::enqueue(
+            &store,
+            id,
+            "scheduler",
+            &format!("schedule:one:1000:{id}"),
+            100,
+            1000,
+        )
+        .await
+        .unwrap();
+    }
+    media_poc::database::query("INSERT INTO scheduled_scans(library_id,interval_minutes,enabled,next_run_at,last_outcome,last_request_key) VALUES('one',5,1,1300,'dispatching','schedule:one:1000')")
+        .execute(store.pool()).await.unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let _router = scheduler::router(auth.clone()).await.unwrap();
+    let outcome: String = media_poc::database::query_scalar(
+        "SELECT last_outcome FROM scheduled_scans WHERE library_id='one'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(outcome, "queued");
+    let running = media_poc::task_engine::claim(&store, "local", 1000, 30, 1)
+        .await
+        .unwrap()
+        .unwrap();
+    media_poc::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES(?,'error',1,0)")
+        .bind(&running.library_id).execute(store.pool()).await.unwrap();
+    media_poc::task_engine::finish(
+        &store,
+        &running.id,
+        running.attempt,
+        "local",
+        1001,
+        Some("retryable synthetic error"),
+    )
+    .await
+    .unwrap();
+    let _router = scheduler::router(auth.clone()).await.unwrap();
+    let outcome: String = media_poc::database::query_scalar(
+        "SELECT last_outcome FROM scheduled_scans WHERE library_id='one'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(outcome, "queued");
+    media_poc::database::query("UPDATE durable_tasks SET status='completed' WHERE id=?")
+        .bind(&running.id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let _router = scheduler::router(auth.clone()).await.unwrap();
+    let outcome: String = media_poc::database::query_scalar(
+        "SELECT last_outcome FROM scheduled_scans WHERE library_id='one'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(outcome, "queued");
+    media_poc::database::query("UPDATE durable_tasks SET status='completed'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let _router = scheduler::router(auth).await.unwrap();
+    let outcome: String = media_poc::database::query_scalar(
+        "SELECT last_outcome FROM scheduled_scans WHERE library_id='one'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(outcome, "completed");
 }

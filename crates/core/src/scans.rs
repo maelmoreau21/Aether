@@ -15,6 +15,8 @@ use std::{
     },
 };
 use tokio::{sync::Semaphore, task::JoinHandle};
+pub(crate) static LOCAL_STREAMS: std::sync::LazyLock<Arc<std::sync::atomic::AtomicU32>> =
+    std::sync::LazyLock::new(|| Arc::new(std::sync::atomic::AtomicU32::new(0)));
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -44,19 +46,29 @@ struct RefreshOptions {
 
 pub struct ScanJobs {
     dispatch: tokio::sync::Mutex<()>,
+    pub(crate) engine_busy: AtomicBool,
+    pub(crate) local_resources: std::sync::OnceLock<media_node::resources::Sampler>,
+    pub(crate) engine_tick: tokio::sync::Mutex<()>,
     pub(crate) scheduler_tick: tokio::sync::Mutex<()>,
     cancel: Arc<AtomicBool>,
-    slots: Arc<Semaphore>,
+    pub(crate) slots: Arc<Semaphore>,
+    pub(crate) preparations: Arc<media_node::packaging::Preparations>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
+    pub(crate) cancellations: Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
 }
 impl Default for ScanJobs {
     fn default() -> Self {
         Self {
             dispatch: tokio::sync::Mutex::new(()),
+            engine_busy: AtomicBool::new(false),
+            local_resources: std::sync::OnceLock::new(),
+            engine_tick: tokio::sync::Mutex::new(()),
             scheduler_tick: tokio::sync::Mutex::new(()),
             cancel: Arc::new(AtomicBool::new(false)),
             slots: Arc::new(Semaphore::new(1)),
+            preparations: Arc::new(media_node::packaging::Preparations::default()),
             tasks: Mutex::new(Vec::new()),
+            cancellations: Mutex::new(Default::default()),
         }
     }
 }
@@ -73,6 +85,35 @@ impl Drop for ScanJobs {
 impl ScanJobs {
     pub fn cancel_all(&self) {
         self.cancel.store(true, Ordering::Release);
+        if let Ok(tokens) = self.cancellations.lock() {
+            for token in tokens.values() {
+                token.store(true, Ordering::Release);
+            }
+        }
+    }
+
+    pub(crate) fn cancel_scan(&self, scan_id: &str) {
+        if let Ok(tokens) = self.cancellations.lock()
+            && let Some(token) = tokens.get(scan_id)
+        {
+            token.store(true, Ordering::Release);
+        }
+    }
+
+    pub(crate) fn scan_active(&self, scan_id: &str) -> bool {
+        self.cancellations
+            .lock()
+            .map(|tokens| tokens.contains_key(scan_id))
+            .unwrap_or(true)
+    }
+
+    pub(crate) fn track_control(&self, task: JoinHandle<()>) {
+        if let Ok(mut tasks) = self.tasks.lock() {
+            tasks.retain(|task| !task.is_finished());
+            tasks.push(task);
+        } else {
+            task.abort();
+        }
     }
 
     pub fn reset(&self) {
@@ -84,7 +125,7 @@ impl ScanJobs {
     }
 
     pub async fn shutdown(&self) {
-        self.cancel.store(true, Ordering::Release);
+        self.cancel_all();
         self.slots.close();
         let tasks = self
             .tasks
@@ -123,6 +164,12 @@ pub async fn router(
 ) -> Result<Router, sqlx::Error> {
     // A stopped process cannot resume a probe. Keep its last inventory and report interruption.
     crate::database::query("UPDATE scan_jobs SET status='error',errors_json='[\"Scan interrompu par un redémarrage\"]',errors_count=1,warnings_count=0 WHERE status IN ('queued','running')").execute(&auth.store.pool).await?;
+    crate::database::query("DELETE FROM scan_batch_receipts")
+        .execute(&auth.store.pool)
+        .await?;
+    crate::database::query("DELETE FROM active_scan_runs")
+        .execute(&auth.store.pool)
+        .await?;
     crate::database::query("DELETE FROM scan_staging_files")
         .execute(&auth.store.pool)
         .await?;
@@ -138,7 +185,7 @@ async fn authorize(
     state: &ScanState,
     headers: &HeaderMap,
     mutation: bool,
-) -> Result<(), StatusCode> {
+) -> Result<String, StatusCode> {
     let identity = state.auth.authenticate(headers).await?;
     if identity.user.role != Role::Administrator {
         return Err(StatusCode::FORBIDDEN);
@@ -146,7 +193,7 @@ async fn authorize(
     if mutation {
         state.auth.require_csrf(headers, &identity)?;
     }
-    Ok(())
+    Ok(identity.user.id)
 }
 async fn status(
     State(state): State<ScanState>,
@@ -172,6 +219,16 @@ async fn status(
     .fetch_all(&state.auth.store.pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let pending: Option<String> = crate::database::query_scalar(
+        "SELECT status FROM durable_tasks WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND status IN ('running','queued','paused') ORDER BY CASE status WHEN 'running' THEN 1 WHEN 'queued' THEN 2 ELSE 3 END LIMIT 1"
+    )
+    .bind(&id)
+    .bind(&id)
+    .fetch_optional(&state.auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     let mut status = Status {
         status: "idle".into(),
         discovered: 0,
@@ -203,6 +260,20 @@ async fn status(
                 .unwrap_or_else(|_| vec!["État de scan illisible".into()]),
         );
     }
+    // Only elevate or dispatch if scan_jobs isn't already reflecting an active state ("running" or "queued").
+    // If durable_tasks has queued/running work but scan_jobs is idle or completed, ensure it doesn't report completed prematurely.
+    if matches!(status.status.as_str(), "idle" | "completed")
+        && let Some(pending_status) = pending
+    {
+        status.status = pending_status;
+        let _ = crate::scheduler::dispatch_once(
+            &state.auth,
+            &state.root,
+            &state.jobs,
+            media_contracts::protocol::unix_now(),
+        )
+        .await;
+    }
     Ok(Json(status))
 }
 async fn start(
@@ -211,13 +282,21 @@ async fn start(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
-    authorize(&state, &headers, true).await?;
+    let owner = authorize(&state, &headers, true).await?;
     let options: RefreshOptions = if body.is_empty() {
         RefreshOptions::default()
     } else {
         serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?
     };
-    enqueue_with_mode(&state.auth, state.root, state.jobs, id, options.mode).await?;
+    enqueue_for_owner(
+        &state.auth,
+        state.root,
+        state.jobs,
+        id,
+        options.mode,
+        &owner,
+    )
+    .await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(
@@ -226,41 +305,68 @@ async fn start(
     ))
 }
 
-/// Shared dispatch path for authenticated manual scans and the internal scheduler.
-pub(crate) async fn enqueue(
-    auth: &AuthState,
-    root: PathBuf,
-    jobs: Arc<ScanJobs>,
-    id: String,
-) -> Result<(), StatusCode> {
-    enqueue_with_mode(auth, root, jobs, id, RefreshMode::Incremental).await
-}
-
-pub(crate) async fn enqueue_with_mode(
+async fn enqueue_for_owner(
     auth: &AuthState,
     root: PathBuf,
     jobs: Arc<ScanJobs>,
     id: String,
     mode: RefreshMode,
+    owner: &str,
 ) -> Result<(), StatusCode> {
-    let _dispatch = jobs.dispatch.lock().await;
-    let folders: Vec<String> = crate::database::query_scalar(
+    if jobs.is_cancelled() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+    let dispatch = jobs.dispatch.lock().await;
+    let mut scopes: Vec<String> = crate::database::query_scalar(
         "SELECT library_id FROM library_folders WHERE parent_id=? AND active=1 ORDER BY library_id",
     )
     .bind(&id)
     .fetch_all(&auth.store.pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let active: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM scan_jobs WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN ('queued','running')")
-        .bind(&id).bind(&id).fetch_one(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    scopes.push(id.clone());
+    let active: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND status IN ('queued','running','paused')")
+        .bind(&id).bind(&id).fetch_one(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     if active != 0 {
         return Err(StatusCode::CONFLICT);
     }
-    enqueue_one(auth, root.clone(), jobs.clone(), id, mode).await?;
-    for folder in folders {
-        enqueue_one(auth, root.clone(), jobs.clone(), folder, mode).await?;
+    let timestamp = media_contracts::protocol::unix_now();
+    for scope in scopes {
+        let key = uuid::Uuid::new_v4().to_string();
+        crate::task_engine::enqueue_mode(
+            &auth.store,
+            &scope,
+            owner,
+            &key,
+            200,
+            timestamp,
+            mode.as_str(),
+        )
+        .await
+        .map_err(|err| match err {
+            crate::task_engine::EngineError::Unavailable
+            | crate::task_engine::EngineError::Invalid => StatusCode::BAD_REQUEST,
+            crate::task_engine::EngineError::Capacity => StatusCode::TOO_MANY_REQUESTS,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        })?;
     }
+    drop(dispatch);
+    crate::scheduler::dispatch_once(auth, &root, &jobs, timestamp)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(())
+}
+/// Execute one already leased physical scope; never expands the parent a second time.
+pub(crate) async fn execute_leased(
+    auth: &AuthState,
+    root: PathBuf,
+    jobs: Arc<ScanJobs>,
+    id: String,
+    scan_id: String,
+    mode: RefreshMode,
+) -> Result<(), StatusCode> {
+    let _dispatch = jobs.dispatch.lock().await;
+    enqueue_one(auth, root, jobs.clone(), id, mode, Some(scan_id)).await
 }
 async fn enqueue_one(
     auth: &AuthState,
@@ -268,6 +374,7 @@ async fn enqueue_one(
     jobs: Arc<ScanJobs>,
     id: String,
     mode: RefreshMode,
+    supplied_scan_id: Option<String>,
 ) -> Result<(), StatusCode> {
     let state = ScanState {
         auth: auth.clone(),
@@ -278,7 +385,7 @@ async fn enqueue_one(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
     let library: Option<(String, String, String, String)> = crate::database::query_as(
-        "SELECT l.root, l.kind, l.node_id, l.excluded_patterns FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series', 'music') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
+        "SELECT l.root, l.kind, l.node_id, l.excluded_patterns FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND (l.enabled=1 OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.kind IN ('films', 'series', 'music') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
     )
     .bind(&id)
     .fetch_optional(&state.auth.store.pool)
@@ -299,20 +406,30 @@ async fn enqueue_one(
     if result.rows_affected() == 0 {
         return Err(StatusCode::CONFLICT);
     }
+    let scan_id = supplied_scan_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    crate::database::query("INSERT INTO active_scan_runs(library_id,scan_id,node_id) VALUES(?,?,?) ON CONFLICT(library_id) DO UPDATE SET scan_id=excluded.scan_id,node_id=excluded.node_id")
+        .bind(&id).bind(&scan_id).bind(&node_id).execute(&state.auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     let store = state.auth.store.clone();
     let slots = state.jobs.slots.clone();
-    let cancel = state.jobs.cancel.clone();
+    let cancel = Arc::new(AtomicBool::new(false));
+    state
+        .jobs
+        .cancellations
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .insert(scan_id.clone(), cancel.clone());
+    let runner_jobs = state.jobs.clone();
     let job_id = id.clone();
     let allowed_root = state.root.clone();
     let core_origin = state.auth.origin().to_owned();
     let task = tokio::spawn(async move {
-        let scan_id = uuid::Uuid::new_v4().to_string();
         let scan_id_err = scan_id.clone();
         let store_err = store.clone();
+        let node_id_err = node_id.clone();
         if node_id != "local" {
             let _ =
-                crate::database::query("UPDATE scan_jobs SET status='running' WHERE library_id=?")
-                    .bind(&job_id)
+                crate::database::query("UPDATE scan_jobs SET status='running' WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
+                    .bind(&job_id).bind(&scan_id)
                     .execute(&store.pool)
                     .await;
             let excluded_for_remote = excluded_patterns.clone();
@@ -340,22 +457,39 @@ async fn enqueue_one(
                 };
                 let errors_json = serde_json::to_string(&vec![format!("Scan échoué: {detailed}")])
                     .unwrap_or_else(|_| "[\"Scan échoué\"]".into());
-                let _ = crate::database::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=?")
+                let _ = crate::database::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
                     .bind(errors_json)
-                    .bind(&job_id)
+                    .bind(&job_id).bind(&scan_id)
                     .execute(&store_err.pool)
                     .await;
+            }
+            if let Ok(mut tokens) = runner_jobs.cancellations.lock() {
+                tokens.remove(&scan_id);
             }
             return;
         }
         let result: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
             let _permit = slots.acquire().await?;
-            if cancel.load(Ordering::Acquire) { return Err("Scan arrêté".into()); }
-            crate::database::query("UPDATE scan_jobs SET status='running' WHERE library_id=?").bind(&job_id).execute(&store.pool).await?;
+            if cancel.load(Ordering::Acquire) || runner_jobs.is_cancelled() { return Err("Scan arrêté".into()); }
+            crate::database::query("UPDATE scan_jobs SET status='running' WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)").bind(&job_id).bind(&scan_id).execute(&store.pool).await?;
             let root = crate::local_mounts::validate(std::path::Path::new(&root), &allowed_root).await?;
             if kind == "music" {
-                let count = crate::music::scan(&store, &job_id, &root, &cancel).await?;
-                crate::database::query("UPDATE scan_jobs SET status='completed',discovered=?,probed=?,reused=0 WHERE library_id=?").bind(count as i64).bind(count as i64).bind(&job_id).execute(&store.pool).await?;
+                let count = crate::music::scan_fenced(&store, &job_id, &root, &cancel, Some(&scan_id)).await?;
+                crate::database::query("UPDATE scan_jobs SET status='completed',discovered=?,probed=?,reused=0 WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)").bind(count as i64).bind(count as i64).bind(&job_id).bind(&scan_id).execute(&store.pool).await?;
+                if let Some((task_id, attempt_str)) = scan_id.split_once(':')
+                    && let Ok(attempt) = attempt_str.parse::<i64>()
+                {
+                    let now = media_contracts::protocol::unix_now();
+                    let _ = crate::task_engine::finish(
+                        &store,
+                        task_id,
+                        attempt,
+                        &node_id,
+                        now,
+                        None,
+                    )
+                    .await;
+                }
                 return Ok(());
             }
             let cache = if mode == RefreshMode::Full { Default::default() } else { inventory::load_scan_cache(&store, &job_id).await? };
@@ -377,6 +511,10 @@ async fn enqueue_one(
                     let scan_id = scan_id_stage.clone();
                     let job_id = job_id_stage.clone();
                     async move {
+                        let _effects = crate::task_engine::EFFECT_GATE.lock().await;
+                        if !crate::nodes::scan_run_authorized(&store,&job_id,"local",&scan_id).await {
+                            return Err(std::io::Error::other("Scan attempt fenced"));
+                        }
                         inventory::stage_batch(&store, &scan_id, &job_id, &batch).await
                             .map_err(|e| std::io::Error::other(e.to_string()))
                     }
@@ -385,9 +523,13 @@ async fn enqueue_one(
 
             if cancel.load(Ordering::Acquire) {
                 let _ = inventory::clean_staging(&store, &scan_id).await;
-                return Err("Scan arrêté".into());
+                return Err("Scan stopped or preempted for playback".into());
             }
 
+            let _effects = crate::task_engine::EFFECT_GATE.lock().await;
+            if !crate::nodes::scan_run_authorized(&store, &job_id, "local", &scan_id).await {
+                return Err("Tentative de scan expirée".into());
+            }
             inventory::publish_staged_scan(&store, &scan_id, &job_id, &root, report.complete).await?;
             let conflicts = inventory::editorial_warnings(&store, &job_id).await?;
             let total_errors = (report.errors_count as i64) + (conflicts.len() as i64);
@@ -397,7 +539,7 @@ async fn enqueue_one(
             // Purge staging tables to strictly bound SQLite storage growth
             let _ = inventory::clean_staging(&store, &scan_id).await;
 
-            crate::database::query("UPDATE scan_jobs SET status=?,discovered=?,probed=?,reused=?,errors_json=?,errors_count=?,warnings_count=? WHERE library_id=?")
+            crate::database::query("UPDATE scan_jobs SET status=?,discovered=?,probed=?,reused=?,errors_json=?,errors_count=?,warnings_count=? WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
                 .bind(if report.complete { "completed" } else { "error" })
                 .bind(report.discovered as i64)
                 .bind(report.probed as i64)
@@ -405,9 +547,23 @@ async fn enqueue_one(
                 .bind(serde_json::to_string(&errors)?)
                 .bind(total_errors)
                 .bind(total_warnings)
-                .bind(&job_id)
+                .bind(&job_id).bind(&scan_id)
                 .execute(&store.pool)
                 .await?;
+            if let Some((task_id, attempt_str)) = scan_id.split_once(':')
+                && let Ok(attempt) = attempt_str.parse::<i64>()
+            {
+                let now = media_contracts::protocol::unix_now();
+                let _ = crate::task_engine::finish(
+                    &store,
+                    task_id,
+                    attempt,
+                    &node_id,
+                    now,
+                    if report.complete { None } else { Some("Scan completed with errors") },
+                )
+                .await;
+            }
             Ok(())
         }.await;
         if let Err(e) = &result {
@@ -432,11 +588,28 @@ async fn enqueue_one(
             let errors_json = serde_json::to_string(&vec![err_msg])
                 .unwrap_or_else(|_| "[\"Scan échoué ou interrompu\"]".into());
             let _ =
-                crate::database::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=?")
+                crate::database::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
                     .bind(errors_json)
-                    .bind(&job_id)
+                    .bind(&job_id).bind(&scan_id)
                     .execute(&store.pool)
                     .await;
+            if let Some((task_id, attempt_str)) = scan_id_err.split_once(':')
+                && let Ok(attempt) = attempt_str.parse::<i64>()
+            {
+                let now = media_contracts::protocol::unix_now();
+                let _ = crate::task_engine::finish(
+                    &store_err,
+                    task_id,
+                    attempt,
+                    &node_id_err,
+                    now,
+                    Some(&detailed_msg),
+                )
+                .await;
+            }
+        }
+        if let Ok(mut tokens) = runner_jobs.cancellations.lock() {
+            tokens.remove(&scan_id);
         }
     });
     let mut tasks = state

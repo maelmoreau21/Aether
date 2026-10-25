@@ -110,7 +110,7 @@
 
   function handleNodeChange() {
     const candidateRoots = availableRootsForNode;
-    if (!candidateRoots.includes(root)) {
+    if (!root && candidateRoots.length > 0) {
       root = candidateRoots[0] ?? '';
     }
   }
@@ -567,7 +567,6 @@
             {nodes}
             {scans}
             {pending}
-            {availableRootsForNode}
             {saving}
             {editing}
             {error}

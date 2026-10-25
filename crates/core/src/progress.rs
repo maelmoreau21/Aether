@@ -36,12 +36,33 @@ async fn authorized(
     if mutation {
         auth.require_csrf(headers, &identity)?;
     }
-    let found: Option<String> = query_scalar("SELECT w.id FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE w.id=? AND w.kind IN ('film','episode') AND l.enabled=1 AND n.status != 'revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?))")
-        .bind(work).bind(identity.user.role.as_str()).bind(&identity.user.id).fetch_optional(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let found: Option<String> = query_scalar(
+        "SELECT COALESCE( \
+           (SELECT w.id FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id \
+            WHERE w.id=? AND w.kind IN ('film','episode') AND l.enabled=1 AND n.status != 'revoked' \
+              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?))), \
+           (SELECT gw.id FROM media_group_members gm JOIN inventory_works gw ON gw.id=gm.work_id JOIN libraries gl ON gl.id=gw.library_id JOIN media_nodes gn ON gn.id=gl.node_id \
+            WHERE (gm.group_id=? OR gm.group_id=(SELECT m2.group_id FROM media_group_members m2 WHERE m2.work_id=?)) \
+              AND gw.kind IN ('film','episode') AND gl.enabled=1 AND gn.status != 'revoked' \
+              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=gl.id AND p.user_id=?)) \
+            ORDER BY gw.id LIMIT 1) \
+         )",
+    )
+    .bind(work)
+    .bind(identity.user.role.as_str())
+    .bind(&identity.user.id)
+    .bind(work)
+    .bind(work)
+    .bind(identity.user.role.as_str())
+    .bind(&identity.user.id)
+    .fetch_optional(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .flatten();
     if found.is_none() {
         return Err(StatusCode::FORBIDDEN);
     }
-    if !crate::product::parental_allowed(&auth.store, &identity.user.id, work).await? {
+    if !crate::product::target_allowed(&auth.store, &identity.user.id, "work", work).await? {
         return Err(StatusCode::FORBIDDEN);
     }
     Ok(identity.user.id)
@@ -70,8 +91,21 @@ async fn read(
         saved["workId"] = json!(requested_work);
         return Ok(Json(saved));
     }
-    let probe: Option<String> = query_scalar("SELECT a.probe_json FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id WHERE e.work_id=? AND a.available=1 ORDER BY a.id LIMIT 1")
-        .bind(&work).fetch_optional(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let probe: Option<String> = query_scalar(
+        "SELECT a.probe_json FROM inventory_assets a \
+         JOIN inventory_sources s ON s.id=a.source_id \
+         JOIN inventory_versions v ON v.id=s.version_id \
+         JOIN inventory_editions e ON e.id=v.edition_id \
+         WHERE (e.work_id=? OR e.work_id=? OR e.work_id IN (SELECT work_id FROM media_group_members WHERE group_id=?)) \
+           AND a.available=1 \
+         ORDER BY a.id LIMIT 1",
+    )
+    .bind(&requested_work)
+    .bind(&work)
+    .bind(&work)
+    .fetch_optional(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let duration = probe
         .and_then(|p| serde_json::from_str::<media_contracts::media::Probe>(&p).ok())
         .and_then(|p| {
@@ -140,27 +174,51 @@ async fn list(
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
     let identity = auth.authenticate(&headers).await?;
-    let rows = query("SELECT p.*,COALESCE(json_extract(w.manual_json,'$.title'),w.title) AS title,w.kind,s.series_id FROM playback_progress p JOIN inventory_works w ON w.id=p.work_id JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id LEFT JOIN inventory_episodes ep ON ep.work_id=w.id LEFT JOIN inventory_seasons s ON s.id=ep.season_id WHERE p.user_id=? AND l.enabled=1 AND n.status != 'revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id=l.id AND lp.user_id=?)) ORDER BY p.updated_at DESC,p.work_id LIMIT 100")
-        .bind(&identity.user.id).bind(if identity.user.role == Role::Administrator {"administrator"} else {"user"}).bind(&identity.user.id).fetch_all(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut items: Vec<_> = rows
+    let role_str = if identity.user.role == Role::Administrator {
+        "administrator"
+    } else {
+        "user"
+    };
+    let rows = query(
+        "SELECT p.*, w.id AS resolved_work_id, COALESCE(json_extract(w.manual_json,'$.title'),w.title) AS title, w.kind, s.series_id \
+         FROM playback_progress p \
+         JOIN inventory_works w ON w.id = COALESCE( \
+           (SELECT dw.id FROM inventory_works dw JOIN libraries dl ON dl.id=dw.library_id JOIN media_nodes dn ON dn.id=dl.node_id \
+            WHERE dw.id=p.work_id AND dl.enabled=1 AND dn.status != 'revoked' \
+              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id=dl.id AND lp.user_id=?))), \
+           (SELECT gw.id FROM media_group_members gm JOIN inventory_works gw ON gw.id=gm.work_id JOIN libraries gl ON gl.id=gw.library_id JOIN media_nodes gn ON gn.id=gl.node_id \
+            WHERE (gm.group_id=p.work_id OR gm.group_id=(SELECT m2.group_id FROM media_group_members m2 WHERE m2.work_id=p.work_id)) \
+              AND gl.enabled=1 AND gn.status != 'revoked' \
+              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id=gl.id AND lp.user_id=?)) \
+            ORDER BY gw.id LIMIT 1) \
+         ) \
+         LEFT JOIN inventory_episodes ep ON ep.work_id=w.id \
+         LEFT JOIN inventory_seasons s ON s.id=ep.season_id \
+         WHERE p.user_id=? \
+         ORDER BY p.updated_at DESC, p.work_id LIMIT 100",
+    )
+    .bind(role_str)
+    .bind(&identity.user.id)
+    .bind(role_str)
+    .bind(&identity.user.id)
+    .bind(&identity.user.id)
+    .fetch_all(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut items: Vec<(String, Value)> = rows
         .iter()
         .map(|row| {
             let mut v = value(row);
+            let resolved_id: String = row.get("resolved_work_id");
             v["title"] = json!(row.get::<String, _>("title"));
             v["kind"] = json!(row.get::<String, _>("kind"));
             v["seriesId"] = json!(row.get::<Option<String>, _>("series_id"));
-            v
+            (resolved_id, v)
         })
         .collect();
     let mut allowed = Vec::new();
-    for item in items.drain(..) {
-        if crate::product::parental_allowed(
-            &auth.store,
-            &identity.user.id,
-            item["workId"].as_str().unwrap_or_default(),
-        )
-        .await?
-        {
+    for (resolved_id, item) in items.drain(..) {
+        if crate::product::parental_allowed(&auth.store, &identity.user.id, &resolved_id).await? {
             allowed.push(item);
         }
     }

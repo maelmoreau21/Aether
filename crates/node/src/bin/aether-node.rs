@@ -161,6 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .iter()
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect();
+            let resource_pressure = Some(hb_state.resources.sample().await);
             let payload = media_contracts::protocol::HeartbeatPayload {
                 protocol_version: media_contracts::protocol::PROTOCOL_VERSION.to_owned(),
                 version: Some(media_contracts::version::current_version().to_string()),
@@ -168,7 +169,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 roots,
                 public_url: id.public_url,
                 active_scans,
+                active_scan_ids: hb_state
+                    .active_scans
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .keys()
+                    .take(64)
+                    .cloned()
+                    .collect(),
+                active_streams: hb_state
+                    .active_streams
+                    .load(std::sync::atomic::Ordering::Relaxed),
                 indexed_assets,
+                resource_pressure,
                 timestamp: media_contracts::protocol::unix_now(),
             };
             let _ = media_node::server::post_signed_to_core(

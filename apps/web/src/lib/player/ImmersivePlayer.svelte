@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import { asset } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
   import PlayerControls, { type Menu } from './PlayerControls.svelte';
@@ -10,6 +11,7 @@
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
   import { chooseSource, playbackMime, audioLanguage, audioSelectionNotice } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
+  import { revalidateMediaDescriptor } from '../catalog/api';
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
   let dialog: HTMLDialogElement;
@@ -40,11 +42,15 @@
   let keyboardPinned = $state(false);
   let paused = $state(true);
   let playback = $state<PlaybackState>({ position: 0, duration: 0, paused: true, volume: 1, speed: 1 });
+  let aspectRatio = $state<'contain' | 'cover' | 'fill'>('contain');
+  let repeat = $state(false);
   let idle: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
   let opener: HTMLElement | null = null;
   let scrollPosition = 0;
   let previousVolume = 1;
+  let triedMediaIds = new SvelteSet<string>();
+  let failoverInProgress = false;
   function sync() {
     if (!engine || !opened) return;
     const snapshot = engine.state();
@@ -60,9 +66,56 @@
   function wake() { visible = true; armIdle(); }
   $effect(() => { armIdle(); return () => clearTimeout(idle); });
   $effect(() => { if (opened && !visible) surface?.focus(); });
+  async function tryAutomaticFailover(): Promise<boolean> {
+    if (!opened || !engine || !active || failoverInProgress) return false;
+    const current = generation;
+    triedMediaIds.add(active.id);
+    if (active.requestedId) triedMediaIds.add(active.requestedId);
+    if (active.failoverFrom) triedMediaIds.add(active.failoverFrom);
+    const candidates = [
+      ...(active.fallbackMediaIds ?? []),
+      ...catalogue
+        .filter(item => item.available !== false && item.nodeStatus !== 'disconnected' && item.nodeStatus !== 'revoked' && (!active?.workId || !item.workId || item.workId === active.workId))
+        .map(item => item.id)
+    ];
+    const nextId = candidates.find(id => !triedMediaIds.has(id));
+    if (!nextId) return false;
+    triedMediaIds.add(nextId);
+    failoverInProgress = true;
+    try {
+      const snapshot = engine.state();
+      const savedPosition = Math.max(playback.position, snapshot.position || 0, video?.currentTime || 0);
+      const restoreState: PlaybackState = {
+        position: Number.isFinite(savedPosition) ? savedPosition : 0,
+        duration: playback.duration,
+        paused: false,
+        volume: playback.volume,
+        speed: playback.speed
+      };
+      progressTracker?.save(restoreState, true);
+      loadStage = 'Basculement automatique vers un nœud disponible…';
+      let fallbackMedia: Media | undefined;
+      try {
+        fallbackMedia = await revalidateMediaDescriptor(nextId);
+      } catch {
+        fallbackMedia = catalogue.find(item => item.id === nextId);
+      }
+      if (!fallbackMedia || current !== generation || !opened) return false;
+      triedMediaIds.add(fallbackMedia.id);
+      await prepare(fallbackMedia, restoreState, 'Basculement automatique sur un nœud disponible.');
+      return current === generation && !error;
+    } finally {
+      failoverInProgress = false;
+    }
+  }
   function fail(message: string) {
     if (!opened) return;
-    engine?.pause(); error = message; busy = false; sync(); wake();
+    engine?.pause();
+    void tryAutomaticFailover().then(recovered => {
+      if (!recovered && opened) {
+        error = message; busy = false; sync(); wake();
+      }
+    });
   }
   async function action(operation: (player: Player) => void | Promise<void>) {
     if (!engine || busy) return;
@@ -76,9 +129,12 @@
     }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
   }
-  async function prepare(media: Media, restore?: PlaybackState) {
+  async function prepare(media: Media, restore?: PlaybackState, failoverNotice?: string) {
     const current = generation;
     if (!engine) return;
+    triedMediaIds.add(media.id);
+    if (media.requestedId) triedMediaIds.add(media.requestedId);
+    if (media.failoverFrom) triedMediaIds.add(media.failoverFrom);
     busy = true; error = ''; notice = ''; wake();
     try {
       // Preferences are optional: an outage must not prevent authorized playback.
@@ -96,7 +152,8 @@
       const resume = tracker?.load();
       await engine.load(media, source.audioTrackId, restore?.position ?? resume ?? 0);
       if (current !== generation) return;
-      notice = preferenceNotice || audioSelectionNotice(media, source, preferredLanguage);
+      const autoFailoverMsg = failoverNotice || (media.failoverFrom ? 'Basculement automatique sur un nœud disponible.' : '');
+      notice = autoFailoverMsg || preferenceNotice || audioSelectionNotice(media, source, preferredLanguage);
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
@@ -128,6 +185,8 @@
   export function open(media: Media | Promise<Media>) {
     if (opened) return false;
     generation++; const current = generation;
+    triedMediaIds.clear();
+    failoverInProgress = false;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     scrollPosition = window.scrollY;
     statistics = false; loadStage = 'Chargement de votre séance…'; audio = ''; active = media instanceof Promise ? undefined : media; opened = true; busy = true; error = ''; notice = ''; menu = null;
@@ -167,6 +226,8 @@
   export function changeMedia(media: Media, requireOpen = false) {
     if (!opened) { if (!requireOpen) open(media); return; }
     if (!engine || busy) return;
+    triedMediaIds.clear();
+    failoverInProgress = false;
     progressTracker?.save(engine.state(), true);
     progressTracker = undefined;
     active = media;
@@ -278,19 +339,18 @@
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = true; wake(); }} onkeydown={keyboard}
     onpointermove={event => { if (event.pointerType !== 'touch') wake(); }} onpointerdown={() => { keyboardPinned = false; surface?.focus(); }}>
-    <video bind:this={video} playsinline preload="auto" ontimeupdate={sync} ondurationchange={sync} onplay={sync} onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }} onended={ended}><track kind="captions" /></video>
+    <video bind:this={video} playsinline preload="auto" loop={repeat} style:object-fit={aspectRatio} ontimeupdate={sync} ondurationchange={sync} onplay={sync} onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }} onended={ended}><track kind="captions" /></video>
     {#if active?.chapters?.length && visible}<label class="chapters">Chapitres<select aria-label="Chapitres vidéo" disabled={busy} onchange={event => seek(Number(event.currentTarget.value))}><option value="" disabled selected>Choisir un chapitre</option>{#each active.chapters as chapter,i (`${chapter.start}-${i}`)}<option value={chapter.start}>{i+1}. {chapter.title}</option>{/each}</select></label>{/if}
     <button class="video-interaction" tabindex="-1" aria-label="Afficher ou masquer les commandes" onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
       <button class="return" aria-label="Retour à l’accueil" onclick={close}><Icon name="back" size={24} /></button>
       <div class="title"><span>{active?.title ?? 'Votre séance'}</span></div>
-      <button class="stats-toggle" aria-expanded={statistics} aria-controls="stream-statistics" onclick={() => { statistics = !statistics; wake(); }}>Statistiques du flux</button>
       {#if nextTitle && onNext}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
     </div>
-    {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" />{loadStage}<button onclick={close}>Annuler</button></div>{/if}
+    {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" /><span>Chargement de la vidéo…</span><button onclick={close}>Annuler</button></div>{/if}
     {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, { ...playback, paused: false }); }}>Réessayer</button></div>{/if}
-    {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label="Statistiques du flux">
-      <header><strong>Statistiques du flux</strong><button onclick={() => { statistics = false; wake(); }}>Fermer</button></header>
+    {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label="Données de lecture">
+      <header><strong>Données de lecture</strong><button onclick={() => { statistics = false; wake(); }}>Fermer</button></header>
       <p>Mesures vidéo du navigateur · actualisation chaque seconde</p>
       <dl>
         <dt>État</dt><dd>{busy ? 'Chargement' : error ? 'Erreur' : paused ? 'En pause' : 'Lecture'}</dd>
@@ -300,25 +360,27 @@
         <dt>Position / durée</dt><dd>{playback.position.toFixed(1)} / {playback.duration.toFixed(1)} s</dd>
         <dt>Vitesse</dt><dd>{playback.speed}×</dd>
         <dt>readyState / networkState</dt><dd>{metrics.ready} / {metrics.network}</dd>
-        <dt>Nœud déclaré</dt><dd>{selectedSource?.nodeId ?? active?.nodeId ?? 'Non renseigné'}</dd>
+        <dt>Nœud serveur</dt><dd>{selectedSource?.nodeId ?? active?.nodeId ?? 'Local'}</dd>
+        <dt>Mode de transport</dt><dd>{selectedSource?.directUrl ? 'Direct Node' : selectedSource?.relayUrl ? 'Relais Core' : 'Local'}</dd>
         <dt>Source / piste audio</dt><dd>{selectedSource?.id ?? 'En attente'} / {audio || 'En attente'}</dd>
         <dt>Conteneur / langue</dt><dd>{selectedSource?.mime ?? 'Non renseigné'} / {selectedSource?.language ?? 'Non renseignée'}</dd>
         <dt>Mode audio déclaré</dt><dd>{selectedSource?.audioSegmentUrl ? 'Segments' : selectedSource?.externalAudioUrl ? 'Séparé' : 'Interne'}</dd>
         <dt>Sous-titres</dt><dd>{subtitle ?? 'Désactivés'}</dd>
       </dl>
       {#each selectedSource?.tracks ?? [] as track, i (i)}<p>Piste {track.index ?? i} · {track.codec_type} · {track.codec_name} {track.profile ?? ''} {track.channels ? `· ${track.channels} canaux` : ''}</p>{/each}
-      <p>Diagnostic : {error || loadStage}</p>
+      <p>Diagnostic technique : {error || loadStage}</p>
       <p>Les pistes déclarées ne prouvent pas la sortie audio physique. Débit réseau non mesuré.</p>
     </section>{/if}
     <p class="fullscreen-notice" role="status">{notice}</p>
     {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
+      {aspectRatio} onAspectRatio={r => aspectRatio = r} {repeat} onRepeat={r => repeat = r} onStats={() => { statistics = true; wake(); }}
       onPlay={togglePlayback} onVolume={volume} onMute={mute} onSeek={seek} onAudio={selectAudio} onSubtitle={selectSubtitle} onSource={selectSource}
       onSpeed={speed => action(player => player.setSpeed(speed))} onFullscreen={toggleFullscreen} onWake={wake} />{/if}
   </div>
 </dialog>
 
 <style>
-  .stats-toggle, .stream-statistics button { color:#eee; background:#ffffff15; border:1px solid #ffffff30; border-radius:8px; padding:10px 14px; cursor:pointer; }
+  .stream-statistics button { color:#eee; background:#ffffff15; border:1px solid #ffffff30; border-radius:8px; padding:10px 14px; cursor:pointer; }
   .stream-statistics { position:absolute; z-index:7; top:90px; right:24px; width:min(460px,calc(100% - 48px)); max-height:calc(100dvh - 230px); overflow:auto; padding:20px; box-sizing:border-box; background:rgba(16,17,25,.96); color:#eee; border:1px solid #ffffff25; border-radius:12px; font-size:12px; overflow-wrap:anywhere; }
   .stream-statistics header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
   .stream-statistics dl { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; }

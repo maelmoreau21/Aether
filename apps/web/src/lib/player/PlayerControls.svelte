@@ -5,7 +5,7 @@
   import { audioChoices } from './available-audio';
   import type { Media, PlaybackState } from './types';
 
-  export type Menu = 'audio' | 'subtitles' | 'video' | 'speed' | null;
+  export type Menu = 'audio' | 'subtitles' | 'video' | 'speed' | 'settings' | null;
 
   let {
     state: playback,
@@ -27,6 +27,7 @@
     onSpeed,
     onFullscreen,
     audioOffset = 0, subtitleOffset = 0, onAudioOffset, onSubtitleOffset,
+    aspectRatio = 'contain', onAspectRatio, repeat = false, onRepeat, onStats,
     onWake
   }: {
     audioOffset?: number; subtitleOffset?: number; onAudioOffset?: (value: number) => void; onSubtitleOffset?: (value: number) => void;
@@ -48,12 +49,19 @@
     onSource: (id: string) => void;
     onSpeed: (speed: number) => void;
     onFullscreen: () => void;
+    aspectRatio?: 'contain' | 'cover' | 'fill';
+    onAspectRatio?: (ratio: 'contain' | 'cover' | 'fill') => void;
+    repeat?: boolean;
+    onRepeat?: (repeat: boolean) => void;
+    onStats?: () => void;
     onWake: () => void;
   } = $props();
 
   let panel = $state<HTMLDivElement>();
   let triggers: HTMLDivElement;
   let hoverTime = $state<number | null>(null);
+  let canSkipIntro = $derived(Boolean(media?.intro && playback.position >= media.intro.start && playback.position < media.intro.end));
+  let canSkipCredits = $derived(Boolean(media?.credits && playback.position >= media.credits.start && playback.position < media.credits.end));
 
   const source = $derived(media.sources.find(source => source.audioTrackId === audio) ?? media.sources[0]);
   const selectableAudio = $derived(audioChoices(media, audio));
@@ -62,6 +70,59 @@
   const videoTracks = $derived((source?.tracks?.some(track => track.codec_type === 'video') ? source.tracks : media.sources[0]?.tracks)?.filter(track => track.codec_type === 'video') ?? []);
   const remainingTime = $derived(Math.max(0, (playback.duration || 0) - (playback.position || 0)));
 
+  let now = $state(Date.now());
+  $effect(() => {
+    const timer = setInterval(() => { now = Date.now(); }, 5000);
+    return () => clearInterval(timer);
+  });
+
+  const projectedEndTime = $derived.by(() => {
+    if (!Number.isFinite(remainingTime) || remainingTime <= 0 || !playback.duration) return '';
+    const speed = playback.speed > 0 ? playback.speed : 1;
+    const end = new Date(now + (remainingTime / speed) * 1000);
+    const hours = end.getHours().toString().padStart(2, '0');
+    const minutes = end.getMinutes().toString().padStart(2, '0');
+    return `${hours}h${minutes}`;
+  });
+
+  function skipChapter(direction: -1 | 1) {
+    const chapters = media?.chapters;
+    if (!chapters || chapters.length === 0) return;
+    const sorted = [...chapters].sort((a, b) => a.start - b.start);
+    const pos = playback.position;
+
+    if (direction === 1) {
+      const next = sorted.find(c => c.start > pos + 1);
+      if (next) {
+        onSeek(next.start);
+      } else if (playback.duration) {
+        onSeek(playback.duration);
+      }
+    } else {
+      let currentIndex = -1;
+      for (let i = 0; i < sorted.length; i++) {
+        if (sorted[i].start <= pos + 0.5) {
+          currentIndex = i;
+        } else {
+          break;
+        }
+      }
+
+      if (currentIndex === -1) {
+        onSeek(0);
+      } else {
+        const currentChapter = sorted[currentIndex];
+        if (pos - currentChapter.start > 3) {
+          onSeek(currentChapter.start);
+        } else if (currentIndex > 0) {
+          onSeek(sorted[currentIndex - 1].start);
+        } else {
+          onSeek(0);
+        }
+      }
+    }
+  }
+
   const title = $derived(
     menu === 'audio'
       ? 'Langue audio'
@@ -69,7 +130,9 @@
         ? 'Sous-titres'
         : menu === 'video'
           ? 'Vidéo et sources'
-          : 'Vitesse de lecture'
+          : menu === 'settings'
+            ? 'Paramètres'
+            : 'Vitesse de lecture'
   );
 
   function clock(seconds: number) {
@@ -149,6 +212,11 @@
       onkeydown={navigateMenu}
     >
       <div class="menu-heading" role="none">
+        {#if menu === 'speed'}
+          <button type="button" class="menu-back" aria-label="Retour aux paramètres" tabindex="-1" onclick={() => menu = 'settings'}>
+            <Icon name="back" size={18} />
+          </button>
+        {/if}
         <span>{title}</span>
         <button type="button" class="menu-close" aria-label="Fermer le menu" tabindex="-1" onclick={closeMenu}>×</button>
       </div>
@@ -269,8 +337,82 @@
             </button>
           {/each}
         </div>
+      {:else if menu === 'settings'}
+        <div role="group" aria-label="Paramètres du lecteur">
+          <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+              const next = aspectRatio === 'contain' ? 'cover' : aspectRatio === 'cover' ? 'fill' : 'contain';
+              onAspectRatio?.(next);
+            }}
+          >
+            <span>Format d'image</span>
+            <span class="setting-value">{aspectRatio === 'cover' ? 'Remplir' : aspectRatio === 'fill' ? 'Étirer' : 'Normal'}</span>
+          </button>
+
+          <button
+            type="button"
+            role="menuitem"
+            onclick={() => menu = 'speed'}
+          >
+            <span>Vitesse de lecture</span>
+            <span class="setting-value">{playback.speed === 1 ? '1x' : `${playback.speed.toLocaleString('fr')}x`}</span>
+          </button>
+
+          <button
+            type="button"
+            role="menuitem"
+            onclick={() => onRepeat?.(!repeat)}
+          >
+            <span>Mode de répétition</span>
+            <span class="setting-value">{repeat ? 'Répéter' : 'Aucun'}</span>
+          </button>
+
+          <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+              closeMenu();
+              onStats?.();
+            }}
+          >
+            <span>Données de lecture</span>
+            <span class="setting-arrow">›</span>
+          </button>
+        </div>
       {/if}
     </div>
+  {/if}
+
+  {#if canSkipIntro}
+
+    <div class="skip-marker-overlay">
+
+      <button type="button" class="skip-marker-btn" onclick={() => { onSeek(media.intro!.end); onWake(); }}>
+
+        <span>Passer l'introduction</span>
+
+        <span class="skip-marker-arrow">›</span>
+
+      </button>
+
+    </div>
+
+  {:else if canSkipCredits}
+
+    <div class="skip-marker-overlay">
+
+      <button type="button" class="skip-marker-btn" onclick={() => { onSeek(media.credits!.end); onWake(); }}>
+
+        <span>Passer les crédits</span>
+
+        <span class="skip-marker-arrow">›</span>
+
+      </button>
+
+    </div>
+
   {/if}
 
   <div class="progress-line">
@@ -298,13 +440,23 @@
   <div class="control-row">
     <div class="left-controls">
       <button
-        class="skip-btn"
+        class="control-btn"
         aria-label="Reculer de 10 secondes"
+        title="Reculer de 10 secondes"
         disabled={busy || !playback.duration}
         onclick={() => onSeek(Math.max(0, playback.position - 10))}
       >
-        <span class="skip-icon">↺</span>
-        <span class="skip-num">10</span>
+        <Icon name="jump-backward" size={22} />
+      </button>
+
+      <button
+        class="control-btn chapter-btn"
+        aria-label="Chapitre précédent"
+        title={media.chapters?.length ? 'Chapitre précédent' : 'Aucun chapitre'}
+        disabled={busy || !media.chapters?.length}
+        onclick={() => skipChapter(-1)}
+      >
+        <Icon name="chapter-prev" size={20} />
       </button>
 
       <button
@@ -317,14 +469,60 @@
       </button>
 
       <button
-        class="skip-btn"
+        class="control-btn chapter-btn"
+        aria-label="Chapitre suivant"
+        title={media.chapters?.length ? 'Chapitre suivant' : 'Aucun chapitre'}
+        disabled={busy || !media.chapters?.length}
+        onclick={() => skipChapter(1)}
+      >
+        <Icon name="chapter-next" size={20} />
+      </button>
+
+      <button
+        class="control-btn"
         aria-label="Avancer de 10 secondes"
+        title="Avancer de 10 secondes"
         disabled={busy || !playback.duration}
         onclick={() => onSeek(Math.min(playback.duration, playback.position + 10))}
       >
-        <span class="skip-icon">↻</span>
-        <span class="skip-num">10</span>
+        <Icon name="jump-forward" size={22} />
       </button>
+
+      <span class="time" aria-label="{clock(playback.position)} sur {clock(playback.duration)}{projectedEndTime ? ', fin à ' + projectedEndTime : ''}">
+        <span class="current-time">{clock(playback.position)}</span>
+        <span class="duration-time"> / {clock(playback.duration)}</span>
+        {#if playback.duration > 0 && projectedEndTime}
+          <span class="remaining-time"> (Fin à {projectedEndTime})</span>
+        {/if}
+      </span>
+    </div>
+
+    <div class="right-controls" bind:this={triggers}>
+      <button
+        data-menu="subtitles"
+        aria-label="Sous-titres"
+        aria-haspopup="menu"
+        aria-expanded={menu === 'subtitles'}
+        aria-controls={menu === 'subtitles' ? 'player-menu' : undefined}
+        onclick={() => toggleMenu('subtitles')}
+        disabled={busy}
+      >
+        <Icon name="captions" size={22} />
+      </button>
+
+      {#if selectableAudio.length > 1}
+      <button
+        data-menu="audio"
+        aria-label="Audio"
+        aria-haspopup="menu"
+        aria-expanded={menu === 'audio'}
+        aria-controls={menu === 'audio' ? 'player-menu' : undefined}
+        onclick={() => toggleMenu('audio')}
+        disabled={busy}
+      >
+        <Icon name="globe" size={20} />
+      </button>
+      {/if}
 
       <div class="volume-group">
         <button
@@ -347,67 +545,16 @@
         />
       </div>
 
-      <span class="time" aria-label="{clock(playback.position)} sur {clock(playback.duration)}">
-        <span class="current-time">{clock(playback.position)}</span>
-        <span class="duration-time"> / {clock(playback.duration)}</span>
-        {#if playback.duration > 0}
-          <span class="remaining-time"> (-{clock(remainingTime)})</span>
-        {/if}
-      </span>
-    </div>
-
-    <div class="right-controls" bind:this={triggers}>
-      {#if selectableAudio.length > 1}
       <button
-        data-menu="audio"
-        aria-label="Audio"
+        data-menu="settings"
+        aria-label="Paramètres"
         aria-haspopup="menu"
-        aria-expanded={menu === 'audio'}
-        aria-controls={menu === 'audio' ? 'player-menu' : undefined}
-        onclick={() => toggleMenu('audio')}
+        aria-expanded={menu === 'settings'}
+        aria-controls={menu === 'settings' ? 'player-menu' : undefined}
+        onclick={() => toggleMenu('settings')}
         disabled={busy}
       >
-        <Icon name="globe" size={20} />
-        <span class="control-label">Audio</span>
-      </button>
-      {/if}
-
-      <button
-        data-menu="subtitles"
-        aria-label="Sous-titres"
-        aria-haspopup="menu"
-        aria-expanded={menu === 'subtitles'}
-        aria-controls={menu === 'subtitles' ? 'player-menu' : undefined}
-        onclick={() => toggleMenu('subtitles')}
-        disabled={busy}
-      >
-        <Icon name="captions" size={22} />
-        <span class="control-label">Sous-titres</span>
-      </button>
-
-      <button
-        data-menu="video"
-        aria-label="Vidéo et sources"
-        aria-haspopup="menu"
-        aria-expanded={menu === 'video'}
-        aria-controls={menu === 'video' ? 'player-menu' : undefined}
-        onclick={() => toggleMenu('video')}
-        disabled={busy}
-      >
-        <Icon name="film" size={20} />
-        <span class="control-label">Vidéo</span>
-      </button>
-
-      <button
-        data-menu="speed"
-        aria-label="Vitesse"
-        aria-haspopup="menu"
-        aria-expanded={menu === 'speed'}
-        aria-controls={menu === 'speed' ? 'player-menu' : undefined}
-        onclick={() => toggleMenu('speed')}
-        disabled={busy}
-      >
-        <span class="speed-value">{playback.speed.toLocaleString('fr')}×</span>
+        <Icon name="settings" size={20} />
       </button>
 
       <button
@@ -499,43 +646,65 @@
     border-color: var(--color-accent-soft);
   }
 
+  .control-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    padding: 0;
+    border-radius: 50%;
+    color: #e2e8f0;
+    background: transparent;
+    border: 1px solid transparent;
+    transition: all var(--transition-fast);
+  }
+  .control-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: scale(1.08);
+  }
+  .control-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+  .control-btn :global(svg) {
+    stroke-width: 2;
+  }
+  .chapter-btn :global(svg) {
+    fill: currentColor;
+    stroke: none;
+  }
+
   .primary.play-btn {
     width: 52px;
     height: 52px;
+    min-width: 52px;
+    min-height: 52px;
     border-radius: 50%;
-    background: var(--color-text-bright);
+    background: #ffffff;
     color: #090a10;
     margin: 0 4px;
+    border: 1px solid transparent;
     box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5), 0 0 16px var(--color-accent-glow);
     transition: all var(--transition-fast);
   }
   .primary.play-btn:hover:not(:disabled) {
     background: #ffffff;
+    color: #090a10;
+    border-color: transparent;
     transform: scale(1.08);
-    box-shadow: 0 6px 24px rgba(255, 255, 255, 0.3), 0 0 24px var(--color-accent-glow);
+    box-shadow: 0 6px 24px rgba(255, 255, 255, 0.35), 0 0 24px var(--color-accent-glow);
+  }
+  .primary.play-btn:active:not(:disabled) {
+    transform: scale(0.96);
   }
   .primary.play-btn :global(svg) {
     fill: currentColor;
     stroke-width: 1.8;
-  }
-
-  .skip-btn {
-    font-size: 11px;
-    position: relative;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.05);
-  }
-  .skip-icon {
-    font-size: 18px;
-    line-height: 1;
-  }
-  .skip-num {
-    font-size: 9px;
-    position: absolute;
-    bottom: 5px;
-    font-weight: 700;
   }
 
   .volume-group {
@@ -566,15 +735,6 @@
   .remaining-time {
     color: var(--color-subtle);
     font-size: 11.5px;
-  }
-
-  .control-label {
-    font-size: 12.5px;
-    font-weight: 600;
-  }
-  .speed-value {
-    font-size: 12.5px;
-    font-weight: 700;
   }
 
   .progress-line {
@@ -642,6 +802,7 @@
     border-radius: 50%;
   }
 
+  .floating-menu button[role="menuitem"],
   .floating-menu button[role="menuitemradio"] {
     width: 100%;
     min-height: 48px;
@@ -652,6 +813,30 @@
     font-weight: 500;
     gap: 16px;
     border-radius: var(--radius-sm);
+  }
+  .setting-value {
+    color: var(--color-muted, #94a3b8);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .setting-arrow {
+    color: var(--color-muted, #94a3b8);
+    font-size: 18px;
+    line-height: 1;
+  }
+  .menu-back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+    margin-right: 8px;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--color-text-bright);
   }
   .floating-menu button[aria-checked='true'] {
     color: var(--color-accent-hover);
@@ -714,13 +899,43 @@
     .volume-group {
       display: none;
     }
-    .control-label {
-      display: none;
-    }
+
     .floating-menu {
       right: 16px;
       bottom: calc(100% - 70px);
       width: min(340px, calc(100vw - 32px));
     }
+  }
+  .skip-marker-overlay {
+    position: absolute;
+    right: 2rem;
+    bottom: 5.5rem;
+    z-index: 40;
+    pointer-events: auto;
+  }
+  .skip-marker-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 9999px;
+    color: #ffffff;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .skip-marker-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.5);
+    transform: scale(1.04);
+  }
+  .skip-marker-arrow {
+    font-size: 1.25rem;
+    line-height: 1;
   }
 </style>

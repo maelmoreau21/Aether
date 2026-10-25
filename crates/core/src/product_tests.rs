@@ -178,6 +178,7 @@ async fn parental_filters_overrides_lists_and_explicit_grouping() {
         query("INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,'films',?)").bind(work).bind(work).bind(&root).execute(&store.pool).await.unwrap();
         query("INSERT INTO inventory_assets(id,source_id,library_id,relative_path,size,modified_ns,mime,probe_json,available) VALUES(?,?,'films',?,1,'0','video/mp4','{\"streams\":[],\"format\":{}}',1)").bind(work).bind(work).bind(work).execute(&store.pool).await.unwrap();
     }
+    query("INSERT INTO inventory_edition_metadata(edition_id,edition_key,label) VALUES('unknown','directors-cut','Director’s Cut')").execute(&store.pool).await.unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
     let a = format!("media_session={}", "a".repeat(64));
     let b = format!("media_session={}", "b".repeat(64));

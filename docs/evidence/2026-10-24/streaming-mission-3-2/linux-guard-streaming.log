@@ -1,0 +1,95 @@
+   Compiling libc v0.2.191
+   Compiling errno v0.3.14
+   Compiling signal-hook-registry v1.4.8
+   Compiling mio v1.2.4
+   Compiling socket2 v0.6.5
+   Compiling icu_normalizer_data v2.3.0
+   Compiling tokio v1.53.3
+   Compiling crc32fast v1.5.2
+   Compiling icu_normalizer v2.3.0
+   Compiling getrandom v0.4.3
+   Compiling openssl-sys v0.9.117
+   Compiling thiserror v2.0.21
+   Compiling hyper v1.12.0
+   Compiling openssl v0.10.81
+   Compiling flate2 v1.1.10
+   Compiling idna_adapter v1.2.2
+   Compiling native-tls v0.2.18
+   Compiling media-contracts v0.1.0 (/source/crates/shared)
+   Compiling png v0.18.1
+   Compiling idna v1.1.0
+   Compiling tower v0.5.3
+   Compiling hyper-util v0.1.21
+   Compiling uuid v1.28.0
+   Compiling tempfile v3.27.0
+   Compiling axum v0.8.9
+   Compiling image v0.25.10
+   Compiling url v2.5.8
+   Compiling tokio-native-tls v0.3.1
+   Compiling media-node v0.1.0 (/source/crates/node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 28s
+     Running unittests src/lib.rs (/build/debug/deps/media_node-23db89da21a856e5)
+
+running 11 tests
+test mp4_audio::tests::a_seek_retains_preroll_history_across_short_timing_runs ... ok
+test mp4_audio::tests::benchmark_native_sample_offsets ... ignored, CPU microbenchmark; warm moov metadata only, no browser or disk latency
+test mp4_audio::tests::cancelling_index_request_retains_admission_until_blocking_work_finishes ... ok
+test mp4_audio::tests::concurrent_native_windows_share_one_index_without_a_preparation_worker ... ok
+test mp4_audio::tests::malformed_concurrent_requests_do_not_poison_the_native_index_service ... ok
+test mp4_audio::tests::native_windows_preserve_opus_packets_timestamps_channels_and_track_ids ... ok
+test mp4_audio::tests::rejects_malformed_boxes_huge_moov_external_references_and_invalid_tables ... ok
+test mp4_audio::tests::sample_offsets_match_reference_across_variable_sizes_and_chunk_runs ... ok
+test mp4_audio::tests::unsupported_tracks_out_of_bounds_windows_and_changed_sources_fail ... ok
+test mp4_audio::tests::variable_packet_durations_resolve_fragment_local_roll_descriptions ... ok
+test mp4_audio::tests::virtual_ranges_match_full_representation_head_and_cancellation ... ok
+
+test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 63 filtered out; finished in 1.47s
+
+   Compiling media-contracts v0.1.0 (/source/crates/shared)
+   Compiling media-node v0.1.0 (/source/crates/node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 11s
+     Running unittests src/lib.rs (/build/debug/deps/media_node-23db89da21a856e5)
+
+running 6 tests
+test video_stream::tests::cancelling_an_unread_pipe_releases_the_child_and_process_permit ... ok
+test video_stream::tests::head_range_and_invalid_method_do_not_acquire_process_slots ... ok
+test video_stream::tests::rejected_media_releases_the_child_slot_and_a_later_valid_stream_succeeds ... ok
+test video_stream::tests::saturated_video_admission_stays_bounded_for_four_eight_and_sixteen_requests ... ok
+test video_stream::tests::stream_positions_are_decimal_milliseconds_bounded_to_one_day ... ok
+test video_stream::tests::streams_av1_packet_copy_from_confined_mkv_and_mp4_without_prepared_files ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 68 filtered out; finished in 2.38s
+
+   Compiling media-contracts v0.1.0 (/source/crates/shared)
+   Compiling media-node v0.1.0 (/source/crates/node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 07s
+     Running unittests src/lib.rs (/build/debug/deps/media_node-23db89da21a856e5)
+
+running 6 tests
+test files::tests::library_root_rejects_symlink_escape ... ok
+test files::tests::library_root_requires_existing_confined_absolute_directory ... ok
+test files::tests::nested_subdirectories_and_fallback_traversal_confinement ... ok
+test files::tests::opened_file_detects_in_place_mutation_via_verify_unchanged ... ok
+test files::tests::opened_file_reads_original_handle_even_if_path_is_substituted_after_open ... ok
+test files::tests::opened_file_rejects_traversal_and_directory_links ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 68 filtered out; finished in 0.07s
+
+   Compiling media-contracts v0.1.0 (/source/crates/shared)
+   Compiling media-node v0.1.0 (/source/crates/node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 20s
+     Running unittests src/lib.rs (/build/debug/deps/media_node-23db89da21a856e5)
+
+running 9 tests
+test stream::tests::active_response_retains_preparation_cache_lease ... ok
+test stream::tests::range_parser_and_byte_range_resist_u64_max_overflow_and_boundary_cases ... ok
+test stream::tests::streams_get_head_and_ranges_from_confined_handle_even_if_path_replaced ... ok
+test video_stream::tests::cancelling_an_unread_pipe_releases_the_child_and_process_permit ... ok
+test video_stream::tests::head_range_and_invalid_method_do_not_acquire_process_slots ... ok
+test video_stream::tests::rejected_media_releases_the_child_slot_and_a_later_valid_stream_succeeds ... ok
+test video_stream::tests::saturated_video_admission_stays_bounded_for_four_eight_and_sixteen_requests ... ok
+test video_stream::tests::stream_positions_are_decimal_milliseconds_bounded_to_one_day ... ok
+test video_stream::tests::streams_av1_packet_copy_from_confined_mkv_and_mp4_without_prepared_files ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 65 filtered out; finished in 1.94s
+

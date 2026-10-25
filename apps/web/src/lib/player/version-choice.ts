@@ -11,7 +11,8 @@ export function bestVersion(media: Media[], canPlay: (mime:string)=>string): Med
       if(!canPlay(source.mime)||declared&&!canPlay(`${source.mime}; codecs="${declared}"`))continue;
       const pixels=(video?.width??0)*(video?.height??0);
       const transport=(source.nodeId==='local'||item.nodeId==='local'?3:source.directUrl?2:1);
-      best=Math.max(best,pixels*10+transport-(source.prepare?0.5:0));
+      const nodeBonus=((source.score??item.score??0)/10000);
+      best=Math.max(best,pixels*10+transport+nodeBonus-(source.prepare?0.5:0));
     }
     return best;
   }

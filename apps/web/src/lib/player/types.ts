@@ -13,6 +13,8 @@ export interface Source {
   tokenExpiresAt?: number;
   nodeId?: string;
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';
+  connectionMode?: string;
+  score?: number;
   mime: string;
   tracks?: CodecTrack[];
   externalAudioUrl?: string;
@@ -30,13 +32,20 @@ export interface Source {
 export interface Subtitle { id: string; language: string; label: string; url: string; forced?: boolean; sdh?: boolean; sourceFormat?: string }
 export interface Media {
   chapters?: { start: number; title: string }[];
+  intro?: { start: number; end: number };
+  credits?: { start: number; end: number };
   id: string;
   workId?: string;
   title: string;
   synthetic?: boolean;
   nodeId?: string;
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';
+  connectionMode?: string;
+  score?: number;
   available?: boolean;
+  fallbackMediaIds?: string[];
+  failoverFrom?: string;
+  requestedId?: string;
   sources: Source[];
   subtitles: Subtitle[];
 }

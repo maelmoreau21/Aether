@@ -7,7 +7,7 @@ use crate::{
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{DefaultBodyLimit, Path, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
@@ -84,6 +84,7 @@ pub fn router(auth: AuthState, local_root: PathBuf) -> Router {
         .route("/api/v1/admin/libraries", get(list).post(create))
         .route("/api/v1/admin/libraries/{id}", axum::routing::put(update))
         .route("/api/v1/admin/roots", get(roots))
+        .route("/api/v1/admin/filesystem/browse", get(browse_filesystem))
         .route(
             "/api/v1/admin/libraries/{id}/images/{kind}",
             get(image).put(upload_image).delete(remove_image),
@@ -272,6 +273,193 @@ async fn roots(
     Ok(Json(
         serde_json::json!({"roots": all_roots, "localRoots": local_roots}),
     ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowseQuery {
+    path: Option<String>,
+    #[serde(default)]
+    node_id: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryEntry {
+    name: String,
+    path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowseResult {
+    path: String,
+    parent: Option<String>,
+    directories: Vec<DirectoryEntry>,
+}
+
+async fn browse_filesystem(
+    State(state): State<LibraryState>,
+    headers: HeaderMap,
+    Query(query): Query<BrowseQuery>,
+) -> Result<Json<BrowseResult>, (StatusCode, Json<serde_json::Value>)> {
+    administrator(&state, &headers, false)
+        .await
+        .map_err(|status| (status, Json(serde_json::json!({ "error": "Accès refusé" }))))?;
+
+    let node_id = query.node_id.as_deref().unwrap_or("local");
+    if node_id != "local" {
+        let node_row: Option<(String, String)> = crate::database::query_as(
+            "SELECT status, roots_json FROM media_nodes WHERE id=? AND kind='remote'",
+        )
+        .bind(node_id)
+        .fetch_optional(&state.auth.store.pool)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Erreur interne" })),
+            )
+        })?;
+
+        let Some((status, roots_json)) = node_row else {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "Media Node introuvable" })),
+            ));
+        };
+        if status == "revoked" {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "Media Node révoqué" })),
+            ));
+        }
+
+        let allowed_roots: Vec<String> = serde_json::from_str(&roots_json).unwrap_or_default();
+        let entries = allowed_roots
+            .into_iter()
+            .map(|r| DirectoryEntry {
+                name: r.clone(),
+                path: r,
+            })
+            .collect();
+
+        return Ok(Json(BrowseResult {
+            path: query.path.unwrap_or_default(),
+            parent: None,
+            directories: entries,
+        }));
+    }
+
+    let raw_path = query.path.unwrap_or_default().trim().to_string();
+
+    #[cfg(windows)]
+    {
+        if raw_path.is_empty() {
+            let mut drives = Vec::new();
+            for c in b'A'..=b'Z' {
+                let drive_str = format!("{}:\\", c as char);
+                if DiskPath::new(&drive_str).exists() {
+                    drives.push(DirectoryEntry {
+                        name: format!("{}:", c as char),
+                        path: drive_str,
+                    });
+                }
+            }
+            if drives.is_empty() {
+                drives.push(DirectoryEntry {
+                    name: "C:".to_string(),
+                    path: "C:\\".to_string(),
+                });
+            }
+            return Ok(Json(BrowseResult {
+                path: "".to_string(),
+                parent: None,
+                directories: drives,
+            }));
+        }
+    }
+
+    let target_path_str = if raw_path.is_empty() {
+        "/".to_string()
+    } else {
+        raw_path
+    };
+
+    let target_path = DiskPath::new(&target_path_str);
+    let Ok(metadata) = tokio::fs::metadata(&target_path).await else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(
+                serde_json::json!({ "error": "Le dossier spécifié n'existe pas ou n'est pas accessible." }),
+            ),
+        ));
+    };
+
+    if !metadata.is_dir() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Le chemin spécifié n'est pas un dossier." })),
+        ));
+    }
+
+    let Ok(mut entries) = tokio::fs::read_dir(&target_path).await else {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "Impossible de lire le contenu de ce dossier." })),
+        ));
+    };
+
+    let mut directories = Vec::new();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if let Ok(meta) = entry.metadata().await
+            && meta.is_dir()
+        {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with('.')
+                && !name.starts_with('$')
+                && !name.starts_with("@eaDir")
+                && name != "#recycle"
+            {
+                let child_path = entry.path().to_string_lossy().into_owned();
+                directories.push(DirectoryEntry {
+                    name,
+                    path: child_path,
+                });
+            }
+        }
+    }
+    directories.sort_by_key(|a| a.name.to_lowercase());
+
+    let parent = target_path
+        .parent()
+        .map(|p| {
+            let s = p.to_string_lossy().into_owned();
+            #[cfg(windows)]
+            {
+                if s.is_empty() {
+                    return "".to_string();
+                }
+            }
+            s
+        })
+        .filter(|p| p != &target_path_str);
+
+    #[cfg(windows)]
+    let parent = parent.or_else(|| {
+        let trimmed = target_path_str.trim_end_matches(['/', '\\']);
+        if trimmed.len() == 2 && trimmed.ends_with(':') {
+            Some("".to_string())
+        } else {
+            None
+        }
+    });
+
+    Ok(Json(BrowseResult {
+        path: target_path_str,
+        parent,
+        directories,
+    }))
 }
 async fn create(
     State(state): State<LibraryState>,
@@ -971,6 +1159,7 @@ mod http_tests {
             "/api/v1/admin/libraries",
             "/api/v1/admin/users",
             "/api/v1/admin/roots",
+            "/api/v1/admin/filesystem/browse",
         ] {
             assert_eq!(
                 request(&app, "GET", path, None, None, &null).await.status(),
@@ -1077,5 +1266,31 @@ mod http_tests {
             .status(),
             StatusCode::BAD_REQUEST
         );
+        let browse_resp = request(
+            &app,
+            "GET",
+            &format!(
+                "/api/v1/admin/filesystem/browse?path={}",
+                root.to_string_lossy()
+            ),
+            Some(&cookies[0]),
+            None,
+            &null,
+        )
+        .await;
+        assert_eq!(browse_resp.status(), StatusCode::OK);
+        let browse_json = json(browse_resp).await;
+        assert!(browse_json["directories"].is_array());
+
+        let invalid_browse = request(
+            &app,
+            "GET",
+            "/api/v1/admin/filesystem/browse?path=/nonexistent-random-dir-404",
+            Some(&cookies[0]),
+            None,
+            &null,
+        )
+        .await;
+        assert_eq!(invalid_browse.status(), StatusCode::NOT_FOUND);
     }
 }

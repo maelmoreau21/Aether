@@ -1,0 +1,122 @@
+{
+  "scope": "export-only; setup and authenticated requests warm index/cache; no timing claims",
+  "date": "2026-10-24T11:50:13.634Z",
+  "fixture": {
+    "path": "tests\\fixtures\\generated\\dual-opus\\dual-opus-long.mp4",
+    "sha256": "bd559e90d168ef519d93268e38ee074048df462294b2b85ac987c9022722eece",
+    "bytes": 352256545
+  },
+  "artifacts": {
+    "aether-node.exe": {
+      "bytes": 11460096,
+      "sha256": "093b151387d0cf706a03d681350405029c8e1aa855c3fc4a10833e801307dc85"
+    },
+    "media-poc.exe": {
+      "bytes": 37100032,
+      "sha256": "bf9d14a588f66b54cf5d6fccc37701aeaa136c631d99950de9fa504621ef65a7"
+    }
+  },
+  "artifactsUnchanged": true,
+  "export": {
+    "scope": "Exact authorized Core relay responses from genuine Rust Node; no repackaging, no timing; fixture index/cache warmed",
+    "files": [
+      {
+        "file": "2-0.mp4",
+        "bytes": 364792,
+        "sha256": "036000cd62bb26f48262778854bcc302f69f2bf1b75bc810d8572555aa0ba575",
+        "requestPath": "/api/v1/assets/270a4841-2fe8-43f4-8bf4-225246b338e4/prepared/opus-2-chunk-0",
+        "status": 200,
+        "contentType": "audio/mp4"
+      },
+      {
+        "file": "2-1.mp4",
+        "bytes": 402648,
+        "sha256": "b50d677b6a8edeef91a8c8d9e601b22b72677e2a948549be3cf1e2e3c3966fcb",
+        "requestPath": "/api/v1/assets/270a4841-2fe8-43f4-8bf4-225246b338e4/prepared/opus-2-chunk-1",
+        "status": 200,
+        "contentType": "audio/mp4"
+      },
+      {
+        "file": "2-2.mp4",
+        "bytes": 412649,
+        "sha256": "c1d0bab77b5148e90057b26b53e56c778cfb5c2317fe5c092e489cd71a9c0faa",
+        "requestPath": "/api/v1/assets/270a4841-2fe8-43f4-8bf4-225246b338e4/prepared/opus-2-chunk-2",
+        "status": 200,
+        "contentType": "audio/mp4"
+      },
+      {
+        "file": "2-90.mp4",
+        "bytes": 411303,
+        "sha256": "422a16e20b00f0961656e44fbc82b41e2f971884f69126240947547bfceb2127",
+        "requestPath": "/api/v1/assets/270a4841-2fe8-43f4-8bf4-225246b338e4/prepared/opus-2-chunk-90",
+        "status": 200,
+        "contentType": "audio/mp4"
+      },
+      {
+        "file": "2-91.mp4",
+        "bytes": 400104,
+        "sha256": "21ac93ffa45c36e2ef1f78b511c65df4b7143534ae6a6c3f6b9066f70618bf85",
+        "requestPath": "/api/v1/assets/270a4841-2fe8-43f4-8bf4-225246b338e4/prepared/opus-2-chunk-91",
+        "status": 200,
+        "contentType": "audio/mp4"
+      },
+      {
+        "file": "2-180.mp4",
+        "bytes": 413059,
+        "sha256": "aad64b1948c98d680c9d60f81960d0c3847d40b3b1ba310ac06c8f6df49e8885",
+        "requestPath": "/api/v1/assets/270a4841-2fe8-43f4-8bf4-225246b338e4/prepared/opus-2-chunk-180",
+        "status": 200,
+        "contentType": "audio/mp4"
+      },
+      {
+        "file": "3-0.mp4",
+        "bytes": 424882,
+        "sha256": "a81b8293f5f8c748a857ccdc95d31d75e1bc24ab4ba304d954cabe487170b2f0",
+        "requestPath": "/api/v1/assets/270a4841-2fe8-43f4-8bf4-225246b338e4/prepared/opus-3-chunk-0",
+        "status": 200,
+        "contentType": "audio/mp4"
+      },
+      {
+        "file": "3-1.mp4",
+        "bytes": 467080,
+        "sha256": "bcdeb1f067b2a5fc5449697e739716c47448436dfebbadadc83cdab7fdb8f21d",
+        "requestPath": "/api/v1/assets/270a4841-2fe8-43f4-8bf4-225246b338e4/prepared/opus-3-chunk-1",
+        "status": 200,
+        "contentType": "audio/mp4"
+      },
+      {
+        "file": "3-2.mp4",
+        "bytes": 484333,
+        "sha256": "e4fcea4be4ce1bc78dcf14ec403954b9b33f24b0c1d541bda510d0eb56de908d",
+        "requestPath": "/api/v1/assets/270a4841-2fe8-43f4-8bf4-225246b338e4/prepared/opus-3-chunk-2",
+        "status": 200,
+        "contentType": "audio/mp4"
+      },
+      {
+        "file": "3-90.mp4",
+        "bytes": 482568,
+        "sha256": "f30477274701afb5f8c0ee9e3509a032c229f807cd58559008efe5b696cdb22a",
+        "requestPath": "/api/v1/assets/270a4841-2fe8-43f4-8bf4-225246b338e4/prepared/opus-3-chunk-90",
+        "status": 200,
+        "contentType": "audio/mp4"
+      },
+      {
+        "file": "3-91.mp4",
+        "bytes": 465912,
+        "sha256": "9054f35efe9896d88e3412e83e789776546819d35c56d1925a2c681f316ee5c6",
+        "requestPath": "/api/v1/assets/270a4841-2fe8-43f4-8bf4-225246b338e4/prepared/opus-3-chunk-91",
+        "status": 200,
+        "contentType": "audio/mp4"
+      },
+      {
+        "file": "3-180.mp4",
+        "bytes": 478145,
+        "sha256": "14fd627feae309b347a8a25ed67276bcf9ad6252d41b69f8f43fd4544fcac8e1",
+        "requestPath": "/api/v1/assets/270a4841-2fe8-43f4-8bf4-225246b338e4/prepared/opus-3-chunk-180",
+        "status": 200,
+        "contentType": "audio/mp4"
+      }
+    ]
+  },
+  "passed": true
+}

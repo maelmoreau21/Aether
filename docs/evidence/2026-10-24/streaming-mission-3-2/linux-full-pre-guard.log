@@ -1,0 +1,374 @@
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded atomic-waker v1.1.2
+  Downloaded adler2 v2.0.1
+  Downloaded autocfg v1.5.1
+  Downloaded axum-core v0.5.6
+  Downloaded generic-array v0.14.7
+  Downloaded cfg-if v1.0.5
+  Downloaded mime v0.3.17
+  Downloaded tokio-macros v2.7.2
+  Downloaded cpufeatures v0.2.17
+  Downloaded thiserror-impl v2.0.21
+  Downloaded tinystr v0.8.4
+  Downloaded thiserror v2.0.21
+  Downloaded openssl-macros v0.1.1
+  Downloaded http-body v1.1.0
+  Downloaded try-lock v0.2.5
+  Downloaded version_check v0.9.5
+  Downloaded want v0.3.2
+  Downloaded futures-task v0.3.34
+  Downloaded httpdate v1.0.3
+  Downloaded zerofrom v0.1.8
+  Downloaded zerofrom-derive v0.1.8
+  Downloaded block-buffer v0.10.4
+  Downloaded quick-error v2.0.1
+  Downloaded tower-layer v0.3.3
+  Downloaded tower-service v0.3.3
+  Downloaded utf8_iter v1.0.4
+  Downloaded futures-core v0.3.34
+  Downloaded crypto-common v0.1.7
+  Downloaded tokio-native-tls v0.3.1
+  Downloaded yoke-derive v0.8.4
+  Downloaded zune-core v0.5.3
+  Downloaded writeable v0.6.4
+  Downloaded openssl-probe v0.2.1
+  Downloaded zerovec-derive v0.11.6
+  Downloaded itoa v1.0.18
+  Downloaded zmij v1.0.23
+  Downloaded byteorder-lite v0.1.0
+  Downloaded idna_adapter v1.2.2
+  Downloaded unicode-ident v1.0.27
+  Downloaded errno v0.3.14
+  Downloaded form_urlencoded v1.2.2
+  Downloaded percent-encoding v2.3.2
+  Downloaded stable_deref_trait v1.2.1
+  Downloaded potential_utf v0.1.6
+  Downloaded hex v0.4.3
+  Downloaded yoke v0.8.3
+  Downloaded tracing-core v0.1.36
+  Downloaded foreign-types v0.3.2
+  Downloaded url v2.5.8
+  Downloaded zerotrie v0.2.5
+  Downloaded zune-jpeg v0.5.15
+  Downloaded uuid v1.28.0
+  Downloaded serde_urlencoded v0.7.1
+  Downloaded sync_wrapper v1.0.2
+  Downloaded typenum v1.20.1
+  Downloaded tower v0.5.3
+  Downloaded digest v0.10.7
+  Downloaded zerovec v0.11.8
+  Downloaded find-msvc-tools v0.1.15
+  Downloaded fdeflate v0.3.7
+  Downloaded serde_path_to_error v0.1.20
+  Downloaded sha2 v0.10.9
+  Downloaded signal-hook-registry v1.4.8
+  Downloaded simd-adler32 v0.3.10
+  Downloaded zlib-rs v0.6.8
+  Downloaded foreign-types-shared v0.1.1
+  Downloaded vcpkg v0.2.15
+  Downloaded displaydoc v0.2.7
+  Downloaded pin-project-lite v0.2.17
+  Downloaded shlex v2.0.1
+  Downloaded slab v0.4.12
+  Downloaded native-tls v0.2.18
+  Downloaded pkg-config v0.3.34
+  Downloaded synstructure v0.14.0
+  Downloaded crc32fast v1.5.2
+  Downloaded matchit v0.8.4
+  Downloaded fastrand v2.5.0
+  Downloaded http-body-util v0.1.5
+  Downloaded tracing v0.1.44
+  Downloaded tokio v1.53.3
+  Downloaded litemap v0.8.3
+  Downloaded quote v1.0.47
+  Downloaded smallvec v1.16.3
+  Downloaded httparse v1.10.1
+  Downloaded tempfile v3.27.0
+  Downloaded icu_provider v2.3.1
+  Downloaded bitflags v2.13.2
+  Downloaded getrandom v0.4.3
+  Downloaded serde_core v1.0.229
+  Downloaded log v0.4.34
+  Downloaded bytemuck v1.25.2
+  Downloaded once_cell v1.21.4
+  Downloaded socket2 v0.6.5
+  Downloaded serde_derive v1.0.229
+  Downloaded bytes v1.12.1
+  Downloaded icu_normalizer_data v2.3.0
+  Downloaded icu_locale_core v2.3.0
+  Downloaded image-webp v0.2.4
+  Downloaded num-traits v0.2.19
+  Downloaded miniz_oxide v0.8.9
+  Downloaded miniz_oxide v0.9.1
+  Downloaded openssl-sys v0.9.117
+  Downloaded base64 v0.23.1
+  Downloaded flate2 v1.1.10
+  Downloaded icu_collections v2.3.0
+  Downloaded ryu v1.0.23
+  Downloaded proc-macro2 v1.0.107
+  Downloaded serde v1.0.229
+  Downloaded memchr v2.8.3
+  Downloaded icu_properties v2.3.0
+  Downloaded mio v1.2.4
+  Downloaded http v1.5.0
+  Downloaded axum v0.8.9
+  Downloaded hyper-util v0.1.21
+  Downloaded png v0.18.1
+  Downloaded idna v1.1.0
+  Downloaded cc v1.9.0
+  Downloaded hyper v1.12.0
+  Downloaded serde_json v1.0.154
+  Downloaded icu_properties_data v2.3.0
+  Downloaded futures-util v0.3.34
+  Downloaded moxcms v0.8.1
+  Downloaded quick-xml v0.42.0
+  Downloaded openssl v0.10.81
+  Downloaded syn v3.0.9
+  Downloaded image v0.25.10
+  Downloaded syn v2.0.119
+  Downloaded rustix v1.1.5
+  Downloaded icu_normalizer v2.3.0
+  Downloaded pxfm v0.1.30
+  Downloaded libc v0.2.191
+  Downloaded linux-raw-sys v0.12.1
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling syn v3.0.9
+   Compiling libc v0.2.191
+   Compiling synstructure v0.14.0
+   Compiling zerofrom-derive v0.1.8
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling stable_deref_trait v1.2.1
+   Compiling yoke v0.8.3
+   Compiling cfg-if v1.0.5
+   Compiling zerovec-derive v0.11.6
+   Compiling itoa v1.0.18
+   Compiling zerovec v0.11.8
+   Compiling displaydoc v0.2.7
+   Compiling pin-project-lite v0.2.17
+   Compiling bytes v1.12.1
+   Compiling find-msvc-tools v0.1.15
+   Compiling shlex v2.0.1
+   Compiling cc v1.9.0
+   Compiling version_check v0.9.5
+   Compiling vcpkg v0.2.15
+   Compiling serde_core v1.0.229
+   Compiling pkg-config v0.3.34
+   Compiling openssl-sys v0.9.117
+   Compiling generic-array v0.14.7
+   Compiling tinystr v0.8.4
+   Compiling errno v0.3.14
+   Compiling bitflags v2.13.2
+   Compiling writeable v0.6.4
+   Compiling smallvec v1.16.3
+   Compiling futures-core v0.3.34
+   Compiling litemap v0.8.3
+   Compiling icu_locale_core v2.3.0
+   Compiling signal-hook-registry v1.4.8
+   Compiling http v1.5.0
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling mio v1.2.4
+   Compiling socket2 v0.6.5
+   Compiling tokio-macros v2.7.2
+   Compiling simd-adler32 v0.3.10
+   Compiling utf8_iter v1.0.4
+   Compiling once_cell v1.21.4
+   Compiling typenum v1.20.1
+   Compiling icu_properties_data v2.3.0
+   Compiling log v0.4.34
+   Compiling icu_normalizer_data v2.3.0
+   Compiling icu_collections v2.3.0
+   Compiling tokio v1.53.3
+   Compiling icu_provider v2.3.1
+   Compiling http-body v1.1.0
+   Compiling adler2 v2.0.1
+   Compiling serde v1.0.229
+   Compiling zmij v1.0.23
+   Compiling getrandom v0.4.3
+   Compiling httparse v1.10.1
+   Compiling autocfg v1.5.1
+   Compiling crc32fast v1.5.2
+   Compiling num-traits v0.2.19
+   Compiling tracing-core v0.1.36
+   Compiling serde_derive v1.0.229
+   Compiling syn v2.0.119
+   Compiling try-lock v0.2.5
+   Compiling foreign-types-shared v0.1.1
+   Compiling memchr v2.8.3
+   Compiling openssl v0.10.81
+   Compiling tower-service v0.3.3
+   Compiling percent-encoding v2.3.2
+   Compiling serde_json v1.0.154
+   Compiling form_urlencoded v1.2.2
+   Compiling foreign-types v0.3.2
+   Compiling want v0.3.2
+   Compiling openssl-macros v0.1.1
+   Compiling tracing v0.1.44
+   Compiling icu_normalizer v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling miniz_oxide v0.9.1
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling tower-layer v0.3.3
+   Compiling slab v0.4.12
+   Compiling atomic-waker v1.1.2
+   Compiling httpdate v1.0.3
+   Compiling native-tls v0.2.18
+   Compiling sync_wrapper v1.0.2
+   Compiling futures-task v0.3.34
+   Compiling rustix v1.1.5
+   Compiling thiserror v2.0.21
+   Compiling futures-util v0.3.34
+   Compiling hyper v1.12.0
+   Compiling digest v0.10.7
+   Compiling flate2 v1.1.10
+   Compiling idna_adapter v1.2.2
+   Compiling miniz_oxide v0.8.9
+   Compiling http-body-util v0.1.5
+   Compiling fdeflate v0.3.7
+   Compiling thiserror-impl v2.0.21
+   Compiling media-contracts v0.1.0 (/source/crates/shared)
+   Compiling linux-raw-sys v0.12.1
+   Compiling openssl-probe v0.2.1
+   Compiling mime v0.3.17
+   Compiling byteorder-lite v0.1.0
+   Compiling ryu v1.0.23
+   Compiling zune-core v0.5.3
+   Compiling pxfm v0.1.30
+   Compiling cpufeatures v0.2.17
+   Compiling quick-error v2.0.1
+   Compiling image-webp v0.2.4
+   Compiling sha2 v0.10.9
+   Compiling moxcms v0.8.1
+   Compiling zune-jpeg v0.5.15
+   Compiling serde_urlencoded v0.7.1
+   Compiling axum-core v0.5.6
+   Compiling png v0.18.1
+   Compiling idna v1.1.0
+   Compiling hyper-util v0.1.21
+   Compiling tower v0.5.3
+   Compiling uuid v1.28.0
+   Compiling serde_path_to_error v0.1.20
+   Compiling hex v0.4.3
+   Compiling bytemuck v1.25.2
+   Compiling base64 v0.23.1
+   Compiling fastrand v2.5.0
+   Compiling matchit v0.8.4
+   Compiling axum v0.8.9
+   Compiling tempfile v3.27.0
+   Compiling image v0.25.10
+   Compiling url v2.5.8
+   Compiling tokio-native-tls v0.3.1
+   Compiling quick-xml v0.42.0
+   Compiling media-node v0.1.0 (/source/crates/node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12m 48s
+     Running unittests src/lib.rs (/build/debug/deps/media_node-23db89da21a856e5)
+
+running 73 tests
+test cache_dirs::tests::abrupt_exit_releases_lease ... ok
+test cache_dirs::tests::crash_child ... ignored, helper launched by abrupt_exit_releases_lease
+test cache_dirs::tests::reclaims_orphan_but_preserves_active_and_unowned ... ok
+test files::tests::library_root_rejects_symlink_escape ... ok
+test files::tests::library_root_requires_existing_confined_absolute_directory ... ok
+test files::tests::nested_subdirectories_and_fallback_traversal_confinement ... ok
+test files::tests::opened_file_detects_in_place_mutation_via_verify_unchanged ... ok
+test files::tests::opened_file_reads_original_handle_even_if_path_is_substituted_after_open ... ok
+test files::tests::opened_file_rejects_traversal_and_directory_links ... ok
+test image_preview::tests::bounded_preview_is_small_cached_and_changes_with_source ... ok
+test image_preview::tests::transparency_and_conditional_range_head_contracts ... ok
+test images::tests::deterministic_names_formats_missing_and_original_bytes ... ok
+test images::tests::jellyfin_cover_aliases_preserve_identity_and_priority ... ok
+test images::tests::junction_or_directory_link_is_rejected ... ok
+test images::tests::rejects_corruption_misleading_extension_and_oversize ... ok
+test images::tests::shared_posters_never_cross_distinct_film_identities ... ok
+test inventory::tests::local_inventory_confinement_and_fixture_bench_flag ... ok
+test mp4_audio::tests::a_seek_retains_preroll_history_across_short_timing_runs ... ok
+test mp4_audio::tests::benchmark_native_sample_offsets ... ignored, CPU microbenchmark; warm moov metadata only, no browser or disk latency
+test mp4_audio::tests::concurrent_native_windows_share_one_index_without_a_preparation_worker ... ok
+test mp4_audio::tests::malformed_concurrent_requests_do_not_poison_the_native_index_service ... ok
+test mp4_audio::tests::native_windows_preserve_opus_packets_timestamps_channels_and_track_ids ... ok
+test mp4_audio::tests::rejects_malformed_boxes_huge_moov_external_references_and_invalid_tables ... ok
+test mp4_audio::tests::sample_offsets_match_reference_across_variable_sizes_and_chunk_runs ... ok
+test mp4_audio::tests::unsupported_tracks_out_of_bounds_windows_and_changed_sources_fail ... ok
+test mp4_audio::tests::variable_packet_durations_resolve_fragment_local_roll_descriptions ... ok
+test mp4_audio::tests::virtual_ranges_match_full_representation_head_and_cancellation ... ok
+test nfo::tests::exact_priority_and_shared_ambiguity ... ok
+test nfo::tests::extracts_bounded_editorial_only_and_entities ... ok
+test nfo::tests::parses_tvshow_and_episodedetails_nfo ... ok
+test nfo::tests::preserves_credits_and_provider_scales ... ok
+test nfo::tests::rejects_hostile_malformed_and_resource_abuse ... ok
+test nfo::tests::rejects_oversize_sidecars_folder_conflicts_and_link_escape ... ok
+test packaging::tests::benchmark_preparation_cache_open_concurrency ... ignored, local I/O microbenchmark; run explicitly with --ignored --nocapture
+test packaging::tests::cached_output_is_pinned_without_holding_cache_lock_during_open ... ok
+test packaging::tests::cancelling_a_window_leader_allows_an_interested_follower_to_take_over ... ok
+test packaging::tests::copies_av1_opus_tracks_and_reuses_cache_with_source_validation ... ok
+test packaging::tests::copies_dual_51_opus_mp4_without_changing_packets_or_channels ... ignored, run python scripts/generate-dual-opus-fixture.py first; requires FFmpeg
+test packaging::tests::identical_cold_audio_windows_coalesce_without_consuming_worker_waiters ... ok
+Unrecognized option 'mapping_family'.
+Error splitting the argument list: Option not found
+test packaging::tests::preserves_eight_opus_channels_and_packets_in_both_containers ... FAILED
+test probe::tests::probe_codecs_matrix_hevc_h264_aac_ac3_eac3 ... FAILED
+test probe::tests::probe_mp4_with_moov_at_end_validates_seek_via_file_descriptor ... FAILED
+test probe::tests::probe_opened_consumes_handle_and_resists_path_substitution ... ok
+test probe::tests::probe_real_mkv_and_mp4_containers_and_fragmented ... ok
+test probe::tests::probe_representative_10bit_av1_and_multitrack_opus ... ok
+test scanner::tests::artwork_is_never_shared_between_ambiguous_films ... ok
+test scanner::tests::cached_scan_skips_probe_and_temporary_files ... ok
+test scanner::tests::dense_directory_scan_caches_folder_videos_and_reuses_sidecars ... ok
+test scanner::tests::qualified_identity_and_exact_folders_only ... ok
+test scanner::tests::scanner_ignores_nas_system_folders_nomedia_and_custom_exclusions ... ok
+test scanner::tests::single_film_discovers_prefixed_artwork_without_generic_image ... ok
+test scanner::tests::traversal_refuses_directory_links_and_windows_junctions ... ok
+test server::stream_signature_tests::real_node_http_errors_and_head_keep_their_signed_framing ... ok
+test server::stream_signature_tests::real_uplink_post_binds_inferred_json_body_length_before_signing ... ok
+test server::stream_signature_tests::stream_signing_preserves_head_lengths_and_bodyless_status_rules ... ok
+test sidecar_manifest::tests::associations_are_versioned_confined_and_explicit ... ok
+test sidecar_manifest::tests::explicit_associations_override_ambiguous_stems_without_bypassing_probe ... ok
+test stream::tests::active_response_retains_preparation_cache_lease ... ok
+test stream::tests::range_parser_and_byte_range_resist_u64_max_overflow_and_boundary_cases ... ok
+test stream::tests::streams_get_head_and_ranges_from_confined_handle_even_if_path_replaced ... ok
+test subtitles::tests::ass_and_ssa_text_fallback_preserves_times_commas_and_escapes ... ok
+test subtitles::tests::association_is_exact_and_suffixes_are_explicit ... ok
+test subtitles::tests::conversion_validates_times_and_escapes_markup ... ok
+test subtitles::tests::discovery_rejects_ambiguous_stems_and_refreshes_sidecars ... ok
+test tests::local_node_serve_grant_streams_asset_and_validates_image_handle ... ok
+test transport::tests::metadata_and_multicast_destinations_are_denied_before_connect ... ok
+test transport::tests::origins_reject_credentials_paths_queries_and_non_http_schemes ... ok
+test video_stream::tests::cancelling_an_unread_pipe_releases_the_child_and_process_permit ... ok
+test video_stream::tests::head_range_and_invalid_method_do_not_acquire_process_slots ... ok
+test video_stream::tests::rejected_media_releases_the_child_slot_and_a_later_valid_stream_succeeds ... ok
+test video_stream::tests::saturated_video_admission_stays_bounded_for_four_eight_and_sixteen_requests ... ok
+test video_stream::tests::stream_positions_are_decimal_milliseconds_bounded_to_one_day ... ok
+test video_stream::tests::streams_av1_packet_copy_from_confined_mkv_and_mp4_without_prepared_files ... ok
+
+failures:
+
+---- packaging::tests::preserves_eight_opus_channels_and_packets_in_both_containers stdout ----
+
+thread 'packaging::tests::preserves_eight_opus_channels_and_packets_in_both_containers' (2453) panicked at crates/node/src/packaging.rs:782:13:
+assertion failed: status.success()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- probe::tests::probe_codecs_matrix_hevc_h264_aac_ac3_eac3 stdout ----
+
+thread 'probe::tests::probe_codecs_matrix_hevc_h264_aac_ac3_eac3' (2455) panicked at crates/node/src/probe.rs:408:9:
+assertion failed: output.status.success()
+
+---- probe::tests::probe_mp4_with_moov_at_end_validates_seek_via_file_descriptor stdout ----
+
+thread 'probe::tests::probe_mp4_with_moov_at_end_validates_seek_via_file_descriptor' (2458) panicked at crates/node/src/probe.rs:331:9:
+ffmpeg must successfully create non-faststart MP4
+
+
+failures:
+    packaging::tests::preserves_eight_opus_channels_and_packets_in_both_containers
+    probe::tests::probe_codecs_matrix_hevc_h264_aac_ac3_eac3
+    probe::tests::probe_mp4_with_moov_at_end_validates_seek_via_file_descriptor
+
+test result: FAILED. 66 passed; 3 failed; 4 ignored; 0 measured; 0 filtered out; finished in 18.06s
+
+error: test failed, to rerun pass `-p media-node --lib`

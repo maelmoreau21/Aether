@@ -1,0 +1,12 @@
+✔ failure-inclusive p99 preserves two missing observations (3.2727ms)
+✔ PCM raw is recorded despite paused video and initial one-second drift (5.2742ms)
+✔ transparent network cut closes real sockets and permits explicit restoration (89.6819ms)
+✔ opening observations survive later failed seek and incomplete opening (0.7326ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 304.7813

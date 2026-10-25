@@ -1,0 +1,16 @@
+{
+  "scope": "Linux local Docker toolchain, not NAS nor physical remote; source snapshot predates blocking-index cancellation guard correction",
+  "image": "sha256:e2a35062a607f3bcb61cf450f084acf1e279e15d1fff0a43816c24ac7b7dbf62",
+  "cargo": "1.99.1",
+  "ffmpeg": "9.0.2; legally available local target/ffmpeg-linux-9.0.2 mounted read-only",
+  "sourceMount": "read-only frozen snapshot",
+  "fixtureMount": "read-only original generated fixtures",
+  "targetAndCargoCache": "dedicated Windows workspace directories; no user Docker volumes written",
+  "command": "cargo test --locked -p media-node --lib -j 1 -- --test-threads=1",
+  "sourceSha256": {
+    "Cargo.toml": "fad0a5ec8962bd7692a68b0125c46548ab4e6ef977013edde5a66dc91914803c",
+    "Cargo.lock": "d97e29446b94b9409fce4527f33c5d5e12b31bf82d3c1dcf1c0084d0eabda68c",
+    "crates/node/src/mp4_audio.rs": "5a5fee958902ab28b328a1d9daf5d8770139fcca04259daad220201dc87ccd8a",
+    "crates/node/src/video_stream.rs": "2ef47deef580c7641be0e231537c6ea28be91d071b1bc099332181b0cb371749"
+  }
+}

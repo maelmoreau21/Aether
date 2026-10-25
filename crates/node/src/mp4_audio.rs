@@ -20,7 +20,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncRead, AsyncSeek},
-    sync::Mutex,
+    sync::{Mutex, OwnedMutexGuard, Semaphore},
 };
 
 const MAX_MOOV: usize = 16 * 1024 * 1024;
@@ -563,7 +563,54 @@ fn roll_boxes(distances: &[u16], counts: &[u32], fragment_local: bool) -> Vec<u8
     bytes
 }
 
+fn remember_durations(history: &mut VecDeque<u32>, delta: u32, count: u32) {
+    if count >= 32 {
+        history.clear();
+    }
+    for _ in 0..count.min(32) {
+        history.push_back(delta);
+        if history.len() > 32 {
+            history.pop_front();
+        }
+    }
+}
+
 impl Track {
+    fn locate_samples(&self, data: &[u8], selected: &mut [Sample]) -> io::Result<u64> {
+        let runs = self.chunk_runs(data)?;
+        // Consecutive samples within one source chunk have consecutive byte
+        // positions. At a chunk boundary there is no in-chunk prefix to sum.
+        let mut cursor = None::<(u32, u32, u64)>;
+        let mut total = 0u64;
+        for sample in selected {
+            let (limit, offset) = if let Some((limit, _, offset)) =
+                cursor.filter(|&(limit, next, _)| sample.ordinal == next && sample.ordinal < limit)
+            {
+                (limit, offset)
+            } else {
+                let run = runs.partition_point(|&(_, _, _, base)| base <= sample.ordinal);
+                let &(first, _, per, base) = runs
+                    .get(run.saturating_sub(1))
+                    .ok_or_else(|| invalid("sample missing chunk"))?;
+                let chunk = first + (sample.ordinal - base) / per;
+                let chunk_first = base + (chunk - first) * per;
+                let displacement = if sample.ordinal == chunk_first {
+                    0
+                } else {
+                    self.byte_sum(data, sample.ordinal)? - self.byte_sum(data, chunk_first)?
+                };
+                (chunk_first + per, self.offset(data, chunk)? + displacement)
+            };
+            sample.offset = offset;
+            cursor = Some((limit, sample.ordinal + 1, offset + u64::from(sample.size)));
+            total += u64::from(sample.size);
+            if total > MAX_WINDOW_BYTES {
+                return Err(unsupported("native audio window exceeds 8 MiB"));
+            }
+        }
+        Ok(total)
+    }
+
     fn size(&self, data: &[u8], sample: u32) -> io::Result<u32> {
         if sample >= self.count {
             return Err(invalid("sample outside MP4 table"));
@@ -677,10 +724,7 @@ impl Track {
             if pts + u64::from(count) * u64::from(delta) <= begin {
                 pts += u64::from(count) * u64::from(delta);
                 ordinal += count;
-                preceding.clear();
-                for _ in 0..count.min(32) {
-                    preceding.push_back(delta);
-                }
+                remember_durations(&mut preceding, delta, count);
                 continue;
             }
             let skip = if pts < begin {
@@ -691,10 +735,7 @@ impl Track {
             pts += u64::from(skip) * u64::from(delta);
             ordinal += skip;
             if skip > 0 {
-                preceding.clear();
-                for _ in 0..skip.min(32) {
-                    preceding.push_back(delta);
-                }
+                remember_durations(&mut preceding, delta, skip);
             }
             for _ in skip..count {
                 if pts >= end {
@@ -737,22 +778,7 @@ impl Track {
         if selected.is_empty() {
             return Err(unsupported("empty native audio window"));
         }
-        let mut total = 0u64;
-        let runs = self.chunk_runs(data)?;
-        for sample in &mut selected {
-            let run = runs.partition_point(|&(_, _, _, base)| base <= sample.ordinal);
-            let &(first, _, per, base) = runs
-                .get(run.saturating_sub(1))
-                .ok_or_else(|| invalid("sample missing chunk"))?;
-            let chunk = first + (sample.ordinal - base) / per;
-            let chunk_first = base + (chunk - first) * per;
-            sample.offset = self.offset(data, chunk)? + self.byte_sum(data, sample.ordinal)?
-                - self.byte_sum(data, chunk_first)?;
-            total += u64::from(sample.size);
-            if total > MAX_WINDOW_BYTES {
-                return Err(unsupported("native audio window exceeds 8 MiB"));
-            }
-        }
+        let total = self.locate_samples(data, &mut selected)?;
         let mut tfhd = vec![0, 2, 0, 0];
         tfhd.extend(self.id.to_be_bytes());
         let mut tfdt = vec![1, 0, 0, 0];
@@ -794,6 +820,7 @@ impl Track {
         })
     }
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Sample {
     ordinal: u32,
     offset: u64,
@@ -821,11 +848,34 @@ struct Cached {
     index: Arc<Index>,
     used: Instant,
 }
-#[derive(Default)]
 pub struct NativeAudio {
     cache: Mutex<Vec<Cached>>,
-    indexing: Mutex<()>,
+    indexing: Arc<Mutex<()>>,
+    cold_admission: Semaphore,
 }
+impl Default for NativeAudio {
+    fn default() -> Self {
+        Self {
+            cache: Mutex::new(Vec::new()),
+            indexing: Arc::new(Mutex::new(())),
+            cold_admission: Semaphore::new(64),
+        }
+    }
+}
+
+async fn guarded_index_task<T: Send + 'static>(
+    guard: OwnedMutexGuard<()>,
+    build: impl FnOnce() -> io::Result<T> + Send + 'static,
+) -> io::Result<(T, OwnedMutexGuard<()>)> {
+    // A running spawn_blocking task cannot be aborted. Keep its admission
+    // guard inside the task, even if the requesting HTTP future is cancelled.
+    // Return the guard too, so insertion still precedes the next cache lookup.
+    let (result, guard) = tokio::task::spawn_blocking(move || (build(), guard))
+        .await
+        .map_err(|_| io::Error::other("native MP4 indexing task failed"))?;
+    Ok((result?, guard))
+}
+
 impl NativeAudio {
     pub fn serve<'a, B>(
         &'a self,
@@ -857,7 +907,20 @@ impl NativeAudio {
             let index = if let Some(index) = cached {
                 index
             } else {
-                let _indexing = self.indexing.lock().await;
+                let _cold = self.cold_admission.try_acquire().map_err(|_| {
+                    io::Error::new(io::ErrorKind::WouldBlock, "native MP4 index admission full")
+                })?;
+                let indexing = tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    self.indexing.clone().lock_owned(),
+                )
+                .await
+                .map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "native MP4 index admission timeout",
+                    )
+                })?;
                 let again = {
                     let mut cache = self.cache.lock().await;
                     cache
@@ -872,11 +935,9 @@ impl NativeAudio {
                     index
                 } else {
                     let file = opened.try_clone_std()?;
-                    let index = Arc::new(
-                        tokio::task::spawn_blocking(move || load_index(file))
-                            .await
-                            .map_err(|_| io::Error::other("native MP4 indexing task failed"))??,
-                    );
+                    let (parsed, _indexing) =
+                        guarded_index_task(indexing, move || load_index(file)).await?;
+                    let index = Arc::new(parsed);
                     opened.verify_unchanged_sync()?;
                     let mut cache = self.cache.lock().await;
                     while cache.len() >= 8
@@ -1137,6 +1198,253 @@ mod tests {
     use http_body_util::BodyExt;
     use std::{path::Path, process::Stdio};
     use tokio::process::Command;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn cold_index_admission_rejects_sixty_fifth_and_releases_cancelled_waiters() {
+        let native = Arc::new(NativeAudio::default());
+        let held = native.indexing.clone().lock_owned().await;
+        let mut requests = Vec::new();
+        for _ in 0..64 {
+            let native = native.clone();
+            let source = opened().await;
+            requests.push(tokio::spawn(async move {
+                native.serve(source, 2, 0, &Request::new(())).await
+            }));
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while native.cold_admission.available_permits() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let error = native
+            .serve(opened().await, 2, 0, &Request::new(()))
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        let cancelled = requests.remove(0);
+        cancelled.abort();
+        assert!(cancelled.await.unwrap_err().is_cancelled());
+        assert_eq!(native.cold_admission.available_permits(), 1);
+        let replacement = {
+            let native = native.clone();
+            let source = opened().await;
+            tokio::spawn(async move { native.serve(source, 2, 0, &Request::new(())).await })
+        };
+        drop(held);
+        for request in requests {
+            assert_eq!(request.await.unwrap().unwrap().status(), StatusCode::OK);
+        }
+        assert_eq!(replacement.await.unwrap().unwrap().status(), StatusCode::OK);
+        assert_eq!(native.cold_admission.available_permits(), 64);
+        // Established index hits bypass cold admission and its FIFO entirely.
+        let _cold = native.cold_admission.acquire_many(64).await.unwrap();
+        let _gate = native.indexing.clone().lock_owned().await;
+        assert_eq!(
+            native
+                .serve(opened().await, 2, 0, &Request::new(()))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelling_index_request_retains_admission_until_blocking_work_finishes() {
+        let native = Arc::new(NativeAudio::default());
+        let indexing = native.indexing.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let request = tokio::spawn(async move {
+            let guard = indexing.lock_owned().await;
+            guarded_index_task(guard, move || {
+                let _ = started_tx.send(());
+                release_rx.recv().map_err(io::Error::other)?;
+                Ok(())
+            })
+            .await
+        });
+        started_rx.await.unwrap();
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+        let blocked = native.indexing.try_lock().is_err();
+        // Release the worker before asserting, so a failed regression never
+        // strands an unabortable blocking task during runtime shutdown.
+        release_tx.send(()).unwrap();
+        let guard = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            native.indexing.clone().lock_owned(),
+        )
+        .await
+        .unwrap();
+        drop(guard);
+        assert!(
+            blocked,
+            "HTTP cancellation must not admit overlapping blocking index builds"
+        );
+        let response = native
+            .serve(opened().await, 2, 0, &Request::new(()))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    fn locate_samples_reference(
+        track: &Track,
+        data: &[u8],
+        selected: &mut [Sample],
+    ) -> io::Result<u64> {
+        // Previous production algorithm, retained only for equivalence and the
+        // ignored CPU microbenchmark. No file I/O or decoding is timed here.
+        let runs = track.chunk_runs(data)?;
+        let mut total = 0u64;
+        for sample in selected {
+            let run = runs.partition_point(|&(_, _, _, base)| base <= sample.ordinal);
+            let &(first, _, per, base) = runs
+                .get(run.saturating_sub(1))
+                .ok_or_else(|| invalid("sample missing chunk"))?;
+            let chunk = first + (sample.ordinal - base) / per;
+            let chunk_first = base + (chunk - first) * per;
+            sample.offset = track.offset(data, chunk)? + track.byte_sum(data, sample.ordinal)?
+                - track.byte_sum(data, chunk_first)?;
+            total += u64::from(sample.size);
+        }
+        Ok(total)
+    }
+
+    #[test]
+    fn sample_offsets_match_reference_across_variable_sizes_and_chunk_runs() {
+        let mut data = Vec::new();
+        for size in 1u32..=30 {
+            data.extend(size.to_be_bytes());
+        }
+        let stsc = data.len();
+        for entry in [[1u32, 3, 1], [5, 6, 1]] {
+            for value in entry {
+                data.extend(value.to_be_bytes());
+            }
+        }
+        let offsets = data.len();
+        for value in [1000u32, 1010, 1030, 1060, 1100, 1200, 1400] {
+            data.extend(value.to_be_bytes());
+        }
+        let track = Track {
+            id: 2,
+            count: 30,
+            media_time: 0,
+            duration: 30 * 960,
+            stts: (0, 0),
+            stsc: (stsc, 2),
+            sizes: 0,
+            fixed_size: 0,
+            offsets: (offsets, 7),
+            wide_offsets: false,
+            byte_prefix: vec![0],
+            init: Bytes::new(),
+        };
+        let mut samples = (2..27)
+            .map(|ordinal| Sample {
+                ordinal,
+                offset: 0,
+                size: ordinal + 1,
+                duration: 960,
+                dts: u64::from(ordinal) * 960,
+                roll: 4,
+            })
+            .collect::<Vec<_>>();
+        let mut reference = samples.clone();
+        let expected = locate_samples_reference(&track, &data, &mut reference).unwrap();
+        assert_eq!(track.locate_samples(&data, &mut samples).unwrap(), expected);
+        assert_eq!(samples, reference);
+        assert_eq!(samples[0].offset, 1003);
+        assert_eq!(samples[10].offset, 1100);
+        assert_eq!(samples[24].offset, 1451);
+    }
+
+    #[test]
+    fn a_seek_retains_preroll_history_across_short_timing_runs() {
+        let runs = [(447u32, 960u32), (1, 1920), (2, 480), (20, 5760)];
+        let count = runs.iter().map(|r| r.0).sum::<u32>();
+        let mut data = Vec::new();
+        for (count, delta) in runs {
+            data.extend(count.to_be_bytes());
+            data.extend(delta.to_be_bytes());
+        }
+        let stsc = data.len();
+        for value in [1, count, 1] {
+            data.extend(value.to_be_bytes());
+        }
+        let offsets = data.len();
+        data.extend(1000u32.to_be_bytes());
+        let track = Track {
+            id: 2,
+            count,
+            media_time: 0,
+            duration: runs
+                .iter()
+                .map(|&(n, delta)| u64::from(n) * u64::from(delta))
+                .sum(),
+            stts: (0, 4),
+            stsc: (stsc, 1),
+            sizes: 0,
+            fixed_size: 1,
+            offsets: (offsets, 1),
+            wide_offsets: false,
+            byte_prefix: vec![0, 256],
+            init: Bytes::new(),
+        };
+        let window = track.window(&data, 1).unwrap();
+        let first = &window.samples[0];
+        assert_eq!(first.ordinal, 450);
+        assert_eq!(first.dts, 9 * 48000);
+        // Preceding packet durations are 10+10+40+20 ms. Three packets would
+        // contain only 60 ms; the 120 ms *current* packet cannot fill that gap.
+        assert_eq!(first.roll, 4);
+    }
+
+    #[test]
+    #[ignore = "CPU microbenchmark; warm moov metadata only, no browser or disk latency"]
+    fn benchmark_native_sample_offsets() {
+        let fixture = std::env::var_os("MEDIA_NODE_WINDOW_BENCHMARK_FIXTURE")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| root().join("representative.mp4"));
+        let index = load_index(File::open(&fixture).unwrap()).unwrap();
+        let track = &index.tracks[0];
+        let mut reports = Vec::new();
+        for chunk in [0, 1] {
+            let original = track.window(&index.data, chunk).unwrap().samples;
+            let mut baseline = original.clone();
+            let mut candidate = original.clone();
+            locate_samples_reference(track, &index.data, &mut baseline).unwrap();
+            track.locate_samples(&index.data, &mut candidate).unwrap();
+            assert_eq!(baseline, candidate);
+            for reference in [true, false, false, true, true, false] {
+                let start = Instant::now();
+                let mut samples = original.clone();
+                for _ in 0..512 {
+                    let result = if reference {
+                        locate_samples_reference(
+                            track,
+                            std::hint::black_box(&index.data),
+                            &mut samples,
+                        )
+                    } else {
+                        track.locate_samples(std::hint::black_box(&index.data), &mut samples)
+                    }
+                    .unwrap();
+                    std::hint::black_box(result);
+                    std::hint::black_box(&samples);
+                }
+                reports.push(serde_json::json!({"strategy":if reference{"prefix_per_packet"}else{"chunk_cursor"},"chunk":chunk,"packets_per_window":samples.len(),"iterations":512,"elapsed_ms":start.elapsed().as_secs_f64()*1000.0}));
+            }
+        }
+        println!(
+            "{}",
+            serde_json::json!({"scope":"Rust offset planning only; moov/index warm; no source payload IO, network, browser or NAS claim","moov_bytes":index.data.len(),"results":reports})
+        );
+    }
 
     #[test]
     fn variable_packet_durations_resolve_fragment_local_roll_descriptions() {
@@ -1458,31 +1766,70 @@ mod tests {
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn concurrent_native_windows_share_one_index_without_a_preparation_worker() {
+        for sessions in [4, 8, 16] {
+            let native = Arc::new(NativeAudio::default());
+            let mut tasks = tokio::task::JoinSet::new();
+            for n in 0..sessions {
+                let native = native.clone();
+                tasks.spawn(async move {
+                    let response = native
+                        .serve(
+                            opened().await,
+                            if n % 2 == 0 { 2 } else { 3 },
+                            n % 2,
+                            &Request::new(()),
+                        )
+                        .await
+                        .unwrap();
+                    let mut body = response.into_body();
+                    let mut total = 0;
+                    while let Some(frame) = body.frame().await {
+                        let data = frame.unwrap().into_data().unwrap();
+                        assert!(data.len() <= BLOCK);
+                        total += data.len();
+                    }
+                    assert!(total > 0);
+                });
+            }
+            while let Some(result) = tasks.join_next().await {
+                result.unwrap();
+            }
+            assert_eq!(native.cache.lock().await.len(), 1);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn malformed_concurrent_requests_do_not_poison_the_native_index_service() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("invalid.mp4"), b"not an MP4").unwrap();
         let native = Arc::new(NativeAudio::default());
         let mut tasks = tokio::task::JoinSet::new();
-        for n in 0..8 {
+        for _ in 0..16 {
             let native = native.clone();
+            let root = temp.path().to_owned();
             tasks.spawn(async move {
-                let response = native
-                    .serve(
-                        opened().await,
-                        if n % 2 == 0 { 2 } else { 3 },
-                        n % 2,
-                        &Request::new(()),
-                    )
+                let source = OpenedFile::open_in_root(&root, Path::new("invalid.mp4"))
                     .await
                     .unwrap();
-                let mut body = response.into_body();
-                let mut total = 0;
-                while let Some(frame) = body.frame().await {
-                    total += frame.unwrap().into_data().unwrap().len();
-                }
-                assert!(total > 0);
+                assert!(native.serve(source, 2, 0, &Request::new(())).await.is_err());
             });
         }
         while let Some(result) = tasks.join_next().await {
             result.unwrap();
         }
-        assert_eq!(native.cache.lock().await.len(), 1);
+        assert!(native.cache.lock().await.is_empty());
+        let response = native
+            .serve(opened().await, 2, 0, &Request::new(()))
+            .await
+            .unwrap();
+        assert!(
+            !response
+                .into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .is_empty()
+        );
     }
 }

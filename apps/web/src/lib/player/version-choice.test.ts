@@ -6,4 +6,5 @@ describe('automatic available version',()=>{
  it('chooses the highest compatible resolution and ignores disconnected Nodes',()=>{const hd=version('hd',1920,1080),uhd=version('uhd',3840,2160);expect(bestVersion([hd,uhd],()=> 'probably')?.id).toBe('uhd');uhd.nodeStatus='disconnected';expect(bestVersion([hd,uhd],()=> 'probably')?.id).toBe('hd');});
  it('excludes a codec the browser explicitly rejects',()=>{const hd=version('hd',1920,1080),uhd=version('uhd',3840,2160,'hevc');expect(bestVersion([uhd,hd],mime=>mime.includes('hvc1')?'':'probably')?.id).toBe('hd');});
  it('returns no declared compatible source instead of claiming direct play',()=>{expect(bestVersion([version('hd',1920,1080)],()=> '')).toBeUndefined();});
+ it('prefers the higher-scored Node copy when resolution and transport match',()=>{const n1=version('node-slow',3840,2160),n2=version('node-fast',3840,2160);n1.score=9500;n2.score=11500;expect(bestVersion([n1,n2],()=> 'probably')?.id).toBe('node-fast');});
 });

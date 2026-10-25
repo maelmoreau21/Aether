@@ -4,7 +4,7 @@ function installStreamingObserver() {
   let context, active, previousPoll = performance.now();
   const trials = [], events = [];
   function begin(kind, details = {}) {
-    active = {kind, start: performance.now(), observedSilenceMs: 0, maxVideoFrameGapMs: 0, ...details};
+    active = {kind, start: performance.now(), startEpochMs:performance.timeOrigin+performance.now(), observedSilenceMs: 0, maxVideoFrameGapMs: 0, ...details};
     const v = document.querySelector('dialog[open] video');
     active.positionBefore = v?.currentTime;
     active.audioTrackBefore = [...document.querySelectorAll('audio[data-external-audio]')].find(a=>!a.paused)?.dataset.internalAudioTrack;
@@ -79,15 +79,23 @@ function installStreamingObserver() {
     const playing=audios.filter(a=>!a.paused&&!a.muted),selected=playing.find(a=>!active.track||a.dataset.internalAudioTrack===active.track);
     const samples=playing.map(a=>({element:a,...signal(a)}));
     const audible=samples.some(s=>s.rms>1e-4);
+    if(audible&&active.firstAnyPcmMs===undefined)active.firstAnyPcmMs=now-active.start;
     if(active.kind==='switch'&&!audible)active.observedSilenceMs+=delta;
     let candidate=selected?{element:selected,...signal(selected)}:null;
     if(!audios.length&&!v.muted&&!v.paused)candidate={element:v,...signal(v)};
-    if(!candidate||active.firstAudioMs!==undefined||candidate.rms<=1e-4)return;
+    if(!candidate||candidate.rms<=1e-4)return;
     const e=candidate.element;
+    const targetSignal=active.kind!=='switch'||(active.track==='internal-2'?candidate.hz>950&&candidate.hz<1150:candidate.hz>400&&candidate.hz<900);
+    if(targetSignal&&active.firstRawPcmMs===undefined){
+      active.firstRawPcmMs=now-active.start;
+      active.initialPcm={signedDriftSeconds:e.currentTime-v.currentTime,videoPosition:v.currentTime,audioPosition:e.currentTime,videoPaused:v.paused,videoSeeking:v.seeking,hz:candidate.hz,rms:candidate.rms};
+    }
+    if(targetSignal&&active.firstRawPcmMs!==undefined&&now-active.start-active.firstRawPcmMs<1000){active.initialDriftSamples??=[];if(active.initialDriftSamples.length<128)active.initialDriftSamples.push({atMs:now-active.start,signedSeconds:e.currentTime-v.currentTime,videoPaused:v.paused,seeking:v.seeking});}
+    if(active.firstAudioMs!==undefined)return;
     if(Math.abs(e.currentTime-v.currentTime)>.15||v.paused||v.seeking)return;
     if(active.kind==='seek'&&Math.abs(v.currentTime-active.target)>.3)return;
     if(active.expectedResumeTime!==undefined&&Math.abs(v.currentTime-active.expectedResumeTime)>.5)return;
-    if(active.kind==='switch'&&!(active.track==='internal-2'?candidate.hz>950&&candidate.hz<1150:candidate.hz>400&&candidate.hz<900))return;
+    if(!targetSignal)return;
     active.firstAudioMs=now-active.start;active.audioSignal={hz:candidate.hz,db:candidate.db,rms:candidate.rms};active.driftSeconds=Math.abs(e.currentTime-v.currentTime);
   },8);
 }

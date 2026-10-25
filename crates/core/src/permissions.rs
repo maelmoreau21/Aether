@@ -57,10 +57,27 @@ pub async fn require_media(
             _ => "",
         };
         if library.is_empty() {
-            match crate::inventory::resource_library(&state.auth.store, "work", id).await {
+            let direct_ok = match crate::inventory::resource_library(&state.auth.store, "work", id)
+                .await
+            {
                 Ok(Some(library)) => visible.iter().any(|v| v == &library),
                 Ok(None) => false,
                 Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+            };
+            if direct_ok {
+                true
+            } else {
+                match crate::consolidation::authorized_group_members(
+                    &state.auth.store,
+                    id,
+                    Some(&identity.user.id),
+                    Some(identity.user.role.as_str()),
+                )
+                .await
+                {
+                    Ok(members) => !members.is_empty(),
+                    Err(_) => false,
+                }
             }
         } else {
             visible.iter().any(|v| v == library)

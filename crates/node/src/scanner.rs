@@ -63,7 +63,7 @@ impl FolderVideos {
             }
             if p.extension().and_then(|s| s.to_str()).is_some_and(|s| {
                 [
-                    "mkv", "mp4", "webm", "opus", "ogg", "srt", "vtt", "ass", "ssa",
+                    "mkv", "mp4", "webm", "m4v", "mov", "opus", "ogg", "srt", "vtt", "ass", "ssa",
                 ]
                 .iter()
                 .any(|e| s.eq_ignore_ascii_case(e))
@@ -77,6 +77,8 @@ impl FolderVideos {
                 s.eq_ignore_ascii_case("mkv")
                     || s.eq_ignore_ascii_case("mp4")
                     || s.eq_ignore_ascii_case("webm")
+                    || s.eq_ignore_ascii_case("m4v")
+                    || s.eq_ignore_ascii_case("mov")
             }) {
                 let relative = p
                     .strip_prefix(root)
@@ -203,6 +205,39 @@ fn metadata_name(name: &str) -> (String, Option<u16>, BTreeMap<String, String>) 
     )
 }
 
+pub(crate) fn is_generic_video_stem(stem: &str) -> bool {
+    let s = stem.trim().to_ascii_lowercase();
+    if matches!(
+        s.as_str(),
+        "movie"
+            | "film"
+            | "video"
+            | "main"
+            | "feature"
+            | "featurette"
+            | "play"
+            | "default"
+            | "untitled"
+            | "complete"
+    ) {
+        return true;
+    }
+    if s.chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, '.' | ' ' | '_' | '-'))
+    {
+        return true;
+    }
+    for prefix in ["cd", "part", "pt", "disc", "disk", "dvd"] {
+        if let Some(rem) = s.strip_prefix(prefix) {
+            let rem = rem.trim_start_matches(['.', ' ', '_', '-']);
+            if !rem.is_empty() && rem.chars().all(|c| c.is_ascii_digit()) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub(crate) fn identity(relative: &Path) -> (String, Option<u16>, BTreeMap<String, String>, String) {
     let stem = relative
         .file_stem()
@@ -222,21 +257,51 @@ pub(crate) fn identity(relative: &Path) -> (String, Option<u16>, BTreeMap<String
                 .is_some_and(|file_year| year.is_some_and(|folder_year| folder_year != file_year))
             || (parsed_file.1.is_some() && !parsed_file.0.eq_ignore_ascii_case(title))
     });
-    let (title, year, ids, group) = match parsed_folder {
-        Some((title, year, ids)) if !conflict && (year.is_some() || !ids.is_empty()) => (
-            title,
-            year,
-            ids,
-            format!(
-                "folder:{}",
-                parent.unwrap_or(Path::new("")).to_string_lossy()
-            ),
-        ),
-        _ => {
-            let (t, y, ids) = parsed_file;
-            (t, y, ids, format!("file:{}", relative.to_string_lossy()))
+
+    let use_folder = match &parsed_folder {
+        Some((folder_title, folder_year, folder_ids)) if !conflict => {
+            let f_lower = folder_title.to_ascii_lowercase();
+            let p_lower = parsed_file.0.to_ascii_lowercase();
+            folder_year.is_some()
+                || !folder_ids.is_empty()
+                || is_generic_video_stem(stem)
+                || parsed_file.0.eq_ignore_ascii_case("untitled")
+                || f_lower == p_lower
+                || (!f_lower.is_empty()
+                    && (p_lower.starts_with(&f_lower) || f_lower.starts_with(&p_lower)))
         }
+        _ => false,
     };
+
+    let (title, year, ids, group) = if use_folder {
+        let (folder_title, folder_year, folder_ids) = parsed_folder.unwrap();
+        let year = folder_year.or(parsed_file.1);
+        let mut merged_ids = folder_ids;
+        for (k, v) in parsed_file.2 {
+            merged_ids.entry(k).or_insert(v);
+        }
+        let title = if is_generic_video_stem(stem)
+            || parsed_file.0.eq_ignore_ascii_case("untitled")
+            || !folder_title.is_empty()
+        {
+            folder_title
+        } else {
+            parsed_file.0
+        };
+        let group = format!(
+            "folder:{}",
+            parent
+                .unwrap_or(Path::new(""))
+                .to_string_lossy()
+                .replace('\\', "/")
+        );
+        (title, year, merged_ids, group)
+    } else {
+        let (t, y, ids) = parsed_file;
+        let group = format!("file:{}", relative.to_string_lossy().replace('\\', "/"));
+        (t, y, ids, group)
+    };
+
     let key = ["tmdb", "imdb", "tvdb"]
         .iter()
         .find_map(|p| ids.get(*p).map(|v| format!("{p}:{v}")))
@@ -557,7 +622,57 @@ pub fn parse_series_episode(relative: &Path) -> Option<ParsedSeriesEpisode> {
         });
     }
 
-    None
+    // 4. Filename provides episode number directly (e.g. "01 - Pilot" or "1. Currahee")
+    if let Some((e, remaining_title)) = extract_episode_from_filename(stem) {
+        let s = season_from_parent.unwrap_or(1);
+        let ep_title = remaining_title.unwrap_or_else(|| format!("S{:02}E{:02}", s, e));
+        return Some(ParsedSeriesEpisode {
+            series_dir,
+            series_raw_title,
+            series_year,
+            series_external_ids,
+            series_identity_key,
+            season_number: s,
+            episode_number: e,
+            episode_title: ep_title,
+        });
+    }
+
+    // 5. Standalone video file in a folder (e.g. a movie or single episode in a folder)
+    if components.len() >= 2 {
+        let (file_title, _, _) = metadata_name(stem);
+        let ep_title =
+            if is_generic_video_stem(stem) || file_title.eq_ignore_ascii_case(&series_raw_title) {
+                series_raw_title.clone()
+            } else {
+                file_title
+            };
+        let s = season_from_parent.unwrap_or(1);
+        return Some(ParsedSeriesEpisode {
+            series_dir,
+            series_raw_title,
+            series_year,
+            series_external_ids,
+            series_identity_key,
+            season_number: s,
+            episode_number: 1,
+            episode_title: ep_title,
+        });
+    }
+
+    // 6. Direct root video file in a series library
+    let (file_title, file_year, file_ids) = metadata_name(stem);
+    let ep_title = file_title.clone();
+    Some(ParsedSeriesEpisode {
+        series_dir,
+        series_raw_title: file_title,
+        series_year: file_year,
+        series_external_ids: file_ids,
+        series_identity_key: format!("file:{}", relative.to_string_lossy().replace('\\', "/")),
+        season_number: 1,
+        episode_number: 1,
+        episode_title: ep_title,
+    })
 }
 
 const MAX_FOLDER_CACHE: usize = 128;
@@ -766,7 +881,9 @@ where
             });
             continue;
         }
-        if !metadata.is_file() || !matches!(extension.as_str(), "mkv" | "mp4" | "webm") {
+        if !metadata.is_file()
+            || !matches!(extension.as_str(), "mkv" | "mp4" | "webm" | "m4v" | "mov")
+        {
             continue;
         }
         report.discovered += 1;
@@ -961,7 +1078,7 @@ where
                 external_ids: BTreeMap::new(),
                 probe,
                 mime: match extension.as_str() {
-                    "mp4" => "video/mp4",
+                    "mp4" | "m4v" | "mov" => "video/mp4",
                     "webm" => "video/webm",
                     _ => "video/x-matroska",
                 }
@@ -1015,7 +1132,7 @@ where
                 external_ids,
                 probe,
                 mime: match extension.as_str() {
-                    "mp4" => "video/mp4",
+                    "mp4" | "m4v" | "mov" => "video/mp4",
                     "webm" => "video/webm",
                     _ => "video/x-matroska",
                 }
@@ -1587,5 +1704,79 @@ mod tests {
         assert_eq!(report.discovered, 1);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].title, "Valid");
+    }
+
+    #[test]
+    fn identity_handles_movies_in_folders_with_and_without_years() {
+        // 1. Generic filename inside a folder without year
+        let (title, year, ids, group) = identity(Path::new("Inception/movie.mkv"));
+        assert_eq!(title, "Inception");
+        assert_eq!(year, None);
+        assert!(ids.is_empty());
+        assert_eq!(group, "folder:Inception");
+
+        // 2. Matching filename inside a folder without year
+        let (title, year, _ids, group) = identity(Path::new("Inception/Inception.mkv"));
+        assert_eq!(title, "Inception");
+        assert_eq!(year, None);
+        assert_eq!(group, "folder:Inception");
+
+        // 3. Multi-part movie in folder without year
+        let (t1, _, _, g1) = identity(Path::new("Fight Club/cd1.mkv"));
+        let (t2, _, _, g2) = identity(Path::new("Fight Club/cd2.mkv"));
+        assert_eq!(t1, "Fight Club");
+        assert_eq!(t2, "Fight Club");
+        assert_eq!(g1, "folder:Fight Club");
+        assert_eq!(g2, "folder:Fight Club");
+
+        // 4. Movie in folder with year in folder name
+        let (title, year, _, group) = identity(Path::new("Inception (2010)/movie.mkv"));
+        assert_eq!(title, "Inception");
+        assert_eq!(year, Some(2010));
+        assert_eq!(group, "folder:Inception (2010)");
+
+        // 5. Direct root movie file
+        let (title, year, _, group) = identity(Path::new("Interstellar.mkv"));
+        assert_eq!(title, "Interstellar");
+        assert_eq!(year, None);
+        assert_eq!(group, "file:Interstellar.mkv");
+
+        // 6. Generic category folder with distinct movies
+        let (t1, _, _, g1) = identity(Path::new("Action/Matrix.mkv"));
+        let (t2, _, _, g2) = identity(Path::new("Action/Die Hard.mkv"));
+        assert_eq!(t1, "Matrix");
+        assert_eq!(t2, "Die Hard");
+        assert_eq!(g1, "file:Action/Matrix.mkv");
+        assert_eq!(g2, "file:Action/Die Hard.mkv");
+    }
+
+    #[test]
+    fn parse_series_episode_fallback_for_movies_and_non_standard_folders() {
+        // 1. Movie folder inside a series library
+        let parsed = parse_series_episode(Path::new("El Camino/El Camino.mkv")).unwrap();
+        assert_eq!(parsed.series_raw_title, "El Camino");
+        assert_eq!(parsed.season_number, 1);
+        assert_eq!(parsed.episode_number, 1);
+        assert_eq!(parsed.episode_title, "El Camino");
+
+        // 2. Generic movie filename inside a folder
+        let parsed = parse_series_episode(Path::new("Special Show/movie.mp4")).unwrap();
+        assert_eq!(parsed.series_raw_title, "Special Show");
+        assert_eq!(parsed.season_number, 1);
+        assert_eq!(parsed.episode_number, 1);
+        assert_eq!(parsed.episode_title, "Special Show");
+
+        // 3. Numbered episodes without "Season" folder or SxxExx
+        let parsed = parse_series_episode(Path::new("Band of Brothers/01 - Currahee.mkv")).unwrap();
+        assert_eq!(parsed.series_raw_title, "Band of Brothers");
+        assert_eq!(parsed.season_number, 1);
+        assert_eq!(parsed.episode_number, 1);
+        assert_eq!(parsed.episode_title, "Currahee");
+
+        // 4. Standard SxxExx pattern still works
+        let parsed = parse_series_episode(Path::new("Breaking Bad/Season 1/S01E02.mkv")).unwrap();
+        assert_eq!(parsed.series_raw_title, "Breaking Bad");
+        assert_eq!(parsed.season_number, 1);
+        assert_eq!(parsed.episode_number, 2);
     }
 }

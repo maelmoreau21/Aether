@@ -1,0 +1,417 @@
+{
+  "scope": "One exploratory Release4 cold-app+warm trial; 8 openings,16 switches,32 seeks. No UI p99, NAS or physical remote proof. Source changed after compilation: artifact hashes authoritative; observed HEAD is not build attestation.",
+  "passed": true,
+  "browser": "155.0.8059.86",
+  "artifactHashes": {
+    "aether-node.exe": {
+      "bytes": 3600384,
+      "sha256": "44a51e1f7b52a313924405a53535efb7e9f22308bfefc7bddba48bcf16eca759"
+    },
+    "media-poc.exe": {
+      "bytes": 14992384,
+      "sha256": "fef1cc43b29057454da23991235768e92ef24a0cac82227c2c3bfb9d849d01fe"
+    }
+  },
+  "reportSha256": "2d9eb40b55d82be0c1fd57a0103f81fb27ed3acee4c5bbabf45644e93ddfb706",
+  "artifactsUnchanged": true,
+  "cells": [
+    {
+      "phase": "cold-app-preparation",
+      "passed": true,
+      "errors": 0,
+      "node": {
+        "cpuUser100ns": 1718750,
+        "cpuKernel100ns": 5000000,
+        "parentCpuUser100ns": 1718750,
+        "parentCpuKernel100ns": 5000000,
+        "readTransferBytes": 226962555,
+        "writeTransferBytes": 9586,
+        "otherTransferBytes": 201104,
+        "parentReadTransferBytes": 226962555,
+        "parentWriteTransferBytes": 9586,
+        "processesCreated": 0,
+        "cpuMs": 671.875,
+        "parentCpuMs": 671.875,
+        "descendantCpuMs": 0,
+        "rssBeforeBytes": 14364672,
+        "rssAfterBytes": 22265856,
+        "peakObservedRssBytes": 22499328,
+        "rssSamples": 27,
+        "maxRssSampleGapMs": 911
+      },
+      "core": {
+        "cpuUser100ns": 3750000,
+        "cpuKernel100ns": 3125000,
+        "parentCpuUser100ns": 3750000,
+        "parentCpuKernel100ns": 3125000,
+        "readTransferBytes": 5195468,
+        "writeTransferBytes": 270249,
+        "otherTransferBytes": 251288,
+        "parentReadTransferBytes": 5195468,
+        "parentWriteTransferBytes": 270249,
+        "processesCreated": 0,
+        "cpuMs": 687.5,
+        "parentCpuMs": 687.5,
+        "descendantCpuMs": 0,
+        "rssBeforeBytes": 41402368,
+        "rssAfterBytes": 43839488,
+        "peakObservedRssBytes": 43839488,
+        "rssSamples": 27,
+        "maxRssSampleGapMs": 957
+      },
+      "cache": {
+        "beforeBytes": 0,
+        "afterBytes": 0,
+        "newFiles": []
+      }
+    },
+    {
+      "phase": "warm-server-new-browser",
+      "passed": true,
+      "errors": 0,
+      "node": {
+        "cpuUser100ns": 2031250,
+        "cpuKernel100ns": 6406250,
+        "parentCpuUser100ns": 2031250,
+        "parentCpuKernel100ns": 6406250,
+        "readTransferBytes": 228842448,
+        "writeTransferBytes": 9597,
+        "otherTransferBytes": 198772,
+        "parentReadTransferBytes": 228842448,
+        "parentWriteTransferBytes": 9597,
+        "processesCreated": 0,
+        "cpuMs": 843.75,
+        "parentCpuMs": 843.75,
+        "descendantCpuMs": 0,
+        "rssBeforeBytes": 19963904,
+        "rssAfterBytes": 22532096,
+        "peakObservedRssBytes": 22814720,
+        "rssSamples": 26,
+        "maxRssSampleGapMs": 508
+      },
+      "core": {
+        "cpuUser100ns": 3125000,
+        "cpuKernel100ns": 3437500,
+        "parentCpuUser100ns": 3125000,
+        "parentCpuKernel100ns": 3437500,
+        "readTransferBytes": 7527431,
+        "writeTransferBytes": 224925,
+        "otherTransferBytes": 500239,
+        "parentReadTransferBytes": 7478417,
+        "parentWriteTransferBytes": 224925,
+        "processesCreated": 0,
+        "cpuMs": 656.25,
+        "parentCpuMs": 656.25,
+        "descendantCpuMs": 0,
+        "rssBeforeBytes": 40566784,
+        "rssAfterBytes": 41152512,
+        "peakObservedRssBytes": 42897408,
+        "rssSamples": 26,
+        "maxRssSampleGapMs": 453
+      },
+      "cache": {
+        "beforeBytes": 0,
+        "afterBytes": 0,
+        "newFiles": []
+      }
+    }
+  ],
+  "latency": {
+    "4-cold-app-preparation": {
+      "runs": 1,
+      "sessionAttempts": 4,
+      "sessionObservations": 4,
+      "failures": 0,
+      "openingOutcomes": {
+        "attempts": 4,
+        "trajectoryFailures": 0,
+        "timeouts": 0,
+        "metrics": {
+          "frame": {
+            "attempts": 4,
+            "observed": 4,
+            "unobserved": 0,
+            "observedOnly": {
+              "n": 4,
+              "min": 2665.2999999523163,
+              "median": 2667.7499999701977,
+              "p95": 2678.899999976158,
+              "p99": null,
+              "max": 2678.899999976158
+            },
+            "p95AllAttempts": {
+              "status": "insufficient-attempts",
+              "attempts": 4,
+              "minimum": 100
+            },
+            "p99AllAttempts": {
+              "status": "insufficient-attempts",
+              "attempts": 4,
+              "minimum": 100
+            }
+          },
+          "rawPcm": {
+            "attempts": 4,
+            "observed": 4,
+            "unobserved": 0,
+            "observedOnly": {
+              "n": 4,
+              "min": 2316.300000011921,
+              "median": 2472.649999976158,
+              "p95": 2607.5,
+              "p99": null,
+              "max": 2607.5
+            },
+            "p95AllAttempts": {
+              "status": "insufficient-attempts",
+              "attempts": 4,
+              "minimum": 100
+            },
+            "p99AllAttempts": {
+              "status": "insufficient-attempts",
+              "attempts": 4,
+              "minimum": 100
+            }
+          },
+          "alignedPcm": {
+            "attempts": 4,
+            "observed": 4,
+            "unobserved": 0,
+            "observedOnly": {
+              "n": 4,
+              "min": 2316.300000011921,
+              "median": 2472.649999976158,
+              "p95": 2607.5,
+              "p99": null,
+              "max": 2607.5
+            },
+            "p95AllAttempts": {
+              "status": "insufficient-attempts",
+              "attempts": 4,
+              "minimum": 100
+            },
+            "p99AllAttempts": {
+              "status": "insufficient-attempts",
+              "attempts": 4,
+              "minimum": 100
+            }
+          }
+        }
+      },
+      "clickToRawPcmMs": {
+        "n": 4,
+        "min": 2316.300000011921,
+        "median": 2472.649999976158,
+        "p95": 2607.5,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 2607.5
+      },
+      "initialSignedDriftSeconds": {
+        "n": 4,
+        "min": -0.008121,
+        "median": -0.0018375000000000006,
+        "p95": 0.018007000000000002,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 0.018007000000000002
+      },
+      "clickToFrameMs": {
+        "n": 4,
+        "min": 2665.2999999523163,
+        "median": 2667.7499999701977,
+        "p95": 2678.899999976158,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 2678.899999976158
+      },
+      "clickToPcmMs": {
+        "n": 4,
+        "min": 2316.300000011921,
+        "median": 2472.649999976158,
+        "p95": 2607.5,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 2607.5
+      },
+      "switchPcmMs": {
+        "n": 8,
+        "min": 135,
+        "median": 526.75,
+        "p95": 715.5,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 715.5
+      },
+      "seekFrameMs": {
+        "n": 16,
+        "min": 170.80000001192093,
+        "median": 266.69999998807907,
+        "p95": 468.19999998807907,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 468.19999998807907
+      },
+      "seekPcmMs": {
+        "n": 16,
+        "min": 245.89999997615814,
+        "median": 354.9500000178814,
+        "p95": 571.5999999642372,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 571.5999999642372
+      },
+      "preparedReopenFrameMs": null,
+      "preparedReopenPcmMs": null,
+      "preparedReopenPolicy": []
+    },
+    "4-warm-server-new-browser": {
+      "runs": 1,
+      "sessionAttempts": 4,
+      "sessionObservations": 4,
+      "failures": 0,
+      "openingOutcomes": {
+        "attempts": 4,
+        "trajectoryFailures": 0,
+        "timeouts": 0,
+        "metrics": {
+          "frame": {
+            "attempts": 4,
+            "observed": 4,
+            "unobserved": 0,
+            "observedOnly": {
+              "n": 4,
+              "min": 2151.399999976158,
+              "median": 2251.850000023842,
+              "p95": 2388.899999976158,
+              "p99": null,
+              "max": 2388.899999976158
+            },
+            "p95AllAttempts": {
+              "status": "insufficient-attempts",
+              "attempts": 4,
+              "minimum": 100
+            },
+            "p99AllAttempts": {
+              "status": "insufficient-attempts",
+              "attempts": 4,
+              "minimum": 100
+            }
+          },
+          "rawPcm": {
+            "attempts": 4,
+            "observed": 4,
+            "unobserved": 0,
+            "observedOnly": {
+              "n": 4,
+              "min": 2169.699999988079,
+              "median": 2375.3000000417233,
+              "p95": 2408.699999988079,
+              "p99": null,
+              "max": 2408.699999988079
+            },
+            "p95AllAttempts": {
+              "status": "insufficient-attempts",
+              "attempts": 4,
+              "minimum": 100
+            },
+            "p99AllAttempts": {
+              "status": "insufficient-attempts",
+              "attempts": 4,
+              "minimum": 100
+            }
+          },
+          "alignedPcm": {
+            "attempts": 4,
+            "observed": 4,
+            "unobserved": 0,
+            "observedOnly": {
+              "n": 4,
+              "min": 2169.699999988079,
+              "median": 2375.3000000417233,
+              "p95": 2408.699999988079,
+              "p99": null,
+              "max": 2408.699999988079
+            },
+            "p95AllAttempts": {
+              "status": "insufficient-attempts",
+              "attempts": 4,
+              "minimum": 100
+            },
+            "p99AllAttempts": {
+              "status": "insufficient-attempts",
+              "attempts": 4,
+              "minimum": 100
+            }
+          }
+        }
+      },
+      "clickToRawPcmMs": {
+        "n": 4,
+        "min": 2169.699999988079,
+        "median": 2375.3000000417233,
+        "p95": 2408.699999988079,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 2408.699999988079
+      },
+      "initialSignedDriftSeconds": {
+        "n": 4,
+        "min": 0.0010740000000000194,
+        "median": 0.003813999999999984,
+        "p95": 0.00720500000000035,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 0.00720500000000035
+      },
+      "clickToFrameMs": {
+        "n": 4,
+        "min": 2151.399999976158,
+        "median": 2251.850000023842,
+        "p95": 2388.899999976158,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 2388.899999976158
+      },
+      "clickToPcmMs": {
+        "n": 4,
+        "min": 2169.699999988079,
+        "median": 2375.3000000417233,
+        "p95": 2408.699999988079,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 2408.699999988079
+      },
+      "switchPcmMs": {
+        "n": 8,
+        "min": 76.59999996423721,
+        "median": 215.4500000178814,
+        "p95": 331.69999998807907,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 331.69999998807907
+      },
+      "seekFrameMs": {
+        "n": 16,
+        "min": 91.09999996423721,
+        "median": 232.10000002384186,
+        "p95": 342.10000002384186,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 342.10000002384186
+      },
+      "seekPcmMs": {
+        "n": 16,
+        "min": 125.59999996423721,
+        "median": 293.84999999403954,
+        "p95": 448.39999997615814,
+        "p99": null,
+        "p99Scope": "not estimated: fewer than 100 samples",
+        "max": 448.39999997615814
+      },
+      "preparedReopenFrameMs": null,
+      "preparedReopenPcmMs": null,
+      "preparedReopenPolicy": []
+    }
+  }
+}

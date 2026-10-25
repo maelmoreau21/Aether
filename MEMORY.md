@@ -1,5 +1,259 @@
 # MEMORY.md — État et décisions Aether
 
+## 25 octobre 2026 — Correction des tests d'intégration CI Shards 1 et 2 (Preemption Playback et Multi-Folder Scan)
+
+- **Problèmes résolus** :
+  1. **Shard 2 (`scanner_performance.rs`)** :
+     - Le test `test_concurrent_playback_and_catalog_navigation_during_scan` échouait en CI avec `Scan stopped or preempted for playback`.
+     - *Cause* : Le middleware `local_stream_priority` dans `crates/core/src/lib.rs` annulait sans distinction tous les scans en cours (`cancel.store(true)`) dès qu'une requête HTTP contenait `/content`. Or, pour le Direct Play de médias locaux sur `/content`, le préchauffage ou préemption brutale de scan n'est requis que pour les transcodages lourds en arrière-plan (`/prepared/` et `/audio/`), pas pour les simples lectures Range directes.
+     - *Correction* : Seules les requêtes vers `/prepared/` et `/audio/` déclenchent la préemption et l'attente d'annulation de scans.
+  2. **Shard 1 (`scanner_flow.rs`)** :
+     - Le test `grouped_folders_scan_filter_stream_and_remove` échouait avec `assertion left == right failed: left: Number(1), right: 2`.
+     - *Causes* :
+       - `task_engine::enqueue_spec` et `task_engine::claim` n'autorisaient pas les bibliothèques virtuelles/dossiers enfants (`library_folders`) car la clause SQL vérifiait strictement `l.enabled=1` sur l'ID enfant, alors que les dossiers enfants ont leur activation liée à `library_folders.active=1` et `parent.enabled=1`.
+       - De plus, en test in-process (sans scheduler loop d'arrière-plan démarré), après le scan du premier dossier, `scans::status` ne consultait que `scan_jobs` sans vérifier les tâches résiduelles dans `durable_tasks`, ce qui renvoyait `status: "completed"` de manière prématurée avant le traitement du deuxième dossier.
+     - *Correction* :
+       - Dans `crates/core/src/task_engine.rs` (`enqueue_spec` et `claim`) et `crates/core/src/scans.rs` (`enqueue_one`), autorisation des dossiers enfants rattachés via `(l.enabled=1 OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))`.
+       - Dans `crates/core/src/scans.rs` (`status`), vérification de l'existence de tâches résiduelles dans `durable_tasks` pour la bibliothèque ou ses sous-dossiers. Si une tâche est `queued` ou `running`, le statut reste `queued`/`running` et un tour de `dispatch_once` est déclenché pour pomper la file.
+- **Validation** :
+  - `cargo test -p media-poc --test scanner_flow` : 3/3 réussis.
+  - `cargo test -p media-poc --test scanner_performance -- test_concurrent_playback_and_catalog_navigation_during_scan` : 1/1 réussi.
+  - `cargo fmt --check` : conforme.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement, 0 erreur.
+
+## 24 octobre 2026 — Reconnaissance et affichage des films et vidéos dans des dossiers
+
+- **Problème résolu** :
+  - Lorsqu'un utilisateur organisait ses films dans des sous-dossiers (ex. `Inception/movie.mkv`, `Film/film.mp4`, `Avatar/cd1.mkv`, ou dossiers sans mention de l'année `(YYYY)` ni identifiant externe `[tmdb-...]`), ou plaçait un dossier de film dans une bibliothèque de type séries :
+    1. Dans les bibliothèques de films, `identity(relative)` ignorait le nom du dossier si celui-ci n'avait pas d'année entre parenthèses ou d'identifiant externe. Si le fichier vidéo s'appelait `movie.mkv`, `film.mp4`, `cd1.mkv` ou `video.mkv`, le film était nommé « movie » ou « cd1 », n'était pas associé au dossier et devenait introuvable sous son vrai nom dans l'interface.
+    2. Dans les bibliothèques de séries, `parse_series_episode(relative)` rejetait avec un avertissement tout fichier ne respectant pas les schémas stricts `SxxExx` ou `1x01` ou `Season \d+`, causant l'exclusion totale du film ou de l'épisode du scan et son absence complète de l'interface.
+    3. Les extensions de conteneurs MP4 courantes `.m4v` et `.mov` étaient ignorées par le scanner.
+- **Modifications apportées** :
+  - `crates/node/src/scanner.rs` :
+    - `is_generic_video_stem` : Détection des noms de fichiers génériques (`movie`, `film`, `video`, `main`, `feature`, `play`, `complete`, numéros de CD/Part/Disc, chiffres seuls `01`, `1`, etc.).
+    - `identity` : Utilisation intelligente du dossier parent pour nommer et regrouper l'œuvre (`folder:...`) même en l'absence d'année ou d'ID externe si le nom du fichier est générique, commence par le nom du dossier, ou correspond au titre du dossier. Normalisation des séparateurs sous Windows (`\`) vers `/` pour la clé d'identité.
+    - `parse_series_episode` : Prise en charge des dossiers de films ou vidéos autonomes placés dans une bibliothèque de séries comme S01E01 sous le titre du dossier/fichier, et détection des numéros d'épisodes en préfixe direct (`01 - Currahee`), garantissant que le média apparaît toujours dans le catalogue et est lisible.
+    - Prise en charge des extensions MP4 `.m4v` et `.mov` en plus de `.mkv`, `.mp4` et `.webm`.
+    - Ajout de tests unitaires dédiés : `identity_handles_movies_in_folders_with_and_without_years` et `parse_series_episode_fallback_for_movies_and_non_standard_folders`.
+- **Validation** :
+  - `cargo test -p media-node` : 88 tests réussis, 0 échec (dont les 2 nouveaux tests unitaires).
+  - `cargo check --all-targets` : 0 avertissement, 0 erreur.
+  - `npm run check --prefix apps/web` : 0 erreur, 0 avertissement.
+  - `npm test --prefix apps/web` : 152 tests réussis, 0 échec.
+
+## 24 octobre 2026 — Ergonomie Catalogue & Fiche Média : Menu Options `...`, Modales Dédiées, Dropdown Saisons et Barre de Recherche
+
+- **Problèmes résolus** :
+  1. **Pollution visuelle de la fiche média** : Présence directe sur la fiche de détails d'un pavé technique (« Provenance : Indexation automatique / Ajouté le ... / Nœud source : local ») et répétition erronée « Média local indexéMédia local indexé » provenant de fallbacks non filtrés.
+  2. **Actions d'administration désordonnées** : Les boutons d'images `▧` et de modification des métadonnées (qui déroulait un grand `<details>` déformant toute la page) nuisaient à la propreté de l'interface.
+  3. **Menu déroulant de saisons disgracieux** : L'ancien `<select>` HTML brut de sélection de saison présentait un rendu natif OS désuet et peu soigné.
+  4. **Champ de recherche sans focus immédiat et loupe chevauchant le texte** :
+     - Accéder à `/search` ne focalisait pas immédiatement le champ de saisie texte.
+     - L'icône loupe SVG (`left: 14px`) chevauchait directement le début du texte saisi en raison d'une règle globale dans `tokens.css` dont la spécificité (`:not():not():not()`) écrasait le `padding-left` de l'input.
+- **Modifications apportées** :
+  - `crates/core/src/inventory.rs` :
+    - Remplacement de `.unwrap_or("Média local indexé")` par `.unwrap_or("")` pour le champ `description`, évitant toute injection de valeur factice lorsqu'aucun synopsis n'existe.
+  - `apps/web/src/lib/ui/Icon.svelte` :
+    - Ajout des icônes vectorielles SVG `more` (trois petits points `...`), `edit` (crayon), `image` (gestion d'images) et `copy` (copie d'identifiant).
+  - `apps/web/src/lib/catalog/WorkTools.svelte` :
+    - Remplacement des boutons disparates par un bouton moderne à trois petits points `...` avec dropdown contextuel flottant.
+    - Ajout d'une modale « **Informations média** » détaillée (Nœud source, statut connecté/hors-ligne, bibliothèque, identifiant copie avec bouton Copier, identité globale, provenance métadonnées, date d'ajout, classification, et specs techniques vidéo/audio/sous-titres/conteneur).
+    - Ajout d'une modale dédiée « **Modifier les métadonnées** » (réservée aux administrateurs) avec tous les champs éditoriaux et le regroupement multi-nœuds.
+    - Intégration soignée de la gestion d'images (`ImageManager`) et de la modale de playlists.
+  - `apps/web/src/lib/catalog/FilmDetail.svelte` & `apps/web/src/lib/catalog/SeriesDetail.svelte` :
+    - Suppression du bloc encombrant `.metadata-footer` (Provenance / Date d'ajout / Nœud source), désormais accessible via le menu `...` > « Informations média ».
+    - Filtrage des mentions factices « Média local indexé » ou « Média local » sur le synopsis et l'outline pour une présentation nette.
+    - Association des flux et specs techniques à `WorkTools` pour affichage dans la modale d'informations.
+  - `apps/web/src/lib/catalog/SeriesDetail.svelte` :
+    - Remplacement du `<select>` par un **sélecteur de saison custom moderne** inspiré des plateformes de streaming : bouton trigger avec saison active, compteur d'épisodes, chevron animé et menu popover sombre avec flou d'arrière-plan, coche de sélection et fermeture au clic/Échap.
+  - `apps/web/src/lib/catalog/CatalogGrid.svelte` & `Navbar.svelte` :
+    - Focus automatique immédiat sur le champ de recherche à l'arrivée sur `/search` (`onMount`, `$effect`, et clic sur la loupe dans la barre de navigation).
+    - Correction définitive du chevauchement de l'icône loupe grâce à `padding: 10px 42px 10px 48px !important;` et masquage des décorations Webkit natives.
+- **Validation** :
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web test` : 25 suites, 152 tests réussis.
+  - `cargo test -p media-poc --lib` : 57 tests réussis, 0 échec.
+
+## 24 octobre 2026 — Correction de l'erreur « Les sauvegardes sont indisponibles. Actualisez pour réessayer »
+
+- **Problème résolu** :
+  - Dans la vue d'administration des tâches (`AdminTasks.svelte`), la requête `GET /api/v1/admin/backups` rejetait la promesse et déclenchait l'alerte d'erreur : *"Les sauvegardes sont indisponibles. Actualisez pour réessayer."*.
+  - En backend (`crates/core/src/admin_backups.rs`), l'endpoint `list()` (`GET /api/v1/admin/backups`) utilisait `validate_directory(&state).await?` avec l'opérateur `?`, provoquant un arrêt immédiat en `409 Conflict` dès que le dossier de sauvegarde était inaccessible, relatif ou refusé par les politiques de sécurité (au lieu de retourner un statut HTTP 200 avec `{ available: false, reason: "..." }`).
+  - De plus, `safe_directory` échouait systématiquement sur les chemins relatifs car `directory.ancestors()` contenait le composant racine vide `""` (rejeté par `check_path_safety`), et `directory.parent()` retournait `""` pour lequel `is_dir()` renvoie `false`.
+  - Côté frontend (`AdminTasks.svelte`), le type `Backup` omettait le champ `reason`, et affichait un motif codé en dur erroné au lieu du motif réel fourni par l'API.
+- **Modifications apportées** :
+  - `crates/core/src/admin_backups.rs` :
+    - `safe_directory` : prise en compte des chemins relatifs (le parent vide `""` est résolu comme le dossier courant `.`) et filtrage des ancêtres vides dans `ancestors().filter(|p| !p.as_os_str().is_empty())`.
+    - `list()` : capture sécurisée de l'échec de validation de répertoire ; au lieu de renvoyer un code HTTP `409 Conflict`, l'API retourne HTTP 200 avec `available: false`, le motif explicite (`reason`) et une liste d'archives vide conformément au contrat d'API.
+  - `apps/web/src/lib/admin/AdminTasks.svelte` :
+    - Ajout de `reason?: string | null` dans l'interface `Backup`.
+    - Affichage de `backup.reason` lorsque les sauvegardes ne sont pas disponibles au lieu d'un message trompeur sur la clé de récupération.
+  - `crates/core/tests/admin_backups.rs` :
+    - Ajout du test d'intégration `backups_list_returns_unavailable_when_directory_refused` garantissant qu'un dossier refusé par la politique renvoie bien HTTP 200 avec `available: false` et un `reason` explicite.
+- **Validation** :
+  - `cargo test -p media-poc --test admin_backups` : 2 tests réussis.
+  - `cargo test -p media-poc --lib admin_backups` : 2 tests réussis.
+  - `cargo clippy -p media-poc --lib -- -D warnings` : 0 avertissement.
+  - `cargo fmt --check` : code formaté.
+  - `npm --prefix apps/web test` : 25 suites, 152 tests réussis.
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+
+## 24 octobre 2026 — Suppression définitive des droits de bibliothèques sur les plugins et correction des erreurs 400
+
+- **Problème résolu** :
+  - Lors de l'installation ou la configuration d'un plugin, une erreur HTTP 400 affichait le message hérité et trompeur : *"Vérifiez les champs et les droits sur les bibliothèques sélectionnées."*, vestige d'une ancienne fonction de restriction par bibliothèque qui devait être supprimée.
+  - La sélection de bibliothèques spécifiques pour les plugins de métadonnées était encore présente dans l'interface (`Utilisation : Toutes les bibliothèques / Certaines bibliothèques`, cases à cocher).
+- **Modifications apportées** :
+  - `apps/web/src/lib/admin/request.ts` :
+    - Remplacement du message d'erreur générique 400 par un message neutre (`Requête invalide. Vérifiez les paramètres saisis.`).
+    - Enregistrement des traductions explicites pour l'ensemble des codes d'erreurs de dépôts et de paquets (`incompatible_server_version`, `invalid_package_digest`, `invalid_package`, `catalogue_package_mismatch`, `invalid_public_key`, `invalid_signature`, `invalid_manifest`, `module_too_large`, `invalid_module`, `invalid_digest`, `incompatible_api`, `repository_https_public_host_required`, `repository_address_forbidden`, `repository_unavailable`, `extension_exists`, etc.).
+    - Affichage direct du code d'erreur serveur `detail.error` si aucun message spécifique n'est défini, empêchant tout masquage d'erreur.
+  - `apps/web/src/lib/admin/AdminExtensions.svelte` :
+    - Suppression complète des contrôles de sélection de bibliothèques pour les plugins (`libraries`, `selected`, `allLibraries`, sélecteur et cases à cocher).
+    - Les plugins sont désormais activés de manière globale sur l'ensemble de la médiathèque (`allLibraries: true`, `libraryIds: []`).
+    - Nettoyage des sélecteurs CSS inutilisés (`fieldset`, `legend`).
+- **Validation** :
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web test` : 25 suites, 152 tests réussis.
+  - `cargo check -p media-contracts -p media-node -p media-poc` : succès.
+
+
+## 24 octobre 2026 — Mission 1 : Plateforme multimédia multi-serveur (jusqu'à 100 Media Nodes)
+
+- **Architecture distribuée Core / Multi-Nodes (`crates/core/src/nodes.rs`, `crates/core/src/inventory.rs`, `crates/node/src/server.rs`)** :
+  - **Registre d'état chaud sans I/O (`NodeRuntimeRegistry`, `NodeRuntimeEntry`, `NodeRuntimeTelemetry`)** : conservé en mémoire Core (`std::sync::RwLock<HashMap<String, NodeRuntimeEntry>>`), alimenté par les heartbeats signés, les scans et les relais, éliminant tout appel HTTP ou requête SQLite séquentielle lors du choix de nœud.
+  - **Fonction de scoring pure O(1) (`score_node_entry`)** : évalue instantanément chaque candidat selon l'état (`connected` +10 000, `disconnected` -100 000, `revoked` -1 000 000), le mode d'acheminement (`local` +2 000, `direct` directUrl +1 500, `inbound` +800, `outbound` +500), la latence RTT mesurée (pénalité continue jusqu'à -1 000), la charge utile active (-120 par flux actif, -200 par scan), et les échecs consécutifs.
+  - **Télémétrie en temps réel des flux (`active_streams`)** : instrumentée côté Media Node via un compteur atomique RAII (`ActiveStreamGuard`, `track_stream_body`), synchronisée au Core dans `HeartbeatPayload`, avec vue d'administration étendue (`AdminNodeView` : `latencyMs`, `activeScans`, `activeStreams`, `indexedAssets`, `selectionScore`).
+  - **Sélection et basculement automatique mid-playback (`descriptor_for_user`, `ImmersivePlayer.svelte`)** :
+    - Résolution de toutes les copies sœurs autorisées (dossiers multi-emplacements, groupes de médias consolidés).
+    - Basculement automatique transparent vers la meilleure copie saine si le nœud primaire est déconnecté (`failoverFrom`), avec liste ordonnée `fallbackMediaIds`.
+    - Sauvegarde et reprise automatique de la progression de lecture (`workId` / `position`) côté client en cas de rupture de flux en direct, sans interruption visible de l'expérience utilisateur.
+- **Résultats des benchmarks et tests de montée en charge (`crates/core/tests/multi_node_scale_and_failover.rs`)** :
+  - **Sélection sur cache chaud (50 itérations par jalon, cible < 50 ms)** :
+    - **1 Nœud simulé** : p50 = `1,46 ms` | p95 = `4,80 ms` | max = `6,37 ms` | Pure score pass = `2,37 µs` | RSS = `25,2 MiB`.
+    - **10 Nœuds simulés** : p50 = `1,23 ms` | p95 = `2,16 ms` | max = `2,61 ms` | Pure score pass = `24,82 µs` | RSS = `26,0 MiB`.
+    - **100 Nœuds simulés** : p50 = `3,85 ms` | p95 = `7,43 ms` | max = `9,74 ms` (**< 10 ms**, très largement sous l'objectif de 50 ms) | Pure score pass = `491,23 µs` | RSS = `28,0 MiB`.
+  - **Basculement automatique dynamique sur 100 Nœuds** : `4,74 ms` lors de la déconnexion de `sim-node-001`, avec re-classement immédiat vers `sim-node-002` puis `sim-node-004` lors d'une surcharge à 25 flux actifs.
+  - **Test d'intégration réel multi-processus TCP (Core + 2 Nodes réels `node-primary` et `node-backup`)** :
+    - Scan multi-dossiers et déduplication catalogue vérifiés.
+    - Streaming direct `206 Partial Content` validé.
+    - Simulation de panne réseau / crash de `node-primary` : détection d'indisponibilité immédiate, basculement vers `node-backup`, reprise exacte de la progression à `42,5 s`.
+    - Concurrence validée : 50 sélections de descripteurs et 50 flux `Range` simultanés servis sans erreur.
+- **Validation qualité** :
+  - `cargo fmt --check` : succès.
+  - `cargo clippy -p media-contracts -p media-node -p media-poc -- -D warnings` : 0 avertissement.
+  - Tests unitaires frontend (`npm --prefix apps/web test`) : 25 fichiers, 152 tests réussis.
+  - Vérification de types Svelte (`npm --prefix apps/web run check`) : 0 erreur, 0 avertissement.
+
+## 24 octobre 2026 — Mission 2 : Catalogue multimédia global consolidé et passage à l'échelle 1 000 000 d'œuvres
+
+- **Modèle hiérarchique et consolidation inter-bibliothèques / inter-Nodes (`0043_global_catalogue_consolidation.sql`, `crates/core/src/consolidation.rs`)** :
+  - Séparation explicite de l'œuvre (`Work`), de l'édition éditoriale (`Edition`, via `inventory_edition_metadata` : `Édition locale`, `Director’s Cut`, `Version longue`, `Édition IMAX`, `Édition remastérisée`, `Édition spéciale`), de la version d'encodage/résolution/conteneur (`MediaVersion`, via `inventory_version_metadata` : ex. `1080p • H.264 • AAC • MP4`, `4K UHD • AV1 • 10-bit • OPUS • MKV`), de la source logique (`MediaSource`), du fichier physique (`Asset`) et des pistes (`Track`).
+  - Reconnaissance automatique des doublons à partir des identifiants externes fiables (`imdb`, `tmdb`, `tvdb`, `wikidata`, `eidr` indexés dans `media_work_external_ids`) lors des ingestions et publications de scans, sans jamais fusionner sur le seul titre.
+  - Détection des correspondances probables / ambiguïtés (`media_match_candidates`) avec score et motif explicite, validation manuelle (`POST /api/v1/admin/media-groups/candidates/{id}/confirm`), rejet persistant (`POST /api/v1/admin/media-groups/candidates/{id}/reject`), séparation d'une œuvre (`ungroup`) et annulation réversible (`POST /api/v1/admin/media-groups/merges/{id}/undo`) restaurée depuis `media_merge_history`.
+  - Unification des films, séries, saisons et épisodes dans `expand_detail` (`crates/core/src/product.rs`) et de la progression (`playback_progress`), des favoris/notes (`work_feedback`) et des listes personnelles sur l'ensemble des membres du groupe, tout en appliquant strictement les permissions de bibliothèques et le contrôle parental (`authorized_group_members`, `crates/core/src/permissions.rs`) et en préservant les métadonnées manuelles (`manual_json`) et affiches personnalisées.
+  - Interface d'administration et d'édition (`apps/web/src/lib/catalog/WorkTools.svelte`) enrichie pour regrouper films et séries, traiter les ambiguïtés candidates et annuler une fusion.
+- **Optimisations SQL et cache pour 100 000 et 1 000 000 d'œuvres (`crates/core/src/inventory.rs`, `docs/SQL_PERFORMANCE.md`)** :
+  - Colonnes de synthèse maintenues par triggers (`display_title_sort`, `effective_year`, `max_height`, `codecs_csv`, `languages_csv`, `genres_csv`, `has_available_asset`), jointure différée en 2 phases sur index couvrants (`inventory_works_lib_avail_sort`, `inventory_works_filter_sort`, `inventory_works_fts_sort`), recherche par trigrammes `FTS5` (`inventory_works_fts` avec `work_id UNINDEXED`) et compteur de génération `inventory_cache_generation` en O(1).
+  - Benchmarks mesurés (`cargo test --package media-poc --test global_catalogue_consolidation -- --nocapture`) :
+    - **1 000 œuvres** : Cold Page 1 (shelf) `31,93 ms` | Warm Cache `0,321 ms` | Cold Page 1 (+COUNT) `8,35 ms` | Cold Search (`'matrix'`) `4,67 ms` | Cold 5-Filter Combo `9,05 ms`.
+    - **10 000 œuvres** : Cold Page 1 (shelf) `9,41 ms` | Warm Cache `0,291 ms` | Cold Page 1 (+COUNT) `10,68 ms` | Cold Search (`'matrix'`) `9,34 ms` | Cold 5-Filter Combo `12,48 ms`.
+    - **100 000 œuvres** : Cold Page 1 (shelf) `7,06 ms` | Warm Cache `0,222 ms` | Cold Page 1 (+COUNT) `14,13 ms` | Cold Search (`'matrix'`) `5,50 ms` | Cold 5-Filter Combo `4,59 ms`.
+    - **1 000 000 d'œuvres** : Cold Page 1 (shelf) `6,41 ms` | Warm Cache `0,242 ms` | Cold Page 1 (+COUNT) `101,59 ms` | Cold Search (`'matrix'`) `39,56 ms` | Cold 5-Filter Combo `5,41 ms`.
+
+## 24 octobre 2026 — Mission streaming 3.2
+
+- Course audio reproduite dans Chrome : seek 900 s en attente puis seek 2 s
+  ignoré. Un seek explicite remplace désormais le précédent : 4/4 échecs avant,
+  12/12 essais après avec les mêmes paquets Rust et le même retard réseau.
+  Web : 151 tests, check et build réussis ; lint lecteur ciblé réussi.
+- Native Opus : offsets calculés par curseur de chunk, historique de pré-roll
+  variable conservé ; garde d'indexation maintenue dans le travail bloquant
+  malgré annulation HTTP. Admission froide limitée à 64, attente 10 s ; hits
+  chauds exemptés. Relais Core limité à 64 en-têtes en attente et purge des
+  receivers annulés. Les processus vidéo progressifs restent plafonnés à quatre.
+- Linux Docker : natif final 11 tests réussis (dont 4/8/16 requêtes, annulation,
+  limite 64 et Range), autres modules vidéo/confinement/stream 15 réussis.
+  Trois générations de fixtures échouent avec le FFmpeg sans encodeurs du
+  conteneur ; conserver cette limite. Ce ne sont pas 16 lectures navigateur.
+- Instrumentation d'allocations séparée dans l'exemple streaming_allocations ;
+  harnais distingue PCM brut/aligné, dérive initiale et échecs sans censure.
+  Aucune promesse p95/p99 Release ou NAS sans campagne réellement terminée.
+  État, commandes et preuves : docs/STREAMING_MISSION_3_2.md.
+- Clôture Release : quatre sessions simultanées, un lot froid applicatif puis
+  un lot serveur chaud/nouveaux navigateurs : 8 ouvertures, 16 changements de
+  piste et 32 seeks réussis, aucune erreur dans ce seul essai. À chaud : médiane
+  première image 2252 ms, PCM brut 2375 ms, changement 215 ms, seek image 232 ms.
+  Objectifs 50/100 ms non atteints ; pas de p95/p99 fiable, ni validation de
+  8/16 lecteurs, NAS ou Node physique distant. Node : pic RSS observé ~22 MiB,
+  aucun processus FFmpeg ni fichier cache créé sur ce parcours natif.
+  CPU Node agrégé par lot : 672/844 ms froid/chaud ; pas un coût par session.
+  Exemple allocations compilé sous Linux, pas de mesure allocations exécutée.
+  Preuves : docs/evidence/2026-10-24/streaming-mission-3-2/release-smoke4-summary.json.
+
+## 24 octobre 2026 — Menu paramètres du lecteur, masquage des détails de nœuds et données de lecture (style Jellyfin)
+
+- **Demande utilisateur** :
+  - Lors du chargement d'un flux, le lecteur affichait des messages techniques mentionnant la connexion au Media Node ou au relais. Les utilisateurs finaux n'ont pas à voir sur quel nœud se trouve le média.
+  - Déplacement de ces informations techniques dans les statistiques de lecture (« Données de lecture »).
+  - Ajout en bas à droite des contrôles du lecteur d'un bouton d'engrenage « Paramètres » ouvrant un menu calqué sur l'ergonomie Jellyfin (Format d'image, Vitesse de lecture, Mode de répétition, Données de lecture).
+- **Modifications apportées** :
+  - `apps/web/src/lib/player/native.ts` :
+    - Remplacement des messages explicites (« Connexion directe au Media Node… », « Node direct indisponible. Connexion au relais… ») par un état neutre et convivial (« Chargement de la vidéo… »).
+  - `apps/web/src/lib/player/ImmersivePlayer.svelte` :
+    - Écran de chargement épuré (`Chargement de la vidéo…` avec spinner animé).
+    - Retrait du bouton redondant « Statistiques du flux » de la barre supérieure.
+    - Gestion de l'aspect ratio (`style:object-fit={aspectRatio}` : Normal / contain, Remplir / cover, Étirer / fill).
+    - Gestion du mode répétition (`loop={repeat}`).
+    - Overlay « Données de lecture » accessible via les paramètres, affichant clairement le Nœud serveur, le Mode de transport (Direct Node / Relais Core), la résolution, le buffer, les images perdues et le diagnostic technique.
+  - `apps/web/src/lib/player/PlayerControls.svelte` :
+    - Réorganisation des contrôles de droite pour correspondre fidèlement à la maquette :
+      - Sous-titres `[CC]`
+      - Piste audio `♪`
+      - Groupe volume (icône haut-parleur + curseur)
+      - Bouton Paramètres `⚙`
+      - Plein écran `⛶`
+    - Menu contextuel « Paramètres » :
+      - Format d'image (Normal, Remplir, Étirer avec bascule dynamique)
+      - Vitesse de lecture (1x, 1.25x, 1.5x... avec sous-menu et bouton retour `←`)
+      - Mode de répétition (Aucun / Répéter)
+      - Données de lecture (ouverture de l'overlay de statistiques techniques détaillées)
+- **Vérifications réelles** :
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement Svelte/TypeScript.
+  - `npm --prefix apps/web test` : 25 suites réussies, 150 tests réussis.
+  - `npm --prefix apps/web run build` : compilation statique Vite/SvelteKit réussie.
+
+
+## 24 octobre 2026 — Sélecteur de dossiers hiérarchique et saisie libre de chemin (ergonomie Jellyfin)
+
+- **Problème initial** :
+  - Dans la gestion des bibliothèques (`AdminLibraries.svelte`), l'ajout de dossier était restreint à une liste déroulante plate (`<select>`) énumérant d'un bloc la racine et tous ses sous-dossiers immédiats.
+  - Impossibilité pour l'administrateur d'explorer l'arborescence dossier par dossier (voir les dossiers à la racine, puis cliquer pour déplier un sous-dossier, remonter avec `...`), ni de saisir manuellement un chemin disque.
+- **Modifications apportées** :
+  - **Backend Core** :
+    - Nouvelle route d'administration sécurisée `GET /api/v1/admin/filesystem/browse` (`browse_filesystem` dans `crates/core/src/libraries.rs`).
+    - Authentification `administrator` obligatoire (401 non authentifié, 403 non-administrateur).
+    - Navigation par dossier : renvoie `path`, `parent` (pour le bouton `...` de remontée vers le parent) et la liste triée des sous-dossiers (`directories: [{ name, path }]`).
+    - Gestion multi-plateforme : sous Unix/Linux démarre à `/` ; sous Windows liste les lecteurs disponibles (`C:\`, `D:\`) lorsque la racine est vide, puis permet la descente dans l'arborescence native.
+  - **Frontend Web** :
+    - Création du composant modal `apps/web/src/lib/admin/PathPickerModal.svelte` calqué sur l'ergonomie de sélection de chemin de Jellyfin :
+      - Entête avec flèche retour `<-` et titre « Sélectionner un chemin ».
+      - Champ texte « Dossier » avec bouton de navigation/recherche (ou touche Entrée) permettant de taper ou coller directement n'importe quel chemin.
+      - Liste des dossiers du niveau courant avec entrée `...` pour remonter d'un cran, chaque ligne de dossier ouvrant ses sous-dossiers au clic.
+      - Bouton « OK » validant le chemin courant dans le formulaire.
+    - Mise à jour de `AdminLibraries.svelte` :
+      - Champ texte modifiable directement pour le chemin du dossier (`root`).
+      - Bouton « Parcourir… » ouvrant la modale de sélection hiérarchique.
+      - Bouton « Ajouter ce dossier » sans blocage sur une liste fermée pré-déterminée.
+      - Prise en compte automatique du chemin saisi si l'utilisateur valide le formulaire sans avoir cliqué sur « Ajouter ce dossier ».
+- **Vérifications réelles** :
+  - `cargo fmt --check` : conforme.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --lib libraries` : 6 passed, 0 failed.
+  - `npm --prefix apps/web test` : 25 suites réussies, 150 tests réussis.
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement Svelte/TypeScript.
+
+
 ## 24 octobre 2026 — Diagnostic et résilience de l'erreur 503 sur la préparation vidéo progressive
 
 - **Cause racine de l'erreur "Préparation vidéo progressive : HTTP 503 (Media Node indisponible)"** :
@@ -3741,3 +3995,25 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
   155.0.8059.86 Windows, MP4/MKV, pixels/PCM et régression fin/seek. Rapports
   `target/ci-scanner-tail-regression/`. 124 tests Web, check 0/0, lint/build,
   formatage et Clippy ciblé strict réussis. Linux CI reste à relancer ; aucun push.
+
+## 24 octobre 2026 — Mission 3.2, smoke Release concurrent
+
+- Artefacts Core/Node Release + Web copiés et SHA vérifiés inchangés; source
+  modifiée par d'autres chats après build, donc pas d'attestation exact HEAD.
+- Smoke réel Core/SQLite/NodeTCP/UI Chrome à4comptes :8ouvertures,
+  16switches,32seeks,0échec. Chaud n4 : image médiane2251,9ms,
+  PCM brut2375,3ms; switch médian215,5ms, seek image232,1ms.
+  Objectifs50/100ms non atteints, aucun p99UI, aucun8/16/100 lancé.
+- Node par cellule4sessions complète : CPU671,9/843,8ms froid/chaud,
+  RSS échantillonné21,46/21,76Mio,0FFmpeg et0nouveau cache préparé.
+  Chrome exclu; cacheOS non purgé, pas de NAS ou Node physique distant.
+- LinuxDocker : Nativefinal11pass/1microbenchignoré (cap64/refus65e,
+  exemptionchaud, annulationindex,4/8/16). Vidéo6/confinement6/stream3
+  passés sur snapshotguard précédent. Ancienne suite complète66pass/3fail/
+  4ignored conservée : générationfixtures impossible avecFFmpegLinuxminimal
+  sans encodeurs/filtres. `cargo check` exempleallocations réussi seulement,
+  aucune mesure d'allocationLinux ni preuveLinux navigateur.
+- Docs/preuves : docs/STREAMING_MISSION_3_2.md et
+  docs/evidence/2026-10-24/streaming-mission-3-2/release-smoke4-summary.json.
+  Audit13fichiers sanssecret; processusRust/FFmpeg test nettoyés, aucunpush
+  ou déploiement. Aucun commit effectué par l'agent benchmark.

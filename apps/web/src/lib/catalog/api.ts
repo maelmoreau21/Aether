@@ -2,7 +2,15 @@ import type { Media } from '../player/types';
 import { getSessionGeneration, invalidateSession, onSessionGenerationChange } from '../auth/session';
 import { goto } from '$app/navigation';
 import { resolve } from '$app/paths';
-export interface CatalogSource { id: string; assetIds: string[]; playbackMediaId: string }
+export interface CatalogSource {
+  id: string;
+  assetIds: string[];
+  playbackMediaId: string;
+  nodeId?: string;
+  nodeStatus?: 'connected' | 'disconnected' | 'revoked';
+  connectionMode?: string;
+  score?: number;
+}
 export interface Edition { id: string; label: string; versions: { id: string; label: string; sources: CatalogSource[] }[] }
 export interface Work {
   tags?: string[]; minimumAge?: number | null; globalMediaId?: string | null;
@@ -234,6 +242,9 @@ async function fetchDescriptor(
     }
     if (reqCacheGen === cacheGeneration) {
       setCachedDescriptor(item.id, item);
+      if (item.requestedId && item.requestedId !== item.id) {
+        setCachedDescriptor(item.requestedId, item);
+      }
     }
     return item;
   } catch (err) {

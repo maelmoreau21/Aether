@@ -135,6 +135,7 @@ async fn browser_series_flow_and_playback() {
         "1\n00:00:00,000 --> 00:00:02,000\nSynthetic subtitle\n",
     )
     .unwrap();
+    std::fs::write(film_root.join(".ignore"), "").unwrap();
     let db = temp.path().join("series.sqlite3");
     let store = IdentityStore::open(&db).await.unwrap();
     store

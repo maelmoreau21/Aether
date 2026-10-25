@@ -111,6 +111,9 @@ async fn test_nodes_version_tracking_local_and_remote() {
         roots: vec!["/media".into()],
         public_url: None,
         active_scans: 0,
+        active_scan_ids: Vec::new(),
+        active_streams: 0,
+        resource_pressure: None,
         indexed_assets: 10,
         timestamp: media_contracts::protocol::unix_now(),
     };
@@ -174,6 +177,9 @@ async fn test_nodes_version_tracking_local_and_remote() {
         roots: vec!["/media".into()],
         public_url: None,
         active_scans: 0,
+        active_scan_ids: Vec::new(),
+        active_streams: 0,
+        resource_pressure: None,
         indexed_assets: 10,
         timestamp: media_contracts::protocol::unix_now(),
     };

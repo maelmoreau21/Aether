@@ -135,6 +135,8 @@ pub struct EnrollNodeResponse {
 pub enum NodeCommandType {
     Ping,
     Scan,
+    Task,
+    CancelScan,
     SyncInventory,
     RotateSecret,
     Revoke,
@@ -148,6 +150,30 @@ pub struct NodeCommandEnvelope {
     pub command_id: String,
     pub command_type: NodeCommandType,
     pub payload: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NodeTaskRequest {
+    pub run_id: String,
+    pub node_id: NodeId,
+    pub library_id: LibraryId,
+    pub category: String,
+    pub target_id: String,
+    pub component: Option<String>,
+    pub width: Option<u32>,
+    pub core_base_url: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NodeTaskResult {
+    pub run_id: String,
+    pub node_id: NodeId,
+    pub library_id: LibraryId,
+    pub success: bool,
+    pub result_json: serde_json::Value,
+    pub error: String,
 }
 
 /// Core -> Node request to stream asset/image chunk via outbound uplink.
@@ -168,6 +194,24 @@ pub struct StreamRelayRequest {
 }
 
 /// Core -> Node or Node -> Core heartbeat payload.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourcePressure {
+    pub sampled_at: i64,
+    #[serde(default)]
+    pub cpu_usage_percent: Option<u8>,
+    #[serde(default)]
+    pub memory_available_bytes: Option<u64>,
+    #[serde(default)]
+    pub memory_total_bytes: Option<u64>,
+    #[serde(default)]
+    pub scratch_available_bytes: Option<u64>,
+    #[serde(default)]
+    pub io_pressure_percent: Option<u8>,
+    #[serde(default)]
+    pub network_bytes_per_second: Option<u64>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HeartbeatPayload {
@@ -178,6 +222,12 @@ pub struct HeartbeatPayload {
     pub roots: Vec<String>,
     pub public_url: Option<String>,
     pub active_scans: u32,
+    #[serde(default)]
+    pub active_scan_ids: Vec<String>,
+    #[serde(default)]
+    pub active_streams: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_pressure: Option<ResourcePressure>,
     pub indexed_assets: usize,
     pub timestamp: i64,
 }

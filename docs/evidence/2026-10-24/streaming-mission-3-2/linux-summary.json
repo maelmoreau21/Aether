@@ -1,0 +1,55 @@
+{
+  "scope": "Local Docker Linux functional Rust tests only; no NAS, physical remote or Linux browser performance claim",
+  "finalNative": {
+    "passed": 11,
+    "failed": 0,
+    "ignored": 1,
+    "log": "linux-final-admission-native.log",
+    "sha256": "ea33fd2fa73135c3fbb1712eb418ef52f3f689fbcde285f0f858fb626a7dc995",
+    "includes": [
+      "cold64 admission and65th rejection",
+      "warm index exempt",
+      "blocking index cancellation guard",
+      "4/8/16 concurrent native windows",
+      "malformed MP4",
+      "packet/timestamp preservation",
+      "Range/HEAD/cancellation"
+    ]
+  },
+  "guardSnapshotOtherModules": {
+    "video": 6,
+    "confinement": 6,
+    "stream": 3,
+    "scope": "Previous frozen source snapshot containing guard; cold64 addition subsequently validated by final Native suite",
+    "log": "linux-guard-streaming.log",
+    "sha256": "f1c1d5805ed25d46fe30bd3844d0311589c4b23cfcbe2f8b112dc7f8a0c2f22a",
+    "duplicateVideoOccurrencesExcluded": 6
+  },
+  "fullEarlierSnapshot": {
+    "passed": 66,
+    "failed": 3,
+    "ignored": 4,
+    "log": "linux-full-pre-guard.log",
+    "sha256": "da2bd636ce1ba78bc15ef97dbb52b073c98143221bbca8b2047d03b77f343448",
+    "failureNames": [
+      "packaging::preserves_eight_opus_channels_and_packets_in_both_containers",
+      "probe::probe_codecs_matrix_hevc_h264_aac_ac3_eac3",
+      "probe::probe_mp4_with_moov_at_end_validates_seek_via_file_descriptor"
+    ],
+    "failureStage": "Fixture creation requires absent FFmpeg filters/encoders; FFmpeg local configuration disables both. Failures retained."
+  },
+  "releaseUI": {
+    "status": "Smoke passed",
+    "summary": "release-smoke4-summary.json",
+    "openings": 8,
+    "switches": 16,
+    "seeks": 32,
+    "p99": null,
+    "preparedReopen": false,
+    "outage": false
+  },
+  "allocationInstrumentation": {
+    "status": "cargo check succeeded only; no allocation performance run",
+    "log": "linux-allocation-check.log"
+  }
+}

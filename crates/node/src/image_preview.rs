@@ -104,7 +104,18 @@ fn disk_cache_path(key: &Key) -> PathBuf {
 
 fn read_disk_cache(key: &Key) -> Option<Preview> {
     let path = disk_cache_path(key);
-    let bytes = std::fs::read(&path).ok()?;
+    let mut file = std::fs::File::open(&path).ok()?;
+    if file.metadata().ok()?.len() > (MAX_ENCODED + 2) as u64 {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take((MAX_ENCODED + 3) as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() > MAX_ENCODED + 2 {
+        return None;
+    }
     if bytes.len() < 2 {
         return None;
     }
@@ -149,6 +160,14 @@ fn write_disk_cache(key: &Key, preview: &Preview) {
     }
 }
 
+async fn disk_cached(key: &Key) -> Option<Preview> {
+    let key = key.clone();
+    tokio::task::spawn_blocking(move || read_disk_cache(&key))
+        .await
+        .ok()
+        .flatten()
+}
+
 pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Preview> {
     if ![320, 640, 1280].contains(&width) {
         return Err(invalid());
@@ -167,7 +186,7 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
     if let Some(value) = cached(&key) {
         return Ok(value);
     }
-    if let Some(disk_value) = read_disk_cache(&key) {
+    if let Some(disk_value) = disk_cached(&key).await {
         remember(key, disk_value.clone());
         return Ok(disk_value);
     }
@@ -178,7 +197,7 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
     if let Some(value) = cached(&key) {
         return Ok(value);
     }
-    if let Some(disk_value) = read_disk_cache(&key) {
+    if let Some(disk_value) = disk_cached(&key).await {
         remember(key, disk_value.clone());
         return Ok(disk_value);
     }
@@ -234,7 +253,9 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
     .await
     .map_err(|_| invalid())??;
     images::remember_validated_image(key.0.clone(), key.1, key.2.clone(), result.source_mime);
-    write_disk_cache(&key, &result);
+    let disk_key = key.clone();
+    let disk_result = result.clone();
+    let _ = tokio::task::spawn_blocking(move || write_disk_cache(&disk_key, &disk_result)).await;
     remember(key, result.clone());
     Ok(result)
 }

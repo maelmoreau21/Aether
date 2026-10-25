@@ -63,7 +63,7 @@ impl FolderVideos {
             }
             if p.extension().and_then(|s| s.to_str()).is_some_and(|s| {
                 [
-                    "mkv", "mp4", "webm", "m4v", "mov", "opus", "ogg", "srt", "vtt", "ass", "ssa",
+                    "mkv", "mp4", "webm", "m4v", "mov", "obu", "opus", "ogg", "srt", "vtt", "ass", "ssa",
                 ]
                 .iter()
                 .any(|e| s.eq_ignore_ascii_case(e))
@@ -79,6 +79,7 @@ impl FolderVideos {
                     || s.eq_ignore_ascii_case("webm")
                     || s.eq_ignore_ascii_case("m4v")
                     || s.eq_ignore_ascii_case("mov")
+                    || s.eq_ignore_ascii_case("obu")
             }) {
                 let relative = p
                     .strip_prefix(root)
@@ -873,16 +874,11 @@ where
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        if metadata.is_file() && extension == "obu" {
-            report.discovered += 1;
-            record_error(&mut report, &mut current_batch_errors, ScanIssue {
-                relative_path,
-                message: "raw AV1 OBU playback unavailable: a validated temporal index, timestamps and Web packaging are required; no frame rate is inferred".into(),
-            });
-            continue;
-        }
         if !metadata.is_file()
-            || !matches!(extension.as_str(), "mkv" | "mp4" | "webm" | "m4v" | "mov")
+            || !matches!(
+                extension.as_str(),
+                "mkv" | "mp4" | "webm" | "m4v" | "mov" | "obu"
+            )
         {
             continue;
         }
@@ -1080,6 +1076,7 @@ where
                 mime: match extension.as_str() {
                     "mp4" | "m4v" | "mov" => "video/mp4",
                     "webm" => "video/webm",
+                    "obu" => "video/mp4",
                     _ => "video/x-matroska",
                 }
                 .into(),
@@ -1134,6 +1131,7 @@ where
                 mime: match extension.as_str() {
                     "mp4" | "m4v" | "mov" => "video/mp4",
                     "webm" => "video/webm",
+                    "obu" => "video/mp4",
                     _ => "video/x-matroska",
                 }
                 .into(),

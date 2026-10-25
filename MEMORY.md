@@ -1,5 +1,25 @@
 # MEMORY.md — État et décisions Aether
 
+## 25 octobre 2026 — Refonte minimaliste de l'en-tête de catalogue, autofocus et correction de la recherche
+
+- **Refonte minimaliste et compacte de l'en-tête du catalogue (`CatalogGrid.svelte`, `Catalog.svelte`)** :
+  - Suppression du bloc `<details><summary>Filtrer le catalogue</summary>` brut positionné hors du flux au-dessus du contenu principal.
+  - Suppression des bandeaux volumineux (redondance d'en-tête, sous-titres génériques verbeux sur 3 lignes et cartes encombrantes) qui repoussaient les affiches de films hors du viewport.
+  - Création d'une barre d'en-tête compacte et épurée inspirée des plateformes de streaming modernes : titre de la bibliothèque/section et badge de comptage intégrés sur la gauche, barre d'outils unifiée sur la droite (recherche, tri, tiroir de filtres dépliable).
+  - Gain immédiat d'espace vertical : les films et affiches apparaissent directement en haut de l'écran sans défilement nécessaire.
+- **Correction du chevauchement de l'icône de recherche sur le texte** :
+  - Identification de la cause racine : la règle globale de `tokens.css` `input:not([type="range"]):not([type="checkbox"]):not([type="radio"])` avait une spécificité supérieure à `input[type='search']`, écrasant le `padding-left: 42px` par un `padding: 10px 14px`, ce qui plaçait le texte directement sous l'icône loupe située à 14 px.
+  - Correction avec un sélecteur haute spécificité et padding gauche explicite (`40px !important`), garantissant que le texte et le placeholder ne se superposent plus jamais à l'icône.
+- **Autofocus automatique à l'ouverture d'une bibliothèque** :
+  - Rétablissement de la référence `bind:this={searchInputRef}` qui était absente sur l'input de recherche.
+  - Autofocus instantané dès l'arrivée sur une bibliothèque ou un changement de section/bibliothèque (`onMount` et `$effect` ciblés), positionnant le curseur en fin de texte sans nécessiter de clic préalable de l'utilisateur.
+  - Soumission fluide via `goto` avec conservation du focus et remplacement d'état d'historique (`replaceState`).
+- **Vérifications réelles** :
+  - `npm --prefix apps/web run check` : 0 erreur TypeScript / Svelte diagnostics.
+  - `npm --prefix apps/web test` : 152 tests vitest exécutés avec succès.
+  - `cargo test -p media-poc --lib` : 64 tests unitaires Rust validés avec succès.
+
+
 ## 25 octobre 2026 — Releases automatiques et Versioning indépendant des extensions Aether
 
 - **Découplage des versions dans `Aether-Plugins`** :

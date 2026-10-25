@@ -488,7 +488,7 @@ fn local_security_with_store(
                     }
                 }
                 let csp = format!(
-                    "default-src 'none'; script-src 'self'; worker-src 'self'; manifest-src 'self'; img-src 'self'{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; frame-ancestors 'none'"
+                    "default-src 'none'; script-src 'self'; worker-src 'self'; manifest-src 'self'; img-src 'self' data:{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; frame-ancestors 'none'"
                 );
                 if let Ok(val) = HeaderValue::from_str(&csp) {
                     res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, val);

@@ -54,7 +54,7 @@ pub async fn probe_file(mut file: std::fs::File) -> Result<Probe, ProbeError> {
             "-protocol_whitelist",
             "fd,pipe",
             "-format_whitelist",
-            "matroska,webm,mov,mp4,ogg,mp3,flac,wav,aac",
+            "matroska,webm,mov,mp4,ogg,mp3,flac,wav,aac,obu",
             "-max_alloc",
             "67108864",
             "-probesize",

@@ -11,7 +11,6 @@
   import type { Media, PlayerFactory } from '../player/types';
   import { accessibleLibraries } from './libraries';
   import Navbar from '../ui/Navbar.svelte';
-  import CatalogFilters from './CatalogFilters.svelte';
   import { bestVersion } from '../player/version-choice';
   import CatalogHome from './CatalogHome.svelte';
   import CatalogGrid from './CatalogGrid.svelte';
@@ -481,7 +480,6 @@
 <a class="skip-link" href="#main-content">Aller au contenu</a>
 
 <Navbar {section} {name} />
-{#if !workId && section !== 'settings' && section !== 'home'}<CatalogFilters />{/if}
 
 <main id="main-content" tabindex="-1">
   {#if launching}<p role="status">Connexion à la source… <button onclick={()=>{episodeLaunchController?.abort();episodeLaunchController=null;launching=false;}}>Annuler</button></p>{/if}

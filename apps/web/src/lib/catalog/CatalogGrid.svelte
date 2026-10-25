@@ -1,7 +1,9 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { onMount, tick } from 'svelte';
+  import { slide } from 'svelte/transition';
   import { resolve } from '$app/paths';
+  import { goto } from '$app/navigation';
   import type { Work } from './api';
   import Poster from './Poster.svelte';
   import Icon from '../ui/Icon.svelte';
@@ -38,35 +40,118 @@
     detailUrl: (work: Work) => string;
   } = $props();
 
-  const paginationTotal = $derived(section === 'films' || selectedKindFilter === 'film' ? totalFilms : section === 'series' || selectedKindFilter === 'series' ? totalSeries : totalFilms === null || totalSeries === null ? null : Math.max(totalFilms,totalSeries));
-  const hasNext = $derived(section === 'films' || selectedKindFilter === 'film' ? moreFilms : section === 'series' || selectedKindFilter === 'series' ? moreSeries : moreFilms || moreSeries);
+  const paginationTotal = $derived(
+    section === 'films' || selectedKindFilter === 'film'
+      ? totalFilms
+      : section === 'series' || selectedKindFilter === 'series'
+        ? totalSeries
+        : totalFilms === null || totalSeries === null
+          ? null
+          : Math.max(totalFilms, totalSeries)
+  );
+  const hasNext = $derived(
+    section === 'films' || selectedKindFilter === 'film'
+      ? moreFilms
+      : section === 'series' || selectedKindFilter === 'series'
+        ? moreSeries
+        : moreFilms || moreSeries
+  );
   const filmCount = $derived(totalFilms ?? films.length);
   const seriesCount = $derived(totalSeries ?? series.length);
   const base = $derived(resolve('/').replace(/\/$/, ''));
 
+  const countText = $derived.by(() => {
+    if (section === 'films') {
+      return `${filmCount} film${filmCount > 1 ? 's' : ''}${totalFilms === null ? ' affichés' : ''}`;
+    }
+    if (section === 'series') {
+      return `${seriesCount} série${seriesCount > 1 ? 's' : ''}${totalSeries === null ? ' affichées' : ''}`;
+    }
+    const total = filmCount + seriesCount;
+    return `${total} résultat${total > 1 ? 's' : ''}${paginationTotal === null ? ' affichés' : ''}`;
+  });
+
+  // Advanced query filters
+  let filterGenre = $state(page.url.searchParams.get('genre') ?? '');
+  let filterYear = $state(page.url.searchParams.get('year') ?? '');
+  let filterQuality = $state(page.url.searchParams.get('quality') ?? '');
+  let filterCodec = $state(page.url.searchParams.get('codec') ?? '');
+  let filterLanguage = $state(page.url.searchParams.get('language') ?? '');
+
+  const activeFilterCount = $derived.by(() => {
+    let count = 0;
+    if (filterGenre.trim()) count++;
+    if (filterYear.trim()) count++;
+    if (filterQuality.trim()) count++;
+    if (filterCodec.trim()) count++;
+    if (filterLanguage.trim()) count++;
+    return count;
+  });
+
+  let showFilters = $state(activeFilterCount > 0);
+
+  // Search input ref &
   let searchInputRef = $state<HTMLInputElement | null>(null);
 
-  onMount(() => {
-    if (section === 'search') {
-      void tick().then(() => {
-        if (searchInputRef) {
-          searchInputRef.focus();
-          if (searchInputRef.value) {
-            const len = searchInputRef.value.length;
-            searchInputRef.setSelectionRange(len, len);
-          }
+  function focusSearch() {
+    void tick().then(() => {
+      if (searchInputRef && document.activeElement !== searchInputRef) {
+        searchInputRef.focus();
+        if (searchInputRef.value) {
+          const len = searchInputRef.value.length;
+          searchInputRef.setSelectionRange(len, len);
         }
-      });
-    }
+      }
+    });
+  }
+
+  onMount(() => {
+    if (activeFilterCount > 0) showFilters = true;
+    focusSearch();
   });
 
   $effect(() => {
-    if (section === 'search' && searchInputRef) {
-      searchInputRef.focus();
-    }
+    const libId = page.url.searchParams.get('library') ?? '';
+    void libId;
+    void section;
+    focusSearch();
   });
 
-  // Local genre quick filter
+  function handleFilterSubmit(event?: SubmitEvent) {
+    if (event) event.preventDefault();
+    const params = new URLSearchParams();
+    const library = page.url.searchParams.get('library');
+    if (library) params.set('library', library);
+    if (search.trim()) params.set('q', search.trim());
+    if (sort && sort !== 'title-asc') params.set('sort', sort);
+    if (section === 'search' && selectedKindFilter !== 'all') params.set('kind', selectedKindFilter);
+
+    if (filterGenre.trim()) params.set('genre', filterGenre.trim());
+    if (filterYear.trim()) params.set('year', filterYear.trim());
+    if (filterQuality.trim()) params.set('quality', filterQuality.trim());
+    if (filterCodec.trim()) params.set('codec', filterCodec.trim());
+    if (filterLanguage.trim()) params.set('language', filterLanguage.trim());
+
+    const targetUrl = resolve(`${section}/?${params}` as `films/?${string}`);
+    void goto(targetUrl, { replaceState: true });
+  }
+
+  function clearSearch() {
+    search = '';
+    handleFilterSubmit();
+    focusSearch();
+  }
+
+  function resetFilters() {
+    filterGenre = '';
+    filterYear = '';
+    filterQuality = '';
+    filterCodec = '';
+    filterLanguage = '';
+    handleFilterSubmit();
+  }
+
+  // Quick genre pill filters
   let activeGenre = $state<string | null>(null);
 
   const allAvailableGenres = $derived.by(() => {
@@ -93,88 +178,150 @@
 </script>
 
 <div class="catalog-grid-view">
-  <!-- Page Header -->
-  <div class="page-heading">
-    <div class="heading-badge-row">
-      <span class="eyebrow">CATALOGUE AETHER</span>
-      {#if section === 'films'}
-        <span class="count-pill">{filmCount} film{filmCount > 1 ? 's' : ''}{totalFilms === null ? ' affichés' : ''}</span>
-      {:else if section === 'series'}
-        <span class="count-pill">{seriesCount} série{seriesCount > 1 ? 's' : ''}{totalSeries === null ? ' affichées' : ''}</span>
-      {:else}
-        <span class="count-pill">{filmCount + seriesCount} résultat{(filmCount + seriesCount) > 1 ? 's' : ''}{paginationTotal === null ? ' affichés' : ''}</span>
-      {/if}
+  <!-- Sleek Minimalist Header & Toolbar -->
+  <header class="catalog-header">
+    <div class="title-cluster">
+      <h1>{title}</h1>
+      <span class="count-pill">{countText}</span>
     </div>
 
-    <h1>{title}</h1>
-    <p class="heading-sub">
-      {#if section === 'films'}
-        Tous vos films indexés, avec leurs différentes versions physiques et pistes audio.
-      {:else if section === 'series'}
-        Toutes vos séries, organisées par saisons et épisodes.
-      {:else}
-        Recherchez une œuvre dans l’ensemble de vos bibliothèques.
-      {/if}
-    </p>
-  </div>
-
-  <!-- Filters & Search Form -->
-  <form class="filters-bar" action={`${base}/${section}/`}>
-    {#if page.url.searchParams.get('library')}<input type="hidden" name="library" value={page.url.searchParams.get('library')??''} />{/if}
-    <div class="search-field">
-      <label for="catalog-search" class="field-label">Rechercher dans le catalogue</label>
-      <div class="search-input-wrapper">
-        <Icon name="search" size={18} />
+    <form class="toolbar" onsubmit={handleFilterSubmit}>
+      <div class="search-box">
+        <span class="search-icon">
+          <Icon name="search" size={17} />
+        </span>
         <input
+          bind:this={searchInputRef}
           id="catalog-search"
           type="search"
           name="q"
           bind:value={search}
-          placeholder="Titre de film ou série…"
+          placeholder="Rechercher…"
           maxlength="200"
+          autocomplete="off"
         />
         {#if search}
           <button
             type="button"
-            class="clear-search-btn"
+            class="clear-btn"
             aria-label="Effacer la recherche"
-            onclick={() => { search = ''; searchInputRef?.focus(); }}
+            onclick={clearSearch}
           >
             ×
           </button>
         {/if}
       </div>
-    </div>
 
-    {#if section === 'search'}
-      <div class="filter-field">
-        <label for="kind-select" class="field-label">Type</label>
-        <select id="kind-select" bind:value={selectedKindFilter}>
-          <option value="all">Tous les médias</option>
-          <option value="film">Films uniquement</option>
-          <option value="series">Séries uniquement</option>
+      {#if section === 'search'}
+        <div class="control-select">
+          <select
+            aria-label="Filtrer par type de média"
+            bind:value={selectedKindFilter}
+            onchange={() => handleFilterSubmit()}
+          >
+            <option value="all">Tout</option>
+            <option value="film">Films</option>
+            <option value="series">Séries</option>
+          </select>
+        </div>
+      {/if}
+
+      <div class="control-select">
+        <select
+          aria-label="Trier par"
+          bind:value={sort}
+          onchange={() => handleFilterSubmit()}
+        >
+          <option value="title-asc">Titre · A à Z</option>
+          <option value="title-desc">Titre · Z à A</option>
+          <option value="year-desc">Année · Récent</option>
+          <option value="year-asc">Année · Ancien</option>
+          <option value="added-desc">Ajout récent</option>
+          <option value="added-asc">Ajout ancien</option>
         </select>
       </div>
-    {/if}
 
-    <div class="filter-field">
-      <label for="catalog-sort" class="field-label">Trier par</label>
-      <select id="catalog-sort" name="sort" bind:value={sort}>
-        <option value="title-asc">Titre · A à Z</option>
-        <option value="title-desc">Titre · Z à A</option>
-        <option value="year-desc">Année · plus récente</option>
-        <option value="year-asc">Année · plus ancienne</option>
-        <option value="added-desc">Ajout · plus récent</option>
-        <option value="added-asc">Ajout · plus ancien</option>
-      </select>
+      <button
+        type="button"
+        class="filter-toggle-btn"
+        class:active={showFilters || activeFilterCount > 0}
+        onclick={() => (showFilters = !showFilters)}
+        aria-expanded={showFilters}
+        aria-label="Filtres avancés"
+      >
+        <Icon name="filter" size={15} />
+        <span class="filter-btn-text">Filtres</span>
+        {#if activeFilterCount > 0}
+          <span class="filter-count-badge">{activeFilterCount}</span>
+        {/if}
+      </button>
+    </form>
+  </header>
+
+  <!-- Expandable Advanced Filter Drawer -->
+  {#if showFilters}
+    <div class="filters-drawer" transition:slide={{ duration: 180 }}>
+      <div class="drawer-grid">
+        <label class="drawer-field">
+          <span class="drawer-label">Genre</span>
+          <input
+            bind:value={filterGenre}
+            placeholder="Animation, Drame…"
+            maxlength="100"
+          />
+        </label>
+        <label class="drawer-field">
+          <span class="drawer-label">Année</span>
+          <input
+            type="number"
+            bind:value={filterYear}
+            placeholder="Ex: 2024"
+            min="1800"
+            max="2200"
+          />
+        </label>
+        <label class="drawer-field">
+          <span class="drawer-label">Qualité min.</span>
+          <select bind:value={filterQuality}>
+            <option value="">Toutes</option>
+            <option value="720">720p</option>
+            <option value="1080">1080p</option>
+            <option value="2160">2160p (4K)</option>
+          </select>
+        </label>
+        <label class="drawer-field">
+          <span class="drawer-label">Codec</span>
+          <select bind:value={filterCodec}>
+            <option value="">Tous</option>
+            <option value="av1">AV1</option>
+            <option value="hevc">HEVC</option>
+            <option value="h264">H.264</option>
+            <option value="opus">Opus</option>
+          </select>
+        </label>
+        <label class="drawer-field">
+          <span class="drawer-label">Langue</span>
+          <input
+            bind:value={filterLanguage}
+            placeholder="fra, eng…"
+            maxlength="35"
+          />
+        </label>
+      </div>
+      <div class="drawer-actions">
+        <button type="button" class="apply-filter-btn" onclick={() => handleFilterSubmit()}>
+          Appliquer
+        </button>
+        {#if activeFilterCount > 0}
+          <button type="button" class="reset-filter-btn" onclick={resetFilters}>
+            Réinitialiser
+          </button>
+        {/if}
+      </div>
     </div>
+  {/if}
 
-    <button class="submit-btn" type="submit">
-      Appliquer
-    </button>
-  </form>
-
-  <!-- Quick Genre Filters Bar if genres exist -->
+  <!-- Quick Genre Filters Bar if available -->
   {#if allAvailableGenres.length > 0}
     <div class="genre-pills-bar" aria-label="Filtrer par genre">
       <button
@@ -200,21 +347,17 @@
 
   <!-- Films Shelf / Grid -->
   {#if section !== 'series' && (selectedKindFilter === 'all' || selectedKindFilter === 'film')}
-    <section class="shelf" aria-labelledby="shelf-films-title">
-      <div class="section-heading">
-        <h2 id="shelf-films-title">
-          {#if section === 'search'}
-            Films correspondants
-          {:else}
-            Tous les films
-          {/if}
-        </h2>
-        <span class="count-badge">{filmCount} film{filmCount > 1 ? 's' : ''}{totalFilms === null ? ' affichés' : ''}</span>
-      </div>
+    <section class="shelf" aria-labelledby={section === 'search' ? 'shelf-films-title' : undefined}>
+      {#if section === 'search'}
+        <div class="section-heading">
+          <h2 id="shelf-films-title">Films</h2>
+          <span class="count-badge">{filmCount} film{filmCount > 1 ? 's' : ''}</span>
+        </div>
+      {/if}
 
       <div class="media-grid">
         {#each filteredFilms as work, index (work.id)}
-          <Poster {work} href={detailUrl(work)} eager={index < 6} />
+          <Poster {work} href={detailUrl(work)} eager={index < 8} />
         {:else}
           <div class="empty-media-box">
             <Icon name="film" size={32} />
@@ -229,21 +372,17 @@
 
   <!-- Series Shelf / Grid -->
   {#if section !== 'films' && (selectedKindFilter === 'all' || selectedKindFilter === 'series')}
-    <section class="shelf" aria-labelledby="shelf-series-title">
-      <div class="section-heading">
-        <h2 id="shelf-series-title">
-          {#if section === 'search'}
-            Séries correspondantes
-          {:else}
-            Toutes les séries
-          {/if}
-        </h2>
-        <span class="count-badge">{seriesCount} série{seriesCount > 1 ? 's' : ''}{totalSeries === null ? ' affichées' : ''}</span>
-      </div>
+    <section class="shelf" aria-labelledby={section === 'search' ? 'shelf-series-title' : undefined}>
+      {#if section === 'search'}
+        <div class="section-heading">
+          <h2 id="shelf-series-title">Séries</h2>
+          <span class="count-badge">{seriesCount} série{seriesCount > 1 ? 's' : ''}</span>
+        </div>
+      {/if}
 
       <div class="media-grid">
         {#each filteredSeries as work, index (work.id)}
-          <Poster {work} href={detailUrl(work)} eager={filteredFilms.length === 0 && index < 6} />
+          <Poster {work} href={detailUrl(work)} eager={filteredFilms.length === 0 && index < 8} />
         {:else}
           <div class="empty-media-box">
             <Icon name="tv" size={32} />
@@ -274,7 +413,9 @@
           ← Page précédente
         </a>
       {/if}
-      <span class="page-indicator">Page {Math.floor(offset / 24) + 1}{#if paginationTotal !== null} sur {Math.max(1, Math.ceil(paginationTotal / 24))}{/if}</span>
+      <span class="page-indicator">
+        Page {Math.floor(offset / 24) + 1}{#if paginationTotal !== null} sur {Math.max(1, Math.ceil(paginationTotal / 24))}{/if}
+      </span>
       {#if hasNext || (paginationTotal !== null && paginationTotal > offset + 24)}
         <a
           class="page-nav-btn"
@@ -298,158 +439,287 @@
   .catalog-grid-view {
     display: flex;
     flex-direction: column;
-    gap: 32px;
+    gap: 20px;
+    padding-top: 6px;
   }
 
-  .page-heading {
+  /* Minimalist Header & Action Bar */
+  .catalog-header {
     display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding-top: 12px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--color-line-subtle);
   }
 
-  .heading-badge-row {
+  .title-cluster {
     display: flex;
     align-items: center;
     gap: 12px;
   }
 
-  .count-pill {
-    font-size: 11px;
-    font-weight: 700;
-    padding: 2px 10px;
-    border-radius: var(--radius-full);
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-    border: 1px solid var(--color-accent-soft);
-  }
-
   h1 {
     font-family: var(--font-display);
-    font-size: clamp(28px, 3vw, 36px);
-    font-weight: 750;
-    line-height: 1.15;
-    letter-spacing: -0.04em;
+    font-size: clamp(22px, 2.4vw, 28px);
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.03em;
     color: var(--color-text-bright);
     margin: 0;
   }
 
-  .heading-sub {
-    color: var(--color-muted);
-    font-size: 14.5px;
-    line-height: 1.5;
-    margin: 0;
-    max-width: 700px;
-  }
-
-  /* Filters Bar */
-  .filters-bar {
-    display: flex;
-    align-items: flex-end;
-    gap: 16px;
-    flex-wrap: wrap;
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    padding: 18px 22px;
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm);
-  }
-
-  .field-label {
-    display: block;
+  .count-pill {
     font-size: 11.5px;
     font-weight: 600;
+    padding: 3px 10px;
+    border-radius: var(--radius-full);
+    background: var(--color-raised);
     color: var(--color-muted);
-    margin-bottom: 8px;
-    letter-spacing: 0.02em;
+    border: 1px solid var(--color-line);
+    white-space: nowrap;
   }
 
-  .search-field {
-    flex: 1 1 280px;
+  /* Toolbar */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex: 1 1 auto;
+    justify-content: flex-end;
   }
 
-  .search-input-wrapper {
+  /* Search Box with Guaranteed Icon Padding */
+  .search-box {
     position: relative;
     display: flex;
     align-items: center;
+    flex: 1 1 200px;
+    min-width: 170px;
+    max-width: 380px;
   }
 
-  .search-input-wrapper :global(svg) {
+  .search-icon {
     position: absolute;
-    left: 14px;
+    left: 13px;
+    top: 50%;
+    transform: translateY(-50%);
     color: var(--color-subtle);
     pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
   }
 
-  input[type='search'] {
+  /* Explicit selector to override tokens.css input:not(...) */
+  .search-box input[type='search'],
+  .search-box input {
     width: 100%;
-    min-height: 44px;
+    min-height: 38px;
+    height: 38px;
     background: var(--color-raised);
     border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-full);
     color: var(--color-text-bright);
-    padding: 10px 38px 10px 42px;
+    padding: 6px 34px 6px 40px !important; /* Critical: 40px left padding prevents icon overlap */
     font-size: 13.5px;
     transition: all var(--transition-fast);
   }
 
-  input[type='search']:focus {
+  .search-box input::placeholder {
+    color: var(--color-muted);
+    opacity: 0.8;
+  }
+
+  .search-box input:focus {
     outline: none;
     border-color: var(--color-accent);
-    box-shadow: 0 0 12px var(--color-accent-glow);
+    background: var(--color-surface);
+    box-shadow: 0 0 0 2px var(--color-accent-soft);
   }
 
-  .clear-search-btn {
+  .clear-btn {
     position: absolute;
-    right: 10px;
+    right: 8px;
     display: grid;
     place-items: center;
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.08);
     border: 0;
     color: var(--color-muted);
-    font-size: 16px;
+    font-size: 15px;
     line-height: 1;
-  }
-
-  .clear-search-btn:hover {
-    color: var(--color-text-bright);
-    background: rgba(255, 255, 255, 0.2);
-  }
-
-  .filter-field {
-    flex: 0 1 200px;
-    min-width: 160px;
-  }
-
-  .submit-btn {
-    min-height: 44px;
-    padding: 0 22px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: var(--radius-sm);
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--color-text-bright);
-    font-size: 13px;
-    font-weight: 600;
+    cursor: pointer;
     transition: all var(--transition-fast);
+  }
+
+  .clear-btn:hover {
+    color: var(--color-text-bright);
+    background: rgba(255, 255, 255, 0.18);
+  }
+
+  /* Control Selects */
+  .control-select {
+    position: relative;
+    min-width: 130px;
+    max-width: 170px;
+  }
+
+  .control-select select {
+    min-height: 38px;
+    height: 38px;
+    padding: 6px 30px 6px 12px;
+    font-size: 12.5px;
+    border-radius: var(--radius-full);
+    background-color: var(--color-raised);
+    border: 1px solid var(--color-line);
+  }
+
+  .control-select select:hover {
+    border-color: var(--color-line-strong);
+  }
+
+  /* Filter Toggle Button */
+  .filter-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 38px;
+    height: 38px;
+    padding: 0 14px;
+    border-radius: var(--radius-full);
+    background: var(--color-raised);
+    border: 1px solid var(--color-line);
+    color: var(--color-text);
+    font-size: 12.5px;
+    font-weight: 500;
+    transition: all var(--transition-fast);
+    cursor: pointer;
     white-space: nowrap;
   }
 
-  .submit-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
+  .filter-toggle-btn:hover {
+    background: var(--color-surface-hover);
+    border-color: var(--color-line-strong);
+    color: var(--color-text-bright);
+  }
+
+  .filter-toggle-btn.active {
+    background: var(--color-accent-soft);
     border-color: var(--color-accent);
+    color: var(--color-accent);
+    font-weight: 600;
+  }
+
+  .filter-count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: var(--radius-full);
+    background: var(--color-accent);
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  /* Filter Drawer */
+  .filters-drawer {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px 20px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .drawer-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+  }
+
+  .drawer-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .drawer-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-muted);
+  }
+
+  .drawer-field input,
+  .drawer-field select {
+    min-height: 36px;
+    height: 36px;
+    font-size: 12.5px;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--color-raised);
+    border: 1px solid var(--color-line);
+    color: var(--color-text-bright);
+  }
+
+  .drawer-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-top: 4px;
+  }
+
+  .apply-filter-btn {
+    min-height: 34px;
+    padding: 0 16px;
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    border: none;
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 600;
+    transition: all var(--transition-fast);
+  }
+
+  .apply-filter-btn:hover {
+    filter: brightness(1.1);
     transform: translateY(-1px);
   }
 
-  /* Genre Pills Bar */
+  .reset-filter-btn {
+    background: transparent;
+    border: none;
+    color: var(--color-muted);
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 4px 8px;
+  }
+
+  .reset-filter-btn:hover {
+    color: var(--color-text-bright);
+  }
+
+  /* Quick Genre Pills Bar */
   .genre-pills-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     overflow-x: auto;
-    padding-bottom: 6px;
+    padding-bottom: 2px;
     scrollbar-width: none;
   }
 
@@ -458,12 +728,12 @@
   }
 
   .genre-chip {
-    padding: 6px 14px;
-    border-radius: var(--radius-pill);
+    padding: 5px 12px;
+    border-radius: var(--radius-full);
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--color-line);
     color: var(--color-muted);
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 500;
     white-space: nowrap;
     transition: all var(--transition-fast);
@@ -472,46 +742,44 @@
   .genre-chip:hover {
     color: var(--color-text-bright);
     background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.2);
   }
 
   .genre-chip.active {
     color: var(--color-text-bright);
     background: var(--color-accent-soft);
-    border-color: var(--color-accent-soft);
-    box-shadow: 0 0 12px var(--color-accent-soft);
+    border-color: var(--color-accent);
     font-weight: 600;
   }
 
   /* Shelf / Grid */
   .shelf {
-    margin: 8px 0 24px;
+    margin: 4px 0 16px;
   }
 
   .section-heading {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 20px;
+    margin-bottom: 14px;
   }
 
   h2 {
-    font-size: clamp(20px, 2.2vw, 24px);
+    font-size: 18px;
     font-weight: 650;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.02em;
     color: var(--color-text-bright);
     margin: 0;
   }
 
   .count-badge {
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--color-muted);
   }
 
   .media-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(clamp(160px, 13vw, 190px), 1fr));
-    gap: 24px 18px;
+    grid-template-columns: repeat(auto-fill, minmax(clamp(150px, 12vw, 185px), 1fr));
+    gap: 20px 16px;
   }
 
   .empty-media-box {
@@ -521,7 +789,7 @@
     align-items: center;
     justify-content: center;
     gap: 12px;
-    padding: 56px 24px;
+    padding: 48px 24px;
     border-radius: var(--radius-lg);
     background: rgba(255, 255, 255, 0.02);
     border: 1px dashed var(--color-line);
@@ -532,7 +800,7 @@
   .empty-media-box p {
     margin: 0;
     color: var(--color-muted);
-    font-size: 14px;
+    font-size: 13.5px;
   }
 
   /* Pagination */
@@ -541,20 +809,20 @@
     align-items: center;
     justify-content: center;
     gap: 16px;
-    margin: 32px 0 16px;
-    padding: 20px 0;
+    margin: 24px 0 12px;
+    padding: 16px 0;
     border-top: 1px solid var(--color-line);
   }
 
   .page-nav-btn {
     display: inline-flex;
     align-items: center;
-    padding: 10px 20px;
+    padding: 8px 16px;
     border-radius: var(--radius-sm);
     background: var(--color-surface);
     border: 1px solid var(--color-line);
     color: var(--color-text);
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
     transition: all var(--transition-fast);
   }
@@ -567,29 +835,41 @@
   }
 
   .page-indicator {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
     color: var(--color-muted);
     padding: 0 8px;
   }
 
   @media (max-width: 640px) {
-    .filters-bar {
-      padding: 14px;
+    .catalog-header {
+      flex-direction: column;
+      align-items: stretch;
       gap: 12px;
     }
 
-    .filter-field {
+    .toolbar {
+      justify-content: stretch;
+    }
+
+    .search-box {
+      max-width: 100%;
       flex: 1 1 100%;
     }
 
-    .submit-btn {
-      width: 100%;
+    .control-select {
+      flex: 1 1 calc(50% - 6px);
+      max-width: none;
+    }
+
+    .filter-toggle-btn {
+      flex: 1 1 100%;
+      justify-content: center;
     }
 
     .media-grid {
       grid-template-columns: repeat(2, 1fr);
-      gap: 16px 12px;
+      gap: 14px 10px;
     }
   }
 </style>

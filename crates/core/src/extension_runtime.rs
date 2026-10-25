@@ -263,10 +263,7 @@ pub fn execute_host_http(
     })
 }
 
-fn write_host_result_to_guest(
-    caller: &mut Caller<'_, HostState>,
-    result: Result<HostHttpResponse, HostHttpError>,
-) -> u64 {
+fn write_host_result_to_guest<T: Serialize>(caller: &mut Caller<'_, HostState>, result: T) -> u64 {
     let Ok(bytes) = serde_json::to_vec(&result) else {
         return 0;
     };
@@ -293,6 +290,18 @@ fn write_host_result_to_guest(
 }
 
 pub fn execute(invocation: Invocation) -> Result<ExtensionResponse, &'static str> {
+    execute_inner(invocation, false)
+}
+
+/// Only the disposable worker enables its private, framed Core pipe.
+pub fn execute_brokered(invocation: Invocation) -> Result<ExtensionResponse, &'static str> {
+    execute_inner(invocation, true)
+}
+
+fn execute_inner(
+    invocation: Invocation,
+    brokered: bool,
+) -> Result<ExtensionResponse, &'static str> {
     if invocation.input.api_version != 1
         || invocation.input.operation.is_empty()
         || invocation.input.operation.len() > 80
@@ -318,9 +327,15 @@ pub fn execute(invocation: Invocation) -> Result<ExtensionResponse, &'static str
     let engine = Engine::new(&config);
     let module = Module::new(&engine, &bytes).map_err(|_| "invalid_module")?;
 
-    // Strictly enforce imports: only allow "aether" / "aether_host_http"
+    // Explicit HTTP and versioned storage imports only; no WASI, SQL or filesystem.
     for import in module.imports() {
-        if import.module() != "aether" || import.name() != "aether_host_http" {
+        if !(import.module() == "aether" && import.name() == "aether_host_http"
+            || import.module() == "media"
+                && matches!(
+                    import.name(),
+                    "media_host_storage_v1" | "media_host_objects_v1"
+                ))
+        {
             return Err("imports_forbidden");
         }
     }
@@ -352,7 +367,7 @@ pub fn execute(invocation: Invocation) -> Result<ExtensionResponse, &'static str
         "aether_host_http",
         |mut caller: Caller<'_, HostState>, ptr: u32, len: u32| -> u64 {
             if len as usize > MAX_JSON {
-                let err_res = Err(HostHttpError {
+                let err_res: Result<HostHttpResponse, HostHttpError> = Err(HostHttpError {
                     code: "request_too_large".into(),
                     message: "Request size exceeds limit".into(),
                 });
@@ -380,6 +395,49 @@ pub fn execute(invocation: Invocation) -> Result<ExtensionResponse, &'static str
             write_host_result_to_guest(&mut caller, result)
         },
     );
+
+    for (name, kind) in [
+        ("media_host_storage_v1", "storage"),
+        ("media_host_objects_v1", "objects"),
+    ] {
+        linker
+            .func_wrap(
+                "media",
+                name,
+                move |mut caller: Caller<'_, HostState>, ptr: u32, len: u32| -> u64 {
+                    let fail = |code: &str| serde_json::json!({"Err":{"code":code,"message":code}});
+                    if !brokered {
+                        return write_host_result_to_guest(
+                            &mut caller,
+                            fail("storage_unavailable"),
+                        );
+                    }
+                    if len as usize > MAX_JSON {
+                        return write_host_result_to_guest(&mut caller, fail("request_too_large"));
+                    }
+                    let Some(Extern::Memory(memory)) = caller.get_export("memory") else {
+                        return 0;
+                    };
+                    let mut bytes = vec![0; len as usize];
+                    if memory.read(&caller, ptr as usize, &mut bytes).is_err() {
+                        return 0;
+                    }
+                    let Ok(request) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+                        return write_host_result_to_guest(&mut caller, fail("invalid_request"));
+                    };
+                    let result = (|| {
+                        write_frame(
+                            &mut std::io::stdout().lock(),
+                            &serde_json::json!({"kind":kind,"request":request}),
+                        )?;
+                        read_frame::<serde_json::Value>(&mut std::io::stdin().lock(), MAX_JSON)
+                    })()
+                    .unwrap_or_else(|_| fail("broker_unavailable"));
+                    write_host_result_to_guest(&mut caller, result)
+                },
+            )
+            .map_err(|_| "runtime_error")?;
+    }
 
     let instance = linker
         .instantiate_and_start(&mut store, &module)
@@ -420,4 +478,55 @@ pub fn execute(invocation: Invocation) -> Result<ExtensionResponse, &'static str
         return Err("invalid_output");
     }
     Ok(response)
+}
+
+/// Length prefix bounds allocation before JSON parsing. No guest data is logged.
+pub fn read_frame<T: serde::de::DeserializeOwned>(
+    reader: &mut impl std::io::Read,
+    maximum: usize,
+) -> Result<T, &'static str> {
+    let mut header = [0; 4];
+    reader.read_exact(&mut header).map_err(|_| "frame_io")?;
+    let len = u32::from_be_bytes(header) as usize;
+    if len > maximum {
+        return Err("frame_too_large");
+    }
+    let mut bytes = vec![0; len];
+    reader.read_exact(&mut bytes).map_err(|_| "frame_io")?;
+    serde_json::from_slice(&bytes).map_err(|_| "frame_json")
+}
+pub fn write_frame(
+    writer: &mut impl std::io::Write,
+    value: &impl Serialize,
+) -> Result<(), &'static str> {
+    let bytes = serde_json::to_vec(value).map_err(|_| "frame_json")?;
+    let len = u32::try_from(bytes.len()).map_err(|_| "frame_too_large")?;
+    writer
+        .write_all(&len.to_be_bytes())
+        .map_err(|_| "frame_io")?;
+    writer.write_all(&bytes).map_err(|_| "frame_io")?;
+    writer.flush().map_err(|_| "frame_io")
+}
+
+#[cfg(test)]
+mod storage_frames {
+    use super::*;
+    #[test]
+    fn broker_rejects_oversized_and_truncated_frames_before_parsing() {
+        let header = (MAX_JSON as u32 + 1).to_be_bytes();
+        assert_eq!(
+            read_frame::<serde_json::Value>(&mut &header[..], MAX_JSON),
+            Err("frame_too_large")
+        );
+        assert_eq!(
+            read_frame::<serde_json::Value>(&mut &[0, 0, 0, 3, b'{'][..], MAX_JSON),
+            Err("frame_io")
+        );
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &serde_json::json!({"kind":"storage"})).unwrap();
+        assert_eq!(
+            read_frame::<serde_json::Value>(&mut &bytes[..], MAX_JSON).unwrap()["kind"],
+            "storage"
+        );
+    }
 }

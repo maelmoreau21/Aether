@@ -100,18 +100,7 @@
       </div>
 
       <AvatarEditor />
-      <div class="profile-info-list">
-        <div class="info-row">
-          <span class="label">{$t('settings_unique_id')}</span>
-          <span class="val"><code>{$session?.user.id ?? 'Inconnu'}</code></span>
-        </div>
-        <div class="info-row">
-          <span class="label">{$t('settings_auth_type')}</span>
-          <span class="val">
-            {$session?.user.sso === true ? $t('sso_account') : $session?.user.sso === false ? $t('auth_local_sub') : 'Non communiqué'}
-          </span>
-        </div>
-      </div>
+
 
     </section>
 <section class="card"><h2>Préférences de l’interface</h2>      <div class="pref-fields">
@@ -140,6 +129,20 @@
 
       </div>
 </section>
+      <section class="card profile-card" aria-label="Informations du compte">
+        <div class="profile-info-list">
+          <div class="info-row">
+            <span class="label">{$t('settings_unique_id')}</span>
+            <span class="val"><code>{$session?.user.id ?? 'Inconnu'}</code></span>
+          </div>
+          <div class="info-row">
+            <span class="label">{$t('settings_auth_type')}</span>
+            <span class="val">
+              {$session?.user.sso === true ? $t('sso_account') : $session?.user.sso === false ? $t('auth_local_sub') : 'Non communiqué'}
+            </span>
+          </div>
+        </div>
+      </section>
       </div>
       <div hidden={current !== 'security'}><section class="card"><h2>Sécurité</h2><AccountSecurity mode="security" /><h3>Connexion SSO</h3><OidcSettings embedded /></section></div>
       <div hidden={current !== 'devices'}><section class="card"><h2>Appareils</h2><AccountSecurity mode="devices" /></section></div>

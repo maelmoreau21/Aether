@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+pub mod storage;
 
 pub const API_VERSION: u32 = 1;
 pub const MAX_MODULE: usize = 262_144;
@@ -608,3 +609,5 @@ macro_rules! extension {
 }
 #[doc(hidden)]
 pub use serde_json;
+
+pub mod objects;

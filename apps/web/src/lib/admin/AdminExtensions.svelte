@@ -40,7 +40,7 @@
   type Installed = { manifest: Manifest; publisherId: string; sha256: string; enabled: boolean; libraryIds: string[]; allLibraries?: boolean; settings?: ExtensionSettings };
   type Repository = { id: string; name: string; url: string; refreshedAt: number };
   type CatalogueEntry = { repositoryId: string; repositoryName: string; compatible: boolean; manifest: Manifest; publisherId: string; publicKey: string };
-  let tab = $state<'installed' | 'catalogue' | 'repositories'>('catalogue');
+  let tab = $state<'installed' | 'catalogue' | 'repositories'>('installed');
   let category = $state('all');
   let catalogueId = $state<string | null>(null);
   let addingRepository = $state(false);

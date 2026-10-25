@@ -86,7 +86,7 @@
       </a>
 
       {#if $session?.user.role === 'administrator'}
-        <a class="profile-entry" href={resolve('admin/libraries/')} onclick={() => panel.hidePopover()}>
+        <a class="profile-entry" href={resolve('admin/libraries/#overview')} onclick={() => panel.hidePopover()}>
           <Icon name="settings" size={17} />
           <span>{$t('admin_dashboard')}</span>
           <Icon name="chevron" size={13} />

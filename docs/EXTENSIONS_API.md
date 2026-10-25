@@ -1,5 +1,10 @@
 # Extensions API v1 — premier parcours local
 
+> Stockage privé du 25 octobre : [contrat KV/objets v1](EXTENSION_STORAGE.md).
+> `storage.private` est une capacité signée reconnue ; imports hôtes versionnés,
+> SQLite/PostgreSQL et conservation explicite remplacent les exclusions de
+> stockage privé des descriptions historiques ci-dessous.
+
 > Images multiples et collecte bornée du25octobre : [contrat actuel](ARTWORK_ROTATION.md).
 > Fournisseurs optionnels conservés ; stockage/déduplication et rotation par session natifs.
 

@@ -1,24 +1,18 @@
-use std::io::{Read, Write};
-
 fn main() {
-    // Never print guest data or internal diagnostics on failure.
-    let mut bytes = Vec::new();
-    let result = std::io::stdin()
-        .take(400_001)
-        .read_to_end(&mut bytes)
-        .map_err(|_| "input_error")
-        .and_then(|_| {
-            if bytes.len() > 400_000 {
-                return Err("input_too_large");
-            }
-            serde_json::from_slice(&bytes).map_err(|_| "invalid_input")
-        })
-        .and_then(media_poc::extension_runtime::execute);
+    use media_poc::extension_runtime::{execute_brokered, read_frame, write_frame};
+    // Release the initial input lock before guest host-calls read broker replies.
+    let invocation = {
+        let input = std::io::stdin();
+        let mut input = input.lock();
+        read_frame(&mut input, 400_000)
+    };
+    let result = invocation.and_then(execute_brokered);
     match result {
-        Ok(result) => {
-            if let Ok(bytes) = serde_json::to_vec(&result) {
-                let _ = std::io::stdout().write_all(&bytes);
-            }
+        Ok(response) => {
+            let _ = write_frame(
+                &mut std::io::stdout().lock(),
+                &serde_json::json!({"kind":"finished","response":response}),
+            );
         }
         Err(_) => std::process::exit(1),
     }

@@ -8,6 +8,7 @@ pub mod avatars;
 pub mod backup;
 pub mod backup_bundle;
 pub mod database;
+pub mod extension_data_lifecycle;
 pub mod extension_files;
 pub mod extension_runtime;
 pub mod extensions;
@@ -552,3 +553,6 @@ pub mod extension_storage;
 
 pub mod task_engine;
 mod task_execution;
+
+pub mod extension_data;
+pub mod extension_objects;

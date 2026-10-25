@@ -158,6 +158,7 @@ pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'st
                 "avatars",
                 "images",
                 "providers",
+                "storage.private",
             ]
             .contains(&p.as_str())
         })
@@ -552,7 +553,8 @@ async fn configure(
             return Err(err(StatusCode::BAD_REQUEST, "invalid_library"));
         }
     }
-    let mut tx = auth.store.pool().begin().await.map_err(db)?;
+    let mut conn = auth.store.pool().acquire().await.map_err(db)?;
+    let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
     let changed = query("UPDATE extensions SET enabled=?,generation=?,all_libraries=? WHERE id=? AND (?=0 OR EXISTS(SELECT 1 FROM extension_publishers p WHERE p.id=extensions.publisher_id AND p.active=1))")
         .bind(i64::from(input.enabled)).bind(uuid::Uuid::new_v4().to_string()).bind(i64::from(input.all_libraries)).bind(&id).bind(i64::from(input.enabled)).execute(&mut *tx).await.map_err(db)?;
     if changed.rows_affected() == 0 {
@@ -649,7 +651,11 @@ async fn uninstall(
 ) -> Result<StatusCode, Error> {
     let actor = admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
-    let mut tx = auth.store.pool().begin().await.map_err(db)?;
+    let mut conn = auth.store.pool().acquire().await.map_err(db)?;
+    let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
+    crate::extension_data_lifecycle::uninstall(&mut tx, &id, input.delete_data)
+        .await
+        .map_err(db)?;
     query("DELETE FROM extensions WHERE id=?")
         .bind(&id)
         .execute(&mut *tx)
@@ -805,7 +811,7 @@ async fn permitted(
         return Ok(count == 1);
     }
     admin(auth, headers, false).await?;
-    let count: i64 = query_scalar("SELECT COUNT(*) FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id JOIN libraries l ON (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id)) JOIN media_nodes n ON n.id=l.node_id WHERE e.id=? AND l.id=? AND e.generation=? AND e.enabled=1 AND p.active=1 AND l.enabled=1 AND n.status!='revoked'")
+    let count: i64 = query_scalar("SELECT COUNT(*) FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id JOIN libraries l ON (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) JOIN media_nodes n ON n.id=l.node_id WHERE e.id=? AND l.id=? AND e.generation=? AND e.enabled=1 AND p.active=1 AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0))")
         .bind(id).bind(library).bind(generation).fetch_one(auth.store.pool()).await.map_err(db)?;
     Ok(count == 1)
 }
@@ -976,39 +982,133 @@ async fn invoke_worker(
         .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
     let payload = serde_json::to_vec(&invocation)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_input"))?;
+    let actor = auth
+        .authenticate(headers)
+        .await
+        .map_err(|status| err(status, "authentication_required"))?;
+    let work_id = invocation
+        .input
+        .input
+        .get("workId")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let episode: Option<(String, String)> =
+        query_as("SELECT id,season_id FROM inventory_episodes WHERE work_id=?")
+            .bind(&work_id)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let context = crate::extension_data::Context {
+        extension_id: id.to_owned(),
+        generation: generation.to_owned(),
+        library_id: library.to_owned(),
+        work_id,
+        season_id: episode.as_ref().map(|v| v.1.clone()).unwrap_or_default(),
+        episode_id: episode.map(|v| v.0).unwrap_or_default(),
+        user_id: actor.user.id,
+    };
     let operation = async {
         let mut stdin = child
             .stdin
             .take()
             .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
         stdin
+            .write_all(&(payload.len() as u32).to_be_bytes())
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
+        stdin
             .write_all(&payload)
             .await
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
-        drop(stdin);
         let mut stdout = child
             .stdout
             .take()
-            .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?
-            .take((media_extension_sdk::MAX_JSON + 1) as u64);
-        let mut bytes = Vec::new();
-        stdout
-            .read_to_end(&mut bytes)
-            .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
-        let status = child
-            .wait()
-            .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
-        if !status.success() || bytes.len() > media_extension_sdk::MAX_JSON {
-            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "extension_failed"));
+            .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
+        let mut count = 0;
+        loop {
+            let mut header = [0; 4];
+            stdout
+                .read_exact(&mut header)
+                .await
+                .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "extension_failed"))?;
+            let len = u32::from_be_bytes(header) as usize;
+            if len > media_extension_sdk::MAX_JSON + 4096 {
+                return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"));
+            }
+            let mut bytes = vec![0; len];
+            stdout
+                .read_exact(&mut bytes)
+                .await
+                .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "extension_failed"))?;
+            let frame: Value = serde_json::from_slice(&bytes)
+                .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
+            let kind = frame["kind"].as_str().unwrap_or("");
+            if kind == "finished" {
+                drop(stdin);
+                let status = child
+                    .wait()
+                    .await
+                    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
+                if !status.success() {
+                    return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "extension_failed"));
+                }
+                let response: ExtensionResponse = serde_json::from_value(frame["response"].clone())
+                    .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
+                if response.api_version != 1 {
+                    return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"));
+                }
+                return adapters::validate_result(&requested_operation, response.result);
+            }
+            count += 1;
+            if count > 128 {
+                return Err(err(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "storage_operation_quota",
+                ));
+            }
+            if !permitted(auth, headers, id, library, generation).await? {
+                return Err(err(StatusCode::FORBIDDEN, "extension_revoked"));
+            }
+            let result = match kind {
+                "storage" => {
+                    let request = serde_json::from_value(frame["request"].clone())
+                        .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_storage_request"))?;
+                    serde_json::to_value(
+                        crate::extension_data::execute(&auth.store, &context, request, now())
+                            .await
+                            .map_err(media_extension_sdk::storage::StorageError::from),
+                    )
+                    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "storage_failed"))?
+                }
+                "objects" => {
+                    let request = serde_json::from_value(frame["request"].clone())
+                        .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_object_request"))?;
+                    serde_json::to_value(
+                        crate::extension_objects::execute(&auth.store, &context, request, now())
+                            .await,
+                    )
+                    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "storage_failed"))?
+                }
+                _ => return Err(err(StatusCode::BAD_REQUEST, "invalid_worker_frame")),
+            };
+            let bytes = serde_json::to_vec(&result)
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "storage_failed"))?;
+            if bytes.len() > media_extension_sdk::MAX_JSON {
+                return Err(err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "storage_response_too_large",
+                ));
+            }
+            stdin
+                .write_all(&(bytes.len() as u32).to_be_bytes())
+                .await
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
+            stdin
+                .write_all(&bytes)
+                .await
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
         }
-        let response: ExtensionResponse = serde_json::from_slice(&bytes)
-            .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
-        if response.api_version != 1 {
-            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"));
-        }
-        adapters::validate_result(&requested_operation, response.result)
     };
     tokio::pin!(operation);
     let deadline = tokio::time::sleep(Duration::from_secs(

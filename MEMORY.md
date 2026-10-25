@@ -60,6 +60,13 @@
 
 # MEMORY.md — État et décisions Aether
 
+## 25 octobre 2026 — Mission 1 : stockage privé persistant des extensions
+
+- SDK stockage/objets v1 et broker bidirectionnel Wasm/Core, sans SQL, chemin ni secret DB dans le guest. Permission signée `storage.private`, six portées liées au contexte Core, contrôles existants et identité éditeur/clé réutilisés.
+- Migrations additives0049/0050 SQLite/PostgreSQL ; CAS UUID, TTL, pagination, quotas100000 entrées/64Mio de valeurs ; objets distincts en blocs16Kio,16Mio/objet128Mio/extension. Conservation durable et purge explicite à la désinstallation ; cache régénérable distinct. Get autorisé en une requête atomique, sans cache de droits.
+- Validation réelle : moteur7 tests SQLite+contrat PostgreSQL, objets3 SQLite+1 PostgreSQL, cycle de vie2 SQLite+1 PostgreSQL,4 intégrations finales dont vrai guest Rust/Wasm signé et129e opération refusée ; autres régressions extensions13 réussies. Crash client sans destructeurs avant/après commit, timeout réel sous verrou, corruption et isolation vérifiés sur les deux moteurs. Clippy Core tous targets strict/query-metrics et fmt réussis.
+- Premier benchmark100000 entrées SQLite : p50 1,094ms/p95 1,698ms avant optimisation Get ; mesure finale et limites dans docs/EXTENSION_STORAGE.md. Aucun push, déploiement ni suppression de données réelles. Tests synthétiques/Windowsdebug ; pas de preuve NAS, coupure électrique ou cluster multi-Core complet.
+
 ## 25 octobre 2026 — Refonte minimaliste de l'en-tête de catalogue, autofocus et correction de la recherche
 
 - **Refonte minimaliste et compacte de l'en-tête du catalogue (`CatalogGrid.svelte`, `Catalog.svelte`)** :

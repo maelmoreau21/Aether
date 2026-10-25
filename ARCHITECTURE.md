@@ -19,6 +19,12 @@
 
 # ARCHITECTURE.md — Architecture cible Aether
 
+Stockage privé des extensions (25 octobre 2026) : connexions SQLx exclusivement
+dans le Core, broker borné via les pipes du worker Wasm, données KV et objets
+binaires par blocs dans des tables distinctes de la base existante. Les scopes
+s'appuient sur les grants et le compte courant, sans SQL ni chemin guest.
+Contrat, quotas et limites multi-Core : [EXTENSION_STORAGE.md](docs/EXTENSION_STORAGE.md).
+
 Jalon J1 (`docs/ARCHITECTURE_ROADMAP.md`, 16 octobre 2026) : découpage effectif du
 workspace Rust en trois crates (`crates/core`, `crates/node`, `crates/shared`),
 aucune dépendance de `media-node` vers `media-poc` ou `sqlx`, et confinement +

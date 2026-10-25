@@ -565,8 +565,6 @@
     <CatalogHome
       {films}
       {series}
-      {totalFilms}
-      {totalSeries}
       featured={films[0] ?? series[0] ?? null}
       onPlay={handleDirectPlay}
       {detailUrl}

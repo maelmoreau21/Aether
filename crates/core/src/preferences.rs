@@ -75,9 +75,7 @@ fn language(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 fn hex_color(value: &str) -> bool {
-    value.len() == 7
-        && value.starts_with('#')
-        && value[1..].bytes().all(|b| b.is_ascii_hexdigit())
+    value.len() == 7 && value.starts_with('#') && value[1..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 impl Preferences {
     fn valid(&self) -> bool {

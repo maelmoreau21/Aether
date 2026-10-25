@@ -9,16 +9,12 @@
   let {
     films = [],
     series = [],
-    totalFilms = 0,
-    totalSeries = 0,
     featured = null,
     onPlay,
     detailUrl
   }: {
     films: Work[];
     series: Work[];
-    totalFilms: number | null;
-    totalSeries: number | null;
     featured?: Work | null;
     onPlay: (work: Work) => void;
     detailUrl: (work: Work) => string;

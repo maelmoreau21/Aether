@@ -4560,3 +4560,8 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
 ## 26 octobre 2026 — Correction du contrôle de format CI
 
 - Les deux expressions `if !s.is_empty()` de `crates/shared/build.rs` ont été mises au format attendu par rustfmt, sans changement de comportement. `cargo fmt --all -- --check` et `git diff --check` passent localement ; le run GitHub après intégration reste à vérifier.
+
+## 26 octobre 2026 — Réparation du contrôle Clippy CI
+
+- `version_policy.rs` conserve la priorité du tag Git et les mêmes versions produites, avec conditions simplifiées pour Clippy Rust 1.99. `task_engine.rs` passe directement à SQLx les références `provider` et `extension` déjà empruntées.
+- Vérifié localement : `cargo fmt --all -- --check`, `cargo test --locked -p media-contracts` (13 tests), `python scripts/test-release-policy.py` (14 tests), et `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings`. Aucun run GitHub après intégration observé.

@@ -435,15 +435,15 @@ async fn filter_automation_claims(
             continue;
         };
         query("INSERT INTO automation_provider_limits(provider) VALUES(?) ON CONFLICT(provider) DO NOTHING")
-            .bind(&provider).execute(&mut **tx).await?;
+            .bind(provider).execute(&mut **tx).await?;
         let (next, interval, provider_limit): (i64,i64,i64) = query_as("SELECT next_allowed_at,min_interval_seconds,max_concurrent FROM automation_provider_limits WHERE provider=?")
-            .bind(&provider).fetch_one(&mut **tx).await?;
+            .bind(provider).fetch_one(&mut **tx).await?;
         let extension_limit: i64 = query_scalar("SELECT COALESCE((SELECT max_concurrent FROM automation_policies WHERE extension_id=? AND library_id=COALESCE((SELECT parent_id FROM library_folders WHERE library_id=? AND active=1),?)),1)")
-            .bind(&extension).bind(&job.library_id).bind(&job.library_id).fetch_one(&mut **tx).await?;
+            .bind(extension).bind(&job.library_id).bind(&job.library_id).fetch_one(&mut **tx).await?;
         let provider_active: i64 = query_scalar("SELECT COUNT(*) FROM automation_task_links a JOIN durable_tasks t ON t.id=a.task_id WHERE a.provider=? AND t.lease_until IS NOT NULL")
-            .bind(&provider).fetch_one(&mut **tx).await?;
+            .bind(provider).fetch_one(&mut **tx).await?;
         let extension_active: i64 = query_scalar("SELECT COUNT(*) FROM automation_task_links a JOIN durable_tasks t ON t.id=a.task_id WHERE a.extension_id=? AND t.lease_until IS NOT NULL")
-            .bind(&extension).fetch_one(&mut **tx).await?;
+            .bind(extension).fetch_one(&mut **tx).await?;
         let library_active: i64 = query_scalar("SELECT COUNT(*) FROM durable_tasks t WHERE t.lease_until IS NOT NULL AND COALESCE((SELECT parent_id FROM library_folders WHERE library_id=t.library_id AND active=1),t.library_id)=COALESCE((SELECT parent_id FROM library_folders WHERE library_id=? AND active=1),?)")
             .bind(&job.library_id).bind(&job.library_id).fetch_one(&mut **tx).await?;
         if next > now
@@ -457,7 +457,7 @@ async fn filter_automation_claims(
         }
         query("UPDATE automation_provider_limits SET next_allowed_at=? WHERE provider=?")
             .bind(now.saturating_add(interval))
-            .bind(&provider)
+            .bind(provider)
             .execute(&mut **tx)
             .await?;
         accepted.push(job);

@@ -10,10 +10,10 @@ pub fn version_for_build(
     // If an exact Git tag is present and starts with 'v', use it directly.
     if let Some(tag) = git_tag {
         let trimmed = tag.trim();
-        if let Some(version) = trimmed.strip_prefix('v') {
-            if !version.is_empty() {
-                return version.to_string();
-            }
+        if let Some(version) = trimmed.strip_prefix('v')
+            && !version.is_empty()
+        {
+            return version.to_string();
         }
     }
 
@@ -29,10 +29,6 @@ pub fn version_for_build(
     if branch == "develop" {
         // On develop without an explicit tag, indicate an unreleased dev build on next beta cycle
         format!("{base}-beta.0-dev{commit_suffix}")
-    } else if branch == "main" {
-        format!("{base}-dev{commit_suffix}")
-    } else if !branch.is_empty() && branch != "HEAD" {
-        format!("{base}-dev{commit_suffix}")
     } else {
         format!("{base}-dev{commit_suffix}")
     }

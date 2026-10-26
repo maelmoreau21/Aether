@@ -74,21 +74,115 @@ pub struct User {
 pub struct IdentityStore {
     pub(crate) pool: AnyPool,
     pub(crate) plugins_path: std::path::PathBuf,
+    pub(crate) assets: std::sync::Arc<crate::assets::AssetStore>,
     pub(crate) task_writes: std::sync::Arc<tokio::sync::Mutex<()>>,
     pub(crate) node_registry: std::sync::Arc<crate::nodes::NodeRuntimeRegistry>,
 }
 fn plugin_path(database: Option<&Path>) -> Result<std::path::PathBuf, IdentityError> {
     let path = std::env::var_os("MEDIA_PLUGINS_PATH")
+        .filter(|p| !p.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            if let Some(parent) = database.and_then(Path::parent) {
+                parent.join("plugins")
+            } else if Path::new("/data").is_dir() {
+                std::path::PathBuf::from("/data/plugins")
+            } else {
+                Path::new("data").join("plugins")
+            }
+        });
+    std::path::absolute(path).map_err(|_| IdentityError::Configuration)
+}
+/// Local asset directory: `MEDIA_ASSETS_PATH`, else `assets` next to the database.
+fn assets_path(database: Option<&Path>) -> Result<std::path::PathBuf, IdentityError> {
+    let path = std::env::var_os("MEDIA_ASSETS_PATH")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
             database
                 .and_then(Path::parent)
                 .unwrap_or(Path::new("data"))
-                .join("plugins")
+                .join("assets")
         });
     std::path::absolute(path).map_err(|_| IdentityError::Configuration)
 }
+fn open_assets(
+    pool: &AnyPool,
+    database: Option<&Path>,
+) -> Result<std::sync::Arc<crate::assets::AssetStore>, IdentityError> {
+    let backend = crate::assets::LocalFs::open(&assets_path(database)?, None)
+        .map_err(|_| IdentityError::Configuration)?;
+    let config =
+        crate::assets::AssetConfig::from_env().map_err(|_| IdentityError::Configuration)?;
+    Ok(std::sync::Arc::new(crate::assets::AssetStore::new(
+        pool.clone(),
+        std::sync::Arc::new(backend),
+        config,
+    )))
+}
+
+fn configure_pool_options(is_sqlite: bool) -> Result<AnyPoolOptions, IdentityError> {
+    let default_max = if is_sqlite { 8 } else { 16 };
+    let default_min = if is_sqlite { 1 } else { 2 };
+    let default_acquire = if is_sqlite { 15 } else { 30 };
+
+    let max = match std::env::var("MEDIA_DB_MAX_CONNECTIONS")
+        .or_else(|_| std::env::var("MEDIA_DB_POOL_MAX"))
+    {
+        Ok(v) => match v.parse::<u32>() {
+            Ok(n) if n > 0 => n,
+            _ => return Err(IdentityError::Configuration),
+        },
+        Err(std::env::VarError::NotPresent) => default_max,
+        Err(_) => return Err(IdentityError::Configuration),
+    };
+
+    let min = match std::env::var("MEDIA_DB_MIN_CONNECTIONS")
+        .or_else(|_| std::env::var("MEDIA_DB_POOL_MIN"))
+    {
+        Ok(v) => match v.parse::<u32>() {
+            Ok(n) => n.min(max),
+            _ => return Err(IdentityError::Configuration),
+        },
+        Err(std::env::VarError::NotPresent) => default_min.min(max),
+        Err(_) => return Err(IdentityError::Configuration),
+    };
+
+    let acquire_secs = match std::env::var("MEDIA_DB_ACQUIRE_TIMEOUT_SECS") {
+        Ok(v) => match v.parse::<u64>() {
+            Ok(n) if n > 0 => n,
+            _ => return Err(IdentityError::Configuration),
+        },
+        Err(std::env::VarError::NotPresent) => default_acquire,
+        Err(_) => return Err(IdentityError::Configuration),
+    };
+
+    let idle_secs = match std::env::var("MEDIA_DB_IDLE_TIMEOUT_SECS") {
+        Ok(v) => match v.parse::<u64>() {
+            Ok(n) if n > 0 => n,
+            _ => return Err(IdentityError::Configuration),
+        },
+        Err(std::env::VarError::NotPresent) => 600,
+        Err(_) => return Err(IdentityError::Configuration),
+    };
+
+    Ok(AnyPoolOptions::new()
+        .max_connections(max)
+        .min_connections(min)
+        .acquire_timeout(Duration::from_secs(acquire_secs))
+        .idle_timeout(Some(Duration::from_secs(idle_secs))))
+}
+
 impl IdentityStore {
+    /// Shared store for durable application binaries (avatars, artwork, derived data).
+    pub fn assets(&self) -> &std::sync::Arc<crate::assets::AssetStore> {
+        &self.assets
+    }
+    /// Fail closed when the asset directory overlaps the read-only media root.
+    pub fn check_assets_outside(&self, media_root: &Path) -> Result<(), IdentityError> {
+        self.assets
+            .ensure_outside(media_root)
+            .map_err(|_| IdentityError::Configuration)
+    }
     pub fn plugins_path(&self) -> &Path {
         &self.plugins_path
     }
@@ -99,15 +193,13 @@ impl IdentityStore {
         if !matches!(parsed.scheme(), "postgres" | "postgresql") {
             return Err(IdentityError::Configuration);
         }
-        let pool = AnyPoolOptions::new()
-            .max_connections(4)
-            .connect(url)
-            .await?;
+        let pool = configure_pool_options(false)?.connect(url).await?;
         sqlx::migrate!("./migrations-postgres").run(&pool).await?;
         let mut conn = pool.acquire().await?;
         crate::inventory::backfill_title_sort_unicode(&mut conn).await?;
         drop(conn);
         Ok(Self {
+            assets: open_assets(&pool, None)?,
             pool,
             plugins_path: plugin_path(None)?,
             task_writes: std::sync::Arc::new(tokio::sync::Mutex::new(())),
@@ -125,13 +217,17 @@ impl IdentityStore {
                     return Err(IdentityError::Configuration);
                 }
                 let path = configured_path(media_root).map_err(|_| IdentityError::Configuration)?;
-                Self::open(&path).await
+                let store = Self::open(&path).await?;
+                store.check_assets_outside(media_root)?;
+                Ok(store)
             }
             "postgres" => {
                 let url = zeroize::Zeroizing::new(
                     std::env::var("MEDIA_DB_URL").map_err(|_| IdentityError::Configuration)?,
                 );
-                Self::open_postgres(&url).await
+                let store = Self::open_postgres(&url).await?;
+                store.check_assets_outside(media_root)?;
+                Ok(store)
             }
             _ => Err(IdentityError::Configuration),
         }
@@ -165,8 +261,8 @@ impl IdentityStore {
         // permissions or schema errors. Each attempt retains its timeout.
         let mut retries = 0;
         let pool = loop {
-            match AnyPoolOptions::new()
-                .max_connections(4)
+            let pool_opts = configure_pool_options(true)?;
+            match pool_opts
                 .after_connect(move |conn, _| {
                     Box::pin(async move {
                         crate::database::query("PRAGMA foreign_keys = ON")
@@ -178,6 +274,18 @@ impl IdentityStore {
                         ));
                         crate::database::query(timeout).execute(&mut *conn).await?;
                         crate::database::query("PRAGMA journal_mode = WAL")
+                            .execute(&mut *conn)
+                            .await?;
+                        crate::database::query("PRAGMA synchronous = NORMAL")
+                            .execute(&mut *conn)
+                            .await?;
+                        crate::database::query("PRAGMA cache_size = -64000")
+                            .execute(&mut *conn)
+                            .await?;
+                        crate::database::query("PRAGMA mmap_size = 268435456")
+                            .execute(&mut *conn)
+                            .await?;
+                        crate::database::query("PRAGMA temp_store = MEMORY")
                             .execute(&mut *conn)
                             .await?;
                         Ok(())
@@ -214,6 +322,7 @@ impl IdentityStore {
             .await?;
         drop(conn);
         Ok(Self {
+            assets: open_assets(&pool, Some(path))?,
             pool,
             plugins_path: plugin_path(Some(path))?,
             task_writes: std::sync::Arc::new(tokio::sync::Mutex::new(())),
@@ -231,6 +340,13 @@ impl IdentityStore {
     }
 
     pub async fn close(&self) {
+        if let Ok(mut conn) = self.pool.acquire().await
+            && conn.backend_name() == "SQLite"
+        {
+            let _ = crate::database::query("PRAGMA wal_checkpoint(TRUNCATE)")
+                .execute(&mut *conn)
+                .await;
+        }
         self.pool.close().await;
     }
 
@@ -334,4 +450,56 @@ pub fn configured_path(media_root: &Path) -> Result<std::path::PathBuf, std::io:
         ));
     }
     Ok(resolved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_pool_configuration_defaults_and_validation() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var("MEDIA_DB_MAX_CONNECTIONS");
+            std::env::remove_var("MEDIA_DB_POOL_MAX");
+            std::env::remove_var("MEDIA_DB_MIN_CONNECTIONS");
+            std::env::remove_var("MEDIA_DB_POOL_MIN");
+            std::env::remove_var("MEDIA_DB_ACQUIRE_TIMEOUT_SECS");
+            std::env::remove_var("MEDIA_DB_IDLE_TIMEOUT_SECS");
+        }
+
+        assert!(configure_pool_options(true).is_ok());
+        assert!(configure_pool_options(false).is_ok());
+
+        unsafe {
+            std::env::set_var("MEDIA_DB_MAX_CONNECTIONS", "0");
+        }
+        assert!(matches!(
+            configure_pool_options(true),
+            Err(IdentityError::Configuration)
+        ));
+
+        unsafe {
+            std::env::set_var("MEDIA_DB_MAX_CONNECTIONS", "invalid");
+        }
+        assert!(matches!(
+            configure_pool_options(true),
+            Err(IdentityError::Configuration)
+        ));
+
+        unsafe {
+            std::env::set_var("MEDIA_DB_MAX_CONNECTIONS", "24");
+            std::env::set_var("MEDIA_DB_MIN_CONNECTIONS", "4");
+            std::env::set_var("MEDIA_DB_ACQUIRE_TIMEOUT_SECS", "45");
+        }
+        assert!(configure_pool_options(true).is_ok());
+
+        unsafe {
+            std::env::remove_var("MEDIA_DB_MAX_CONNECTIONS");
+            std::env::remove_var("MEDIA_DB_MIN_CONNECTIONS");
+            std::env::remove_var("MEDIA_DB_ACQUIRE_TIMEOUT_SECS");
+        }
+    }
 }

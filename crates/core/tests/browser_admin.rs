@@ -58,9 +58,15 @@ async fn run_browser(script: &str, seed: bool) {
             ))
             .write_to(&mut bytes, image::ImageFormat::Png)
             .unwrap();
-            query("INSERT INTO work_posters(work_id,image_data) VALUES(?,?)")
+            let poster_bytes = bytes.into_inner();
+            let asset = store
+                .assets()
+                .put_bytes(&poster_bytes, "image/png")
+                .await
+                .unwrap();
+            query("INSERT INTO work_posters(work_id,sha256) VALUES(?,?)")
                 .bind(&id)
-                .bind(bytes.into_inner())
+                .bind(&asset.sha256)
                 .execute(store.pool())
                 .await
                 .unwrap();

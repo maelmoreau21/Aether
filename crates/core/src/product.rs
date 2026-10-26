@@ -431,7 +431,19 @@ async fn upload_poster(
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
-    query("INSERT INTO work_posters(work_id,image_data,revision) VALUES(?,?,?) ON CONFLICT(work_id) DO UPDATE SET image_data=excluded.image_data,revision=excluded.revision").bind(work).bind(image).bind(uuid::Uuid::new_v4().to_string()).execute(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let meta = auth
+        .store
+        .assets
+        .put_bytes(&image, "image/webp")
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    query("INSERT INTO work_posters(work_id,sha256,revision) VALUES(?,?,?) ON CONFLICT(work_id) DO UPDATE SET sha256=excluded.sha256,revision=excluded.revision")
+        .bind(work)
+        .bind(&meta.sha256)
+        .bind(uuid::Uuid::new_v4().to_string())
+        .execute(&auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     crate::inventory::invalidate_catalogue_cache();
     Ok(StatusCode::NO_CONTENT)
 }

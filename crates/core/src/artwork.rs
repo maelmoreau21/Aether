@@ -9,7 +9,7 @@ use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::Response,
     routing::get,
 };
 use image::{ImageDecoder, ImageFormat, ImageReader, Limits};
@@ -40,82 +40,78 @@ pub async fn legacy(
     if ![0, 320, 640, 1280].contains(&width) {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let revision: String = query_scalar("SELECT revision FROM work_posters WHERE work_id=?")
-        .bind(work)
-        .fetch_optional(&store.pool)
-        .await
-        .map_err(db)?
-        .ok_or(StatusCode::NOT_FOUND)?;
-    let etag = format!("\"poster-{work}-{revision}-{width}\"");
-    if headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        == Some(etag.as_str())
-    {
-        return Ok((
-            StatusCode::NOT_MODIFIED,
-            [
-                (header::ETAG, etag.as_str()),
-                (header::CACHE_CONTROL, "private, no-cache"),
-            ],
-        )
-            .into_response());
-    }
-    let (mime, data) = if width == 0 {
-        (
-            "image/png".to_owned(),
-            query_scalar::<_, Vec<u8>>("SELECT image_data FROM work_posters WHERE work_id=?")
-                .bind(work)
-                .fetch_one(&store.pool)
-                .await
-                .map_err(db)?,
-        )
-    } else {
-        let cached:Option<(String,Vec<u8>)>=query_as("SELECT mime,image_data FROM poster_previews WHERE work_id=? AND width=? AND revision=?").bind(work).bind(i64::from(width)).bind(&revision).fetch_optional(&store.pool).await.map_err(db)?;
-        if let Some(cached) = cached {
-            cached
-        } else {
-            let permit =
-                tokio::time::timeout(std::time::Duration::from_secs(8), DECODERS.acquire())
-                    .await
-                    .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
-                    .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-            let original: Vec<u8> =
-                query_scalar("SELECT image_data FROM work_posters WHERE work_id=?")
-                    .bind(work)
-                    .fetch_optional(&store.pool)
-                    .await
-                    .map_err(db)?
-                    .ok_or(StatusCode::NOT_FOUND)?;
-            let encoded = tokio::task::spawn_blocking(move || {
-                let _permit = permit;
-                normalize(Bytes::from(original), "image/png")
-            })
+    let (revision, sha256): (String, String) =
+        query_as("SELECT revision,sha256 FROM work_posters WHERE work_id=?")
+            .bind(work)
+            .fetch_optional(&store.pool)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
-            let mut target = None;
-            for (size, mime, data) in encoded.variants {
-                if size == 0 {
-                    continue;
-                }
-                if size == i64::from(width) {
-                    target = Some((mime.to_owned(), data.clone()));
-                }
-                query("INSERT INTO poster_previews(work_id,width,revision,mime,image_data) SELECT work_id,?,?,?,? FROM work_posters WHERE work_id=? AND revision=? ON CONFLICT(work_id,width) DO UPDATE SET revision=excluded.revision,mime=excluded.mime,image_data=excluded.image_data").bind(size).bind(&revision).bind(mime).bind(data).bind(work).bind(&revision).execute(&store.pool).await.map_err(db)?;
-            }
-            target.ok_or(StatusCode::NOT_FOUND)?
-        }
-    };
-    Ok((
-        [
-            (header::CONTENT_TYPE, mime.as_str()),
-            (header::ETAG, etag.as_str()),
-            (header::CACHE_CONTROL, "private, no-cache"),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-        ],
-        data,
+            .map_err(db)?
+            .ok_or(StatusCode::NOT_FOUND)?;
+    if width == 0 {
+        return store
+            .assets
+            .response_after_authorization(&sha256, headers)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    let cached: Option<String> = query_scalar(
+        "SELECT sha256 FROM poster_previews WHERE work_id=? AND width=? AND revision=?",
     )
-        .into_response())
+    .bind(work)
+    .bind(i64::from(width))
+    .bind(&revision)
+    .fetch_optional(&store.pool)
+    .await
+    .map_err(db)?;
+
+    let target_sha = if let Some(cached_sha) = cached {
+        cached_sha
+    } else {
+        let permit = tokio::time::timeout(std::time::Duration::from_secs(8), DECODERS.acquire())
+            .await
+            .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+            .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+        let (_, original) = store
+            .assets
+            .read_all(&sha256)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let encoded = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            normalize(Bytes::from(original), "image/webp")
+        })
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
+        let mut target = None;
+        for (size, mime, data) in encoded.variants {
+            if size == 0 {
+                continue;
+            }
+            let meta = store
+                .assets
+                .put_bytes(&data, mime)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            if size == i64::from(width) {
+                target = Some(meta.sha256.clone());
+            }
+            query("INSERT INTO poster_previews(work_id,width,revision,mime,sha256) VALUES(?,?,?,?,?) ON CONFLICT(work_id,width) DO UPDATE SET revision=excluded.revision,mime=excluded.mime,sha256=excluded.sha256")
+                .bind(work)
+                .bind(size)
+                .bind(&revision)
+                .bind(mime)
+                .bind(&meta.sha256)
+                .execute(&store.pool)
+                .await
+                .map_err(db)?;
+        }
+        target.ok_or(StatusCode::NOT_FOUND)?
+    };
+    store
+        .assets
+        .response_after_authorization(&target_sha, headers)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 static DECODERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 #[derive(Serialize, sqlx::FromRow)]
@@ -235,7 +231,6 @@ async fn read(
     if ![0, 320, 640, 1280].contains(&width) {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let etag = format!("\"{id}-{width}\"");
     // Check existence/ownership before returning 304; a deleted image cannot be revived by a validator.
     let exists: i64 =
         query_scalar("SELECT COUNT(*) FROM work_image_entries WHERE id=? AND work_id=?")
@@ -247,31 +242,19 @@ async fn read(
     if exists == 0 {
         return Err(StatusCode::NOT_FOUND);
     }
-    if headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        == Some(etag.as_str())
-    {
-        return Ok((
-            StatusCode::NOT_MODIFIED,
-            [
-                (header::ETAG, etag.as_str()),
-                (header::CACHE_CONTROL, "private, no-cache"),
-            ],
-        )
-            .into_response());
-    }
-    let (mime,data):(String,Vec<u8>)=query_as("SELECT d.mime,d.image_data FROM work_image_data d JOIN work_image_entries e ON e.id=d.image_id WHERE e.work_id=? AND e.id=? AND d.width=?").bind(work).bind(id).bind(i64::from(width)).fetch_optional(&auth.store.pool).await.map_err(db)?.ok_or(StatusCode::NOT_FOUND)?;
-    Ok((
-        [
-            (header::CONTENT_TYPE, mime.as_str()),
-            (header::CACHE_CONTROL, "private, no-cache"),
-            (header::ETAG, etag.as_str()),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-        ],
-        data,
-    )
-        .into_response())
+    let sha256: String = query_scalar("SELECT d.sha256 FROM work_image_data d JOIN work_image_entries e ON e.id=d.image_id WHERE e.work_id=? AND e.id=? AND d.width=?")
+        .bind(work)
+        .bind(id)
+        .bind(i64::from(width))
+        .fetch_optional(&auth.store.pool)
+        .await
+        .map_err(db)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    auth.store
+        .assets
+        .response_after_authorization(&sha256, &headers)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 fn valid_language(value: &str) -> bool {
@@ -481,6 +464,16 @@ pub(crate) async fn upload(
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
+    let mut stored_variants = Vec::with_capacity(encoded.variants.len());
+    for (width, mime, data) in &encoded.variants {
+        let meta = auth
+            .store
+            .assets
+            .put_bytes(data, mime)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        stored_variants.push((*width, *mime, meta.sha256));
+    }
     let mut connection = auth.store.pool.acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write(&mut connection)
         .await
@@ -585,12 +578,12 @@ pub(crate) async fn upload(
         query("INSERT INTO artwork_image_sources(work_id,source_url_hash,image_id) VALUES(?,?,?) ON CONFLICT(work_id,source_url_hash) DO UPDATE SET image_id=excluded.image_id")
             .bind(&work).bind(source).bind(&id).execute(&mut *tx).await.map_err(db)?;
     }
-    for (width, mime, data) in encoded.variants {
-        query("INSERT INTO work_image_data(image_id,width,mime,image_data) VALUES(?,?,?,?)")
+    for (width, mime, sha256) in stored_variants {
+        query("INSERT INTO work_image_data(image_id,width,mime,sha256) VALUES(?,?,?,?)")
             .bind(&id)
             .bind(width)
             .bind(mime)
-            .bind(data)
+            .bind(&sha256)
             .execute(&mut *tx)
             .await
             .map_err(db)?;

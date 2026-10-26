@@ -53,6 +53,8 @@ services:
       - MEDIA_PUBLIC_URL=${MEDIA_PUBLIC_URL:-http://127.0.0.1:3000}
       - MEDIA_CORE_INTERNAL_URL=${MEDIA_CORE_INTERNAL_URL:-http://aether-core:3000}
       - MEDIA_DB_PATH=/data/core.sqlite3
+      - MEDIA_ASSETS_PATH=/data/assets
+      - MEDIA_PLUGINS_PATH=/data/plugins
       - MEDIA_DB_ENGINE=${MEDIA_DB_ENGINE:-sqlite}
       - MEDIA_DB_URL=${MEDIA_DB_URL:-}
       - MEDIA_BACKUP_DIR=/backups
@@ -65,6 +67,11 @@ services:
       - MEDIA_OIDC_CLIENT_SECRET=${MEDIA_OIDC_CLIENT_SECRET:-}
       - MEDIA_OIDC_USER_GROUPS=${MEDIA_OIDC_USER_GROUPS:-}
     volumes:
+      # Persistent application state, plugins & SQLite database (/data volume):
+      # - Docker named volume (default: 'aether_core_data:/data'): Docker assigns ownership to 10001:10001.
+      # - Host bind mount on SSD/NVMe (e.g. '/mnt/nvme/aether/data:/data'):
+      #   The host directory MUST be owned or writable by UID:GID 10001:10001:
+      #     sudo chown -R 10001:10001 /path/to/data && sudo chmod 750 /path/to/data
       - aether_core_data:/data
       - aether_core_backups:/backups
     networks:

@@ -29,7 +29,6 @@ use tokio::{
 };
 
 static MUTATIONS: Mutex<()> = Mutex::const_new(());
-static EXECUTIONS: Semaphore = Semaphore::const_new(1);
 
 #[path = "extension_adapters.rs"]
 mod adapters;
@@ -192,6 +191,10 @@ pub fn router(auth: AuthState) -> Router {
         .merge(collections::router())
         .route("/api/v1/admin/extensions", get(list).post(install))
         .route(
+            "/api/v1/admin/extensions/storage/health",
+            get(storage_health),
+        )
+        .route(
             "/api/v1/admin/extensions/publishers",
             get(publishers).post(trust),
         )
@@ -208,6 +211,10 @@ pub fn router(auth: AuthState) -> Router {
         .route(
             "/api/v1/admin/extensions/{id}",
             put(configure).delete(uninstall),
+        )
+        .route(
+            "/api/v1/admin/extensions/{id}/upgrade",
+            axum::routing::post(upgrade),
         )
         .route(
             "/api/v1/admin/extensions/{id}/settings",
@@ -438,7 +445,19 @@ async fn list(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<
             settings,
         });
     }
-    Ok(Json(json!({"apiVersion":1,"extensions":installed})))
+    let storage = crate::extension_storage::check_health(&auth.store).await;
+    Ok(Json(
+        json!({"apiVersion":1,"extensions":installed,"storage":storage}),
+    ))
+}
+async fn storage_health(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+) -> Result<Json<crate::extension_storage::PluginStorageHealth>, Error> {
+    admin(&auth, &headers, false).await?;
+    Ok(Json(
+        crate::extension_storage::check_health(&auth.store).await,
+    ))
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -446,6 +465,8 @@ struct InstallPackage {
     #[serde(flatten)]
     package: Package,
     public_key: Option<String>,
+    #[serde(default)]
+    upgrade: bool,
 }
 async fn install(
     State(auth): State<AuthState>,
@@ -464,8 +485,100 @@ async fn install(
             .map_err(db)?
             .ok_or_else(|| err(StatusCode::BAD_REQUEST, "package_public_key_required"))?
     };
-    install_with_key(auth, headers, input.package, key).await
+    if input.upgrade {
+        let ext_id = input.package.manifest.id.clone();
+        upgrade_with_key(auth, headers, ext_id, input.package, key).await
+    } else {
+        install_with_key(auth, headers, input.package, key).await
+    }
 }
+
+async fn upgrade(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<InstallPackage>,
+) -> Result<(StatusCode, Json<Value>), Error> {
+    admin(&auth, &headers, true).await?;
+    let key = if let Some(key) = input.public_key {
+        key
+    } else {
+        query_scalar("SELECT public_key FROM extension_publishers WHERE id=? AND active=1")
+            .bind(&input.package.publisher_id)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "package_public_key_required"))?
+    };
+    upgrade_with_key(auth, headers, id, input.package, key).await
+}
+
+async fn upgrade_with_key(
+    auth: AuthState,
+    headers: HeaderMap,
+    id: String,
+    package: Package,
+    public_key: String,
+) -> Result<(StatusCode, Json<Value>), Error> {
+    let actor = admin(&auth, &headers, true).await?;
+    let _lock = MUTATIONS.lock().await;
+    if package.manifest.id != id {
+        return Err(err(StatusCode::BAD_REQUEST, "extension_id_mismatch"));
+    }
+    let (existing_publisher_id,): (String,) =
+        query_as("SELECT publisher_id FROM extensions WHERE id = ?")
+            .bind(&id)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "extension_not_found"))?;
+
+    let key = STANDARD
+        .decode(&public_key)
+        .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_public_key"))?;
+    validate_package(&package, &key).map_err(|code| err(StatusCode::BAD_REQUEST, code))?;
+
+    if existing_publisher_id != package.publisher_id {
+        return Err(err(StatusCode::FORBIDDEN, "publisher_mismatch"));
+    }
+
+    let bytes = serde_json::to_string(&package)
+        .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_package"))?;
+
+    let new_generation = uuid::Uuid::new_v4().to_string();
+    let mut tx = auth.store.pool().begin().await.map_err(db)?;
+
+    query("UPDATE extensions SET package_json=?, generation=? WHERE id=?")
+        .bind(&bytes)
+        .bind(&new_generation)
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+
+    audit(
+        &mut tx,
+        &actor.user.id,
+        &id,
+        &format!("upgraded:{}:{}", package.manifest.version, package.sha256),
+    )
+    .await?;
+
+    crate::extension_storage::persist_upgrade(&auth.store, &package)
+        .await
+        .map_err(storage_error)?;
+
+    tx.commit().await.map_err(db)?;
+    Ok((
+        StatusCode::OK,
+        Json(json!({
+            "id": id,
+            "version": package.manifest.version,
+            "upgraded": true
+        })),
+    ))
+}
+
 async fn install_with_key(
     auth: AuthState,
     headers: HeaderMap,
@@ -570,6 +683,11 @@ async fn configure(
     }
     let action = json!({"action": if input.enabled { "permissions.enabled" } else { "permissions.disabled" }, "libraryIds": input.library_ids, "allLibraries": input.all_libraries}).to_string();
     audit(&mut tx, &actor.user.id, &id, &action).await?;
+    if input.enabled {
+        crate::automation::emit_extension(&mut tx, &id, now())
+            .await
+            .map_err(db)?;
+    }
     tx.commit().await.map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -635,6 +753,9 @@ async fn put_settings(
         .await
         .map_err(db)?;
     audit(&mut tx, &actor.user.id, &id, "settings.updated").await?;
+    crate::automation::emit_extension(&mut tx, &id, now())
+        .await
+        .map_err(db)?;
     tx.commit().await.map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -823,9 +944,11 @@ async fn run(
     Json(input): Json<Run>,
 ) -> Result<Json<Value>, Error> {
     let actor = admin(&auth, &headers, true).await?;
-    let _slot = EXECUTIONS
-        .try_acquire()
-        .map_err(|_| err(StatusCode::CONFLICT, "extension_busy"))?;
+    let _slot = crate::extension_runtime::try_acquire_execution(
+        &id,
+        crate::extension_runtime::ExecutionClass::Interactive,
+    )
+    .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
     let resource: Option<adapters::WorkContext> =
         query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
             .bind(&input.work_id)
@@ -952,6 +1075,19 @@ async fn invoke_worker(
     generation: &str,
     invocation: crate::extension_runtime::Invocation,
 ) -> Result<Value, Error> {
+    invoke_worker_context(auth, headers, id, library, generation, invocation, None).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn invoke_worker_context(
+    auth: &AuthState,
+    headers: &HeaderMap,
+    id: &str,
+    library: &str,
+    generation: &str,
+    invocation: crate::extension_runtime::Invocation,
+    background: Option<&crate::task_engine::Job>,
+) -> Result<Value, Error> {
     let requested_operation = invocation.input.operation.clone();
     let exe = std::env::current_exe()
         .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
@@ -982,10 +1118,15 @@ async fn invoke_worker(
         .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
     let payload = serde_json::to_vec(&invocation)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_input"))?;
-    let actor = auth
-        .authenticate(headers)
-        .await
-        .map_err(|status| err(status, "authentication_required"))?;
+    let user_id = if let Some(job) = background {
+        job.owner.clone()
+    } else {
+        auth.authenticate(headers)
+            .await
+            .map_err(|status| err(status, "authentication_required"))?
+            .user
+            .id
+    };
     let work_id = invocation
         .input
         .input
@@ -1006,7 +1147,7 @@ async fn invoke_worker(
         work_id,
         season_id: episode.as_ref().map(|v| v.1.clone()).unwrap_or_default(),
         episode_id: episode.map(|v| v.0).unwrap_or_default(),
-        user_id: actor.user.id,
+        user_id,
     };
     let operation = async {
         let mut stdin = child
@@ -1044,6 +1185,21 @@ async fn invoke_worker(
             let frame: Value = serde_json::from_slice(&bytes)
                 .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
             let kind = frame["kind"].as_str().unwrap_or("");
+            if kind == "provider_retry" {
+                let delay = frame["retryAfterSeconds"]
+                    .as_i64()
+                    .unwrap_or(60)
+                    .clamp(1, 86400);
+                if let Some(job) = background {
+                    query("UPDATE automation_provider_limits SET next_allowed_at=CASE WHEN next_allowed_at>? THEN next_allowed_at ELSE ? END WHERE provider=(SELECT provider FROM automation_task_links WHERE task_id=?)")
+                        .bind(now().saturating_add(delay)).bind(now().saturating_add(delay)).bind(&job.id)
+                        .execute(auth.store.pool()).await.map_err(db)?;
+                }
+                return Err((
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Json(json!({"error":"provider_rate_limited","retryAfterSeconds":delay})),
+                ));
+            }
             if kind == "finished" {
                 drop(stdin);
                 let status = child
@@ -1067,7 +1223,7 @@ async fn invoke_worker(
                     "storage_operation_quota",
                 ));
             }
-            if !permitted(auth, headers, id, library, generation).await? {
+            if !worker_permitted(auth, headers, id, library, generation, background).await? {
                 return Err(err(StatusCode::FORBIDDEN, "extension_revoked"));
             }
             let result = match kind {
@@ -1119,12 +1275,12 @@ async fn invoke_worker(
     loop {
         tokio::select! {
             result = &mut operation => {
-                if !permitted(auth, headers, id, library, generation).await? { return Err(err(StatusCode::FORBIDDEN, "extension_revoked")); }
+                if !worker_permitted(auth, headers, id, library, generation, background).await? { return Err(err(StatusCode::FORBIDDEN, "extension_revoked")); }
                 return result;
             }
             _ = &mut deadline => return Err(err(StatusCode::REQUEST_TIMEOUT, "extension_timeout")),
             _ = check.tick() => {
-                if !permitted(auth, headers, id, library, generation).await? { return Err(err(StatusCode::FORBIDDEN, "extension_revoked")); }
+                if !worker_permitted(auth, headers, id, library, generation, background).await? { return Err(err(StatusCode::FORBIDDEN, "extension_revoked")); }
             }
         }
     }
@@ -1156,6 +1312,187 @@ async fn audit_log(
     Ok(Json(
         json!({"audit":rows.into_iter().map(|(actor,id,action,time)| json!({"actorId":actor,"extensionId":id,"action":action,"createdAt":time})).collect::<Vec<_>>()}),
     ))
+}
+
+// Background authority is the persisted initiating administrator, rechecked together
+// with grants and the current fenced lease; it never fabricates a browser session.
+async fn worker_permitted(
+    auth: &AuthState,
+    headers: &HeaderMap,
+    id: &str,
+    library: &str,
+    generation: &str,
+    background: Option<&crate::task_engine::Job>,
+) -> Result<bool, Error> {
+    let Some(job) = background else {
+        return permitted(auth, headers, id, library, generation).await;
+    };
+    let valid: i64 = query_scalar("SELECT COUNT(*) FROM durable_tasks j JOIN users u ON u.id=j.owner JOIN extensions e ON e.id=? JOIN extension_publishers p ON p.id=e.publisher_id JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.id=? AND j.attempt=? AND j.status='running' AND j.lease_until>? AND u.role='administrator' AND u.disabled_at IS NULL AND NOT EXISTS(SELECT 1 FROM automation_policies policy WHERE policy.extension_id=e.id AND policy.library_id=l.id AND policy.mode='disabled') AND e.generation=? AND e.enabled=1 AND p.active=1 AND l.id=? AND l.node_id=j.node_id AND l.enabled=1 AND n.status!='revoked' AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0))")
+        .bind(id).bind(&job.id).bind(job.attempt).bind(now()).bind(generation).bind(library)
+        .fetch_one(auth.store.pool()).await.map_err(db)?;
+    Ok(valid == 1)
+}
+
+/// Durable invocation uses the same validation, language policy and isolated worker
+/// as interactive calls. No disk path or SQL capability is sent to the guest.
+pub(crate) async fn run_automated(
+    auth: &AuthState,
+    job: &crate::task_engine::Job,
+    extension_id: &str,
+    generation: &str,
+    operation: &str,
+) -> Result<Value, Error> {
+    let headers = HeaderMap::new();
+    if !worker_permitted(
+        auth,
+        &headers,
+        extension_id,
+        &job.library_id,
+        generation,
+        Some(job),
+    )
+    .await?
+    {
+        return Err(err(StatusCode::FORBIDDEN, "extension_revoked"));
+    }
+    let (work_id, context): (String, adapters::WorkContext) = {
+        let work_id: Option<String> = query_scalar("SELECT e.work_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN libraries l ON l.id=a.library_id WHERE a.id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root")
+            .bind(&job.target_id).bind(&job.library_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
+        let work_id = work_id.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_asset"))?;
+        let context = query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
+            .bind(&work_id).fetch_one(auth.store.pool()).await.map_err(db)?;
+        (work_id, context)
+    };
+    let raw: String =
+        query_scalar("SELECT package_json FROM extensions WHERE id=? AND generation=?")
+            .bind(extension_id)
+            .bind(generation)
+            .fetch_one(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let package: Package =
+        serde_json::from_str(&raw).map_err(|_| err(StatusCode::CONFLICT, "invalid_package"))?;
+    adapters::authorize_operation(&package.manifest, operation)?;
+    let raw: Option<String> =
+        query_scalar("SELECT settings_json FROM extension_settings WHERE extension_id=?")
+            .bind(extension_id)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let mut settings: Value = raw
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|_| err(StatusCode::CONFLICT, "invalid_settings"))?
+        .unwrap_or_else(|| json!({}));
+    if !settings.is_object() {
+        return Err(err(StatusCode::CONFLICT, "invalid_settings"));
+    }
+    let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
+        .bind(&job.library_id)
+        .fetch_one(auth.store.pool())
+        .await
+        .map_err(db)?;
+    let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
+        .map_err(|_| err(StatusCode::CONFLICT, "invalid_library_options"))?;
+    let legacy = operation == "metadata.propose"
+        && package
+            .manifest
+            .config_schema
+            .as_ref()
+            .is_none_or(Vec::is_empty)
+        && settings.as_object().is_some_and(|v| v.is_empty());
+    if !legacy {
+        settings["language"] = json!(options.preferred_metadata_language);
+    }
+    let payload = if operation == "intro.parse_chapters" {
+        if context.kind != "episode" {
+            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "episode_required"));
+        }
+        let raw: String = query_scalar(
+            "SELECT probe_json FROM inventory_assets WHERE id=? AND library_id=? AND available=1",
+        )
+        .bind(&job.target_id)
+        .bind(&job.library_id)
+        .fetch_one(auth.store.pool())
+        .await
+        .map_err(db)?;
+        let probe: Value = serde_json::from_str(&raw)
+            .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_probe"))?;
+        let duration = probe["format"]["duration"]
+            .as_str()
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "duration_required"))?;
+        let chapters = probe["chapters"]
+            .as_array()
+            .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "chapters_required"))?;
+        if chapters.len() > 1000 {
+            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "too_many_chapters"));
+        }
+        let chapters: Vec<Value> = chapters
+            .iter()
+            .filter_map(|chapter| {
+                let start = chapter["start_time"].as_str()?.parse::<f64>().ok()?;
+                let title = chapter["tags"]["title"].as_str()?;
+                (start.is_finite() && start >= 0.0 && title.len() <= 128)
+                    .then(|| json!({"start":start,"title":title}))
+            })
+            .collect();
+        json!({"episodeId":work_id,"duration":duration,"chapters":chapters})
+    } else {
+        let mut value = adapters::metadata_input(&context, &work_id, operation, &json!({}))?;
+        if operation != "metadata.propose" {
+            value["language"] = settings["language"].clone();
+        }
+        value
+    };
+    let invocation = crate::extension_runtime::Invocation {
+        wasm: crate::extension_storage::wasm(&auth.store, &package)
+            .await
+            .map_err(storage_error)?,
+        input: ExtensionRequest {
+            api_version: 1,
+            operation: operation.into(),
+            input: metadata_input_with_settings(payload, settings),
+        },
+        allowed_hosts: package.manifest.http_hosts.clone(),
+        auth_headers: Default::default(),
+    };
+    let result = invoke_worker_context(
+        auth,
+        &headers,
+        extension_id,
+        &job.library_id,
+        generation,
+        invocation.clone(),
+        Some(job),
+    )
+    .await?;
+    // A unique exact-title candidate can be enriched automatically. Ambiguity stays
+    // a validated search result for review rather than selecting the first match.
+    if operation == "metadata.search"
+        && let Some(items) = result.as_array()
+        && items.len() == 1
+        && items[0]["title"].as_str().is_some_and(|title| {
+            title.eq_ignore_ascii_case(invocation.input.input["title"].as_str().unwrap_or(""))
+        })
+    {
+        let mut details = invocation;
+        details.input.operation = "metadata.details".into();
+        details.input.input["id"] = items[0]["id"].clone();
+        return invoke_worker_context(
+            auth,
+            &headers,
+            extension_id,
+            &job.library_id,
+            generation,
+            details,
+            Some(job),
+        )
+        .await;
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

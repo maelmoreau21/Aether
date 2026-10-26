@@ -21,6 +21,79 @@ pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 6;
 // Ten bounded HTTP requests plus compilation/serialization, below the Web request deadline.
 pub const INVOCATION_TIMEOUT_SECS: u64 = 65;
 
+/// Process-wide admission, shared by Web calls and durable background jobs.
+/// No in-memory waiting queue: a rejected durable task must retain its lease/retry
+/// policy in the database. Each admitted invocation still uses its own worker.
+pub const MAX_CONCURRENT_EXECUTIONS: usize = 4;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecutionClass {
+    Interactive,
+    Background,
+}
+
+pub struct ExecutionAdmission {
+    active: std::sync::Mutex<BTreeMap<String, ExecutionClass>>,
+    capacity: usize,
+}
+
+pub struct ExecutionPermit<'a> {
+    admission: &'a ExecutionAdmission,
+    extension_id: String,
+}
+
+impl ExecutionAdmission {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            active: std::sync::Mutex::new(BTreeMap::new()),
+            capacity: capacity.clamp(2, 16),
+        }
+    }
+
+    /// One invocation per extension and one slot reserved for interactive work.
+    /// The lock protects only this bounded map, never I/O or Wasm execution.
+    pub fn try_acquire(
+        &self,
+        extension_id: &str,
+        class: ExecutionClass,
+    ) -> Option<ExecutionPermit<'_>> {
+        let mut active = self.active.lock().ok()?;
+        let background = active
+            .values()
+            .filter(|&&value| value == ExecutionClass::Background)
+            .count();
+        if active.len() >= self.capacity
+            || active.contains_key(extension_id)
+            || (class == ExecutionClass::Background && background >= self.capacity - 1)
+        {
+            return None;
+        }
+        active.insert(extension_id.to_owned(), class);
+        Some(ExecutionPermit {
+            admission: self,
+            extension_id: extension_id.to_owned(),
+        })
+    }
+}
+
+impl Drop for ExecutionPermit<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.admission.active.lock() {
+            active.remove(&self.extension_id);
+        }
+    }
+}
+
+static EXECUTION_ADMISSION: std::sync::LazyLock<ExecutionAdmission> =
+    std::sync::LazyLock::new(|| ExecutionAdmission::new(MAX_CONCURRENT_EXECUTIONS));
+
+pub fn try_acquire_execution(
+    extension_id: &str,
+    class: ExecutionClass,
+) -> Option<ExecutionPermit<'static>> {
+    EXECUTION_ADMISSION.try_acquire(extension_id, class)
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Invocation {
@@ -50,6 +123,23 @@ pub struct HostState {
     pub http_count: usize,
     pub max_http_requests: usize,
     pub max_response_size: usize,
+    pub last_http_at: Option<std::time::Instant>,
+    pub retry_after_seconds: Option<u64>,
+}
+
+/// RFC HTTP dates and delta-seconds; malformed/missing values use bounded backoff.
+pub fn provider_retry_after(value: Option<&str>, now: std::time::SystemTime) -> u64 {
+    let seconds = value.and_then(|value| {
+        value.trim().parse::<u64>().ok().or_else(|| {
+            httpdate::parse_http_date(value).ok().map(|date| {
+                date.duration_since(now)
+                    .unwrap_or_default()
+                    .as_secs()
+                    .saturating_add(1)
+            })
+        })
+    });
+    seconds.unwrap_or(30).clamp(1, 86_400)
 }
 
 pub(crate) fn is_forbidden_ip(ip: IpAddr) -> bool {
@@ -83,6 +173,12 @@ pub fn execute_host_http(
     state: &mut HostState,
     req: HostHttpRequest,
 ) -> Result<HostHttpResponse, HostHttpError> {
+    if state.retry_after_seconds.is_some() {
+        return Err(HostHttpError {
+            code: "provider_rate_limited".into(),
+            message: "Provider cooldown requires a durable retry".into(),
+        });
+    }
     if state.http_count >= state.max_http_requests {
         return Err(HostHttpError {
             code: "quota_exceeded".into(),
@@ -169,7 +265,10 @@ pub fn execute_host_http(
     let max_resp = state.max_response_size;
     let auth_headers = state.auth_headers.clone();
 
-    rt.block_on(async move {
+    if let Some(previous) = state.last_http_at {
+        std::thread::sleep(Duration::from_secs(1).saturating_sub(previous.elapsed()));
+    }
+    let result: Result<HostHttpResponse, HostHttpError> = rt.block_on(async move {
         let addresses: Vec<_> = tokio::time::timeout(
             Duration::from_secs(timeout_secs),
             tokio::net::lookup_host((host.as_str(), 443)),
@@ -241,6 +340,14 @@ pub fn execute_host_http(
             }
         }
 
+        if matches!(status, 429 | 503) {
+            return Ok(HostHttpResponse {
+                status,
+                headers: resp_headers,
+                body: Vec::new(),
+            });
+        }
+
         let mut body_bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(|_| HostHttpError {
             code: "read_error".into(),
@@ -260,7 +367,17 @@ pub fn execute_host_http(
             headers: resp_headers,
             body: body_bytes.to_vec(),
         })
-    })
+    });
+    state.last_http_at = Some(std::time::Instant::now());
+    if let Ok(response) = &result
+        && matches!(response.status, 429 | 503)
+    {
+        state.retry_after_seconds = Some(provider_retry_after(
+            response.headers.get("retry-after").map(String::as_str),
+            std::time::SystemTime::now(),
+        ));
+    }
+    result
 }
 
 fn write_host_result_to_guest<T: Serialize>(caller: &mut Caller<'_, HostState>, result: T) -> u64 {
@@ -355,6 +472,8 @@ fn execute_inner(
         http_count: 0,
         max_http_requests: DEFAULT_MAX_HTTP_REQUESTS,
         max_response_size: DEFAULT_MAX_RESPONSE_SIZE,
+        last_http_at: None,
+        retry_after_seconds: None,
     };
 
     let mut store = Store::new(&engine, host_state);
@@ -365,7 +484,7 @@ fn execute_inner(
     let _ = linker.func_wrap(
         "aether",
         "aether_host_http",
-        |mut caller: Caller<'_, HostState>, ptr: u32, len: u32| -> u64 {
+        move |mut caller: Caller<'_, HostState>, ptr: u32, len: u32| -> u64 {
             if len as usize > MAX_JSON {
                 let err_res: Result<HostHttpResponse, HostHttpError> = Err(HostHttpError {
                     code: "request_too_large".into(),
@@ -384,6 +503,7 @@ fn execute_inner(
             }
 
             let parsed_req: Result<HostHttpRequest, _> = serde_json::from_slice(&req_bytes);
+            let previous_retry = caller.data().retry_after_seconds;
             let result = match parsed_req {
                 Ok(req) => execute_host_http(caller.data_mut(), req),
                 Err(e) => Err(HostHttpError {
@@ -391,6 +511,16 @@ fn execute_inner(
                     message: e.to_string(),
                 }),
             };
+
+            if brokered
+                && previous_retry.is_none()
+                && let Some(seconds) = caller.data().retry_after_seconds
+            {
+                let _ = write_frame(
+                    &mut std::io::stdout().lock(),
+                    &serde_json::json!({"kind":"provider_retry","retryAfterSeconds":seconds}),
+                );
+            }
 
             write_host_result_to_guest(&mut caller, result)
         },
@@ -511,6 +641,92 @@ pub fn write_frame(
 #[cfg(test)]
 mod storage_frames {
     use super::*;
+    #[test]
+    fn provider_cooldown_handles_delta_http_dates_and_bounds() {
+        let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        assert_eq!(provider_retry_after(Some("120"), now), 120);
+        assert_eq!(provider_retry_after(Some("0"), now), 1);
+        assert_eq!(provider_retry_after(Some("999999"), now), 86_400);
+        assert_eq!(provider_retry_after(Some("bad"), now), 30);
+        assert_eq!(provider_retry_after(None, now), 30);
+        let future = httpdate::fmt_http_date(now + Duration::from_secs(120));
+        assert_eq!(provider_retry_after(Some(&future), now), 121);
+        let past = httpdate::fmt_http_date(now - Duration::from_secs(120));
+        assert_eq!(provider_retry_after(Some(&past), now), 1);
+    }
+
+    #[test]
+    fn execution_admission_reserves_interactive_capacity_and_releases_on_drop() {
+        let pool = ExecutionAdmission::new(4);
+        let first = pool.try_acquire("a", ExecutionClass::Background).unwrap();
+        let _second = pool.try_acquire("b", ExecutionClass::Background).unwrap();
+        let _third = pool.try_acquire("c", ExecutionClass::Background).unwrap();
+        assert!(pool.try_acquire("d", ExecutionClass::Background).is_none());
+        assert!(pool.try_acquire("a", ExecutionClass::Interactive).is_none());
+        let interactive = pool.try_acquire("d", ExecutionClass::Interactive).unwrap();
+        assert!(pool.try_acquire("e", ExecutionClass::Interactive).is_none());
+        drop(first);
+        let _replacement = pool.try_acquire("a", ExecutionClass::Background).unwrap();
+        drop(interactive);
+        assert!(pool.try_acquire("e", ExecutionClass::Background).is_none());
+        assert!(pool.try_acquire("e", ExecutionClass::Interactive).is_some());
+    }
+
+    #[tokio::test]
+    async fn cancelled_invocation_releases_admission() {
+        let pool = std::sync::Arc::new(ExecutionAdmission::new(2));
+        let entered = std::sync::Arc::new(tokio::sync::Notify::new());
+        let task_pool = pool.clone();
+        let task_entered = entered.clone();
+        let task = tokio::spawn(async move {
+            let _permit = task_pool
+                .try_acquire("a", ExecutionClass::Background)
+                .unwrap();
+            task_entered.notify_one();
+            std::future::pending::<()>().await;
+        });
+        entered.notified().await;
+        assert!(pool.try_acquire("a", ExecutionClass::Interactive).is_none());
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(pool.try_acquire("a", ExecutionClass::Background).is_some());
+    }
+
+    #[test]
+    fn simultaneous_admission_never_overcommits_workers() {
+        let pool = ExecutionAdmission::new(4);
+        let start = std::sync::Barrier::new(24);
+        let finish = std::sync::Barrier::new(24);
+        let admitted = std::thread::scope(|scope| {
+            let tasks: Vec<_> = (0..24)
+                .map(|index| {
+                    let pool = &pool;
+                    let start = &start;
+                    let finish = &finish;
+                    scope.spawn(move || {
+                        start.wait();
+                        let permit = pool
+                            .try_acquire(&format!("extension-{index}"), ExecutionClass::Background);
+                        let admitted = permit.is_some();
+                        finish.wait();
+                        drop(permit);
+                        admitted
+                    })
+                })
+                .collect();
+            tasks
+                .into_iter()
+                .map(|task| task.join().unwrap())
+                .filter(|admitted| *admitted)
+                .count()
+        });
+        assert_eq!(admitted, 3);
+        assert!(
+            pool.try_acquire("replacement", ExecutionClass::Background)
+                .is_some()
+        );
+    }
+
     #[test]
     fn broker_rejects_oversized_and_truncated_frames_before_parsing() {
         let header = (MAX_JSON as u32 + 1).to_be_bytes();

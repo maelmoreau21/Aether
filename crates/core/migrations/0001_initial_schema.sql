@@ -447,9 +447,9 @@ CREATE TABLE poster_previews (
 ) STRICT;
 CREATE INDEX poster_previews_asset ON poster_previews(sha256);
 
-CREATE INDEX inventory_display_sort ON inventory_works(kind,lower(COALESCE(json_extract(manual_json,'$.title'),title_sort)),id);
+CREATE INDEX inventory_display_sort ON inventory_works(kind,display_title_sort,id);
 
-CREATE INDEX inventory_library_display_sort ON inventory_works(library_id,kind,lower(COALESCE(json_extract(manual_json,'$.title'),title_sort)),id);
+CREATE INDEX inventory_library_display_sort ON inventory_works(library_id,kind,display_title_sort,id);
 
 CREATE TABLE playlist_music_items(list_id TEXT NOT NULL REFERENCES personal_lists(id) ON DELETE CASCADE,track_id TEXT NOT NULL REFERENCES music_tracks(id) ON DELETE CASCADE,position INTEGER NOT NULL,PRIMARY KEY(list_id,track_id)) STRICT;
 

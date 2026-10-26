@@ -210,3 +210,44 @@ générale. Aucune extrapolation Release ou NAS. Pic RSS échantillonné du proc
 26,60 Mio, CPU échantillonné160,94 s, initialisation100000 valeurs incluse.
 Preuves complètes et empreintes sources/binaire :
 `evidence/2026-10-25/extension-storage/sqlite-final*`.
+
+PostgreSQL final, 100 000 entrées réellement créées :
+
+| Charge | Clients | p50 lecture SQLx | p95 lecture SQLx | p99 lecture SQLx | p95 écriture CAS |
+|---|---:|---:|---:|---:|---:|
+| Lecture | 1 | 6,145 ms | 28,131 ms | 122,762 ms | — |
+| Lecture | 4 | 6,767 ms | 10,280 ms | 13,408 ms | — |
+| 90 % lecture / 10 % CAS | 1 | 9,957 ms | 12,289 ms | 13,646 ms | 40,830 ms |
+| 90 % lecture / 10 % CAS | 4 | 7,093 ms | 10,545 ms | 12,469 ms | 29,045 ms |
+
+Temps SQL serveur seul via EXPLAIN ANALYZE : p50/p95 1,559/2,032 ms à un
+client, 1,533/2,929 ms à quatre clients. La cible sous1 ms n'est donc pas
+démontrée même pour cette partie SQL. Les chiffres SQLx incluent le réseau
+loopback Docker ; ils ne permettent pas une comparaison sans réseau complète
+avec SQLite. Chargement par100000 appels moteur :2775,08 s ; pic RSS client
+échantillonné13,84 Mio, CPU657,38 s (serveur PostgreSQL exclu).
+Preuves, plans et empreintes :
+`evidence/2026-10-25/extension-storage/postgres-final*`.
+
+Les lectures utilisent le namespace A ; les100000 lignes sont réparties entre
+deux extensions. Les clients sont des tâches Tokio, pas des navigateurs. Aucun
+résultat Release/NAS, allocation exacte ni cluster multi-Core complet n'est
+déduit de ces bancs Windows/debug. Prochain petit jalon : profilage Release
+ciblé du décodage de manifeste, de la contention et des allocations.
+
+### Refonte de base concurrente constatée le26octobre
+
+Après les tests, un autre travail a regroupé les anciennes migrations dans
+`0001_initial_schema.sql` pour les deux moteurs ; les tables privées et objets
+y sont présentes. Les fichiers moteur KV/objets, runtime et contrat SDK ont les
+mêmes SHA-256 que les preuves, mais `extensions.rs` et d'autres composants ont
+changé. Les résultats attestent l'instantané enregistré, pas l'ensemble de
+cette refonte encore en cours. Aucune migration ni modification de cette autre
+intervention n'a été restaurée ou écrasée. Les numéros0049/0050 cités plus haut
+décrivent les migrations du jalon testé avant leur regroupement.
+
+Nettoyage final : le daemon Docker était arrêté le26octobre ; la suppression
+du seul conteneur jetable `media-extension-storage-test`
+(`2db01fe85b3c7d0038dd28d90b551bef5dfee6c7fb9e3cf9d073fd329c9d0b6a`)
+n'a donc pas pu être confirmée. Docker n'a pas été redémarré pour éviter
+d'interférer avec l'autre intervention. Aucun conteneur ou volume tiers visé.

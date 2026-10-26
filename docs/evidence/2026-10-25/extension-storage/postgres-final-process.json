@@ -1,0 +1,15 @@
+{
+  "test": "postgres_storage_benchmark",
+  "sampledPeakRssBytes": 14508032,
+  "sampledCpuMs": 657375.0,
+  "sampleIntervalMs": 100,
+  "binarySha256": "bb5c6ef46145c40bdee987b15cde1837eae0dd5b6f3f7b2e9a006b4fcc4fd166",
+  "sourceHashes": {
+    "crates/core/src/extension_data.rs": "ce7b77dac6bb0935907af9e04770191456f52118bfabc73eb85126394435f8c4",
+    "crates/core/src/extension_objects.rs": "9df02be023c32c5a0f45d33a75d815ad0e7ecd932075a8e6263362fe002b7f90",
+    "crates/core/src/extensions.rs": "6e9f44dbc305007490723f83fdd909a0c1afd16b4fb433a7d20efaa78cb71744",
+    "crates/core/src/extension_runtime.rs": "5c56e0305f348ad231b9ef46c7c56bd4e1f8c16b1cf485b4986578875920a80a",
+    "crates/extension-sdk/src/storage.rs": "0f9a6b1bdf041a5b40fa04362a14643883c2d9d7b7164bf12ec46dd809215c62"
+  },
+  "includes": "whole benchmark process incl seeding, runtime and assertions; excludes compilation and PostgreSQL server"
+}

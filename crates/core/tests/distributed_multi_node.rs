@@ -216,6 +216,74 @@ async fn spawn_node_server(
     (public_url, state, tx, addr)
 }
 
+/// Real signed Wasm fixture, scoped to the two paired Nodes' libraries. This
+/// provider receives catalogue context only; physical scans stay on the Nodes.
+async fn install_automatic_metadata_fixture(store: &IdentityStore, libraries: &[&str]) {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use media_extension_sdk::{Manifest, Package};
+    use ring::{
+        rand::SystemRandom,
+        signature::{Ed25519KeyPair, KeyPair},
+    };
+    use sha2::{Digest, Sha256};
+    let output=json!({"apiVersion":1,"result":{"title":"Automatic proposal","summary":"Distributed signed fixture"}}).to_string();
+    let data = output
+        .bytes()
+        .map(|b| format!("\\{b:02x}"))
+        .collect::<String>();
+    let wasm = wat::parse_str(format!(
+        r#"(module (memory (export "memory") 1 256)
+        (data (i32.const 4096) "{data}")
+        (func (export "media_alloc") (param i32) (result i32) i32.const 1024)
+        (func (export "media_run") (param i32 i32) (result i64) i64.const {}))"#,
+        (4096u64 << 32) | output.len() as u64
+    ))
+    .unwrap();
+    let bytes = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
+    let signing = Ed25519KeyPair::from_pkcs8(bytes.as_ref()).unwrap();
+    let mut package = Package {
+        manifest: Manifest {
+            api_version: 1,
+            id: "distributed.fixture".into(),
+            name: "Distributed fixture".into(),
+            version: "1.0.0".into(),
+            description: "Legal synthetic provider".into(),
+            author: "Test".into(),
+            license: "MIT".into(),
+            repository: "https://example.invalid/distributed".into(),
+            permissions: vec!["metadata.read".into()],
+            ..Default::default()
+        },
+        publisher_id: "distributed-fixture".into(),
+        wasm: STANDARD.encode(&wasm),
+        sha256: format!("{:x}", Sha256::digest(&wasm)),
+        signature: String::new(),
+    };
+    package.signature = STANDARD.encode(signing.sign(&package.signing_bytes().unwrap()).as_ref());
+    media_poc::extensions::validate_package(&package, signing.public_key().as_ref()).unwrap();
+    media_poc::database::query(
+        "INSERT INTO extension_publishers(id,public_key,active) VALUES('distributed-fixture',?,1)",
+    )
+    .bind(STANDARD.encode(signing.public_key().as_ref()))
+    .execute(store.pool())
+    .await
+    .unwrap();
+    media_poc::extension_storage::persist(store, &package)
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('distributed.fixture','distributed-fixture',?,1,'distributed-generation')")
+        .bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
+    for library in libraries {
+        media_poc::database::query(
+            "INSERT INTO extension_grants(extension_id,library_id) VALUES('distributed.fixture',?)",
+        )
+        .bind(*library)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    }
+}
+
 #[tokio::test]
 async fn distributed_core_and_two_remote_nodes_end_to_end() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -562,6 +630,9 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .unwrap()
         .to_owned();
 
+    install_automatic_metadata_fixture(&store, &[&lib1_id, &lib2_id]).await;
+    let automation_started = std::time::Instant::now();
+
     // 5 & 6. Trigger scans on both remote libraries and wait for completion
     for lib_id in [&lib1_id, &lib2_id] {
         let (scan_st, _, _) = http_request(
@@ -606,6 +677,30 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
             "remote scan for library {lib_id} did not complete in time"
         );
     }
+
+    // Both real remote scans now feed the same durable event/extension queue.
+    // The Core runs the signed Wasm worker after publication, without a manual
+    // extension invocation. Distinct Node provenance must survive persistence.
+    let mut automatic_count=tokio::time::timeout(Duration::from_secs(30),async {
+        loop {
+            let expected:i64=media_poc::database::query_scalar("SELECT COUNT(*) FROM inventory_assets WHERE available=1 AND library_id IN (?,?)")
+                .bind(&lib1_id).bind(&lib2_id).fetch_one(store.pool()).await.unwrap();
+            let completed:i64=media_poc::database::query_scalar("SELECT COUNT(*) FROM automation_results r JOIN durable_tasks t ON t.id=r.task_id WHERE r.extension_id='distributed.fixture' AND t.status='completed'")
+                .fetch_one(store.pool()).await.unwrap();
+            if expected>=3 && completed==expected {break completed;}
+            let errors:Vec<String>=media_poc::database::query_scalar("SELECT t.error FROM durable_tasks t JOIN automation_task_links a ON a.task_id=t.id WHERE t.status='error'")
+                .fetch_all(store.pool()).await.unwrap();
+            assert!(errors.is_empty(),"automatic extension failures: {errors:?}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }).await.expect("two real TCP Nodes did not complete automatic enrichment");
+    let automatic_nodes:i64=media_poc::database::query_scalar("SELECT COUNT(DISTINCT t.node_id) FROM automation_results r JOIN durable_tasks t ON t.id=r.task_id WHERE r.extension_id='distributed.fixture'")
+        .fetch_one(store.pool()).await.unwrap();
+    assert_eq!(automatic_nodes, 2);
+    println!(
+        "REAL_TWO_NODE_AUTOMATION nodes=2 assets={automatic_count} elapsed_ms={:.3}; real TCP scans, signed Wasm subprocesses, common durable results; browser decoding latency not measured",
+        automation_started.elapsed().as_secs_f64() * 1000.0
+    );
 
     // Music is scanned on the owning remote Node and streamed under the same live library rights.
     let music_root = node1_root
@@ -1477,6 +1572,52 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     assert_eq!(film_off["available"], false);
     assert_eq!(film_off["nodeStatus"], "disconnected");
 
+    // While Node 1 is actually stopped, discovery and automatic extension work
+    // on Node 2 must still progress through the shared durable queue.
+    let new_episode = node2_root
+        .join("Chroniques Orbitales (2024) [tvdb-777]")
+        .join("Season 01")
+        .join("Chroniques Orbitales - S01E03 - Reprise.mkv");
+    tokio::fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/generated/av1-opus.mkv"),
+        &new_episode,
+    )
+    .await
+    .unwrap();
+    let failure_progress = std::time::Instant::now();
+    let (scan_status, _, scan_error) = http_request(
+        &core_origin,
+        Method::POST,
+        &format!("/api/v1/admin/libraries/{lib2_id}/scan"),
+        &[
+            ("origin", &core_origin),
+            ("cookie", &admin_cookie),
+            ("x-csrf-token", &admin_csrf),
+        ],
+        vec![],
+    )
+    .await;
+    assert_eq!(
+        scan_status,
+        StatusCode::ACCEPTED,
+        "{}",
+        String::from_utf8_lossy(&scan_error)
+    );
+    tokio::time::timeout(Duration::from_secs(30),async {
+        loop {
+            let completed:i64=media_poc::database::query_scalar("SELECT COUNT(*) FROM automation_results r JOIN durable_tasks t ON t.id=r.task_id WHERE r.extension_id='distributed.fixture' AND t.status='completed'")
+                .fetch_one(store.pool()).await.unwrap();
+            if completed==automatic_count+1 {break;}
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }).await.expect("healthy Node did not discover/enrich new episode while peer was offline");
+    automatic_count += 1;
+    println!(
+        "REAL_NODE_FAILURE_AUTOMATION failed_nodes=1 healthy_nodes=1 new_assets=1 elapsed_ms={:.3}; real TCP Node 2 scan and signed Wasm completion while Node 1 listener stopped",
+        failure_progress.elapsed().as_secs_f64() * 1000.0
+    );
+
     // Restart Node 1 on the same address using its persisted node_identity.json and node_inventory.json
     let listener_re = TcpListener::bind(node1_addr).await.expect("rebind node1");
     let app_re = node_router(node1_state.clone());
@@ -1890,6 +2031,26 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     let cat_after_rev: Value = serde_json::from_slice(&cat_after_rev_body).unwrap();
     assert_eq!(cat_after_rev["total"], 1);
     assert_eq!(cat_after_rev["items"][0]["id"], series_work_id);
+
+    // The unchanged rescans and actual Node 1 restart above must not duplicate
+    // extension effects or discard results already committed by either Node.
+    let retained: i64 = media_poc::database::query_scalar(
+        "SELECT COUNT(*) FROM automation_results WHERE extension_id='distributed.fixture'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    let admitted: i64 = media_poc::database::query_scalar(
+        "SELECT COUNT(*) FROM automation_task_links WHERE extension_id='distributed.fixture'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(retained, automatic_count);
+    assert_eq!(
+        admitted, automatic_count,
+        "unchanged rescans duplicated extension work"
+    );
 
     let _ = node1_stop_tx2.send(());
     let _ = node2_stop_tx.send(());

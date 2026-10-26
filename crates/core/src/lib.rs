@@ -4,6 +4,9 @@ pub mod admin_backups;
 pub mod admin_users;
 pub mod api_keys;
 pub mod auth;
+pub mod automation;
+pub mod automation_execution;
+pub mod automation_http;
 pub mod avatars;
 pub mod backup;
 pub mod backup_bundle;
@@ -17,9 +20,11 @@ pub mod oidc;
 pub mod postgres_backup;
 pub mod scheduler;
 pub mod server_settings;
+pub mod system_task_queue;
 pub mod system_tasks;
 use media_contracts::brand;
 pub mod artwork;
+pub mod assets;
 mod catalog;
 pub mod consolidation;
 mod demo;
@@ -199,6 +204,8 @@ pub async fn secure_app_with_jobs(
             .merge(system_tasks::router(auth.clone(), root.clone()).await?)
             .merge(groups::router(auth.clone()))
             .merge(api_keys::router(auth.clone()))
+            .merge(automation_http::router(auth.clone()))
+            .merge(timeline_markers::router(auth.clone()))
             .merge(extensions::router(auth.clone()))
             .merge(auth::router(auth))
             .merge(oidc),
@@ -553,6 +560,7 @@ pub mod extension_storage;
 
 pub mod task_engine;
 mod task_execution;
+pub mod timeline_markers;
 
 pub mod extension_data;
 pub mod extension_objects;

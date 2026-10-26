@@ -29,6 +29,7 @@ uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10.9"
 bytes = "1"
 http-body-util = "0.1"
+httpdate = "1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 url = "2"
@@ -78,6 +79,9 @@ required-features = ["fixture-bench"]
 name = "catalog"
 required-features = ["fixture-bench"]
 
+[[bin]]
+name = "media-restore-assets"
+path = "src/bin/restore-assets.rs"
 [[bin]]
 name = "media-recover"
 path = "src/bin/recover.rs"

@@ -13,14 +13,20 @@ use std::{
 use zeroize::Zeroizing;
 const MAGIC: &[u8; 8] = b"MDBK0001";
 const CHUNK: usize = 65536;
-pub const DEFAULT_BACKUP_KEY: &str =
-    "0000000000000000000000000000000000000000000000000000000000000000";
+/// Publicly known key used by pre-hardening betas. It is never accepted for creating or restoring
+/// archives unless the operator explicitly calls [`extract_legacy_public_key`].
+const LEGACY_PUBLIC_KEY: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+const INSTALLATION_KEY_FILE: &str = "backup.key";
 #[derive(Debug, thiserror::Error)]
 pub enum BundleError {
     #[error("backup I/O failed")]
     Io(#[from] std::io::Error),
-    #[error("backup key must be exactly 64 hexadecimal characters")]
+    #[error(
+        "backup key must be exactly 64 hexadecimal characters and must not be a known weak value"
+    )]
     InvalidKey,
+    #[error("no backup key configured: set MEDIA_BACKUP_KEY or MEDIA_BACKUP_KEY_FILE")]
+    MissingKey,
     #[error("backup authentication or format validation failed")]
     InvalidBundle,
     #[error("backup target already exists")]
@@ -29,6 +35,8 @@ pub enum BundleError {
     InvalidConfig,
     #[error("backup worker failed")]
     Worker,
+    #[error("an asset is missing or does not match its recorded SHA-256 or size")]
+    AssetIntegrity,
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -37,12 +45,36 @@ struct Manifest {
     config: BTreeMap<String, String>,
     #[serde(default)]
     attachments: BTreeMap<String, u64>,
+    /// Number of content-addressed assets carried by the archive (0 for database-only archives).
+    #[serde(default)]
+    assets: u64,
+    #[serde(default)]
+    asset_bytes: u64,
+}
+/// One durable binary object to embed. `(sha256, size, mime)` come from the SQL `assets` table.
+pub struct AssetSource {
+    pub items: Vec<(String, u64, String)>,
+    pub open: AssetOpener,
+}
+/// Opens one stored object by digest (blocking).
+pub type AssetOpener = Box<dyn Fn(&str) -> std::io::Result<File> + Send + 'static>;
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssetHeader {
+    sha256: String,
+    size: u64,
+    mime: String,
+}
+fn hex_digest(digest: impl AsRef<[u8]>) -> String {
+    digest.as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
 #[derive(Debug, Serialize)]
 pub struct BundleSummary {
     pub engine: String,
     pub database_file: String,
     pub bytes: u64,
+    /// Verified assets written to `<output>/assets/<sha256>` (listed in `assets.json`).
+    pub assets: u64,
 }
 struct Cleanup(PathBuf, bool);
 impl Drop for Cleanup {
@@ -56,13 +88,14 @@ impl Drop for Cleanup {
         }
     }
 }
-fn decode_key(value: &str) -> Result<Zeroizing<[u8; 32]>, BundleError> {
-    let value = if value.is_empty() {
-        DEFAULT_BACKUP_KEY
-    } else {
-        value
-    };
-    if value.len() != 64 {
+fn decode_key_inner(value: &str, allow_legacy: bool) -> Result<Zeroizing<[u8; 32]>, BundleError> {
+    if value.is_empty() {
+        return Err(BundleError::MissingKey);
+    }
+    if value.len() != 64 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(BundleError::InvalidKey);
+    }
+    if !allow_legacy && value == LEGACY_PUBLIC_KEY {
         return Err(BundleError::InvalidKey);
     }
     let mut key = Zeroizing::new([0; 32]);
@@ -71,6 +104,74 @@ fn decode_key(value: &str) -> Result<Zeroizing<[u8; 32]>, BundleError> {
         key[i] = u8::from_str_radix(text, 16).map_err(|_| BundleError::InvalidKey)?;
     }
     Ok(key)
+}
+fn decode_key(value: &str) -> Result<Zeroizing<[u8; 32]>, BundleError> {
+    decode_key_inner(value, false)
+}
+/// Validate a backup key without exposing it. Empty, malformed and the legacy public key are refused.
+pub fn validate_key(value: &str) -> Result<(), BundleError> {
+    decode_key(value).map(|_| ())
+}
+/// Resolve the backup key with a strict order and no fixed fallback:
+/// 1. `explicit` (`MEDIA_BACKUP_KEY`) — a set but invalid value is an error, never ignored;
+/// 2. `key_file` (`MEDIA_BACKUP_KEY_FILE`) — must be a regular file containing 64 hex digits;
+/// 3. the installation key `<data_dir>/secrets/backup.key`, generated from the OS CSPRNG when
+///    `generate` is true and the file does not exist yet (created atomically, mode 0600 on Unix).
+///
+/// The key is never written inside an archive.
+pub fn resolve_key(
+    explicit: Option<&str>,
+    key_file: Option<&Path>,
+    data_dir: Option<&Path>,
+    generate: bool,
+) -> Result<Zeroizing<String>, BundleError> {
+    if let Some(value) = explicit.filter(|v| !v.is_empty()) {
+        validate_key(value.trim())?;
+        return Ok(Zeroizing::new(value.trim().to_owned()));
+    }
+    if let Some(path) = key_file {
+        let meta = fs::symlink_metadata(path)?;
+        if !meta.is_file() || meta.len() > 256 {
+            return Err(BundleError::InvalidKey);
+        }
+        let value = Zeroizing::new(fs::read_to_string(path)?);
+        validate_key(value.trim())?;
+        return Ok(Zeroizing::new(value.trim().to_owned()));
+    }
+    let dir = data_dir.ok_or(BundleError::MissingKey)?.join("secrets");
+    let path = dir.join(INSTALLATION_KEY_FILE);
+    match fs::symlink_metadata(&path) {
+        Ok(meta) if meta.is_file() && meta.len() <= 256 => {
+            let value = Zeroizing::new(fs::read_to_string(&path)?);
+            validate_key(value.trim())?;
+            return Ok(Zeroizing::new(value.trim().to_owned()));
+        }
+        Ok(_) => return Err(BundleError::InvalidKey),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+    if !generate {
+        return Err(BundleError::MissingKey);
+    }
+    let _ = private_dir(&dir);
+    let mut bytes = Zeroizing::new([0u8; 32]);
+    SystemRandom::new()
+        .fill(bytes.as_mut())
+        .map_err(|_| BundleError::InvalidKey)?;
+    let hex = Zeroizing::new(bytes.iter().map(|b| format!("{b:02x}")).collect::<String>());
+    validate_key(&hex)?;
+    match private_file(&path) {
+        Ok(mut file) => {
+            file.write_all(hex.as_bytes())?;
+            file.sync_all()?;
+            Ok(hex)
+        }
+        // Another process created it first: use that key, never overwrite.
+        Err(BundleError::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            resolve_key(None, None, data_dir, false)
+        }
+        Err(e) => Err(e),
+    }
 }
 struct KeyLength;
 impl hkdf::KeyType for KeyLength {
@@ -193,12 +294,32 @@ pub async fn create(
     key_hex: &str,
     engine: &str,
 ) -> Result<u64, BundleError> {
+    create_with_assets(database_archive, config, target, key_hex, engine, None).await
+}
+/// Like [`create`], additionally embedding every asset of `assets`. Each object is re-hashed while
+/// it is read: a missing, truncated or altered object aborts the backup instead of producing an
+/// archive that claims to be complete.
+pub async fn create_with_assets(
+    database_archive: &Path,
+    config: BTreeMap<String, String>,
+    target: &Path,
+    key_hex: &str,
+    engine: &str,
+    assets: Option<AssetSource>,
+) -> Result<u64, BundleError> {
     let database_archive = database_archive.to_owned();
     let target = target.to_owned();
     let key = decode_key(key_hex)?;
     let engine = engine.to_owned();
     tokio::task::spawn_blocking(move || {
-        create_sync(&database_archive, config, &target, &key[..], &engine)
+        create_sync(
+            &database_archive,
+            config,
+            &target,
+            &key[..],
+            &engine,
+            assets,
+        )
     })
     .await
     .map_err(|_| BundleError::Worker)?
@@ -218,6 +339,7 @@ fn create_sync(
     target: &Path,
     root: &[u8],
     engine: &str,
+    assets: Option<AssetSource>,
 ) -> Result<u64, BundleError> {
     if !matches!(engine, "sqlite" | "postgres") {
         return Err(BundleError::InvalidConfig);
@@ -278,6 +400,10 @@ fn create_sync(
             engine: engine.into(),
             config,
             attachments,
+            assets: assets.as_ref().map_or(0, |a| a.items.len() as u64),
+            asset_bytes: assets
+                .as_ref()
+                .map_or(0, |a| a.items.iter().map(|i| i.1).sum()),
         })
         .map_err(|_| BundleError::InvalidConfig)?,
     );
@@ -323,6 +449,40 @@ fn create_sync(
             return Err(BundleError::InvalidConfig);
         }
     }
+    if let Some(assets) = assets {
+        for (sha256, size, mime) in &assets.items {
+            if !crate::assets::is_sha256_hex(sha256) || *size == 0 {
+                return Err(BundleError::AssetIntegrity);
+            }
+            let header_json = serde_json::to_vec(&AssetHeader {
+                sha256: sha256.clone(),
+                size: *size,
+                mime: mime.clone(),
+            })
+            .map_err(|_| BundleError::InvalidConfig)?;
+            record(&mut output, &key, &header, counter, 8, &header_json)?;
+            counter = counter.checked_add(1).ok_or(BundleError::InvalidBundle)?;
+            let mut file = (assets.open)(sha256).map_err(|_| BundleError::AssetIntegrity)?;
+            let mut hasher = <sha2::Sha256 as sha2::Digest>::new();
+            let mut copied = 0u64;
+            loop {
+                let n = file.read(&mut buffer)?;
+                if n == 0 {
+                    break;
+                }
+                copied += n as u64;
+                if copied > *size {
+                    return Err(BundleError::AssetIntegrity);
+                }
+                sha2::Digest::update(&mut hasher, &buffer[..n]);
+                record(&mut output, &key, &header, counter, 9, &buffer[..n])?;
+                counter = counter.checked_add(1).ok_or(BundleError::InvalidBundle)?;
+            }
+            if copied != *size || hex_digest(sha2::Digest::finalize(hasher)) != *sha256 {
+                return Err(BundleError::AssetIntegrity);
+            }
+        }
+    }
     let mut database_bytes = 0u64;
     loop {
         let n = source.read(&mut buffer)?;
@@ -353,6 +513,19 @@ fn create_sync(
     sync_directory(target.parent().ok_or(BundleError::InvalidConfig)?)?;
     guard.1 = false;
     Ok(bytes)
+}
+/// Explicit, loud recovery path for archives written by pre-hardening betas with the publicly known
+/// all-zero key. Such archives never had confidentiality; callers must warn the operator.
+pub async fn extract_legacy_public_key(
+    source: &Path,
+    target_dir: &Path,
+) -> Result<BundleSummary, BundleError> {
+    let source = source.to_owned();
+    let target = target_dir.to_owned();
+    let key = decode_key_inner(LEGACY_PUBLIC_KEY, true)?;
+    tokio::task::spawn_blocking(move || extract_sync(&source, &target, &key[..]))
+        .await
+        .map_err(|_| BundleError::Worker)?
 }
 /// Authenticate all records in a private sibling staging directory, then publish atomically.
 pub async fn extract(
@@ -385,6 +558,10 @@ fn extract_sync(source: &Path, target: &Path, root: &[u8]) -> Result<BundleSumma
     let mut result: Option<BundleSummary> = None;
     let mut attachments = BTreeMap::<u8, (File, u64, u64)>::new();
     let mut database_started = false;
+    let mut expected_assets = (0u64, 0u64);
+    let mut current_asset: Option<CurrentAsset> = None;
+    let mut asset_index: Vec<AssetHeader> = Vec::new();
+    let mut asset_total = 0u64;
     loop {
         let mut frame = [0; 5];
         input
@@ -397,9 +574,9 @@ fn extract_sync(source: &Path, target: &Path, root: &[u8]) -> Result<BundleSumma
                 .map_err(|_| BundleError::InvalidBundle)?,
         ) as usize;
         if len > CHUNK
-            || !matches!(kind, 1..=7)
+            || !matches!(kind, 1..=9)
             || (counter == 0) != (kind == 1)
-            || (matches!(kind, 2 | 4..=7) && len == 0)
+            || (matches!(kind, 2 | 4..=9) && len == 0)
             || (kind == 3 && len != 0)
         {
             return Err(BundleError::InvalidBundle);
@@ -445,9 +622,45 @@ fn extract_sync(source: &Path, target: &Path, root: &[u8]) -> Result<BundleSumma
                     engine: manifest.engine,
                     database_file: file.into(),
                     bytes: 0,
+                    assets: 0,
                 });
+                expected_assets = (manifest.assets, manifest.asset_bytes);
+                if manifest.assets > 0 {
+                    private_dir(&temp.join("assets"))?;
+                }
+            }
+            8 => {
+                if database_started || result.is_none() {
+                    return Err(BundleError::InvalidBundle);
+                }
+                finish_asset(&mut current_asset, &mut asset_index, &mut asset_total)?;
+                let h: AssetHeader =
+                    serde_json::from_slice(plain).map_err(|_| BundleError::InvalidBundle)?;
+                if !crate::assets::is_sha256_hex(&h.sha256)
+                    || h.size == 0
+                    || h.mime.len() > 100
+                    || asset_index.iter().any(|a| a.sha256 == h.sha256)
+                {
+                    return Err(BundleError::InvalidBundle);
+                }
+                let file = private_file(&temp.join("assets").join(&h.sha256))?;
+                current_asset = Some((h, file, <sha2::Sha256 as sha2::Digest>::new(), 0));
+            }
+            9 => {
+                if database_started {
+                    return Err(BundleError::InvalidBundle);
+                }
+                let (h, file, hasher, copied) =
+                    current_asset.as_mut().ok_or(BundleError::InvalidBundle)?;
+                *copied += len as u64;
+                if *copied > h.size {
+                    return Err(BundleError::InvalidBundle);
+                }
+                sha2::Digest::update(hasher, &*plain);
+                file.write_all(plain)?;
             }
             2 => {
+                finish_asset(&mut current_asset, &mut asset_index, &mut asset_total)?;
                 database_started = true;
                 database
                     .as_mut()
@@ -475,6 +688,10 @@ fn extract_sync(source: &Path, target: &Path, root: &[u8]) -> Result<BundleSumma
                 file.write_all(plain)?;
             }
             3 => {
+                finish_asset(&mut current_asset, &mut asset_index, &mut asset_total)?;
+                if expected_assets != (asset_index.len() as u64, asset_total) {
+                    return Err(BundleError::InvalidBundle);
+                }
                 if attachments
                     .values()
                     .any(|(_, expected, copied)| expected != copied)
@@ -502,11 +719,39 @@ fn extract_sync(source: &Path, target: &Path, root: &[u8]) -> Result<BundleSumma
     for (_, (file, _, _)) in attachments {
         file.sync_all()?;
     }
+    if !asset_index.is_empty() {
+        let mut list = private_file(&temp.join("assets.json"))?;
+        serde_json::to_writer(&mut list, &asset_index).map_err(|_| BundleError::InvalidBundle)?;
+        list.sync_all()?;
+        sync_directory(&temp.join("assets"))?;
+    }
+    if let Some(summary) = result.as_mut() {
+        summary.assets = asset_index.len() as u64;
+    }
     sync_directory(&temp)?;
     publish_dir(&temp, target)?;
     sync_directory(target.parent().ok_or(BundleError::InvalidConfig)?)?;
     guard.1 = false;
     result.ok_or(BundleError::InvalidBundle)
+}
+type CurrentAsset = (AssetHeader, File, sha2::Sha256, u64);
+/// Close the asset being extracted: size and SHA-256 must both match what the header promised.
+fn finish_asset(
+    current: &mut Option<CurrentAsset>,
+    index: &mut Vec<AssetHeader>,
+    total: &mut u64,
+) -> Result<(), BundleError> {
+    if let Some((header, file, hasher, copied)) = current.take() {
+        if copied != header.size || hex_digest(sha2::Digest::finalize(hasher)) != header.sha256 {
+            return Err(BundleError::InvalidBundle);
+        }
+        file.sync_all()?;
+        *total = total
+            .checked_add(copied)
+            .ok_or(BundleError::InvalidBundle)?;
+        index.push(header);
+    }
+    Ok(())
 }
 fn sync_directory(path: &Path) -> Result<(), BundleError> {
     #[cfg(unix)]
@@ -577,6 +822,83 @@ fn publish_dir(source: &Path, target: &Path) -> Result<(), BundleError> {
 mod tests {
     use super::*;
     #[test]
+    fn public_zero_key_and_malformed_keys_are_refused() {
+        assert!(matches!(
+            validate_key(LEGACY_PUBLIC_KEY),
+            Err(BundleError::InvalidKey)
+        ));
+        assert!(matches!(validate_key(""), Err(BundleError::MissingKey)));
+        assert!(validate_key(&"g".repeat(64)).is_err());
+        assert!(validate_key(&"a".repeat(63)).is_err());
+        assert!(validate_key(&"ab".repeat(32)).is_ok());
+        // An explicitly configured but invalid key is an error, never a silent fallback.
+        let dir = tempfile::tempdir().unwrap();
+        assert!(resolve_key(Some("bad"), None, Some(dir.path()), true).is_err());
+        assert!(resolve_key(Some(LEGACY_PUBLIC_KEY), None, Some(dir.path()), true).is_err());
+        assert!(!dir.path().join("secrets").exists());
+    }
+
+    #[test]
+    fn installation_key_is_generated_once_persisted_and_never_in_archive() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            resolve_key(None, None, Some(dir.path()), false),
+            Err(BundleError::MissingKey)
+        ));
+        assert!(matches!(
+            resolve_key(None, None, None, true),
+            Err(BundleError::MissingKey)
+        ));
+        let first = resolve_key(None, None, Some(dir.path()), true).unwrap();
+        let second = resolve_key(None, None, Some(dir.path()), true).unwrap();
+        assert_eq!(*first, *second);
+        assert_eq!(first.len(), 64);
+        assert_ne!(first.as_str(), LEGACY_PUBLIC_KEY);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(dir.path().join("secrets/backup.key"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o077, 0);
+        }
+        // A fresh installation gets a different key.
+        let other = tempfile::tempdir().unwrap();
+        let third = resolve_key(None, None, Some(other.path()), true).unwrap();
+        assert_ne!(*first, *third);
+        // Key file takes precedence over the installation key and must be well formed.
+        let file = dir.path().join("explicit.key");
+        fs::write(&file, format!("{}\n", "cd".repeat(32))).unwrap();
+        let from_file = resolve_key(None, Some(&file), Some(dir.path()), true).unwrap();
+        assert_eq!(from_file.as_str(), "cd".repeat(32));
+        fs::write(&file, "short").unwrap();
+        assert!(resolve_key(None, Some(&file), Some(dir.path()), true).is_err());
+    }
+
+    #[tokio::test]
+    async fn legacy_archive_opens_only_through_explicit_legacy_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("db");
+        fs::write(&db, b"sqlite-bytes").unwrap();
+        let archive = dir.path().join("legacy.media-backup");
+        // Simulate an archive written by an old beta with the public key.
+        let key = decode_key_inner(LEGACY_PUBLIC_KEY, true).unwrap();
+        create_sync(&db, BTreeMap::new(), &archive, &key[..], "sqlite", None).unwrap();
+        let denied = extract(&archive, &dir.path().join("out-a"), LEGACY_PUBLIC_KEY).await;
+        assert!(matches!(denied, Err(BundleError::InvalidKey)));
+        let good_key = "ab".repeat(32);
+        assert!(
+            extract(&archive, &dir.path().join("out-b"), &good_key)
+                .await
+                .is_err()
+        );
+        let summary = extract_legacy_public_key(&archive, &dir.path().join("out-c"))
+            .await
+            .unwrap();
+        assert_eq!(summary.bytes, 12);
+    }
+    #[test]
     fn authenticated_empty_database_and_key_file_manifest_are_rejected() {
         let directory = tempfile::tempdir().unwrap();
         for (index, config) in [
@@ -600,6 +922,8 @@ mod tests {
                 engine: "sqlite".into(),
                 config,
                 attachments: BTreeMap::new(),
+                assets: 0,
+                asset_bytes: 0,
             })
             .unwrap();
             record(&mut file, &key, &header, 0, 1, &manifest).unwrap();

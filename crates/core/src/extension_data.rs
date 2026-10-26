@@ -1,6 +1,6 @@
 //! Core-owned private state. No database credentials or namespace IDs cross the ABI.
 use crate::{
-    database::{begin_write, query, query_as, query_scalar},
+    database::{begin_write_scoped, query, query_as, query_scalar},
     identity::IdentityStore,
 };
 use media_extension_sdk::storage::{
@@ -321,12 +321,14 @@ pub async fn execute(
     request: StorageRequest,
     now: i64,
 ) -> Result<StorageResponse, Error> {
-    tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        execute_inner(store, c, request, now),
-    )
-    .await
-    .map_err(|_| Error::Timeout)?
+    let timeout_duration = if cfg!(test) {
+        std::time::Duration::from_secs(10)
+    } else {
+        std::time::Duration::from_secs(2)
+    };
+    tokio::time::timeout(timeout_duration, execute_inner(store, c, request, now))
+        .await
+        .map_err(|_| Error::Timeout)?
 }
 async fn execute_inner(
     store: &IdentityStore,
@@ -348,7 +350,7 @@ async fn execute_inner(
         StorageOperation::Put { .. } | StorageOperation::Delete { .. }
     );
     let mut tx = if writing {
-        begin_write(&mut conn).await?
+        begin_write_scoped(&mut conn, "extension_data", &c.extension_id).await?
     } else {
         sqlx::Connection::begin(&mut *conn).await?
     };

@@ -1745,6 +1745,14 @@ pub async fn publish_staged_scan(
     query("INSERT INTO inventory_audio(asset_id,audios_json) SELECT a.id,f.audios_json FROM scan_staging_files f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE SET audios_json=excluded.audios_json")
         .bind(scan_id).execute(&mut *tx).await?;
 
+    crate::automation::emit_snapshot(
+        &mut tx,
+        library_id,
+        scan_id,
+        media_contracts::protocol::unix_now(),
+    )
+    .await?;
+
     query("DELETE FROM scan_staging_files WHERE scan_id=?")
         .bind(scan_id)
         .execute(&mut *tx)
@@ -1881,6 +1889,8 @@ pub async fn refresh_editorial_for_works(
         }
     }
 
+    crate::automation::reapply_results(tx, &work_ids.iter().cloned().collect::<Vec<_>>()).await?;
+
     let mut parent_series = std::collections::BTreeSet::new();
     for wid in work_ids {
         crate::consolidation::consolidate_work_tx(tx, wid).await?;
@@ -1990,6 +2000,7 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
         "metadataProvenance": metadata["provenance"].as_str().unwrap_or("local"),
         "metadataWarnings": metadata["warnings"].as_array().cloned().unwrap_or_default(),
         "synthetic": false,
+        "episode": row.try_get::<String,_>("kind").is_ok_and(|kind| kind == "episode"),
         "posterUrl": row.try_get::<Option<String>,_>("poster_url").ok().flatten()
             .or_else(|| metadata["poster_url"].as_str().or_else(|| metadata["posterUrl"].as_str()).map(str::to_owned)),
         "artwork": {
@@ -3716,30 +3727,124 @@ pub async fn descriptor_for_user(
     let mut credits_segment: Option<serde_json::Value> = None;
 
     for (i, (start, title)) in chapter_list.iter().enumerate() {
-        let clean = title.to_lowercase();
+        if initial_work_kind != "episode" {
+            break;
+        }
+        let clean = title
+            .to_lowercase()
+            .replace(['é', 'è', 'ê', 'ë'], "e")
+            .replace(['à', 'â'], "a");
         let next_start = if i + 1 < chapter_list.len() {
             chapter_list[i + 1].0
         } else {
-            total_dur.unwrap_or(*start + 90.0)
+            total_dur.unwrap_or(*start)
         };
         let dur = next_start - start;
-        if (clean.contains("intro")
-            || clean.contains("opening")
-            || clean.contains("generique debut")
-            || clean.starts_with("op"))
-            && (15.0..=150.0).contains(&dur)
+        if matches!(
+            clean.trim(),
+            "intro"
+                | "introduction"
+                | "opening"
+                | "opening credits"
+                | "op"
+                | "generique debut"
+                | "generique d'ouverture"
+        ) && (15.0..=150.0).contains(&dur)
             && intro_segment.is_none()
         {
             intro_segment = Some(json!({ "start": start, "end": next_start }));
-        } else if (clean.contains("credits")
-            || clean.contains("ending")
-            || clean.contains("generique fin")
-            || clean.contains("generique de fin")
-            || clean.starts_with("ed"))
-            && (10.0..=300.0).contains(&dur)
+        } else if matches!(
+            clean.trim(),
+            "credits"
+                | "end credits"
+                | "ending"
+                | "ending credits"
+                | "ed"
+                | "generique fin"
+                | "generique de fin"
+        ) && (10.0..=300.0).contains(&dur)
             && credits_segment.is_none()
         {
             credits_segment = Some(json!({ "start": start, "end": next_start }));
+        }
+    }
+
+    // A completed marker task is reusable only for this physical asset and
+    // the exact inventory revision that produced it. Other copies need their
+    // own timeline validation before sharing any marker.
+    let stored_markers: Option<String> = query_scalar(
+        "SELECT r.result_json FROM automation_results r \
+         JOIN automation_task_links link ON link.task_id=r.task_id \
+         JOIN automation_events event ON event.id=link.event_id \
+         JOIN automation_observations obs ON obs.asset_id=r.asset_id AND obs.fingerprint=event.fingerprint \
+         JOIN extensions ext ON ext.id=r.extension_id AND ext.enabled=1 AND ext.generation=link.generation \
+         JOIN extension_publishers publisher ON publisher.id=ext.publisher_id AND publisher.active=1 \
+         WHERE r.asset_id=? AND link.operation='intro.parse_chapters' AND \
+         (ext.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants grant_row WHERE grant_row.extension_id=ext.id AND grant_row.library_id=?)) \
+         LIMIT 1",
+    )
+    .bind(asset_id)
+    .bind(&library_id)
+    .fetch_optional(&store.pool)
+    .await?;
+    if let Some(raw) = stored_markers {
+        intro_segment = None;
+        credits_segment = None;
+        if let Ok(markers) = serde_json::from_str::<Vec<Value>>(&raw) {
+            for marker in markers {
+                let (Some(start), Some(end), Some(confidence)) = (
+                    marker["start"].as_f64(),
+                    marker["end"].as_f64(),
+                    marker["confidence"].as_f64(),
+                ) else {
+                    continue;
+                };
+                if !start.is_finite()
+                    || !end.is_finite()
+                    || !confidence.is_finite()
+                    || start < 0.0
+                    || end <= start
+                    || confidence < 0.9
+                    || end > total_dur.unwrap_or(0.0)
+                {
+                    continue;
+                }
+                match marker["markerType"].as_str() {
+                    Some("intro") if intro_segment.is_none() => {
+                        intro_segment = Some(json!({"start":start,"end":end}))
+                    }
+                    Some("credits") if credits_segment.is_none() => {
+                        credits_segment = Some(json!({"start":start,"end":end}))
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    let manual: Vec<(String, Option<f64>, Option<f64>, i64)> = query_as(
+        "SELECT marker_type,start_seconds,end_seconds,enabled FROM manual_timeline_markers WHERE asset_id=?",
+    ).bind(asset_id).fetch_all(&store.pool).await?;
+    for (kind, start, end, enabled) in manual {
+        let value = if enabled == 1 {
+            match (start, end) {
+                (Some(start), Some(end))
+                    if start.is_finite()
+                        && end.is_finite()
+                        && start >= 0.0
+                        && end > start
+                        && end <= total_dur.unwrap_or(0.0) =>
+                {
+                    Some(json!({"start":start,"end":end}))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        match kind.as_str() {
+            "intro" => intro_segment = value,
+            "credits" => credits_segment = value,
+            _ => {}
         }
     }
 
@@ -4661,28 +4766,17 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        query("CREATE TABLE libraries(id TEXT PRIMARY KEY)")
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','Films','films','local','/test',1)")
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::raw_sql(include_str!("../migrations/0004_inventory.sql"))
-            .execute(&pool)
-            .await
-            .unwrap();
-        query("INSERT INTO libraries VALUES('lib')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        query("INSERT INTO inventory_works VALUES('stable','lib','folder:Film','Film',2026,'{}')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::raw_sql(include_str!("../migrations/0005_film_editorial.sql"))
+        query("INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort,kind) VALUES('stable','lib','folder:Film','Film',2026,'{}','film','film')")
             .execute(&pool)
             .await
             .unwrap();
         let preserved: (String, String, i64, String) =
-            query_as("SELECT id,title,year,editorial_json FROM inventory_works")
+            query_as("SELECT id,title,year,editorial_json FROM inventory_works WHERE id='stable'")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
@@ -4690,27 +4784,17 @@ mod tests {
             preserved,
             ("stable".into(), "Film".into(), 2026, "{}".into())
         );
-        sqlx::raw_sql(include_str!("../migrations/0006_local_posters.sql"))
-            .execute(&pool)
-            .await
-            .unwrap();
-        let after: (String, String, i64, String) =
-            query_as("SELECT id,title,year,editorial_json FROM inventory_works")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(preserved, after);
-        sqlx::raw_sql(include_str!("../migrations/0007_catalogue_indexes.sql"))
-            .execute(&pool)
-            .await
-            .unwrap();
-        let after_0007: (String, String, i64, String, String) =
-            query_as("SELECT id,title,year,editorial_json,title_sort FROM inventory_works")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        backfill_title_sort_unicode(&mut conn).await.unwrap();
+        drop(conn);
+        let after_unicode: (String, String, i64, String, String) = query_as(
+            "SELECT id,title,year,editorial_json,title_sort FROM inventory_works WHERE id='stable'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
-            after_0007,
+            after_unicode,
             (
                 "stable".into(),
                 "Film".into(),
@@ -4719,35 +4803,7 @@ mod tests {
                 "film".into()
             )
         );
-        sqlx::raw_sql(include_str!(
-            "../migrations/0008_catalogue_unicode_sort.sql"
-        ))
-        .execute(&pool)
-        .await
-        .unwrap();
-        let mut conn = pool.acquire().await.unwrap();
-        backfill_title_sort_unicode(&mut conn).await.unwrap();
-        drop(conn);
-        let after_0008: (String, String, i64, String, String) =
-            query_as("SELECT id,title,year,editorial_json,title_sort FROM inventory_works")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(after_0008, after_0007);
-        sqlx::raw_sql(include_str!("../migrations/0016_catalogue_added_at.sql"))
-            .execute(&pool)
-            .await
-            .unwrap();
-        let historical: Option<i64> =
-            query_scalar("SELECT added_at FROM inventory_works WHERE id='stable'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(
-            historical, None,
-            "migration must not invent historical dates"
-        );
-        query("INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort) VALUES('new','lib','new','New',2026,'{}','new')").execute(&pool).await.unwrap();
+        query("INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort,kind) VALUES('new','lib','new','New',2026,'{}','new','film')").execute(&pool).await.unwrap();
         let added: i64 = query_scalar("SELECT added_at FROM inventory_works WHERE id='new'")
             .fetch_one(&pool)
             .await

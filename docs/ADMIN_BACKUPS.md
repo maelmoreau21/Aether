@@ -2,7 +2,7 @@
 
 La console crée, liste et télécharge des archives chiffrées `.media-backup` contenant la base complète et un instantané des variables `MEDIA_*` / `OIDC_*` du processus (secrets inclus uniquement dans la partie chiffrée). Les paramètres enregistrés en base sont inclus : comptes, groupes, accès, catalogue, progression, tâches, clés API hachées et état des extensions. Les chemins/URL du moteur et URL publique reflètent la connexion réelle. La clé de sauvegarde et son éventuel chemin source restent exclus.
 
-`MEDIA_BACKUP_KEY` est facultatif (64 caractères hexadécimaux si spécifié). Si non configuré, une clé interne par défaut est utilisée automatiquement, rendant la création Web et les exécutions planifiées utilisables immédiatement sans configuration préalable de clé.
+Cle de sauvegarde : aucune cle par defaut. Voir [BACKUP_KEY.md](BACKUP_KEY.md) (`MEDIA_BACKUP_KEY`, `MEDIA_BACKUP_KEY_FILE` ou cle d'installation generee par le CSPRNG, jamais dans l'archive). Une cle explicite invalide empeche le demarrage.
 
 SQLite utilise le snapshot WAL cohérent existant, avec contrôle intégrité/tables. PostgreSQL utilise le `pg_dump` 18 existant, avec l'URL de la connexion SQLx réelle, y compris base distante. `pg_dump` 18 doit être installé dans l'environnement du Core ; une absence/erreur échoue explicitement. Ce support de code ne prouve pas une restauration distante réelle.
 

@@ -8,7 +8,7 @@ use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, State},
     http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::Response,
     routing::get,
 };
 use image::{ImageDecoder, ImageFormat, ImageReader, Limits};
@@ -187,26 +187,17 @@ pub(crate) fn content_type(bytes: &[u8]) -> &'static str {
 }
 async fn read(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Response, StatusCode> {
     let user = auth.authenticate(&headers).await?;
-    let bytes: Option<Vec<u8>> =
-        query_scalar("SELECT image_data FROM user_avatars WHERE user_id=?")
-            .bind(user.user.id)
-            .fetch_optional(&auth.store.pool)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let bytes = bytes.ok_or(StatusCode::NOT_FOUND)?;
-    Ok((
-        [
-            (header::CONTENT_TYPE, content_type(&bytes)),
-            (
-                header::CONTENT_SECURITY_POLICY,
-                "default-src 'none'; sandbox",
-            ),
-            (header::CACHE_CONTROL, "private, no-store"),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-        ],
-        bytes,
-    )
-        .into_response())
+    let sha256: Option<String> = query_scalar("SELECT sha256 FROM user_avatars WHERE user_id=?")
+        .bind(user.user.id)
+        .fetch_optional(&auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let sha256 = sha256.ok_or(StatusCode::NOT_FOUND)?;
+    auth.store
+        .assets
+        .response_after_authorization(&sha256, &headers)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 async fn permissions(auth: &AuthState) -> Result<(bool, bool), StatusCode> {
     let rows: Vec<(String,String)> = crate::database::query_as("SELECT es.settings_json,e.package_json FROM extension_settings es JOIN extensions e ON e.id=es.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.enabled=1 AND p.active=1").fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -248,7 +239,7 @@ async fn write(
     if bytes.is_empty() {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
-    let content_type = headers
+    let req_content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
@@ -258,11 +249,23 @@ async fn write(
         .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
     let bytes = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        normalize(bytes, &content_type)
+        normalize(bytes, &req_content_type)
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
-    query("INSERT INTO user_avatars(user_id,image_data) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET image_data=excluded.image_data").bind(user.user.id).bind(bytes).execute(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mime = content_type(&bytes);
+    let meta = auth
+        .store
+        .assets
+        .put_bytes(&bytes, mime)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET sha256=excluded.sha256")
+        .bind(user.user.id)
+        .bind(&meta.sha256)
+        .execute(&auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn remove(

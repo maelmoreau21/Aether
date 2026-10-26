@@ -255,6 +255,8 @@ async fn test_concurrent_writes_during_sqlite_publication_and_timeout_behavior()
         );
     }
 
+    jobs.shutdown().await;
+
     // 3. Test timeout behavior when write lock wait exceeds busy_timeout:
     // Open a second store with a very short 100ms busy timeout
     let short_store = IdentityStore::open_with_timeout(&db_path, Duration::from_millis(100))

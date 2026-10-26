@@ -1,6 +1,6 @@
 use media_extension_sdk::storage::{StorageOperation, StorageRequest, StorageScope};
 use media_poc::{
-    database::{begin_write, query, query_scalar},
+    database::{begin_write, begin_write_scoped, query, query_scalar},
     extension_data::{self, Context},
     extension_data_lifecycle,
     identity::IdentityStore,
@@ -61,7 +61,9 @@ async fn uninstall_contract(store: &IdentityStore) {
     // Hold the real SQLite write lock / PostgreSQL advisory transaction lock.
     // The host operation must exhaust its execution budget without publishing.
     let mut blocker = store.pool().acquire().await.unwrap();
-    let held = begin_write(&mut blocker).await.unwrap();
+    let held = begin_write_scoped(&mut blocker, "extension_data", &c.extension_id)
+        .await
+        .unwrap();
     let started = std::time::Instant::now();
     let blocked = extension_data::execute(store, &c, put("budget_probe", "durable"), 100).await;
     let elapsed = started.elapsed();

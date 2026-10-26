@@ -95,13 +95,20 @@ async fn full_backup(
     target: &std::path::Path,
     media_root: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let key = zeroize::Zeroizing::new(
-        std::env::var("MEDIA_BACKUP_KEY")
-            .unwrap_or_else(|_| media_poc::backup_bundle::DEFAULT_BACKUP_KEY.to_string()),
-    );
-    if key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err("invalid MEDIA_BACKUP_KEY".into());
+    // No fixed fallback key: explicit key, key file, or the installation key created by Core.
+    let data_dir = match media_poc::identity::configured_path(media_root) {
+        Ok(db) => db.parent().map(|p| p.to_owned()),
+        Err(_) => None,
     }
+    .or_else(|| std::env::var_os("MEDIA_DATA_DIR").map(PathBuf::from));
+    let key = media_poc::backup_bundle::resolve_key(
+        std::env::var("MEDIA_BACKUP_KEY").ok().as_deref(),
+        std::env::var_os("MEDIA_BACKUP_KEY_FILE")
+            .map(PathBuf::from)
+            .as_deref(),
+        data_dir.as_deref(),
+        false,
+    )?;
     media_poc::backup::check_path_safety(target, "full backup")?;
     media_poc::backup::check_not_in_media_root(target, Some(media_root), "full backup")?;
     if target.exists() {

@@ -258,6 +258,8 @@ pub async fn dispatch_once(
     if jobs.is_cancelled() {
         return Ok(());
     }
+    crate::automation::drain(&auth.store, timestamp, 64).await?;
+    crate::system_task_queue::dispatch_once(auth, root, jobs, timestamp).await?;
     let leased = crate::task_engine::leased(&auth.store, 100).await?;
     jobs.engine_busy
         .store(!leased.is_empty(), std::sync::atomic::Ordering::Relaxed);
@@ -271,6 +273,15 @@ pub async fn dispatch_once(
         .map(|j| format!("{}:{}", j.id, j.attempt))
         .collect();
     for job in leased {
+        if job.category == "system" {
+            continue;
+        }
+        if crate::automation::task_link(&auth.store, &job.id)
+            .await?
+            .is_some()
+        {
+            continue;
+        }
         let scan = format!("{}:{}", job.id, job.attempt);
         let preempted = job.node_id == "local"
             && crate::scans::LOCAL_STREAMS.load(std::sync::atomic::Ordering::Relaxed) > 0;
@@ -437,6 +448,9 @@ pub async fn dispatch_once(
         jobs.engine_busy
             .store(true, std::sync::atomic::Ordering::Relaxed);
         let scan = format!("{}:{}", job.id, job.attempt);
+        if crate::automation_execution::dispatch(auth, jobs, &job).await? {
+            continue;
+        }
         if job.category != "scan" {
             if crate::task_execution::dispatch(auth, root, jobs, &job)
                 .await

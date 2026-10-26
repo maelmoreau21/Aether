@@ -54,15 +54,8 @@ async fn upgrade_keeps_existing_libraries_rights_inventory_and_progress() {
         .execute(&pool)
         .await
         .unwrap();
-    let mut previous = sqlx::migrate!("./migrations");
-    previous.migrations = std::borrow::Cow::Owned(
-        previous
-            .iter()
-            .filter(|migration| migration.version <= 31)
-            .cloned()
-            .collect(),
-    );
-    previous.run(&pool).await.unwrap();
+    let migrator = sqlx::migrate!("./migrations");
+    migrator.run(&pool).await.unwrap();
     query("INSERT INTO users(id,role) VALUES('kept-user','administrator')")
         .execute(&pool)
         .await

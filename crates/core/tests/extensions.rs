@@ -951,6 +951,8 @@ fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
         http_count: 0,
         max_http_requests: 10,
         max_response_size: 1024,
+        last_http_at: None,
+        retry_after_seconds: None,
     };
 
     // 1. Non-HTTPS scheme is forbidden
@@ -1436,13 +1438,14 @@ async fn rich_operations_and_account_avatars_use_signed_permissions() {
             )
             .await;
             assert_eq!(status, StatusCode::OK, "{output}");
-            let data: Vec<u8> = media_poc::database::query_scalar(
-                "SELECT image_data FROM user_avatars WHERE user_id=?",
+            let sha: String = media_poc::database::query_scalar(
+                "SELECT sha256 FROM user_avatars WHERE user_id=?",
             )
             .bind(user_login["user"]["id"].as_str().unwrap())
             .fetch_one(store.pool())
             .await
             .unwrap();
+            let (_, data) = store.assets().read_all(&sha).await.unwrap();
             assert_eq!(data, svg.as_bytes());
             assert_eq!(
                 call(
@@ -1952,4 +1955,183 @@ async fn rust_sdk_storage_guest_runs_through_signed_http_install_and_worker_brok
             format!("Successful durable invocation {expected}")
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_extension_upgrade_preserves_durable_storage_and_updates_generation() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "admin-upgrade",
+            Zeroizing::new("synthetic upgrade password".into()),
+        )
+        .await
+        .unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = extensions::router(auth.clone()).merge(auth::router(auth));
+    let (_, login, cookie) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        "",
+        json!({"login":"admin-upgrade","password":"synthetic upgrade password"}),
+    )
+    .await;
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let signing = key();
+
+    let wasm1 = wat::parse_str(r#"(module (memory (export "memory") 1 256))"#).unwrap();
+    let mut p1 = package(&signing, wasm1);
+    p1.manifest.id = "upgradable.ext".into();
+    p1.manifest.version = "1.0.0".into();
+    p1.manifest.permissions = vec!["storage.private".into()];
+    p1.signature = STANDARD.encode(signing.sign(&p1.signing_bytes().unwrap()).as_ref());
+
+    // 0. Trust publisher
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/publishers",
+            &cookie,
+            csrf,
+            json!({"id": p1.publisher_id, "publicKey": STANDARD.encode(signing.public_key().as_ref())})
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+
+    // 1. Install v1
+    let (status, resp, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions",
+        &cookie,
+        csrf,
+        serde_json::to_value(&p1).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{resp}");
+
+    call(
+        &app,
+        "PUT",
+        "/api/v1/admin/extensions/upgradable.ext",
+        &cookie,
+        csrf,
+        json!({"enabled": true, "allLibraries": true}),
+    )
+    .await;
+
+    media_poc::database::query(
+        "INSERT INTO extension_data_namespaces(extension_id,publisher_id,publisher_key,entries,bytes) VALUES('upgradable.ext','test','key',1,18)"
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    media_poc::database::query(
+        "INSERT INTO extension_data(extension_id,scope,scope_id,key,value,version,durability,value_bytes,sha256) VALUES('upgradable.ext','global','','state','durable_v1_payload','v1-uuid','durable',18,'sha')"
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    let gen_v1: String = media_poc::database::query_scalar(
+        "SELECT generation FROM extensions WHERE id='upgradable.ext'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+
+    // 2. Prepare v2 package
+    let wasm2 = wat::parse_str(r#"(module (memory (export "memory") 2 256))"#).unwrap();
+    let mut p2 = package(&signing, wasm2.clone());
+    p2.manifest.id = "upgradable.ext".into();
+    p2.manifest.version = "2.0.0".into();
+    p2.manifest.permissions = vec!["storage.private".into()];
+    p2.signature = STANDARD.encode(signing.sign(&p2.signing_bytes().unwrap()).as_ref());
+
+    // 3. Upgrade to v2 via POST /api/v1/admin/extensions/{id}/upgrade
+    let (status, resp, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/upgradable.ext/upgrade",
+        &cookie,
+        csrf,
+        serde_json::to_value(&p2).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resp}");
+    assert_eq!(resp["version"], "2.0.0");
+    assert_eq!(resp["upgraded"], true);
+
+    // 4. Verify generation updated
+    let gen_v2: String = media_poc::database::query_scalar(
+        "SELECT generation FROM extensions WHERE id='upgradable.ext'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_ne!(gen_v1, gen_v2, "Generation must be updated on upgrade");
+
+    // 5. Verify durable storage was preserved!
+    let saved_state: String = media_poc::database::query_scalar(
+        "SELECT value FROM extension_data WHERE extension_id='upgradable.ext' AND key='state'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        saved_state, "durable_v1_payload",
+        "Durable data must be preserved on upgrade"
+    );
+
+    // 6. Verify mismatched ID is rejected
+    let mut p_bad_id = p2.clone();
+    p_bad_id.manifest.id = "wrong.id".into();
+    p_bad_id.signature = STANDARD.encode(signing.sign(&p_bad_id.signing_bytes().unwrap()).as_ref());
+    let (bad_status, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/upgradable.ext/upgrade",
+        &cookie,
+        csrf,
+        serde_json::to_value(&p_bad_id).unwrap(),
+    )
+    .await;
+    assert_eq!(bad_status, StatusCode::BAD_REQUEST);
+
+    // 7. Verify mismatched publisher key is rejected
+    let other_key = key();
+    let mut p_bad_key = package(&other_key, wasm2);
+    p_bad_key.manifest.id = "upgradable.ext".into();
+    p_bad_key.manifest.version = "3.0.0".into();
+    p_bad_key.publisher_id = "other_publisher".into();
+    p_bad_key.signature =
+        STANDARD.encode(other_key.sign(&p_bad_key.signing_bytes().unwrap()).as_ref());
+    let (key_status, resp, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/upgradable.ext/upgrade",
+        &cookie,
+        csrf,
+        json!({
+            "manifest": p_bad_key.manifest,
+            "publisherId": p_bad_key.publisher_id,
+            "sha256": p_bad_key.sha256,
+            "wasm": p_bad_key.wasm,
+            "signature": p_bad_key.signature,
+            "publicKey": STANDARD.encode(other_key.public_key().as_ref()),
+        }),
+    )
+    .await;
+    assert_eq!(key_status, StatusCode::FORBIDDEN, "{resp}");
 }

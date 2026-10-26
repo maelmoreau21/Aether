@@ -1352,14 +1352,15 @@ mod tests {
             StatusCode::TOO_MANY_REQUESTS
         );
         state.store.close().await;
-        let restarted = AuthState::new(
-            IdentityStore::open(&temp.path().join("auth.sqlite3"))
-                .await
-                .unwrap(),
-            ORIGIN.into(),
-        )
-        .await
-        .unwrap();
+        let reopened_store = IdentityStore::open(&temp.path().join("auth.sqlite3"))
+            .await
+            .unwrap();
+        // Keep throttle window fresh across test restarts under heavy CI load
+        crate::database::query("UPDATE login_throttle SET window_started = unixepoch()")
+            .execute(&reopened_store.pool)
+            .await
+            .unwrap();
+        let restarted = AuthState::new(reopened_store, ORIGIN.into()).await.unwrap();
         assert_eq!(
             request(
                 &restarted,
@@ -1625,7 +1626,7 @@ mod tests {
             HeaderValue::from_str(&restart_cookie).unwrap(),
         )]);
         crate::database::query(
-            "UPDATE sessions SET last_seen_at = unixepoch() - 604790 WHERE token_hash = ?",
+            "UPDATE sessions SET last_seen_at = unixepoch() - 600000 WHERE token_hash = ?",
         )
         .bind(&restart_hash)
         .execute(&store.pool)

@@ -27,6 +27,10 @@ struct Preferences {
     subtitle_preference: Option<SubtitlePreference>,
     #[serde(skip_serializing_if = "Option::is_none")]
     subtitle_style: Option<SubtitleStyle>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_intro_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_credits_enabled: Option<bool>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -428,11 +428,12 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
         server_settings::load(&reopened).await.unwrap().server_name,
         "Mon serveur"
     );
-    let persisted: Vec<u8> = query_scalar("SELECT image_data FROM user_avatars WHERE user_id=?")
+    let sha: String = query_scalar("SELECT sha256 FROM user_avatars WHERE user_id=?")
         .bind(admin)
         .fetch_one(reopened.pool())
         .await
         .unwrap();
+    let (_, persisted) = reopened.assets().read_all(&sha).await.unwrap();
     assert_eq!(persisted, bytes.to_vec());
     let auth = AuthState::new(reopened.clone(), ORIGIN.into())
         .await

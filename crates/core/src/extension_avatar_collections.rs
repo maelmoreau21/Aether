@@ -1,7 +1,7 @@
 //! Administrator-imported avatar collections. Only normalized images are stored;
 //! URLs are resolved by a bounded HTTPS broker, never by the browser or Wasm.
 use super::*;
-use axum::response::IntoResponse;
+
 use futures_util::{StreamExt, stream};
 use std::collections::BTreeMap;
 static IMPORTS: Semaphore = Semaphore::const_new(1);
@@ -270,6 +270,25 @@ async fn import(
             staged.push((name, bytes));
             count += 1;
         }
+        let mut stored_images = Vec::with_capacity(staged.len());
+        for (name, bytes) in staged {
+            let mime = if name.ends_with(".webp") {
+                "image/webp"
+            } else if name.ends_with(".svg") {
+                "image/svg+xml"
+            } else if name.ends_with(".jpg") || name.ends_with(".jpeg") {
+                "image/jpeg"
+            } else {
+                "image/png"
+            };
+            let meta = auth
+                .store
+                .assets
+                .put_bytes(&bytes, mime)
+                .await
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?;
+            stored_images.push((name, meta.sha256));
+        }
         // Serialize only the final authorization check/commit with revocations and uninstall.
         let _lock = MUTATIONS.lock().await;
         check(&auth, &id).await?;
@@ -292,17 +311,15 @@ async fn import(
             .execute(&mut *tx)
             .await
             .map_err(db)?;
-        for (name, bytes) in staged {
-            query(
-                "INSERT INTO extension_avatar_images(id,pack_id,name,image_data) VALUES(?,?,?,?)",
-            )
-            .bind(uuid::Uuid::new_v4().to_string())
-            .bind(&pack)
-            .bind(name)
-            .bind(bytes)
-            .execute(&mut *tx)
-            .await
-            .map_err(db)?;
+        for (name, sha256) in stored_images {
+            query("INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)")
+                .bind(uuid::Uuid::new_v4().to_string())
+                .bind(&pack)
+                .bind(name)
+                .bind(&sha256)
+                .execute(&mut *tx)
+                .await
+                .map_err(db)?;
         }
         audit(&mut tx, &actor.user.id, &id, "avatars.pack.imported").await?;
         tx.commit().await.map_err(db)?;
@@ -392,6 +409,25 @@ async fn upload(
     if staged.is_empty() {
         return Err(invalid());
     }
+    let mut stored_images = Vec::with_capacity(staged.len());
+    for (name, bytes) in staged {
+        let mime = if name.ends_with(".webp") {
+            "image/webp"
+        } else if name.ends_with(".svg") {
+            "image/svg+xml"
+        } else if name.ends_with(".jpg") || name.ends_with(".jpeg") {
+            "image/jpeg"
+        } else {
+            "image/png"
+        };
+        let meta = auth
+            .store
+            .assets
+            .put_bytes(&bytes, mime)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?;
+        stored_images.push((name, meta.sha256));
+    }
     let _lock = MUTATIONS.lock().await;
     check(&auth, &id).await?;
     let mut tx = auth.store.pool().begin().await.map_err(db)?;
@@ -403,7 +439,7 @@ async fn upload(
         return Err(err(StatusCode::CONFLICT, "avatar_pack_limit"));
     }
     let pack = uuid::Uuid::new_v4().to_string();
-    let count = staged.len();
+    let count = stored_images.len();
     query("INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES(?,?,?,'upload')")
         .bind(&pack)
         .bind(&id)
@@ -411,12 +447,12 @@ async fn upload(
         .execute(&mut *tx)
         .await
         .map_err(db)?;
-    for (name, bytes) in staged {
-        query("INSERT INTO extension_avatar_images(id,pack_id,name,image_data) VALUES(?,?,?,?)")
+    for (name, sha256) in stored_images {
+        query("INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)")
             .bind(uuid::Uuid::new_v4().to_string())
             .bind(&pack)
             .bind(name)
-            .bind(bytes)
+            .bind(&sha256)
             .execute(&mut *tx)
             .await
             .map_err(db)?;
@@ -490,16 +526,21 @@ async fn admin_image(
 ) -> Result<axum::response::Response, Error> {
     admin(&auth, &headers, false).await?;
     check(&auth, &id).await?;
-    let bytes:Vec<u8>=query_scalar("SELECT i.image_data FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? AND p.id=? AND i.id=?").bind(id).bind(pack).bind(image).fetch_optional(auth.store.pool()).await.map_err(db)?.ok_or_else(||err(StatusCode::NOT_FOUND,"avatar_not_found"))?;
-    Ok((
-        [
-            (header::CONTENT_TYPE, "image/png"),
-            (header::CACHE_CONTROL, "private, no-store"),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-        ],
-        bytes,
+    let sha256: String = query_scalar(
+        "SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? AND p.id=? AND i.id=?",
     )
-        .into_response())
+    .bind(id)
+    .bind(pack)
+    .bind(image)
+    .fetch_optional(auth.store.pool())
+    .await
+    .map_err(db)?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "avatar_not_found"))?;
+    auth.store
+        .assets
+        .response_after_authorization(&sha256, &headers)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))
 }
 async fn remove_image(
     State(auth): State<AuthState>,
@@ -520,16 +561,24 @@ async fn assign_missing(
     admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
     check(&auth, &id).await?;
-    let images:Vec<Vec<u8>>=query_scalar("SELECT i.image_data FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? LIMIT 500").bind(id).fetch_all(auth.store.pool()).await.map_err(db)?;
+    let images: Vec<String> = query_scalar("SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? LIMIT 500").bind(id).fetch_all(auth.store.pool()).await.map_err(db)?;
     if images.is_empty() {
         return Err(err(StatusCode::BAD_REQUEST, "avatar_gallery_empty"));
     }
     let mut tx = auth.store.pool().begin().await.map_err(db)?;
-    let users:Vec<String>=query_scalar("SELECT id FROM users WHERE disabled_at IS NULL AND NOT EXISTS(SELECT 1 FROM user_avatars a WHERE a.user_id=users.id) LIMIT 10000").fetch_all(&mut *tx).await.map_err(db)?;
+    let users: Vec<String> = query_scalar("SELECT id FROM users WHERE disabled_at IS NULL AND NOT EXISTS(SELECT 1 FROM user_avatars a WHERE a.user_id=users.id) LIMIT 10000").fetch_all(&mut *tx).await.map_err(db)?;
     let mut count = 0;
     for user in users {
         let index = (uuid::Uuid::new_v4().as_u128() % images.len() as u128) as usize;
-        count+=query("INSERT INTO user_avatars(user_id,image_data) VALUES(?,?) ON CONFLICT(user_id) DO NOTHING").bind(user).bind(&images[index]).execute(&mut *tx).await.map_err(db)?.rows_affected();
+        count += query(
+            "INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO NOTHING",
+        )
+        .bind(user)
+        .bind(&images[index])
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?
+        .rows_affected();
     }
     tx.commit().await.map_err(db)?;
     Ok(Json(json!({"count":count})))
@@ -551,7 +600,7 @@ pub(crate) async fn assign_new_user(auth: &AuthState, user: &str) -> Result<(), 
             continue;
         }
         let index = (uuid::Uuid::new_v4().as_u128() % images.len() as u128) as usize;
-        query("INSERT INTO user_avatars(user_id,image_data) SELECT ?,image_data FROM extension_avatar_images WHERE id=? ON CONFLICT(user_id) DO NOTHING").bind(user).bind(&images[index]).execute(auth.store.pool()).await.map_err(db)?;
+        query("INSERT INTO user_avatars(user_id,sha256) SELECT ?,sha256 FROM extension_avatar_images WHERE id=? ON CONFLICT(user_id) DO NOTHING").bind(user).bind(&images[index]).execute(auth.store.pool()).await.map_err(db)?;
         break;
     }
     Ok(())
@@ -637,7 +686,13 @@ async fn gravatar(
     auth.authenticate(&headers)
         .await
         .map_err(|s| err(s, "authentication_required"))?;
-    query("INSERT INTO user_avatars(user_id,image_data) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET image_data=excluded.image_data").bind(actor.user.id).bind(data).execute(auth.store.pool()).await.map_err(db)?;
+    let meta = auth
+        .store
+        .assets
+        .put_bytes(&data, "image/webp")
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?;
+    query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET sha256=excluded.sha256").bind(actor.user.id).bind(&meta.sha256).execute(auth.store.pool()).await.map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn account_packs(
@@ -665,8 +720,8 @@ async fn images(
         json!({"images":rows.into_iter().map(|(id,name)|json!({"id":id,"name":name,"url":format!("/api/v1/account/avatar/collections/{pack}/{id}")})).collect::<Vec<_>>()}),
     ))
 }
-async fn bytes(auth: &AuthState, pack: &str, image: &str) -> Result<Vec<u8>, Error> {
-    query_scalar("SELECT i.image_data FROM extension_avatar_images i JOIN extension_avatar_packs a ON a.id=i.pack_id JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE a.id=? AND i.id=? AND e.enabled=1 AND p.active=1").bind(pack).bind(image).fetch_optional(auth.store.pool()).await.map_err(db)?.ok_or_else(||err(StatusCode::NOT_FOUND,"avatar_not_found"))
+async fn sha256(auth: &AuthState, pack: &str, image: &str) -> Result<String, Error> {
+    query_scalar("SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs a ON a.id=i.pack_id JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE a.id=? AND i.id=? AND e.enabled=1 AND p.active=1").bind(pack).bind(image).fetch_optional(auth.store.pool()).await.map_err(db)?.ok_or_else(||err(StatusCode::NOT_FOUND,"avatar_not_found"))
 }
 async fn image(
     State(auth): State<AuthState>,
@@ -676,14 +731,12 @@ async fn image(
     auth.authenticate(&headers)
         .await
         .map_err(|s| err(s, "authentication_required"))?;
-    Ok((
-        [
-            (header::CONTENT_TYPE, "image/png"),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-        ],
-        bytes(&auth, &pack, &id).await?,
-    )
-        .into_response())
+    let sha = sha256(&auth, &pack, &id).await?;
+    auth.store
+        .assets
+        .response_after_authorization(&sha, &headers)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))
 }
 async fn apply(
     State(auth): State<AuthState>,
@@ -697,8 +750,8 @@ async fn apply(
     auth.require_csrf(&headers, &actor)
         .map_err(|s| err(s, "csrf_required"))?;
     let _lock = MUTATIONS.lock().await;
-    let bytes = bytes(&auth, &pack, &id).await?;
-    query("INSERT INTO user_avatars(user_id,image_data) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET image_data=excluded.image_data").bind(actor.user.id).bind(bytes).execute(auth.store.pool()).await.map_err(db)?;
+    let sha = sha256(&auth, &pack, &id).await?;
+    query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET sha256=excluded.sha256").bind(actor.user.id).bind(sha).execute(auth.store.pool()).await.map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
 }
 #[cfg(test)]
@@ -1049,12 +1102,13 @@ mod tests {
         let uploaded: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(uploaded["count"], 1);
         let pack = uploaded["id"].as_str().unwrap();
-        let data: Vec<u8> =
-            query_scalar("SELECT image_data FROM extension_avatar_images WHERE pack_id=?")
+        let sha: String =
+            query_scalar("SELECT sha256 FROM extension_avatar_images WHERE pack_id=?")
                 .bind(pack)
                 .fetch_one(store.pool())
                 .await
                 .unwrap();
+        let (_, data) = store.assets.read_all(&sha).await.unwrap();
         assert_eq!(image::load_from_memory(&data).unwrap().width(), 256);
         // The administrator can curate a disabled extension's gallery.
         let image_list = format!("{endpoint}/{pack}/images");

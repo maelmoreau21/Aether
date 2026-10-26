@@ -30,6 +30,8 @@
   let current = $state('account');
   let audioOffset = $state(preferences().offsets?.audio ?? 0);
   let subtitleOffset = $state(preferences().offsets?.subtitle ?? 0);
+  let skipIntroEnabled = $state(preferences().skipIntroEnabled !== false);
+  let skipCreditsEnabled = $state(preferences().skipCreditsEnabled !== false);
   let offsetsEdited = false;
 
   let subtitleStyle = $state<Required<SubtitleStyle>>({
@@ -59,6 +61,8 @@
       if (saved.subtitleStyle) {
         subtitleStyle = { ...DEFAULT_SUBTITLE_STYLE, ...sanitizeSubtitleStyle(saved.subtitleStyle) };
       }
+      skipIntroEnabled = saved.skipIntroEnabled !== false;
+      skipCreditsEnabled = saved.skipCreditsEnabled !== false;
     }).catch(() => {});
     const sync = () => { const hash = window.location.hash.slice(1); const id = hash === 'appearance' ? 'account' : hash === 'sso' ? 'security' : hash; current = pages.some(page => page.id === id) ? id : 'account'; };
     sync(); window.addEventListener('hashchange', sync);
@@ -173,6 +177,12 @@
         </label>
       </div>
 
+
+        <section class="offsets" aria-label="Sauts des génériques">
+          <h3>Intros et génériques</h3>
+          <label><input type="checkbox" bind:checked={skipIntroEnabled} onchange={() => savePreferences({ skipIntroEnabled })} /> Proposer « Passer l'intro »</label>
+          <label><input type="checkbox" bind:checked={skipCreditsEnabled} onchange={() => savePreferences({ skipCreditsEnabled })} /> Proposer « Passer le générique »</label>
+        </section>
 
         <form class="offsets" onsubmit={saveOffsets}>
           <h3>Synchronisation</h3><p class="muted">Décalages par défaut, de −30 à +30 secondes. Un décalage positif retarde la piste. Le décalage audio concerne les pistes externes.</p>

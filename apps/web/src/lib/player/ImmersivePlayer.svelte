@@ -9,7 +9,7 @@
   import { subtitleStyleToCss, type SubtitleStyle } from './subtitle-style';
   import { ProgressTracker } from './progress';
   import { PlaybackPresence } from './presence';
-  import { getSessionGeneration } from '../auth/session';
+  import { session, getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
   import { chooseSource, playbackMime, audioLanguage, audioSelectionNotice } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
@@ -29,6 +29,13 @@
   let error = $state('');
   let notice = $state('');
   let statistics = $state(false);
+  let markerEditor = $state(false);
+  let markerKind = $state<'intro' | 'credits'>('intro');
+  let markerEnabled = $state(true);
+  let markerStart = $state(0);
+  let markerEnd = $state(0);
+  let markerSaving = $state(false);
+  let markerError = $state('');
   let metrics = $state({ width: 0, height: 0, frames: 0, dropped: 0, buffered: 0, ready: 0, network: 0 });
   const selectedSource = $derived(active?.sources.find(source => source.audioTrackId === audio));
   let loadStage = $state('Chargement de votre séance…');
@@ -165,7 +172,12 @@
       await engine.selectSubtitle(usableSubtitle); subtitle = usableSubtitle;
       if (restore) { engine.setVolume(restore.volume); engine.setSpeed(restore.speed); }
       if (current !== generation) return;
-      active = media;
+      const skipPreferences = preferences();
+      active = {
+        ...media,
+        intro: skipPreferences.skipIntroEnabled === false ? undefined : media.intro,
+        credits: skipPreferences.skipCreditsEnabled === false ? undefined : media.credits
+      };
       presence?.stop();presence=undefined;
       if(media.workId&&!media.synthetic)presence=new PlaybackPresence(media.workId,()=>engine?.state());
       if (!restore || !restore.paused) await engine.play();
@@ -189,6 +201,37 @@
       else subtitlePreference = undefined;
       subtitleStyle = account.subtitleStyle;
     } catch { /* Preferences are optional when browser storage is unavailable. */ }
+  }
+  function editMarker(kind: 'intro' | 'credits') {
+    markerKind = kind;
+    const value = active?.[kind];
+    markerEnabled = Boolean(value);
+    markerStart = value?.start ?? Math.floor(playback.position);
+    markerEnd = value?.end ?? Math.min(playback.duration, markerStart + 60);
+    markerError = '';
+    markerEditor = true;
+    wake();
+  }
+  async function saveMarker(remove = false) {
+    const account = $session;
+    if (!account || !active || markerSaving) return;
+    markerSaving = true; markerError = '';
+    try {
+      const response = await fetch(`/api/v1/admin/assets/${encodeURIComponent(active.id)}/markers/${markerKind}`, {
+        method: remove ? 'DELETE' : 'PUT', credentials: 'same-origin',
+        headers: { 'x-csrf-token': account.csrfToken, 'content-type': 'application/json' },
+        body: remove ? undefined : JSON.stringify(markerEnabled ? { enabled: true, start: markerStart, end: markerEnd } : { enabled: false })
+      });
+      if (!response.ok) throw new Error(`Correction refusée (${response.status}).`);
+      if (remove) {
+        const fresh = await revalidateMediaDescriptor(active.id);
+        if (fresh) active = fresh;
+      } else {
+        active = { ...active, [markerKind]: markerEnabled ? { start: markerStart, end: markerEnd } : undefined };
+      }
+      markerEditor = false;
+    } catch (error) { markerError = error instanceof Error ? error.message : 'Correction indisponible.'; }
+    finally { markerSaving = false; }
   }
   export function open(media: Media | Promise<Media>) {
     if (opened) return false;
@@ -372,7 +415,23 @@
       <button class="return" aria-label="Retour à l’accueil" onclick={close}><Icon name="back" size={24} /></button>
       <div class="title"><span>{active?.title ?? 'Votre séance'}</span></div>
       {#if nextTitle && onNext}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
+      {#if $session?.user.role === 'administrator' && active?.episode}<button type="button" onclick={() => editMarker('intro')}>Corriger les marqueurs</button>{/if}
     </div>
+    {#if markerEditor && active?.episode}
+      <section class="marker-editor" aria-label="Correction des marqueurs">
+        <h2>Marqueur manuel</h2>
+        <label>Type<select bind:value={markerKind} onchange={() => editMarker(markerKind)}><option value="intro">Introduction</option><option value="credits">Générique de fin</option></select></label>
+        <label><input type="checkbox" bind:checked={markerEnabled} /> Activer ce marqueur</label>
+        {#if markerEnabled}
+          <label>Début (secondes)<input type="number" min="0" step="0.1" bind:value={markerStart} /></label>
+          <label>Fin (secondes)<input type="number" min="0" max={playback.duration} step="0.1" bind:value={markerEnd} /></label>
+        {/if}
+        {#if markerError}<p role="alert">{markerError}</p>{/if}
+        <button type="button" disabled={markerSaving} onclick={() => void saveMarker()}>Enregistrer</button>
+        <button type="button" disabled={markerSaving} onclick={() => void saveMarker(true)}>Revenir à la détection</button>
+        <button type="button" onclick={() => markerEditor = false}>Fermer</button>
+      </section>
+    {/if}
     {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" /><span>Chargement de la vidéo…</span><button onclick={close}>Annuler</button></div>{/if}
     {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, { ...playback, paused: false }); }}>Réessayer</button></div>{/if}
     {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label="Données de lecture">
@@ -406,6 +465,8 @@
 </dialog>
 
 <style>
+  .marker-editor { position:absolute;z-index:10;top:90px;right:24px;display:grid;gap:10px;width:min(340px,calc(100% - 48px));padding:16px;background:#171923;color:white;border:1px solid #ffffff50;border-radius:10px; }
+  .marker-editor label { display:grid;gap:4px; }
   .stream-statistics button { color:#eee; background:#ffffff15; border:1px solid #ffffff30; border-radius:8px; padding:10px 14px; cursor:pointer; }
   .stream-statistics { position:absolute; z-index:7; top:90px; right:24px; width:min(460px,calc(100% - 48px)); max-height:calc(100dvh - 230px); overflow:auto; padding:20px; box-sizing:border-box; background:rgba(16,17,25,.96); color:#eee; border:1px solid #ffffff25; border-radius:12px; font-size:12px; overflow-wrap:anywhere; }
   .stream-statistics header { display:flex; align-items:center; justify-content:space-between; gap:12px; }

@@ -144,9 +144,22 @@ empreintes audio; ces opérations Node demandent leur propre contrat contrôlé.
 
 Limites fixes du premier runtime : module 256 Kio, entrée/sortie 64 Kio,
 une mémoire linéaire de 16 Mio, une table de 4096 éléments, 2 millions d'unités
-de fuel, délai maximal de 65 secondes et une invocation simultanée par Core.
+de fuel et délai maximal de 65 secondes. L'admission commune limite le Core à
+quatre opérations simultanées et une par extension. Les tâches automatiques
+occupent au plus trois places, conservant une place pour les opérations
+interactives. Les appels Web saturés répondent `409 extension_busy` sans file
+d'attente en mémoire ; les tâches automatiques conservent leur reprise dans la
+file durable. Chaque invocation utilise un processus jetable distinct, arrêté
+au dépassement du délai ou à l'annulation. Cette borne protège les ressources ;
+elle ne garantit pas l'absence de contention avec la lecture sur une machine saturée.
 Le broker autorise au plus 10 requêtes HTTP de 6 secondes et 256 Kio par réponse,
 avec lecture bornée, hôte signé, DNS public épinglé et redirections refusées.
+Les départs HTTP d'une invocation sont espacés d'au moins une seconde dans son
+processus worker. Une réponse `429` ou `503` interrompt ses prochains appels et
+émet un signal hôte de reprise au Core, indépendamment du résultat du guest.
+`Retry-After` accepte les secondes ou une date HTTP, avec repli de 30 secondes
+et borne de 1 seconde à 24 heures. La file durable conserve l'échéance de reprise ;
+aucune attente fournisseur prolongée n'occupe un worker Wasm.
 Le délai Web de ces opérations est de 70 secondes. Les erreurs fournisseurs
 conservent leur code borné dans `pluginError` ; les messages bruts potentiellement
 porteurs de secrets sont exclus des réponses et de l’historique.

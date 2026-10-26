@@ -2,7 +2,7 @@
 
 `backup_bundle::create` emballe un instantané cohérent de base de données et sa configuration dans un fichier chiffré. L'instantané doit déjà avoir été produit par le service de sauvegarde : SQLite cohérent ou archive PostgreSQL `pg_dump` au format custom. Ce module ne copie jamais directement la base active et ne prend aucune décision sur sa restauration dans une base en service.
 
-La clé `MEDIA_BACKUP_KEY` doit contenir exactement 64 chiffres hexadécimaux, soit 32 octets aléatoires. Elle est fournie par l'opérateur, conservée séparément des paquets et indispensable pour toute récupération. Aucune clé de repli, génération temporaire perdue ou clé dans le paquet. Les configurations sensibles (par exemple mots de passe/clients OIDC) sont chiffrées. `MEDIA_BACKUP_KEY` est systématiquement retirée du manifeste. Le service appelant collecte la configuration effective ; le module stocke les valeurs reçues et ne découvre pas seul des fichiers externes, des secrets Docker ou des certificats.
+La clé `MEDIA_BACKUP_KEY` doit contenir exactement 64 chiffres hexadécimaux, soit 32 octets aléatoires. Elle est fournie par l'opérateur, conservée séparément des paquets et indispensable pour toute récupération. Aucune cle publique de repli (voir BACKUP_KEY.md). Aucune clé de repli, génération temporaire perdue ou clé dans le paquet. Les configurations sensibles (par exemple mots de passe/clients OIDC) sont chiffrées. `MEDIA_BACKUP_KEY` est systématiquement retirée du manifeste. Le service appelant collecte la configuration effective ; le module stocke les valeurs reçues et ne découvre pas seul des fichiers externes, des secrets Docker ou des certificats.
 
 ## Format et limites
 

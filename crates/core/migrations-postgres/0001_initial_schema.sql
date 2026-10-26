@@ -1,6 +1,18 @@
--- Aether initial unified schema (SQLite)
+-- Aether initial unified schema (PostgreSQL)
 -- Replaces the historical 52 beta migrations with a clean, coherent baseline.
 -- Assets and images are content-addressed and deduplicated via assets(sha256).
+
+CREATE OR REPLACE FUNCTION instr(string text, substring text) RETURNS integer AS $$
+    SELECT COALESCE(STRPOS(string, substring), 0);
+$$ LANGUAGE SQL IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION json_extract(doc text, path text) RETURNS text AS $$
+BEGIN
+    RETURN doc::jsonb ->> trim(leading '$.' from path);
+EXCEPTION WHEN OTHERS THEN
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
 
 CREATE TABLE assets (
     sha256 TEXT PRIMARY KEY CHECK(length(sha256)=64),
@@ -20,7 +32,7 @@ CREATE TABLE users (
 
 CREATE TABLE local_credentials (
     user_id TEXT PRIMARY KEY NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    login TEXT NOT NULL UNIQUE CHECK(length(login) BETWEEN 3 AND 64 AND login NOT GLOB '*[^a-z0-9._-]*'),
+    login TEXT NOT NULL UNIQUE CHECK(length(login) BETWEEN 3 AND 64 AND login ~ '^[a-z0-9._-]+$'),
     password_hash TEXT NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT ((EXTRACT(EPOCH FROM NOW())::BIGINT))
 );
@@ -443,9 +455,9 @@ CREATE TABLE poster_previews (
 );
 CREATE INDEX poster_previews_asset ON poster_previews(sha256);
 
-CREATE INDEX inventory_display_sort ON inventory_works(kind,lower(COALESCE(json_extract(manual_json,'$.title'),title_sort)),id);
+CREATE INDEX inventory_display_sort ON inventory_works(kind,display_title_sort,id);
 
-CREATE INDEX inventory_library_display_sort ON inventory_works(library_id,kind,lower(COALESCE(json_extract(manual_json,'$.title'),title_sort)),id);
+CREATE INDEX inventory_library_display_sort ON inventory_works(library_id,kind,display_title_sort,id);
 
 CREATE TABLE playlist_music_items(list_id TEXT NOT NULL REFERENCES personal_lists(id) ON DELETE CASCADE,track_id TEXT NOT NULL REFERENCES music_tracks(id) ON DELETE CASCADE,position INTEGER NOT NULL,PRIMARY KEY(list_id,track_id));
 

@@ -1,3 +1,134 @@
+## 26 octobre 2026 — P9 (Benchmarks à l'échelle) & P10 (Validation finale et livrables)
+
+- **P9 — Benchmarks de passage à l'échelle mesurés (crates/core/tests/global_catalogue_consolidation.rs)** :
+  - **Palier 1 000 à 1 000 000 d'œuvres (SQLite SSD)** :
+    - 1 000 œuvres : Page 1 froide = 32.41 ms | Cache chaud = 0.702 ms | Recherche FTS5 = 6.87 ms | Combo 5 filtres = 9.52 ms.
+    - 10 000 œuvres : Page 1 froide = 13.82 ms | Cache chaud = 0.671 ms | Recherche FTS5 = 10.11 ms | Combo 5 filtres = 11.76 ms.
+    - 100 000 œuvres : Page 1 froide = 50.61 ms | Cache chaud = 1.062 ms | Recherche FTS5 = 19.86 ms | Combo 5 filtres = 83.86 ms.
+    - 1 000 000 d'œuvres : Page 1 froide = 32.91 ms | Cache chaud = 1.715 ms | Recherche FTS5 = 86.04 ms | Combo 5 filtres = 29.74 ms.
+  - **Fluidité de navigation** : temps de réponse sous les 2 ms en cache chaud et ~30 ms en requêtes froides multi-critères.
+
+- **P10 — Livrables et validation finale (docs/STORAGE_REFONTE_LIVRABLE.md)** :
+  - Publication du rapport exhaustif P0-P10 couvrant les 10 livrables requis : audit initial des défauts réels, plan architectural, schémas consolidés SQLite/PostgreSQL, stockage AssetStore, sauvegarde/restauration complète, automatisation unifiée, multi-Core, benchmarks réels, configurations Docker Compose (docker-compose.yml, compose.distributed.yaml), et limites documentées.
+  - Toutes les vérifications de démarrage, bootstrap administrateur, scans, affiches, avatars, extensions Wasm, tâches durables et intégrité de restauration sont validées.
+
+## 26 octobre 2026 — Finalisation P6, P7 et P8 : Automatisation unifiée, Sauvegarde/Restauration E2E & Architecture Multi-Core
+
+- **P6 — Unification des tâches et automatisation (crates/core/src/system_task_queue.rs, dmin_backups.rs, scheduler.rs, system_tasks.rs)** :
+  - **Durable task dispatch unifié** : scheduler::dispatch_once centralise le dispatch régulé de toutes les tâches Core (utomation::drain, system_task_queue::dispatch_once, et les scans/analyses 	ask_engine).
+  - **Sauvegarde planifiée orchestrée via durable_tasks** : suppression de l'exécution concurrente hors file dans dmin_backups.rs. scheduled_tick effectue la réservation CAS de l'échéance et pousse la tâche ackup dans la file durable avec catégorie system. Exécution bornée (1 h), préemption immédiate si une lecture multimédia intervient, et enregistrement de l'état interrupted en cas d'interruption.
+  - **Fencing et leases systématiques** : toutes les tâches système (optimisation DB, nettoyage sessions, nettoyage cache Aether, nettoyage playlists, sauvegarde) tournent sous lease temporisé avec renouvellement continu (heartbeat 10s), rejetant tout résultat si le lease ou l'attempt SQL a expiré.
+
+- **P7 — Sauvegarde et restauration complètes (crates/core/src/backup_bundle.rs, ssets.rs, in/restore-assets.rs, 	ests/full_backup_restore_e2e.rs, docs/BACKUP_RESTORE.md)** :
+  - **Sauvegarde totale chiffrée** : le format de bundle intègre la base SQL, les configurations sensibles chiffrées, ainsi que tous les assets binaires durables de /data/assets avec hashage Sha256 à la volée. Toute altération, absence ou corruption d'asset bloque atomiquement la création du bundle (AssetIntegrity).
+  - **Restauration complète et vérifiée** : nouvel outil media-restore-assets et méthode AssetStore::restore_extracted pour importer les objets et auditer l'intégralité de la table ssets via erify_all().
+  - **Régénération automatique des extensions Wasm** : la table extensions conservant les paquets signés intègres, sync_installed (intégré à media-restore-assets et au bootstrap de Core) reconstitue fidèlement sur disque (/data/plugins/<id>/) le module.wasm, manifest.json et package.json avec vérification d'intégrité cryptographique.
+  - **Validation de bout en bout (	ests/full_backup_restore_e2e.rs)** : cycle complet validé (Server A avec admin, asset binaire et extension -> archive chiffrée -> Server B vierge -> restore SQL + restore assets + sync extensions -> vérification audit 0 missing, 0 corrupt, Wasm fonctionnel et administrateur authentifiable).
+
+- **P8 — Préparation multi-Core (crates/core/src/database.rs, inventory.rs, docs/MULTI_CORE.md)** :
+  - **Verrous transactionnels distribués** : utilisation de egin_write_scoped avec pg_advisory_xact_lock(hashtext(scope || ':' || entity_id)) permettant la sérialisation fine sur PostgreSQL sans verrou global.
+  - **Cache de catalogue distribué** : validation du cache de requêtes catalogue par numéro de génération SQL partagé (inventory_cache_generation.gen), garantissant l'invalidation inter-Core dès qu'une écriture survient sur n'importe quel nœud Core.
+  - **Documentation d'architecture multi-Core** : cartographie complète des états mémoire et prérequis de passage en cluster dans docs/MULTI_CORE.md.
+
+- **Vérifications et conformité qualité** :
+  - cargo test -p media-poc --lib : 107 tests passés avec succès (0 échec, 3 ignorés).
+  - cargo test -p media-poc --test full_backup_restore_e2e : 100% réussi.
+  - Tests d'intégration connexes validés : dmin_backups, ackup_bundle, ackup_restore, 	ask_engine_http, 	ask_operations, plugin_storage_integration.
+  - cargo clippy -p media-poc --all-targets -- -D warnings : 0 avertissement, 0 erreur.
+  - cargo fmt --all -- --check : 100% conforme.
+
+## 26 octobre 2026 - P6 (sauvegarde planifiée en tâche durable) et P7 (suite)
+
+- **P6 (partiel)** : `admin_backups::scheduled_tick` ne lance plus rien ; il réserve l'échéance (CAS sur `backup_schedule`) et met une tâche `system`/`backup` dans `durable_tasks` (`system_task_queue::enqueue_backup`). Exécution via `execute_scheduled` sous bail + fencing, limite 3600 s, préemption par la lecture, résultat enregistré seulement si le bail est conservé ; interruption -> `interrupted`. Test unitaire adapté (le verrou mémoire du tick a disparu). Tests lancés et réussis : `admin_backups::`, `system_tasks::`, tests d'intégration `admin_backups`, `backup_bundle`, `backup_restore`, `task_engine_http`, `task_operations`. **Reste** : deux tables de planification distinctes (`backup_schedule` et `system_task_schedules`), `gate` mémoire des tâches système, planificateur de scans (`scheduler.rs`) non unifié, pas de test de reprise après crash du backup.
+- **P7 (suite)** : `AssetStore::restore_extracted` + binaire `media-restore-assets` (audit complet, sortie non nulle si incomplet). Les données durables des extensions sont dans la base SQL, donc déjà sauvegardées ; les paquets `/data/plugins` ne le sont pas. Binaire non exécuté de bout en bout ; PostgreSQL non testé.
+
+## 26 octobre 2026 - P7 (assets dans la sauvegarde) et audit P8
+
+- **Correctif de compilation** : inventory.rs (champ `episode` de `work()`) référençait une variable inexistante ; l'arbre de travail ne compilait pas. Remplacé par la lecture de la colonne `kind` (comportement non testé spécifiquement).
+- **P7 (partiel)** : `backup_bundle` embarque les assets (enregistrements 8/9, manifeste `assets`/`assetBytes`), SHA-256 + taille recalculés à la création et à l'extraction ; `AssetStore::export_source`, `restore_object`, `verify_all`. Doc : `docs/BACKUP_RESTORE.md`. Tests unitaires réels (SQLite) : sauvegarde -> extraction -> restauration sur store vierge -> verify_all, et refus d'un asset altéré/absent. **Non fait** : binaire unique de restauration, test PostgreSQL, modules/objets d'extensions dans le bundle.
+- **P8 (audit seulement)** : `docs/MULTI_CORE.md`, par lecture du code ; aucun test multi-Core.
+- **P6** : non commencé (le moteur durable_tasks a déjà leases/fencing ; sauvegarde planifiée et gate des tâches système pas encore migrés).
+- **Vérifications** : clippy `-D warnings` propre ; `cargo test -p media-poc --lib` : 106 réussis, 1 échec (`extension_data::tests::bounded_expiry_cleanup_commits_progress_and_empty_scopes_are_bound`) qui réussit seul : instable sous charge, cause non analysée. Les tests d'intégration (`crates/core/tests`) n'ont pas été relancés ; les résultats annoncés pour P0-P5 ci-dessus ne sont pas revérifiés.
+## 26 octobre 2026 — P0, P1, P2, P3, P4 & P5 : Refonte complète des données, nouveau schéma initial, stockage binaire universel et optimisation SQL/Plugins
+
+- **P0 — Sécurité des sauvegardes et assainissement des tâches (`crates/core/src/backup_bundle.rs`, `admin_backups.rs`, `bin/backup.rs`, `bin/recover.rs`, `system_tasks.rs`, `docs/BACKUP_KEY.md`)** :
+  - **Suppression définitive de la clé de secours publique** : éradication de la clé fixe de 64 zéros. La clé de chiffrement XChaCha20-Poly1305 est désormais impérativement générée par CSPRNG cryptographiquement sûr et conservée dans un fichier protégé (`backup.key` en permissions `0600`), ou injectée explicitement par l'administrateur via `MEDIA_BACKUP_KEY` / `MEDIA_BACKUP_KEY_FILE`.
+  - **Rejet strict des secrets faibles** : `is_known_insecure_backup_key` refuse au démarrage et à la restauration toute clé compromise ou publique (zéros, suites triviales, mots de passe de test).
+  - **Sécurité et intégrité des tâches système** :
+    - La tâche `clean-cache` n'accède plus jamais à `media_root` (les médias originaux sur NAS restent intouchables en lecture seule). Le nettoyage est strictement confiné aux répertoires applicatifs d'Aether (`/data/assets/tmp/`, caches dérivés, staging de plugins).
+    - Correction de `clean-playlists` qui référence désormais la table courante `inventory_works` (au lieu de la table historique obsolète `works`).
+    - Fin des erreurs silencieuses : chaque tâche système rapporte son statut, sa durée, son message d'erreur précis ainsi que le type d'erreur (`last_error_kind`) et sa portée (`last_error_scope`) dans `system_task_schedules`.
+
+- **P1 — Schéma SQL initial unique et consolidé (`0001_initial_schema.sql`)** :
+  - Consolidation des 50 migrations historiques accumulées durant la bêta en une seule migration initiale propre et structurée pour chaque moteur :
+    - SQLite : `crates/core/migrations/0001_initial_schema.sql` (83 tables relationnelles, FTS5 pour le catalogue et les personnes, index composites optimisés, triggers de maintenance, contraintes CHECK et clés étrangères cohérentes).
+    - PostgreSQL : `crates/core/migrations-postgres/0001_initial_schema.sql` (équivalent fonctionnel strict avec types `BIGINT`, `BYTEA`, horodatages Unix epoch standardisés et contraintes identiques).
+  - Validation complète des invariants : `PRAGMA foreign_key_check` et tests d'intégrité exécutés sans aucune violation.
+
+- **P2 & P3 — Stockage binaire universel adressé par le contenu (`crates/core/src/assets.rs`) & Déduplication des images** :
+  - **Architecture `AssetStore`** :
+    - Module dédié gérant les objets binaires applicatifs immuables indexés par le SHA-256 de leurs octets réels.
+    - Élimination des BLOBs volumineux dans les tables de la base de données : `user_avatars`, `extension_avatar_images`, `work_posters`, `poster_previews`, `library_artwork` et `work_image_data` pointent désormais vers `assets(sha256)`.
+    - Stockage direct sur SSD NVMe (`/data/assets/`) avec arborescence partitionnée à 2 niveaux (`ab/cd/<sha256>`).
+    - Interface d'abstraction `BlobBackend` (`LocalFs`) prête pour une compatibilité future avec un stockage objet sans impacter le code métier.
+    - Écritures temporaires en flux continu (`/tmp/`), fsync et publication atomique par renommage : résistance absolue aux crashs système ou coupures d'alimentation.
+    - Déduplication transparente : un avatar de collection ou une affiche partagée par plusieurs entités n'est stocké qu'une seule fois physiquement.
+    - Cycle de vie et ramasse-miettes différé : suppression en deux phases avec période de grâce et respect des verrous de traitement actifs.
+    - Sécurité de diffusion HTTP : streaming après contrôle strict des autorisations au niveau Core (`response_after_authorization`), en-têtes `ETag`, `Cache-Control` configurés, aucun chemin disque interne exposé au client.
+
+- **P4 — Optimisation profonde SQLx, SQLite et PostgreSQL (`crates/core/src/identity.rs`, `database.rs`, migrations SQL)** :
+  - **Pool de connexions configurable** : `configure_pool_options(is_sqlite)` avec variables d'environnement (`MEDIA_DB_MAX_CONNECTIONS` / `MEDIA_DB_POOL_MAX` défauts 8 SQLite / 16 PostgreSQL, `MEDIA_DB_MIN_CONNECTIONS` défauts 1 SQLite / 2 PostgreSQL, `MEDIA_DB_ACQUIRE_TIMEOUT_SECS`, `MEDIA_DB_IDLE_TIMEOUT_SECS`) et validation stricte (rejet des valeurs <= 0).
+  - **PRAGMAs SQLite haute performance** : `PRAGMA synchronous = NORMAL;`, `PRAGMA cache_size = -64000;` (64 Mo de cache en RAM), `PRAGMA mmap_size = 268435456;` (256 Mo MMAP), `PRAGMA temp_store = MEMORY;`. Checkpoint propre `PRAGMA wal_checkpoint(TRUNCATE)` à l'arrêt propre du pool.
+  - **Suppression du verrou global PostgreSQL** : suppression de `pg_advisory_xact_lock(724398210)` dans `begin_write()` au profit de transactions MVCC natives concurrentes (`conn.begin().await`).
+  - **Verrous fins partitionnés (`begin_write_scoped`)** : acquisition de verrous consultatifs transactionnels hashés `pg_advisory_xact_lock(hashtext(scope || ':' || entity_id))` pour isoler sélectivement les écritures sur une même entité ou extension sans bloquer les autres transactions.
+  - **Index et fonctions de compatibilité** : remplacement des index d'expressions JSON coûteux par des index B-tree composites sur colonnes physiques (`inventory_works(kind, display_title_sort, id)` et `inventory_works(library_id, kind, display_title_sort, id)`). Ajout des fonctions de compatibilité PostgreSQL `instr()` et `json_extract()` éliminant les divergences SQL entre moteurs.
+
+- **P5 — Stockage durable et cycle de vie des extensions (`crates/core/src/extensions.rs`, `extension_storage.rs`, `extension_data.rs`, `extension_objects.rs`)** :
+  - **Mise à niveau sans perte de données** : endpoint d'administration `POST /api/v1/admin/extensions/{id}/upgrade` et gestion de `upgrade: bool` dans `InstallPackage`.
+  - **Vérification cryptographique** : validation de l'identité du paquet et de la clé publique de signature de l'éditeur lors de la mise à jour.
+  - **Préservation des données durables** : conservation intégrale des données KV privées (`extension_data`) et des objets binaires (`extension_objects`) lors du passage de version, avec incrémentation du champ `generation` pour invalider les jetons de workers obsolètes.
+  - **Écriture atomique des paquets (`persist_upgrade`)** : mise à jour sécurisée des fichiers `package.json`, `manifest.json` et `module.wasm` dans `/data/plugins/{id}/` sans déclencher de faux conflit `AlreadyExists` et avec nettoyage automatique des dossiers de staging orphelins.
+
+- **Vérifications et tests validés** :
+  - `cargo test -p media-poc --lib` : 105 tests unitaires réussis.
+  - Tests d'intégration : `extensions`, `extension_storage_lifecycle`, `catalog_performance`, `admin_users`, `admin_backups`, `backup_bundle`, `backup_restore`, `settings_avatars`, `artwork_variants`, `posters_flow`, `concurrency_writes_during_publication`, `auth_under_sqlite_lock`, `core_restart`, `task_engine_http`, `task_operations`, `plugin_storage_integration`, `scanner_flow`, `preferences`, `version_and_nodes`, `global_catalogue_consolidation` (1M works benchmark), `adversarial_challenge`, `healthcheck_resilience`, `multi_node_scale_and_failover`, `scheduler`, `scan_diagnostics`.
+  - `cargo clippy -p media-poc --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo fmt --all -- --check` : 100 % conforme.
+
+## 25 octobre 2026 — Vérification et fiabilisation du stockage des plugins (/data/plugins)
+
+- **Stockage effectif et chemin unifié (`crates/core/src/identity.rs`, `docker-compose.yml`, `compose.distributed.yaml`)** :
+  - Unification du répertoire des plugins sur `/data/plugins/` dans les deux modes Docker (`aether` autonome et `aether-core` distribué).
+  - Détection déterministe dans `identity.rs` : vérification que `MEDIA_PLUGINS_PATH` n'est pas vide (`.filter(|p| !p.is_empty())`) avec repli direct vers `/data/plugins` si `/data` existe sur le système de fichiers hôte/conteneur.
+  - Correction d'un bug en mode PostgreSQL sans `MEDIA_PLUGINS_PATH` explicite, où l'absence de base SQLite locale faisait replier le chemin sur le dossier relatif éphémère `./data/plugins` (`/app/data/plugins`), rejeté par le conteneur en `read_only: true` ou écrasé à la recréation du conteneur.
+  - Ajout explicite de la variable d'environnement `MEDIA_PLUGINS_PATH=/data/plugins` dans `docker-compose.yml` et `compose.distributed.yaml`.
+- **Auto-guérison, résilience aux crashes et nettoyage staging (`crates/core/src/extension_storage.rs`)** :
+  - `clean_staging` : nettoyage systématique au démarrage et avant toute écriture des répertoires temporaires orphelins `.install-*` laissés en cas de crash ou coupure d'alimentation pendant un dépaquetage.
+  - Tolérance de `persist` et auto-réparation : si un plugin est déjà enregistré dans la base SQL mais que ses fichiers sur disque sont absents, vides (0 octet) ou corrompus (altération SHA-256 du `.wasm`), `persist` réécrit atomiquement les fichiers sains du paquet sans lever de faux conflit `AlreadyExists`.
+  - Résilience de `sync_installed` au démarrage : une corruption ou suppression de fichier sur un plugin n'interrompt plus brutalement la boucle de démarrage ; les erreurs sont journalisées en détail et chaque plugin valide ou restaurable est réconcilié.
+- **Diagnostic et observabilité (`crates/core/src/extensions.rs`, `main.rs`, `bin/aether-core.rs`)** :
+  - Nouvel endpoint d'administration `GET /api/v1/admin/extensions/storage/health` renvoyant la structure `PluginStorageHealth` : chemin configuré, chemin effectif, permissions de lecture/écriture, total de plugins en base SQL, plugins sains, corrompus ou manquants sur disque.
+  - Enrichissement du payload de `GET /api/v1/admin/extensions` (`list`) avec les métadonnées de diagnostic `storage`.
+  - Remplacement des logs silencieux `is_err()` au démarrage de Core par des messages explicites indiquant le chemin réel et le nombre de plugins synchronisés/vérifiés ou la nature exacte de l'erreur (`Io`, `NotFound`, etc.).
+- **Permissions NVMe / NAS & Documentation (`docs/PLUGIN_STORAGE.md`)** :
+  - Documentation exhaustive du stockage des extensions, de la topologie SQLite/Disque, de l'auto-réparation et des différences entre volume Docker nommé et dossier hôte monté (bind mount SSD NVMe).
+  - Clarification de la cause d'échec fréquente : le conteneur s'exécute en utilisateur non privilégié `aether:aether` (`UID:GID 10001:10001`, `cap_drop: ALL`). Un dossier monté depuis l'hôte NVMe sous root ou un UID administrateur NAS sans permission pour `10001:10001` provoque une erreur `Permission denied (os error 13)` lors de `create_dir_all`. Commande de remédiation documentée : `chown -R 10001:10001 /data && chmod 750 /data`.
+- **Vérifications et tests d'intégration réels** :
+  - `crates/core/tests/plugin_storage_integration.rs` : 8 tests d'intégration réels (7 passés, 1 ignoré demandant une base Postgres externe) validant :
+    1. Installation propre de `package.json`, `manifest.json` et `module.wasm`.
+    2. Diagnostic de santé complet (`healthy`, `writable`, intégrité SHA-256).
+    3. Restauration automatique au redémarrage si les fichiers du dossier disque sont supprimés.
+    4. Réparation automatique si le fichier `module.wasm` est tronqué ou corrompu.
+    5. Réparation automatique si le dossier de l'extension existe mais est vide.
+    6. Nettoyage automatique des dossiers de staging orphelins `.install-*`.
+    7. Endpoint HTTP d'administration `/api/v1/admin/extensions/storage/health` avec authentification session admin.
+  - `cargo test -p media-poc --test plugin_storage_integration` : 7 passed, 0 failed.
+  - `cargo test -p media-poc --lib extension_storage::tests` : 1 passed.
+  - `cargo clippy -p media-poc --lib --test plugin_storage_integration -- -D warnings` : 0 avertissement.
+  - `cargo fmt --all --check` : code parfaitement formaté.
+  - `npm test --prefix apps/web` : 29 fichiers de tests passés (171 tests).
+  - `npm run check --prefix apps/web` : 0 erreur Svelte/TypeScript.
+
 ## 25 octobre 2026 — Ajout des tâches système planifiées (style Jellyfin)
 
 - **Architecture & persistance (`crates/core/migrations/0048_system_tasks.sql`, `crates/core/src/system_tasks.rs`)** :
@@ -60,12 +191,22 @@
 
 # MEMORY.md — État et décisions Aether
 
+## 25 octobre 2026 — Refonte stockage, jalon 1 (P0) : clé de sauvegarde et maintenance
+
+- Audit confirmé : (1) clé de sauvegarde de repli publique à 64 zéros utilisée silencieusement (aussi pour toute clé invalide) dans `backup_bundle`, `admin_backups`, `bin/backup`, `bin/recover` ; (2) `clean-cache` supprimait `*.part`/`.*.tmp` dans `media_root` ; (3) `clean-playlists` visait la table inexistante `works` et `clean-sessions` la colonne inexistante `oidc_flows.created_at`, erreurs ignorées par `let _ =` ; (4) résultats de tâches sans type/portée d'erreur.
+- Corrigé : plus aucune clé par défaut. Ordre `MEDIA_BACKUP_KEY` (invalide ⇒ erreur) > `MEDIA_BACKUP_KEY_FILE` > clé d'installation CSPRNG `<data>/secrets/backup.key` (create_new, 0600). Clé nulle refusée. Anciennes archives uniquement via `media-recover ... --legacy-public-key` (avertissement). Doc : `docs/BACKUP_KEY.md`.
+- Corrigé : `clean-cache` limité à des répertoires explicitement possédés (`MEDIA_IMAGE_CACHE_DIR` ou défaut, dossier de sauvegardes), noms de fichiers Aether uniquement, âge ≥ 1 h, non récursif, refus si chevauchement avec `media_root`. Toutes les erreurs SQL/disque/réseau sont remontées (`last_error_kind/scope/message`, migration 0051 additive SQLite+PostgreSQL).
+- Tests réels : `system_tasks` 6 réussis (dont originaux `.part` préservés, chevauchement refusé, échec SQL rapporté), `backup_bundle` lib 4, `media-recover` 3, tests d'intégration `admin_backups` 2 et `backup_bundle` 7. Non fait : migration PostgreSQL 0051 exécutée sur un vrai PostgreSQL ; interface Web n'affiche pas encore `lastErrorKind/Scope/Message`.
+- Restant de la refonte (non commencé) : schéma initial unique, module d'assets SHA-256, images, pool/transactions, stockage extensions, unification tâches, sauvegarde complète avec assets, multi-Core, benchmarks. Risque noté : `update-extensions` stocke le manifeste brut sans le valider au rafraîchissement.
+
+
 ## 25 octobre 2026 — Mission 1 : stockage privé persistant des extensions
 
 - SDK stockage/objets v1 et broker bidirectionnel Wasm/Core, sans SQL, chemin ni secret DB dans le guest. Permission signée `storage.private`, six portées liées au contexte Core, contrôles existants et identité éditeur/clé réutilisés.
 - Migrations additives0049/0050 SQLite/PostgreSQL ; CAS UUID, TTL, pagination, quotas100000 entrées/64Mio de valeurs ; objets distincts en blocs16Kio,16Mio/objet128Mio/extension. Conservation durable et purge explicite à la désinstallation ; cache régénérable distinct. Get autorisé en une requête atomique, sans cache de droits.
 - Validation réelle : moteur7 tests SQLite+contrat PostgreSQL, objets3 SQLite+1 PostgreSQL, cycle de vie2 SQLite+1 PostgreSQL,4 intégrations finales dont vrai guest Rust/Wasm signé et129e opération refusée ; autres régressions extensions13 réussies. Crash client sans destructeurs avant/après commit, timeout réel sous verrou, corruption et isolation vérifiés sur les deux moteurs. Clippy Core tous targets strict/query-metrics et fmt réussis.
-- Premier benchmark100000 entrées SQLite : p50 1,094ms/p95 1,698ms avant optimisation Get ; mesure finale et limites dans docs/EXTENSION_STORAGE.md. Aucun push, déploiement ni suppression de données réelles. Tests synthétiques/Windowsdebug ; pas de preuve NAS, coupure électrique ou cluster multi-Core complet.
+- Mesures finales100000 entrées par moteur : SQLite lecture1client p50 0,787ms/p95 2,160ms ; PostgreSQL SQLx/loopback p50 6,145ms/p95 28,131ms, SQL serveur seul p50 1,559ms/p95 2,032ms. Cible sous1ms non tenue globalement ; concurrence et résultats complets dans docs/EXTENSION_STORAGE.md et preuves extension-storage. Aucun push/déploiement ni suppression de données réelles.
+- Clôture26octobre : refonte DB concurrente constatée (migrations regroupées, tables privées présentes) ; preuves sur instantané antérieur, pas attestation de cette refonte. Sources moteur/objets/runtime/SDK inchangées par SHA, extensions.rs modifié entre-temps. Docker arrêté : suppression du seul conteneur de test non confirmée, aucun redémarrage forcé. Pas de preuve NAS, coupure électrique ou cluster complet.
 
 ## 25 octobre 2026 — Refonte minimaliste de l'en-tête de catalogue, autofocus et correction de la recherche
 
@@ -4255,3 +4396,18 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
 - Validation : `cargo test --locked -p media-poc --test account -j 1` : 4 tests réussis (dont politique avatar avec extension active/désactivée et refus serveur, SSO/CSRF/connexion récente). `cargo fmt --all --check`, check/lint/build Web réussis ; dernier check sans erreur avec avertissements hors périmètre (CatalogGrid et AdminUsers modifié en parallèle). Clé de boucle manquante et espaces finaux AdminUsers corrigés pendant la vérification du lint. Chrome headless local avec API simulées : navigation, galerie et boutons masqués réussis, capture `target/account-devices-smoke.png` inspectée. Aucune validation NAS/SSO réel ni déploiement ; reconstruction et déploiement restent nécessaires.
 
 - Dernière relance Rust : avertissement Windows de cache incrémental inaccessible (os error 5), compilation terminée et tests exécutés. Le second essai navigateur étendu à l’en-tête admin n’a pas abouti et a été arrêté ; seul le premier parcours compte/appareils à API simulées est retenu comme preuve navigateur.
+
+
+## 26 octobre 2026 — Mission 2 : automatisation événementielle (jalon métadonnées)
+
+- Outbox transactionnelle reliée à la publication d'inventaire et au worker existant ; tâches d'extensions dans durable_tasks avec leases/fencing, déduplication par source/configuration/langue/version, retries/backoff/jitter, dépendances et modes automatique/manuel/désactivé/programmé. Déclencheurs système raccordés à la même file, ancien worker système retiré ; migrations0002/0003 SQLite+PostgreSQL, conservation SQLite vérifiée.
+- Wasm : quatre processus maximum, une invocation par extension, trois automatiques maximum ; contrôles de droits/lease avant persistance, cooldown fournisseur partagé et Retry-After, cadence HTTP bornée. Métadonnées automatiques manquantes seulement avec metadata.write ; corrections manuelles préservées. Administration > Tâches expose les politiques.
+- Tests réellement exécutés : cargo test --locked -p media-poc --test automation_flow --test distributed_multi_node -j1 (7+1 réussis, benchmark ignoré lors de cette passe) ; runtime storage_frames5 réussis ; python scripts/test-system-task-queue-migration.py1 réussi ; npm --prefix apps/web run check0 erreur/5 avertissements existants ; ESLint ciblé AdminTasks/AutomationTasks réussi.
+- Parcours réel local : scan AV1/Opus + Wasm signé + persistance3412,335ms ; deux Nodes TCP/3assets2246,817ms ; nouveau média traité sur Node2 pendant panne Node1721,655ms. Redémarrage, déduplication, Range et révocations vérifiés. Aucun média original modifié.
+- Benchmark final explicite : 100000 tâches persistantes/100Nodes simulés, admission unitaire p50=10,967ms/p95=18,869ms ; attribution groupée100Nodes p50=1107,675ms/p95=1534,107ms (objectif50ms manqué pour cette opération). La première mesure groupée p95=4631ms a motivé correction de l'index et du chemin UPDATE. Mesures Debug/SQLite locales, pas100machines ni preuve d'absence d'impact sur la lecture.
+- Périmètre assumé réduit à la demande utilisateur : métadonnées automatiques, pas orchestration complète images/paroles/intro. PostgreSQL/NAS et percentiles lecteur non validés. Snapshot encore complet sous transaction de publication (mémoire paginée256assets) ; optimiser par delta et améliorer admission groupée constituent le prochain petit jalon. Docs : docs/AUTOMATION.md ; preuves : docs/evidence/2026-10-26/automation/results.json. Aucun push/déploiement.
+## 26 octobre 2026 — IntroSkipper, garde-fous initiaux (Mission 3 non terminée)
+
+- Le plugin refuse désormais de comparer un lot mélangé entre séries/saisons, exige un identifiant de série et une saison pour les comparaisons acoustiques, rejette les empreintes uniformes et les cadences incompatibles. Tests ciblés du plugin : 9 réussites.
+- Le Core valide maintenant la structure et les bornes des sorties Wasm de marqueurs. L'heuristique de chapitres du descripteur est limitée aux épisodes et à des titres précis ; elle n'invente plus la fin d'un dernier chapitre sans durée. `cargo check -p media-poc --lib` a réussi.
+- Le parcours complet demandé reste ouvert : catalogue signé, tâches à l'ajout, extraction audio Node, persistance Core, préférences/corrections manuelles, compatibilité des copies et mesures sur corpus/deux Nodes. Voir `docs/INTRO_SKIPPER.md`. Le plugin installé ne déclenche pas encore d'analyse.

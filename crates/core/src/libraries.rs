@@ -9,7 +9,7 @@ use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::Response,
     routing::get,
 };
 use serde::{Deserialize, Serialize};
@@ -491,8 +491,8 @@ async fn image(
 ) -> Result<Response, StatusCode> {
     administrator(&state, &headers, false).await?;
     image_target(&state, &id, &kind).await?;
-    let bytes: Vec<u8> = crate::database::query_scalar(
-        "SELECT image_data FROM library_artwork WHERE library_id=? AND kind=?",
+    let sha256: String = crate::database::query_scalar(
+        "SELECT sha256 FROM library_artwork WHERE library_id=? AND kind=?",
     )
     .bind(id)
     .bind(kind)
@@ -500,15 +500,18 @@ async fn image(
     .await
     .map_err(database)?
     .ok_or(StatusCode::NOT_FOUND)?;
-    Ok((
-        [
-            (header::CONTENT_TYPE, "image/png"),
-            (header::CACHE_CONTROL, "private, no-store"),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-        ],
-        bytes,
-    )
-        .into_response())
+    let mut response = state
+        .auth
+        .store
+        .assets
+        .response_after_authorization(&sha256, &headers)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("private, no-store"),
+    );
+    Ok(response)
 }
 static IMAGE_WORKERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 async fn upload_image(
@@ -533,8 +536,15 @@ async fn upload_image(
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
-    crate::database::query("INSERT INTO library_artwork(library_id,kind,image_data,revision) VALUES(?,?,?,?) ON CONFLICT(library_id,kind) DO UPDATE SET image_data=excluded.image_data,revision=excluded.revision")
-        .bind(id).bind(kind).bind(normalized).bind(uuid::Uuid::new_v4().to_string()).execute(&state.auth.store.pool).await.map_err(database)?;
+    let meta = state
+        .auth
+        .store
+        .assets
+        .put_bytes(&normalized, "image/png")
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::database::query("INSERT INTO library_artwork(library_id,kind,sha256,revision) VALUES(?,?,?,?) ON CONFLICT(library_id,kind) DO UPDATE SET sha256=excluded.sha256,revision=excluded.revision")
+        .bind(id).bind(kind).bind(&meta.sha256).bind(uuid::Uuid::new_v4().to_string()).execute(&state.auth.store.pool).await.map_err(database)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn remove_image(
@@ -790,6 +800,18 @@ async fn save(
             .bind(&folder_id).bind(&input.name).bind(&input.kind).bind(&folder.node_id).bind(&folder.root).bind(i64::from(input.enabled)).bind(input.excluded_patterns.trim()).bind(&options_json).execute(&mut *tx).await.map_err(database)?;
         crate::database::query("INSERT INTO library_folders(library_id,parent_id,active) VALUES(?,?,1) ON CONFLICT(library_id) DO UPDATE SET active=1")
             .bind(&folder_id).bind(&id).execute(&mut *tx).await.map_err(database)?;
+    }
+    if previous.as_deref() != Some(options_json.as_str()) {
+        crate::automation::schedule_library(
+            &mut tx,
+            &id,
+            "metadata.missing",
+            &uuid::Uuid::new_v4().to_string(),
+            None,
+            media_contracts::protocol::unix_now(),
+        )
+        .await
+        .map_err(database)?;
     }
     tx.commit().await.map_err(database)?;
     Ok(Library {

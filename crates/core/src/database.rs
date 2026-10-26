@@ -112,7 +112,11 @@ where
     )))
 }
 
-/// Serialize state-check/write sequences across connections and Core restarts.
+/// Start an engine-appropriate write transaction.
+/// On SQLite, uses `BEGIN IMMEDIATE` to acquire the reserved write lock immediately,
+/// preventing upgrade deadlocks.
+/// On PostgreSQL, uses a standard ACID transaction (`conn.begin()`) with MVCC and row-level locking,
+/// avoiding arbitrary global advisory lock bottlenecks.
 pub async fn begin_write(
     conn: &mut AnyConnection,
 ) -> Result<sqlx::Transaction<'_, Any>, sqlx::Error> {
@@ -120,8 +124,46 @@ pub async fn begin_write(
     if conn.backend_name() == "SQLite" {
         conn.begin_with("BEGIN IMMEDIATE").await
     } else {
+        conn.begin().await
+    }
+}
+
+/// Start a write transaction scoped to a specific entity or logical partition.
+/// On SQLite, relies on SQLite's engine-level write lock (`BEGIN IMMEDIATE`).
+/// On PostgreSQL, acquires a transaction-scoped advisory lock specifically on
+/// the hash of `(scope, entity_id)`, serializing only conflicting operations on
+/// the same entity while allowing full concurrency across all other entities.
+pub async fn begin_write_scoped<'a>(
+    conn: &'a mut AnyConnection,
+    scope: &str,
+    entity_id: &str,
+) -> Result<sqlx::Transaction<'a, Any>, sqlx::Error> {
+    count_statement();
+    if conn.backend_name() == "SQLite" {
+        conn.begin_with("BEGIN IMMEDIATE").await
+    } else {
         let mut tx = conn.begin().await?;
-        sqlx::query("SELECT CAST(pg_advisory_xact_lock(724398210) AS TEXT)")
+        let lock_key = format!("{scope}:{entity_id}");
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+            .bind(&lock_key)
+            .execute(&mut *tx)
+            .await?;
+        Ok(tx)
+    }
+}
+
+/// Explicit serialized transaction with a designated numeric lock ID for global synchronization.
+pub async fn begin_write_serialized(
+    conn: &mut AnyConnection,
+    lock_id: i64,
+) -> Result<sqlx::Transaction<'_, Any>, sqlx::Error> {
+    count_statement();
+    if conn.backend_name() == "SQLite" {
+        conn.begin_with("BEGIN IMMEDIATE").await
+    } else {
+        let mut tx = conn.begin().await?;
+        sqlx::query("SELECT CAST(pg_advisory_xact_lock($1) AS TEXT)")
+            .bind(lock_id)
             .execute(&mut *tx)
             .await?;
         Ok(tx)

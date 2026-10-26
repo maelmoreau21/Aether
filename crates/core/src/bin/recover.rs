@@ -1,16 +1,28 @@
 //! Offline recovery staging. Never connects to a database or applies configuration.
 use std::{ffi::OsString, path::PathBuf};
-use zeroize::Zeroizing;
 
-const USAGE: &str = "usage: media-recover ARCHIVE NEW_OUTPUT_DIR\nOptionally set MEDIA_BACKUP_KEY to a custom 64-character hexadecimal key (default key used if omitted). The output directory must not exist; its parent must exist. This extracts sensitive recovery files only; stop Core and use media-restore separately.";
+const USAGE: &str = "usage: media-recover ARCHIVE NEW_OUTPUT_DIR\nSet MEDIA_BACKUP_KEY (64 hexadecimal characters) or MEDIA_BACKUP_KEY_FILE; there is no default key. Archives made by old betas with the public all-zero key can only be opened with the explicit --legacy-public-key flag as a third argument (they never had confidentiality). The output directory must not exist; its parent must exist. This extracts sensitive recovery files only; stop Core and use media-restore separately.";
 
+#[cfg(test)]
 fn paths(mut args: impl Iterator<Item = OsString>) -> Result<(PathBuf, PathBuf), &'static str> {
+    let (source, target, _) = paths_with_flag(&mut args)?;
+    Ok((source, target))
+}
+
+fn paths_with_flag(
+    args: &mut impl Iterator<Item = OsString>,
+) -> Result<(PathBuf, PathBuf, bool), &'static str> {
     let source = args.next().ok_or(USAGE)?;
     let target = args.next().ok_or(USAGE)?;
+    let legacy = match args.next() {
+        None => false,
+        Some(flag) if flag == "--legacy-public-key" => true,
+        Some(_) => return Err(USAGE),
+    };
     if args.next().is_some() || source.is_empty() || target.is_empty() {
         return Err(USAGE);
     }
-    Ok((source.into(), target.into()))
+    Ok((source.into(), target.into(), legacy))
 }
 
 fn validate_key(key: &str) -> Result<(), &'static str> {
@@ -48,17 +60,40 @@ async fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let (source, target) = paths(std::env::args_os().skip(1))?;
-    let key = Zeroizing::new(
-        std::env::var("MEDIA_BACKUP_KEY")
-            .unwrap_or_else(|_| media_poc::backup_bundle::DEFAULT_BACKUP_KEY.to_string()),
-    );
-    validate_key(&key)?;
-    let summary = media_poc::backup_bundle::extract(&source, &target, &key).await?;
+    let (source, target, legacy) = paths_with_flag(&mut std::env::args_os().skip(1))?;
+    let summary = if legacy {
+        eprintln!(
+            "WARNING: opening an archive protected by the publicly known legacy key. Its content was never confidential; rotate every secret it contains."
+        );
+        media_poc::backup_bundle::extract_legacy_public_key(&source, &target).await?
+    } else {
+        let key = media_poc::backup_bundle::resolve_key(
+            std::env::var("MEDIA_BACKUP_KEY").ok().as_deref(),
+            std::env::var_os("MEDIA_BACKUP_KEY_FILE")
+                .map(PathBuf::from)
+                .as_deref(),
+            std::env::var_os("MEDIA_DATA_DIR")
+                .map(PathBuf::from)
+                .as_deref(),
+            false,
+        )?;
+        validate_key(&key)?;
+        media_poc::backup_bundle::extract(&source, &target, &key).await?
+    };
     println!(
         "Recovery files extracted. Keep the output directory private: config.json contains sensitive settings."
     );
     println!("{}", next_steps(&summary.engine)?);
+    if summary.assets > 0 {
+        println!(
+            "{} durable assets were verified (size and SHA-256) and extracted to assets/<sha256> with assets.json. They are not yet in the live store: after restoring the database, import them with AssetStore::restore_object and require AssetStore::verify_all to report no missing or corrupt object before declaring the restore successful.",
+            summary.assets
+        );
+    } else {
+        println!(
+            "This archive contains no durable assets (database-only or pre-asset format). Avatars, posters and other stored images referenced by the database will be missing."
+        );
+    }
     println!(
         "If internal-ca.pem is present, remount it at the original path or set MEDIA_INTERNAL_CA_FILE to its restored path before starting Core. If postgres-ca.pem, postgres-cert.pem or postgres-key.pem are present, restore their original paths or update the TLS file path parameters in MEDIA_DB_URL. Other external file secrets must be restored separately."
     );
@@ -79,13 +114,24 @@ mod tests {
         assert_eq!(target, PathBuf::from("new directory"));
         assert!(paths(std::iter::empty()).is_err());
         assert!(paths([OsString::from("archive")].into_iter()).is_err());
+        let (_, _, legacy) = paths_with_flag(
+            &mut [
+                OsString::from("a"),
+                OsString::from("b"),
+                OsString::from("--legacy-public-key"),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        assert!(legacy);
         assert!(paths([OsString::from("archive"), OsString::new()].into_iter()).is_err());
         assert!(
             paths(
                 [
                     OsString::from("a"),
                     OsString::from("b"),
-                    OsString::from("--replace")
+                    OsString::from("--replace"),
+                    OsString::from("x")
                 ]
                 .into_iter()
             )

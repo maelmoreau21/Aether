@@ -1245,6 +1245,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "http-body-util",
+ "httpdate",
  "hyper",
  "hyper-util",
  "image",

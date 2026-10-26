@@ -38,6 +38,7 @@ export interface Media {
   workId?: string;
   title: string;
   synthetic?: boolean;
+  episode?: boolean;
   nodeId?: string;
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';
   connectionMode?: string;

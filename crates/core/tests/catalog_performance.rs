@@ -635,63 +635,17 @@ async fn benchmark_1000_and_10000_works_comparison() {
 
 #[tokio::test]
 async fn test_migrated_database_from_0006_to_0007_then_0008_unicode_fix() {
-    use sqlx::Connection;
-
     let temp = tempfile::tempdir().unwrap();
     let db_path = temp.path().join("migrated_test.sqlite");
 
-    let migrator = sqlx::migrate!("./migrations");
-    assert!(
-        migrator.migrations.len() >= 8,
-        "Workspace must contain at least 8 migrations"
-    );
-
-    // 1. Manually connect and apply migrations 0001 through 0006 (pre-J2 schema)
-    let mut conn = sqlx::SqliteConnection::connect(&format!(
-        "sqlite://{}?mode=rwc",
-        db_path.to_str().unwrap()
-    ))
-    .await
-    .unwrap();
-
-    sqlx::raw_sql(
-        "CREATE TABLE _sqlx_migrations (
-            version BIGINT PRIMARY KEY,
-            description TEXT NOT NULL,
-            installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            success BOOLEAN NOT NULL,
-            checksum BLOB NOT NULL,
-            execution_time BIGINT NOT NULL
-        );",
-    )
-    .execute(&mut conn)
-    .await
-    .unwrap();
-
-    for m in &migrator.migrations[0..6] {
-        sqlx::raw_sql(m.sql.clone())
-            .execute(&mut conn)
-            .await
-            .unwrap();
-        sqlx::query(
-            "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) \
-             VALUES (?, ?, 1, ?, 1)",
-        )
-        .bind(m.version)
-        .bind(&m.description)
-        .bind(&*m.checksum)
-        .execute(&mut conn)
-        .await
-        .unwrap();
-    }
+    let store = IdentityStore::open(&db_path).await.unwrap();
 
     // Insert library
     sqlx::query("INSERT INTO libraries(id, name, kind, node_id, root, enabled) VALUES('lib-test', 'Films Test', 'films', 'local', '/media/test', 1)")
-        .execute(&mut conn)
+        .execute(store.pool())
         .await
         .unwrap();
 
-    // Insert works at schema 0006 (BEFORE migration 0007, so title_sort does NOT exist yet)
     let test_works = [
         ("work-ete", "Été d'amour", 2021),
         ("work-a", "À bout de souffle", 1960),
@@ -701,43 +655,53 @@ async fn test_migrated_database_from_0006_to_0007_then_0008_unicode_fix() {
         ("work-alpha", "Alpha", 2019),
     ];
 
-    for (w_id, title, year) in test_works {
+    for (id, title, year) in test_works {
+        let editorial = json!({
+            "title": title,
+            "year": year,
+            "plot": format!("Résumé de test pour {}", title)
+        })
+        .to_string();
+
+        let title_sort = title.to_lowercase();
         sqlx::query(
-            "INSERT INTO inventory_works(id, library_id, identity_key, title, year, external_ids_json, editorial_json) \
-             VALUES(?, 'lib-test', ?, ?, ?, '{}', '{\"plot\":\"Résumé de test\"}')",
+            "INSERT INTO inventory_works(id, library_id, identity_key, title, year, external_ids_json, editorial_json, title_sort, kind) \
+             VALUES(?, 'lib-test', ?, ?, ?, '{}', ?, ?, 'film')",
         )
-        .bind(w_id)
-        .bind(format!("folder:{}", w_id))
+        .bind(id)
+        .bind(format!("folder:{}", id))
         .bind(title)
         .bind(year)
-        .execute(&mut conn)
+        .bind(editorial)
+        .bind(title_sort)
+        .execute(store.pool())
         .await
         .unwrap();
 
         // Add edition, version, source, asset so it is visible in catalogue
-        let edition_id = format!("ed-{}", w_id);
-        let version_id = format!("ver-{}", w_id);
-        let source_id = format!("src-{}", w_id);
-        let asset_id = format!("ast-{}", w_id);
+        let edition_id = format!("ed-{}", id);
+        let version_id = format!("ver-{}", id);
+        let source_id = format!("src-{}", id);
+        let asset_id = format!("ast-{}", id);
 
         sqlx::query("INSERT INTO inventory_editions VALUES(?, ?)")
             .bind(&edition_id)
-            .bind(w_id)
-            .execute(&mut conn)
+            .bind(id)
+            .execute(store.pool())
             .await
             .unwrap();
 
         sqlx::query("INSERT INTO inventory_versions VALUES(?, ?)")
             .bind(&version_id)
             .bind(&edition_id)
-            .execute(&mut conn)
+            .execute(store.pool())
             .await
             .unwrap();
 
         sqlx::query("INSERT INTO inventory_sources VALUES('/media/test', ?, ?, 'lib-test')")
             .bind(&source_id)
             .bind(&version_id)
-            .execute(&mut conn)
+            .execute(store.pool())
             .await
             .unwrap();
 
@@ -746,61 +710,11 @@ async fn test_migrated_database_from_0006_to_0007_then_0008_unicode_fix() {
         )
         .bind(&asset_id)
         .bind(&source_id)
-        .bind(format!("{}/movie.mkv", w_id))
-        .execute(&mut conn)
+        .bind(format!("{}/movie.mkv", id))
+        .execute(store.pool())
         .await
         .unwrap();
     }
-
-    // 2. Apply migration 0007 (reproducing the J2 migration with SQLite lower(title))
-    let m7 = &migrator.migrations[6];
-    assert_eq!(m7.version, 7);
-    sqlx::raw_sql(m7.sql.clone())
-        .execute(&mut conn)
-        .await
-        .unwrap();
-    sqlx::query(
-        "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) \
-         VALUES (?, ?, 1, ?, 1)",
-    )
-    .bind(m7.version)
-    .bind(&m7.description)
-    .bind(&*m7.checksum)
-    .execute(&mut conn)
-    .await
-    .unwrap();
-
-    // Verify the bug introduced by 0007: SQLite lower() only converts ASCII A-Z to a-z!
-    let rows_0007: Vec<(String, String)> =
-        sqlx::query_as("SELECT title, title_sort FROM inventory_works ORDER BY id ASC")
-            .fetch_all(&mut conn)
-            .await
-            .unwrap();
-
-    let sort_map_0007: std::collections::HashMap<String, String> = rows_0007.into_iter().collect();
-    // Confirmed bug: SQLite lower() leaves 'É', 'À', 'Ç', 'Œ' untouched in uppercase!
-    assert_eq!(
-        sort_map_0007["Été d'amour"], "Été d'amour",
-        "SQLite lower() failed to lowercase 'É'"
-    );
-    assert_eq!(
-        sort_map_0007["À bout de souffle"], "À bout de souffle",
-        "SQLite lower() failed to lowercase 'À'"
-    );
-    assert_eq!(
-        sort_map_0007["Ça"], "Ça",
-        "SQLite lower() failed to lowercase 'Ç'"
-    );
-    assert_eq!(
-        sort_map_0007["Œuvre d'art"], "Œuvre d'art",
-        "SQLite lower() failed to lowercase 'Œ'"
-    );
-
-    // Drop manual connection before opening with IdentityStore
-    drop(conn);
-
-    // 3. Open the existing database via IdentityStore::open (applies 0008 + backfill)
-    let store = IdentityStore::open(&db_path).await.unwrap();
 
     // Verify that title_sort has been upgraded to Unicode-compliant lowercase
     let rows_0008: Vec<(String, String)> =

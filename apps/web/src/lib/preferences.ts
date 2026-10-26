@@ -8,6 +8,7 @@ export type Preferences = {
   subtitles?: 'forced' | 'always' | 'off'; audioTrack?: { mediaId: string; trackId: string };
   offsets?: { audio: number; subtitle: number }; subtitlePreference?: SubtitlePreference;
   subtitleStyle?: SubtitleStyle;
+  skipIntroEnabled?: boolean; skipCreditsEnabled?: boolean;
 };
 let current: Preferences = {};
 let owner: string | null = null;

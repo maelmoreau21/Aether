@@ -1,6 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
+  import AutomationTasks from './AutomationTasks.svelte';
   import DistributedTasks from './DistributedTasks.svelte';
   import { adminRequest } from './request';
   import type { AdminNode, Library, Scan } from './types';
@@ -64,7 +65,7 @@
       name: st.name,
       category: 'Extensions',
       description: st.description,
-      running: !!runningSystemTasks[st.id] || st.lastOutcome === 'running',
+      running: !!runningSystemTasks[st.id] || ['queued', 'running'].includes(st.lastOutcome),
       reason: null,
       plan: { enabled: st.enabled === 1, interval: st.intervalMinutes, next: st.nextDueAt, last: st.lastStartedAt, outcome: st.lastOutcome }
     })),
@@ -83,7 +84,7 @@
       name: st.name,
       category: st.category,
       description: st.description,
-      running: !!runningSystemTasks[st.id] || st.lastOutcome === 'running',
+      running: !!runningSystemTasks[st.id] || ['queued', 'running'].includes(st.lastOutcome),
       reason: null,
       plan: { enabled: st.enabled === 1, interval: st.intervalMinutes, next: st.nextDueAt, last: st.lastStartedAt, outcome: st.lastOutcome }
     }))
@@ -370,6 +371,7 @@
       </div>
     {/each}
     <DistributedTasks {active} {libraries} {nodes} />
+    <AutomationTasks {active} {libraries} />
   {/if}
   {#if scanError}<p class="feedback error" role="alert">{scanError}</p>{/if}
   {#if backupError}<p class="feedback error" role="alert">{backupError}</p>{/if}

@@ -7,7 +7,7 @@ pub(super) struct WorkContext {
     pub library_id: String,
     title: String,
     year: Option<i64>,
-    kind: String,
+    pub(super) kind: String,
     external_ids_json: String,
     editorial_json: String,
     manual_json: Option<String>,
@@ -158,16 +158,98 @@ pub(super) fn validate_result(operation: &str, result: Value) -> Result<Value, E
             let svg = result["svg"].as_str().ok_or_else(invalid)?;
             crate::avatars::validate_svg(svg).map_err(|_| invalid())?;
         }
-        "intro.detect"
-        | "markers.detect"
-        | "intro.match_fingerprints"
-        | "intro.parse_chapters"
-        | "markers.get" => {
-            // Validated timeline markers
+        "intro.detect" | "markers.detect" => {
+            let episodes = result.as_array().ok_or_else(invalid)?;
+            if episodes.len() > 32
+                || episodes.iter().any(|episode| {
+                    episode["episodeId"]
+                        .as_str()
+                        .is_none_or(|id| id.is_empty() || id.len() > 128)
+                        || episode["markers"].as_array().is_none_or(|markers| {
+                            markers.len() > 8 || markers.iter().any(|m| !valid_timeline_marker(m))
+                        })
+                })
+            {
+                return Err(invalid());
+            }
+        }
+        "intro.parse_chapters" | "markers.get" => {
+            let markers = result.as_array().ok_or_else(invalid)?;
+            if markers.len() > 8 || markers.iter().any(|m| !valid_timeline_marker(m)) {
+                return Err(invalid());
+            }
+        }
+        "intro.match_fingerprints" => {
+            if !result.is_null()
+                && (result["offsetA"]
+                    .as_f64()
+                    .is_none_or(|n| !n.is_finite() || n < 0.0)
+                    || result["offsetB"]
+                        .as_f64()
+                        .is_none_or(|n| !n.is_finite() || n < 0.0)
+                    || result["duration"]
+                        .as_f64()
+                        .is_none_or(|n| !n.is_finite() || n <= 0.0)
+                    || result["score"]
+                        .as_f64()
+                        .is_none_or(|n| !n.is_finite() || !(0.0..=1.0).contains(&n)))
+            {
+                return Err(invalid());
+            }
         }
         _ => return Err(invalid()),
     }
     Ok(result)
+}
+fn valid_timeline_marker(marker: &Value) -> bool {
+    let (Some(start), Some(end), Some(confidence)) = (
+        marker["start"].as_f64(),
+        marker["end"].as_f64(),
+        marker["confidence"].as_f64(),
+    ) else {
+        return false;
+    };
+    start.is_finite()
+        && end.is_finite()
+        && confidence.is_finite()
+        && start >= 0.0
+        && end > start
+        && end - start <= 600.0
+        && (0.0..=1.0).contains(&confidence)
+        && marker["id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty() && id.len() <= 128)
+        && matches!(
+            marker["markerType"].as_str(),
+            Some("intro" | "credits" | "recap" | "preview")
+        )
+        && matches!(
+            marker["method"].as_str(),
+            Some("fingerprint" | "chapter" | "silence" | "manual")
+        )
+}
+#[cfg(test)]
+mod marker_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_unbounded_or_invalid_wasm_markers() {
+        let valid = json!({"id":"m1","start":10.0,"end":40.0,"confidence":0.98,"markerType":"intro","method":"chapter"});
+        assert!(validate_result("intro.parse_chapters", json!([valid.clone()])).is_ok());
+        let mut invalid = valid;
+        invalid["end"] = json!(1000.0);
+        assert!(validate_result("intro.parse_chapters", json!([invalid])).is_err());
+        assert!(
+            validate_result("intro.detect", json!([{"episodeId":"ep","markers":"bad"}])).is_err()
+        );
+        assert!(
+            validate_result(
+                "intro.match_fingerprints",
+                json!({"offsetA":0,"offsetB":0,"duration":-1,"score":1})
+            )
+            .is_err()
+        );
+    }
 }
 fn public_image_url(value: &str) -> bool {
     reqwest::Url::parse(value).is_ok_and(|url| {
@@ -282,9 +364,11 @@ pub(super) async fn avatar_operation(
     {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_input"));
     }
-    let _slot = EXECUTIONS
-        .try_acquire()
-        .map_err(|_| err(StatusCode::CONFLICT, "extension_busy"))?;
+    let _slot = crate::extension_runtime::try_acquire_execution(
+        &id,
+        crate::extension_runtime::ExecutionClass::Interactive,
+    )
+    .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
     let row: Option<(String, String)> =
         query_as("SELECT package_json,generation FROM extensions WHERE id=?")
             .bind(&id)
@@ -319,8 +403,18 @@ pub(super) async fn avatar_operation(
         if !permitted(&auth, &headers, &id, "", &generation).await? {
             return Err(err(StatusCode::FORBIDDEN, "extension_revoked"));
         }
-        query("INSERT INTO user_avatars(user_id,image_data) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET image_data=excluded.image_data")
-            .bind(&actor.user.id).bind(svg.as_bytes()).execute(auth.store.pool()).await.map_err(db)?;
+        let meta = auth
+            .store
+            .assets
+            .put_bytes(svg.as_bytes(), "image/svg+xml")
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?;
+        query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET sha256=excluded.sha256")
+            .bind(&actor.user.id)
+            .bind(&meta.sha256)
+            .execute(auth.store.pool())
+            .await
+            .map_err(db)?;
     }
     Ok(Json(json!({"result":result,"applied":input.apply})))
 }
@@ -380,9 +474,11 @@ pub(super) async fn import_image(
             return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
         }
     }
-    let _slot = EXECUTIONS
-        .try_acquire()
-        .map_err(|_| err(StatusCode::CONFLICT, "extension_busy"))?;
+    let _slot = crate::extension_runtime::try_acquire_execution(
+        &id,
+        crate::extension_runtime::ExecutionClass::Interactive,
+    )
+    .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
     let url = reqwest::Url::parse(&input.url)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_image_url"))?;
     let host = url

@@ -443,12 +443,14 @@ jobs:
           python scripts/calculate_release.py --json --channel develop > beta_info.json
           cat beta_info.json
           HAS_REL=$(jq -r '.has_release' beta_info.json)
-          echo "has_release=$HAS_REL" >> "$GITHUB_OUTPUT"
-          if [ "$HAS_REL" = "true" ]; then
-            echo "version=$(jq -r '.version' beta_info.json)" >> "$GITHUB_OUTPUT"
-            echo "next_tag=$(jq -r '.next_tag' beta_info.json)" >> "$GITHUB_OUTPUT"
-            echo "series=$(jq -r '.series' beta_info.json)" >> "$GITHUB_OUTPUT"
-          fi
+          {
+            echo "has_release=$HAS_REL"
+            if [ "$HAS_REL" = "true" ]; then
+              echo "version=$(jq -r '.version' beta_info.json)"
+              echo "next_tag=$(jq -r '.next_tag' beta_info.json)"
+              echo "series=$(jq -r '.series' beta_info.json)"
+            fi
+          } >> "$GITHUB_OUTPUT"
 
   tag-beta:
     name: Création du tag bêta Git

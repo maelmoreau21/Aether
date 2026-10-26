@@ -82,10 +82,12 @@ jobs:
             NEXT_TAG=$(jq -r '.next_tag' release_info.json)
             VERSION=$(jq -r '.version' release_info.json)
             SERIES=$(jq -r '.series' release_info.json)
-            echo "has_release=true" >> "$GITHUB_OUTPUT"
-            echo "next_tag=$NEXT_TAG" >> "$GITHUB_OUTPUT"
-            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-            echo "series=$SERIES" >> "$GITHUB_OUTPUT"
+            {
+              echo "has_release=true"
+              echo "next_tag=$NEXT_TAG"
+              echo "version=$VERSION"
+              echo "series=$SERIES"
+            } >> "$GITHUB_OUTPUT"
             jq -r '.changelog' release_info.json > changelog.md
           else
             REASON=$(jq -r '.reason // "Aucune release requise"' release_info.json)

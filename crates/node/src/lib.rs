@@ -30,7 +30,7 @@ pub mod video_stream;
 pub fn trim_memory() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     unsafe {
-        extern "C" {
+        unsafe extern "C" {
             fn malloc_trim(pad: usize) -> i32;
         }
         let _ = malloc_trim(0);

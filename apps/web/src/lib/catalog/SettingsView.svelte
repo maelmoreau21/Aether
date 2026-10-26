@@ -324,6 +324,7 @@
               <div class="info-row">
                 <span class="label">Notes de version</span>
                 <span class="val">
+                  <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
                   <a href={serverConfig.release_url} target="_blank" rel="noopener noreferrer">
                     Consulter la release {serverConfig.version} sur GitHub
                   </a>

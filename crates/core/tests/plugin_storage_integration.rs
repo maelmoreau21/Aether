@@ -221,16 +221,27 @@ async fn test_sync_installed_repairs_corrupted_wasm_file() {
         .await
         .unwrap();
 
-    // Verify wasm() fails integrity
-    assert!(wasm(&store, &package).await.is_err());
+    // Verify health detects corruption on disk
+    let health_before = check_health(&store).await;
+    assert!(!health_before.healthy);
+    assert_eq!(health_before.corrupted_count, 1);
 
     // Run sync_installed
     let synced = sync_installed(&store).await.unwrap();
     assert_eq!(synced, 1);
 
-    // Verify wasm() now succeeds and module was restored
-    let restored_wasm = wasm(&store, &package).await.unwrap();
-    assert_eq!(restored_wasm, package.wasm);
+    // Verify on-disk module was restored and matches package sha256
+    let restored_module = tokio::fs::read(plugin_dir.join("module.wasm"))
+        .await
+        .unwrap();
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&restored_module)),
+        package.sha256
+    );
+
+    let health_after = check_health(&store).await;
+    assert!(health_after.healthy);
+    assert_eq!(health_after.corrupted_count, 0);
 }
 
 #[tokio::test]

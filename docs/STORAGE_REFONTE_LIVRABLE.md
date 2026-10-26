@@ -7,7 +7,7 @@
 | **Sauvegarde (`backup_bundle.rs`)** | Clé de secours publique de 64 zéros présente dans le code. | Confidentialité nulle, déchiffrement immédiat par un attaquant connaissant la valeur publique. | Clé par zéros bannie (`is_known_insecure_backup_key`). Clé propre à l'installation générée par CSPRNG ou injectée explicitement via `MEDIA_BACKUP_KEY`. |
 | **Tâches système (`clean-cache`)** | Tentative de suppression de fichiers `.tmp` et `.part` dans `media_root`. | Risque critique de corruption ou de suppression de médias originaux sur NAS en cas de droits relâchés. | Nettoyage strictement interdit sur `media_root`. Confiné exclusivement aux dossiers Aether (`/data/assets/tmp/`, caches applicatifs). |
 | **Tâches système (`clean-playlists`)** | Référence historique à la table obsolète `works`. | Échec d'exécution silencieux lors du nettoyage des listes. | Migration vers `inventory_works` et rapport d'erreur structuré (`last_error_kind`, `last_error_scope`, `last_message`). |
-| **Migrations SQL** | 50 migrations historiques accumulées depuis la genèse de la bêta. | Risque de dérive, clés étrangères disjointes, indexes coûteux sur expressions JSON, transactions hétérogènes. | Consolidation en une seule migration initiale propre `0001_initial_schema.sql` (SQLite & PostgreSQL) testée sur installation vierge. |
+| **Schéma SQL** | Scripts historiques accumulés pendant la bêta. | Risque de dérive et de création fragile sur base neuve. | Une source `crates/core/schema.sql` avec sections SQLite et PostgreSQL, appliquée seulement à une base vide. |
 | **Stockage des binaires** | BLOBs SQL volumineux (`user_avatars`, `work_posters`, `poster_previews`, images d'extensions). | Explosion de la taille de la base, contention WAL et I/O en lecture lors des scans et sauvegardes. | Création du stockage binaire adressé par le contenu SHA-256 (`AssetStore` dans `/data/assets`), déduplication universelle. |
 | **Gestion des verrous SQL** | Verrou global PostgreSQL `pg_advisory_xact_lock(724398210)` dans `begin_write()`. | Goulot d'étranglement total entre tous les modules concurrents sur PostgreSQL. | Suppression du verrou global. Adoption de verrous ciblés partitionnés `begin_write_scoped`. |
 
@@ -27,10 +27,10 @@
 
 ---
 
-## 3. Schéma SQL propre consolidé (`0001_initial_schema.sql`)
+## 3. Schéma SQL propre consolidé (`crates/core/schema.sql`)
 
-- **SQLite** : `crates/core/migrations/0001_initial_schema.sql` (83 tables relationnelles, FTS5 pour catalogue et personnes, index composites optimisés, contraintes CHECK et triggers d'intégrité).
-- **PostgreSQL** : `crates/core/migrations-postgres/0001_initial_schema.sql` (équivalent fonctionnel strict avec types `BIGINT`, `BYTEA`, index B-Tree composites et fonctions de compatibilité).
+- **SQLite et PostgreSQL** : `crates/core/schema.sql`, source unique avec une
+  section par moteur et les contraintes, index et fonctions adaptés à chacun.
 - **Vérification d'intégrité** : `PRAGMA foreign_key_check` et validation de toutes les contraintes de clés étrangères sans violation.
 
 ---

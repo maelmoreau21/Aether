@@ -34,7 +34,8 @@ Les bibliothèques désactivées et Nodes révoqués ne sont pas exécutés.
 La prochaine échéance est enregistrée par compare-and-set avant le dispatch.
 Un redémarrage ne produit pas de rafale de rattrapage : une échéance dépassée
 entraîne un seul scan, puis un nouvel intervalle à partir du lancement effectif.
-Un arrêt pendant le dispatch produit `interrupted` au redémarrage. Un échec est
+Une tentative durable expirée peut reprendre un plan resté `running` après
+arrêt brutal, sous contrôle du lease courant. Un arrêt pendant le dispatch produit `interrupted` au redémarrage. Un échec est
 conservé et réessayé seulement à la prochaine échéance. Modifier/enregistrer un
 plan recalcule sa prochaine échéance. Le bouton Actualiser relit les résultats.
 

@@ -1,14 +1,22 @@
 name: Release
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       bump_type:
-        description: 'Increment choisi pour cette release uniquement'
+        description: 'Incrément choisi pour cette release'
         required: true
         type: choice
-        options: [PATCH, MINOR, MAJOR]
-        default: PATCH
+        options: [AUTO, PATCH, MINOR, MAJOR]
+        default: AUTO
+      force_release:
+        description: 'Forcer la release même si la PR n’est pas marquée release'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -43,32 +51,49 @@ jobs:
       - name: Déterminer la version et générer le Changelog
         id: calc
         env:
-          RELEASE_BUMP: ${{ inputs.bump_type }}
+          RELEASE_BUMP: ${{ inputs.bump_type || 'AUTO' }}
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE_RELEASE: ${{ inputs.force_release || false }}
         run: |
-          python scripts/calculate_release.py --json --bump "$RELEASE_BUMP" > release_info.json
-          cat release_info.json
-          
-          NEXT_TAG=$(jq -r '.next_tag' release_info.json)
-          VERSION=$(jq -r '.version' release_info.json)
-          SERIES=$(jq -r '.minor' release_info.json)
-          
-          # Vérifier si le tag existe déjà sur git
-          if git rev-parse "$NEXT_TAG" >/dev/null 2>&1; then
-            echo "Le tag $NEXT_TAG existe déjà sur git. Aucune nouvelle release requise."
-            echo "has_release=false" >> "$GITHUB_OUTPUT"
-          else
-            {
-              echo "has_release=true"
-              echo "next_tag=$NEXT_TAG"
-              echo "version=$VERSION"
-              echo "series=$SERIES"
-            } >> "$GITHUB_OUTPUT"
-            
-            # Sauvegarder le changelog pour l'étape de création de release
-            jq -r '.changelog' release_info.json > changelog.md
+          set -euo pipefail
+          CHECK_ARG=()
+          if [ "$EVENT_NAME" = "push" ] && [ "$FORCE_RELEASE" != "true" ]; then
+            CHECK_ARG=(--check-release-pr)
           fi
 
-      - name: Téléverser le changelog généré en artifact de job
+          python scripts/calculate_release.py \
+            --json \
+            --channel main \
+            --bump "$RELEASE_BUMP" \
+            "${CHECK_ARG[@]}" > release_info.json
+
+          cat release_info.json
+
+          HAS_REL=$(jq -r '.has_release' release_info.json)
+          TAG_COLLISION=$(jq -r '.tag_collision // false' release_info.json)
+
+          if [ "$TAG_COLLISION" = "true" ]; then
+            ERR_MSG=$(jq -r '.error // "Collision de tag détectée"' release_info.json)
+            echo "::error::$ERR_MSG"
+            exit 1
+          fi
+
+          if [ "$HAS_REL" = "true" ]; then
+            NEXT_TAG=$(jq -r '.next_tag' release_info.json)
+            VERSION=$(jq -r '.version' release_info.json)
+            SERIES=$(jq -r '.series' release_info.json)
+            echo "has_release=true" >> "$GITHUB_OUTPUT"
+            echo "next_tag=$NEXT_TAG" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "series=$SERIES" >> "$GITHUB_OUTPUT"
+            jq -r '.changelog' release_info.json > changelog.md
+          else
+            REASON=$(jq -r '.reason // "Aucune release requise"' release_info.json)
+            echo "has_release=false" >> "$GITHUB_OUTPUT"
+            echo "Information : $REASON"
+          fi
+
+      - name: Téléverser le changelog généré en artifact
         if: steps.calc.outputs.has_release == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -88,6 +113,7 @@ jobs:
       version: ${{ needs.calculate-and-tag.outputs.version }}
       series: ${{ needs.calculate-and-tag.outputs.series }}
       is_release: true
+      push: true
 
   create-github-release:
     name: Création de la GitHub Release & Git Tag
@@ -107,6 +133,31 @@ jobs:
         with:
           name: release-changelog
 
+      - name: Télécharger les empreintes d'images Docker
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+
+      - name: Compléter le changelog avec les empreintes Docker
+        env:
+          VERSION: ${{ needs.calculate-and-tag.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          {
+            echo ""
+            echo "### 🐳 Images Docker vérifiées (GHCR)"
+            for img in aether aether-core aether-node; do
+              if [ -f "digests/$img.digest" ]; then
+                digest=$(cat "digests/$img.digest")
+                echo "- \`ghcr.io/$OWNER/$img:$VERSION\` (\`$digest\`)"
+              fi
+            done
+          } >> changelog.md
+          cat changelog.md
+
       - name: Créer le tag Git et la Release GitHub
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -114,15 +165,59 @@ jobs:
           VERSION: ${{ needs.calculate-and-tag.outputs.version }}
         run: |
           set -euo pipefail
-          # Configurer git bot
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Poser et pousser le tag git
-          git tag -a "$TAG" -m "Release $TAG"
-          git push origin "$TAG"
-          
-          # Créer la GitHub Release
-          gh release create "$TAG" \
-            --title "Aether $TAG" \
-            --notes-file changelog.md
+
+          # Vérifier si le tag existe déjà sur ce commit exact
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          fi
+
+          # Créer ou compléter la GitHub Release
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "Aether $TAG" --notes-file changelog.md
+          else
+            gh release create "$TAG" \
+              --title "Aether $TAG" \
+              --notes-file changelog.md
+          fi
+
+  prepare-next-cycle:
+    name: Préparation du prochain cycle sur develop
+    needs: [calculate-and-tag, create-github-release]
+    if: needs.calculate-and-tag.outputs.has_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Configurer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Calculer et tagger le début du cycle suivant
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASED_VERSION: ${{ needs.calculate-and-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          python scripts/calculate_release.py --json --next-cycle --target-version "$RELEASED_VERSION" > next_cycle.json
+          NEXT_CYCLE_TAG=$(jq -r '.next_tag' next_cycle.json)
+          echo "Initialisation du prochain cycle : $NEXT_CYCLE_TAG"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if ! git rev-parse "$NEXT_CYCLE_TAG" >/dev/null 2>&1; then
+            git tag -a "$NEXT_CYCLE_TAG" -m "Start development cycle $NEXT_CYCLE_TAG"
+            git push origin "$NEXT_CYCLE_TAG"
+          else
+            echo "Le tag $NEXT_CYCLE_TAG existe déjà sur develop."
+          fi

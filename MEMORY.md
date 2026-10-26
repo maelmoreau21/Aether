@@ -1,3 +1,113 @@
+## 26 octobre 2026 — Refonte complète du versionnement et des releases (Aether & Aether-Plugins)
+
+- **Source de vérité unique & SemVer pour toute la plateforme Aether** :
+  - Harmonisation stricte de la version produit entre le backend Rust (`crates/shared/src/version.rs`, `version_policy.rs`, `build.rs`), `aether-core`, `aether-node`, le binaire standalone `aether`, l'interface Web SvelteKit et les 3 images Docker GHCR.
+  - Structure `VersionInfo` exposée par `media_contracts::version::current_version_info()` (`version`, `channel`, `commit`, `build_date`, `release_url`).
+  - Point de terminaison `/api/v1/config` enrichi avec ces métadonnées réelles.
+  - Interface Web SvelteKit (`SettingsView.svelte`) : ajout d'un onglet « À propos » discret affichant la version, le canal (`stable`, `beta` ou `dev`), le SHA Git court, la date de compilation et le lien vers la GitHub Release.
+  - Builds locaux non publiés : affichage transparent de la version de développement avec commit SHA (ex: `0.2.0-beta.0-dev+b08c635`), sans prétendre être une version officielle.
+
+- **Automatisations Aether sur `develop` et `main`** :
+  - `scripts/calculate_release.py` et `.github/workflows/` refondus :
+    - Première initialisation déterministe à `0.1.0` sur `main` (aucun tag écrasé).
+    - Sur `develop` : incrément automatique du compteur bêta après réussite des tests (`0.2.0-beta.0` → `0.2.0-beta.1` → `0.2.0-beta.2`), pose du tag Git sur le commit exact et publication Docker GHCR avec tags `develop`, `0.2.0-beta.N`, SHA.
+    - Idempotence absolue : détection des commits déjà tagués pour éviter toute duplication lors d'une relance.
+    - Sur `main` : promotion contrôlée via Pull Request (avec support des évolutions `AUTO`, `PATCH`, `MINOR`, `MAJOR`), publication des 3 images Docker avec digest SHA-256 dans les notes de version, tag immutable `vX.Y.Z`, et mise à jour de `latest` uniquement après validation complète.
+    - Préparation automatique du cycle suivant sur `develop` (ex: `0.3.0-beta.0`).
+
+- **Versionnement indépendant et respect des branches protégées pour Aether-Plugins** :
+  - `scripts/detect_changed_plugins.py` fiabilisé : détection granulaire des seuls plugins modifiés (TMDb, IMDb, OMDb, MusicBrainz, IntroSkipper, etc.), exclusion des modifications documentaires, et détection ciblée des changements d'API partagée.
+  - Résolution de la contrainte des branches protégées : fin des tentatives de push direct sur `main` dans le workflow de release !
+    - Nouveau workflow `prepare-plugin-release.yml` : prépare le paquet signé Ed25519, met à jour `repository/manifest.json` et ouvre une Pull Request contrôlée ciblant `main`.
+    - Workflow `release-plugins.yml` : après fusion de la PR sur `main`, vérifie les paquets et crée le tag Git indépendant (`<plugin>-v<version>`) ainsi que la GitHub Release sans aucune commande `git push origin main`.
+    - Sur `develop` : incrément bêta propre à chaque plugin modifié (`<plugin>-v<version>-beta.N`).
+    - Immutabilité des paquets : refus d'écraser un paquet signé existant.
+
+- **Vérifications et tests validés** :
+  - `python scripts/test-release-policy.py` (Aether) : 14/14 tests passés couvrant l'ensemble des 18 critères d'acceptation, les fusions squash/rebase/merge et la concurrence.
+  - `python scripts/test-release-policy.py` (Aether-Plugins) : 7/7 tests passés.
+  - `cargo test -p media-contracts` : 13/13 tests passés.
+  - `npm run check --prefix apps/web` : 0 erreur Svelte/TypeScript.
+  - `node scripts/test-manifests.cjs` & `test-repository.cjs` (Aether-Plugins) : catalogue et signatures 100 % valides.
+  - Documentation exhaustive créée : `docs/RELEASES_AND_VERSIONING.md` dans les deux dépôts.
+  - Respect strict des consignes de sécurité : aucune release réelle déclenchée pendant la phase de développement.
+
+## 26 octobre 2026 — Optimisation de l'empreinte mémoire RAM (P0 à P3) & Allègement Docker
+
+- **P0 — Diagnostic et observabilité de la RAM réelle (`crates/core/src/system_memory.rs`, `AdminMaintenance.svelte`)** :
+  - Module `system_memory` distinguant la consommation réelle :
+    - Core process : RSS, tas anonyme (`RssAnon`), fichiers/mmap (`RssFile`), pic historique (`VmHWM`), taille virtuelle.
+    - Processus enfants : inspection des PIDs fils (workers Wasm, probe) et somme de leur RSS.
+    - Hôte Linux / Conteneur : analyse de `/proc/meminfo` (`Cached`, `Buffers`, `SReclaimable`), calcul du cache restituable (`linux_reclaimable_cache_bytes`).
+  - Endpoints sécurisés : `GET /api/v1/admin/system/memory` et `POST /api/v1/admin/system/memory/trim`.
+  - Interface Web : panneau de diagnostic mémoire dans `AdminMaintenance.svelte` avec synthèse claire identifiant les vrais responsables (expliquant que la RAM visible dans Docker est souvent dominée par le cache de pages Linux restituable), et bouton « Libérer la mémoire (Trim) ».
+
+- **P1 — Cache catalogue borné en Mo (`crates/core/src/inventory.rs`)** :
+  - Remplacement de l'ancien `HashMap` limité en nombre d'entrées (512) qui purgeait tout brutalement par `BoundedCatalogueCache`.
+  - Estimation de taille mémoire en octets pour chaque réponse (`estimate_json_bytes`).
+  - Budget mémoire configurable via `MEDIA_CATALOGUE_CACHE_MAX_MB` (défaut : 32 Mo, minimum 1 Mo).
+  - Éviction LRU fine au fur et à mesure sans purge destructrice globale.
+
+- **P1 — Optimisation des allocations et libérations post-scan (`crates/node/src/scanner.rs`, `inventory.rs`)** :
+  - Libération immédiate des structures de cache de répertoires (`drop(folder_cache)`, `drop(series_cache)`, `drop(artwork_memo)`).
+  - Appel systématique à `trim_memory()` (`malloc_trim(0)`) à la fin de `scan_streaming`, dans `publish_staged_scan` et dans les tâches de scan pour restituer immédiatement les blocs d'arènes d'allocateur glibc au noyau Linux.
+
+- **P2 — Maîtrise des allocations Argon2 et rétention de mémoire (`crates/core/src/identity.rs`, `auth.rs`)** :
+  - Paramètre de mémoire Argon2 configurable via `MEDIA_ARGON2_MEMORY_KIB` (défaut : 65536 KiB, ajustable jusqu'à 19456 KiB OWASP pour NAS contraints).
+  - Élimination de la rétention mémoire dans les threads Tokio : invocation de `trim_memory()` à la fin de chaque opération de hachage et de vérification (`verify_password`), évitant que les 64 Mo de tas ne restent piégés dans les arènes de threads.
+
+- **P2 — Optimisation des caches persistants et SQLite (`crates/core/src/identity.rs`, `system_tasks.rs`)** :
+  - Tailles de cache SQLite par connexion et mmap configurables et allégées par défaut : `MEDIA_SQLITE_CACHE_KIB` (-32 Mo au lieu de -64 Mo) et `MEDIA_SQLITE_MMAP_BYTES` (64 Mo au lieu de 256 Mo).
+  - Ajout de `PRAGMA shrink_memory` et `trim_memory()` dans la tâche de maintenance périodique `optimize-database`.
+
+- **P3 — Allègement des images Docker (`Dockerfile`)** :
+  - Nettoyage des fichiers de documentation, manuels, caches temporaires et catalogues de langues inutilisés (`/usr/share/locale`, `/usr/share/info`, `/usr/share/man`, `/usr/share/doc`) dans `backup-runtime` et `runtime-node`.
+
+- **Vérifications et tests validés** :
+  - `cargo test -p media-poc --lib system_memory` : 2 tests passés.
+  - `cargo test -p media-poc --lib test_bounded_catalogue_cache` : 1 test passé.
+  - `cargo test -p media-poc --lib` : 111 tests passés (0 échec, 3 ignorés).
+  - `npm test --prefix apps/web` : 29 suites passées (171 tests).
+  - `npm run check --prefix apps/web` : 0 erreur Svelte/TypeScript.
+  - `cargo clippy --workspace --all-targets -- -D warnings` : 0 avertissement, 0 erreur.
+  - `cargo fmt --all -- --check` : 100 % conforme.
+
+## 26 octobre 2026 — Mission 4 : Orchestrateur universel des extensions
+
+- **Fonctionnalités livrées et validées** :
+  - **1. Métadonnées automatiques & Provenance** :
+    - Déclenchement post-scan lors de données manquantes (`metadata.missing`, `media.added`, `media.modified`).
+    - Priorité par fournisseur et par bibliothèque (`automation_policies.priority`).
+    - Sélection stricte du candidat de confiance (`trusted_metadata_candidate`, `trusted_music_candidate` avec tolérance de durée ±5s / ±5%).
+    - Enrichissement progressif sans écrasement : conservation de la provenance dans `automatic_metadata_provenance` (work_id, field_name, extension_id, provider_id, priority, value_json, source_fingerprint, updated_at).
+    - Respect absolu des corrections manuelles (`manual_json` préservé à 100%).
+  - **2. Images & Déduplication** :
+    - Récupération des affiches, backdrops, logos via extensions multimédias.
+    - Déduplication via hash d'URL source (`source_url_hash`) et SHA-256 dans `AssetStore`.
+    - Préservation inviolable des affiches manuelles (`work_image_entries` où `provider IS NULL`).
+  - **3. Musique & Paroles synchronisées** :
+    - Émission de snapshots dédiés (`automation::emit_music_snapshot`) sur `music_tracks`.
+    - Enrichissement automatique artiste, album, pochette (`cover_path` / `asset:`) et paroles synchronisées (LRC) ou texte brut via opération `lyrics.get`.
+    - Protection stricte des paroles locales manuelles existantes (fichiers tagués).
+    - Cache contrôlé des réponses fournisseurs (`automation_provider_cache`) avec TTL et purge automatique.
+  - **4. Administration & Traçabilité** :
+    - Endpoints `/api/v1/admin/tasks/automation/history`, `/policies`, `/run` (avec option `missing_only: true`).
+    - Interface d'administration enrichie (`AutomationTasks.svelte`) : configuration des priorités, bouton « Exécuter maintenant » / « Manquants uniquement », suivi des tâches avec durée et explication d'échecs, suivi des quotas/limites de débits fournisseurs et traçabilité de provenance des métadonnées.
+  - **5. Défi Extrême & Benchmark d'échelle (100 000 médias)** :
+    - Traitement naïf vs Traitement optimisé (`crates/core/tests/automation_flow.rs` - `extreme_scale_100k_and_naive_vs_optimized_comparison`) :
+      - Requêtes HTTP externes : 5 000 -> 50 (99,0 % de requêtes évitées grâce au cache fournisseur partagé entre épisodes/pistes).
+      - Transactions SQL : 5 000 commits individuels -> 50 transactions groupées (99,0 % de réduction d'écritures).
+      - Temps d'exécution : 701 ms -> 186 ms (accélération ~3,7x à 4,3x).
+      - Empreinte mémoire RAM : passage de O(N) non borné à O(1) borné via pagination par curseur (lots de 256).
+  - **6. Tests & Qualité** :
+    - `cargo test -p media-poc --test automation_flow` : 15/15 réussis (1 ignoré benchmark queue).
+    - `cargo test -p media-poc --test extensions -- --test-threads=1` : 15/15 réussis.
+    - `cargo test --manifest-path c:\Users\Mael\Documents\GitHub\Aether-Plugins\Cargo.toml` : 100 % réussis (lrclib, musicbrainz, omdb, tmdb, etc.).
+    - `npm test --prefix apps/web` : 29 suites passées, 171 tests réussis.
+    - `npm run check --prefix apps/web` : 0 erreur TypeScript/Svelte.
+    - `cargo clippy --workspace --all-targets -- -D warnings` : 0 erreur, 0 avertissement.
+    - `cargo fmt --all -- --check` : 100 % conforme.
+
 ## 26 octobre 2026 — P9 (Benchmarks à l'échelle) & P10 (Validation finale et livrables)
 
 - **P9 — Benchmarks de passage à l'échelle mesurés (crates/core/tests/global_catalogue_consolidation.rs)** :
@@ -4411,3 +4521,33 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
 - Le plugin refuse désormais de comparer un lot mélangé entre séries/saisons, exige un identifiant de série et une saison pour les comparaisons acoustiques, rejette les empreintes uniformes et les cadences incompatibles. Tests ciblés du plugin : 9 réussites.
 - Le Core valide maintenant la structure et les bornes des sorties Wasm de marqueurs. L'heuristique de chapitres du descripteur est limitée aux épisodes et à des titres précis ; elle n'invente plus la fin d'un dernier chapitre sans durée. `cargo check -p media-poc --lib` a réussi.
 - Le parcours complet demandé reste ouvert : catalogue signé, tâches à l'ajout, extraction audio Node, persistance Core, préférences/corrections manuelles, compatibilité des copies et mesures sur corpus/deux Nodes. Voir `docs/INTRO_SKIPPER.md`. Le plugin installé ne déclenche pas encore d'analyse.
+
+## 26 octobre 2026 — IntroSkipper, reprise de Mission 3
+
+- Parcours local ajouté : événement épisode → Wasm de chapitres → marqueurs automatiques Core ; si intro absente, tâche durable Chromaprint sur Node propriétaire → événement d'analyse → comparaison bornée avec un épisode de la même saison → marqueurs Core. Préférences par utilisateur et correction/désactivation administrateur prioritaires dans le lecteur. Source/génération d'extension contrôlées ; empreintes retardées pendant une lecture active.
+- Limite Wasm mesurée sur paire synthétique : 5 100 mots/épisode, 139 millions de fuel et 12,6 s sur Windows local après indexation ; 2 millions provoquaient un trap. Le budget d'`intro.detect` est 200 millions, entrée JSON plafonnée à 65 536 octets. Tests plugin 11/11, Core automation_flow 10 réussis/1 ignoré, build Wasm réussi ; voir `docs/INTRO_SKIPPER.md` pour limites.
+- Mission encore incomplète : crédits audio sans chapitre, preuve de timeline compatible entre copies, publication signée dans le catalogue, précision/rappel sur corpus annoté de 24 épisodes et essai IntroSkipper complet sur deux Nodes. Aucune preuve NAS/production ni push.
+
+## 26 octobre 2026 — Mission 5, premier verrou inter-Core (partiel)
+
+- Les admissions des tâches et automatisations utilisent un verrou transactionnel PostgreSQL commun ; SQLite conserve son verrou d'écriture. Les opérations de résultat et de lease restent conditionnées par tentative. Test SQLite de concurrence passé ; essai PostgreSQL à deux processus non réalisé faute de serveur local.
+- Le Wasm exécuté provient du paquet durable en base avec taille et SHA-256 vérifiés ; le cache local peut être reconstruit depuis `extensions.package_json` après une mise à jour. Le démarrage PostgreSQL n'interrompt plus les exécutions d'extensions d'un autre Core ; les lignes de plus d'une heure sont récupérées provisoirement.
+- Une tâche système peut reprendre un plan laissé `running` par une tentative expirée. La propriété durable des connexions Node, l'atomicité des effets, la reprise des exécutions d'extensions et la preuve à deux Core/100 Nodes/100 000 tâches restent ouvertes. Voir `docs/MULTI_CORE_READINESS.md`.
+- Décision utilisateur : viser des bases neuves avec un schéma initial propre, sans reprise ni migration de l'ancienne base. La consolidation des scripts SQL actuels en schéma initial unique reste à faire ; aucune base existante n'a été effacée.
+- Audit complémentaire : de nombreuses requêtes Core emploient encore `unixepoch()`/`json_extract()` propres à SQLite ; PostgreSQL ne peut pas être déclaré fonctionnel sans adaptation SQL et essais réels. Docker Desktop arrêté et non démarrable depuis cette session, aucun serveur PostgreSQL local accessible.
+
+## 26 octobre 2026 — Mission 5, PostgreSQL 18 et deux processus Core (validation ciblée)
+
+- Docker Desktop fourni par l'utilisateur a permis un PostgreSQL 18 temporaire en mémoire. Le schéma PostgreSQL initial a été corrigé : nom de paramètre SQL réservé, ordre des tables référencées, fragments de déclencheurs SQLite invalides, fonctions `unixepoch`/`json_valid`, colonnes flottantes `DOUBLE PRECISION`. Les six fichiers SQL se créent sur une base neuve.
+- `scripts/test-postgres.ps1` passe : contrat HTTP PostgreSQL (1), OIDC (7), deux Nodes TCP (1). Le script isole les caches locaux des extensions/assets par exécution pour éviter les collisions avec d'anciens paquets.
+- `scripts/test-two-cores.ps1` passe : deux vrais processus `aether-core` partagent PostgreSQL, répondent chacun à `/api/v1/config`, puis un Core répond encore après arrêt forcé de l'autre. Cela ne prouve pas la reprise des tâches en vol ni l'absence de double effet.
+- Le défi 100 Nodes/100 000 tâches et la création d'un schéma initial unique sans scripts historiques restent ouverts. Aucune base utilisateur ni média n'a été supprimé.
+- Mesure ponctuelle du smoke deux Core sur Windows Debug : prêts en 1 950 ms, RSS 21,6 Mio par processus, réponse du survivant 7 ms après Stop-Process ; aucune tâche en vol et aucune distribution statistique.
+- Smoke étendu : administrateur et session créés via Core 1, `/api/v1/auth/me` accepté par Core 2 sur PostgreSQL commun. Dernier passage : prêts en 1 894 ms, RSS 21,7 Mio/Core, réponse du survivant 11 ms après arrêt forcé ; pas de tâches en vol.
+
+## 26 octobre 2026 — Schéma initial unique et mesure de charge ciblée
+
+- À la demande de repartir sur des bases neuves sans migrations, les scripts SQL actifs SQLite/PostgreSQL ont été consolidés en `crates/core/schema.sql`, avec une section par moteur et `schema_version=1`. Le démarrage installe ce schéma sur une base vide ; une ancienne base incompatible est refusée sans effacer ses données. Les anciens fichiers SQL actifs ont été supprimés.
+- Création neuve SQLite et PostgreSQL 18 validée par `scripts/test-fresh-schema.py` et `scripts/test-fresh-postgres-schema.ps1`. Quatre tests ciblés `database::tests` réussis ; les contrats PostgreSQL HTTP (1), OIDC (7) et deux Nodes TCP (1) ont réussi après consolidation.
+- Après consolidation, `scripts/test-two-cores.ps1` a démarré deux vrais Core sur une PostgreSQL commune : prêts en 8 591 ms, RSS 21,8/21,6 Mio, session Core 1 lue sur Core 2, réponse du survivant 35 ms après arrêt forcé. Il n'y avait aucune tâche en vol.
+- Benchmark SQLite Debug : 100 Nodes simulés, 100 000 tâches persistantes. Avant regroupement des lectures des liens d'automatisation : insertion 3 572 ms, attribution par lots de 100 p50 477 ms/p95 596 ms ; admission unitaire p50 10,3 ms/p95 15,1 ms. Après regroupement : insertion 3 524 ms, lot p50 509 ms/p95 582 ms, unitaire p50 9,8 ms/p95 12,2 ms. Le gain p95 est modeste et variable ; rien ici ne prouve la reprise multi-Core sous charge ni l'absence de double effet durable.

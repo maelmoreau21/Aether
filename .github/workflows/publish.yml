@@ -4,12 +4,12 @@ on:
   workflow_call:
     inputs:
       version:
-        description: 'Version exacte SemVer à tagger (ex: 0.1.2) si release'
+        description: 'Version exacte SemVer à tagger (ex: 0.1.2 ou 0.2.0-beta.1)'
         required: false
         type: string
         default: ''
       series:
-        description: 'Série SemVer majeure.mineure (ex: 0.1) si release'
+        description: 'Série SemVer majeure.mineure (ex: 0.1 ou 0.2)'
         required: false
         type: string
         default: ''
@@ -18,6 +18,11 @@ on:
         required: false
         type: boolean
         default: false
+      push:
+        description: 'Effectuer le push réel des images'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -51,6 +56,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
+        if: inputs.push
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -62,9 +68,9 @@ jobs:
           images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' && !inputs.is_release }}
-            type=raw,value=latest,enable=${{ inputs.is_release || github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ inputs.is_release }}
             type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' }}
+            type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' && inputs.is_release }}
             type=sha,format=long
 
       - uses: docker/build-push-action@v6
@@ -75,13 +81,16 @@ jobs:
           platforms: linux/amd64
           build-args: |
             GIT_BRANCH=${{ github.ref_name }}
-          push: true
+            MEDIA_VERSION=${{ inputs.version }}
+          push: ${{ inputs.push }}
+          load: ${{ !inputs.push }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=${{ matrix.target }}
 
-      - name: Vérifier le téléchargement et le rattachement de l'image publiée
+      - name: Vérifier le téléchargement et le rattachement de l'image
+        if: inputs.push
         env:
           IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
@@ -101,20 +110,43 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
-          ref="${IMAGE}@${DIGEST}"
-          docker run --rm --entrypoint sh "$ref" -ec '
+          target_ref="${IMAGE}@${DIGEST}"
+          if [ "${{ inputs.push }}" != "true" ]; then
+            target_ref="${{ matrix.image }}:${{ inputs.version || 'test' }}"
+          fi
+          docker run --rm --entrypoint sh "$target_ref" -ec '
             ffprobe -version | head -n 1 | grep -F "ffprobe version 9.0.2"
             ffmpeg -version | head -n 1 | grep -F "ffmpeg version 9.0.2"
             test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
           '
-          test "$(docker inspect --format '{{.Size}}' "$ref")" -lt 200000000
+          test "$(docker inspect --format '{{.Size}}' "$target_ref")" -lt 200000000
 
       - name: Vérifier la commande version du conteneur
         env:
           IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
           BINARY: ${{ matrix.image }}
+          EXPECTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          ref="${IMAGE}@${DIGEST}"
-          docker run --rm "$ref" "$BINARY" --version
+          target_ref="${IMAGE}@${DIGEST}"
+          if [ "${{ inputs.push }}" != "true" ]; then
+            target_ref="${{ matrix.image }}:${{ inputs.version || 'test' }}"
+          fi
+          output=$(docker run --rm "$target_ref" "$BINARY" --version)
+          echo "Sortie version du binaire : $output"
+          if [ -n "$EXPECTED_VERSION" ]; then
+            echo "$output" | grep -F "$EXPECTED_VERSION"
+          fi
+
+      - name: Enregistrer l'empreinte de l'image
+        run: |
+          mkdir -p digests
+          echo "${{ steps.build.outputs.digest }}" > "digests/${{ matrix.image }}.digest"
+
+      - name: Sauvegarder les digests en artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.image }}
+          path: digests/${{ matrix.image }}.digest
+          retention-days: 1

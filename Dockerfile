@@ -152,7 +152,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && pg_dump --version \
     && pg_restore --version \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc /usr/share/locale /usr/share/info
 
 # ==============================================================================
 # Stage 3: Distributed Core Runtime (`aether-core`)
@@ -211,7 +211,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         tini \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc /usr/share/locale /usr/share/info
 
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffprobe /usr/local/bin/ffprobe

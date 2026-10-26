@@ -40,7 +40,10 @@ bibliothèque. La priorité est un entier de 0 à 1 000, les valeurs élevées
 passent d'abord ; à priorité égale, la date puis l'identifiant départagent les
 tâches. Une transaction d'écriture sérialise l'admission et empêche le
 dépassement de capacité par des claimers concurrents. Cela reste une
-architecture à Core unique.
+architecture à Core unique pour le déploiement pris en charge. Les admissions
+PostgreSQL utilisent désormais un verrou transactionnel commun entre Core ;
+les autres bloqueurs multi-Core sont consignés dans
+[MULTI_CORE_READINESS.md](MULTI_CORE_READINESS.md).
 Les mutations de la file attendent leur tour avant d'acquérir une connexion
 SQL : elles ne monopolisent pas les quatre connexions SQLite en attendant le
 verrou d'écriture. Une passe de production attribue jusqu'à 100 leases dans

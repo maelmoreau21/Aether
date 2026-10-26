@@ -389,10 +389,11 @@ async fn execute_inner(
     let started = now();
     // Claim task execution
     let claimed = crate::database::query(
-        "UPDATE system_task_schedules SET last_started_at=?, last_completed_at=NULL, last_outcome='running', last_error_kind=NULL, last_error_scope=NULL, last_message=NULL WHERE id=? AND last_outcome!='running' AND (?='' OR EXISTS(SELECT 1 FROM durable_tasks WHERE id=? AND attempt=? AND status='running' AND lease_until>?))"
+        "UPDATE system_task_schedules SET last_started_at=?, last_completed_at=NULL, last_outcome='running', last_error_kind=NULL, last_error_scope=NULL, last_message=NULL WHERE id=? AND (last_outcome!='running' OR (?!='' AND NOT EXISTS(SELECT 1 FROM durable_tasks previous WHERE previous.category='system' AND previous.target_id=? AND previous.id<>? AND previous.status='running' AND previous.lease_until>?))) AND (?='' OR EXISTS(SELECT 1 FROM durable_tasks WHERE id=? AND attempt=? AND status='running' AND lease_until>?))"
     )
     .bind(started)
     .bind(id)
+    .bind(task_id).bind(id).bind(task_id).bind(started)
     .bind(task_id).bind(task_id).bind(attempt).bind(started)
     .execute(&state.auth.store.pool)
     .await
@@ -520,7 +521,11 @@ async fn task_optimize_database(state: &SystemTasksState) -> Result<TaskReport, 
         .backend_name()
         == "SQLite";
     let statements: &'static [&'static str] = if sqlite {
-        &["PRAGMA optimize", "PRAGMA wal_checkpoint(PASSIVE)"]
+        &[
+            "PRAGMA optimize",
+            "PRAGMA wal_checkpoint(PASSIVE)",
+            "PRAGMA shrink_memory",
+        ]
     } else {
         &["ANALYZE"]
     };
@@ -530,6 +535,7 @@ async fn task_optimize_database(state: &SystemTasksState) -> Result<TaskReport, 
             report.failures.push(TaskFailure::database(statement, e));
         }
     }
+    crate::system_memory::trim_memory();
     report.summary = format!("{} statement(s) executed", statements.len());
     Ok(report)
 }
@@ -679,6 +685,41 @@ mod tests {
         assert_eq!(updated.last_outcome, "succeeded");
         assert!(updated.last_completed_at.is_some());
         assert!(updated.last_error_kind.is_none());
+    }
+
+    #[tokio::test]
+    async fn expired_system_attempt_can_resume_a_running_schedule() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = state_in(temp.path(), Vec::new()).await;
+        let started = now();
+        crate::database::query(
+            "UPDATE system_task_schedules SET last_outcome='running',last_started_at=? WHERE id='optimize-database'",
+        )
+        .bind(started - 120)
+        .execute(&state.auth.store.pool)
+        .await
+        .unwrap();
+        crate::database::query(
+            "INSERT INTO durable_tasks(id,owner,idempotency_key,node_id,category,target_id,status,attempt,created_at,updated_at,available_at,lease_until) VALUES('recovered-system-job','system','recovered-system-job','local','system','optimize-database','running',2,?,?,?,?)",
+        )
+        .bind(started - 120)
+        .bind(started)
+        .bind(started)
+        .bind(started + 60)
+        .execute(&state.auth.store.pool)
+        .await
+        .unwrap();
+        let job = crate::task_engine::get(&state.auth.store, "recovered-system-job")
+            .await
+            .unwrap()
+            .unwrap();
+        execute_leased(&state, "optimize-database", &job)
+            .await
+            .unwrap();
+        assert_eq!(
+            schedule(&state, "optimize-database").await.last_outcome,
+            "succeeded"
+        );
     }
 
     /// Every maintenance statement must actually run: before this fix `clean-playlists` queried the

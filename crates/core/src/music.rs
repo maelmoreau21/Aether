@@ -182,6 +182,14 @@ async fn cover(
     let cover_mime: String = row
         .get::<Option<String>, _>("cover_mime")
         .unwrap_or_else(|| "image/jpeg".into());
+    if let Some(sha256) = cover_path.strip_prefix("asset:") {
+        return auth
+            .store
+            .assets
+            .response_after_authorization(sha256, request.headers())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+    }
     let node_id = row.get::<String, _>("node_id");
     if node_id != "local" {
         let node = crate::nodes::load_node(&auth.store, &node_id)
@@ -320,6 +328,11 @@ pub(crate) async fn scan_fenced(
         .bind(scan)
         .execute(&store.pool)
         .await?;
+    let mut conn = store.pool.acquire().await?;
+    let mut tx = crate::database::begin_write(&mut conn).await?;
+    crate::automation::emit_music_snapshot(&mut tx, library, media_contracts::protocol::unix_now())
+        .await?;
+    crate::database::commit(tx).await?;
     Ok(count)
 }
 

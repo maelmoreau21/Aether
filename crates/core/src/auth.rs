@@ -448,11 +448,15 @@ impl AuthState {
         let secure = scheme == "https";
         let origin = origin.trim_end_matches('/').to_owned();
         let dummy_hash = tokio::task::spawn_blocking(|| {
-            let params = Params::new(65536, 3, 1, Some(32)).map_err(|_| IdentityError::Hash)?;
-            Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+            let memory_kib = crate::identity::argon2_memory_cost_kib();
+            let params =
+                Params::new(memory_kib, 3, 1, Some(32)).map_err(|_| IdentityError::Hash)?;
+            let h = Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
                 .hash_password(random_token().as_bytes())
                 .map(|h| h.to_string())
-                .map_err(|_| IdentityError::Hash)
+                .map_err(|_| IdentityError::Hash);
+            crate::system_memory::trim_memory();
+            h
         })
         .await
         .map_err(|_| IdentityError::Worker)??;
@@ -905,10 +909,12 @@ async fn login(
         let Ok(parsed) = PasswordHash::new(&encoded) else {
             return false;
         };
-        encoded.starts_with("$argon2id$")
+        let ok = encoded.starts_with("$argon2id$")
             && Argon2::default()
                 .verify_password(password.as_bytes(), &parsed)
-                .is_ok()
+                .is_ok();
+        crate::system_memory::trim_memory();
+        ok
     })
     .await
     .unwrap_or(false);

@@ -211,25 +211,24 @@ async fn persist_internal(
     result
 }
 
-pub async fn wasm(store: &IdentityStore, package: &Package) -> io::Result<String> {
-    let directory = directory(store, &package.manifest.id)?;
-    // Older DB-only installations are materialized lazily as well as at startup.
-    if !tokio::fs::try_exists(&directory).await? {
-        persist(store, package).await?;
+pub async fn wasm(_store: &IdentityStore, package: &Package) -> io::Result<String> {
+    // Callers have loaded this package from the durable extensions row. Execute
+    // its verified bytes directly: local files are a disposable cache and may
+    // lag a package upgrade performed by another Core.
+    let module = STANDARD.decode(&package.wasm).map_err(io::Error::other)?;
+    if module.len() > MAX_MODULE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "plugin module too large",
+        ));
     }
-    let module = read(
-        store.plugins_path(),
-        &directory.join("module.wasm"),
-        MAX_MODULE,
-    )
-    .await?;
     if format!("{:x}", Sha256::digest(&module)) != package.sha256 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "plugin module integrity failure",
         ));
     }
-    Ok(STANDARD.encode(module))
+    Ok(package.wasm.clone())
 }
 
 pub async fn remove(store: &IdentityStore, id: &str) -> io::Result<()> {
@@ -266,7 +265,13 @@ pub async fn sync_installed(store: &IdentityStore) -> io::Result<usize> {
                 continue;
             }
         };
-        match persist(store, &package).await {
+        let synced_package = match persist(store, &package).await {
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                persist_upgrade(store, &package).await
+            }
+            result => result,
+        };
+        match synced_package {
             Ok(()) => synced += 1,
             Err(e) => {
                 eprintln!(
@@ -465,7 +470,9 @@ mod tests {
         tokio::fs::write(directory.join("module.wasm"), b"tampered")
             .await
             .unwrap();
-        assert!(wasm(&store, &package).await.is_err());
+        // The package snapshot remains authoritative even when the local cache
+        // is corrupt; startup reconciliation will rebuild the cache.
+        assert_eq!(wasm(&store, &package).await.unwrap(), package.wasm);
         remove(&store, &package.manifest.id).await.unwrap();
         assert!(!directory.exists());
         crate::database::query(
@@ -477,6 +484,30 @@ mod tests {
         crate::database::query("INSERT INTO extensions(id,publisher_id,package_json,generation) VALUES(?,?,?,'fixture')").bind(&package.manifest.id).bind("anyone").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
         assert_eq!(sync_installed(&store).await.unwrap(), 1);
         assert!(directory.join("module.wasm").exists());
+        let mut upgraded = package.clone();
+        upgraded.manifest.version = "2.0.0".into();
+        let upgraded_bytes = serde_json::to_string(&upgraded).unwrap();
+        crate::database::query("UPDATE extensions SET package_json=? WHERE id=?")
+            .bind(upgraded_bytes)
+            .bind(&package.manifest.id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(sync_installed(&store).await.unwrap(), 1);
+        let cached = read(
+            store.plugins_path(),
+            &directory.join("package.json"),
+            400000,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Package>(&cached)
+                .unwrap()
+                .manifest
+                .version,
+            "2.0.0"
+        );
         let reopened = IdentityStore::open(&root.path().join("core.sqlite3"))
             .await
             .unwrap();

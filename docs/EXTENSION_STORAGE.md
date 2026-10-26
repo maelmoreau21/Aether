@@ -1,5 +1,11 @@
 # Stockage privé des extensions — contrat v1
 
+Pour plusieurs Core, le paquet Wasm enregistré dans `extensions.package_json`
+est la source durable du code exécuté. Le module est revérifié par taille et
+SHA-256 au chargement ; les fichiers locaux sont un cache reconstruit depuis
+la base. Voir [MULTI_CORE_READINESS.md](MULTI_CORE_READINESS.md) pour les limites
+de coordination restantes.
+
 Mission du 25 octobre 2026. Le Core possède les connexions SQLx, l'identité de
 l'extension et les autorisations. Le guest ne reçoit ni SQL, ni URL de connexion,
 ni chemin disque. SQLite/WAL et PostgreSQL utilisent le même contrat SDK Rust.
@@ -237,8 +243,8 @@ ciblé du décodage de manifeste, de la contention et des allocations.
 
 ### Refonte de base concurrente constatée le26octobre
 
-Après les tests, un autre travail a regroupé les anciennes migrations dans
-`0001_initial_schema.sql` pour les deux moteurs ; les tables privées et objets
+Après les tests, le schéma neuf a été consolidé dans
+`crates/core/schema.sql` pour les deux moteurs ; les tables privées et objets
 y sont présentes. Les fichiers moteur KV/objets, runtime et contrat SDK ont les
 mêmes SHA-256 que les preuves, mais `extensions.rs` et d'autres composants ont
 changé. Les résultats attestent l'instantané enregistré, pas l'ensemble de

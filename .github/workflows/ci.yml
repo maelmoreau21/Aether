@@ -417,16 +417,72 @@ jobs:
 
   # =========================================================================
   # 5. Publication des images Docker sur GHCR
-  # Push ou lancement manuel de CI (main/develop), après tous les contrôles.
+  # Push ou lancement manuel de CI (develop), après tous les contrôles.
   # Les pull requests non fiables ne publient jamais d'image.
   # =========================================================================
-  publish:
-    name: Publication Docker GHCR (develop)
+  calculate-beta:
+    name: Calcul du numéro bêta
     needs: [workflows, rust, security-audit, frontend, browser, images]
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/develop' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    outputs:
+      has_release: ${{ steps.calc.outputs.has_release }}
+      version: ${{ steps.calc.outputs.version }}
+      next_tag: ${{ steps.calc.outputs.next_tag }}
+      series: ${{ steps.calc.outputs.series }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: calc
+        run: |
+          set -euo pipefail
+          python scripts/calculate_release.py --json --channel develop > beta_info.json
+          cat beta_info.json
+          HAS_REL=$(jq -r '.has_release' beta_info.json)
+          echo "has_release=$HAS_REL" >> "$GITHUB_OUTPUT"
+          if [ "$HAS_REL" = "true" ]; then
+            echo "version=$(jq -r '.version' beta_info.json)" >> "$GITHUB_OUTPUT"
+            echo "next_tag=$(jq -r '.next_tag' beta_info.json)" >> "$GITHUB_OUTPUT"
+            echo "series=$(jq -r '.series' beta_info.json)" >> "$GITHUB_OUTPUT"
+          fi
+
+  tag-beta:
+    name: Création du tag bêta Git
+    needs: [calculate-beta]
+    if: needs.calculate-beta.outputs.has_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Poser le tag bêta
+        env:
+          TAG: ${{ needs.calculate-beta.outputs.next_tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            git tag -a "$TAG" -m "Development beta $TAG"
+            git push origin "$TAG"
+          fi
+
+  publish:
+    name: Publication Docker GHCR (develop)
+    needs: [calculate-beta, tag-beta]
+    if: needs.calculate-beta.outputs.has_release == 'true'
     permissions:
       contents: read
       packages: write
     uses: ./.github/workflows/publish.yml
     with:
+      version: ${{ needs.calculate-beta.outputs.version }}
+      series: ${{ needs.calculate-beta.outputs.series }}
       is_release: false
+      push: true

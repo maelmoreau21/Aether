@@ -215,17 +215,23 @@
   async function saveMarker(remove = false) {
     const account = $session;
     if (!account || !active || markerSaving) return;
+    const assetId = active.id;
     markerSaving = true; markerError = '';
     try {
-      const response = await fetch(`/api/v1/admin/assets/${encodeURIComponent(active.id)}/markers/${markerKind}`, {
+      const response = await fetch(`/api/v1/admin/assets/${encodeURIComponent(assetId)}/markers/${markerKind}`, {
         method: remove ? 'DELETE' : 'PUT', credentials: 'same-origin',
         headers: { 'x-csrf-token': account.csrfToken, 'content-type': 'application/json' },
         body: remove ? undefined : JSON.stringify(markerEnabled ? { enabled: true, start: markerStart, end: markerEnd } : { enabled: false })
       });
       if (!response.ok) throw new Error(`Correction refusée (${response.status}).`);
+      if (active?.id !== assetId) return;
       if (remove) {
-        const fresh = await revalidateMediaDescriptor(active.id);
-        if (fresh) active = fresh;
+        const fresh = await revalidateMediaDescriptor(assetId);
+        if (fresh && active?.id === assetId) active = {
+          ...fresh,
+          intro: preferences().skipIntroEnabled === false ? undefined : fresh.intro,
+          credits: preferences().skipCreditsEnabled === false ? undefined : fresh.credits
+        };
       } else {
         active = { ...active, [markerKind]: markerEnabled ? { start: markerStart, end: markerEnd } : undefined };
       }
@@ -259,7 +265,7 @@
     if (engine) progressTracker?.save(engine.state(), true);
     progressTracker = undefined;
     presence?.stop();presence=undefined;
-    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null;
+    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null; markerEditor = false;
     const returnTarget = opener;
     const restoreNavigation = () => {
       if (opened || generation !== closedGeneration) return;

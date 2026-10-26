@@ -11,6 +11,9 @@
   import { t, locale, setLocale } from '../i18n';
   import { themeMode, setTheme, type ThemeMode } from '../theme';
   import { DEFAULT_SUBTITLE_STYLE, sanitizeSubtitleStyle, subtitleStyleToCss, type SubtitleStyle } from '../player/subtitle-style';
+  import { fetchServerConfig, type AppServerConfig } from '../config/brand';
+
+  let serverConfig = $state<AppServerConfig | null>(null);
 
   let {
     prefAudio = $bindable('fr'),
@@ -48,10 +51,12 @@
     { id: 'account', label: 'Compte', icon: 'profile' },
     { id: 'security', label: 'Sécurité', icon: 'shield' },
     { id: 'devices', label: 'Appareils', icon: 'server' },
-    { id: 'playback', label: 'Lecture', icon: 'play' }
+    { id: 'playback', label: 'Lecture', icon: 'play' },
+    { id: 'about', label: 'À propos', icon: 'info' }
   ] as const;
   onMount(() => {
     let disposed = false;
+    void fetchServerConfig().then(cfg => { if (!disposed) serverConfig = cfg; }).catch(() => {});
     void ensurePreferences().then(saved => {
       if (disposed || !saved) return;
       if (!offsetsEdited) {
@@ -288,6 +293,50 @@
           </div>
         </section>
       </section></div>
+      <div hidden={current !== 'about'}>
+        <section class="card" aria-labelledby="about-heading">
+          <h2 id="about-heading" class="card-title">À propos de {serverConfig?.name || 'Aether'}</h2>
+          <div class="profile-info-list">
+            <div class="info-row">
+              <span class="label">Version</span>
+              <span class="val">
+                <strong>{serverConfig?.version || '0.1.0'}</strong>
+                {#if serverConfig?.channel}
+                  <span class="role-badge" class:admin-badge={serverConfig.channel === 'stable'}>
+                    {serverConfig.channel}
+                  </span>
+                {/if}
+              </span>
+            </div>
+            {#if serverConfig?.commit}
+              <div class="info-row">
+                <span class="label">Commit Git</span>
+                <span class="val"><code>{serverConfig.commit}</code></span>
+              </div>
+            {/if}
+            {#if serverConfig?.build_date}
+              <div class="info-row">
+                <span class="label">Date de compilation</span>
+                <span class="val">{serverConfig.build_date}</span>
+              </div>
+            {/if}
+            {#if serverConfig?.release_url}
+              <div class="info-row">
+                <span class="label">Notes de version</span>
+                <span class="val">
+                  <a href={serverConfig.release_url} target="_blank" rel="noopener noreferrer">
+                    Consulter la release {serverConfig.version} sur GitHub
+                  </a>
+                </span>
+              </div>
+            {/if}
+            <div class="info-row">
+              <span class="label">Mode d'exécution</span>
+              <span class="val"><code>{serverConfig?.mode || 'standalone'}</code></span>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   </div>
 </div>

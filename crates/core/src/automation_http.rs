@@ -32,6 +32,7 @@ pub fn router(auth: AuthState) -> Router {
         )
         .route("/api/v1/admin/tasks/automation/run", post(run))
         .route("/api/v1/admin/tasks/automation/results", get(results))
+        .route("/api/v1/admin/tasks/automation/history", get(history))
         .layer(DefaultBodyLimit::max(4096))
         .with_state(auth)
 }
@@ -65,6 +66,8 @@ struct Manual {
     library_id: String,
     extension_id: String,
     idempotency_key: String,
+    #[serde(default)]
+    missing_only: bool,
 }
 async fn run(
     State(auth): State<AuthState>,
@@ -97,7 +100,11 @@ async fn run(
     let id = automation::schedule_library(
         &mut tx,
         &input.library_id,
-        "manual",
+        if input.missing_only {
+            "metadata.missing"
+        } else {
+            "manual"
+        },
         &input.idempotency_key,
         Some(&input.extension_id),
         media_contracts::protocol::unix_now(),
@@ -120,4 +127,35 @@ async fn results(
     Ok(Json(
         json!({"results":rows.into_iter().map(|(extension,asset,task,result,updated)|json!({"extensionId":extension,"assetId":asset,"taskId":task,"result":serde_json::from_str::<Value>(&result).unwrap_or(Value::Null),"updatedAt":updated})).collect::<Vec<_>>()}),
     ))
+}
+
+type TaskHistoryRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    i64,
+    Option<i64>,
+    Option<i64>,
+    String,
+);
+
+async fn history(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, StatusCode> {
+    admin(&auth, &headers, false).await?;
+    let tasks: Vec<TaskHistoryRow> = query_as("SELECT t.id,l.extension_id,t.library_id,t.status,l.operation,t.priority,t.attempt,t.started_at,t.finished_at,t.error FROM durable_tasks t JOIN automation_task_links l ON l.task_id=t.id ORDER BY t.created_at DESC,t.id LIMIT 100")
+        .fetch_all(auth.store.pool()).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let quotas:Vec<(String,i64,i64,i64)>=query_as("SELECT provider,next_allowed_at,min_interval_seconds,max_concurrent FROM automation_provider_limits ORDER BY provider LIMIT 100")
+        .fetch_all(auth.store.pool()).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let sources:Vec<(String,String,String,String,i64,i64)>=query_as("SELECT work_id,field_name,extension_id,provider_id,priority,updated_at FROM automatic_metadata_provenance ORDER BY updated_at DESC,work_id,field_name LIMIT 100")
+        .fetch_all(auth.store.pool()).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(json!({
+        "tasks":tasks.into_iter().map(|(id,extension,library,status,operation,priority,attempt,started,finished,error)|json!({"id":id,"extensionId":extension,"libraryId":library,"status":status,"operation":operation,"priority":priority,"attempt":attempt,"durationSeconds":started.zip(finished).map(|(start,end)|end.saturating_sub(start)),"error":error})).collect::<Vec<_>>(),
+        "quotas":quotas.into_iter().map(|(provider,next,min_interval,max_concurrent)|json!({"provider":provider,"nextAllowedAt":next,"minIntervalSeconds":min_interval,"maxConcurrent":max_concurrent})).collect::<Vec<_>>(),
+        "sources":sources.into_iter().map(|(work,field,extension,provider,priority,updated)|json!({"workId":work,"field":field,"extensionId":extension,"providerId":provider,"priority":priority,"updatedAt":updated})).collect::<Vec<_>>()
+    })))
 }

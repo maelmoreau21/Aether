@@ -20,6 +20,7 @@ pub mod oidc;
 pub mod postgres_backup;
 pub mod scheduler;
 pub mod server_settings;
+pub mod system_memory;
 pub mod system_task_queue;
 pub mod system_tasks;
 use media_contracts::brand;
@@ -202,6 +203,7 @@ pub async fn secure_app_with_jobs(
             .merge(admin_backups::router(auth.clone(), root.clone()).await?)
             .merge(scheduler::router(auth.clone()).await?)
             .merge(system_tasks::router(auth.clone(), root.clone()).await?)
+            .merge(system_memory::router(auth.clone()))
             .merge(groups::router(auth.clone()))
             .merge(api_keys::router(auth.clone()))
             .merge(automation_http::router(auth.clone()))
@@ -378,10 +380,15 @@ fn public_routes(mode: &'static str) -> Router {
         .route(
             "/api/v1/config",
             get(move || async move {
+                let v = media_contracts::version::current_version_info();
                 Json(serde_json::json!({
                     "name": brand::DEFAULT_NAME,
                     "mode": mode,
-                    "version": media_contracts::version::current_version()
+                    "version": v.version,
+                    "channel": v.channel,
+                    "commit": v.commit,
+                    "build_date": v.build_date,
+                    "release_url": v.release_url,
                 }))
             }),
         );

@@ -86,7 +86,11 @@ async fn repeated_playback_preemption_and_pause_preserve_failure_budget() {
         let after = engine::get(&store, &job.id).await.unwrap().unwrap();
         assert_eq!(after.failure_count, failure);
         assert_eq!(after.status, if failure < 3 { "queued" } else { "error" });
-        now += 301;
+        now = query_scalar("SELECT available_at FROM durable_tasks WHERE id=?")
+            .bind(&job.id)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
     }
 }
 
@@ -410,7 +414,11 @@ async fn controls_hold_capacity_until_stop_ack_and_retries_are_bounded() {
             .await
             .unwrap()
         );
-        now += 1 + attempt * 5;
+        now = query_scalar("SELECT available_at FROM durable_tasks WHERE id=?")
+            .bind(&low.id)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
     }
     assert_eq!(
         engine::get(&store, &low.id).await.unwrap().unwrap().status,

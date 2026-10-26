@@ -1,5 +1,13 @@
 //! Local identity persistence. No HTTP routes, sessions or OIDC implementation.
 use argon2::{Algorithm, Argon2, Params, Version, password_hash::PasswordHasher};
+
+pub fn argon2_memory_cost_kib() -> u32 {
+    std::env::var("MEDIA_ARGON2_MEMORY_KIB")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .map(|v| v.clamp(19456, 262144))
+        .unwrap_or(65536)
+}
 use sqlx::{AnyPool, any::AnyPoolOptions};
 use std::{path::Path, time::Duration};
 use zeroize::Zeroizing;
@@ -12,8 +20,6 @@ pub enum IdentityError {
     Configuration,
     #[error("database operation failed")]
     Database(#[from] sqlx::Error),
-    #[error("database migration failed")]
-    Migration(#[from] sqlx::migrate::MigrateError),
     #[error("initial bootstrap is already closed")]
     AlreadyInitialized,
     #[error(
@@ -194,8 +200,8 @@ impl IdentityStore {
             return Err(IdentityError::Configuration);
         }
         let pool = configure_pool_options(false)?.connect(url).await?;
-        sqlx::migrate!("./migrations-postgres").run(&pool).await?;
         let mut conn = pool.acquire().await?;
+        crate::database::initialize_fresh_schema(&mut conn).await?;
         crate::inventory::backfill_title_sort_unicode(&mut conn).await?;
         drop(conn);
         Ok(Self {
@@ -279,10 +285,22 @@ impl IdentityStore {
                         crate::database::query("PRAGMA synchronous = NORMAL")
                             .execute(&mut *conn)
                             .await?;
-                        crate::database::query("PRAGMA cache_size = -64000")
+                        let cache_kib = std::env::var("MEDIA_SQLITE_CACHE_KIB")
+                            .ok()
+                            .and_then(|v| v.parse::<i64>().ok())
+                            .unwrap_or(-32000);
+                        let pragma_cache =
+                            sqlx::AssertSqlSafe(format!("PRAGMA cache_size = {cache_kib}"));
+                        crate::database::query(pragma_cache)
                             .execute(&mut *conn)
                             .await?;
-                        crate::database::query("PRAGMA mmap_size = 268435456")
+                        let mmap_bytes = std::env::var("MEDIA_SQLITE_MMAP_BYTES")
+                            .ok()
+                            .and_then(|v| v.parse::<i64>().ok())
+                            .unwrap_or(67108864);
+                        let pragma_mmap =
+                            sqlx::AssertSqlSafe(format!("PRAGMA mmap_size = {mmap_bytes}"));
+                        crate::database::query(pragma_mmap)
                             .execute(&mut *conn)
                             .await?;
                         crate::database::query("PRAGMA temp_store = MEMORY")
@@ -308,13 +326,12 @@ impl IdentityStore {
                 Err(error) => return Err(error.into()),
             }
         };
-        // SQLx SQLite migration lock is a no-op: serialize the entire check/apply sequence.
         let mut conn = pool.acquire().await?;
         crate::database::query("PRAGMA foreign_keys = OFF")
             .execute(&mut *conn)
             .await?;
+        crate::database::initialize_fresh_schema(&mut conn).await?;
         let mut tx = crate::database::begin_write(&mut conn).await?;
-        sqlx::migrate!("./migrations").run(&mut *tx).await?;
         crate::inventory::backfill_title_sort_unicode(&mut tx).await?;
         tx.commit().await?;
         crate::database::query("PRAGMA foreign_keys = ON")
@@ -377,12 +394,15 @@ impl IdentityStore {
             return Err(IdentityError::InvalidPassword);
         }
         let hash = tokio::task::spawn_blocking(move || {
-            // 64 MiB, 3 passes, one lane; PHC includes version, costs and random OS salt.
-            let params = Params::new(65536, 3, 1, Some(32)).map_err(|_| IdentityError::Hash)?;
-            Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+            let memory_kib = argon2_memory_cost_kib();
+            let params =
+                Params::new(memory_kib, 3, 1, Some(32)).map_err(|_| IdentityError::Hash)?;
+            let h = Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
                 .hash_password(password.as_bytes())
                 .map(|h| h.to_string())
-                .map_err(|_| IdentityError::Hash)
+                .map_err(|_| IdentityError::Hash);
+            crate::system_memory::trim_memory();
+            h
         })
         .await
         .map_err(|_| IdentityError::Worker)??;

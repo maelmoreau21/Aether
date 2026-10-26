@@ -5,7 +5,81 @@ use crate::{
 };
 use media_contracts::inventory::{ReadGrant, ReadTarget};
 use serde_json::{Value, json};
+use std::process::Stdio;
 use std::{io, path::Path};
+use tokio::io::AsyncReadExt;
+
+async fn audio_fingerprint(opened: &crate::files::OpenedFile) -> io::Result<Value> {
+    let input = opened.try_clone_std()?;
+    let mut child = tokio::process::Command::new("ffmpeg")
+        .args([
+            "-nostdin",
+            "-v",
+            "error",
+            "-protocol_whitelist",
+            "fd,pipe",
+            "-probesize",
+            "5000000",
+            "-analyzeduration",
+            "5000000",
+            "-i",
+            "-",
+            "-map",
+            "0:a:0",
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "11025",
+            "-t",
+            "600",
+            "-f",
+            "chromaprint",
+            "-fp_format",
+            "raw",
+            "-",
+        ])
+        .stdin(Stdio::from(input))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()?;
+    let mut output = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("fingerprint_output_unavailable"))?
+        .take(32_769);
+    let mut bytes = Vec::new();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(90), async {
+        output.read_to_end(&mut bytes).await?;
+        if bytes.len() > 32_768 || bytes.len() % 4 != 0 {
+            return Err(io::Error::other("fingerprint_result_invalid"));
+        }
+        if !child.wait().await?.success() {
+            return Err(io::Error::other("fingerprint_decoder_failed"));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "fingerprint_timeout"))?;
+    result?;
+    opened.verify_unchanged()?;
+    let fingerprints: Vec<u32> = bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| u32::from_le_bytes(*chunk))
+        .collect();
+    if fingerprints.is_empty() {
+        return Err(io::Error::other("fingerprint_empty"));
+    }
+    let analyzed_seconds = fingerprints.len() as f64 / 8.61328125;
+    let result = json!({"fingerprints":fingerprints,"fingerprintRate":8.61328125,"analyzedSeconds":analyzed_seconds,"algorithm":"chromaprint-v1"});
+    if result.to_string().len() > 64 * 1024 {
+        return Err(io::Error::other("fingerprint_result_too_large"));
+    }
+    Ok(result)
+}
 
 pub async fn run_task_on_grant(
     category: &str,
@@ -30,6 +104,9 @@ pub async fn run_task_on_grant(
     }
     match (category, &grant.target) {
         ("analyze", ReadTarget::Asset(_)) => {
+            if component == Some("fingerprint") {
+                return audio_fingerprint(&opened).await;
+            }
             let probe = crate::probe::probe_opened(&opened)
                 .await
                 .map_err(io::Error::other)?;
@@ -95,6 +172,51 @@ pub async fn run_task_on_grant(
 mod tests {
     use super::*;
     use media_contracts::ids::{AssetId, ImageId, LibraryId, NodeId};
+
+    #[tokio::test]
+    async fn confined_av1_opus_asset_produces_bounded_chromaprint() {
+        if std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_err()
+        {
+            eprintln!("ffmpeg unavailable; Chromaprint adapter not exercised");
+            return;
+        }
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/generated/representative");
+        let root = tokio::fs::canonicalize(root).await.unwrap();
+        let opened = LocalNode
+            .open_media(&root, Path::new("representative.mp4"))
+            .await
+            .unwrap();
+        let grant = ReadGrant {
+            target: ReadTarget::Asset(AssetId::new("asset")),
+            library_id: LibraryId::new("library"),
+            node_id: NodeId::new("node"),
+            root_snapshot: root.to_string_lossy().into_owned(),
+            relative_path: "representative.mp4".into(),
+            mime: "video/mp4".into(),
+        };
+        let result = run_task_on_grant(
+            "analyze",
+            &grant,
+            Some("fingerprint"),
+            None,
+            &Preparations::default(),
+            opened.size(),
+            opened.modified_ns(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["algorithm"], "chromaprint-v1");
+        assert!(
+            result["fingerprints"]
+                .as_array()
+                .is_some_and(|values| values.len() > 20 && values.len() < 256)
+        );
+        assert!(result.to_string().len() < 64 * 1024);
+    }
 
     #[tokio::test]
     async fn analysis_uses_real_confined_asset_and_rejects_changed_fingerprint() {

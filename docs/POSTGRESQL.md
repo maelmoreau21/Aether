@@ -28,8 +28,13 @@ de transfert et de vérification. Aucun outil de transfert inter-moteurs n'est l
 
 ## Schémas et transactions
 
-Les migrations SQLite historiques restent dans `crates/core/migrations`.
-Les migrations PostgreSQL indépendantes sont dans `crates/core/migrations-postgres`.
+Le schéma neuf SQLite et PostgreSQL vient du seul fichier
+`crates/core/schema.sql`. Le Core choisit la section correspondant au moteur
+et l'applique dans une transaction uniquement si le schéma est vide. Il ne
+convertit ni ne modifie automatiquement une ancienne base incompatible. La
+table `schema_version` identifie la structure actuelle (version 1) ; si le
+produit change sans procédure de mise à jour, une ancienne base est refusée
+explicitement et ses données restent intactes.
 SQLx utilise le même pool applicatif et les mêmes requêtes paramétrées pour les
 comptes, sessions, permissions et catalogue. Les identifiants texte UUID existants
 et leurs relations restent identiques ; aucune régénération d'identité.
@@ -82,6 +87,12 @@ Après génération des fixtures synthétiques AV1/Opus et installation de ffpro
 Le script crée une instance PostgreSQL 18 temporaire en RAM, sur un port loopback
 aléatoire, avec un mot de passe aléatoire. Il exécute les contrats HTTP/catalogue,
 OIDC et multi-Node, puis supprime uniquement son propre conteneur.
+`scripts/test-fresh-schema.py` vérifie la section SQLite et
+`scripts/test-fresh-postgres-schema.ps1` valide séparément la création d'une
+base neuve. `scripts/test-two-cores.ps1` démarre deux processus Core distincts
+sur la même base temporaire, puis arrête brutalement le premier pour vérifier
+que le second sert toujours l'API. Ce dernier essai ne couvre aucune tâche en
+cours ni les effets durables.
 Les tests créent des schémas isolés ; ne jamais fournir une base de production.
 
 Pour une instance temporaire fournie séparément :

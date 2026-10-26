@@ -712,6 +712,8 @@ pub async fn scan_with_images(
     )
     .await?;
     report.files = files;
+    crate::trim_memory();
+
     Ok(report)
 }
 
@@ -1285,6 +1287,11 @@ where
         };
         on_batch(batch).await?;
     }
+
+    drop(folder_cache);
+    drop(series_cache);
+    drop(artwork_memo);
+    crate::trim_memory();
 
     Ok(report)
 }

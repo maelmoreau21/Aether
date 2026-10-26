@@ -1,7 +1,7 @@
 //! Durable Core-owned queue. Execution uses the existing confined Media Node scan protocol.
 use crate::{
     auth::AuthState,
-    database::{begin_write, query, query_as, query_scalar},
+    database::{begin_write_serialized, query, query_as, query_scalar},
     identity::{IdentityStore, Role},
 };
 use axum::{
@@ -15,6 +15,11 @@ use serde::{Deserialize, Serialize};
 /// Serialize control changes with the final authorization/publication of scan effects.
 pub static EFFECT_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 pub static WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+// PostgreSQL admission must serialize across Core processes. The local mutex only
+// protects one process; this transaction lock covers node, library and provider
+// capacity checks together until their leases are committed.
+pub(crate) const TASK_ADMISSION_LOCK: i64 = 0x4d45444941544153;
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -157,7 +162,8 @@ async fn enqueue_spec(
         || component.len() > 64
         || (category == "scan" && (!target.is_empty() || !component.is_empty() || width != 640))
         || (category != "scan" && (target.is_empty() || mode != "incremental"))
-        || (matches!(category, "analyze" | "image") && !component.is_empty())
+        || (category == "analyze" && !matches!(component, "" | "fingerprint"))
+        || (category == "image" && !component.is_empty())
         || (category != "image" && width != 640)
         || (category == "prepare" && !valid_component(component))
         || !matches!(
@@ -178,7 +184,7 @@ async fn enqueue_spec(
     // connections available to authentication, navigation and playback in WAL mode.
     let _writer = store.task_writes.lock().await;
     let mut conn = store.pool().acquire().await?;
-    let mut tx = begin_write(&mut conn).await?;
+    let mut tx = begin_write_serialized(&mut conn, TASK_ADMISSION_LOCK).await?;
     let existing: Option<Job> =
         query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error FROM durable_tasks WHERE owner=? AND idempotency_key=?")
             .bind(owner)
@@ -315,7 +321,7 @@ pub async fn claim(
     // connections available to authentication, navigation and playback in WAL mode.
     let _writer = store.task_writes.lock().await;
     let mut conn = store.pool().acquire().await?;
-    let mut tx = begin_write(&mut conn).await?;
+    let mut tx = begin_write_serialized(&mut conn, TASK_ADMISSION_LOCK).await?;
     let job = claim_in_transaction(&mut tx, node_id, now, lease_seconds, node_limit).await?;
     crate::database::commit(tx).await?;
     Ok(job)
@@ -337,7 +343,7 @@ pub async fn claim_batch(
     }
     let _writer = store.task_writes.lock().await;
     let mut conn = store.pool().acquire().await?;
-    let mut tx = begin_write(&mut conn).await?;
+    let mut tx = begin_write_serialized(&mut conn, TASK_ADMISSION_LOCK).await?;
     // Select one indexed candidate per ready Node inside SQLite/PostgreSQL. Materialize
     // before UPDATE so changing status cannot cause a second candidate on the same Node.
     // Only placeholder syntax is generated; Node identifiers remain bound values.
@@ -349,13 +355,14 @@ pub async fn claim_batch(
         }
         sql.push_str("(?)");
     }
-    sql.push_str(") , candidates AS MATERIALIZED (SELECT (SELECT j.id FROM durable_tasks j JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.node_id=ready.node_id AND j.status='queued' AND j.lease_until IS NULL AND j.available_at<=? AND j.failure_count<j.max_attempts AND NOT EXISTS(SELECT 1 FROM automation_dependencies d JOIN durable_tasks prerequisite ON prerequisite.id=d.prerequisite_id WHERE d.task_id=j.id AND prerequisite.status!='completed') AND l.node_id=j.node_id AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1) AS id FROM ready WHERE NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=ready.node_id AND busy.lease_until IS NOT NULL)) UPDATE durable_tasks SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 WHERE id IN (SELECT id FROM candidates WHERE id IS NOT NULL) RETURNING id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error");
+    sql.push_str(") , candidates AS MATERIALIZED (SELECT (SELECT j.id FROM durable_tasks j JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.node_id=ready.node_id AND j.status='queued' AND j.lease_until IS NULL AND j.available_at<=? AND j.failure_count<j.max_attempts AND NOT EXISTS(SELECT 1 FROM automation_dependencies d JOIN durable_tasks prerequisite ON prerequisite.id=d.prerequisite_id WHERE d.task_id=j.id AND prerequisite.status!='completed') AND l.node_id=j.node_id AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL) AND (COALESCE(j.component,'')!='fingerprint' OR NOT EXISTS(SELECT 1 FROM active_playbacks p WHERE p.paused=0 AND p.updated_at>?)) AND NOT EXISTS(SELECT 1 FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1) AS id FROM ready WHERE NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=ready.node_id AND busy.lease_until IS NOT NULL)) UPDATE durable_tasks SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 WHERE id IN (SELECT id FROM candidates WHERE id IS NOT NULL) RETURNING id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error");
     let mut mutation = query_as::<sqlx::Any, Job>(sqlx::AssertSqlSafe(sql));
     for node in nodes {
         mutation = mutation.bind(node);
     }
     let claimed = mutation
         .bind(now)
+        .bind(now.saturating_sub(45))
         .bind(now.saturating_add(lease_seconds))
         .bind(now)
         .bind(now)
@@ -382,7 +389,7 @@ async fn claim_in_transaction(
     if active >= node_limit {
         return Ok(None);
     }
-    let id:Option<String>=query_scalar("SELECT j.id FROM durable_tasks j JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.node_id=? AND j.status='queued' AND j.lease_until IS NULL AND j.available_at<=? AND j.failure_count<j.max_attempts AND NOT EXISTS(SELECT 1 FROM automation_dependencies d JOIN durable_tasks prerequisite ON prerequisite.id=d.prerequisite_id WHERE d.task_id=j.id AND prerequisite.status!='completed') AND l.node_id=j.node_id AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1").bind(node_id).bind(now).fetch_optional(&mut **tx).await?;
+    let id:Option<String>=query_scalar("SELECT j.id FROM durable_tasks j JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.node_id=? AND j.status='queued' AND j.lease_until IS NULL AND j.available_at<=? AND j.failure_count<j.max_attempts AND NOT EXISTS(SELECT 1 FROM automation_dependencies d JOIN durable_tasks prerequisite ON prerequisite.id=d.prerequisite_id WHERE d.task_id=j.id AND prerequisite.status!='completed') AND l.node_id=j.node_id AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL) AND (COALESCE(j.component,'')!='fingerprint' OR NOT EXISTS(SELECT 1 FROM active_playbacks p WHERE p.paused=0 AND p.updated_at>?)) AND NOT EXISTS(SELECT 1 FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1").bind(node_id).bind(now).bind(now.saturating_sub(45)).fetch_optional(&mut **tx).await?;
     let Some(id) = id else { return Ok(None) };
     query("UPDATE durable_tasks SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 WHERE id=? AND status='queued'").bind(now.saturating_add(lease_seconds)).bind(now).bind(now).bind(&id).execute(&mut **tx).await?;
     let job = query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error FROM durable_tasks WHERE id=?")
@@ -398,14 +405,32 @@ async fn filter_automation_claims(
     claimed: Vec<Job>,
     now: i64,
 ) -> Result<Vec<Job>, sqlx::Error> {
+    if claimed.is_empty() {
+        return Ok(claimed);
+    }
+    let mut sql = String::from(
+        "SELECT task_id,extension_id,provider FROM automation_task_links WHERE task_id IN (",
+    );
+    for index in 0..claimed.len() {
+        if index != 0 {
+            sql.push(',');
+        }
+        sql.push('?');
+    }
+    sql.push(')');
+    let mut lookup = query_as::<sqlx::Any, (String, String, String)>(sqlx::AssertSqlSafe(sql));
+    for job in &claimed {
+        lookup = lookup.bind(&job.id);
+    }
+    let links: std::collections::HashMap<String, (String, String)> = lookup
+        .fetch_all(&mut **tx)
+        .await?
+        .into_iter()
+        .map(|(task_id, extension, provider)| (task_id, (extension, provider)))
+        .collect();
     let mut accepted = Vec::with_capacity(claimed.len());
     for job in claimed {
-        let link: Option<(String, String)> =
-            query_as("SELECT extension_id,provider FROM automation_task_links WHERE task_id=?")
-                .bind(&job.id)
-                .fetch_optional(&mut **tx)
-                .await?;
-        let Some((extension, provider)) = link else {
+        let Some((extension, provider)) = links.get(&job.id) else {
             accepted.push(job);
             continue;
         };

@@ -350,7 +350,9 @@ pub async fn ingest(
         }
     }
     refresh_editorial(&mut tx, library_id).await?;
-    tx.commit().await
+    tx.commit().await?;
+    crate::system_memory::trim_memory();
+    Ok(())
 }
 
 pub async fn clean_staging(store: &IdentityStore, scan_id: &str) -> Result<(), sqlx::Error> {
@@ -387,6 +389,7 @@ pub async fn stage_batch(
         == 0
     {
         tx.commit().await?;
+        crate::system_memory::trim_memory();
         return Ok(());
     }
     let encoded: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
@@ -574,7 +577,9 @@ pub async fn stage_batch(
         query("UPDATE durable_tasks SET processed_items=processed_items+? WHERE id=? AND attempt=? AND status='running'")
             .bind(batch.files.len() as i64).bind(job).bind(attempt).execute(&mut *tx).await?;
     }
-    tx.commit().await
+    tx.commit().await?;
+    crate::system_memory::trim_memory();
+    Ok(())
 }
 
 pub async fn publish_staged_scan(
@@ -1763,7 +1768,9 @@ pub async fn publish_staged_scan(
         .execute(&mut *tx)
         .await?;
 
-    tx.commit().await
+    tx.commit().await?;
+    crate::system_memory::trim_memory();
+    Ok(())
 }
 
 pub async fn refresh_editorial_for_works(
@@ -2326,15 +2333,135 @@ pub async fn catalogue_filtered(
     .await
 }
 
-static CATALOGUE_CACHE: std::sync::OnceLock<
-    std::sync::Mutex<std::collections::HashMap<String, (String, Value)>>,
-> = std::sync::OnceLock::new();
+pub struct BoundedCatalogueCache {
+    max_bytes: usize,
+    current_bytes: usize,
+    entries: std::collections::HashMap<String, CatalogueCacheEntry>,
+    access_seq: u64,
+}
+
+struct CatalogueCacheEntry {
+    gen_fp: String,
+    value: Value,
+    size_bytes: usize,
+    last_accessed: u64,
+}
+
+impl BoundedCatalogueCache {
+    pub fn new(max_bytes: usize) -> Self {
+        Self {
+            max_bytes: max_bytes.max(1024 * 1024),
+            current_bytes: 0,
+            entries: std::collections::HashMap::new(),
+            access_seq: 0,
+        }
+    }
+
+    pub fn from_env() -> Self {
+        let max_mb = std::env::var("MEDIA_CATALOGUE_CACHE_MAX_MB")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(32)
+            .clamp(1, 1024);
+        Self::new(max_mb * 1024 * 1024)
+    }
+
+    pub fn get(&mut self, key: &str, current_fp: i64) -> Option<Value> {
+        let fp_str = current_fp.to_string();
+        if let Some(entry) = self.entries.get_mut(key) {
+            if entry.gen_fp == fp_str {
+                self.access_seq += 1;
+                entry.last_accessed = self.access_seq;
+                return Some(entry.value.clone());
+            } else if let Some(removed) = self.entries.remove(key) {
+                self.current_bytes = self.current_bytes.saturating_sub(removed.size_bytes);
+            }
+        }
+        None
+    }
+
+    pub fn insert(&mut self, key: String, current_fp: i64, value: Value) {
+        let entry_size = key.len() + 64 + estimate_json_bytes(&value);
+        if entry_size > self.max_bytes {
+            return;
+        }
+
+        while self.current_bytes.saturating_add(entry_size) > self.max_bytes
+            && !self.entries.is_empty()
+        {
+            if let Some((oldest_key, _)) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, e)| e.last_accessed)
+                .map(|(k, e)| (k.clone(), e.size_bytes))
+            {
+                if let Some(removed) = self.entries.remove(&oldest_key) {
+                    self.current_bytes = self.current_bytes.saturating_sub(removed.size_bytes);
+                }
+            } else {
+                break;
+            }
+        }
+
+        self.access_seq += 1;
+        let entry = CatalogueCacheEntry {
+            gen_fp: current_fp.to_string(),
+            value,
+            size_bytes: entry_size,
+            last_accessed: self.access_seq,
+        };
+
+        if let Some(old) = self.entries.insert(key, entry) {
+            self.current_bytes = self.current_bytes.saturating_sub(old.size_bytes);
+        }
+        self.current_bytes = self.current_bytes.saturating_add(entry_size);
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.current_bytes = 0;
+    }
+
+    pub fn stats(&self) -> (usize, usize, usize) {
+        (self.current_bytes, self.max_bytes, self.entries.len())
+    }
+}
+
+pub fn estimate_json_bytes(val: &Value) -> usize {
+    match val {
+        Value::Null | Value::Bool(_) | Value::Number(_) => 16,
+        Value::String(s) => 24 + s.capacity().max(s.len()),
+        Value::Array(arr) => {
+            24 + arr.capacity() * std::mem::size_of::<Value>()
+                + arr.iter().map(estimate_json_bytes).sum::<usize>()
+        }
+        Value::Object(map) => {
+            48 + map
+                .iter()
+                .map(|(k, v)| 24 + k.capacity().max(k.len()) + estimate_json_bytes(v))
+                .sum::<usize>()
+        }
+    }
+}
+
+static CATALOGUE_CACHE: std::sync::OnceLock<std::sync::Mutex<BoundedCatalogueCache>> =
+    std::sync::OnceLock::new();
 
 pub fn invalidate_catalogue_cache() {
     if let Some(lock) = CATALOGUE_CACHE.get()
         && let Ok(mut guard) = lock.lock()
     {
         guard.clear();
+    }
+}
+
+pub fn catalogue_cache_stats() -> (usize, usize, usize) {
+    if let Some(lock) = CATALOGUE_CACHE.get()
+        && let Ok(guard) = lock.lock()
+    {
+        guard.stats()
+    } else {
+        (0, 0, 0)
     }
 }
 
@@ -2395,11 +2522,10 @@ pub async fn catalogue_page(
 
     if state_fp > 0
         && let Some(lock) = CATALOGUE_CACHE.get()
-        && let Ok(guard) = lock.lock()
-        && let Some((cached_fp, cached_val)) = guard.get(&cache_key)
-        && *cached_fp == state_fp.to_string()
+        && let Ok(mut guard) = lock.lock()
+        && let Some(cached_val) = guard.get(&cache_key, state_fp)
     {
-        return Ok(cached_val.clone());
+        return Ok(cached_val);
     }
 
     // 1. Pre-filter visible libraries to enabled libraries on non-revoked nodes matching target_kind.
@@ -2718,13 +2844,10 @@ pub async fn catalogue_page(
     });
 
     if state_fp > 0 {
-        let lock =
-            CATALOGUE_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+        let lock = CATALOGUE_CACHE
+            .get_or_init(|| std::sync::Mutex::new(BoundedCatalogueCache::from_env()));
         if let Ok(mut guard) = lock.lock() {
-            if guard.len() > 512 {
-                guard.clear();
-            }
-            guard.insert(cache_key, (state_fp.to_string(), response.clone()));
+            guard.insert(cache_key, state_fp, response.clone());
         }
     }
 
@@ -3772,52 +3895,49 @@ pub async fn descriptor_for_user(
     // A completed marker task is reusable only for this physical asset and
     // the exact inventory revision that produced it. Other copies need their
     // own timeline validation before sharing any marker.
-    let stored_markers: Option<String> = query_scalar(
-        "SELECT r.result_json FROM automation_results r \
-         JOIN automation_task_links link ON link.task_id=r.task_id \
-         JOIN automation_events event ON event.id=link.event_id \
-         JOIN automation_observations obs ON obs.asset_id=r.asset_id AND obs.fingerprint=event.fingerprint \
-         JOIN extensions ext ON ext.id=r.extension_id AND ext.enabled=1 AND ext.generation=link.generation \
+    let stored_markers: Vec<(String,f64,f64,f64)> = query_as(
+        "SELECT m.marker_type,m.start_seconds,m.end_seconds,m.confidence FROM automatic_timeline_markers m \
+         JOIN automation_observations obs ON obs.asset_id=m.asset_id AND obs.fingerprint=m.source_fingerprint \
+         JOIN extensions ext ON ext.id=m.extension_id AND ext.enabled=1 AND ext.generation=m.generation \
          JOIN extension_publishers publisher ON publisher.id=ext.publisher_id AND publisher.active=1 \
-         WHERE r.asset_id=? AND link.operation='intro.parse_chapters' AND \
-         (ext.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants grant_row WHERE grant_row.extension_id=ext.id AND grant_row.library_id=?)) \
-         LIMIT 1",
+         WHERE m.asset_id=? AND \
+         (ext.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants grant_row WHERE grant_row.extension_id=ext.id AND (grant_row.library_id=? OR EXISTS(SELECT 1 FROM library_folders folder WHERE folder.library_id=? AND folder.parent_id=grant_row.library_id AND folder.active=1)))) \
+         ORDER BY m.confidence DESC LIMIT 8",
     )
     .bind(asset_id)
     .bind(&library_id)
-    .fetch_optional(&store.pool)
+    .bind(&library_id)
+    .fetch_all(&store.pool)
     .await?;
-    if let Some(raw) = stored_markers {
-        intro_segment = None;
-        credits_segment = None;
-        if let Ok(markers) = serde_json::from_str::<Vec<Value>>(&raw) {
-            for marker in markers {
-                let (Some(start), Some(end), Some(confidence)) = (
-                    marker["start"].as_f64(),
-                    marker["end"].as_f64(),
-                    marker["confidence"].as_f64(),
-                ) else {
-                    continue;
-                };
-                if !start.is_finite()
-                    || !end.is_finite()
-                    || !confidence.is_finite()
-                    || start < 0.0
-                    || end <= start
-                    || confidence < 0.9
-                    || end > total_dur.unwrap_or(0.0)
-                {
-                    continue;
+    if !stored_markers.is_empty() {
+        let mut seen_kinds = std::collections::HashSet::new();
+        for (kind, start, end, confidence) in stored_markers {
+            if !seen_kinds.insert(kind.clone()) {
+                continue;
+            }
+            match kind.as_str() {
+                "intro" => intro_segment = None,
+                "credits" => credits_segment = None,
+                _ => continue,
+            }
+            if !start.is_finite()
+                || !end.is_finite()
+                || !confidence.is_finite()
+                || start < 0.0
+                || end <= start
+                || confidence < 0.9
+                || end > total_dur.unwrap_or(0.0)
+            {
+                continue;
+            }
+            match kind.as_str() {
+                "intro" if intro_segment.is_none() => {
+                    intro_segment = Some(json!({"start":start,"end":end}))
                 }
-                match marker["markerType"].as_str() {
-                    Some("intro") if intro_segment.is_none() => {
-                        intro_segment = Some(json!({"start":start,"end":end}))
-                    }
-                    Some("credits") if credits_segment.is_none() => {
-                        credits_segment = Some(json!({"start":start,"end":end}))
-                    }
-                    _ => {}
+                "credits" if credits_segment.is_none() => {
+                    credits_segment = Some(json!({"start":start,"end":end}))
                 }
+                _ => {}
             }
         }
     }
@@ -4759,14 +4879,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn editorial_migration_preserves_existing_0004_works() {
+    async fn fresh_schema_preserves_editorial_fields() {
         sqlx::any::install_default_drivers();
         let pool = sqlx::any::AnyPoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        crate::database::initialize_fresh_schema(&mut conn)
+            .await
+            .unwrap();
+        drop(conn);
         query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','Films','films','local','/test',1)")
             .execute(&pool)
             .await
@@ -5054,5 +5178,35 @@ mod tests {
                 .unwrap()["total"],
             0
         );
+    }
+
+    #[test]
+    fn test_bounded_catalogue_cache_budget_and_lru_eviction() {
+        let mut cache = BoundedCatalogueCache::new(2000);
+
+        let val1 = serde_json::json!({"items": ["movie1", "movie2"], "total": 2});
+        let val2 = serde_json::json!({"items": ["movie3", "movie4"], "total": 2});
+
+        cache.insert("key1".into(), 1, val1.clone());
+        let (bytes1, max_b, count1) = cache.stats();
+        assert_eq!(count1, 1);
+        assert!(bytes1 > 0);
+        assert!(bytes1 <= max_b);
+
+        cache.insert("key2".into(), 1, val2.clone());
+        let (bytes2, _, count2) = cache.stats();
+        assert_eq!(count2, 2);
+        assert!(bytes2 > bytes1);
+
+        // Access key1 to update its recency
+        assert!(cache.get("key1", 1).is_some());
+
+        // Stale generation removes entry
+        assert!(cache.get("key2", 2).is_none());
+        assert_eq!(cache.stats().2, 1);
+
+        cache.clear();
+        assert_eq!(cache.stats().0, 0);
+        assert_eq!(cache.stats().2, 0);
     }
 }

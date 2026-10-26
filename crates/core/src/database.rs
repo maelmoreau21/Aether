@@ -162,12 +162,76 @@ pub async fn begin_write_serialized(
         conn.begin_with("BEGIN IMMEDIATE").await
     } else {
         let mut tx = conn.begin().await?;
-        sqlx::query("SELECT CAST(pg_advisory_xact_lock($1) AS TEXT)")
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(lock_id)
             .execute(&mut *tx)
             .await?;
         Ok(tx)
     }
+}
+
+/// Install the one current schema on an empty database. Existing databases are
+/// never rewritten here; incompatible older schemas fail explicitly.
+pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sqlx::Error> {
+    const SOURCE: &str = include_str!("../schema.sql");
+    const SQLITE_START: &str = "-- AETHER_SCHEMA_SQLITE_BEGIN";
+    const SQLITE_END: &str = "-- AETHER_SCHEMA_SQLITE_END";
+    const POSTGRES_START: &str = "-- AETHER_SCHEMA_POSTGRES_BEGIN";
+    const POSTGRES_END: &str = "-- AETHER_SCHEMA_POSTGRES_END";
+    let sqlite = conn.backend_name() == "SQLite";
+    let (start, end) = if sqlite {
+        (SQLITE_START, SQLITE_END)
+    } else {
+        (POSTGRES_START, POSTGRES_END)
+    };
+    let section = SOURCE
+        .split_once(start)
+        .and_then(|(_, rest)| rest.split_once(end))
+        .map(|(schema, _)| schema)
+        .ok_or_else(|| sqlx::Error::Protocol("Missing database schema section".into()))?;
+    let mut tx = begin_write_serialized(conn, 0x4d45444941534348).await?;
+    let (tables, current): (i64, i64) = if sqlite {
+        sqlx::query_as("SELECT COUNT(*),COALESCE(SUM(CASE WHEN name='users' THEN 1 ELSE 0 END),0) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            .fetch_one(&mut *tx)
+            .await?
+    } else {
+        sqlx::query_as("SELECT COUNT(*)::bigint,COALESCE(SUM(CASE WHEN tablename='users' THEN 1 ELSE 0 END),0)::bigint FROM pg_tables WHERE schemaname=current_schema()")
+            .fetch_one(&mut *tx)
+            .await?
+    };
+    if current != 0 {
+        let marker: i64 = if sqlite {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_version'",
+            )
+            .fetch_one(&mut *tx)
+            .await?
+        } else {
+            sqlx::query_scalar("SELECT COUNT(*)::bigint FROM pg_tables WHERE schemaname=current_schema() AND tablename='schema_version'")
+                .fetch_one(&mut *tx)
+                .await?
+        };
+        if marker != 1 {
+            return Err(sqlx::Error::Protocol(
+                "Existing database uses an unsupported schema; choose a fresh database".into(),
+            ));
+        }
+        let version: i64 = sqlx::query_scalar("SELECT CAST(version AS BIGINT) FROM schema_version")
+            .fetch_one(&mut *tx)
+            .await?;
+        if version != 1 {
+            return Err(sqlx::Error::Protocol(
+                "Unsupported database schema version; choose a fresh database".into(),
+            ));
+        }
+    } else if tables != 0 {
+        return Err(sqlx::Error::Protocol(
+            "Database schema is not empty; choose a fresh database".into(),
+        ));
+    } else {
+        sqlx::raw_sql(section).execute(&mut *tx).await?;
+    }
+    tx.commit().await
 }
 
 /// Integer flags retain the existing SQLite schema and JSON boolean contract.
@@ -198,6 +262,8 @@ impl From<DbBool> for bool {
 
 #[cfg(test)]
 mod tests {
+    use sqlx::Connection;
+
     #[test]
     fn placeholders_preserve_literals() {
         assert_eq!(
@@ -211,5 +277,46 @@ mod tests {
             super::normalize_sql("SELECT ? -- ?\n, ? /* ? /* ? */ */ , ?"),
             "SELECT $1 -- ?\n, $2 /* ? /* ? */ */ , $3"
         );
+    }
+
+    #[tokio::test]
+    async fn fresh_schema_reopens_without_rewriting_data() {
+        sqlx::any::install_default_drivers();
+        let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
+            .await
+            .unwrap();
+        super::initialize_fresh_schema(&mut conn).await.unwrap();
+        super::query("INSERT INTO users(id,role) VALUES('kept','user')")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        super::initialize_fresh_schema(&mut conn).await.unwrap();
+        let count: i64 = super::query_scalar("SELECT COUNT(*) FROM users WHERE id='kept'")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn older_schema_is_rejected_without_data_loss() {
+        sqlx::any::install_default_drivers();
+        let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
+            .await
+            .unwrap();
+        super::query("CREATE TABLE users(id TEXT PRIMARY KEY)")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        super::query("INSERT INTO users(id) VALUES('kept')")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert!(super::initialize_fresh_schema(&mut conn).await.is_err());
+        let count: i64 = super::query_scalar("SELECT COUNT(*) FROM users WHERE id='kept'")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

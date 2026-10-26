@@ -158,6 +158,7 @@ pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'st
                 "images",
                 "providers",
                 "storage.private",
+                "playback.markers",
             ]
             .contains(&p.as_str())
         })
@@ -251,11 +252,22 @@ pub fn router(auth: AuthState) -> Router {
         .with_state(auth)
 }
 
-/// Called only when constructing the single production Core, before serving requests.
+/// Recover stale invocation history without interrupting another active Core.
 pub async fn initialize(auth: &AuthState) -> Result<(), sqlx::Error> {
-    query("UPDATE extension_runs SET status='interrupted' WHERE status='running'")
-        .execute(auth.store.pool())
-        .await?;
+    let mut conn = auth.store.pool().acquire().await?;
+    if conn.backend_name() == "SQLite" {
+        query("UPDATE extension_runs SET status='interrupted' WHERE status='running'")
+            .execute(&mut *conn)
+            .await?;
+    } else {
+        // The current history table has no Core owner or heartbeat. A second Core
+        // must not declare a live invocation interrupted on startup. The worker
+        // deadline is bounded; old rows can be recovered after a conservative hour.
+        query("UPDATE extension_runs SET status='interrupted' WHERE status='running' AND started_at<?")
+            .bind(media_contracts::protocol::unix_now().saturating_sub(3600))
+            .execute(&mut *conn)
+            .await?;
+    }
     Ok(())
 }
 
@@ -1335,6 +1347,12 @@ async fn worker_permitted(
 
 /// Durable invocation uses the same validation, language policy and isolated worker
 /// as interactive calls. No disk path or SQL capability is sent to the guest.
+type TargetResolution = (
+    Option<String>,
+    Option<adapters::WorkContext>,
+    Option<(String, String, String, Option<f64>)>,
+);
+
 pub(crate) async fn run_automated(
     auth: &AuthState,
     job: &crate::task_engine::Job,
@@ -1355,13 +1373,20 @@ pub(crate) async fn run_automated(
     {
         return Err(err(StatusCode::FORBIDDEN, "extension_revoked"));
     }
-    let (work_id, context): (String, adapters::WorkContext) = {
+    let (work_id, context, music_track): TargetResolution = {
         let work_id: Option<String> = query_scalar("SELECT e.work_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN libraries l ON l.id=a.library_id WHERE a.id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root")
             .bind(&job.target_id).bind(&job.library_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
-        let work_id = work_id.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_asset"))?;
-        let context = query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
-            .bind(&work_id).fetch_one(auth.store.pool()).await.map_err(db)?;
-        (work_id, context)
+        if let Some(work_id) = work_id {
+            let context = query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
+                .bind(&work_id).fetch_one(auth.store.pool()).await.map_err(db)?;
+            (Some(work_id), Some(context), None)
+        } else {
+            let track: Option<(String, String, String, Option<f64>)> = query_as("SELECT title, artist, album, duration FROM music_tracks WHERE id=? AND library_id=? AND available=1")
+                .bind(&job.target_id).bind(&job.library_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
+            let track =
+                track.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_asset_or_track"))?;
+            (None, None, Some(track))
+        }
     };
     let raw: String =
         query_scalar("SELECT package_json FROM extensions WHERE id=? AND generation=?")
@@ -1405,7 +1430,100 @@ pub(crate) async fn run_automated(
     if !legacy {
         settings["language"] = json!(options.preferred_metadata_language);
     }
-    let payload = if operation == "intro.parse_chapters" {
+    let payload = if let Some((title, artist, album, duration)) = &music_track {
+        if operation == "lyrics.get" {
+            json!({
+                "trackName": title,
+                "artistName": artist,
+                "albumName": album,
+                "duration": duration,
+                "durationSecs": duration,
+            })
+        } else {
+            json!({
+                "title": title,
+                "artist": artist,
+                "album": album,
+                "duration": duration,
+                "mediaType": "music",
+            })
+        }
+    } else if operation == "intro.detect" {
+        let context = context
+            .as_ref()
+            .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "episode_required"))?;
+        let work_id = work_id
+            .as_ref()
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "work_required"))?;
+        if context.kind != "episode" {
+            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "episode_required"));
+        }
+        let scope: (String, String, i64) = query_as("SELECT ep.season_id,se.series_id,se.season_number FROM inventory_episodes ep JOIN inventory_seasons se ON se.id=ep.season_id WHERE ep.work_id=?")
+            .bind(work_id).fetch_one(auth.store.pool()).await.map_err(db)?;
+        let candidates: Vec<(String,String,String,String,String,String,String)> = query_as("SELECT a.id,t.result_json,t.idempotency_key,obs.fingerprint,a.probe_json,ep.work_id,CAST(ep.episode_number AS TEXT) FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN automation_observations obs ON obs.asset_id=a.id JOIN durable_tasks t ON t.target_id=a.id AND t.category='analyze' AND t.component='fingerprint' AND t.status='completed' WHERE ep.season_id=? AND a.available=1 ORDER BY CASE WHEN a.id=? THEN 0 ELSE 1 END,t.finished_at DESC,a.id LIMIT 12")
+            .bind(&scope.0).bind(&job.target_id).fetch_all(auth.store.pool()).await.map_err(db)?;
+        let mut episodes = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for (asset, raw, key, source, probe, episode_work, number) in candidates {
+            if episodes.len() >= 2 {
+                break;
+            }
+            if seen.contains(&episode_work) {
+                continue;
+            }
+            let expected = format!(
+                "fp:{}",
+                crate::automation::hash(&(&asset, &source, "chromaprint-v1")).map_err(db)?
+            );
+            if key != expected {
+                continue;
+            }
+            let Ok(result) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
+            let Some(words) = result["fingerprints"]
+                .as_array()
+                .filter(|v| !v.is_empty() && v.len() <= 6000)
+            else {
+                continue;
+            };
+            let mut bytes = Vec::with_capacity(words.len() * 4);
+            let mut valid = true;
+            for word in words {
+                if let Some(n) = word.as_u64().filter(|n| *n <= u32::MAX as u64) {
+                    bytes.extend_from_slice(&(n as u32).to_le_bytes());
+                } else {
+                    valid = false;
+                    break;
+                }
+            }
+            if !valid {
+                continue;
+            }
+            let Ok(probe) = serde_json::from_str::<Value>(&probe) else {
+                continue;
+            };
+            let Some(duration) = probe["format"]["duration"]
+                .as_str()
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|n| n.is_finite() && *n > 0.0)
+            else {
+                continue;
+            };
+            seen.insert(episode_work);
+            episodes.push(json!({"id":asset,"seriesId":scope.1,"seasonNumber":scope.2,"episodeNumber":number.parse::<u32>().ok(),"duration":duration,"fingerprintsCompact":STANDARD.encode(bytes),"fingerprintRate":result["fingerprintRate"]}));
+        }
+        if episodes.len() != 2 || episodes[0]["id"] != job.target_id {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "compatible_fingerprint_peer_required",
+            ));
+        }
+        json!({"episodes":episodes})
+    } else if operation == "intro.parse_chapters" {
+        let context = context
+            .as_ref()
+            .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "episode_required"))?;
         if context.kind != "episode" {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "episode_required"));
         }
@@ -1424,9 +1542,7 @@ pub(crate) async fn run_automated(
             .and_then(|value| value.parse::<f64>().ok())
             .filter(|value| value.is_finite() && *value > 0.0)
             .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "duration_required"))?;
-        let chapters = probe["chapters"]
-            .as_array()
-            .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "chapters_required"))?;
+        let chapters = probe["chapters"].as_array().cloned().unwrap_or_default();
         if chapters.len() > 1000 {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "too_many_chapters"));
         }
@@ -1441,7 +1557,13 @@ pub(crate) async fn run_automated(
             .collect();
         json!({"episodeId":work_id,"duration":duration,"chapters":chapters})
     } else {
-        let mut value = adapters::metadata_input(&context, &work_id, operation, &json!({}))?;
+        let context = context
+            .as_ref()
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "work_context_required"))?;
+        let work_id = work_id
+            .as_ref()
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "work_id_required"))?;
+        let mut value = adapters::metadata_input(context, work_id, operation, &json!({}))?;
         if operation != "metadata.propose" {
             value["language"] = settings["language"].clone();
         }
@@ -1454,11 +1576,26 @@ pub(crate) async fn run_automated(
         input: ExtensionRequest {
             api_version: 1,
             operation: operation.into(),
-            input: metadata_input_with_settings(payload, settings),
+            input: metadata_input_with_settings(payload.clone(), settings),
         },
         allowed_hosts: package.manifest.http_hosts.clone(),
         auth_headers: Default::default(),
     };
+    let now = media_contracts::protocol::unix_now();
+    let mut conn = auth.store.pool().acquire().await.map_err(db)?;
+    let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
+    if let Some(cached) = crate::automation::get_cached_provider_response(
+        &mut tx,
+        extension_id,
+        operation,
+        &payload,
+        now,
+    )
+    .await
+    .map_err(db)?
+    {
+        return Ok(cached);
+    }
     let result = invoke_worker_context(
         auth,
         &headers,
@@ -1469,19 +1606,15 @@ pub(crate) async fn run_automated(
         Some(job),
     )
     .await?;
-    // A unique exact-title candidate can be enriched automatically. Ambiguity stays
-    // a validated search result for review rather than selecting the first match.
-    if operation == "metadata.search"
+    if music_track.is_some()
+        && operation == "metadata.search"
         && let Some(items) = result.as_array()
-        && items.len() == 1
-        && items[0]["title"].as_str().is_some_and(|title| {
-            title.eq_ignore_ascii_case(invocation.input.input["title"].as_str().unwrap_or(""))
-        })
+        && let Some(candidate) = trusted_music_candidate(items, &invocation.input.input)
     {
         let mut details = invocation;
         details.input.operation = "metadata.details".into();
-        details.input.input["id"] = items[0]["id"].clone();
-        return invoke_worker_context(
+        details.input.input["id"] = candidate["id"].clone();
+        let enriched = invoke_worker_context(
             auth,
             &headers,
             extension_id,
@@ -1490,15 +1623,155 @@ pub(crate) async fn run_automated(
             details,
             Some(job),
         )
+        .await?;
+        let _ = crate::automation::put_cached_provider_response(
+            &mut tx,
+            extension_id,
+            operation,
+            &payload,
+            &enriched,
+            86400,
+            now,
+        )
         .await;
+        let _ = crate::database::commit(tx).await;
+        return Ok(enriched);
     }
+    // Only an unambiguous title/type/year match may reach automatic details.
+    if operation == "metadata.search"
+        && let Some(items) = result.as_array()
+        && let Some(candidate) = trusted_metadata_candidate(items, &invocation.input.input)
+    {
+        let mut details = invocation;
+        details.input.operation = "metadata.details".into();
+        details.input.input["id"] = candidate["id"].clone();
+        let enriched = invoke_worker_context(
+            auth,
+            &headers,
+            extension_id,
+            &job.library_id,
+            generation,
+            details,
+            Some(job),
+        )
+        .await?;
+        let id_matches = enriched["providerId"]
+            .as_str()
+            .is_some_and(|id| id == candidate["id"].as_str().unwrap_or(""));
+        let title_matches = enriched["title"].as_str().is_none_or(|title| {
+            normalize_title(title) == normalize_title(candidate["title"].as_str().unwrap_or(""))
+        });
+        let year_matches = invocation_year_matches(&enriched, candidate);
+        if id_matches && title_matches && year_matches {
+            let _ = crate::automation::put_cached_provider_response(
+                &mut tx,
+                extension_id,
+                operation,
+                &payload,
+                &enriched,
+                86400,
+                now,
+            )
+            .await;
+            let _ = crate::database::commit(tx).await;
+            return Ok(enriched);
+        }
+    }
+    let _ = crate::automation::put_cached_provider_response(
+        &mut tx,
+        extension_id,
+        operation,
+        &payload,
+        &result,
+        86400,
+        now,
+    )
+    .await;
+    let _ = crate::database::commit(tx).await;
     Ok(result)
+}
+
+fn normalize_title(title: &str) -> String {
+    title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+fn invocation_year_matches(details: &Value, candidate: &Value) -> bool {
+    details["year"].as_i64().is_none_or(|year| {
+        candidate["year"]
+            .as_i64()
+            .is_none_or(|expected| year == expected)
+    })
+}
+fn trusted_metadata_candidate<'a>(items: &'a [Value], input: &Value) -> Option<&'a Value> {
+    let title = normalize_title(input["title"].as_str()?);
+    let media_type = input["mediaType"].as_str()?;
+    let year = input["year"].as_i64();
+    let mut matches = items.iter().filter(|item| {
+        item["title"]
+            .as_str()
+            .is_some_and(|name| normalize_title(name) == title)
+            && item["mediaType"].as_str() == Some(media_type)
+            && year.is_none_or(|expected| item["year"].as_i64() == Some(expected))
+    });
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
+}
+
+pub fn trusted_music_candidate<'a>(items: &'a [Value], input: &Value) -> Option<&'a Value> {
+    let title = normalize_title(input["title"].as_str()?);
+    let artist = input["artist"].as_str().map(normalize_title);
+    let duration = input["duration"].as_f64();
+    let mut matches = items.iter().filter(|item| {
+        let item_title = item["title"].as_str().map(normalize_title);
+        let title_ok = item_title.as_deref() == Some(&title);
+        let artist_ok = match (&artist, item["artist"].as_str().map(normalize_title)) {
+            (Some(expected), Some(actual)) => {
+                expected == &actual || actual.contains(expected) || expected.contains(&actual)
+            }
+            (None, _) => true,
+            _ => false,
+        };
+        let duration_ok = match (
+            duration,
+            item["duration"]
+                .as_f64()
+                .or_else(|| item["length"].as_f64().map(|ms| ms / 1000.0)),
+        ) {
+            (Some(d1), Some(d2)) => (d1 - d2).abs() <= 5.0 || (d1 - d2).abs() / d1.max(1.0) <= 0.05,
+            _ => true,
+        };
+        title_ok && artist_ok && duration_ok
+    });
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
 }
 
 #[cfg(test)]
 mod configuration_tests {
     use super::*;
     use media_extension_sdk::MetadataInput;
+    #[test]
+    fn automatic_candidate_requires_unique_title_type_and_year() {
+        let input = json!({"title":"  Film  Test ","mediaType":"movie","year":2024});
+        let candidate = json!({"id":"42","title":"Film Test","mediaType":"movie","year":2024});
+        assert_eq!(
+            trusted_metadata_candidate(std::slice::from_ref(&candidate), &input).unwrap()["id"],
+            "42"
+        );
+        assert!(
+            trusted_metadata_candidate(&[candidate.clone(), candidate.clone()], &input).is_none()
+        );
+        for other in [
+            json!({"id":"42","title":"Film Test","mediaType":"tv_show","year":2024}),
+            json!({"id":"42","title":"Film Test","mediaType":"movie","year":2023}),
+            json!({"id":"42","title":"Different","mediaType":"movie","year":2024}),
+        ] {
+            assert!(trusted_metadata_candidate(&[other], &input).is_none());
+        }
+    }
     #[test]
     fn historical_empty_endpoint_keeps_provider_default_and_credentials() {
         let value = metadata_input_with_settings(

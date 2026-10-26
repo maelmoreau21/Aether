@@ -478,7 +478,12 @@ fn execute_inner(
 
     let mut store = Store::new(&engine, host_state);
     store.limiter(|state| &mut state.limits);
-    store.set_fuel(2_000_000).map_err(|_| "runtime_error")?;
+    let fuel = if invocation.input.operation == "intro.detect" {
+        200_000_000
+    } else {
+        2_000_000
+    };
+    store.set_fuel(fuel).map_err(|_| "runtime_error")?;
 
     let mut linker = Linker::new(&engine);
     let _ = linker.func_wrap(

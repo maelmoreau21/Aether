@@ -280,15 +280,13 @@ fn inspect_child_processes(parent_pid: u32) -> Vec<ChildProcessMemory> {
                         let status_path = entry.path().join("status");
                         if let Ok(status) = std::fs::read_to_string(&status_path) {
                             for line in status.lines() {
-                                if let Some(rest) = line.strip_prefix("VmRSS:") {
-                                    if let Some(val) = rest
-                                        .split_whitespace()
-                                        .next()
-                                        .and_then(|v| v.parse::<u64>().ok())
-                                    {
-                                        rss_bytes = val * 1024;
-                                        break;
-                                    }
+                                if let Some(val) = line
+                                    .strip_prefix("VmRSS:")
+                                    .and_then(|rest| rest.split_whitespace().next())
+                                    .and_then(|v| v.parse::<u64>().ok())
+                                {
+                                    rss_bytes = val * 1024;
+                                    break;
                                 }
                             }
                         }

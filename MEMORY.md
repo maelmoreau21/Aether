@@ -4556,3 +4556,7 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
 - `ci.yml` et `release.yml` regroupent les écritures dans `GITHUB_OUTPUT` pour satisfaire ShellCheck SC2129, sans changer les sorties de release.
 - Les blocs FFI `malloc_trim` du Node et du Core sont déclarés `unsafe extern "C"`, conformément à Rust 2024 pour Linux GNU. Le lien externe de `SettingsView.svelte` porte une exception ESLint limitée à cette ancre GitHub.
 - Vérifié localement : `actionlint` 1.7.12 sur tous les workflows, `cargo check --locked -p media-node -p media-poc`, `npm run lint` et `npm run check` (0 erreur, 5 avertissements existants). `cargo fmt --all -- --check` signale un écart préexistant dans `crates/shared/build.rs`. Le contrôle croisé Linux a été bloqué par l'absence d'un sysroot OpenSSL Linux sur l'hôte Windows ; la CI Linux reste à confirmer après intégration.
+
+## 26 octobre 2026 — Correction du contrôle de format CI
+
+- Les deux expressions `if !s.is_empty()` de `crates/shared/build.rs` ont été mises au format attendu par rustfmt, sans changement de comportement. `cargo fmt --all -- --check` et `git diff --check` passent localement ; le run GitHub après intégration reste à vérifier.

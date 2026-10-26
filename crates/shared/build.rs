@@ -30,11 +30,7 @@ fn main() {
             .and_then(|output| {
                 if output.status.success() {
                     let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if !s.is_empty() {
-                        Some(s)
-                    } else {
-                        None
-                    }
+                    if !s.is_empty() { Some(s) } else { None }
                 } else {
                     None
                 }
@@ -49,11 +45,7 @@ fn main() {
         .and_then(|output| {
             if output.status.success() {
                 let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !s.is_empty() {
-                    Some(s)
-                } else {
-                    None
-                }
+                if !s.is_empty() { Some(s) } else { None }
             } else {
                 None
             }

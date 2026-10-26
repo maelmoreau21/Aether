@@ -175,12 +175,15 @@ mod tests {
 
     #[tokio::test]
     async fn confined_av1_opus_asset_produces_bounded_chromaprint() {
-        if std::process::Command::new("ffmpeg")
-            .arg("-version")
+        let has_chromaprint = std::process::Command::new("ffmpeg")
+            .arg("-muxers")
             .output()
-            .is_err()
-        {
-            eprintln!("ffmpeg unavailable; Chromaprint adapter not exercised");
+            .map(|out| {
+                out.status.success() && String::from_utf8_lossy(&out.stdout).contains("chromaprint")
+            })
+            .unwrap_or(false);
+        if !has_chromaprint {
+            eprintln!("ffmpeg Chromaprint muxer unavailable; Chromaprint adapter not exercised");
             return;
         }
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))

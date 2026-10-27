@@ -2,6 +2,7 @@ import { get, writable } from 'svelte/store';
 import { session, getSessionGeneration, onSessionGenerationChange } from './auth/session';
 import type { SubtitlePreference } from './player/subtitle-preference';
 import { sanitizeSubtitleStyle, type SubtitleStyle } from './player/subtitle-style';
+import type { ArtworkRotationPolicy } from './catalog/artwork-rotation-policy.svelte';
 
 export type Preferences = {
   theme?: 'light' | 'dark' | 'system'; locale?: 'fr' | 'en'; audioLanguage?: string;
@@ -9,6 +10,7 @@ export type Preferences = {
   offsets?: { audio: number; subtitle: number }; subtitlePreference?: SubtitlePreference;
   subtitleStyle?: SubtitleStyle;
   skipIntroEnabled?: boolean; skipCreditsEnabled?: boolean;
+  artworkRotation?: ArtworkRotationPolicy;
 };
 let current: Preferences = {};
 let owner: string | null = null;

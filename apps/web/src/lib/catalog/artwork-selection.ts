@@ -58,7 +58,7 @@ function choose(work: Work, kind: string, candidates: NonNullable<Work['imageVar
   }
   const key = `${work.id}:${kind}`;
   const previous = choices[key];
-  if (previous?.session === session && candidates.some(image => image.id === previous.image)) return candidates.find(image => image.id === previous.image)!.url;
+  if (previous?.session === session && (policy.minHoursBetweenSwitches === 0 || !previous.switchedAt || Date.now() - previous.switchedAt < policy.minHoursBetweenSwitches * 3_600_000) && candidates.some(image => image.id === previous.image)) return candidates.find(image => image.id === previous.image)!.url;
   if (previous?.switchedAt && Date.now() - previous.switchedAt < policy.minHoursBetweenSwitches * 3_600_000) {
     const retained = candidates.find(image => image.id === previous.image);
     if (retained) return retained.url;
@@ -97,7 +97,7 @@ export function selectArtwork(work: Work | null | undefined, current: Session | 
       selected[kind] = manual[0].url;
       continue;
     }
-    const rotation = kind === 'poster' && policy.enabled && policy.libraries.includes(work.libraryId)
+    const rotation = kind === 'poster' && policy.enabled
       && ((work.kind === 'film' && policy.enableMovies) || (work.kind === 'series' && policy.enableSeries));
     const selectionLanguages = rotation ? [policy.preferredLanguage, policy.fallbackLanguage] : languages;
     if (rotation) {

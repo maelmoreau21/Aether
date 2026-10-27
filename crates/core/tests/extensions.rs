@@ -269,135 +269,6 @@ async fn call(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn poster_rotation_policy_follows_install_grants_settings_and_disable() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = IdentityStore::open(&temp.path().join("db.sqlite"))
-        .await
-        .unwrap();
-    store
-        .bootstrap(
-            "poster-admin",
-            Zeroizing::new("synthetic poster password".into()),
-        )
-        .await
-        .unwrap();
-    media_poc::libraries::initialize_local(&store)
-        .await
-        .unwrap();
-    for id in ["films", "other"] {
-        media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,'films','local','synthetic',1)")
-            .bind(id).bind(id).execute(store.pool()).await.unwrap();
-    }
-    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
-        .await
-        .unwrap();
-    let app = extensions::router(auth.clone()).merge(auth::router(auth));
-    let endpoint = "/api/v1/artwork/rotation-policy";
-    assert_eq!(
-        call(&app, "GET", endpoint, "", "", Value::Null).await.0,
-        StatusCode::UNAUTHORIZED
-    );
-    let (_, login, cookie) = call(
-        &app,
-        "POST",
-        "/api/v1/auth/login",
-        "",
-        "",
-        json!({"login":"poster-admin","password":"synthetic poster password"}),
-    )
-    .await;
-    let csrf = login["csrfToken"].as_str().unwrap();
-    assert_eq!(
-        call(&app, "GET", endpoint, &cookie, "", Value::Null)
-            .await
-            .1["enabled"],
-        false
-    );
-    let signing = key();
-    assert_eq!(
-        call(
-            &app,
-            "POST",
-            "/api/v1/admin/extensions/publishers",
-            &cookie,
-            csrf,
-            json!({"id":"test","publicKey":STANDARD.encode(signing.public_key().as_ref())})
-        )
-        .await
-        .0,
-        StatusCode::CREATED
-    );
-    let mut pkg = package(&signing, good_module());
-    pkg.manifest.id = "poster-rotator".into();
-    pkg.manifest.permissions = vec!["images".into()];
-    pkg.signature = STANDARD.encode(signing.sign(&pkg.signing_bytes().unwrap()).as_ref());
-    assert_eq!(
-        call(
-            &app,
-            "POST",
-            "/api/v1/admin/extensions",
-            &cookie,
-            csrf,
-            json!(pkg)
-        )
-        .await
-        .0,
-        StatusCode::CREATED
-    );
-    assert_eq!(
-        call(
-            &app,
-            "PUT",
-            "/api/v1/admin/extensions/poster-rotator",
-            &cookie,
-            csrf,
-            json!({"enabled":true,"libraryIds":["films"],"allLibraries":false})
-        )
-        .await
-        .0,
-        StatusCode::NO_CONTENT
-    );
-    assert_eq!(
-        call(
-            &app,
-            "PUT",
-            "/api/v1/admin/extensions/poster-rotator/settings",
-            &cookie,
-            csrf,
-            json!({"rotation_mode":"sequential","pool_size":3,"preferred_language":"fr-CA"})
-        )
-        .await
-        .0,
-        StatusCode::NO_CONTENT
-    );
-    let (status, policy, _) = call(&app, "GET", endpoint, &cookie, "", Value::Null).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(policy["libraries"], json!(["films"]));
-    assert_eq!(policy["rotationMode"], "sequential");
-    assert_eq!(policy["poolSize"], 3);
-    assert_eq!(policy["preferredLanguage"], "fr-ca");
-    assert_eq!(
-        call(
-            &app,
-            "PUT",
-            "/api/v1/admin/extensions/poster-rotator",
-            &cookie,
-            csrf,
-            json!({"enabled":false,"libraryIds":["films"],"allLibraries":false})
-        )
-        .await
-        .0,
-        StatusCode::NO_CONTENT
-    );
-    assert_eq!(
-        call(&app, "GET", endpoint, &cookie, "", Value::Null)
-            .await
-            .1["enabled"],
-        false
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn image_collection_uses_only_enabled_providers_and_skips_known_sources() {
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("db.sqlite"))
@@ -2181,7 +2052,7 @@ async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutatio
     .unwrap();
 
     // 2. Prepare v2 package
-    let wasm2 = wat::parse_str(r#"(module (memory (export "memory") 2 256))"#).unwrap();
+    let wasm2 = good_module();
     let mut p2 = package(&signing, wasm2.clone());
     p2.manifest.id = "upgradable.ext".into();
     p2.manifest.version = "2.0.0".into();
@@ -2200,6 +2071,30 @@ async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutatio
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{resp}");
     assert_eq!(resp["error"], "extension_update_compatibility_unverified");
+
+    for (field, value, expected) in [
+        ("permissions", json!(["storage.private", "metadata.read"]), "extension_update_requires_authorization"),
+        ("httpHosts", json!(["example.com"]), "extension_update_requires_authorization"),
+        ("targetAbi", json!("2.0"), "incompatible_server_version"),
+        ("configSchema", json!([{ "key": "added", "label": "Added", "fieldType": "text" }]), "extension_settings_compatibility_unverified"),
+    ] {
+        let mut manifest = serde_json::to_value(&p2.manifest).unwrap();
+        manifest[field] = value;
+        let mut changed = p2.clone();
+        changed.manifest = serde_json::from_value(manifest).unwrap();
+        changed.signature = STANDARD.encode(signing.sign(&changed.signing_bytes().unwrap()).as_ref());
+        let (_, response, _) = call(&app, "POST", "/api/v1/admin/extensions/upgradable.ext/upgrade", &cookie, csrf, serde_json::to_value(changed).unwrap()).await;
+        assert_eq!(response["error"], expected, "{response}");
+    }
+
+    let mut bad_abi = p2.clone();
+    let invalid = wat::parse_str(r#"(module (memory (export "memory") 1))"#).unwrap();
+    bad_abi.wasm = STANDARD.encode(&invalid);
+    bad_abi.sha256 = format!("{:x}", Sha256::digest(&invalid));
+    bad_abi.signature = STANDARD.encode(signing.sign(&bad_abi.signing_bytes().unwrap()).as_ref());
+    let (status, response, _) = call(&app, "POST", "/api/v1/admin/extensions/upgradable.ext/upgrade", &cookie, csrf, serde_json::to_value(bad_abi).unwrap()).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(response["error"], "incompatible_abi");
 
     // 4. The active generation and package remain unchanged.
     let gen_v2: String = media_poc::database::query_scalar(

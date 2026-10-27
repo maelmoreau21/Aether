@@ -350,7 +350,7 @@ async fn execute_inner(
         StorageOperation::Put { .. } | StorageOperation::Delete { .. }
     );
     let mut tx = if writing {
-        begin_write_scoped(&mut conn, "extension_data", &c.extension_id).await?
+        begin_write_scoped(&mut conn, "extension_state", &c.extension_id).await?
     } else {
         sqlx::Connection::begin(&mut *conn).await?
     };

@@ -204,7 +204,7 @@ fn version(raw: &str) -> Option<[u64; 3]> {
         parts[2].parse().ok()?,
     ])
 }
-fn compatible(manifest: &Manifest) -> bool {
+pub(super) fn compatible(manifest: &Manifest) -> bool {
     let current = media_contracts::version::current_version();
     let Some(current) = version(current.split('-').next().unwrap_or(current)) else {
         return false;

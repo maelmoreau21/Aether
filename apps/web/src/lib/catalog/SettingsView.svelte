@@ -12,6 +12,7 @@
   import { themeMode, setTheme, type ThemeMode } from '../theme';
   import { DEFAULT_SUBTITLE_STYLE, sanitizeSubtitleStyle, subtitleStyleToCss, type SubtitleStyle } from '../player/subtitle-style';
   import { fetchServerConfig, type AppServerConfig } from '../config/brand';
+  import { defaultArtworkRotationPolicy, setArtworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
 
   let serverConfig = $state<AppServerConfig | null>(null);
 
@@ -36,6 +37,8 @@
   let skipIntroEnabled = $state(preferences().skipIntroEnabled !== false);
   let skipCreditsEnabled = $state(preferences().skipCreditsEnabled !== false);
   let offsetsEdited = false;
+  let artworkRotation = $state<ArtworkRotationPolicy>({ ...defaultArtworkRotationPolicy, ...preferences().artworkRotation });
+  let artworkEdited = false;
 
   let subtitleStyle = $state<Required<SubtitleStyle>>({
     ...DEFAULT_SUBTITLE_STYLE,
@@ -68,6 +71,7 @@
       }
       skipIntroEnabled = saved.skipIntroEnabled !== false;
       skipCreditsEnabled = saved.skipCreditsEnabled !== false;
+      if (!artworkEdited) artworkRotation = { ...defaultArtworkRotationPolicy, ...saved.artworkRotation };
     }).catch(() => {});
     const sync = () => { const hash = window.location.hash.slice(1); const id = hash === 'appearance' ? 'account' : hash === 'sso' ? 'security' : hash; current = pages.some(page => page.id === id) ? id : 'account'; };
     sync(); window.addEventListener('hashchange', sync);
@@ -79,6 +83,13 @@
     if ([audioOffset, subtitleOffset].every(value => Number.isFinite(value) && Math.abs(value) <= 30)) {
       savePreferences({ offsets: { audio: audioOffset, subtitle: subtitleOffset } });
     }
+  }
+  function saveArtworkRotation(event: SubmitEvent) {
+    event.preventDefault();
+    artworkEdited = true;
+    const value = { ...artworkRotation };
+    savePreferences({ artworkRotation: value });
+    setArtworkRotationPolicy(value);
   }
 </script>
 
@@ -138,6 +149,21 @@
 
       </div>
 </section>
+      <form class="card offsets" onsubmit={saveArtworkRotation}>
+        <h2>Affichage des affiches</h2>
+        <p class="muted">La rotation utilise les affiches déjà présentes. Les images choisies manuellement restent prioritaires.</p>
+        <label><span>Activer la rotation</span><input type="checkbox" bind:checked={artworkRotation.enabled} onchange={() => artworkEdited = true} /></label>
+        <label><span>Films</span><input type="checkbox" bind:checked={artworkRotation.enableMovies} onchange={() => artworkEdited = true} /></label>
+        <label><span>Séries</span><input type="checkbox" bind:checked={artworkRotation.enableSeries} onchange={() => artworkEdited = true} /></label>
+        <label>Ordre<select bind:value={artworkRotation.rotationMode} onchange={() => artworkEdited = true}><option value="random">Aléatoire</option><option value="sequential">Séquentiel</option></select></label>
+        <label>Intervalle minimal en heures (0 : nouvelle visite)<input type="number" min="0" max="720" step="1" required bind:value={artworkRotation.minHoursBetweenSwitches} oninput={() => artworkEdited = true} /></label>
+        <label>Nombre maximal d'affiches<input type="number" min="1" max="24" step="1" required bind:value={artworkRotation.poolSize} oninput={() => artworkEdited = true} /></label>
+        <label>Langue préférée<input type="text" pattern="[A-Za-z0-9-]+" minlength="2" maxlength="35" required bind:value={artworkRotation.preferredLanguage} oninput={() => artworkEdited = true} /></label>
+        <label>Langue de repli<input type="text" pattern="[A-Za-z0-9-]+" minlength="2" maxlength="35" required bind:value={artworkRotation.fallbackLanguage} oninput={() => artworkEdited = true} /></label>
+        <label><span>Inclure les images sans langue</span><input type="checkbox" bind:checked={artworkRotation.includeUnknownLanguage} onchange={() => artworkEdited = true} /></label>
+        <label><span>Accepter les autres langues en repli</span><input type="checkbox" bind:checked={artworkRotation.allowAnyLanguageFallback} onchange={() => artworkEdited = true} /></label>
+        <button type="submit">Enregistrer l'affichage</button>
+      </form>
       <section class="card profile-card" aria-label="Informations du compte">
         <div class="profile-info-list">
           <div class="info-row">

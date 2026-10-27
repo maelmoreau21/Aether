@@ -7,7 +7,7 @@ import { setArtworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-
 const current: Session = { user: { id: 'viewer', login: 'viewer', role: 'user' }, csrfToken: 'session-one' };
 const work: Work = { id: 'film', title: 'Film', kind: 'film', year: null, description: '', libraryId: 'library', synthetic: false, artwork: { backdrop: '/fallback' }, posterUrl: '/poster' };
 const variant = (id: string, kind = 'backdrop', language: string | null = null, origin = 'provider', position = 0) => ({ id, kind, language, origin, position, url: `/images/${id}` });
-const policy: ArtworkRotationPolicy = { enabled: true, libraries: ['library'], enableMovies: true, enableSeries: true, rotationMode: 'random', minHoursBetweenSwitches: 0, poolSize: 4, preferredLanguage: 'fr', fallbackLanguage: 'en', includeUnknownLanguage: true, allowAnyLanguageFallback: true };
+const policy: ArtworkRotationPolicy = { enabled: true, enableMovies: true, enableSeries: true, rotationMode: 'random', minHoursBetweenSwitches: 0, poolSize: 4, preferredLanguage: 'fr', fallbackLanguage: 'en', includeUnknownLanguage: true, allowAnyLanguageFallback: true };
 
 beforeEach(() => {
   const stored = new Map<string, string>();
@@ -75,22 +75,31 @@ test('new browsing visits rotate while the authentication cookie remains the sam
   expect(selectArtwork(item, current).poster).not.toBe(first);
 });
 
-test('disabled extension leaves posters fixed and does not write rotation history', () => {
+test('disabled rotation leaves posters fixed and does not write rotation history', () => {
   setArtworkRotationPolicy({ ...policy, enabled: false });
   const item = { ...work, imageVariants: [variant('b', 'poster'), variant('a', 'poster')] };
   expect(selectArtwork(item, current).poster).toBe('/images/a');
   expect(localStorage.getItem('media_artwork_choices_viewer')).toBeNull();
 });
 
-test('library, media type, pool size and sequential setting control rotation', () => {
+test('media type, pool size and sequential setting control rotation', () => {
   setArtworkRotationPolicy({ ...policy, rotationMode: 'sequential', poolSize: 2 });
   const item = { ...work, imageVariants: [variant('a', 'poster'), variant('b', 'poster'), variant('c', 'poster')] };
   const first = selectArtwork(item, current).poster;
   expect(['/images/a', '/images/b']).toContain(first);
   session.set({ ...current, csrfToken: 'next' }); setArtworkRotationPolicy({ ...policy, rotationMode: 'sequential', poolSize: 2 });
   expect(selectArtwork(item, { ...current, csrfToken: 'next' }).poster).toBe(first === '/images/a' ? '/images/b' : '/images/a');
-  setArtworkRotationPolicy({ ...policy, libraries: [] });
-  expect(selectArtwork(item, current).poster).toBe('/images/a');
+});
+
+test('rotates at the configured interval within the same visit', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-27T10:00:00Z'));
+  setArtworkRotationPolicy({ ...policy, rotationMode: 'sequential', minHoursBetweenSwitches: 1 });
+  const item = { ...work, imageVariants: [variant('a', 'poster'), variant('b', 'poster')] };
+  const first = selectArtwork(item, current).poster;
+  vi.advanceTimersByTime(3_600_000);
+  expect(selectArtwork(item, current).poster).not.toBe(first);
+  vi.useRealTimers();
 });
 
 test('minimum interval holds the previous poster and film switch excludes series', () => {

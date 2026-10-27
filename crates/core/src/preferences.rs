@@ -31,6 +31,22 @@ struct Preferences {
     skip_intro_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     skip_credits_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    artwork_rotation: Option<ArtworkRotation>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ArtworkRotation {
+    enabled: bool,
+    enable_movies: bool,
+    enable_series: bool,
+    rotation_mode: String,
+    min_hours_between_switches: u32,
+    pool_size: u32,
+    preferred_language: String,
+    fallback_language: String,
+    include_unknown_language: bool,
+    allow_any_language_fallback: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -83,7 +99,13 @@ fn hex_color(value: &str) -> bool {
 }
 impl Preferences {
     fn valid(&self) -> bool {
-        self.theme
+        self.artwork_rotation.as_ref().is_none_or(|v| {
+            matches!(v.rotation_mode.as_str(), "random" | "sequential")
+                && v.min_hours_between_switches <= 720
+                && (1..=24).contains(&v.pool_size)
+                && language(&v.preferred_language)
+                && language(&v.fallback_language)
+        }) && self.theme
             .as_deref()
             .is_none_or(|v| matches!(v, "light" | "dark" | "system"))
             && self

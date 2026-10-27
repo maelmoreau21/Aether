@@ -1,33 +1,39 @@
 import { getSessionGeneration, onSessionGenerationChange } from '../auth/session';
+import { ensurePreferences } from '../preferences';
 
 export type ArtworkRotationPolicy = {
-  enabled: boolean; libraries: string[]; enableMovies: boolean; enableSeries: boolean;
+  enabled: boolean; enableMovies: boolean; enableSeries: boolean;
   rotationMode: 'random' | 'sequential'; minHoursBetweenSwitches: number; poolSize: number;
   preferredLanguage: string; fallbackLanguage: string;
   includeUnknownLanguage: boolean; allowAnyLanguageFallback: boolean;
 };
 
-const disabled: ArtworkRotationPolicy = {
-  enabled: false, libraries: [], enableMovies: true, enableSeries: true,
+export const defaultArtworkRotationPolicy: ArtworkRotationPolicy = {
+  enabled: false, enableMovies: true, enableSeries: true,
   rotationMode: 'random', minHoursBetweenSwitches: 0, poolSize: 4,
   preferredLanguage: 'fr', fallbackLanguage: 'en',
   includeUnknownLanguage: true, allowAnyLanguageFallback: true,
 };
-let current = $state<ArtworkRotationPolicy>(disabled);
+let current = $state<ArtworkRotationPolicy>(defaultArtworkRotationPolicy);
+let timer: ReturnType<typeof setInterval> | undefined;
 export function artworkRotationPolicy(): ArtworkRotationPolicy { return current; }
-export function setArtworkRotationPolicy(value: ArtworkRotationPolicy): void { current = value; }
-onSessionGenerationChange(() => { current = disabled; });
+export function setArtworkRotationPolicy(value: ArtworkRotationPolicy): void {
+  if (timer) clearInterval(timer);
+  timer = undefined;
+  current = value;
+  if (typeof window !== 'undefined' && value.enabled && value.minHoursBetweenSwitches > 0) {
+    timer = setInterval(() => { current = { ...current }; }, 60_000);
+  }
+}
+onSessionGenerationChange(() => { setArtworkRotationPolicy(defaultArtworkRotationPolicy); });
 
 export async function loadArtworkRotationPolicy(signal?: AbortSignal): Promise<void> {
-  current = disabled;
+  setArtworkRotationPolicy(defaultArtworkRotationPolicy);
   const generation = getSessionGeneration();
   try {
-    const response = await fetch('/api/v1/artwork/rotation-policy', { credentials: 'same-origin', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000) });
-    if (!response.ok || signal?.aborted || generation !== getSessionGeneration()) return;
-    const policy: unknown = await response.json();
-    if (signal?.aborted || generation !== getSessionGeneration() || !policy || typeof policy !== 'object') return;
-    const input = policy as Partial<ArtworkRotationPolicy>;
-    if (!input.enabled || !Array.isArray(input.libraries)) return;
-    current = { ...disabled, ...input, libraries: input.libraries.filter((id): id is string => typeof id === 'string') };
-  } catch { /* Keep artwork fixed if the policy is unavailable. */ }
+    const saved = await ensurePreferences();
+    if (!signal?.aborted && generation === getSessionGeneration()) {
+      setArtworkRotationPolicy(saved?.artworkRotation ?? defaultArtworkRotationPolicy);
+    }
+  } catch { /* Keep artwork fixed if preferences are unavailable. */ }
 }

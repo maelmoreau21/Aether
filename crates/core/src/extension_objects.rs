@@ -123,7 +123,7 @@ async fn execute_inner(
     let (kind, scope_id) = extension_data::scope_identity(context, &request.scope)
         .map_err(|_| error("permission_denied"))?;
     let mut conn = store.pool().acquire().await.map_err(database)?;
-    let mut tx = begin_write_scoped(&mut conn, "extension_objects", &context.extension_id)
+    let mut tx = begin_write_scoped(&mut conn, "extension_state", &context.extension_id)
         .await
         .map_err(database)?;
     extension_data::authorize(&mut tx, context)

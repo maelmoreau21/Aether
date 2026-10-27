@@ -136,6 +136,12 @@ jamais incorporés au paquet signé. Le serveur stocke cette configuration dans
 la base applicative, accessible à l’administrateur ; cela ne constitue pas un
 coffre de secrets chiffrés autonome.
 
+Les champs de configuration de fournisseur affichés proviennent du manifeste
+signé ; l'interface ne choisit plus d'adresse selon l'identifiant du plugin.
+Une adresse `base_url` vide est omise avant l'appel : le fournisseur peut
+alors utiliser sa propre valeur par défaut. Les préférences de langue du
+catalogue restent fournies par le contexte de bibliothèque.
+
 ## Exécution et révocation
 
 Wasmi 2.0.0 dans un worker temporaire distinct du Core; aucun chargement natif

@@ -383,13 +383,10 @@ propositions de métadonnées et historique. Le catalogue distant a été ajout�
 Intro Skipper restent absents. Preuves et limites du contrat local initial :
 [evidence/2026-10-20/extensions/README.md](evidence/2026-10-20/extensions/README.md).
 
-`GET /api/v1/artwork/rotation-policy` exige une session et renvoie la politique
-de Poster Rotator pour les seules bibliothèques visibles et autorisées au compte.
-Extension absente, désactivée ou éditeur révoqué : `{"enabled":false,"libraries":[]}`.
-Sinon, la réponse comprend `enabled`, `libraries`, `enableMovies`, `enableSeries`,
-`rotationMode`, `minHoursBetweenSwitches`, `poolSize`, `preferredLanguage`,
-`fallbackLanguage`, `includeUnknownLanguage` et `allowAnyLanguageFallback`.
-Réponse privée sans cache ; voir [ARTWORK_ROTATION.md](ARTWORK_ROTATION.md).
+La rotation native des affiches utilise `artworkRotation` dans les préférences
+du compte (`GET/PUT /api/v1/preferences`) ; la modification exige la session et
+le CSRF. Les bornes et le comportement sont décrits dans
+[ARTWORK_ROTATION.md](ARTWORK_ROTATION.md).
 # Fonctions produit du 20 octobre 2026
 
 Contrats comptes/sessions, musique, restrictions parentales, filtres, métadonnées,

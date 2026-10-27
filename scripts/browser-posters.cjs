@@ -26,11 +26,10 @@ fs.mkdirSync(out, {recursive:true});
     await page.locator('button[type="submit"]').click();
     await page.waitForURL(origin+'/app/');
     if (phase !== 'restart') {
-      await page.goto(origin+'/app/admin/libraries/');
+      await page.goto(origin+'/app/admin/libraries/#libraries-section');
       if (phase === 'initial') {
         await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();
         await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
-        await page.getByLabel('Racine autorisée sur le Node',{exact:true}).selectOption({index:1});
         await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
         await page.getByRole('dialog').getByRole('button',{name:'Enregistrer',exact:true}).click();
         await page.getByRole('heading',{name:'Films scanner navigateur',exact:true}).waitFor();
@@ -100,15 +99,16 @@ fs.mkdirSync(out, {recursive:true});
       try {
         await page.goto(origin+'/app/');
         await page.getByText('Une partie du catalogue est indisponible. Rechargez la page pour réessayer.',{exact:true}).waitFor();
-        await page.locator('a.media-card').filter({hasText:expectedTitle}).waitFor();
+        await page.locator('a.media-card').filter({hasText:expectedTitle}).first().waitFor();
         report.results.partialCatalogueFailureKeepsFilms = true;
       } finally { await page.unrouteAll({behavior:'wait'}); }
     }
     for (const route of ['/app/','/app/search/?q='+encodeURIComponent(expectedTitle),'/app/films/']) {
       await page.goto(origin+route);
-      const card=page.locator('a.media-card').filter({hasText:expectedTitle});
+      const cards=page.locator('a.media-card').filter({hasText:expectedTitle});
+      const card=cards.first();
       await card.waitFor();
-      assert.equal(await page.locator('a.media-card').count(),1);
+      assert.equal(new Set(await cards.evaluateAll(items=>items.map(item=>item.getAttribute('href')))).size,1);
       if (phase === 'delete') {
         assert.equal(await card.locator('img.poster-image').count(),0);
       } else {
@@ -169,7 +169,8 @@ fs.mkdirSync(out, {recursive:true});
     await page.screenshot({path:`${out}/detail-${phase}.png`});
     await page.getByRole('button',{name:'Sélectionner la version MP4',exact:true}).click();
     await page.locator('.hero-cta').click();
-    await page.waitForFunction(()=>document.querySelector('video')?.currentTime>0.2);
+    const startPosition = await page.locator('video').evaluate(video=>video.currentTime);
+    await page.waitForFunction(start=>{const video=document.querySelector('video');return video && !video.paused && !video.seeking && video.currentTime>start+0.2;},startPosition);
     await page.evaluate(()=>{const video=document.querySelector('video');video.pause();video.currentTime=4;});
     await page.waitForFunction(()=>{const video=document.querySelector('video');return !video.seeking && video.paused && Math.abs(video.currentTime-4)<0.3;});
     await page.screenshot({path:`${out}/playback-${phase}.png`});

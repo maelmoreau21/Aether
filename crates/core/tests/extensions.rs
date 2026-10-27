@@ -2087,7 +2087,7 @@ async fn rust_sdk_storage_guest_runs_through_signed_http_install_and_worker_brok
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_extension_upgrade_preserves_durable_storage_and_updates_generation() {
+async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutation() {
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("db.sqlite"))
         .await
@@ -2188,7 +2188,7 @@ async fn test_extension_upgrade_preserves_durable_storage_and_updates_generation
     p2.manifest.permissions = vec!["storage.private".into()];
     p2.signature = STANDARD.encode(signing.sign(&p2.signing_bytes().unwrap()).as_ref());
 
-    // 3. Upgrade to v2 via POST /api/v1/admin/extensions/{id}/upgrade
+    // 3. Refuse v2 until private-data compatibility and worker fencing are proven.
     let (status, resp, _) = call(
         &app,
         "POST",
@@ -2198,18 +2198,73 @@ async fn test_extension_upgrade_preserves_durable_storage_and_updates_generation
         serde_json::to_value(&p2).unwrap(),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{resp}");
-    assert_eq!(resp["version"], "2.0.0");
-    assert_eq!(resp["upgraded"], true);
+    assert_eq!(status, StatusCode::CONFLICT, "{resp}");
+    assert_eq!(resp["error"], "extension_update_compatibility_unverified");
 
-    // 4. Verify generation updated
+    // 4. The active generation and package remain unchanged.
     let gen_v2: String = media_poc::database::query_scalar(
         "SELECT generation FROM extensions WHERE id='upgradable.ext'",
     )
     .fetch_one(store.pool())
     .await
     .unwrap();
-    assert_ne!(gen_v1, gen_v2, "Generation must be updated on upgrade");
+    assert_eq!(gen_v1, gen_v2);
+    let installed: String = media_poc::database::query_scalar(
+        "SELECT package_json FROM extensions WHERE id='upgradable.ext'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    let installed: media_extension_sdk::Package = serde_json::from_str(&installed).unwrap();
+    assert_eq!(installed.manifest.version, "1.0.0");
+
+    for version in ["1.0.0", "0.9.0"] {
+        let mut candidate = p2.clone();
+        candidate.manifest.version = version.into();
+        candidate.signature =
+            STANDARD.encode(signing.sign(&candidate.signing_bytes().unwrap()).as_ref());
+        let (status, response, _) = call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/upgradable.ext/upgrade",
+            &cookie,
+            csrf,
+            serde_json::to_value(candidate).unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(response["error"], "extension_version_not_newer");
+    }
+
+    let impostor = key();
+    let mut candidate = p2.clone();
+    candidate.signature =
+        STANDARD.encode(impostor.sign(&candidate.signing_bytes().unwrap()).as_ref());
+    let mut input = serde_json::to_value(&candidate).unwrap();
+    input["publicKey"] = json!(STANDARD.encode(impostor.public_key().as_ref()));
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/upgradable.ext/upgrade",
+        &cookie,
+        csrf,
+        input,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(response["error"], "publisher_key_mismatch");
+
+    candidate.signature = STANDARD.encode([0_u8; 64]);
+    let (status, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/upgradable.ext/upgrade",
+        &cookie,
+        csrf,
+        serde_json::to_value(candidate).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     // 5. Verify durable storage was preserved!
     let saved_state: String = media_poc::database::query_scalar(

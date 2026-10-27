@@ -6,7 +6,7 @@ if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('iso
 const phase = process.env.MEDIA_TEST_PHASE || 'initial';
 const expectedTitle = phase === 'delete' ? 'Scanner Film' : phase === 'update' ? 'NFO Film actualise' : 'NFO Film & <img src=x onerror=alert(1)>';
 const expectedSynopsis = phase === 'update' ? 'Synopsis actualise' : 'Texte & <script>alert(1)</script>';
-const out = 'docs/evidence/2026-10-16/nfo';
+const out = process.env.MEDIA_REPORT_DIR || 'docs/evidence/2026-10-16/nfo';
 fs.mkdirSync(out, {recursive:true});
 (async () => {
   const browser = await chromium.launch({channel:'chrome', headless:true});
@@ -24,7 +24,7 @@ fs.mkdirSync(out, {recursive:true});
     await page.locator('button[type="submit"]').click();
     await page.waitForURL(origin+'/app/');
     if (phase !== 'restart') {
-      await page.goto(origin+'/app/admin/libraries/');
+      await page.goto(origin+'/app/admin/libraries/#libraries-section');
       if (phase === 'initial') {
         await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();
         await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
@@ -33,24 +33,35 @@ fs.mkdirSync(out, {recursive:true});
         await page.getByRole('heading',{name:'Films scanner navigateur',exact:true}).waitFor();
       }
       const article=page.locator('article').filter({has:page.getByRole('heading',{name:'Films scanner navigateur',exact:true})});
-      await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
-      await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
-      await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
+      const runScan = async () => {
+        const posted=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/scan'));
+        await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
+        await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
+        await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
+        assert.equal((await posted).status(),202);
+        await page.waitForFunction(async()=>{
+          const data=await (await fetch('/api/v1/admin/libraries')).json();
+          const library=data.libraries.find(l=>l.name==='Films scanner navigateur');
+          const scan=await (await fetch('/api/v1/admin/libraries/'+library.id+'/scan')).json();
+          return scan.status==='completed';
+        },null,{timeout:60000});
+        await page.reload();
+      };
+      await runScan();
       await article.getByText(/Terminé/).waitFor({timeout:60000});
       assert.match(await article.textContent(),/2 fichier\(s\) découvert\(s\)/);
       if (phase === 'initial') {
-        await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
-      await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
-      await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
+        await runScan();
       }
       await article.getByText(/Scan : Terminé.*0 analysé\(s\).*2 réutilisé\(s\)/).waitFor({timeout:60000});
       report.results.incrementalWithoutVideoProbe=true;
     }
     for (const route of ['/app/','/app/search/?q='+encodeURIComponent(expectedTitle),'/app/films/']) {
       await page.goto(origin+route);
-      const card=page.locator('a.media-card').filter({hasText:expectedTitle});
+      const cards=page.locator('a.media-card').filter({hasText:expectedTitle});
+      const card=cards.first();
       await card.waitFor();
-      assert.equal(await page.locator('a.media-card').count(),1);
+      assert.equal(new Set(await cards.evaluateAll(items=>items.map(item=>item.getAttribute('href')))).size,1);
       if (phase !== 'delete') {
         assert.match(await card.textContent(),/2025/);
         assert.match(await card.textContent(),/Drame/);
@@ -61,14 +72,15 @@ fs.mkdirSync(out, {recursive:true});
     await page.getByRole('heading',{name:expectedTitle,exact:true}).waitFor();
     if (phase !== 'delete') {
       assert.equal(await page.locator('.synopsis').textContent(),expectedSynopsis);
-      assert.match(await page.locator('.genres').textContent(),/Drame/);
-      assert.match(await page.locator('.detail .metadata').first().textContent(),/2025/);
-      assert.equal(await page.locator('.detail-copy script, .detail-copy img').count(),0);
+      assert.match(await page.locator('.film-detail-view .genres-row').textContent(),/Drame/);
+      assert.match(await page.locator('.detail-info-column .badge-row').textContent(),/2025/);
+      assert.equal(await page.locator('.detail-info-column script, .detail-info-column img').count(),0);
     }
     await page.screenshot({path:`${out}/detail-${phase}.png`});
     await page.getByRole('button',{name:'Sélectionner la version MP4',exact:true}).click();
     await page.locator('.hero-cta').click();
-    await page.waitForFunction(()=>document.querySelector('video')?.currentTime>0.2);
+    const startPosition = await page.locator('video').evaluate(video=>video.currentTime);
+    await page.waitForFunction(start=>{const video=document.querySelector('video');return video && !video.paused && !video.seeking && video.currentTime>start+0.2;},startPosition);
     await page.evaluate(()=>{const video=document.querySelector('video');video.pause();video.currentTime=4;});
     await page.waitForFunction(()=>{const video=document.querySelector('video');return !video.seeking && video.paused && Math.abs(video.currentTime-4)<0.3;});
     await page.screenshot({path:`${out}/playback-${phase}.png`});

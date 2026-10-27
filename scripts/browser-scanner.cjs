@@ -29,7 +29,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('button[type="submit"]').click();
     await page.waitForURL(origin+'/app/');
     if (!restart) {
-      await page.goto(origin+'/app/admin/libraries/');
+      await page.goto(origin+'/app/admin/libraries/#libraries-section');
       await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();
       await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
       await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();

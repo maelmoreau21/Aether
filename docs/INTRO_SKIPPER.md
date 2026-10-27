@@ -5,6 +5,9 @@ d'empreintes fournies par l'hôte. Une extension installée, activée et autoris
 pour la bibliothèque est désormais admise par l'outbox à chaque ajout ou
 modification d'épisode. Le Core appelle `intro.parse_chapters` dans le worker
 Wasm, valide les marqueurs et persiste le résultat dans `automatic_timeline_markers`.
+Les opérations de détection et de lecture des marqueurs exigent la permission
+`playback.markers` ; `metadata.read` seul ne les autorise pas. Le manifeste
+source d'IntroSkipper déclare déjà cette permission.
 Le descripteur de la copie exacte réutilise uniquement un résultat de la
 révision courante, de la génération d'extension active et d'une bibliothèque
 autorisée. Les boutons du lecteur utilisent ce résultat ; sans résultat,

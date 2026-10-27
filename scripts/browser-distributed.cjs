@@ -65,7 +65,7 @@ fs.mkdirSync(out, { recursive: true });
     report.results.login = true;
 
     // 2. Navigate to Admin Libraries & Nodes page and pair both remote Nodes via UI
-    await page.goto(origin + '/app/admin/libraries/');
+    await page.goto(origin + '/app/admin/libraries/#nodes-section');
     await page.locator('#pair-node-name').waitFor();
 
     const nodeListSection = page.locator('section[aria-labelledby="node-list"]');

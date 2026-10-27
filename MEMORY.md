@@ -4595,6 +4595,26 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
 - L’ouverture de `admin/libraries/` sans fragment, ou avec un fragment inconnu, sélectionne désormais « Vue d’ensemble ». Les liens explicites vers Bibliothèques et les autres sections restent utilisables. Vérification locale : `npm run check --prefix apps/web` (0 erreur, 5 avertissements préexistants). Aucun déploiement ni parcours navigateur réel effectué.
 - Le planificateur Web dit désormais « Toutes les 24 heures » et « Intervalle » pour la règle actuelle de 1440 minutes ; l'horaire civil fixe avec fuseau et gestion du changement d'heure reste non implémenté. Même vérification Web après ce changement.
 
+## 27 octobre 2026 — Poster Rotator configurable
+
+- Le dépôt voisin `Aether-Plugins` contient maintenant le code source d'une extension Poster Rotator inspirée du plugin Jellyfin du même auteur. Le Core n'expose la politique de rotation qu'avec une extension installée, active, un éditeur actif et une autorisation pour la bibliothèque visible du compte.
+- L'interface tourne les affiches des films et séries selon les paramètres enregistrés : ordre, délai minimal, taille du pool et langues. Une image manuelle garde priorité. Sans extension, l'affiche est fixe. Les autres types d'images restent fixes.
+- Vérifié localement : tests Web ciblés (11 réussis), `npm run check` (0 erreur, 5 avertissements préexistants), ESLint ciblé, `cargo check -p media-poc --lib`, test unitaire Core du bornage des paramètres, test HTTP Core avec paquet signé simulé (installation, autorisation, paramètres, désactivation), test unitaire de l'extension, compilation Wasm (114 301 octets), validation ABI et test du manifeste du dépôt des extensions.
+- La collecte automatique en masse et le planificateur du plugin Jellyfin ne sont pas portés. Aucun déploiement NAS ou test avec des images réelles n'est établi.
+- Le 27 octobre, Poster Rotator 0.1.0 a été signé avec une clé d'éditeur dédiée, puis publié dans le catalogue `main` d'Aether-Plugins et en GitHub Release (`poster-rotator-v0.1.0`). Les neuf paquets du catalogue passent la vérification locale des signatures ; l'URL publique du manifeste et celle du paquet ont répondu 200, avec empreinte SHA-256 conforme. Les PR de préparation, de clé dédiée et de paquet sont les numéros 7, 8 et 9. Le NAS doit encore récupérer un Aether contenant la politique de rotation et actualiser son catalogue d'extensions.
+
+## 27 octobre 2026 — Navigation des tests navigateur CI
+
+- Le run 40466113909 échouait avant le scan Films car la page d'administration ouvre désormais la vue d'ensemble. Échec reproduit localement après reconstruction Web ; les scénarios ouvrent explicitement Bibliothèques ou Nodes selon leur besoin.
+- `npm run build --prefix apps/web`, puis les tests Chrome `browser_scanner` et `browser_series` avec `--ignored --nocapture` ont réussi sous Windows et Chrome 156. Films couvre scan initial/incrémental, lecture, seek et redémarrage ; Séries couvre notamment lecture, seek et révocation. NFO, affiches, distribué et nouvelle CI Linux restent à valider. Voir `docs/CI_GHCR.md`.
+
+## 27 octobre 2026 — Refus conservateur des mises à jour d'extensions
+
+- Les deux routes de mise à jour refusent désormais toute bascule tant que le format des données privées et la clôture atomique des écritures anciennes ne sont pas établis. Identité de l'éditeur, clé, signature et version strictement supérieure sont vérifiées ; aucune migration ni modification des données installées n'est effectuée. L'administration explique le refus.
+- Le test HTTP SQLite ciblé `test_extension_upgrade_refuses_unverified_compatibility_without_mutation` passe : version et génération restent inchangées, donnée privée conservée, versions égale/inférieure, clé différente et signature invalide refusées. `npm run check --prefix apps/web` passe avec 5 avertissements existants. PostgreSQL, crash, reprise et véritable mise à jour restent à réaliser ; voir `docs/PLUGIN_UPDATE_LIFECYCLE.md`.
+- Les scénarios NFO et affiches ont été adaptés à l'éditeur et au catalogue actuels. Après redémarrage, ils attendent une progression effective avant le seek ; NFO attend aussi la fin du scan nouvellement lancé. Les quatre phases initiale, redémarrage, mise à jour et suppression passent sous Chrome 156/Windows avec rapports isolés via `MEDIA_REPORT_DIR`. Le scénario distribué reste à valider.
+- Les opérations de marqueurs exigent désormais `playback.markers` dans l'adaptateur Core ; `metadata.read` seul ne suffit plus. Le manifeste source d'IntroSkipper possède déjà ce droit. Test unitaire ciblé `marker_operations_require_the_dedicated_permission` réussi ; aucune publication ni validation complète du plugin n'a été effectuée.
+
 ## 27 octobre 2026 — Chemin des assets Web fixe
 
 - Le Core sert l'interface depuis `apps/web/build`, relatif à son répertoire de travail (`/app` dans les images Docker). La variable de configuration du chemin Web a été supprimée du code, des images, des exemples Compose, des scripts et de la documentation courante.

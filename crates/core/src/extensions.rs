@@ -606,13 +606,13 @@ async fn upgrade_with_key(
     package: Package,
     public_key: String,
 ) -> Result<(StatusCode, Json<Value>), Error> {
-    let actor = admin(&auth, &headers, true).await?;
+    admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
     if package.manifest.id != id {
         return Err(err(StatusCode::BAD_REQUEST, "extension_id_mismatch"));
     }
-    let (existing_publisher_id,): (String,) =
-        query_as("SELECT publisher_id FROM extensions WHERE id = ?")
+    let (existing_package, trusted_key): (String, String) =
+        query_as("SELECT e.package_json,p.public_key FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id AND p.active=1 WHERE e.id = ?")
             .bind(&id)
             .fetch_optional(auth.store.pool())
             .await
@@ -624,44 +624,32 @@ async fn upgrade_with_key(
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_public_key"))?;
     validate_package(&package, &key).map_err(|code| err(StatusCode::BAD_REQUEST, code))?;
 
-    if existing_publisher_id != package.publisher_id {
+    let installed: Package = serde_json::from_str(&existing_package)
+        .map_err(|_| err(StatusCode::CONFLICT, "installed_package_invalid"))?;
+    if installed.publisher_id != package.publisher_id {
         return Err(err(StatusCode::FORBIDDEN, "publisher_mismatch"));
     }
+    if STANDARD.decode(&trusted_key).ok().as_deref() != Some(key.as_slice()) {
+        return Err(err(StatusCode::FORBIDDEN, "publisher_key_mismatch"));
+    }
+    let version = |value: &str| -> Option<Vec<u32>> {
+        value.split('.').map(|part| part.parse().ok()).collect()
+    };
+    let installed_version = version(&installed.manifest.version)
+        .filter(|v| v.len() == 3)
+        .ok_or_else(|| err(StatusCode::CONFLICT, "installed_package_invalid"))?;
+    let target_version = version(&package.manifest.version)
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid_manifest"))?;
+    if target_version <= installed_version {
+        return Err(err(StatusCode::CONFLICT, "extension_version_not_newer"));
+    }
 
-    let bytes = serde_json::to_string(&package)
-        .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_package"))?;
-
-    let new_generation = uuid::Uuid::new_v4().to_string();
-    let mut tx = auth.store.pool().begin().await.map_err(db)?;
-
-    query("UPDATE extensions SET package_json=?, generation=? WHERE id=?")
-        .bind(&bytes)
-        .bind(&new_generation)
-        .bind(&id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db)?;
-
-    audit(
-        &mut tx,
-        &actor.user.id,
-        &id,
-        &format!("upgraded:{}:{}", package.manifest.version, package.sha256),
-    )
-    .await?;
-
-    crate::extension_storage::persist_upgrade(&auth.store, &package)
-        .await
-        .map_err(storage_error)?;
-
-    tx.commit().await.map_err(db)?;
-    Ok((
-        StatusCode::OK,
-        Json(json!({
-            "id": id,
-            "version": package.manifest.version,
-            "upgraded": true
-        })),
+    // Existing packages do not declare a private-data format, and in-flight
+    // writes are not yet fenced atomically with the version switch. Do not
+    // mutate the installed package until both guarantees can be established.
+    Err(err(
+        StatusCode::CONFLICT,
+        "extension_update_compatibility_unverified",
     ))
 }
 

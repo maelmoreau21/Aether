@@ -21,17 +21,7 @@ pub(super) fn authorize_operation(manifest: &Manifest, operation: &str) -> Resul
         | "markers.detect"
         | "intro.match_fingerprints"
         | "intro.parse_chapters"
-        | "markers.get" => {
-            if manifest
-                .permissions
-                .iter()
-                .any(|p| p == "playback.markers" || p == "metadata.read")
-            {
-                return Ok(());
-            } else {
-                return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
-            }
-        }
+        | "markers.get" => "playback.markers",
         _ => return Err(err(StatusCode::BAD_REQUEST, "unsupported_operation")),
     };
     if !manifest.permissions.iter().any(|p| p == permission) {
@@ -231,6 +221,38 @@ fn valid_timeline_marker(marker: &Value) -> bool {
 #[cfg(test)]
 mod marker_tests {
     use super::*;
+
+    #[test]
+    fn marker_operations_require_the_dedicated_permission() {
+        let mut manifest = Manifest {
+            permissions: vec!["metadata.read".into()],
+            ..Default::default()
+        };
+        for operation in [
+            "intro.detect",
+            "markers.detect",
+            "intro.match_fingerprints",
+            "intro.parse_chapters",
+            "markers.get",
+        ] {
+            assert_eq!(
+                authorize_operation(&manifest, operation).unwrap_err().0,
+                StatusCode::FORBIDDEN
+            );
+        }
+        manifest.permissions.push("playback.markers".into());
+        for operation in [
+            "intro.detect",
+            "markers.detect",
+            "intro.match_fingerprints",
+            "intro.parse_chapters",
+            "markers.get",
+        ] {
+            assert!(authorize_operation(&manifest, operation).is_ok());
+        }
+        manifest.permissions.clear();
+        assert!(authorize_operation(&manifest, "intro.detect").is_err());
+    }
 
     #[test]
     fn rejects_unbounded_or_invalid_wasm_markers() {

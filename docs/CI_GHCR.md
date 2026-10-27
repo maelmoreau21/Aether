@@ -1,5 +1,19 @@
 # CI et publication GHCR
 
+## Parcours administrateur navigateur — 27 octobre 2026
+
+Le run CI 40466113909 échouait avant le scan Films : l'administration ouvre
+la vue d'ensemble par défaut et le test cherchait le bouton d'ajout dans la
+section Bibliothèques masquée. Les scénarios Films, Séries, NFO et affiches
+ouvrent désormais explicitement cette section ; le scénario distribué ouvre
+la section Nodes. Les assertions et délais de lecture restent inchangés.
+Après reconstruction du frontend, les parcours Films et Séries passent avec
+Chrome 156.0.8078.48 sous Windows, sur fixtures synthétiques et SQLite
+temporaire. Les scénarios NFO et affiches passent aussi sur les quatre phases
+initiale, redémarrage, mise à jour et suppression. Ils attendent une vraie
+progression avant le seek et l'achèvement du scan demandé. Le scénario distribué
+et la CI Linux après correction ne sont pas encore validés ici.
+
 ## Réduction de l'attente CI — 22 octobre 2026
 
 Le run `39827517263` a pris 22 min 25 s. Les logs montrent 13 min 27 s

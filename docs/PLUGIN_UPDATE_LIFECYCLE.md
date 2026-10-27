@@ -1,15 +1,14 @@
 # Cycle de mise à jour des extensions — contrat à réaliser
 
-État au 27 octobre 2026 : le Core expose déjà `POST /api/v1/admin/extensions/{id}/upgrade`
-et `POST /api/v1/admin/extensions` avec `upgrade=true`. La route vérifie la
-signature et l'identifiant, remplace le paquet en base et la copie locale,
-change la génération et conserve les données. Le test actuel prouve seulement
-la conservation d'une valeur privée et le changement de génération. **Ce n'est
-pas encore un parcours de mise à jour sûr pour une installation réelle.**
-Aujourd'hui, la route ne vérifie pas une version strictement supérieure, la
-continuité de la clé publique, les droits ajoutés, les schémas de paramètres
-ou de stockage, ni la possibilité d'un retour arrière. L'écriture du cache de
-paquet et la transaction SQL ne sont pas une seule opération atomique.
+État au 27 octobre 2026 : les routes `POST /api/v1/admin/extensions/{id}/upgrade`
+et `POST /api/v1/admin/extensions` avec `upgrade=true` refusent actuellement
+toute mise à jour. Elles vérifient la signature, l'identifiant, l'éditeur, sa
+clé et une version strictement supérieure, puis renvoient
+`extension_update_compatibility_unverified` sans modifier la version installée.
+Le format privé n'est pas déclaré et les anciennes écritures ne sont pas encore
+clôturées atomiquement ; il serait donc dangereux de supposer la compatibilité.
+Le consentement aux droits ajoutés, la validation des paramètres, la bascule
+et le retour arrière restent à réaliser et à éprouver avant leur activation.
 
 ## Identité et compatibilité
 
@@ -76,7 +75,6 @@ explicite et distincte de toute mise à jour.
 - Parcours administrateur montrant le diff, l'accord et l'état d'échec sans
   dévoiler de secret. Vérifier les deux moteurs de base utilisés.
 
-Jusqu'à ces preuves, ne pas présenter la route d'upgrade actuelle comme une
-mise à jour avec sauvegarde et rollback garantis. Pour les données importantes,
-faire une sauvegarde restaurable et tester la migration sur une installation
-séparée avant toute opération réelle.
+Jusqu'à ces preuves, aucune mise à jour n'est effectuée par ces routes. Aucune
+migration automatique des bases ou des données privées n'est prévue dans ce
+chantier ; une incompatibilité doit être refusée en conservant l'installation.

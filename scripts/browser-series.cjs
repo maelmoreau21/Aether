@@ -37,7 +37,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForURL(origin + '/app/');
 
     // 2. Admin libraries: add Séries library, grant access to series-user-b in Users section, and scan
-    await page.goto(origin + '/app/admin/libraries/');
+    await page.goto(origin + '/app/admin/libraries/#libraries-section');
     await page.getByRole('button', {name:'Ajouter une bibliothèque', exact:true}).click();
     await page.locator('#library-name').fill('Séries Navigateur');
     await page.locator('#library-kind').selectOption('series');

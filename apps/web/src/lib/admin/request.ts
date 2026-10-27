@@ -56,6 +56,9 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
       unknown_catalogue_version: 'Cette version de l’extension n’existe pas dans le catalogue.',
       repository_changed: 'Le catalogue a changé. Veuillez réactualiser les dépôts.',
       extension_exists: 'Cette extension est déjà installée.',
+      extension_version_not_newer: 'La version proposée doit être supérieure à la version installée.',
+      publisher_key_mismatch: 'La clé de signature ne correspond pas à celle de l’extension installée.',
+      extension_update_compatibility_unverified: 'La mise à jour est refusée : la compatibilité des données et l’arrêt des anciennes écritures ne peuvent pas encore être garantis. La version installée est conservée.',
       extension_limit: 'La limite de 32 extensions installées est atteinte.',
       extension_unavailable: 'Cette extension n’est pas disponible.'
     };

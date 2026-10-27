@@ -59,8 +59,6 @@ services:
       - MEDIA_DB_URL=${MEDIA_DB_URL:-}
       - MEDIA_BACKUP_DIR=/backups
       # Keep this key in a protected secret store, separate from /backups.
-      - MEDIA_BACKUP_KEY=${MEDIA_BACKUP_KEY:-}
-      - MEDIA_WEB_DIST=/app/apps/web/build
       - MEDIA_OIDC_ENABLED=${MEDIA_OIDC_ENABLED:-false}
       - MEDIA_OIDC_ISSUER=${MEDIA_OIDC_ISSUER:-}
       - MEDIA_OIDC_CLIENT_ID=${MEDIA_OIDC_CLIENT_ID:-}

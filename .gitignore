@@ -25,3 +25,6 @@
 
 # Local first-run authentication secret
 .bootstrap_token
+
+# Per-installation backup keys must never be committed.
+**/secrets/backup.key

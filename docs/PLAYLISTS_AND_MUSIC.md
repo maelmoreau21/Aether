@@ -81,7 +81,7 @@ Les DLL et paquets Jellyfin ne sont pas compatibles.
 - `cargo clippy --locked --workspace --all-features --all-targets -j 1 -- -D warnings` : passé ; format appliqué.
 - Tests produit existants : cinq passés ; test ciblé des playlists mixtes passé avec le parcours navigateur activé.
 - `cargo test --locked -p media-poc --test extensions signed_file_import -- --test-threads=1` : import signé vérifié, un test passé.
-- `cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1` avec `MEDIA_TEST_PLAYLIST_BROWSER=1` et `MEDIA_WEB_DIST` absolu : passé.
+- `cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1` avec `MEDIA_TEST_PLAYLIST_BROWSER=1` et le build Web présent : passé.
 - Scan musical avec paroles et contrat Range : test ciblé passé. Workflow validé par actionlint.
 
 Chrome réel 155.0.8059.85, Core/SQLite et comptes jetables : lecture Opus

@@ -58,6 +58,7 @@ docs/evidence/
 # 5. Database Files & Runtime State
 # ------------------------------------------------------------------------------
 data/
+**/secrets/backup.key
 *.sqlite3*
 *.sqlite*
 *.db*

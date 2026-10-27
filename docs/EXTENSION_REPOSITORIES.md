@@ -83,9 +83,10 @@ ne télécharge aucun manifeste. Une erreur d’actualisation conserve le dernie
 catalogue valide. **Retirer le dépôt** conserve les extensions installées ;
 révoquer l’éditeur ou désactiver l’extension restent des actions distinctes.
 Une installation utilise le snapshot sélectionné ; un changement de catalogue
-pendant son téléchargement est signalé. Les mises à jour en place et le rollback
-ne sont pas fournis : une version déjà installée se gère dans Installées, avec
-désinstallation/réinstallation et de nouveaux consentements si nécessaire.
+pendant son téléchargement est signalé. Une route d'upgrade existe côté Core,
+mais le cycle complet depuis le catalogue et le rollback ne sont pas garantis.
+Voir [Cycle de mise à jour](PLUGIN_UPDATE_LIFECYCLE.md) ; une
+désinstallation/réinstallation exige une sauvegarde préalable des données.
 
 ## Format du manifeste
 

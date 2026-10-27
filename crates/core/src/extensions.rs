@@ -190,6 +190,10 @@ pub fn router(auth: AuthState) -> Router {
     Router::new()
         .merge(repositories::router())
         .merge(collections::router())
+        .route(
+            "/api/v1/artwork/rotation-policy",
+            get(artwork_rotation_policy),
+        )
         .route("/api/v1/admin/extensions", get(list).post(install))
         .route(
             "/api/v1/admin/extensions/storage/health",
@@ -309,6 +313,76 @@ async fn admin(
             .map_err(|s| err(s, "csrf_required"))?;
     }
     Ok(actor)
+}
+
+fn rotation_setting_bool(settings: &Value, key: &str, fallback: bool) -> bool {
+    settings
+        .get(key)
+        .and_then(|value| {
+            value
+                .as_bool()
+                .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+        })
+        .unwrap_or(fallback)
+}
+fn rotation_setting_number(settings: &Value, key: &str, fallback: u32, max: u32) -> u32 {
+    settings
+        .get(key)
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+        })
+        .filter(|value| *value <= u64::from(max))
+        .map(|value| value as u32)
+        .unwrap_or(fallback)
+}
+fn rotation_setting_language(settings: &Value, key: &str, fallback: &str) -> String {
+    settings
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|text| {
+            text.len() <= 35
+                && !text.is_empty()
+                && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+        .unwrap_or(fallback)
+        .to_ascii_lowercase()
+}
+
+async fn artwork_rotation_policy(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, Error> {
+    let actor = auth
+        .authenticate(&headers)
+        .await
+        .map_err(|status| err(status, "authentication_required"))?;
+    let extension: Option<(String,)> = query_as("SELECT s.settings_json FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id JOIN extension_settings s ON s.extension_id=e.id WHERE e.id='poster-rotator' AND e.enabled=1 AND p.active=1")
+        .fetch_optional(auth.store.pool()).await.map_err(db)?;
+    let installed: Option<i64> = query_scalar("SELECT 1 FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.id='poster-rotator' AND e.enabled=1 AND p.active=1")
+        .fetch_optional(auth.store.pool()).await.map_err(db)?;
+    if installed.is_none() {
+        return Ok(Json(json!({"enabled": false, "libraries": []})));
+    }
+    let settings: Value = extension
+        .and_then(|row| serde_json::from_str(&row.0).ok())
+        .unwrap_or_else(|| json!({}));
+    let libraries: Vec<(String,)> = query_as("SELECT l.id FROM libraries l JOIN media_nodes n ON n.id=l.node_id JOIN extensions e ON e.id='poster-rotator' WHERE l.enabled=1 AND n.status!='revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND (g.library_id=l.id OR EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id AND f.parent_id=g.library_id AND f.active=1))))")
+        .bind(actor.user.role.as_str()).bind(&actor.user.id).fetch_all(auth.store.pool()).await.map_err(db)?;
+    Ok(Json(json!({
+        "enabled": true,
+        "libraries": libraries.into_iter().map(|row| row.0).collect::<Vec<_>>(),
+        "enableMovies": rotation_setting_bool(&settings, "enable_movies", true),
+        "enableSeries": rotation_setting_bool(&settings, "enable_series", true),
+        "rotationMode": if settings.get("rotation_mode").and_then(Value::as_str) == Some("sequential") { "sequential" } else { "random" },
+        "minHoursBetweenSwitches": rotation_setting_number(&settings, "min_hours_between_switches", 0, 720),
+        "poolSize": rotation_setting_number(&settings, "pool_size", 4, 24).max(1),
+        "preferredLanguage": rotation_setting_language(&settings, "preferred_language", "fr"),
+        "fallbackLanguage": rotation_setting_language(&settings, "fallback_language", "en"),
+        "includeUnknownLanguage": rotation_setting_bool(&settings, "include_unknown_language", true),
+        "allowAnyLanguageFallback": rotation_setting_bool(&settings, "allow_any_language_fallback", true),
+    })))
 }
 async fn audit(
     conn: &mut sqlx::AnyConnection,
@@ -1753,6 +1827,28 @@ pub fn trusted_music_candidate<'a>(items: &'a [Value], input: &Value) -> Option<
 mod configuration_tests {
     use super::*;
     use media_extension_sdk::MetadataInput;
+    #[test]
+    fn poster_rotation_settings_are_bounded_and_private() {
+        let values = json!({"pool_size":"25","min_hours_between_switches":"24","preferred_language":"fr-CA","enable_movies":"false"});
+        assert_eq!(rotation_setting_number(&values, "pool_size", 4, 24), 4);
+        assert_eq!(
+            rotation_setting_number(&values, "min_hours_between_switches", 0, 720),
+            24
+        );
+        assert_eq!(
+            rotation_setting_language(&values, "preferred_language", "fr"),
+            "fr-ca"
+        );
+        assert!(!rotation_setting_bool(&values, "enable_movies", true));
+        assert_eq!(
+            rotation_setting_language(
+                &json!({"preferred_language":"../../"}),
+                "preferred_language",
+                "fr"
+            ),
+            "fr"
+        );
+    }
     #[test]
     fn automatic_candidate_requires_unique_title_type_and_year() {
         let input = json!({"title":"  Film  Test ","mediaType":"movie","year":2024});

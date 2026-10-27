@@ -1,13 +1,13 @@
-# Images multiples et rotation par session — 25 octobre 2026
+# Images multiples et extension Poster Rotator — 27 octobre 2026
 
 ## Décision
 
-La conservation des variantes, leurs représentations privées, la déduplication et
-la sélection d'affichage sont natives. Les fournisseurs restent des extensions
-Wasm facultatives et activées explicitement. Il n'est pas nécessaire d'installer
-un autre plugin de rotation. Le Core ne contient pas de table de fournisseurs ni
-de clés intégrées. Aucun changement du lecteur AV1/Opus ou des médias en lecture
-seule n'est requis.
+La conservation des variantes, leurs représentations privées et la déduplication
+restent natives. La rotation des **affiches** est commandée par l'extension
+Poster Rotator. Sans cette extension installée, active et autorisée pour la
+bibliothèque, le catalogue affiche une image fixe. Les fournisseurs d'images
+restent des extensions Wasm distinctes. Le Core ne contient pas de clés de
+fournisseurs intégrées et les médias restent en lecture seule.
 
 L'audit du [Poster Rotator Jellyfin, commit 6640be2](https://github.com/maelmoreau21/jellyfin-plugin-poster-rotator/tree/6640be2dd685026749d990d991b90e155879fb3b)
 a servi de référence fonctionnelle. Son remplacement quotidien de l'image
@@ -43,14 +43,28 @@ au rôle consomment l'image. Une image ajoutée manuellement, y compris l'ancien
 poster personnalisé, reste prioritaire. Les pools téléchargés sont conservés
 lors de l'ajout d'un remplacement manuel.
 
-Les choix sont stables pendant la navigation et les rechargements. Lors d'une
-nouvelle session de navigation, le choix précédent est exclu lorsqu'au moins
-deux candidats correspondent à la langue retenue. L'historique est borné à
+Poster Rotator se règle dans **Administration → Extensions → Poster Rotator**.
+L'administrateur choisit les bibliothèques autorisées, active l'extension puis
+enregistre ses paramètres : films/séries, ordre aléatoire ou séquentiel, intervalle
+minimal entre changements (heures), taille du pool, langue préférée, langue de
+secours et autorisation des images sans langue ou dans une autre langue. Les
+images manuelles restent prioritaires. Les choix sont stables pendant la
+navigation et les rechargements ; une nouvelle visite change l'affiche quand
+l'intervalle est écoulé et qu'au moins deux candidates existent dans la langue
+retenue. L'historique est borné à
 512 couples œuvre/type par compte dans le navigateur ; aucun jeton brut n'est
 persisté par ce mécanisme. Cet historique est local au navigateur, sans garantie
 de synchronisation entre appareils. Une seule variante disponible reste stable.
 
 ## API et bornes
+
+`GET /api/v1/artwork/rotation-policy` requiert une session. Il ne renvoie que
+les bibliothèques visibles par ce compte et autorisées pour l'extension, ainsi
+que les paramètres de rotation validés. Le résultat est privé et non mis en cache.
+Une extension absente, désactivée ou dont l'éditeur est révoqué renvoie
+`enabled:false`. Les paramètres sont persistés par l'API d'administration
+existante de l'extension. Les valeurs hors limites sont ignorées : pool 1–24,
+intervalle 0–720 heures.
 
 `POST /api/v1/admin/extensions/images/collect` exige administrateur, session et
 CSRF. Corps :
@@ -94,7 +108,9 @@ et les originaux locaux ne sont pas rétroactivement décodés pour cette étape
 
 ## Limites et prochain jalon
 
-La collecte est une action explicite par œuvre. Aucun balayage automatique de
+La collecte est une action explicite par œuvre. L'extension Poster Rotator de ce
+jalon règle la sélection des affiches déjà présentes ; elle ne télécharge pas
+elle-même des images. Aucun balayage automatique de
 toute la médiathèque, quota disque administrable ou tâche planifiée de collecte
 distante n'est annoncé. La catégorie `image` du moteur distribué existant
 prépare des images locales inventoriées ; elle ne constitue pas un contrat

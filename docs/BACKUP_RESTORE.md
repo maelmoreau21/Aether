@@ -2,12 +2,12 @@
 
 ## Contenu d'une archive `.media-backup`
 
-Chiffrée (AES-256-GCM par blocs authentifiés, clé d'installation ou `MEDIA_BACKUP_KEY`, jamais incluse).
+Format courant `MDBK0002` sans clé et sans chiffrement. L'archive contient des secrets en clair ; voir [BACKUP_BUNDLE.md](BACKUP_BUNDLE.md).
 
 | Élément | Présent | Vérification |
 |---|---|---|
-| Base SQL cohérente (SQLite snapshot / `pg_dump`) | oui | authentification des blocs |
-| Configuration `MEDIA_*` / `OIDC_*` (sans la clé de sauvegarde) | oui | idem |
+| Base SQL cohérente (SQLite snapshot / `pg_dump`) | oui | checksum SHA-256 du paquet |
+| Configuration `MEDIA_*` / `OIDC_*` | oui | checksum SHA-256 du paquet |
 | Certificats TLS référencés | oui | taille annoncée au manifeste |
 | **Assets durables** (`/data/assets`, avatars, affiches, variantes) | oui (format courant) | SHA-256 + taille recalculés à l'écriture **et** à l'extraction |
 | Caches régénérables (miniatures temporaires, `tmp/`) | non | — |
@@ -20,7 +20,7 @@ Le manifeste porte `assets` (nombre) et `assetBytes` (octets) ; une archive dont
 ## Garanties
 
 - Création : un asset absent, tronqué ou altéré fait échouer la sauvegarde (`AssetIntegrity`) ; aucun fichier d'archive n'est publié.
-- Extraction : écriture dans un dossier privé de préparation, publication atomique seulement si tout est authentifié et vérifié.
+- Extraction : écriture dans un dossier privé de préparation, publication atomique seulement si la structure, le checksum et les assets sont vérifiés. Le checksum ne protège pas contre une modification hostile.
 - Les lignes SQL `assets` viennent de la base restaurée ; les octets sont remis par `AssetStore::restore_object` (re-hachage, publication atomique, idempotent).
 - **Une restauration n'est réussie que si `AssetStore::verify_all()` ne signale ni objet manquant ni corrompu.** Importer le SQL seul ne suffit pas.
 
@@ -33,7 +33,7 @@ Le manifeste porte `assets` (nombre) et `assetBytes` (octets) ; une archive dont
 
 ## Anciennes archives
 
-Les archives sans assets (avant ce format) restent lisibles ; `media-recover` signale qu'elles ne contiennent aucun asset. Celles chiffrées avec l'ancienne clé publique (zéros) ne s'ouvrent qu'avec `--legacy-public-key`.
+Les archives `MDBK0001` chiffrées ne sont plus lisibles avec le binaire courant. Les conserver et utiliser une ancienne version de `media-recover` avec leur clé d'origine si une restauration est nécessaire. Les archives `MDBK0002` sans assets restent lisibles ; `media-recover` signale qu'elles n'en contiennent aucun.
 
 ## Limites connues
 

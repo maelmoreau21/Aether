@@ -43,7 +43,7 @@ Le projet privilégie la **lecture directe** et évite d'imposer un transcodage 
 | **Administration** | Comptes, groupes, droits par bibliothèque, clés API limitées au catalogue, tâches et scans planifiés |
 | **Authentification** | Comptes locaux et connexion OpenID Connect (OIDC), notamment avec Authentik |
 | **Stockage** | SQLite par défaut, PostgreSQL 18 externe en option pour un Core unique |
-| **Sauvegardes** | Sauvegardes administratives chiffrées et planifiables, restauration hors ligne |
+| **Sauvegardes** | Sauvegardes administratives planifiables sans chiffrement, restauration hors ligne |
 | **Distribution** | Mode autonome ou Core central avec un ou plusieurs Media Nodes |
 
 **Limites actuelles :** la lecture AV1/Opus dépend de la prise en charge du navigateur et du conteneur ; toutes les combinaisons de pistes ne sont pas garanties. Le support complet des styles ASS/SSA, des flux élémentaires « raw », des extensions exécutables et du cluster multi-Core n'est **pas** livré comme fonctionnalité de production. Aucun transcodage vidéo universel n'est proposé comme solution de repli.
@@ -176,7 +176,7 @@ Les tags `latest` et `develop` correspondent respectivement aux branches `main` 
 | `MEDIA_LIBRARY_DIR` | Dossier de médias monté en lecture seule en mode autonome |
 | `MEDIA_DB_ENGINE` | `sqlite` (défaut) ou `postgres` |
 | `MEDIA_DB_URL` | URL PostgreSQL, uniquement si ce moteur est activé |
-| `MEDIA_BACKUP_KEY` | Cle des archives (64 hex). Sinon `MEDIA_BACKUP_KEY_FILE`, sinon cle d'installation generee dans `<data>/secrets/backup.key` ; aucune cle par defaut (voir `docs/BACKUP_KEY.md`) |
+| `MEDIA_BACKUP_DIR` | Dossier privé des archives non chiffrées ; voir `docs/BACKUP_BUNDLE.md` |
 | `MEDIA_OIDC_ENABLED` | Activation optionnelle de l'authentification OIDC |
 | `MEDIA_NODE_PAIRING_TOKEN` | Secret d'appairage pour le mode distribué |
 
@@ -188,7 +188,7 @@ Principes de sécurité :
 - **Pas d'identifiants prédéfinis** : le premier administrateur est créé localement.
 - **HTTPS obligatoire** pour l'accès réseau ; vérification de l'origine des requêtes et protections des sessions/CSRF.
 - **Conteneurs non-root** avec capacités Linux réduites.
-- **Secrets hors Git** : ne jamais commiter de `.env` de production, token d'appairage, clé de sauvegarde ou mot de passe.
+- **Secrets hors Git** : ne jamais commiter de `.env` de production, token d'appairage, archive de sauvegarde ou mot de passe.
 
 **Attention :** sélectionner PostgreSQL ne migre **pas** automatiquement une base SQLite existante. Les sauvegardes administratives couvrent la configuration et l'état applicatif, **pas** les fichiers multimédias.
 

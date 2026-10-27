@@ -73,7 +73,7 @@
       id: 'backup',
       name: 'Sauvegarder le serveur',
       category: 'Maintenance',
-      description: 'Crée une archive chiffrée de la base et de la configuration du serveur. Les fichiers médias ne sont pas inclus.',
+      description: 'Crée une archive non chiffrée de la base et de la configuration du serveur. Réservez son accès à l’administrateur. Les fichiers médias ne sont pas inclus.',
       running: creatingBackup || backup?.running === true,
       reason: backupError ? 'État des sauvegardes indisponible.' : !backup ? 'Chargement des sauvegardes…' : !backup.available ? (backup.reason ?? 'Sauvegardes indisponibles.') : null,
       plan: backup ? { enabled: backup.schedule.enabled, interval: backup.schedule.intervalMinutes, next: backup.schedule.nextDueAt, last: backup.schedule.lastStartedAt, outcome: backup.schedule.lastOutcome } : null
@@ -114,9 +114,11 @@
   function taskHref(id?: string) { return resolve(`admin/libraries/#tasks-section${id ? `?task=${encodeURIComponent(id)}` : ''}`); }
   function date(value: number) { return new Date(value * 1000).toLocaleString(); }
   function intervalLabel(minutes: number) {
-    const count = minutes % 1440 === 0 ? minutes / 1440 : minutes % 60 === 0 ? minutes / 60 : minutes;
-    const suffix = minutes % 1440 === 0 ? 'jour' : minutes % 60 === 0 ? 'heure' : 'minute';
-    return `${count === 1 ? 'Chaque' : 'Toutes les'} ${count === 1 ? '' : `${count} `}${suffix}${count > 1 ? 's' : ''}`;
+    // These plans repeat after a duration; they do not run at a fixed calendar hour.
+    if (minutes % 1440 === 0) return `Toutes les ${minutes / 60} heures`;
+    const count = minutes % 60 === 0 ? minutes / 60 : minutes;
+    const suffix = minutes % 60 === 0 ? 'heure' : 'minute';
+    return `Toutes les ${count} ${suffix}${count > 1 ? 's' : ''}`;
   }
 
   function lastRun(task: Task) {
@@ -293,7 +295,7 @@
         <span aria-hidden="true">+</span> {selected.plan?.enabled ? 'Modifier le déclencheur' : 'Ajouter un déclencheur'}
       </button>
       <div class="trigger-list" aria-label="Déclencheurs">
-        <h3>Heure</h3>
+        <h3>Intervalle</h3>
         {#if selected.plan?.enabled}
           <div class="trigger-row">
             <div>

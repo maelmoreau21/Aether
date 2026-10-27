@@ -41,8 +41,7 @@
 #       # Configuration PostgreSQL 18 :
 #       - MEDIA_DB_ENGINE=postgres
 #       - MEDIA_BACKUP_DIR=/backups
-#       # Store MEDIA_BACKUP_KEY separately from backup archives.
-#       - MEDIA_BACKUP_KEY=${MEDIA_BACKUP_KEY:-}
+#       # Backups are unencrypted: protect the mounted archive volume and its copies.
 #       - MEDIA_DB_URL=postgresql://aether_user:VotreMotDePasseTresSecurise@postgres:5432/aether_db?sslmode=disable
 #     ports:
 #       # Bind local strict : un reverse proxy (Caddy / Nginx / DSM) écoute en 443 et renvoie vers 127.0.0.1:3000

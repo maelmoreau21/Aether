@@ -1386,8 +1386,6 @@ mod tests {
         ));
     }
 
-    const BACKUP_KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
     #[tokio::test]
     async fn backup_carries_assets_and_restore_is_verified_on_a_fresh_store() {
         let f = fixture(quick()).await;
@@ -1407,16 +1405,13 @@ mod tests {
             &db,
             Default::default(),
             &archive,
-            BACKUP_KEY,
             "sqlite",
             Some(source),
         )
         .await
         .unwrap();
         let out = f._dir.path().join("extracted");
-        let summary = crate::backup_bundle::extract(&archive, &out, BACKUP_KEY)
-            .await
-            .unwrap();
+        let summary = crate::backup_bundle::extract(&archive, &out).await.unwrap();
         assert_eq!(summary.assets, 2);
 
         // Fresh installation: SQL rows come back with the restored database, bytes via restore_object.
@@ -1490,7 +1485,6 @@ mod tests {
             &db,
             Default::default(),
             &target,
-            BACKUP_KEY,
             "sqlite",
             Some(f.store.export_source().await.unwrap()),
         )
@@ -1509,7 +1503,6 @@ mod tests {
             &db,
             Default::default(),
             &target,
-            BACKUP_KEY,
             "sqlite",
             Some(f.store.export_source().await.unwrap()),
         )

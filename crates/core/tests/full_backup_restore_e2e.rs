@@ -13,8 +13,6 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use zeroize::Zeroizing;
 
-const KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
 fn generate_key() -> Ed25519KeyPair {
     let bytes = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
     Ed25519KeyPair::from_pkcs8(bytes.as_ref()).unwrap()
@@ -114,7 +112,7 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
     persist(&store_a, &package).await.unwrap();
     assert_eq!(wasm(&store_a, &package).await.unwrap(), package.wasm);
 
-    // === 2. Take a full encrypted backup of Server A ===
+    // === 2. Take a full unencrypted backup of Server A ===
     let backups_dir = temp.path().join("backups");
     tokio::fs::create_dir_all(&backups_dir).await.unwrap();
     let backup_archive = backups_dir.join("live-full-backup.media-backup");
@@ -131,7 +129,6 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
         &snapshot_db,
         BTreeMap::from([("MEDIA_MODE".into(), "standalone".into())]),
         &backup_archive,
-        KEY,
         "sqlite",
         Some(asset_source),
     )
@@ -144,7 +141,7 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
 
     // === 3. Disaster recovery onto Server B (clean slate) ===
     let extracted_dir = temp.path().join("extracted-recovery");
-    let summary = extract(&backup_archive, &extracted_dir, KEY).await.unwrap();
+    let summary = extract(&backup_archive, &extracted_dir).await.unwrap();
     assert_eq!(summary.engine, "sqlite");
     assert_eq!(summary.assets, 1);
     assert!(extracted_dir.join("database.sqlite3").exists());

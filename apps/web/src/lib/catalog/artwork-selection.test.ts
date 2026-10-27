@@ -2,10 +2,12 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { selectArtwork } from './artwork-selection';
 import { session, type Session } from '../auth/session';
 import type { Work } from './api';
+import { setArtworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
 
 const current: Session = { user: { id: 'viewer', login: 'viewer', role: 'user' }, csrfToken: 'session-one' };
 const work: Work = { id: 'film', title: 'Film', kind: 'film', year: null, description: '', libraryId: 'library', synthetic: false, artwork: { backdrop: '/fallback' }, posterUrl: '/poster' };
 const variant = (id: string, kind = 'backdrop', language: string | null = null, origin = 'provider', position = 0) => ({ id, kind, language, origin, position, url: `/images/${id}` });
+const policy: ArtworkRotationPolicy = { enabled: true, libraries: ['library'], enableMovies: true, enableSeries: true, rotationMode: 'random', minHoursBetweenSwitches: 0, poolSize: 4, preferredLanguage: 'fr', fallbackLanguage: 'en', includeUnknownLanguage: true, allowAnyLanguageFallback: true };
 
 beforeEach(() => {
   const stored = new Map<string, string>();
@@ -13,6 +15,7 @@ beforeEach(() => {
   const visit = new Map<string, string>();
   vi.stubGlobal('sessionStorage', { getItem: (key: string) => visit.get(key) ?? null, setItem: (key: string, value: string) => visit.set(key, value), clear: () => visit.clear() });
   session.set(null);
+  setArtworkRotationPolicy(policy);
 });
 
 test('preserves legacy fallbacks and handles missing works', () => {
@@ -21,14 +24,16 @@ test('preserves legacy fallbacks and handles missing works', () => {
 });
 
 test('stays stable across API ordering, navigation and reload; next login avoids the previous image', () => {
-  const images = [variant('a'), variant('b'), variant('c')];
-  const first = selectArtwork({ ...work, imageVariants: images }, current).backdrop;
-  expect(selectArtwork({ ...work, imageVariants: images.toReversed() }, current).backdrop).toBe(first);
+  const images = [variant('a', 'poster'), variant('b', 'poster'), variant('c', 'poster')];
+  const first = selectArtwork({ ...work, imageVariants: images }, current).poster;
+  expect(selectArtwork({ ...work, imageVariants: images.toReversed() }, current).poster).toBe(first);
   session.set(current); // Clear in-memory history as a reload would; recover browser history.
-  expect(selectArtwork({ ...work, imageVariants: images }, current).backdrop).toBe(first);
+  setArtworkRotationPolicy(policy);
+  expect(selectArtwork({ ...work, imageVariants: images }, current).poster).toBe(first);
   const next = { ...current, csrfToken: 'session-two' };
   session.set(next);
-  expect(selectArtwork({ ...work, imageVariants: images }, next).backdrop).not.toBe(first);
+  setArtworkRotationPolicy(policy);
+  expect(selectArtwork({ ...work, imageVariants: images }, next).poster).not.toBe(first);
   expect(localStorage.getItem('media_artwork_choices_viewer')).not.toContain(current.csrfToken);
 });
 
@@ -53,18 +58,54 @@ test('tolerates malformed or blocked browser storage', () => {
 });
 
 test('keeps account histories separate and bounds retained choices', () => {
-  const images = [variant('a'), variant('b')];
+  const images = [variant('a', 'poster'), variant('b', 'poster')];
   for (let i = 0; i < 520; i++) selectArtwork({ ...work, id: `film-${i}`, imageVariants: images }, current);
   expect(Object.keys(JSON.parse(localStorage.getItem('media_artwork_choices_viewer')!))).toHaveLength(512);
   const other = { ...current, user: { ...current.user, id: 'other' } };
   selectArtwork({ ...work, imageVariants: images }, other);
-  expect(Object.keys(JSON.parse(localStorage.getItem('media_artwork_choices_other')!))).toEqual(['film:backdrop']);
+  expect(Object.keys(JSON.parse(localStorage.getItem('media_artwork_choices_other')!))).toEqual(['film:poster']);
 });
 
 test('new browsing visits rotate while the authentication cookie remains the same', () => {
-  const item = { ...work, imageVariants: [variant('a'), variant('b')] };
-  const first = selectArtwork(item, current).backdrop;
+  const item = { ...work, imageVariants: [variant('a', 'poster'), variant('b', 'poster')] };
+  const first = selectArtwork(item, current).poster;
   sessionStorage.clear();
   session.set(current);
-  expect(selectArtwork(item, current).backdrop).not.toBe(first);
+  setArtworkRotationPolicy(policy);
+  expect(selectArtwork(item, current).poster).not.toBe(first);
+});
+
+test('disabled extension leaves posters fixed and does not write rotation history', () => {
+  setArtworkRotationPolicy({ ...policy, enabled: false });
+  const item = { ...work, imageVariants: [variant('b', 'poster'), variant('a', 'poster')] };
+  expect(selectArtwork(item, current).poster).toBe('/images/a');
+  expect(localStorage.getItem('media_artwork_choices_viewer')).toBeNull();
+});
+
+test('library, media type, pool size and sequential setting control rotation', () => {
+  setArtworkRotationPolicy({ ...policy, rotationMode: 'sequential', poolSize: 2 });
+  const item = { ...work, imageVariants: [variant('a', 'poster'), variant('b', 'poster'), variant('c', 'poster')] };
+  const first = selectArtwork(item, current).poster;
+  expect(['/images/a', '/images/b']).toContain(first);
+  session.set({ ...current, csrfToken: 'next' }); setArtworkRotationPolicy({ ...policy, rotationMode: 'sequential', poolSize: 2 });
+  expect(selectArtwork(item, { ...current, csrfToken: 'next' }).poster).toBe(first === '/images/a' ? '/images/b' : '/images/a');
+  setArtworkRotationPolicy({ ...policy, libraries: [] });
+  expect(selectArtwork(item, current).poster).toBe('/images/a');
+});
+
+test('minimum interval holds the previous poster and film switch excludes series', () => {
+  setArtworkRotationPolicy({ ...policy, minHoursBetweenSwitches: 24, enableSeries: false });
+  const item = { ...work, imageVariants: [variant('a', 'poster'), variant('b', 'poster')] };
+  const first = selectArtwork(item, current).poster;
+  session.set({ ...current, csrfToken: 'later' });
+  setArtworkRotationPolicy({ ...policy, minHoursBetweenSwitches: 24, enableSeries: false });
+  expect(selectArtwork(item, { ...current, csrfToken: 'later' }).poster).toBe(first);
+  expect(selectArtwork({ ...item, kind: 'series' as const }, current).poster).toBe('/images/a');
+});
+
+test('language restrictions reject unavailable images and keep the fallback', () => {
+  setArtworkRotationPolicy({ ...policy, includeUnknownLanguage: false, allowAnyLanguageFallback: false });
+  const item = { ...work, imageVariants: [variant('de', 'poster', 'de'), variant('unknown', 'poster')] };
+  expect(selectArtwork(item, current).poster).toBe('/poster');
+  expect(selectArtwork({ ...item, imageVariants: [...item.imageVariants, variant('english', 'poster', 'en')] }, current).poster).toBe('/images/english');
 });

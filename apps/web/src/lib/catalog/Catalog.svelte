@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import { loadArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
   import { serverPresentation } from '../config/presentation';
   import { ensurePreferences, savePreferences } from '../preferences';
   import { page } from '$app/state';
@@ -290,6 +291,7 @@
 
   onMount(() => {
     const controller = new AbortController();
+    void loadArtworkRotationPolicy(controller.signal);
     fetchBrandName(controller.signal)
       .then(brandName => {
         name = brandName;

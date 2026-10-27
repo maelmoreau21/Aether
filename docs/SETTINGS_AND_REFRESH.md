@@ -81,3 +81,7 @@ NFO existantes doivent rester utilisables sans connexion externe.
 Les vérifications PostgreSQL réelles et les autres parcours navigateur ignorés ne sont pas
 revendiqués pour ce jalon. Les tests utilisent des fixtures locales ; pas de validation NAS,
 d’appareil physique ou d’un nouveau mode de décodage navigateur, ni de déploiement effectué.
+# Navigation du tableau de bord (27 octobre 2026)
+
+L'entrée Administration → Tableau de bord ouvre « Vue d’ensemble » lorsqu'aucune section n'est indiquée dans l'URL. Les liens directs vers une section continuent d'ouvrir cette section.
+

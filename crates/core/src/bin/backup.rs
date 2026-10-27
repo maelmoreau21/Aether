@@ -95,20 +95,6 @@ async fn full_backup(
     target: &std::path::Path,
     media_root: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // No fixed fallback key: explicit key, key file, or the installation key created by Core.
-    let data_dir = match media_poc::identity::configured_path(media_root) {
-        Ok(db) => db.parent().map(|p| p.to_owned()),
-        Err(_) => None,
-    }
-    .or_else(|| std::env::var_os("MEDIA_DATA_DIR").map(PathBuf::from));
-    let key = media_poc::backup_bundle::resolve_key(
-        std::env::var("MEDIA_BACKUP_KEY").ok().as_deref(),
-        std::env::var_os("MEDIA_BACKUP_KEY_FILE")
-            .map(PathBuf::from)
-            .as_deref(),
-        data_dir.as_deref(),
-        false,
-    )?;
     media_poc::backup::check_path_safety(target, "full backup")?;
     media_poc::backup::check_not_in_media_root(target, Some(media_root), "full backup")?;
     if target.exists() {
@@ -139,7 +125,8 @@ async fn full_backup(
     let snapshot = cleanup.0.join("database.snapshot");
     let mut config: std::collections::BTreeMap<String, String> = std::env::vars()
         .filter(|(name, _)| {
-            (name.starts_with("MEDIA_") || name.starts_with("OIDC_")) && name != "MEDIA_BACKUP_KEY"
+            (name.starts_with("MEDIA_") || name.starts_with("OIDC_"))
+                && !matches!(name.as_str(), "MEDIA_BACKUP_KEY" | "MEDIA_BACKUP_KEY_FILE")
         })
         .collect();
     let engine = std::env::var("MEDIA_DB_ENGINE").unwrap_or_else(|_| "sqlite".into());
@@ -158,7 +145,7 @@ async fn full_backup(
         _ => return Err("MEDIA_DB_ENGINE must be sqlite or postgres".into()),
     }
     config.insert("MEDIA_DB_ENGINE".into(), engine.clone());
-    media_poc::backup_bundle::create(&snapshot, config, target, &key, &engine).await?;
+    media_poc::backup_bundle::create(&snapshot, config, target, &engine).await?;
     Ok(())
 }
 

@@ -65,8 +65,10 @@ de clés sont conservées pour compatibilité des outils existants.
 
 Le paquet est conservé en base applicative, hors médias; installation atomique
 par insertion et unicité. Installation et activation restent séparées.
-Une mise à jour en place est refusée : désinstaller puis installer et réaccorder
-les droits. Pas de dépendances, migrations privées ni rollback annoncés.
+Une route de mise à jour en place existe désormais, mais son parcours complet
+de compatibilité, consentement, sauvegarde et rollback n'est pas garanti.
+Voir [Cycle de mise à jour](PLUGIN_UPDATE_LIFECYCLE.md) avant tout usage réel.
+La désinstallation/réinstallation n'est pas un substitut de sauvegarde.
 La conservation des résultats à la désinstallation est un choix explicite.
 
 ## ABI Rust/Wasm

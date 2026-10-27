@@ -4565,3 +4565,38 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
 
 - `version_policy.rs` conserve la priorité du tag Git et les mêmes versions produites, avec conditions simplifiées pour Clippy Rust 1.99. `task_engine.rs` passe directement à SQLx les références `provider` et `extension` déjà empruntées.
 - Vérifié localement : `cargo fmt --all -- --check`, `cargo test --locked -p media-contracts` (13 tests), `python scripts/test-release-policy.py` (14 tests), et `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings`. Aucun run GitHub après intégration observé.
+
+## 27 octobre 2026 — Clé de sauvegarde publique et contrat de mise à jour des extensions
+
+- Le fichier `crates/core/secrets/backup.key`, ajouté le 26 octobre, a été
+  retiré du suivi Git et supprimé du checkout ; `.gitignore` et `.dockerignore`
+  excluent ce chemin. Son historique public reste exposé. Aucun accès aux
+  serveurs ou archives externes : son usage réel n'a pas été établi.
+- Sur instruction explicite de retirer toute gestion des clés de sauvegarde,
+  le format courant devient `MDBK0002` sans chiffrement ni clé. Les archives
+  contiennent les secrets en clair ; le SHA-256 final détecte les corruptions
+  accidentelles sans authenticité. L'ancien `MDBK0001` exige l'ancien binaire
+  et sa clé d'origine ; aucune archive existante n'a été modifiée.
+- Le code possède déjà une route d'upgrade en place mais sans les garanties
+  complètes attendues ; `docs/PLUGIN_UPDATE_LIFECYCLE.md` définit identité,
+  compatibilité, consentement, sauvegarde, bascule, échec et rollback avant de
+  déclarer ce parcours prêt pour des données importantes.
+- Vérifié localement : `cargo check --locked -p media-poc --all-targets`,
+  `cargo test --locked -p media-poc --test backup_bundle` (4 tests),
+  `--test admin_backups` (2 tests), `--test full_backup_restore_e2e` (1 test),
+  tests unitaires ciblés du bundle, des assets et de `media-recover`, puis
+  `cargo fmt --all -- --check`,
+  `cargo clippy --locked -p media-poc --all-targets -- -D warnings` et
+  `npm run check --prefix apps/web` (0 erreur, 5 avertissements préexistants).
+  Aucun serveur externe, ancien paquet ou NAS n'a été testé.
+
+## 27 octobre 2026 — Entrée du tableau de bord administrateur
+
+- L’ouverture de `admin/libraries/` sans fragment, ou avec un fragment inconnu, sélectionne désormais « Vue d’ensemble ». Les liens explicites vers Bibliothèques et les autres sections restent utilisables. Vérification locale : `npm run check --prefix apps/web` (0 erreur, 5 avertissements préexistants). Aucun déploiement ni parcours navigateur réel effectué.
+- Le planificateur Web dit désormais « Toutes les 24 heures » et « Intervalle » pour la règle actuelle de 1440 minutes ; l'horaire civil fixe avec fuseau et gestion du changement d'heure reste non implémenté. Même vérification Web après ce changement.
+
+## 27 octobre 2026 — Chemin des assets Web fixe
+
+- Le Core sert l'interface depuis `apps/web/build`, relatif à son répertoire de travail (`/app` dans les images Docker). La variable de configuration du chemin Web a été supprimée du code, des images, des exemples Compose, des scripts et de la documentation courante.
+- Les tests d'intégration fournissent un répertoire Web temporaire directement au constructeur du routeur ; le banc de mesure copie le build Web de ses artefacts dans son répertoire de travail avant de démarrer le Core.
+- Vérification ciblée : `cargo test --locked -p media-poc --test static_web --test adversarial_challenge` (6 tests passés), test unitaire `configured_web_dist_uses_build_directory` (1 passé), `rustfmt --check --edition 2024 --config skip_children=true` sur les trois fichiers Rust touchés, syntaxe Node/Python et validation des deux exemples Compose. Aucun build Docker ni test navigateur réel pour ce changement.

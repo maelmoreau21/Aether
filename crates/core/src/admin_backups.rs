@@ -25,7 +25,6 @@ struct Backups {
     media_root: PathBuf,
     gate: Arc<Semaphore>,
     worker: Mutex<Option<tokio::task::AbortHandle>>,
-    key: Option<Arc<zeroize::Zeroizing<String>>>,
     configuration: BTreeMap<String, String>,
 }
 
@@ -52,12 +51,11 @@ pub async fn router(
     auth: AuthState,
     media_root: PathBuf,
 ) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
-    let (directory, key, configuration) = environment_inputs();
-    router_with_configuration(auth, media_root, directory, key, configuration).await
+    let (directory, configuration) = environment_inputs();
+    router_with_configuration(auth, media_root, directory, configuration).await
 }
 
-fn environment_inputs() -> (Option<PathBuf>, Option<String>, BTreeMap<String, String>) {
-    let key = std::env::var("MEDIA_BACKUP_KEY").ok();
+fn environment_inputs() -> (Option<PathBuf>, BTreeMap<String, String>) {
     let directory = std::env::var_os("MEDIA_BACKUP_DIR").map(PathBuf::from);
     let configuration = std::env::vars()
         .filter(|(name, _)| {
@@ -65,7 +63,7 @@ fn environment_inputs() -> (Option<PathBuf>, Option<String>, BTreeMap<String, St
                 && !matches!(name.as_str(), "MEDIA_BACKUP_KEY" | "MEDIA_BACKUP_KEY_FILE")
         })
         .collect();
-    (directory, key, configuration)
+    (directory, configuration)
 }
 
 /// Explicit operator/test configuration; never exposed as an HTTP payload.
@@ -73,19 +71,17 @@ pub async fn router_with_configuration(
     auth: AuthState,
     media_root: PathBuf,
     directory: Option<PathBuf>,
-    key: Option<String>,
     configuration: BTreeMap<String, String>,
 ) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
-    let state = build_state(auth, media_root, directory, key, configuration).await?;
+    let state = build_state(auth, media_root, directory, configuration).await?;
     Ok(router_with_state(state))
 }
 
-/// Resolve engine, directory, key and configuration from the open database.
+/// Resolve engine, directory and configuration from the open database.
 async fn build_state(
     auth: AuthState,
     media_root: PathBuf,
     directory: Option<PathBuf>,
-    key: Option<String>,
     mut configuration: BTreeMap<String, String>,
 ) -> Result<Backups, Box<dyn std::error::Error + Send + Sync>> {
     configuration.remove("MEDIA_BACKUP_KEY");
@@ -122,21 +118,6 @@ async fn build_state(
         .map(|parent| parent.join("backups"))
         .unwrap_or(std::env::current_dir()?.join("backups"));
     let directory = Some(directory.unwrap_or(default_directory));
-    // No fixed fallback: explicit key (invalid => startup error), key file, or a per-installation
-    // CSPRNG key persisted under `<data>/secrets/` and never copied into archives.
-    let key_file = std::env::var_os("MEDIA_BACKUP_KEY_FILE").map(PathBuf::from);
-    let data_dir = source
-        .as_ref()
-        .and_then(|s| s.parent())
-        .or_else(|| directory.as_ref().and_then(|d| d.parent()))
-        .map(|p| p.to_owned());
-    let key = crate::backup_bundle::resolve_key(
-        key.as_deref(),
-        key_file.as_deref(),
-        data_dir.as_deref(),
-        true,
-    )?;
-    let key = Some(Arc::new(key));
     if let Some(directory) = &directory {
         configuration.insert(
             "MEDIA_BACKUP_DIR".into(),
@@ -170,7 +151,6 @@ async fn build_state(
         media_root,
         gate: Arc::new(Semaphore::new(1)),
         worker: Mutex::new(None),
-        key,
         configuration,
     })
 }
@@ -361,11 +341,6 @@ async fn list(
 }
 
 async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
-    let key = state
-        .key
-        .as_ref()
-        .map(|k| k.as_str())
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let directory = validate_directory(state).await?;
     let path = directory.clone();
     tokio::task::spawn_blocking(move || {
@@ -433,7 +408,6 @@ async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
         &temporary.0,
         state.configuration.clone(),
         &directory.join(format!("{id}.media-backup")),
-        key,
         engine,
         Some(assets),
     )
@@ -577,8 +551,8 @@ pub(crate) async fn execute_scheduled(
     media_root: PathBuf,
     job: &crate::task_engine::Job,
 ) -> Result<(), StatusCode> {
-    let (directory, key, configuration) = environment_inputs();
-    let state = build_state(auth, media_root, directory, key, configuration)
+    let (directory, configuration) = environment_inputs();
+    let state = build_state(auth, media_root, directory, configuration)
         .await
         .map_err(|error| {
             eprintln!("scheduled backup: configuration unavailable: {error}");
@@ -708,7 +682,6 @@ mod tests {
             media_root: media,
             gate: Arc::new(Semaphore::new(1)),
             worker: Mutex::new(None),
-            key: Some(Arc::new(zeroize::Zeroizing::new("11".repeat(32)))),
             configuration: BTreeMap::new(),
         };
         assert!(!load_schedule(&state).await.unwrap().enabled);

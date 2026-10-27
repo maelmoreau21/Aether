@@ -2,6 +2,10 @@
 
 # Scans planifiés — 19 octobre 2026
 
+## Libellé des déclencheurs — 27 octobre 2026
+
+L'interface nomme les déclencheurs actuels « intervalles » et affiche « Toutes les 24 heures » pour 1440 minutes. Le moteur part de l'heure d'enregistrement ou du dernier lancement ; il ne garantit pas « chaque jour à 7 h ». Un horaire civil fixe requiert une règle persistée avec fuseau horaire et un calcul explicite des changements d'heure pour les scans, sauvegardes et tâches système.
+
 Le Core possède un plan persistant par bibliothèque Films/Séries, locale ou distante.
 L’administrateur active le plan et choisit un intervalle de 5 à 10 080 minutes dans
 Administration → Tâches. Les médias restent en lecture seule. Le scanner et la

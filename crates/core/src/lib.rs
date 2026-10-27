@@ -134,6 +134,35 @@ pub async fn secure_app_with_jobs(
     auth: auth::AuthState,
     jobs: Arc<scans::ScanJobs>,
 ) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
+    secure_app_with_jobs_and_web_dist(inventory, _port, auth, jobs, configured_web_dist()).await
+}
+
+/// Build the authenticated router with an explicit static asset directory.
+/// Used by integration tests to supply disposable web fixtures.
+#[doc(hidden)]
+pub async fn secure_app_with_web_dist(
+    inventory: node::Inventory,
+    port: u16,
+    auth: auth::AuthState,
+    web_dist: std::path::PathBuf,
+) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
+    secure_app_with_jobs_and_web_dist(
+        inventory,
+        port,
+        auth,
+        Arc::new(scans::ScanJobs::default()),
+        web_dist,
+    )
+    .await
+}
+
+async fn secure_app_with_jobs_and_web_dist(
+    inventory: node::Inventory,
+    _port: u16,
+    auth: auth::AuthState,
+    jobs: Arc<scans::ScanJobs>,
+    web_dist: std::path::PathBuf,
+) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
     let mode = if inventory.is_fixture_bench() {
         "localhost-fixtures"
     } else {
@@ -183,7 +212,7 @@ pub async fn secure_app_with_jobs(
             permissions::require_media,
         ));
     let protected = local_security_with_store(
-        public_routes(mode)
+        public_routes(mode, web_dist)
             .merge(media)
             .merge(scans::router(auth.clone(), root.clone(), jobs).await?)
             .merge(libraries::router(auth.clone(), root.clone()))
@@ -312,25 +341,15 @@ async fn indexed_descriptor(
 #[cfg(feature = "fixture-bench")]
 pub fn app(inventory: node::Inventory, port: u16) -> Router {
     health_routes("localhost-fixtures").merge(local_security(
-        public_routes("localhost-fixtures").merge(media_routes(inventory)),
+        public_routes("localhost-fixtures", configured_web_dist()).merge(media_routes(inventory)),
         format!("http://127.0.0.1:{port}"),
     ))
 }
 
-/// Helper to resolve web dist path from an optional string slice.
-pub fn configured_web_dist_from(val: Option<&str>) -> std::path::PathBuf {
-    let raw = match val {
-        Some(s) if !s.trim().is_empty() => std::path::PathBuf::from(s.trim()),
-        _ => std::path::PathBuf::from("apps/web/build"),
-    };
-    raw.canonicalize().unwrap_or(raw)
-}
-
-/// Resolve the static web distribution directory from `MEDIA_WEB_DIST`.
-/// Defaults to `"apps/web/build"` if unset or empty/whitespace.
-/// Best-effort canonicalizes if the directory exists on disk.
+/// Static assets are built at this path relative to the Core working directory.
 pub fn configured_web_dist() -> std::path::PathBuf {
-    configured_web_dist_from(std::env::var("MEDIA_WEB_DIST").ok().as_deref())
+    let raw = std::path::PathBuf::from("apps/web/build");
+    raw.canonicalize().unwrap_or(raw)
 }
 
 fn health_routes(mode: &'static str) -> Router {
@@ -370,12 +389,11 @@ fn health_routes(mode: &'static str) -> Router {
         ))
 }
 
-fn public_routes(mode: &'static str) -> Router {
+fn public_routes(mode: &'static str, web_dist: std::path::PathBuf) -> Router {
     let mut router = Router::new()
         .nest_service(
             "/app",
-            tower_http::services::ServeDir::new(configured_web_dist())
-                .append_index_html_on_directories(true),
+            tower_http::services::ServeDir::new(web_dist).append_index_html_on_directories(true),
         )
         .route(
             "/api/v1/config",
@@ -531,35 +549,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn configured_web_dist_defaults_when_unset_or_empty() {
+    fn configured_web_dist_uses_build_directory() {
         let expected = std::path::PathBuf::from("apps/web/build");
         let expected = expected.canonicalize().unwrap_or(expected);
-
-        assert_eq!(configured_web_dist_from(None), expected);
-        assert_eq!(configured_web_dist_from(Some("")), expected);
-        assert_eq!(configured_web_dist_from(Some("   \t  ")), expected);
-    }
-
-    #[test]
-    fn configured_web_dist_custom_path() {
-        let temp = tempfile::tempdir().unwrap();
-        let custom = temp.path().join("dist");
-        std::fs::create_dir_all(&custom).unwrap();
-        let canonical_custom = custom.canonicalize().unwrap();
-
-        assert_eq!(
-            configured_web_dist_from(Some(custom.to_str().unwrap())),
-            canonical_custom
-        );
-    }
-
-    #[test]
-    fn configured_web_dist_nonexistent_path_falls_back_to_raw() {
-        let nonexistent = "nonexistent/custom/path";
-        assert_eq!(
-            configured_web_dist_from(Some(nonexistent)),
-            std::path::PathBuf::from(nonexistent)
-        );
+        assert_eq!(configured_web_dist(), expected);
     }
 }
 

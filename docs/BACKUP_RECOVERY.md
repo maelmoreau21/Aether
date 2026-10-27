@@ -1,15 +1,16 @@
-# Récupération d'une sauvegarde complète chiffrée
+# Récupération d'une sauvegarde complète
 
-Le parcours comprend deux opérations distinctes : déchiffrer la sauvegarde dans
+Le parcours comprend deux opérations distinctes : extraire la sauvegarde dans
 un dossier de récupération privé, puis restaurer hors ligne la base et remettre
 en place la configuration après examen. `media-recover` réalise la première
 opération seulement ; il ne modifie ni l'environnement du Core ni sa base active.
 
 ## Préparer la récupération
 
-Conserver la clé `MEDIA_BACKUP_KEY` séparément des archives. Sans la clé correcte,
-le contenu chiffré n'est pas récupérable. Ne pas stocker cette clé dans Git, une
-capture, un ticket ou le même emplacement public que les sauvegardes.
+Le format courant `MDBK0002` est non chiffré : protéger strictement l'archive
+et ses copies. `media-recover` ne prend aucune clé et refuse les anciennes
+archives `MDBK0001`. Leur récupération exige un ancien binaire et la clé
+d'origine ; cette suppression ne convertit ni n'efface les archives existantes.
 
 Utiliser un poste et un dossier contrôlés par l'opérateur. L'archive contient la
 base applicative et une configuration pouvant inclure des secrets : sessions,
@@ -25,16 +26,11 @@ compte opérateur ; des permissions Unix ne démontrent pas une isolation ACL NT
 Exemple PowerShell, à partir de binaires construits :
 
 ```powershell
-$backupKey = Read-Host 'Clé de sauvegarde (64 caractères hexadécimaux)' -MaskInput
-$env:MEDIA_BACKUP_KEY = $backupKey
 media-recover 'D:\Sauvegardes\serveur.media-backup' 'D:\Recuperation\serveur-2026-10-19'
-Remove-Item Env:MEDIA_BACKUP_KEY
-Remove-Variable backupKey
 ```
 
-Le secret est transmis via l'environnement, jamais comme argument de commande.
-Ces commandes ne remplacent pas la protection de la session opérateur et de son
-gestionnaire de secrets. Le nom et la date du dossier sont des exemples.
+Cette commande ne remplace pas la protection de la session opérateur et du
+stockage des archives. Le nom et la date du dossier sont des exemples.
 
 ## Examiner le contenu extrait
 
@@ -100,12 +96,12 @@ le serveur restauré avant remise en service.
 ## Limites et validation
 
 `media-recover` ne démarre pas de service, ne remplace pas un volume Docker et ne
-relance pas les Nodes. L'extraction authentifiée ne prouve pas à elle seule que
+relance pas les Nodes. La vérification du checksum ne prouve pas à elle seule que
 la configuration convient à la nouvelle infrastructure. Les paramètres externes
 du reverse proxy, de l'IdP, du gestionnaire de secrets et les médias demeurent
 sous responsabilité opérateur.
 
-Les tests automatiques vérifient séparément intégrité/authentification de
+Les tests automatiques vérifient séparément intégrité du format et du checksum de
 l'archive, refus d'écrasement et chemins confinés. Un exercice réel de restauration
 sur un environnement distinct reste la preuve de reprise complète ; aucun
 résultat NAS ou PostgreSQL réel n'est déduit de la seule présence du binaire.

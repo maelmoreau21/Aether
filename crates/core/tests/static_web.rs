@@ -1,11 +1,11 @@
-//! Integration tests for static asset serving under /app and MEDIA_WEB_DIST support.
+//! Integration tests for static asset serving under /app.
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use media_poc::{
-    auth::AuthState, configured_web_dist, identity::IdentityStore, node::Inventory, secure_app,
+    auth::AuthState, identity::IdentityStore, node::Inventory, secure_app_with_web_dist,
 };
 use tower::ServiceExt;
 use zeroize::Zeroizing;
@@ -13,7 +13,7 @@ use zeroize::Zeroizing;
 static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test]
-async fn static_web_serves_custom_dist_and_applies_security_headers() {
+async fn static_web_serves_assets_and_applies_security_headers() {
     let _lock = ENV_LOCK.lock().await;
     let temp = tempfile::tempdir().unwrap();
     let web_dist = temp.path().join("custom_dist");
@@ -29,12 +29,6 @@ async fn static_web_serves_custom_dist_and_applies_security_headers() {
     )
     .unwrap();
 
-    // Verify configured_web_dist with explicit MEDIA_WEB_DIST
-    unsafe {
-        std::env::set_var("MEDIA_WEB_DIST", &web_dist);
-    }
-    assert_eq!(configured_web_dist(), web_dist.canonicalize().unwrap());
-
     let db_path = temp.path().join("test_static.sqlite3");
     let store = IdentityStore::open(&db_path).await.unwrap();
     store
@@ -48,7 +42,9 @@ async fn static_web_serves_custom_dist_and_applies_security_headers() {
     std::fs::create_dir_all(&media_dir).unwrap();
     let inventory = Inventory::local(media_dir).await.unwrap();
 
-    let router = secure_app(inventory, 3000, auth).await.unwrap();
+    let router = secure_app_with_web_dist(inventory, 3000, auth, web_dist)
+        .await
+        .unwrap();
 
     // 0. Request to / -> redirects to /app/
     let req = Request::builder()
@@ -155,9 +151,6 @@ async fn static_web_serves_custom_dist_and_applies_security_headers() {
     let res = router.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::TEMPORARY_REDIRECT);
 
-    unsafe {
-        std::env::remove_var("MEDIA_WEB_DIST");
-    }
     store.close().await;
 }
 
@@ -169,10 +162,7 @@ async fn static_web_trusted_external_origin_from_env_or_oidc() {
     std::fs::create_dir_all(&web_dist).unwrap();
     std::fs::write(web_dist.join("index.html"), "Hello from Aether").unwrap();
 
-    unsafe {
-        std::env::set_var("MEDIA_WEB_DIST", &web_dist);
-        std::env::set_var("MEDIA_ALLOWED_ORIGINS", "https://authentik.dfmag.fr");
-    }
+    unsafe { std::env::set_var("MEDIA_ALLOWED_ORIGINS", "https://authentik.dfmag.fr") };
 
     let db_path = temp.path().join("trusted_origin_test.sqlite3");
     let store = IdentityStore::open(&db_path).await.unwrap();
@@ -189,7 +179,9 @@ async fn static_web_trusted_external_origin_from_env_or_oidc() {
     std::fs::create_dir_all(&media_dir).unwrap();
     let inventory = Inventory::local(media_dir).await.unwrap();
 
-    let router = secure_app(inventory, 3000, auth).await.unwrap();
+    let router = secure_app_with_web_dist(inventory, 3000, auth, web_dist)
+        .await
+        .unwrap();
 
     // Authentik origin is accepted even without sec-fetch-mode: navigate (e.g. mobile browser sending Origin header)
     let req = Request::builder()
@@ -212,7 +204,6 @@ async fn static_web_trusted_external_origin_from_env_or_oidc() {
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
     unsafe {
-        std::env::remove_var("MEDIA_WEB_DIST");
         std::env::remove_var("MEDIA_ALLOWED_ORIGINS");
     }
     store.close().await;

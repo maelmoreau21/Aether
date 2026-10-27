@@ -155,7 +155,6 @@ L'endpoint interne `/api/v1/health` est volontairement placé en amont du middle
 | `MEDIA_DB_PATH` | `/data/core.sqlite3` | Chemin du fichier SQLite dans le volume persistant |
 | `MEDIA_SQLITE_BUSY_TIMEOUT_SECS` | `15` | Délai d'attente max sur verrou d'écriture SQLite avant erreur BUSY (45s+ recommandé sur 10k+ médias) |
 | `MEDIA_LIBRARY_ROOT` | optionnelle | Restriction explicite à une racine ; sinon découverte des montages de dossiers Linux |
-| `MEDIA_WEB_DIST` | `/app/apps/web/build` | Répertoire des assets Web statiques pré-compilés |
 
 ---
 
@@ -389,7 +388,7 @@ Administration → Bibliothèques. Les dossiers système et `/data`, `/backups`,
 `/app` sont exclus. Sélectionner les dossiers et lancer leur scan reste explicite.
 Les chemins restent confinés aux montages découverts ; les droits de bibliothèque
 et les contrôles contre les liens restent appliqués. Hors Linux, configurer une racine.
-`MEDIA_WEB_DIST` est facultative : l’image inclut le bon chemin par défaut.
+Le Core sert les assets Web depuis `apps/web/build` sous son répertoire de travail (`/app` dans l’image).
 
 ```yaml
 volumes:

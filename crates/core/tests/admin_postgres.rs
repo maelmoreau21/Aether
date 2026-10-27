@@ -1,4 +1,4 @@
-//! Opt-in proof with real PostgreSQL 18 dump/restore and encrypted complete Core state.
+//! Opt-in proof with real PostgreSQL 18 dump/restore and unencrypted Core state.
 use axum::{
     Router,
     body::{Body, to_bytes},
@@ -75,7 +75,6 @@ async fn remote_postgres_full_backup_restores_all_core_tables_and_configuration(
         .execute(store.pool())
         .await
         .unwrap();
-    let key = "12".repeat(32);
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
@@ -83,7 +82,6 @@ async fn remote_postgres_full_backup_restores_all_core_tables_and_configuration(
         auth,
         media.clone(),
         Some(temp.path().join("backups")),
-        Some(key.clone()),
         std::collections::BTreeMap::from([(
             "MEDIA_OIDC_CLIENT_SECRET".into(),
             "synthetic-oidc-secret".into(),
@@ -104,7 +102,6 @@ async fn remote_postgres_full_backup_restores_all_core_tables_and_configuration(
             .join("backups")
             .join(format!("{id}.media-backup")),
         &output,
-        &key,
     )
     .await
     .unwrap();

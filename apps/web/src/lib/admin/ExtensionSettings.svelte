@@ -9,7 +9,7 @@
       <label class="toggle-row"><span><strong>{field.label}</strong>{#if field.description}<small>{field.description}</small>{/if}</span><input type="checkbox" role="switch" checked={values[field.key]===true||values[field.key]==='true'} disabled={busy} onchange={event=>values[field.key]=event.currentTarget.checked} /></label>
     {:else}<label class="field"><span>{field.label}{#if field.required}<span aria-hidden="true"> *</span>{/if}</span>
       {#if field.fieldType==='select'}<select aria-label={field.label} required={field.required} disabled={busy} bind:value={values[field.key]}>{#each field.options??[] as option (option.value)}<option value={option.value}>{option.label}</option>{/each}</select>
-      {:else}<input aria-label={field.label} type={field.secret||field.fieldType==='password'?'password':field.key==='base_url'?'url':'text'} required={field.required} autocomplete={field.secret?'new-password':'off'} disabled={busy} bind:value={values[field.key]} />{/if}
+      {:else}<input aria-label={field.label} type={field.secret||field.fieldType==='password'?'password':field.fieldType==='number'?'number':field.key==='base_url'?'url':'text'} min={field.fieldType==='number'?(field.key==='pool_size'?'1':'0'):undefined} max={field.key==='pool_size'?'24':field.key==='min_hours_between_switches'?'720':undefined} step={field.fieldType==='number'?'1':undefined} required={field.required} autocomplete={field.secret?'new-password':'off'} disabled={busy} bind:value={values[field.key]} />{/if}
       {#if field.description}<small>{field.description}</small>{/if}</label>
     {/if}
   {/each}</div>

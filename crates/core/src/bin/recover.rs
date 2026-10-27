@@ -1,35 +1,15 @@
 //! Offline recovery staging. Never connects to a database or applies configuration.
 use std::{ffi::OsString, path::PathBuf};
 
-const USAGE: &str = "usage: media-recover ARCHIVE NEW_OUTPUT_DIR\nSet MEDIA_BACKUP_KEY (64 hexadecimal characters) or MEDIA_BACKUP_KEY_FILE; there is no default key. Archives made by old betas with the public all-zero key can only be opened with the explicit --legacy-public-key flag as a third argument (they never had confidentiality). The output directory must not exist; its parent must exist. This extracts sensitive recovery files only; stop Core and use media-restore separately.";
+const USAGE: &str = "usage: media-recover ARCHIVE NEW_OUTPUT_DIR\nOnly version 2 archives are supported. The output directory must not exist; its parent must exist. Archives are unencrypted and contain sensitive data. Stop Core and use media-restore separately.";
 
-#[cfg(test)]
 fn paths(mut args: impl Iterator<Item = OsString>) -> Result<(PathBuf, PathBuf), &'static str> {
-    let (source, target, _) = paths_with_flag(&mut args)?;
-    Ok((source, target))
-}
-
-fn paths_with_flag(
-    args: &mut impl Iterator<Item = OsString>,
-) -> Result<(PathBuf, PathBuf, bool), &'static str> {
     let source = args.next().ok_or(USAGE)?;
     let target = args.next().ok_or(USAGE)?;
-    let legacy = match args.next() {
-        None => false,
-        Some(flag) if flag == "--legacy-public-key" => true,
-        Some(_) => return Err(USAGE),
-    };
     if args.next().is_some() || source.is_empty() || target.is_empty() {
         return Err(USAGE);
     }
-    Ok((source.into(), target.into(), legacy))
-}
-
-fn validate_key(key: &str) -> Result<(), &'static str> {
-    if key.len() != 64 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("MEDIA_BACKUP_KEY must contain exactly 64 hexadecimal characters");
-    }
-    Ok(())
+    Ok((source.into(), target.into()))
 }
 
 fn next_steps(engine: &str) -> Result<&'static str, &'static str> {
@@ -60,26 +40,8 @@ async fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let (source, target, legacy) = paths_with_flag(&mut std::env::args_os().skip(1))?;
-    let summary = if legacy {
-        eprintln!(
-            "WARNING: opening an archive protected by the publicly known legacy key. Its content was never confidential; rotate every secret it contains."
-        );
-        media_poc::backup_bundle::extract_legacy_public_key(&source, &target).await?
-    } else {
-        let key = media_poc::backup_bundle::resolve_key(
-            std::env::var("MEDIA_BACKUP_KEY").ok().as_deref(),
-            std::env::var_os("MEDIA_BACKUP_KEY_FILE")
-                .map(PathBuf::from)
-                .as_deref(),
-            std::env::var_os("MEDIA_DATA_DIR")
-                .map(PathBuf::from)
-                .as_deref(),
-            false,
-        )?;
-        validate_key(&key)?;
-        media_poc::backup_bundle::extract(&source, &target, &key).await?
-    };
+    let (source, target) = paths(std::env::args_os().skip(1))?;
+    let summary = media_poc::backup_bundle::extract(&source, &target).await?;
     println!(
         "Recovery files extracted. Keep the output directory private: config.json contains sensitive settings."
     );
@@ -114,16 +76,6 @@ mod tests {
         assert_eq!(target, PathBuf::from("new directory"));
         assert!(paths(std::iter::empty()).is_err());
         assert!(paths([OsString::from("archive")].into_iter()).is_err());
-        let (_, _, legacy) = paths_with_flag(
-            &mut [
-                OsString::from("a"),
-                OsString::from("b"),
-                OsString::from("--legacy-public-key"),
-            ]
-            .into_iter(),
-        )
-        .unwrap();
-        assert!(legacy);
         assert!(paths([OsString::from("archive"), OsString::new()].into_iter()).is_err());
         assert!(
             paths(
@@ -137,15 +89,6 @@ mod tests {
             )
             .is_err()
         );
-    }
-
-    #[test]
-    fn key_validation_never_embeds_secret_in_error() {
-        assert!(validate_key(&"aB19".repeat(16)).is_ok());
-        assert!(validate_key(&"z".repeat(64)).is_err());
-        assert!(validate_key(&"a".repeat(63)).is_err());
-        let secret = "synthetic secret which must not appear";
-        assert!(!validate_key(secret).unwrap_err().contains(secret));
     }
 
     #[test]

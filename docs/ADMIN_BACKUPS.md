@@ -1,17 +1,17 @@
 # Sauvegardes administrateur et planification
 
-La console crée, liste et télécharge des archives chiffrées `.media-backup` contenant la base complète et un instantané des variables `MEDIA_*` / `OIDC_*` du processus (secrets inclus uniquement dans la partie chiffrée). Les paramètres enregistrés en base sont inclus : comptes, groupes, accès, catalogue, progression, tâches, clés API hachées et état des extensions. Les chemins/URL du moteur et URL publique reflètent la connexion réelle. La clé de sauvegarde et son éventuel chemin source restent exclus.
+La console crée, liste et télécharge des archives `.media-backup` **non chiffrées** contenant la base complète et un instantané des variables `MEDIA_*` / `OIDC_*` du processus. Les secrets sont donc lisibles par quiconque peut lire l'archive. Les paramètres enregistrés en base sont inclus : comptes, groupes, accès, catalogue, progression, tâches, clés API hachées et état des extensions. Les chemins/URL du moteur et URL publique reflètent la connexion réelle.
 
-Cle de sauvegarde : aucune cle par defaut. Voir [BACKUP_KEY.md](BACKUP_KEY.md) (`MEDIA_BACKUP_KEY`, `MEDIA_BACKUP_KEY_FILE` ou cle d'installation generee par le CSPRNG, jamais dans l'archive). Une cle explicite invalide empeche le demarrage.
+Le format et ses limites sont décrits dans [BACKUP_BUNDLE.md](BACKUP_BUNDLE.md). Réserver strictement le volume d'archives à l'opérateur ; le digest SHA-256 détecte les corruptions accidentelles sans authentifier une modification hostile.
 
 SQLite utilise le snapshot WAL cohérent existant, avec contrôle intégrité/tables. PostgreSQL utilise le `pg_dump` 18 existant, avec l'URL de la connexion SQLx réelle, y compris base distante. `pg_dump` 18 doit être installé dans l'environnement du Core ; une absence/erreur échoue explicitement. Ce support de code ne prouve pas une restauration distante réelle.
 
-L'archive protège configuration et base avec le format versionné de `backup_bundle`. La création passe par un fichier de base temporaire dans le dossier privé, effacé à la fin/annulation. Aucun fichier temporaire n'est listé. Un arrêt brutal peut laisser un temporaire à nettoyer par l'opérateur. Les médias, certificats/fichiers référencés extérieurement, montages Docker, configuration du proxy et binaires externes doivent être conservés séparément. L'archive contient leurs variables de chemin lorsque configurées, pas le contenu de ces fichiers. Ne pas annoncer une copie intégrale de l'hôte.
+L'archive regroupe configuration et base avec le format versionné de `backup_bundle`. La création passe par un fichier de base temporaire dans le dossier privé, effacé à la fin/annulation. Aucun fichier temporaire n'est listé. Un arrêt brutal peut laisser un temporaire à nettoyer par l'opérateur. Les médias, montages Docker, configuration du proxy et binaires externes doivent être conservés séparément. Les certificats TLS explicitement pris en charge sont inclus ; les autres fichiers externes ne le sont pas. L'archive conserve les variables de chemin configurées. Ne pas annoncer une copie intégrale de l'hôte.
 
 ## Contrat HTTP
 
 - `GET /api/v1/admin/backups` : `available`, `reason`, `running`, `archives` (`id`, `size`, `createdAt` en secondes Unix), `schedule`.
-- `POST /api/v1/admin/backups` : 201 après vérification et chiffrement ; une création à la fois, 409 si occupé/dossier refusé ; 501 si configuration incomplète, 500 si échec (sans chemins/secrets).
+- `POST /api/v1/admin/backups` : 201 après vérification et publication ; une création à la fois, 409 si occupé/dossier refusé ; 501 si configuration incomplète, 500 si échec (sans chemins/secrets).
 - `GET`/`HEAD /api/v1/admin/backups/{id}/download` : fichier au nom UUID v4, descripteur confiné, Range et mémoire bornée, téléchargement `no-store`.
 - `PUT /api/v1/admin/backups/schedule` : `{ "enabled": true, "intervalMinutes": 1440 }`. Intervalle entier 60..10080 minutes, champs inconnus refusés. 422 hors bornes. Retourne la planification persistée.
 
@@ -27,6 +27,6 @@ Aucune suppression ni rétention automatique. Maximum 10 000 entrées inspectée
 
 ## Récupération et vérifications
 
-Arrêter le Core ; extraire/déchiffrer vers un nouvel emplacement privé avec la clé séparée ; restaurer la base via `media-restore` (SQLite destination nouvelle, PostgreSQL base vide), puis rétablir la configuration extraite et vérifier le redémarrage. La restauration de la base active depuis HTTP reste exclue.
+Arrêter le Core ; extraire vers un nouvel emplacement privé ; restaurer la base via `media-restore` (SQLite destination nouvelle, PostgreSQL base vide), puis rétablir la configuration extraite et vérifier le redémarrage. La restauration de la base active depuis HTTP reste exclue.
 
-Tests ciblés : `cargo test -p media-poc --test admin_backups` et `cargo test -p media-poc --lib admin_backups`. Couverture prévue : vrai snapshot SQLite, bundle chiffré téléchargé/déchiffré, comptes présents, absence de secret en clair, rôles/CSRF, identifiants, paramètres planification, sémaphore commun, échéance persistée, échec terminal et absence de rafale. Validation PostgreSQL distant et récupération complète à documenter selon les commandes réellement exécutées par le coordinateur.
+Tests ciblés : `cargo test -p media-poc --test admin_backups` et `cargo test -p media-poc --lib admin_backups`. Couverture prévue : vrai snapshot SQLite, bundle non chiffré téléchargé/extrait, comptes présents, protection du dossier et format sans clé, rôles/CSRF, identifiants, paramètres planification, sémaphore commun, échéance persistée, échec terminal et absence de rafale. Validation PostgreSQL distant et récupération complète à documenter selon les commandes réellement exécutées par le coordinateur.

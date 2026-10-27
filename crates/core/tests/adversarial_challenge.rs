@@ -1,16 +1,14 @@
-//! Empirical stress tests for MEDIA_BIND_ADDR and MEDIA_WEB_DIST configurations.
+//! Empirical stress tests for binding and static web serving.
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use media_poc::{
-    auth::AuthState, configured_web_dist, configured_web_dist_from, identity::IdentityStore,
-    node::Inventory, secure_app,
+    auth::AuthState, identity::IdentityStore, node::Inventory, secure_app_with_web_dist,
 };
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
-    path::PathBuf,
     process::Command,
 };
 use tower::ServiceExt;
@@ -81,72 +79,8 @@ async fn adversarial_bind_addr_permutations_socket_binding() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. MEDIA_WEB_DIST Empirical Verification
+// 2. Static web serving under /app
 // ---------------------------------------------------------------------------
-
-#[test]
-fn adversarial_web_dist_resolution_permutations() {
-    let default_expected = PathBuf::from("apps/web/build");
-    let default_expected = default_expected.canonicalize().unwrap_or(default_expected);
-
-    // 1. None (unset)
-    assert_eq!(configured_web_dist_from(None), default_expected);
-
-    // 2. Empty string
-    assert_eq!(configured_web_dist_from(Some("")), default_expected);
-
-    // 3. Whitespace padding only
-    assert_eq!(
-        configured_web_dist_from(Some("   \t \r\n ")),
-        default_expected
-    );
-
-    // 4. Non-existent path returns raw uncanonicalized path without panic
-    let non_existent = "nonexistent/custom/path/that/does/not/exist";
-    assert_eq!(
-        configured_web_dist_from(Some(non_existent)),
-        PathBuf::from(non_existent)
-    );
-
-    // 5. Existing directory with whitespace padding around it
-    let temp = tempfile::tempdir().unwrap();
-    let custom_dir = temp.path().join("my_custom_dist");
-    std::fs::create_dir_all(&custom_dir).unwrap();
-    let canonical_custom = custom_dir.canonicalize().unwrap();
-
-    let padded = format!("   {}   \t", custom_dir.display());
-    assert_eq!(configured_web_dist_from(Some(&padded)), canonical_custom);
-
-    // 6. Directory containing spaces in its path
-    let space_dir = temp.path().join("dist with spaces in folder name");
-    std::fs::create_dir_all(&space_dir).unwrap();
-    let canonical_space_dir = space_dir.canonicalize().unwrap();
-
-    assert_eq!(
-        configured_web_dist_from(Some(space_dir.to_str().unwrap())),
-        canonical_space_dir
-    );
-
-    // 7. Directory containing spaces WITH whitespace padding
-    let space_padded = format!("  {}  ", space_dir.display());
-    assert_eq!(
-        configured_web_dist_from(Some(&space_padded)),
-        canonical_space_dir
-    );
-
-    // 8. Relative vs Absolute path
-    // Relative path that exists in current working dir
-    let rel_temp = PathBuf::from("target").join("tmp_rel_test_dist");
-    let _ = std::fs::create_dir_all(&rel_temp);
-    if rel_temp.exists() {
-        let canonical_rel = rel_temp.canonicalize().unwrap();
-        assert_eq!(
-            configured_web_dist_from(Some(rel_temp.to_str().unwrap())),
-            canonical_rel
-        );
-        let _ = std::fs::remove_dir(&rel_temp);
-    }
-}
 
 // ---------------------------------------------------------------------------
 // 3. Static Web Serving Behavior under /app
@@ -184,11 +118,6 @@ async fn adversarial_web_dist_serving_and_security_under_app() {
     )
     .unwrap();
 
-    unsafe {
-        std::env::set_var("MEDIA_WEB_DIST", &web_dist);
-    }
-    assert_eq!(configured_web_dist(), web_dist.canonicalize().unwrap());
-
     let db_path = temp.path().join("test_app.sqlite3");
     let store = IdentityStore::open(&db_path).await.unwrap();
     store
@@ -205,7 +134,9 @@ async fn adversarial_web_dist_serving_and_security_under_app() {
     std::fs::create_dir_all(&media_dir).unwrap();
     let inventory = Inventory::local(media_dir).await.unwrap();
 
-    let router = secure_app(inventory, 3000, auth).await.unwrap();
+    let router = secure_app_with_web_dist(inventory, 3000, auth, web_dist)
+        .await
+        .unwrap();
 
     // A. Root index at /app/ -> 200 OK
     let req = Request::builder()
@@ -315,9 +246,6 @@ async fn adversarial_web_dist_serving_and_security_under_app() {
     let res = router.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
-    unsafe {
-        std::env::remove_var("MEDIA_WEB_DIST");
-    }
     store.close().await;
 }
 
@@ -326,11 +254,6 @@ async fn adversarial_nonexistent_web_dist_serves_404_without_crashing() {
     let _lock = ENV_LOCK.lock().await;
     let temp = tempfile::tempdir().unwrap();
     let non_existent_dist = temp.path().join("completely_missing_dir");
-
-    unsafe {
-        std::env::set_var("MEDIA_WEB_DIST", &non_existent_dist);
-    }
-    assert_eq!(configured_web_dist(), non_existent_dist);
 
     let db_path = temp.path().join("test_app_missing.sqlite3");
     let store = IdentityStore::open(&db_path).await.unwrap();
@@ -348,7 +271,9 @@ async fn adversarial_nonexistent_web_dist_serves_404_without_crashing() {
     std::fs::create_dir_all(&media_dir).unwrap();
     let inventory = Inventory::local(media_dir).await.unwrap();
 
-    let router = secure_app(inventory, 3000, auth).await.unwrap();
+    let router = secure_app_with_web_dist(inventory, 3000, auth, non_existent_dist)
+        .await
+        .unwrap();
 
     // When web_dist does not exist, requests to /app/ return 404 cleanly
     let req = Request::builder()
@@ -365,8 +290,5 @@ async fn adversarial_nonexistent_web_dist_serves_404_without_crashing() {
     eprintln!("BODY: {}", String::from_utf8_lossy(&body));
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    unsafe {
-        std::env::remove_var("MEDIA_WEB_DIST");
-    }
     store.close().await;
 }

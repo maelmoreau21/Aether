@@ -81,7 +81,6 @@ services:
       - MEDIA_DB_URL=${MEDIA_DB_URL:-}
       - MEDIA_BACKUP_DIR=/backups
       # Store the encryption key separately from archives; no fallback key is generated.
-      - MEDIA_BACKUP_KEY=${MEDIA_BACKUP_KEY:-}
       - MEDIA_OIDC_ENABLED=${MEDIA_OIDC_ENABLED:-false}
       - MEDIA_OIDC_ISSUER=${MEDIA_OIDC_ISSUER:-}
       - MEDIA_OIDC_CLIENT_ID=${MEDIA_OIDC_CLIENT_ID:-}

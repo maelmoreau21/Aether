@@ -9,7 +9,7 @@ Accès : `/app/admin/libraries/`. Navigation par rubrique, liens directs et reto
 - Groupes locaux avec membres et bibliothèques ; droits effectifs vérifiés côté Core. Voir [accès](ADMIN_ACCESS.md).
 - Clés API expirables et révocables, limitées au catalogue et à des bibliothèques explicites. Aucun accès administrateur ou streaming avec ces clés.
 - Scans manuels et périodiques, intervalles persistants, suivi des résultats et reprise bornée. Voir [tâches](SCHEDULED_TASKS.md).
-- Création/téléchargement et planification des archives chiffrées : base entière, configuration du processus et certificats pris en charge, SQLite et PostgreSQL. Clé de récupération externe obligatoire. Voir [sauvegardes](ADMIN_BACKUPS.md), [format](BACKUP_BUNDLE.md), [récupération](BACKUP_RECOVERY.md) et [Docker](ADMIN_DEPLOYMENT.md).
+- Création/téléchargement et planification des archives non chiffrées : base entière, configuration du processus et certificats pris en charge, SQLite et PostgreSQL. Dossier privé obligatoire. Voir [sauvegardes](ADMIN_BACKUPS.md), [format](BACKUP_BUNDLE.md), [récupération](BACKUP_RECOVERY.md) et [Docker](ADMIN_DEPLOYMENT.md).
 
 ## Limites explicites
 
@@ -50,7 +50,7 @@ rectangulaire compacte groupée par Bibliothèques et Maintenance. Cliquer le no
 ouvre une page dédiée avec retour à la liste, description, déclencheur et dernier
 résultat connu. Le bouton de lancement reste indépendant à droite.
 
-Les scans et la sauvegarde chiffrée utilisent leurs endpoints existants.
+Les scans et la sauvegarde utilisent leurs endpoints existants.
 Le déclencheur est réglable en minutes/heures/jours dans une boîte de dialogue ;
 le serveur conserve un intervalle unique, de 5 minutes à 7 jours pour les scans et
 de 1 heure à 7 jours pour les sauvegardes. Supprimer un déclencheur de scan utilise
@@ -71,11 +71,12 @@ Captures actuelles : `docs/evidence/2026-10-19/settings-jellyfin/`.
 Vérification de ce parcours : check/lint, 54 tests unitaires et build Web réussis.
 Le test navigateur simulé couvre les deux thèmes et cinq largeurs. Le test
 `cargo test -p media-poc --test browser_admin -- --ignored --nocapture` passe aussi
-sur vrai Core/SQLite temporaire : scans et suppression relue, archivage chiffré,
+sur vrai Core/SQLite temporaire : scans et suppression relue, archivage de
+l'ancien format chiffré,
 planification/lancement/désactivation des backups depuis Tâches, préférences
-`offsets` relues par API puis après rechargement. Il demande une clé de sauvegarde
-éphémère de 64 caractères hexadécimaux dans MEDIA_BACKUP_KEY ; ne pas lui fournir
-un dossier MEDIA_BACKUP_DIR personnel. Ce résultat ne prouve pas un déploiement NAS.
+`offsets` relues par API puis après rechargement. Ce résultat historique ne
+valide pas le nouveau format sans clé ; ne pas fournir un dossier
+`MEDIA_BACKUP_DIR` personnel à ce test. Il ne prouve pas un déploiement NAS.
 
 ## Extension Général / Réseau / profil / actualisation (19 octobre 2026)
 

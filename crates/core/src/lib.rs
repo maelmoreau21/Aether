@@ -346,10 +346,20 @@ pub fn app(inventory: node::Inventory, port: u16) -> Router {
     ))
 }
 
-/// Static assets are built at this path relative to the Core working directory.
-pub fn configured_web_dist() -> std::path::PathBuf {
-    let raw = std::path::PathBuf::from("apps/web/build");
+/// Helper to resolve web dist path from an optional string slice.
+pub fn configured_web_dist_from(val: Option<&str>) -> std::path::PathBuf {
+    let raw = match val {
+        Some(s) if !s.trim().is_empty() => std::path::PathBuf::from(s.trim()),
+        _ => std::path::PathBuf::from("apps/web/build"),
+    };
     raw.canonicalize().unwrap_or(raw)
+}
+
+/// Resolve the static web distribution directory from `MEDIA_WEB_DIST`.
+/// Defaults to `"apps/web/build"` if unset or empty/whitespace.
+/// Best-effort canonicalizes if the directory exists on disk.
+pub fn configured_web_dist() -> std::path::PathBuf {
+    configured_web_dist_from(std::env::var("MEDIA_WEB_DIST").ok().as_deref())
 }
 
 fn health_routes(mode: &'static str) -> Router {
@@ -549,10 +559,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn configured_web_dist_uses_build_directory() {
+    fn configured_web_dist_defaults_when_unset_or_empty() {
         let expected = std::path::PathBuf::from("apps/web/build");
         let expected = expected.canonicalize().unwrap_or(expected);
-        assert_eq!(configured_web_dist(), expected);
+
+        assert_eq!(configured_web_dist_from(None), expected);
+        assert_eq!(configured_web_dist_from(Some("")), expected);
+        assert_eq!(configured_web_dist_from(Some("   \t  ")), expected);
+    }
+
+    #[test]
+    fn configured_web_dist_custom_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let custom = temp.path().join("dist");
+        std::fs::create_dir_all(&custom).unwrap();
+        let canonical_custom = custom.canonicalize().unwrap();
+
+        assert_eq!(
+            configured_web_dist_from(Some(custom.to_str().unwrap())),
+            canonical_custom
+        );
+    }
+
+    #[test]
+    fn configured_web_dist_nonexistent_path_falls_back_to_raw() {
+        let nonexistent = "nonexistent/custom/path";
+        assert_eq!(
+            configured_web_dist_from(Some(nonexistent)),
+            std::path::PathBuf::from(nonexistent)
+        );
     }
 }
 

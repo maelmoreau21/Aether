@@ -1490,19 +1490,23 @@ async fn mixed_playlists_share_only_with_authenticated_accounts_and_keep_library
         let port = listener.local_addr().unwrap().port();
         let origin = format!("http://127.0.0.1:{port}");
         let auth = AuthState::new(store.clone(), origin.clone()).await.unwrap();
-        let app = crate::secure_app(
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let web_dist = std::env::var("MEDIA_WEB_DIST")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| root.join("apps/web/build"));
+        let app = crate::secure_app_with_web_dist(
             crate::node::Inventory::local(temp.path().to_owned())
                 .await
                 .unwrap(),
             port,
             auth,
+            web_dist,
         )
         .await
         .unwrap();
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let result = tokio::process::Command::new("node")
             .arg("scripts/browser-playlists.cjs")
             .current_dir(root)

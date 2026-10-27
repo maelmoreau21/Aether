@@ -115,15 +115,42 @@ async fn preferences_are_account_owned_csrf_protected_bounded_and_persistent() {
     assert_eq!(saved["theme"], "light");
     assert_eq!(saved["audioLanguage"], "fr");
     let rotation = json!({"enabled":true,"enableMovies":true,"enableSeries":false,"rotationMode":"sequential","minHoursBetweenSwitches":24,"poolSize":3,"preferredLanguage":"fr-CA","fallbackLanguage":"en","includeUnknownLanguage":true,"allowAnyLanguageFallback":false});
-    for invalid in [json!({"poolSize":0}), json!({"poolSize":25}), json!({"minHoursBetweenSwitches":721}), json!({"rotationMode":"unexpected"}), json!({"preferredLanguage":"../../"})] {
+    for invalid in [
+        json!({"poolSize":0}),
+        json!({"poolSize":25}),
+        json!({"minHoursBetweenSwitches":721}),
+        json!({"rotationMode":"unexpected"}),
+        json!({"preferredLanguage":"../../"}),
+    ] {
         let mut value = rotation.clone();
-        for (key, field) in invalid.as_object().unwrap() { value[key] = field.clone(); }
-        assert_eq!(request(&app, "PUT", cookie, csrf, json!({"artworkRotation":value})).await.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        for (key, field) in invalid.as_object().unwrap() {
+            value[key] = field.clone();
+        }
+        assert_eq!(
+            request(&app, "PUT", cookie, csrf, json!({"artworkRotation":value}))
+                .await
+                .status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
     }
-    assert_eq!(request(&app, "PUT", cookie, csrf, json!({"artworkRotation":rotation})).await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            cookie,
+            csrf,
+            json!({"artworkRotation":rotation})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
     let saved = body(request(&app, "GET", cookie, "", json!(null)).await).await;
     assert_eq!(saved["artworkRotation"], rotation);
-    assert_eq!(body(request(&app, "GET", &sessions[1].0, "", json!(null)).await).await, json!({}));
+    assert_eq!(
+        body(request(&app, "GET", &sessions[1].0, "", json!(null)).await).await,
+        json!({})
+    );
     drop(app);
     store.close().await;
     let reopened = IdentityStore::open(&path).await.unwrap();

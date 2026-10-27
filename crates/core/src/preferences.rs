@@ -105,7 +105,8 @@ impl Preferences {
                 && (1..=24).contains(&v.pool_size)
                 && language(&v.preferred_language)
                 && language(&v.fallback_language)
-        }) && self.theme
+        }) && self
+            .theme
             .as_deref()
             .is_none_or(|v| matches!(v, "light" | "dark" | "system"))
             && self

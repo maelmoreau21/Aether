@@ -1,3 +1,21 @@
+## 27 octobre 2026 — Correction CI : Résolution de `MEDIA_WEB_DIST` pour les tests navigateur et `cargo fmt`
+
+- **Correction du test navigateur Playwright `product_tests::mixed_playlists`** :
+  - **Cause racine** : le commit `74377be` avait remplacé l'implémentation de `configured_web_dist()` par un chemin fixe relatif `apps/web/build`, ignorant la variable d'environnement `MEDIA_WEB_DIST`. Lors de l'exécution de `cargo test -p media-poc --lib` dans le sous-répertoire `crates/core`, Axum `ServeDir` tentait de charger les assets depuis `crates/core/apps/web/build` au lieu de `${{ github.workspace }}/apps/web/build` (défini dans `.github/workflows/ci.yml`). Playwright échouait avec `net::ERR_HTTP_RESPONSE_CODE_FAILURE` (404) sur `http://127.0.0.1:<port>/app/music/`.
+  - **Correction** :
+    - Restauration de `configured_web_dist_from` et de la prise en compte de `std::env::var("MEDIA_WEB_DIST")` dans `crates/core/src/lib.rs`.
+    - Restauration des tests unitaires `configured_web_dist_defaults_when_unset_or_empty`, `configured_web_dist_custom_path`, et `configured_web_dist_nonexistent_path_falls_back_to_raw`.
+    - Dans `crates/core/src/product_tests.rs`, passage explicite par `secure_app_with_web_dist` résolvant `MEDIA_WEB_DIST` ou retombant de manière sûre sur `CARGO_MANIFEST_DIR/../../apps/web/build` pour les lancements locaux indépendamment du CWD.
+
+- **Conformité `cargo fmt --check`** :
+  - Formatage conforme sur `crates/core/src/extensions.rs`, `crates/core/src/preferences.rs`, `crates/core/tests/extensions.rs`, et `crates/core/tests/preferences.rs`.
+
+- **Vérifications validées** :
+  - `cargo fmt --check` : code 0 (100 % conforme).
+  - `cargo test -p media-poc --lib tests::configured_web_dist` : 3/3 passés.
+  - `cargo test -p media-poc --lib product_tests::mixed_playlists` : 1/1 passé.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement, 0 erreur.
+
 ## 26 octobre 2026 — Refonte complète du versionnement et des releases (Aether & Aether-Plugins)
 
 - **Source de vérité unique & SemVer pour toute la plateforme Aether** :

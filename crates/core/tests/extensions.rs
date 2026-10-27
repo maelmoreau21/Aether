@@ -2073,17 +2073,38 @@ async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutatio
     assert_eq!(resp["error"], "extension_update_compatibility_unverified");
 
     for (field, value, expected) in [
-        ("permissions", json!(["storage.private", "metadata.read"]), "extension_update_requires_authorization"),
-        ("httpHosts", json!(["example.com"]), "extension_update_requires_authorization"),
+        (
+            "permissions",
+            json!(["storage.private", "metadata.read"]),
+            "extension_update_requires_authorization",
+        ),
+        (
+            "httpHosts",
+            json!(["example.com"]),
+            "extension_update_requires_authorization",
+        ),
         ("targetAbi", json!("2.0"), "incompatible_server_version"),
-        ("configSchema", json!([{ "key": "added", "label": "Added", "fieldType": "text" }]), "extension_settings_compatibility_unverified"),
+        (
+            "configSchema",
+            json!([{ "key": "added", "label": "Added", "fieldType": "text" }]),
+            "extension_settings_compatibility_unverified",
+        ),
     ] {
         let mut manifest = serde_json::to_value(&p2.manifest).unwrap();
         manifest[field] = value;
         let mut changed = p2.clone();
         changed.manifest = serde_json::from_value(manifest).unwrap();
-        changed.signature = STANDARD.encode(signing.sign(&changed.signing_bytes().unwrap()).as_ref());
-        let (_, response, _) = call(&app, "POST", "/api/v1/admin/extensions/upgradable.ext/upgrade", &cookie, csrf, serde_json::to_value(changed).unwrap()).await;
+        changed.signature =
+            STANDARD.encode(signing.sign(&changed.signing_bytes().unwrap()).as_ref());
+        let (_, response, _) = call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/upgradable.ext/upgrade",
+            &cookie,
+            csrf,
+            serde_json::to_value(changed).unwrap(),
+        )
+        .await;
         assert_eq!(response["error"], expected, "{response}");
     }
 
@@ -2092,7 +2113,15 @@ async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutatio
     bad_abi.wasm = STANDARD.encode(&invalid);
     bad_abi.sha256 = format!("{:x}", Sha256::digest(&invalid));
     bad_abi.signature = STANDARD.encode(signing.sign(&bad_abi.signing_bytes().unwrap()).as_ref());
-    let (status, response, _) = call(&app, "POST", "/api/v1/admin/extensions/upgradable.ext/upgrade", &cookie, csrf, serde_json::to_value(bad_abi).unwrap()).await;
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/upgradable.ext/upgrade",
+        &cookie,
+        csrf,
+        serde_json::to_value(bad_abi).unwrap(),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(response["error"], "incompatible_abi");
 

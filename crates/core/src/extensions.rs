@@ -581,13 +581,27 @@ async fn upgrade_with_key(
         return Err(err(StatusCode::BAD_REQUEST, "incompatible_server_version"));
     }
     validate_update_module(&package).map_err(|code| err(StatusCode::BAD_REQUEST, code))?;
-    if package.manifest.permissions.iter().any(|permission| !installed.manifest.permissions.contains(permission))
-        || package.manifest.http_hosts.iter().any(|host| !installed.manifest.http_hosts.contains(host))
+    if package
+        .manifest
+        .permissions
+        .iter()
+        .any(|permission| !installed.manifest.permissions.contains(permission))
+        || package
+            .manifest
+            .http_hosts
+            .iter()
+            .any(|host| !installed.manifest.http_hosts.contains(host))
     {
-        return Err(err(StatusCode::CONFLICT, "extension_update_requires_authorization"));
+        return Err(err(
+            StatusCode::CONFLICT,
+            "extension_update_requires_authorization",
+        ));
     }
     if package.manifest.config_schema != installed.manifest.config_schema {
-        return Err(err(StatusCode::CONFLICT, "extension_settings_compatibility_unverified"));
+        return Err(err(
+            StatusCode::CONFLICT,
+            "extension_settings_compatibility_unverified",
+        ));
     }
 
     // Existing packages do not declare a private-data format, and in-flight
@@ -603,7 +617,9 @@ async fn upgrade_with_key(
 // prospective version switch; signature and digest have already been checked.
 fn validate_update_module(package: &Package) -> Result<(), &'static str> {
     use wasmi::{Config, EnforcedLimits, Engine, FuncType, Module, ValType};
-    let bytes = STANDARD.decode(&package.wasm).map_err(|_| "invalid_module")?;
+    let bytes = STANDARD
+        .decode(&package.wasm)
+        .map_err(|_| "invalid_module")?;
     let mut config = Config::default();
     config.consume_fuel(true).allow_start_fn(false);
     config.enforced_limits(EnforcedLimits::strict());
@@ -614,16 +630,29 @@ fn validate_update_module(package: &Package) -> Result<(), &'static str> {
     let host_signature = FuncType::new([ValType::I32, ValType::I32], [ValType::I64]);
     for import in module.imports() {
         let allowed = import.module() == "aether" && import.name() == "aether_host_http"
-            || import.module() == "media" && matches!(import.name(), "media_host_storage_v1" | "media_host_objects_v1");
+            || import.module() == "media"
+                && matches!(
+                    import.name(),
+                    "media_host_storage_v1" | "media_host_objects_v1"
+                );
         if !allowed || import.ty().func() != Some(&host_signature) {
             return Err("imports_forbidden");
         }
     }
     let alloc = FuncType::new([ValType::I32], [ValType::I32]);
     let run = FuncType::new([ValType::I32, ValType::I32], [ValType::I64]);
-    if module.get_export("media_alloc").and_then(|e| e.func().cloned()) != Some(alloc)
-        || module.get_export("media_run").and_then(|e| e.func().cloned()) != Some(run)
-        || !module.get_export("memory").and_then(|e| e.memory().copied()).is_some_and(|m| !m.is_64() && m.minimum() <= 256)
+    if module
+        .get_export("media_alloc")
+        .and_then(|e| e.func().cloned())
+        != Some(alloc)
+        || module
+            .get_export("media_run")
+            .and_then(|e| e.func().cloned())
+            != Some(run)
+        || !module
+            .get_export("memory")
+            .and_then(|e| e.memory().copied())
+            .is_some_and(|m| !m.is_64() && m.minimum() <= 256)
     {
         return Err("incompatible_abi");
     }

@@ -620,9 +620,11 @@
           <div hidden={currentHash !== '#api-keys-section'}>
             <AdminApiKeys {users} {libraries} />
           </div>
-          <div hidden={currentHash !== '#avatars-section'}>
-            <AvatarCollections />
-          </div>
+          {#if currentHash === '#avatars-section'}
+            <div>
+              <AvatarCollections />
+            </div>
+          {/if}
           <AdminCapabilities section={currentHash.slice(1)} />
         </div>
       </div>

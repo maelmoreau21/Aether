@@ -1,3 +1,19 @@
+## 27 octobre 2026 — Correction des régressions CI (Avatar Policy & Browser Playlists)
+
+- **Avatar policy & plugins actifs (`crates/core/tests/account.rs`)** :
+  - **Cause racine** : lors du passage à la politique native d'avatars (`load_policy`), la fonction `permissions` dans `crates/core/src/avatars.rs` n'interrogeait plus les `extension_settings` des extensions actives disposant de la permission `avatars`. Les contraintes `disallow_custom_avatars` et `force_random_on_creation` imposées par les plugins étaient ignorées.
+  - **Correction** : `permissions()` cumule désormais la politique native et les règles déclarées par les extensions actives, rétablissant la conformité du test `avatar_policy_enforced_for_active_plugins`.
+- **Test Playwright des playlists partagées (`scripts/browser-playlists.cjs` & `product_tests::mixed_playlists`)** :
+  - **Cause racine** : dans `apps/web/src/routes/admin/libraries/+page.svelte`, `<AvatarCollections />` était injecté dans un `<div hidden={currentHash !== '#avatars-section'}>`. Bien que masqué visuellement, le composant restait dans le DOM de la page d'administration, y compris lorsque l'utilisateur naviguait vers `#extensions-section`. Le test Playwright vérifiait `settings.locator('input[type=file]').count() === 0` (politique repository-only des extensions) et échouait avec `1 !== 0` en trouvant l'input de fichier de l'avatar pack.
+  - **Correction** : conditionnement de `<AvatarCollections />` avec un bloc Svelte `{#if currentHash === '#avatars-section'}` afin qu'aucun input file parasite ne réside dans le DOM hors de sa section dédiée.
+- **Vérifications validées** :
+  - `cargo fmt --check` : 100 % conforme.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement, 0 erreur.
+  - `cargo test --test account` : 4/4 tests passés.
+  - `cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1` : 1/1 passé (Playwright browser test).
+  - `npm run check --prefix apps/web` : 0 erreur Svelte / TypeScript.
+  - `npm run build --prefix apps/web` : build static OK.
+
 ## 27 octobre 2026 — Suite de stabilisation, validation incomplète
 
 - Avatars : collections et politique natives implémentées dans les schémas initiaux, anciennes ressources conservées ; SQLite vierge et tests frontend ciblés réussis. Le test HTTP complet et PostgreSQL restent à exécuter. Les bases existantes n'ont pas automatiquement les nouvelles tables ; aucune migration ni réinitialisation. Le `cargo check` antérieur ne couvre pas les derniers changements.

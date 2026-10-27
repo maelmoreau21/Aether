@@ -262,7 +262,26 @@ async fn set_admin_policy(
     Ok(StatusCode::NO_CONTENT)
 }
 async fn permissions(auth: &AuthState) -> Result<(bool, bool), StatusCode> {
-    Ok((load_policy(auth).await?.allow_custom, true))
+    let rows: Vec<(String, String)> = crate::database::query_as(
+        "SELECT es.settings_json,e.package_json FROM extension_settings es JOIN extensions e ON e.id=es.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.enabled=1 AND p.active=1",
+    )
+    .fetch_all(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let (mut upload, mut remove) = (load_policy(auth).await?.allow_custom, true);
+    for (settings, package) in rows {
+        let package: media_extension_sdk::Package =
+            serde_json::from_str(&package).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if !package.manifest.permissions.iter().any(|p| p == "avatars") {
+            continue;
+        }
+        let settings: serde_json::Value =
+            serde_json::from_str(&settings).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        upload &= settings["disallow_custom_avatars"].as_bool() != Some(true);
+        remove &= settings["force_random_on_creation"].as_bool() != Some(true)
+            && settings["require_avatar"].as_bool() != Some(true);
+    }
+    Ok((upload, remove))
 }
 async fn policy(
     State(auth): State<AuthState>,

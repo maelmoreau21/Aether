@@ -9,6 +9,36 @@ const IMAGE_MAX: usize = 2 * 1024 * 1024;
 
 pub(super) fn router() -> Router<AuthState> {
     Router::new()
+        // Native admin avatar-packs routes
+        .route(
+            "/api/v1/admin/avatar-packs/upload",
+            axum::routing::post(native_upload).layer(DefaultBodyLimit::max(65 * 1024 * 1024)),
+        )
+        .route(
+            "/api/v1/admin/avatar-packs",
+            get(native_list).post(native_import),
+        )
+        .route(
+            "/api/v1/admin/avatar-packs/source",
+            axum::routing::post(native_source),
+        )
+        .route(
+            "/api/v1/admin/avatar-packs/{pack}",
+            axum::routing::delete(native_remove).put(native_rename),
+        )
+        .route(
+            "/api/v1/admin/avatar-packs/{pack}/images",
+            get(native_admin_images),
+        )
+        .route(
+            "/api/v1/admin/avatar-packs/{pack}/images/{image}",
+            get(native_admin_image).delete(native_remove_image),
+        )
+        .route(
+            "/api/v1/admin/avatars/assign-missing",
+            axum::routing::post(native_assign_missing),
+        )
+        // Extension-scoped routes (preserved for compatibility)
         .route(
             "/api/v1/admin/extensions/{id}/avatar-packs/upload",
             axum::routing::post(upload).layer(DefaultBodyLimit::max(65 * 1024 * 1024)),
@@ -48,7 +78,87 @@ pub(super) fn router() -> Router<AuthState> {
             get(image).post(apply),
         )
 }
+
+async fn native_upload(
+    state: State<AuthState>,
+    headers: HeaderMap,
+    body: axum::extract::Multipart,
+) -> Result<Json<Value>, Error> {
+    upload(state, headers, Path("\u{1}".into()), body).await
+}
+
+async fn native_list(state: State<AuthState>, headers: HeaderMap) -> Result<Json<Value>, Error> {
+    list(state, headers, Path("\u{1}".into())).await
+}
+
+async fn native_import(
+    state: State<AuthState>,
+    headers: HeaderMap,
+    body: Json<Import>,
+) -> Result<Json<Value>, Error> {
+    import(state, headers, Path("\u{1}".into()), body).await
+}
+
+async fn native_source(
+    state: State<AuthState>,
+    headers: HeaderMap,
+    body: Json<Source>,
+) -> Result<Json<Value>, Error> {
+    source(state, headers, Path("\u{1}".into()), body).await
+}
+
+async fn native_remove(
+    state: State<AuthState>,
+    headers: HeaderMap,
+    Path(pack): Path<String>,
+) -> Result<StatusCode, Error> {
+    remove(state, headers, Path(("\u{1}".into(), pack))).await
+}
+
+async fn native_rename(
+    state: State<AuthState>,
+    headers: HeaderMap,
+    Path(pack): Path<String>,
+    body: Json<Rename>,
+) -> Result<StatusCode, Error> {
+    rename(state, headers, Path(("\u{1}".into(), pack)), body).await
+}
+
+async fn native_admin_images(
+    state: State<AuthState>,
+    headers: HeaderMap,
+    Path(pack): Path<String>,
+) -> Result<Json<Value>, Error> {
+    admin_images(state, headers, Path(("\u{1}".into(), pack))).await
+}
+
+async fn native_admin_image(
+    state: State<AuthState>,
+    headers: HeaderMap,
+    Path((pack, image)): Path<(String, String)>,
+) -> Result<axum::response::Response, Error> {
+    admin_image(state, headers, Path(("\u{1}".into(), pack, image))).await
+}
+
+async fn native_remove_image(
+    state: State<AuthState>,
+    headers: HeaderMap,
+    Path((pack, image)): Path<(String, String)>,
+) -> Result<StatusCode, Error> {
+    remove_image(state, headers, Path(("\u{1}".into(), pack, image))).await
+}
+
+async fn native_assign_missing(
+    state: State<AuthState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, Error> {
+    assign_missing(state, headers, Path("\u{1}".into())).await
+}
+
 async fn check(auth: &AuthState, id: &str) -> Result<(), Error> {
+    if id == "\u{1}" {
+        return Ok(());
+    }
     let stored: Option<String> = query_scalar("SELECT e.package_json FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.id=? AND p.active=1")
         .bind(id).fetch_optional(auth.store.pool()).await.map_err(db)?;
     let package: Package = serde_json::from_str(
@@ -172,7 +282,18 @@ async fn list(
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
     check(&auth, &id).await?;
-    let rows:Vec<(String,String,String,i64)>=query_as("SELECT p.id,p.name,p.source,COUNT(i.id) FROM extension_avatar_packs p LEFT JOIN extension_avatar_images i ON i.pack_id=p.id WHERE p.extension_id=? GROUP BY p.id,p.name,p.source ORDER BY p.name").bind(id).fetch_all(auth.store.pool()).await.map_err(db)?;
+    let rows: Vec<(String, String, String, i64)> = if id == "\u{1}" {
+        query_as("SELECT p.id,p.name,p.source,COUNT(i.id) FROM avatar_packs p LEFT JOIN avatar_images i ON i.pack_id=p.id GROUP BY p.id,p.name,p.source ORDER BY p.name")
+            .fetch_all(auth.store.pool())
+            .await
+            .map_err(db)?
+    } else {
+        query_as("SELECT p.id,p.name,p.source,COUNT(i.id) FROM extension_avatar_packs p LEFT JOIN extension_avatar_images i ON i.pack_id=p.id WHERE p.extension_id=? GROUP BY p.id,p.name,p.source ORDER BY p.name")
+            .bind(id)
+            .fetch_all(auth.store.pool())
+            .await
+            .map_err(db)?
+    };
     Ok(Json(
         json!({"packs":rows.into_iter().map(|(id,name,source,count)|json!({"id":id,"name":name,"source":source,"count":count})).collect::<Vec<_>>()}),
     ))
@@ -272,15 +393,7 @@ async fn import(
         }
         let mut stored_images = Vec::with_capacity(staged.len());
         for (name, bytes) in staged {
-            let mime = if name.ends_with(".webp") {
-                "image/webp"
-            } else if name.ends_with(".svg") {
-                "image/svg+xml"
-            } else if name.ends_with(".jpg") || name.ends_with(".jpeg") {
-                "image/jpeg"
-            } else {
-                "image/png"
-            };
+            let mime = crate::avatars::content_type(&bytes);
             let meta = auth
                 .store
                 .assets
@@ -293,17 +406,16 @@ async fn import(
         let _lock = MUTATIONS.lock().await;
         check(&auth, &id).await?;
         let mut tx = auth.store.pool().begin().await.map_err(db)?;
-        let packs: i64 = query_scalar("SELECT COUNT(*) FROM extension_avatar_packs")
+        let packs: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM extension_avatar_packs) + (SELECT COUNT(*) FROM avatar_packs)")
             .fetch_one(&mut *tx)
             .await
             .map_err(db)?;
         if packs >= 32 {
             return Err(err(StatusCode::CONFLICT, "avatar_pack_limit"));
         }
-        query("INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES(?,?,?,?)")
-            .bind(&pack)
-            .bind(&id)
-            .bind(input.name.trim())
+        let mut insert = query(if id == "\u{1}" { "INSERT INTO avatar_packs(id,name,source) VALUES(?,?,?)" } else { "INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES(?,?,?,?)" }).bind(&pack);
+        if id != "\u{1}" { insert = insert.bind(&id); }
+        insert.bind(input.name.trim())
             .bind(format!(
                 "https://github.com/{owner}/{repo}/tree/{sha}/{}",
                 input.folder
@@ -312,7 +424,7 @@ async fn import(
             .await
             .map_err(db)?;
         for (name, sha256) in stored_images {
-            query("INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)")
+            query(if id == "\u{1}" { "INSERT INTO avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" } else { "INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" })
                 .bind(uuid::Uuid::new_v4().to_string())
                 .bind(&pack)
                 .bind(name)
@@ -321,7 +433,7 @@ async fn import(
                 .await
                 .map_err(db)?;
         }
-        audit(&mut tx, &actor.user.id, &id, "avatars.pack.imported").await?;
+        audit(&mut tx, &actor.user.id, if id == "\u{1}" { "native-avatar" } else { &id }, "avatars.pack.imported").await?;
         tx.commit().await.map_err(db)?;
         Ok(Json(json!({"id":pack,"count":count})))
     })
@@ -411,15 +523,7 @@ async fn upload(
     }
     let mut stored_images = Vec::with_capacity(staged.len());
     for (name, bytes) in staged {
-        let mime = if name.ends_with(".webp") {
-            "image/webp"
-        } else if name.ends_with(".svg") {
-            "image/svg+xml"
-        } else if name.ends_with(".jpg") || name.ends_with(".jpeg") {
-            "image/jpeg"
-        } else {
-            "image/png"
-        };
+        let mime = crate::avatars::content_type(&bytes);
         let meta = auth
             .store
             .assets
@@ -431,7 +535,7 @@ async fn upload(
     let _lock = MUTATIONS.lock().await;
     check(&auth, &id).await?;
     let mut tx = auth.store.pool().begin().await.map_err(db)?;
-    let count: i64 = query_scalar("SELECT COUNT(*) FROM extension_avatar_packs")
+    let count: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM extension_avatar_packs) + (SELECT COUNT(*) FROM avatar_packs)")
         .fetch_one(&mut *tx)
         .await
         .map_err(db)?;
@@ -440,15 +544,14 @@ async fn upload(
     }
     let pack = uuid::Uuid::new_v4().to_string();
     let count = stored_images.len();
-    query("INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES(?,?,?,'upload')")
-        .bind(&pack)
-        .bind(&id)
-        .bind(name.trim())
+    let mut insert = query(if id == "\u{1}" { "INSERT INTO avatar_packs(id,name,source) VALUES(?,?,'upload')" } else { "INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES(?,?,?,'upload')" }).bind(&pack);
+    if id != "\u{1}" { insert = insert.bind(&id); }
+    insert.bind(name.trim())
         .execute(&mut *tx)
         .await
         .map_err(db)?;
     for (name, sha256) in stored_images {
-        query("INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)")
+        query(if id == "\u{1}" { "INSERT INTO avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" } else { "INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" })
             .bind(uuid::Uuid::new_v4().to_string())
             .bind(&pack)
             .bind(name)
@@ -457,7 +560,7 @@ async fn upload(
             .await
             .map_err(db)?;
     }
-    audit(&mut tx, &actor.user.id, &id, "avatars.pack.uploaded").await?;
+    audit(&mut tx, &actor.user.id, if id == "\u{1}" { "native-avatar" } else { &id }, "avatars.pack.uploaded").await?;
     tx.commit().await.map_err(db)?;
     Ok(Json(json!({"id":pack,"count":count})))
     }).await.map_err(|_|err(StatusCode::GATEWAY_TIMEOUT,"avatar_import_timeout"))?
@@ -470,12 +573,20 @@ async fn remove(
     admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
     check(&auth, &id).await?;
-    query("DELETE FROM extension_avatar_packs WHERE id=? AND extension_id=?")
-        .bind(pack)
-        .bind(id)
-        .execute(auth.store.pool())
-        .await
-        .map_err(db)?;
+    if id == "\u{1}" {
+        query("DELETE FROM avatar_packs WHERE id=?")
+            .bind(pack)
+            .execute(auth.store.pool())
+            .await
+            .map_err(db)?;
+    } else {
+        query("DELETE FROM extension_avatar_packs WHERE id=? AND extension_id=?")
+            .bind(pack)
+            .bind(id)
+            .execute(auth.store.pool())
+            .await
+            .map_err(db)?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 #[derive(Deserialize)]
@@ -498,13 +609,22 @@ async fn rename(
     }
     let _lock = MUTATIONS.lock().await;
     check(&auth, &id).await?;
-    query("UPDATE extension_avatar_packs SET name=? WHERE id=? AND extension_id=?")
-        .bind(input.name.trim())
-        .bind(pack)
-        .bind(id)
-        .execute(auth.store.pool())
-        .await
-        .map_err(db)?;
+    if id == "\u{1}" {
+        query("UPDATE avatar_packs SET name=? WHERE id=?")
+            .bind(input.name.trim())
+            .bind(pack)
+            .execute(auth.store.pool())
+            .await
+            .map_err(db)?;
+    } else {
+        query("UPDATE extension_avatar_packs SET name=? WHERE id=? AND extension_id=?")
+            .bind(input.name.trim())
+            .bind(pack)
+            .bind(id)
+            .execute(auth.store.pool())
+            .await
+            .map_err(db)?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 async fn admin_images(
@@ -514,9 +634,27 @@ async fn admin_images(
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
     check(&auth, &id).await?;
-    let rows:Vec<(String,String)>=query_as("SELECT i.id,i.name FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.id=? AND p.extension_id=? ORDER BY i.name LIMIT 500").bind(&pack).bind(&id).fetch_all(auth.store.pool()).await.map_err(db)?;
+    let rows: Vec<(String, String)> = if id == "\u{1}" {
+        query_as("SELECT i.id,i.name FROM avatar_images i JOIN avatar_packs p ON p.id=i.pack_id WHERE p.id=? ORDER BY i.name LIMIT 500")
+            .bind(&pack)
+            .fetch_all(auth.store.pool())
+            .await
+            .map_err(db)?
+    } else {
+        query_as("SELECT i.id,i.name FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.id=? AND p.extension_id=? ORDER BY i.name LIMIT 500")
+            .bind(&pack)
+            .bind(&id)
+            .fetch_all(auth.store.pool())
+            .await
+            .map_err(db)?
+    };
+    let base = if id == "\u{1}" {
+        format!("/api/v1/admin/avatar-packs/{pack}/images")
+    } else {
+        format!("/api/v1/admin/extensions/{id}/avatar-packs/{pack}/images")
+    };
     Ok(Json(
-        json!({"images":rows.into_iter().map(|(image,name)|json!({"id":image,"name":name,"url":format!("/api/v1/admin/extensions/{id}/avatar-packs/{pack}/images/{image}")})).collect::<Vec<_>>()}),
+        json!({"images":rows.into_iter().map(|(image,name)|json!({"id":image,"name":name,"url":format!("{base}/{image}")})).collect::<Vec<_>>()}),
     ))
 }
 async fn admin_image(
@@ -526,15 +664,27 @@ async fn admin_image(
 ) -> Result<axum::response::Response, Error> {
     admin(&auth, &headers, false).await?;
     check(&auth, &id).await?;
-    let sha256: String = query_scalar(
-        "SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? AND p.id=? AND i.id=?",
-    )
-    .bind(id)
-    .bind(pack)
-    .bind(image)
-    .fetch_optional(auth.store.pool())
-    .await
-    .map_err(db)?
+    let query_str = if id == "\u{1}" {
+        "SELECT i.sha256 FROM avatar_images i JOIN avatar_packs p ON p.id=i.pack_id WHERE p.id=? AND i.id=?"
+    } else {
+        "SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? AND p.id=? AND i.id=?"
+    };
+    let sha256: String = if id == "\u{1}" {
+        query_scalar(query_str)
+            .bind(pack)
+            .bind(image)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?
+    } else {
+        query_scalar(query_str)
+            .bind(id)
+            .bind(pack)
+            .bind(image)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?
+    }
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "avatar_not_found"))?;
     auth.store
         .assets
@@ -550,7 +700,11 @@ async fn remove_image(
     admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
     check(&auth, &id).await?;
-    query("DELETE FROM extension_avatar_images WHERE id=? AND pack_id=? AND EXISTS(SELECT 1 FROM extension_avatar_packs p WHERE p.id=? AND p.extension_id=?)").bind(image).bind(&pack).bind(pack).bind(id).execute(auth.store.pool()).await.map_err(db)?;
+    if id == "\u{1}" {
+        query("DELETE FROM avatar_images WHERE id=? AND pack_id=? AND EXISTS(SELECT 1 FROM avatar_packs p WHERE p.id=?)").bind(image).bind(&pack).bind(pack).execute(auth.store.pool()).await.map_err(db)?;
+    } else {
+        query("DELETE FROM extension_avatar_images WHERE id=? AND pack_id=? AND EXISTS(SELECT 1 FROM extension_avatar_packs p WHERE p.id=? AND p.extension_id=?)").bind(image).bind(&pack).bind(pack).bind(id).execute(auth.store.pool()).await.map_err(db)?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 async fn assign_missing(
@@ -561,7 +715,20 @@ async fn assign_missing(
     admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
     check(&auth, &id).await?;
-    let images: Vec<String> = query_scalar("SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? LIMIT 500").bind(id).fetch_all(auth.store.pool()).await.map_err(db)?;
+    let images: Vec<String> = if id == "\u{1}" {
+        query_scalar(
+            "SELECT i.sha256 FROM avatar_images i JOIN avatar_packs p ON p.id=i.pack_id LIMIT 500",
+        )
+        .fetch_all(auth.store.pool())
+        .await
+        .map_err(db)?
+    } else {
+        query_scalar("SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? LIMIT 500")
+            .bind(id)
+            .fetch_all(auth.store.pool())
+            .await
+            .map_err(db)?
+    };
     if images.is_empty() {
         return Err(err(StatusCode::BAD_REQUEST, "avatar_gallery_empty"));
     }
@@ -585,42 +752,27 @@ async fn assign_missing(
 }
 // Used by local and OIDC account creation; existing user photos are never overwritten.
 pub(crate) async fn assign_new_user(auth: &AuthState, user: &str) -> Result<(), Error> {
-    let rows:Vec<(String,String,String)>=query_as("SELECT e.id,e.package_json,COALESCE(s.settings_json,'{}') FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id LEFT JOIN extension_settings s ON s.extension_id=e.id WHERE e.enabled=1 AND p.active=1 ORDER BY e.id").fetch_all(auth.store.pool()).await.map_err(db)?;
-    for (id, package, settings) in rows {
-        let package: Package = serde_json::from_str(&package)
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
-        let settings: Value = serde_json::from_str(&settings).unwrap_or_else(|_| json!({}));
-        if adapters::authorize_operation(&package.manifest, "avatars.list").is_err()
-            || settings["force_random_on_creation"].as_bool() == Some(false)
-        {
-            continue;
+    if crate::avatars::load_policy(auth)
+        .await
+        .map_err(|s| err(s, "avatar_policy_unavailable"))?
+        .assign_on_create
+    {
+        let images: Vec<String> = query_scalar("SELECT sha256 FROM avatar_images LIMIT 16000")
+            .fetch_all(auth.store.pool())
+            .await
+            .map_err(db)?;
+        if !images.is_empty() {
+            let index = (uuid::Uuid::new_v4().as_u128() % images.len() as u128) as usize;
+            query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO NOTHING").bind(user).bind(&images[index]).execute(auth.store.pool()).await.map_err(db)?;
         }
-        let images:Vec<String>=query_scalar("SELECT i.id FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? LIMIT 16000").bind(id).fetch_all(auth.store.pool()).await.map_err(db)?;
-        if images.is_empty() {
-            continue;
-        }
-        let index = (uuid::Uuid::new_v4().as_u128() % images.len() as u128) as usize;
-        query("INSERT INTO user_avatars(user_id,sha256) SELECT ?,sha256 FROM extension_avatar_images WHERE id=? ON CONFLICT(user_id) DO NOTHING").bind(user).bind(&images[index]).execute(auth.store.pool()).await.map_err(db)?;
-        break;
     }
     Ok(())
 }
 async fn allows_gravatar(auth: &AuthState) -> Result<bool, Error> {
-    let rows:Vec<(String,String)>=query_as("SELECT e.package_json,s.settings_json FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id JOIN extension_settings s ON s.extension_id=e.id WHERE e.enabled=1 AND p.active=1").fetch_all(auth.store.pool()).await.map_err(db)?;
-    let mut allowed = false;
-    for (package, settings) in rows {
-        let package: Package = serde_json::from_str(&package)
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
-        if adapters::authorize_operation(&package.manifest, "avatars.list").is_err() {
-            continue;
-        }
-        let settings: Value = serde_json::from_str(&settings).unwrap_or_else(|_| json!({}));
-        if settings["disallow_custom_avatars"].as_bool() == Some(true) {
-            return Ok(false);
-        }
-        allowed |= settings["allow_gravatar"].as_bool() == Some(true);
-    }
-    Ok(allowed)
+    let policy = crate::avatars::load_policy(auth)
+        .await
+        .map_err(|s| err(s, "avatar_policy_unavailable"))?;
+    Ok(policy.allow_custom && policy.allow_gravatar)
 }
 async fn gravatar_policy(
     State(auth): State<AuthState>,
@@ -680,6 +832,7 @@ async fn gravatar(
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "avatar_decode_failed"))?
     .map_err(|s| err(s, "invalid_avatar_image"))?;
     let _lock = MUTATIONS.lock().await;
+    let _policy_guard = crate::avatars::POLICY_LOCK.read().await;
     if !allows_gravatar(&auth).await? {
         return Err(err(StatusCode::FORBIDDEN, "gravatar_disabled"));
     }
@@ -689,7 +842,7 @@ async fn gravatar(
     let meta = auth
         .store
         .assets
-        .put_bytes(&data, "image/webp")
+        .put_bytes(&data, "image/png")
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?;
     query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET sha256=excluded.sha256").bind(actor.user.id).bind(&meta.sha256).execute(auth.store.pool()).await.map_err(db)?;
@@ -702,7 +855,7 @@ async fn account_packs(
     auth.authenticate(&headers)
         .await
         .map_err(|s| err(s, "authentication_required"))?;
-    let rows:Vec<(String,String,i64)>=query_as("SELECT a.id,a.name,COUNT(i.id) FROM extension_avatar_packs a JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id JOIN extension_avatar_images i ON i.pack_id=a.id WHERE e.enabled=1 AND p.active=1 GROUP BY a.id,a.name ORDER BY a.name").fetch_all(auth.store.pool()).await.map_err(db)?;
+    let rows:Vec<(String,String,i64)>=query_as("SELECT a.id,a.name,COUNT(i.id) FROM avatar_packs a JOIN avatar_images i ON i.pack_id=a.id GROUP BY a.id,a.name UNION ALL SELECT a.id,a.name,COUNT(i.id) FROM extension_avatar_packs a JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id JOIN extension_avatar_images i ON i.pack_id=a.id WHERE e.enabled=1 AND p.active=1 GROUP BY a.id,a.name ORDER BY 2").fetch_all(auth.store.pool()).await.map_err(db)?;
     Ok(Json(
         json!({"packs":rows.into_iter().map(|(id,name,count)|json!({"id":id,"name":name,"count":count})).collect::<Vec<_>>()}),
     ))
@@ -715,13 +868,13 @@ async fn images(
     auth.authenticate(&headers)
         .await
         .map_err(|s| err(s, "authentication_required"))?;
-    let rows:Vec<(String,String)>=query_as("SELECT i.id,i.name FROM extension_avatar_images i JOIN extension_avatar_packs a ON a.id=i.pack_id JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE a.id=? AND e.enabled=1 AND p.active=1 ORDER BY i.name LIMIT 500").bind(&pack).fetch_all(auth.store.pool()).await.map_err(db)?;
+    let rows:Vec<(String,String)>=query_as("SELECT i.id,i.name FROM avatar_images i JOIN avatar_packs a ON a.id=i.pack_id WHERE a.id=? UNION ALL SELECT i.id,i.name FROM extension_avatar_images i JOIN extension_avatar_packs a ON a.id=i.pack_id JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE a.id=? AND e.enabled=1 AND p.active=1 ORDER BY 2 LIMIT 500").bind(&pack).bind(&pack).fetch_all(auth.store.pool()).await.map_err(db)?;
     Ok(Json(
         json!({"images":rows.into_iter().map(|(id,name)|json!({"id":id,"name":name,"url":format!("/api/v1/account/avatar/collections/{pack}/{id}")})).collect::<Vec<_>>()}),
     ))
 }
 async fn sha256(auth: &AuthState, pack: &str, image: &str) -> Result<String, Error> {
-    query_scalar("SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs a ON a.id=i.pack_id JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE a.id=? AND i.id=? AND e.enabled=1 AND p.active=1").bind(pack).bind(image).fetch_optional(auth.store.pool()).await.map_err(db)?.ok_or_else(||err(StatusCode::NOT_FOUND,"avatar_not_found"))
+    query_scalar("SELECT i.sha256 FROM avatar_images i JOIN avatar_packs a ON a.id=i.pack_id WHERE a.id=? AND i.id=? UNION ALL SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs a ON a.id=i.pack_id JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE a.id=? AND i.id=? AND e.enabled=1 AND p.active=1").bind(pack).bind(image).bind(pack).bind(image).fetch_optional(auth.store.pool()).await.map_err(db)?.ok_or_else(||err(StatusCode::NOT_FOUND,"avatar_not_found"))
 }
 async fn image(
     State(auth): State<AuthState>,
@@ -769,6 +922,201 @@ mod tests {
             assert!(repository(value).is_err(), "{value}");
         }
         assert!(repository("https://github.com/cedev-1/jellyfin-avatars").is_ok());
+    }
+    #[tokio::test]
+    async fn native_gallery_works_without_extensions() {
+        use axum::{body::Body, http::Request};
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+        let root = tempfile::tempdir().unwrap();
+        let store = crate::identity::IdentityStore::open(&root.path().join("native.sqlite"))
+            .await
+            .unwrap();
+        store
+            .bootstrap(
+                "admin",
+                zeroize::Zeroizing::new("disposable avatar password".into()),
+            )
+            .await
+            .unwrap();
+        let auth = AuthState::new(store.clone(), "http://localhost".into())
+            .await
+            .unwrap();
+        let app = crate::auth::router(auth.clone())
+            .merge(super::super::router(auth.clone()))
+            .merge(crate::avatars::router(auth.clone()));
+        let login = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/login")
+                    .header("origin", "http://localhost")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"login":"admin","password":"disposable avatar password"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(login.status(), StatusCode::OK);
+        let cookie = login.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        let body = login.into_body().collect().await.unwrap().to_bytes();
+        let csrf = serde_json::from_slice::<Value>(&body).unwrap()["csrfToken"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let count: i64 = query_scalar("SELECT COUNT(*) FROM extensions")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+        let policy = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/avatar-policy")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = policy.into_body().collect().await.unwrap().to_bytes();
+        let policy: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            policy,
+            json!({"allowCustom":true,"allowGravatar":false,"assignOnCreate":false})
+        );
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(8, 8)
+            .write_to(&mut png, image::ImageFormat::Jpeg)
+            .unwrap();
+        let boundary = "fixture-boundary";
+        let mut multipart=format!("--{boundary}\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nPack\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"images\"; filename=\"one.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n").into_bytes();
+        multipart.extend(png.into_inner());
+        multipart.extend(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/avatar-packs/upload")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::ORIGIN, "http://localhost")
+                    .header("x-csrf-token", &csrf)
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(multipart))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let pack = serde_json::from_slice::<Value>(&body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/account/avatar/collections/{pack}"))
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let image = serde_json::from_slice::<Value>(&body).unwrap()["images"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let image_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/account/avatar/collections/{pack}/{image}"))
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(image_response.status(), StatusCode::OK);
+        assert_eq!(image_response.headers()[header::CONTENT_TYPE], "image/png");
+        let image_bytes = image_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        assert!(image_bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/account/avatar/collections/{pack}/{image}"))
+                    .header(header::COOKIE, &cookie)
+                    .header(header::ORIGIN, "http://localhost")
+                    .header("x-csrf-token", &csrf)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM user_avatars")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            1
+        );
+        let settings = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/v1/admin/avatar-policy")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::ORIGIN, "http://localhost")
+                    .header("x-csrf-token", &csrf)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"allowCustom":false,"allowGravatar":true,"assignOnCreate":true}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(settings.status(), StatusCode::NO_CONTENT);
+        assert!(!allows_gravatar(&auth).await.unwrap());
+        query("INSERT INTO users(id,role) VALUES('new-user','user')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assign_new_user(&auth, "new-user").await.unwrap();
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM user_avatars WHERE user_id='new-user'")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            1
+        );
     }
     #[tokio::test]
     async fn imports_normalized_collections_without_approval_and_enforces_activation() {
@@ -1218,8 +1566,9 @@ mod tests {
             .fetch_one(store.pool())
             .await
             .unwrap(),
-            1
+            0
         );
+        query("INSERT INTO avatar_policy(singleton,allow_custom,allow_gravatar,assign_on_create) VALUES(1,1,1,0)").execute(store.pool()).await.unwrap();
         let gravatar_url = format!(
             "https://www.gravatar.com/avatar/{:x}?s=256&d=404",
             Sha256::digest(b"fixture@example.invalid")
@@ -1271,6 +1620,10 @@ mod tests {
             .0,
             StatusCode::NO_CONTENT
         );
+        query("UPDATE avatar_policy SET allow_custom=0 WHERE singleton=1")
+            .execute(store.pool())
+            .await
+            .unwrap();
         assert_eq!(
             call(
                 &app,

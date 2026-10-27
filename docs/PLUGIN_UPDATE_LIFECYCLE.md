@@ -78,3 +78,7 @@ explicite et distincte de toute mise à jour.
 Jusqu'à ces preuves, aucune mise à jour n'est effectuée par ces routes. Aucune
 migration automatique des bases ou des données privées n'est prévue dans ce
 chantier ; une incompatibilité doit être refusée en conservant l'installation.
+
+## Vérification locale ciblée
+
+`cargo test --locked -p media-poc --test extensions test_extension_upgrade_refuses_unverified_compatibility_without_mutation -j 1 -- --nocapture` : réussite sur SQLite temporaire. Le test vérifie aussi le refus de `upgrade=true` sur la route d'installation et celui d'une installation en doublon, puis la conservation de la génération et des données privées. Il ne démontre ni bascule, ni rollback, ni exécution PostgreSQL.

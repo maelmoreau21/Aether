@@ -2072,6 +2072,37 @@ async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutatio
     assert_eq!(status, StatusCode::CONFLICT, "{resp}");
     assert_eq!(resp["error"], "extension_update_compatibility_unverified");
 
+    // The alternate install endpoint must enforce exactly the same refusal.
+    let mut alternate = serde_json::to_value(&p2).unwrap();
+    alternate["upgrade"] = json!(true);
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions",
+        &cookie,
+        csrf,
+        alternate,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{response}");
+    assert_eq!(
+        response["error"],
+        "extension_update_compatibility_unverified"
+    );
+
+    // Reinstalling an existing id cannot bypass the protected update path.
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions",
+        &cookie,
+        csrf,
+        serde_json::to_value(&p2).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{response}");
+    assert_eq!(response["error"], "extension_exists");
+
     for (field, value, expected) in [
         (
             "permissions",

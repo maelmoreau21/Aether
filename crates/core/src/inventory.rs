@@ -3822,30 +3822,13 @@ pub async fn descriptor_for_user(
         source["tracks"] = json!(track.probe.streams);
         sources.push(source);
     }
-    let chapter_list: Vec<(f64, String)> = probe
-        .chapters
-        .iter()
-        .filter_map(|chapter| {
-            let start = chapter["start_time"].as_str()?.parse::<f64>().ok()?;
-            if !start.is_finite() || start < 0. {
-                return None;
-            }
-            Some((
-                start,
-                chapter["tags"]["title"]
-                    .as_str()
-                    .unwrap_or("Chapitre")
-                    .to_string(),
-            ))
-        })
-        .take(1000)
-        .collect();
-
     let total_dur = probe
         .format
         .get("duration")
         .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<f64>().ok());
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|duration| duration.is_finite() && *duration > 0.0);
+    let chapter_list = valid_chapters(&probe.chapters, total_dur);
     let mut intro_segment: Option<serde_json::Value> = None;
     let mut credits_segment: Option<serde_json::Value> = None;
 
@@ -4747,8 +4730,50 @@ pub async fn backfill_title_sort_unicode(
     Ok(())
 }
 
+// Probe output is external data: chapter ordering and timestamps cannot be
+// assumed valid, especially when their boundaries drive skip controls.
+fn valid_chapters(chapters: &[Value], duration: Option<f64>) -> Vec<(f64, String)> {
+    let mut valid: Vec<_> = chapters
+        .iter()
+        .take(1000)
+        .filter_map(|chapter| {
+            let start = chapter["start_time"].as_str()?.parse::<f64>().ok()?;
+            if !start.is_finite()
+                || start < 0.0
+                || duration.is_some_and(|duration| start >= duration)
+            {
+                return None;
+            }
+            Some((
+                start,
+                chapter["tags"]["title"]
+                    .as_str()
+                    .unwrap_or("Chapitre")
+                    .to_string(),
+            ))
+        })
+        .collect();
+    valid.sort_by(|left, right| left.0.total_cmp(&right.0));
+    valid
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chapter_boundaries_are_sorted_and_confined_to_the_media() {
+        let chapters = serde_json::json!([
+            {"start_time":"60", "tags":{"title":"Episode"}},
+            {"start_time":"10", "tags":{"title":"Intro"}},
+            {"start_time":"1200", "tags":{"title":"Invalid end"}},
+            {"start_time":"NaN"},
+            {"start_time":"-1"}
+        ]);
+        assert_eq!(
+            super::valid_chapters(chapters.as_array().unwrap(), Some(1200.0)),
+            vec![(10.0, "Intro".into()), (60.0, "Episode".into())]
+        );
+    }
+
     #[test]
     fn packet_stream_descriptors_use_validated_track_ids_and_real_av1_configuration() {
         let probe: super::Probe = serde_json::from_value(serde_json::json!({

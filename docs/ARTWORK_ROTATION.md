@@ -59,7 +59,8 @@ de synchronisation entre appareils. Une seule variante disponible reste stable.
 ## API et bornes
 
 Les paramètres `artworkRotation` sont persistés par l'API des préférences du
-compte. Pool 1–24 et intervalle 0–720 heures : les valeurs hors limites sont
+compte. Une liste explicite de bibliothèques vide désactive la rotation partout ;
+une sélection absente conserve les anciens réglages par type de média. Pool 1–24 et intervalle 0–720 heures : les valeurs hors limites sont
 refusées. Les droits sur les bibliothèques et les images restent vérifiés par
 les routes de catalogue et d'image existantes.
 

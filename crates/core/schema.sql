@@ -396,6 +396,22 @@ CREATE TABLE library_folders (
     CHECK(library_id != parent_id)
 );
 
+CREATE TABLE avatar_packs (
+ id TEXT PRIMARY KEY, name TEXT NOT NULL, source TEXT NOT NULL
+);
+CREATE TABLE avatar_images (
+ id TEXT PRIMARY KEY, pack_id TEXT NOT NULL REFERENCES avatar_packs(id) ON DELETE CASCADE,
+ name TEXT NOT NULL, sha256 TEXT NOT NULL REFERENCES assets(sha256)
+);
+CREATE INDEX avatar_images_asset ON avatar_images(sha256);
+CREATE INDEX avatar_images_pack ON avatar_images(pack_id);
+CREATE TABLE avatar_policy (
+ singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+ allow_custom INTEGER NOT NULL CHECK(allow_custom IN (0,1)),
+ allow_gravatar INTEGER NOT NULL CHECK(allow_gravatar IN (0,1)),
+ assign_on_create INTEGER NOT NULL CHECK(assign_on_create IN (0,1))
+);
+
 CREATE TABLE extension_avatar_packs (
  id TEXT PRIMARY KEY, extension_id TEXT NOT NULL REFERENCES extensions(id) ON DELETE CASCADE,
  name TEXT NOT NULL, source TEXT NOT NULL
@@ -1550,6 +1566,22 @@ CREATE TABLE extension_avatar_images (
 
 
 
+CREATE TABLE avatar_packs (
+ id text PRIMARY KEY, name text NOT NULL, source text NOT NULL
+);
+CREATE TABLE avatar_images (
+ id text PRIMARY KEY, pack_id text NOT NULL REFERENCES avatar_packs(id) ON DELETE CASCADE,
+ name text NOT NULL, sha256 text NOT NULL
+);
+CREATE INDEX avatar_images_asset ON avatar_images(sha256);
+CREATE INDEX avatar_images_pack ON avatar_images(pack_id);
+CREATE TABLE avatar_policy (
+ singleton integer PRIMARY KEY CHECK(singleton=1),
+ allow_custom bigint NOT NULL CHECK(allow_custom IN (0,1)),
+ allow_gravatar bigint NOT NULL CHECK(allow_gravatar IN (0,1)),
+ assign_on_create bigint NOT NULL CHECK(assign_on_create IN (0,1))
+);
+
 CREATE TABLE extension_avatar_packs (
     id text NOT NULL,
     extension_id text NOT NULL,
@@ -2382,6 +2414,8 @@ ALTER TABLE ONLY artwork_image_sources
 
 ALTER TABLE ONLY assets
     ADD CONSTRAINT assets_pkey PRIMARY KEY (sha256);
+
+ALTER TABLE avatar_images ADD CONSTRAINT avatar_images_sha256_fkey FOREIGN KEY (sha256) REFERENCES assets(sha256);
 
 
 

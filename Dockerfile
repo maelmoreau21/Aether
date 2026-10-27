@@ -183,6 +183,7 @@ ENV MEDIA_MODE=distributed \
     MEDIA_BIND_ADDR=0.0.0.0 \
     MEDIA_DB_PATH=/data/core.sqlite3 \
     MEDIA_PLUGINS_PATH=/data/plugins \
+    MEDIA_ASSETS_PATH=/data/assets \
     MEDIA_BACKUP_DIR=/backups \
     MEDIA_PUBLIC_URL=http://127.0.0.1:3000
 
@@ -288,6 +289,7 @@ ENV MEDIA_PORT=3000 \
     MEDIA_BIND_ADDR=0.0.0.0 \
     MEDIA_DB_PATH=/data/core.sqlite3 \
     MEDIA_PLUGINS_PATH=/data/plugins \
+    MEDIA_ASSETS_PATH=/data/assets \
     MEDIA_BACKUP_DIR=/backups \
     MEDIA_PUBLIC_URL=http://127.0.0.1:3000
 

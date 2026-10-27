@@ -1,5 +1,14 @@
 # Plugins : installation libre, paramètres et collections d’avatars
 
+> Les collections natives sont indépendantes des extensions : administration via
+> `/api/v1/admin/avatar-packs`, politique via `/api/v1/admin/avatar-policy` et
+> galerie via `/api/v1/account/avatar/collections`. La politique native autorise
+> les images personnalisées par défaut ; Gravatar et l’attribution à la création
+> sont désactivés par défaut. Les anciens packs d’extension restent stockés et
+> accessibles tant que leur extension est active ; ils ne sont pas convertis.
+> Les images importées sont normalisées et les contenus SVG restent validés.
+> Les anciennes descriptions de politique d’extension ci-dessous sont historiques.
+
 ## Comportement
 
 Aucun clic d’approbation n’est demandé pour un dépôt ou un auteur. Dépôts affiche

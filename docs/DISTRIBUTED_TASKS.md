@@ -1,5 +1,10 @@
 # Moteur de tâches distribué — 24 octobre 2026
 
+Le canal sortant d'un Node applique un délai de reconnexion progressif, plafonné
+à cinq secondes, aux erreurs réseau et aux réponses signées mal formées. Une
+commande valide rétablit le délai initial. Ce mécanisme ne prouve pas à lui seul
+la reprise d'un travail interrompu ni la résilience sur un NAS.
+
 Le Core possède désormais une file persistante de travaux multimédias. Il admet les tâches,
 attribue un lease au Node qui possède la bibliothèque, suit leur exécution et
 refuse les résultats d'une ancienne tentative. Le scanner Node existant effectue

@@ -34,12 +34,20 @@ struct Preferences {
     #[serde(skip_serializing_if = "Option::is_none")]
     artwork_rotation: Option<ArtworkRotation>,
 }
-#[derive(Serialize, Deserialize)]
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ArtworkRotation {
     enabled: bool,
+    #[serde(default = "default_true")]
     enable_movies: bool,
+    #[serde(default = "default_true")]
     enable_series: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    enabled_libraries: Option<Vec<String>>,
     rotation_mode: String,
     min_hours_between_switches: u32,
     pool_size: u32,
@@ -105,6 +113,15 @@ impl Preferences {
                 && (1..=24).contains(&v.pool_size)
                 && language(&v.preferred_language)
                 && language(&v.fallback_language)
+                && v.enabled_libraries.as_ref().is_none_or(|libraries| {
+                    libraries.len() <= 64
+                        && libraries.iter().all(|lib| {
+                            (1..=64).contains(&lib.len())
+                                && lib
+                                    .bytes()
+                                    .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+                        })
+                })
         }) && self
             .theme
             .as_deref()

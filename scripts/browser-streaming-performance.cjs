@@ -162,7 +162,8 @@ function summarize(trials, field) {
   let browser;
   try {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    browser = await chromium.launch({ channel: process.env.MEDIA_BROWSER_CHANNEL || 'chrome', headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+    const executablePath = process.env.MEDIA_BROWSER_EXECUTABLE;
+    browser = await chromium.launch({ ...(executablePath ? { executablePath } : { channel: process.env.MEDIA_BROWSER_CHANNEL || 'chrome' }), headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
     report.browser = browser.version(); report.ffmpeg = execFileSync('ffmpeg', ['-version'], { encoding: 'utf8' }).split('\n')[0];
     for (const strategy of ['original', 'segmented']) {
       const context = await browser.newContext(), page = await context.newPage();

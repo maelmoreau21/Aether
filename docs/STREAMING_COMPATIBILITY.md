@@ -463,3 +463,9 @@ Le test court final (40,41 s) vérifie aussi le rendu du sous-titre intégré fo
 l'offset négatif et l'accès clavier. Régression séries (38,66 s) réussie : suivant
 manuel/automatique opt-in et inter-saisons, permissions/isolation des comptes.
 Résumé machine : `evidence/2026-10-18/player-verification.json`.
+
+## 27 octobre 2026 — contrôle local EdgeCore limité
+
+`MEDIA_BROWSER_EXECUTABLE` permet de choisir un exécutable pour `scripts/browser-streaming-performance.cjs`. EdgeCore 155.0.4283.62 sous Windows a été lancé headless sur les fixtures représentatives MP4 et MKV AV1/Opus, une répétition chacune : ouverture, deux changements audio segmentés et seek ont produit image et signal PCM selon le banc synthétique. La préparation utilise FFmpeg pour copier des paquets, sans réencodage. Le serveur HTTP est simulé : ce résultat ne valide ni Svelte, ni Core/Node, ni sortie audio physique, ni un navigateur Edge installé en usage normal. Les valeurs ponctuelles ne démontrent aucune amélioration avant/après ; le premier signal audio mesuré pour la source originale a été tardif (14,5 s MP4 et 8,5 s MKV), à investiguer avant de conclure à un fonctionnement fiable. Rapports locaux : `target/stabilisation-edgecore-mp4/report.json` et `target/stabilisation-edgecore-mkv/report.json`.
+
+Le parcours applicatif `browser_scanner`, exécuté avec `MEDIA_BROWSER_EXECUTABLE` vers EdgeCore 155.0.4283.62 sous Windows, a également réussi sur les fixtures MP4 puis MKV après redémarrage du Core (1 test, 41,28 s). Il couvre scan incrémental, changements FR/EN, PCM, pause/seek, sous-titres internes et externes et reprise. Première image après clic observée : 194 ms MP4 puis 98 ms MKV, mesures uniques locales sans comparaison de référence. Rapports : `target/stabilisation-edgecore-app/`. Ce n'est ni une lecture de plusieurs heures ni un test de Node distant ou de NAS.

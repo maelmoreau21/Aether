@@ -24,6 +24,7 @@
   import AdminCapabilities from '../../../lib/admin/AdminCapabilities.svelte';
   import AdminGroups from '../../../lib/admin/AdminGroups.svelte';
   import AdminApiKeys from '../../../lib/admin/AdminApiKeys.svelte';
+  import AvatarCollections from '../../../lib/admin/AvatarCollections.svelte';
   import type { UserGroup } from '../../../lib/admin/request';
   import { t } from '../../../lib/i18n';
 
@@ -351,7 +352,7 @@
     '#nodes-section': $t('admin_nav_nodes'), '#users-section': $t('admin_nav_users'),
     '#groups-section': 'Groupes',
     '#tasks-section': $t('admin_nav_tasks'), '#backups-section': 'Sauvegardes',
-    '#api-keys-section': 'Clés API', '#extensions-section': 'Extensions'
+    '#api-keys-section': 'Clés API', '#avatars-section': 'Avatars', '#extensions-section': 'Extensions'
   } as Record<string, string>)[currentHash]);
   function chooseSection(hash: string) { currentHash = hash; closeMenu(); }
   function navigateHome(event: MouseEvent) {
@@ -360,7 +361,7 @@
     void goto(resolve('/'));
   }
 
-  const sections = new Set(['#overview', '#general-section', '#network-section', '#libraries-section', '#nodes-section', '#users-section', '#tasks-section', '#backups-section', '#groups-section', '#api-keys-section', '#extensions-section']);
+  const sections = new Set(['#overview', '#general-section', '#network-section', '#libraries-section', '#nodes-section', '#users-section', '#tasks-section', '#backups-section', '#groups-section', '#api-keys-section', '#avatars-section', '#extensions-section']);
   function selectedSection() {
     const section = window.location.hash.split('?')[0];
     return sections.has(section) ? section : '#overview';
@@ -512,6 +513,12 @@
               <span class="nav-icon"><Icon name="users" size={16} /></span>
               <span class="nav-text">Groupes d’utilisateurs</span>
             </a>
+            <a href="#avatars-section" class="sidebar-nav-item" class:active={currentHash === '#avatars-section'}
+              aria-current={currentHash === '#avatars-section' ? 'page' : undefined}
+              onclick={() => chooseSection('#avatars-section')}>
+              <span class="nav-icon"><Icon name="sparkles" size={16} /></span>
+              <span class="nav-text">Avatars</span>
+            </a>
           </div>
           <div class="sidebar-group">
             <span class="group-label">Maintenance</span>
@@ -612,6 +619,9 @@
           </div>
           <div hidden={currentHash !== '#api-keys-section'}>
             <AdminApiKeys {users} {libraries} />
+          </div>
+          <div hidden={currentHash !== '#avatars-section'}>
+            <AvatarCollections />
           </div>
           <AdminCapabilities section={currentHash.slice(1)} />
         </div>

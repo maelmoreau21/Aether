@@ -151,6 +151,22 @@ async fn preferences_are_account_owned_csrf_protected_bounded_and_persistent() {
         body(request(&app, "GET", &sessions[1].0, "", json!(null)).await).await,
         json!({})
     );
+    let mut excluded = rotation.clone();
+    excluded["enabledLibraries"] = json!([]);
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            cookie,
+            csrf,
+            json!({"artworkRotation":excluded})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let saved = body(request(&app, "GET", cookie, "", json!(null)).await).await;
+    assert_eq!(saved["artworkRotation"], excluded);
     drop(app);
     store.close().await;
     let reopened = IdentityStore::open(&path).await.unwrap();

@@ -97,8 +97,10 @@ export function selectArtwork(work: Work | null | undefined, current: Session | 
       selected[kind] = manual[0].url;
       continue;
     }
-    const rotation = kind === 'poster' && policy.enabled
-      && ((work.kind === 'film' && policy.enableMovies) || (work.kind === 'series' && policy.enableSeries));
+    const isLibraryAllowed = policy.enabledLibraries !== undefined
+      ? policy.enabledLibraries.includes(work.libraryId)
+      : ((work.kind === 'film' && (policy.enableMovies ?? true)) || (work.kind === 'series' && (policy.enableSeries ?? true)));
+    const rotation = kind === 'poster' && policy.enabled && isLibraryAllowed;
     const selectionLanguages = rotation ? [policy.preferredLanguage, policy.fallbackLanguage] : languages;
     if (rotation) {
       candidates = candidates.filter(image => {

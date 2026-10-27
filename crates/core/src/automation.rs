@@ -447,6 +447,21 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
                 }
                 .into();
             }
+            if c.operation == "lyrics.get" {
+                let existing: Option<String> = query_scalar(
+                    "SELECT lyrics FROM music_tracks WHERE id=? AND library_id=? AND available=1",
+                )
+                .bind(&asset)
+                .bind(&library)
+                .fetch_optional(&mut *tx)
+                .await?;
+                if existing
+                    .as_deref()
+                    .is_none_or(|lyrics| !lyrics.trim().is_empty())
+                {
+                    continue;
+                }
+            }
             if marker_plugin
                 && c.operation
                     != if fingerprint_ready {
@@ -641,6 +656,12 @@ async fn persist_timeline_markers(
             .collect::<Result<_, sqlx::Error>>()?
     };
     for (asset, markers) in results {
+        // The task's fingerprint fence protects its own target only. A peer
+        // can change while Wasm runs, so its result must be handled by its own
+        // fenced task instead of attributing it to its current revision here.
+        if asset != job.target_id {
+            continue;
+        }
         let state:Option<(String,String,String)>=query_as("SELECT ep.season_id,obs.fingerprint,a.probe_json FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN automation_observations obs ON obs.asset_id=a.id WHERE a.id=? AND a.available=1")
             .bind(&asset).fetch_optional(&mut **tx).await?;
         let Some((candidate_season, source_fingerprint, probe)) = state else {
@@ -809,34 +830,33 @@ pub async fn apply_missing_music_metadata(
     let provider_id = result["providerId"]
         .as_str()
         .or_else(|| result["id"].as_str())
-        .unwrap_or("")
+        .map(str::to_owned)
+        .or_else(|| result["id"].as_u64().map(|id| id.to_string()))
+        .unwrap_or_default()
         .chars()
         .take(256)
         .collect::<String>();
 
     // 1. Lyrics enrichment: preserve manual lyrics, allow higher priority
-    let proposal_lyrics = result["synced"]
-        .as_str()
-        .or_else(|| result["plain"].as_str())
-        .or_else(|| result["lyrics"].as_str());
+    let proposal_lyrics = ["synced", "plain", "lyrics"]
+        .into_iter()
+        .filter_map(|field| result[field].as_str())
+        .find(|text| !text.trim().is_empty() && text.len() <= 32768);
 
-    if let Some(new_lyrics) = proposal_lyrics.filter(|s| !s.trim().is_empty()) {
-        let has_lyrics_provenance: i64 = query_scalar(
-            "SELECT COUNT(*) FROM automatic_metadata_provenance WHERE work_id=? AND field_name='lyrics'"
-        )
-        .bind(track_id)
-        .fetch_one(&mut **tx)
-        .await?;
-
-        let can_update_lyrics = lyrics.is_empty() || (has_lyrics_provenance > 0);
-        if can_update_lyrics {
-            let previous_prio: Option<i64> = query_scalar(
-                "SELECT priority FROM automatic_metadata_provenance WHERE work_id=? AND field_name='lyrics'"
-            )
-            .bind(track_id)
-            .fetch_optional(&mut **tx)
-            .await?;
-
+    if let Some(new_lyrics) = proposal_lyrics {
+        let previous: Option<(i64, String)> = query_as(
+            "SELECT priority, value_json FROM automatic_metadata_provenance WHERE work_id=? AND field_name='lyrics'"
+        ).bind(track_id).fetch_optional(&mut **tx).await?;
+        let previous_matches = previous.as_ref().is_some_and(|(_, value)| {
+            serde_json::from_str::<String>(value).ok().as_deref() == Some(lyrics.as_str())
+        });
+        // A rescan or manual edit may have replaced the cached provider value.
+        // Provenance alone must never authorize overwriting those local lyrics.
+        if lyrics.is_empty() || previous_matches {
+            let previous_prio = previous
+                .as_ref()
+                .filter(|_| previous_matches)
+                .map(|(priority, _)| *priority);
             if previous_prio.is_none_or(|p| priority >= p) {
                 query("UPDATE music_tracks SET lyrics=? WHERE id=?")
                     .bind(new_lyrics)
@@ -916,10 +936,52 @@ pub async fn complete(
     result: &Value,
     now: i64,
 ) -> Result<bool, sqlx::Error> {
+    complete_with_marker_sources(store, job, link, result, &[], now).await
+}
+
+async fn lock_marker_sources(
+    tx: &mut Transaction<'_, Any>,
+    library: &str,
+    target: &str,
+    marker_sources: &[(String, String)],
+) -> Result<bool, sqlx::Error> {
+    if marker_sources.len() != 2
+        || marker_sources[0].0 != target
+        || marker_sources[0].0 == marker_sources[1].0
+    {
+        return Ok(false);
+    }
+    // Lock in a stable order until commit so a scan cannot update either
+    // revision after validation.
+    let mut sources: Vec<_> = marker_sources.iter().collect();
+    sources.sort_by(|a, b| a.0.cmp(&b.0));
+    for (asset, fingerprint) in sources {
+        let locked = query("UPDATE automation_observations SET fingerprint=fingerprint WHERE asset_id=? AND fingerprint=? AND EXISTS(SELECT 1 FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id WHERE a.id=automation_observations.asset_id AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root)")
+            .bind(asset).bind(fingerprint).bind(library).execute(&mut **tx).await?;
+        if locked.rows_affected() != 1 {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+pub(crate) async fn complete_with_marker_sources(
+    store: &IdentityStore,
+    job: &Job,
+    link: &TaskLink,
+    result: &Value,
+    marker_sources: &[(String, String)],
+    now: i64,
+) -> Result<bool, sqlx::Error> {
     let _effects = crate::task_engine::EFFECT_GATE.lock().await;
     let _writer = store.task_writes.lock().await;
     let mut conn = store.pool().acquire().await?;
     let mut tx = begin_write_serialized(&mut conn, crate::task_engine::TASK_ADMISSION_LOCK).await?;
+    if link.operation == "intro.detect"
+        && !lock_marker_sources(&mut tx, &job.library_id, &job.target_id, marker_sources).await?
+    {
+        return Ok(false);
+    }
     if !persist_result(&mut tx, job, link, result, now).await? {
         return Ok(false);
     }
@@ -1351,4 +1413,62 @@ pub async fn add_dependency(
     }
     query("INSERT INTO automation_dependencies(task_id,prerequisite_id) VALUES(?,?) ON CONFLICT(task_id,prerequisite_id) DO NOTHING").bind(task).bind(prerequisite).execute(&mut **tx).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod marker_source_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn marker_inputs_must_still_match_their_observed_revisions() {
+        sqlx::any::install_default_drivers();
+        let pool = sqlx::any::AnyPoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for sql in [
+            "CREATE TABLE libraries(id TEXT PRIMARY KEY, root TEXT)",
+            "CREATE TABLE inventory_sources(id TEXT PRIMARY KEY, root_snapshot TEXT)",
+            "CREATE TABLE inventory_assets(id TEXT PRIMARY KEY, source_id TEXT, library_id TEXT, available INTEGER)",
+            "CREATE TABLE automation_observations(asset_id TEXT PRIMARY KEY, fingerprint TEXT)",
+            "INSERT INTO libraries VALUES('lib','/read-only')",
+            "INSERT INTO inventory_sources VALUES('s1','/read-only'),('s2','/read-only')",
+            "INSERT INTO inventory_assets VALUES('a','s1','lib',1),('b','s2','lib',1)",
+            "INSERT INTO automation_observations VALUES('a','rev-a'),('b','rev-b')",
+        ] {
+            query(sql).execute(&pool).await.unwrap();
+        }
+        let sources = vec![("a".into(), "rev-a".into()), ("b".into(), "rev-b".into())];
+        let mut tx = pool.begin().await.unwrap();
+        assert!(
+            lock_marker_sources(&mut tx, "lib", "a", &sources)
+                .await
+                .unwrap()
+        );
+        tx.commit().await.unwrap();
+        query("UPDATE automation_observations SET fingerprint='new' WHERE asset_id='b'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        assert!(
+            !lock_marker_sources(&mut tx, "lib", "a", &sources)
+                .await
+                .unwrap()
+        );
+        tx.rollback().await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        assert!(
+            !lock_marker_sources(&mut tx, "other", "a", &sources)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !lock_marker_sources(&mut tx, "lib", "b", &sources)
+                .await
+                .unwrap()
+        );
+        tx.rollback().await.unwrap();
+    }
 }

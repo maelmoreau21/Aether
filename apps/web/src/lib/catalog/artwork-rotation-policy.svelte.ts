@@ -2,7 +2,7 @@ import { getSessionGeneration, onSessionGenerationChange } from '../auth/session
 import { ensurePreferences } from '../preferences';
 
 export type ArtworkRotationPolicy = {
-  enabled: boolean; enableMovies: boolean; enableSeries: boolean;
+  enabled: boolean; enableMovies?: boolean; enableSeries?: boolean; enabledLibraries?: string[];
   rotationMode: 'random' | 'sequential'; minHoursBetweenSwitches: number; poolSize: number;
   preferredLanguage: string; fallbackLanguage: string;
   includeUnknownLanguage: boolean; allowAnyLanguageFallback: boolean;

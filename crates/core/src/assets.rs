@@ -41,6 +41,7 @@ use tokio::{
 /// (a test compares this list with the real schema): the collector only trusts this registry.
 pub const REFERENCING_COLUMNS: &[(&str, &str)] = &[
     ("extension_avatar_images", "sha256"),
+    ("avatar_images", "sha256"),
     ("library_artwork", "sha256"),
     ("poster_previews", "sha256"),
     ("user_avatars", "sha256"),

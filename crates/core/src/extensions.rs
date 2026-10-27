@@ -65,6 +65,15 @@ fn metadata_input_with_settings(input: Value, mut settings: Value) -> Value {
     value
 }
 
+fn lyrics_request_input(title: &str, artist: &str, album: &str, duration: Option<f64>) -> Value {
+    json!({
+        "track": title,
+        "artist": artist,
+        "album": album,
+        "durationSecs": duration.filter(|value| value.is_finite() && *value >= 0.0 && *value <= u32::MAX as f64).map(|value| value.round() as u32),
+    })
+}
+
 type Error = (StatusCode, Json<Value>);
 pub(super) fn storage_error(error: std::io::Error) -> Error {
     eprintln!(
@@ -1421,13 +1430,18 @@ type TargetResolution = (
     Option<(String, String, String, Option<f64>)>,
 );
 
+pub(crate) struct AutomatedResult {
+    pub value: Value,
+    pub marker_sources: Vec<(String, String)>,
+}
+
 pub(crate) async fn run_automated(
     auth: &AuthState,
     job: &crate::task_engine::Job,
     extension_id: &str,
     generation: &str,
     operation: &str,
-) -> Result<Value, Error> {
+) -> Result<AutomatedResult, Error> {
     let headers = HeaderMap::new();
     if !worker_permitted(
         auth,
@@ -1498,15 +1512,10 @@ pub(crate) async fn run_automated(
     if !legacy {
         settings["language"] = json!(options.preferred_metadata_language);
     }
+    let mut marker_sources = Vec::new();
     let payload = if let Some((title, artist, album, duration)) = &music_track {
         if operation == "lyrics.get" {
-            json!({
-                "trackName": title,
-                "artistName": artist,
-                "albumName": album,
-                "duration": duration,
-                "durationSecs": duration,
-            })
+            lyrics_request_input(title, artist, album, *duration)
         } else {
             json!({
                 "title": title,
@@ -1528,8 +1537,8 @@ pub(crate) async fn run_automated(
         }
         let scope: (String, String, i64) = query_as("SELECT ep.season_id,se.series_id,se.season_number FROM inventory_episodes ep JOIN inventory_seasons se ON se.id=ep.season_id WHERE ep.work_id=?")
             .bind(work_id).fetch_one(auth.store.pool()).await.map_err(db)?;
-        let candidates: Vec<(String,String,String,String,String,String,String)> = query_as("SELECT a.id,t.result_json,t.idempotency_key,obs.fingerprint,a.probe_json,ep.work_id,CAST(ep.episode_number AS TEXT) FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN automation_observations obs ON obs.asset_id=a.id JOIN durable_tasks t ON t.target_id=a.id AND t.category='analyze' AND t.component='fingerprint' AND t.status='completed' WHERE ep.season_id=? AND a.available=1 ORDER BY CASE WHEN a.id=? THEN 0 ELSE 1 END,t.finished_at DESC,a.id LIMIT 12")
-            .bind(&scope.0).bind(&job.target_id).fetch_all(auth.store.pool()).await.map_err(db)?;
+        let candidates: Vec<(String,String,String,String,String,String,String)> = query_as("SELECT a.id,t.result_json,t.idempotency_key,obs.fingerprint,a.probe_json,ep.work_id,CAST(ep.episode_number AS TEXT) FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=a.library_id JOIN automation_observations obs ON obs.asset_id=a.id JOIN durable_tasks t ON t.target_id=a.id AND t.category='analyze' AND t.component='fingerprint' AND t.status='completed' WHERE ep.season_id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root ORDER BY CASE WHEN a.id=? THEN 0 ELSE 1 END,t.finished_at DESC,a.id LIMIT 12")
+            .bind(&scope.0).bind(&job.library_id).bind(&job.target_id).fetch_all(auth.store.pool()).await.map_err(db)?;
         let mut episodes = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for (asset, raw, key, source, probe, episode_work, number) in candidates {
@@ -1579,6 +1588,7 @@ pub(crate) async fn run_automated(
                 continue;
             };
             seen.insert(episode_work);
+            marker_sources.push((asset.clone(), source));
             episodes.push(json!({"id":asset,"seriesId":scope.1,"seasonNumber":scope.2,"episodeNumber":number.parse::<u32>().ok(),"duration":duration,"fingerprintsCompact":STANDARD.encode(bytes),"fingerprintRate":result["fingerprintRate"]}));
         }
         if episodes.len() != 2 || episodes[0]["id"] != job.target_id {
@@ -1649,6 +1659,11 @@ pub(crate) async fn run_automated(
         allowed_hosts: package.manifest.http_hosts.clone(),
         auth_headers: Default::default(),
     };
+    // Prevent results admitted under older, weaker matching rules from being reused.
+    let mut cache_payload = payload.clone();
+    if music_track.is_some() && operation == "metadata.search" {
+        cache_payload["matchingPolicyVersion"] = json!(2);
+    }
     let now = media_contracts::protocol::unix_now();
     let mut conn = auth.store.pool().acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
@@ -1656,13 +1671,23 @@ pub(crate) async fn run_automated(
         &mut tx,
         extension_id,
         operation,
-        &payload,
+        &cache_payload,
         now,
     )
     .await
     .map_err(db)?
     {
-        return Ok(cached);
+        if operation == "intro.detect" && !adapters::marker_result_matches_input(&payload, &cached)
+        {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_marker_origin",
+            ));
+        }
+        return Ok(AutomatedResult {
+            value: cached,
+            marker_sources,
+        });
     }
     let result = invoke_worker_context(
         auth,
@@ -1674,12 +1699,18 @@ pub(crate) async fn run_automated(
         Some(job),
     )
     .await?;
+    if operation == "intro.detect" && !adapters::marker_result_matches_input(&payload, &result) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_marker_origin",
+        ));
+    }
     if music_track.is_some()
         && operation == "metadata.search"
         && let Some(items) = result.as_array()
         && let Some(candidate) = trusted_music_candidate(items, &invocation.input.input)
     {
-        let mut details = invocation;
+        let mut details = invocation.clone();
         details.input.operation = "metadata.details".into();
         details.input.input["id"] = candidate["id"].clone();
         let enriched = invoke_worker_context(
@@ -1692,21 +1723,27 @@ pub(crate) async fn run_automated(
             Some(job),
         )
         .await?;
-        let _ = crate::automation::put_cached_provider_response(
-            &mut tx,
-            extension_id,
-            operation,
-            &payload,
-            &enriched,
-            86400,
-            now,
-        )
-        .await;
-        let _ = crate::database::commit(tx).await;
-        return Ok(enriched);
+        if music_details_match(&enriched, candidate) {
+            let _ = crate::automation::put_cached_provider_response(
+                &mut tx,
+                extension_id,
+                operation,
+                &cache_payload,
+                &enriched,
+                86400,
+                now,
+            )
+            .await;
+            let _ = crate::database::commit(tx).await;
+            return Ok(AutomatedResult {
+                value: enriched,
+                marker_sources,
+            });
+        }
     }
     // Only an unambiguous title/type/year match may reach automatic details.
-    if operation == "metadata.search"
+    if music_track.is_none()
+        && operation == "metadata.search"
         && let Some(items) = result.as_array()
         && let Some(candidate) = trusted_metadata_candidate(items, &invocation.input.input)
     {
@@ -1735,28 +1772,34 @@ pub(crate) async fn run_automated(
                 &mut tx,
                 extension_id,
                 operation,
-                &payload,
+                &cache_payload,
                 &enriched,
                 86400,
                 now,
             )
             .await;
             let _ = crate::database::commit(tx).await;
-            return Ok(enriched);
+            return Ok(AutomatedResult {
+                value: enriched,
+                marker_sources,
+            });
         }
     }
     let _ = crate::automation::put_cached_provider_response(
         &mut tx,
         extension_id,
         operation,
-        &payload,
+        &cache_payload,
         &result,
         86400,
         now,
     )
     .await;
     let _ = crate::database::commit(tx).await;
-    Ok(result)
+    Ok(AutomatedResult {
+        value: result,
+        marker_sources,
+    })
 }
 
 fn normalize_title(title: &str) -> String {
@@ -1790,37 +1833,105 @@ fn trusted_metadata_candidate<'a>(items: &'a [Value], input: &Value) -> Option<&
 
 pub fn trusted_music_candidate<'a>(items: &'a [Value], input: &Value) -> Option<&'a Value> {
     let title = normalize_title(input["title"].as_str()?);
-    let artist = input["artist"].as_str().map(normalize_title);
+    let artist = normalize_title(input["artist"].as_str()?);
+    if title.is_empty() || artist.is_empty() || artist == "unknown artist" {
+        return None;
+    }
     let duration = input["duration"].as_f64();
     let mut matches = items.iter().filter(|item| {
-        let item_title = item["title"].as_str().map(normalize_title);
-        let title_ok = item_title.as_deref() == Some(&title);
-        let artist_ok = match (&artist, item["artist"].as_str().map(normalize_title)) {
-            (Some(expected), Some(actual)) => {
-                expected == &actual || actual.contains(expected) || expected.contains(&actual)
-            }
-            (None, _) => true,
-            _ => false,
-        };
+        let id_ok = item["id"]
+            .as_str()
+            .is_some_and(|id| !id.trim().is_empty() && id.len() <= 256);
+        let title_ok = item["title"]
+            .as_str()
+            .is_some_and(|name| normalize_title(name) == title);
+        let artist_ok = item["artist"]
+            .as_str()
+            .is_some_and(|name| normalize_title(name) == artist);
         let duration_ok = match (
             duration,
             item["duration"]
                 .as_f64()
                 .or_else(|| item["length"].as_f64().map(|ms| ms / 1000.0)),
         ) {
-            (Some(d1), Some(d2)) => (d1 - d2).abs() <= 5.0 || (d1 - d2).abs() / d1.max(1.0) <= 0.05,
+            (Some(a), Some(b)) => {
+                a.is_finite()
+                    && b.is_finite()
+                    && a > 0.0
+                    && b > 0.0
+                    && ((a - b).abs() <= 5.0 || (a - b).abs() / a <= 0.05)
+            }
             _ => true,
         };
-        title_ok && artist_ok && duration_ok
+        id_ok && item["mediaType"].as_str() == Some("music") && title_ok && artist_ok && duration_ok
     });
     let first = matches.next()?;
     matches.next().is_none().then_some(first)
+}
+
+fn music_details_match(details: &Value, candidate: &Value) -> bool {
+    let id_matches = candidate["id"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .is_some_and(|id| details["providerId"].as_str() == Some(id));
+    let title_matches = details["title"].as_str().is_none_or(|title| {
+        candidate["title"]
+            .as_str()
+            .is_some_and(|expected| normalize_title(title) == normalize_title(expected))
+    });
+    id_matches && title_matches
 }
 
 #[cfg(test)]
 mod configuration_tests {
     use super::*;
     use media_extension_sdk::MetadataInput;
+    #[test]
+    fn music_candidates_and_details_require_consistent_identity() {
+        let input = json!({"title":"Song", "artist":"Muse", "duration":180});
+        let candidate = json!({"id":"42", "title":"Song", "artist":"Muse", "duration":182, "mediaType":"music"});
+        assert!(trusted_music_candidate(std::slice::from_ref(&candidate), &input).is_some());
+        for invalid in [
+            json!({"id":"42", "title":"Song", "artist":"Museum", "duration":180, "mediaType":"music"}),
+            json!({"id":"42", "title":"Song", "artist":"", "duration":180, "mediaType":"music"}),
+            json!({"id":"", "title":"Song", "artist":"Muse", "duration":180, "mediaType":"music"}),
+            json!({"id":"42", "title":"Song", "artist":"Muse", "duration":240, "mediaType":"music"}),
+            json!({"id":"42", "title":"Song", "artist":"Muse", "duration":180, "mediaType":"movie"}),
+        ] {
+            assert!(trusted_music_candidate(&[invalid], &input).is_none());
+        }
+        assert!(trusted_music_candidate(&[candidate.clone(), candidate.clone()], &input).is_none());
+        assert!(
+            trusted_music_candidate(
+                std::slice::from_ref(&candidate),
+                &json!({"title":"Song", "artist":""})
+            )
+            .is_none()
+        );
+        assert!(music_details_match(
+            &json!({"providerId":"42", "title":"Song"}),
+            &candidate
+        ));
+        assert!(!music_details_match(
+            &json!({"providerId":"43", "title":"Song"}),
+            &candidate
+        ));
+        assert!(!music_details_match(
+            &json!({"providerId":"42", "title":"Other"}),
+            &candidate
+        ));
+    }
+
+    #[test]
+    fn lyrics_payload_matches_sdk_request() {
+        let input = lyrics_request_input("Track", "Artist", "Album", Some(123.6));
+        let decoded: media_extension_sdk::LyricsRequest = serde_json::from_value(input).unwrap();
+        assert_eq!(decoded.track, "Track");
+        assert_eq!(decoded.artist, "Artist");
+        assert_eq!(decoded.album.as_deref(), Some("Album"));
+        assert_eq!(decoded.duration_secs, Some(124));
+    }
+
     #[test]
     fn automatic_candidate_requires_unique_title_type_and_year() {
         let input = json!({"title":"  Film  Test ","mediaType":"movie","year":2024});

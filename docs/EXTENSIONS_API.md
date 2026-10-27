@@ -253,3 +253,31 @@ fournisseur réel reste à vérifier avec ses clés et conditions. Leur absence
 est signalée dans l'administration; le fonctionnement du serveur n'en dépend pas.
 
 Interface actuelle : installation par Catalogue/Dépôts. L'import manuel signé passe par les fichiers du serveur, sans envoi dans l'interface : [procédure](PLAYLISTS_AND_MUSIC.md#extensions). Les descriptions historiques d'envoi JSON concernent le contrat API.
+
+
+### Paroles (`lyrics.get`)
+
+L'opération générique `lyrics.get` exige `metadata.read` et reçoit `track`,
+`artist`, `album` et `durationSecs` entier ou nul, conformément à
+`LyricsRequest` du SDK. Elle peut retourner `plain` et `synced` ; le Core
+privilégie le texte synchronisé non vide et borne les paroles enregistrées à
+32 Kio. La provenance est conservée et une modification locale ultérieure
+reste prioritaire. Les recherches restent soumises aux politiques et tâches
+d'automatisation ; la lecture des paroles ne déclenche pas elle-même de recherche.
+Les tâches `lyrics.get` ne sont pas admises pour une piste ayant déjà des
+paroles. Le cache de résultat d'automatisation est distinct des paroles de la
+piste. Un scan conserve un texte externe si sa provenance et les propriétés de
+la piste correspondent encore ; les paroles locales présentes restent
+prioritaires. Aucun appel LRCLIB réel n'est prouvé par ce contrat.
+
+### Correspondance musicale automatique
+
+Une recherche musicale automatique doit renvoyer un unique candidat avec un
+identifiant non vide, le type musical, le titre et le nom d'artiste correspondant exactement
+après normalisation des espaces et de la casse. Une durée fournie des deux côtés
+est contrôlée. Les détails obtenus doivent conserver l'identifiant du candidat
+et ne pas contredire son titre. Les anciens résultats enregistrés sous les règles
+de correspondance précédentes ne sont pas réutilisés. Une réponse ambiguë ou
+incomplète ne provoque aucune adoption automatique. Les fournisseurs renvoyant
+uniquement l'artiste dans un champ descriptif ne sont pas associés automatiquement ;
+leur adaptation au contrat reste à valider.

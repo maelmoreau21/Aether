@@ -45,10 +45,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             "restore is INCOMPLETE: do not reopen access (see missing/corrupt counts)".into(),
         );
     }
-    match media_poc::extension_storage::sync_installed(&store).await {
-        Ok(count) => println!("Extensions synchronized to disk: {count}"),
-        Err(error) => eprintln!("Warning: extensions could not be synchronized to disk: {error}"),
+    let count = media_poc::extension_storage::sync_installed(&store).await?;
+    let health = media_poc::extension_storage::check_health(&store).await;
+    if !health.healthy {
+        return Err("restore is INCOMPLETE: extension storage is missing or corrupt".into());
     }
-    println!("Assets and extensions restored and verified.");
+    println!("Extensions synchronized to disk: {count}");
+    println!("Assets restored and verified; extension storage is healthy.");
     Ok(())
 }

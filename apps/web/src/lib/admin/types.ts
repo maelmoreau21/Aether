@@ -48,6 +48,7 @@ export interface LibraryOptions {
   subtitleDownloadEnabled: boolean; subtitleLanguages: string[];
   subtitleOnlyMissing: boolean; subtitleMatchAudio: boolean; subtitleRequireHash: boolean;
   saveSubtitlesToMedia: boolean;
+  posterRotationEnabled?: boolean;
 }
 export function defaultLibraryOptions(): LibraryOptions {
   return { preferredMetadataLanguage: 'fr', metadataCountryCode: 'FR', readLocalNfo: true,
@@ -59,7 +60,8 @@ export function defaultLibraryOptions(): LibraryOptions {
     trickplayEnabled: false, trickplayDuringScan: false, trickplaySaveToMedia: false, trickplayIntervalSeconds: 10, trickplayWidth: 320,
     chapterImagesEnabled: false, chapterImagesDuringScan: false, chapterImagesSaveToMedia: false,
     subtitleDownloadEnabled: false, subtitleLanguages: ['fr'], subtitleOnlyMissing: true, subtitleMatchAudio: false,
-    subtitleRequireHash: true, saveSubtitlesToMedia: false };
+    subtitleRequireHash: true, saveSubtitlesToMedia: false,
+    posterRotationEnabled: false };
 }
 export interface LibraryFolder { nodeId: string; root: string }
 export interface Library {

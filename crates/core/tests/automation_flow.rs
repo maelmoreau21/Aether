@@ -1515,7 +1515,7 @@ async fn music_automation_pipeline_and_lyrics_provenance() {
 
     // Drain outbox: creates automation tasks
     let admitted = automation::drain(&store, 101, 10).await.unwrap();
-    assert_eq!(admitted, 2);
+    assert_eq!(admitted, 1); // Local lyrics do not trigger a provider query.
 
     // Verify task links exist for music tracks
     let task_id: String = query_scalar("SELECT task_id FROM automation_task_links l JOIN durable_tasks t ON t.id=l.task_id WHERE t.target_id='track-1'")
@@ -1566,6 +1566,51 @@ async fn music_automation_pipeline_and_lyrics_provenance() {
         "SELECT priority FROM automatic_metadata_provenance WHERE work_id='track-1' AND field_name='lyrics'"
     ).fetch_one(store.pool()).await.unwrap();
     assert_eq!(lyrics_prio, 100);
+    let provider_id: String = query_scalar("SELECT provider_id FROM automatic_metadata_provenance WHERE work_id='track-1' AND field_name='lyrics'")
+        .fetch_one(store.pool()).await.unwrap();
+    assert_eq!(provider_id, "42");
+
+    // Empty synced text falls back to plain text.
+    let mut tx = store.pool().begin().await.unwrap();
+    automation::apply_missing_music_metadata(
+        &mut tx,
+        "track-1",
+        "lrclib",
+        &link.fingerprint,
+        &json!({"id":42,"synced":"", "plain":"Plain fallback"}),
+        103,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    let plain: String = query_scalar("SELECT lyrics FROM music_tracks WHERE id='track-1'")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(plain, "Plain fallback");
+
+    // A subsequent local scan must take priority over stale provider provenance.
+    query("UPDATE music_tracks SET lyrics='Local replacement' WHERE id='track-1'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let mut tx = store.pool().begin().await.unwrap();
+    automation::apply_missing_music_metadata(
+        &mut tx,
+        "track-1",
+        "lrclib",
+        &link.fingerprint,
+        &json!({"plain":"Provider replacement"}),
+        103,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    let lyrics: String = query_scalar("SELECT lyrics FROM music_tracks WHERE id='track-1'")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(lyrics, "Local replacement");
 
     // Verify track-manual with manual lyrics was NOT overwritten
     let mut tx = store.pool().begin().await.unwrap();

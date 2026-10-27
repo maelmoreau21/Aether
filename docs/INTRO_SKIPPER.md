@@ -13,6 +13,12 @@ révision courante, de la génération d'extension active et d'une bibliothèque
 autorisée. Les boutons du lecteur utilisent ce résultat ; sans résultat,
 l'ancienne heuristique de chapitres reste un repli temporaire.
 
+Le Core expose aussi les chapitres sans extension : il écarte les horodatages
+négatifs, non finis ou hors durée connue et les ordonne avant de déterminer
+les limites de saut. Les titres explicitement reconnus et les plages de durée
+bornées seules produisent les boutons natifs. Ces contrôles ne démontrent pas
+une détection acoustique ni un saut automatique.
+
 Les préférences `skipIntroEnabled` et `skipCreditsEnabled` sont enregistrées
 par compte via `/api/v1/preferences`. L'administrateur peut corriger ou
 désactiver chaque type de marqueur pour une copie dans le lecteur :
@@ -40,6 +46,16 @@ Les crédits sans chapitre ne sont pas encore analysés : le Node ne décode que
 les 600 premières secondes et le plugin exige une empreinte de fin explicite.
 Les différentes copies gardent leurs marqueurs séparés faute de preuve de
 compatibilité de leurs timelines.
+
+Pour la comparaison d'empreintes, les copies candidates appartiennent à la
+bibliothèque autorisée et à sa racine courante. Le Core refuse les résultats qui désignent
+une copie absente de l'entrée, la répètent, dépassent sa durée ou contiennent
+un marqueur invalide ; cette validation s'applique aussi aux résultats en cache.
+Seul le marqueur de la copie cible de la tâche est persisté ; le second épisode
+pourra être traité séparément. Avant l'enregistrement, les deux observations
+utilisées sont vérifiées et verrouillées dans la transaction. Une confiance
+inférieure à 0,9 ne produit pas de bouton de saut et les corrections manuelles
+restent prioritaires. La concurrence PostgreSQL exige encore un test réel.
 
 ## Limites et suite
 

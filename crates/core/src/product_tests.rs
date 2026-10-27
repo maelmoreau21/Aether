@@ -571,6 +571,50 @@ async fn music_scan_metadata_stable_identity_and_range() {
             .unwrap(),
         id
     );
+    // A scan of an unchanged track preserves provider lyrics, but an actual
+    // local sidecar replaces them and removing it does not revive stale data.
+    query("INSERT INTO extension_publishers(id,public_key) VALUES('scan-publisher','fixture')")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    query("INSERT INTO extensions(id,publisher_id,package_json,generation) VALUES('scan-provider','scan-publisher','{}','fixture')").execute(&store.pool).await.unwrap();
+    std::fs::remove_file(root.join("track.lrc")).unwrap();
+    query("UPDATE music_tracks SET lyrics='External lyrics' WHERE id=?")
+        .bind(&id)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    query("INSERT INTO automatic_metadata_provenance(work_id,field_name,extension_id,provider_id,priority,value_json,source_fingerprint,updated_at) VALUES(?,'lyrics','scan-provider','42',100,?,'scan',1)")
+        .bind(&id).bind(json!("External lyrics").to_string()).execute(&store.pool).await.unwrap();
+    crate::music::scan(&store, "music", &root, &cancel)
+        .await
+        .unwrap();
+    let lyrics: String = query_scalar("SELECT lyrics FROM music_tracks WHERE id=?")
+        .bind(&id)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(lyrics, "External lyrics");
+    std::fs::write(root.join("track.lrc"), "Local lyrics").unwrap();
+    crate::music::scan(&store, "music", &root, &cancel)
+        .await
+        .unwrap();
+    let lyrics: String = query_scalar("SELECT lyrics FROM music_tracks WHERE id=?")
+        .bind(&id)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(lyrics, "Local lyrics");
+    std::fs::remove_file(root.join("track.lrc")).unwrap();
+    crate::music::scan(&store, "music", &root, &cancel)
+        .await
+        .unwrap();
+    let lyrics: String = query_scalar("SELECT lyrics FROM music_tracks WHERE id=?")
+        .bind(&id)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    assert!(lyrics.is_empty());
     query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,unixepoch(),unixepoch(),unixepoch()+3600)").bind(auth::hash(&"d".repeat(64))).bind(user).execute(&store.pool).await.unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
     let app = crate::music::router(auth);
@@ -1380,6 +1424,45 @@ async fn mixed_playlists_share_only_with_authenticated_accounts_and_keep_library
         .await["text"],
         "[00:00]Hello"
     );
+    query("INSERT INTO extension_publishers(id,public_key) VALUES('lyrics-provider','fixture')")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    query("INSERT INTO extensions(id,publisher_id,package_json,generation) VALUES('lyrics-fixture','lyrics-provider','{}','fixture')").execute(&store.pool).await.unwrap();
+    query("INSERT INTO automatic_metadata_provenance(work_id,field_name,extension_id,provider_id,priority,value_json,source_fingerprint,updated_at) VALUES('song','lyrics','lyrics-fixture','42',100,?,'fixture',1)").bind(json!("provider lyrics").to_string()).execute(&store.pool).await.unwrap();
+    let local = value(
+        request(
+            &app,
+            "/api/v1/music/tracks/song/lyrics",
+            "GET",
+            &peer_cookie,
+            "",
+            Value::Null,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(local["source"], "library");
+    assert!(local["provenance"].is_null());
+    query("UPDATE music_tracks SET lyrics='provider lyrics' WHERE id='song'")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    let external = value(
+        request(
+            &app,
+            "/api/v1/music/tracks/song/lyrics",
+            "GET",
+            &peer_cookie,
+            "",
+            Value::Null,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(external["source"], "extension");
+    assert_eq!(external["provenance"]["extensionId"], "lyrics-fixture");
+    assert_eq!(external["provenance"]["providerId"], "42");
     let reorder = format!("/api/v1/playlists/{id}/order");
     assert_eq!(
         request(

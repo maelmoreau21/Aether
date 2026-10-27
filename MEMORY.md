@@ -1,3 +1,50 @@
+## 27 octobre 2026 — Suite de stabilisation, validation incomplète
+
+- Avatars : collections et politique natives implémentées dans les schémas initiaux, anciennes ressources conservées ; SQLite vierge et tests frontend ciblés réussis. Le test HTTP complet et PostgreSQL restent à exécuter. Les bases existantes n'ont pas automatiquement les nouvelles tables ; aucune migration ni réinitialisation. Le `cargo check` antérieur ne couvre pas les derniers changements.
+- Paroles : branchement `lyrics.get`, protection des paroles locales et provenance modifiés ; compilation et tests Rust finaux interrompus sous pression mémoire, aucun appel réel LRCLIB. Un scan peut encore effacer le cache des paroles externes.
+- IntroSkipper : entrée limitée à la bibliothèque autorisée, résultats liés aux copies et durées soumises et seule la cible est persistée. Test de ces derniers changements interrompu ; fraîcheur transactionnelle de la copie associée non garantie.
+- EdgeCore 155 headless : banc synthétique MP4/MKV parcouru, mais signal audio initial original tardif et aucune preuve de parcours Svelte/Core/Node. Détails dans `docs/STREAMING_COMPATIBILITY.md`.
+
+## 27 octobre 2026 — Stabilisation : premier contrôle ciblé
+
+- Chrome 156 headless sous Windows : `browser_scanner` réussit sur fixtures synthétiques MP4 et MKV AV1/Opus, avec changements audio, sous-titres, pause/seek et redémarrage du Core. Ce test court ne démontre ni Edge, ni lecture continue de plusieurs heures, ni NAS ou Node distant. Les mesures de démarrage sont locales et ne constituent pas une comparaison avant/après.
+- Avatars natifs : le parcours existant n'est pas finalisé. Sur SQLite vierge sans extension, l'import de pack échoue sur une clé étrangère ; galerie et politiques restent liées aux extensions. Les indications d'intégration complète ci-dessous sont à considérer comme non validées. PostgreSQL et Docker indisponibles lors de ce contrôle.
+- Rotation d'affiches : une sélection explicitement vide doit désactiver toutes les bibliothèques ; l'absence de sélection conserve le repli historique. Chapitres : les limites sont triées et filtrées avant utilisation pour les marqueurs natifs.
+
+## 27 octobre 2026 — Intégration native de Poster Rotator et de la Galerie d'Avatars (Sans Wasm)
+
+- **Poster Rotator natif & sélection granulaire par bibliothèque** :
+  - **Découplage de Wasm / plugins** : le système de rotation d'affiches fait désormais partie intégrante du cœur d'Aether et ne dépend d'aucun module externe.
+  - **Préférences utilisateur repensées** :
+    - Retrait de la section encombrante dans l'onglet « Compte ».
+    - Création d'un onglet dédié « Affichage & Affiches » dans `SettingsView.svelte`.
+    - Remplacement du basculement binaire rigide (« Films » / « Séries ») par une sélection dynamique et granulaire des bibliothèques accessibles par l'utilisateur (`enabled_libraries: Vec<String>`).
+    - Rétro-compatibilité assurée (`enable_movies` et `enable_series` conservés en repli si `enabled_libraries` n'est pas encore défini).
+  - **Paramétrage administrateur par bibliothèque** :
+    - Ajout du commutateur `poster_rotation_enabled: bool` dans `LibraryOptions` (`crates/core/src/library_options.rs` et `apps/web/src/lib/admin/types.ts`).
+    - Intégration d'une option « Rotation des affiches (Poster Rotator) » dans `LibraryOptions.svelte` permettant aux administrateurs d'activer ou désactiver la rotation spécifique à chaque bibliothèque.
+  - **Sélection d'artwork dans le frontend** :
+    - Mise à jour de `selectArtwork` dans `apps/web/src/lib/catalog/artwork-selection.ts` et du store réactif `artwork-rotation-policy.svelte.ts` pour respecter `policy.enabledLibraries` et `work.libraryId`.
+
+- **Galerie d'Avatars native dans l'administration** :
+  - **Section d'administration dédiée** :
+    - Ajout de l'onglet « Avatars » dans la barre latérale sous la catégorie « Accès » (`#avatars-section`) dans `apps/web/src/routes/admin/libraries/+page.svelte`.
+    - Affichage direct du composant `AvatarCollections.svelte` sans nécessiter l'ouverture d'un plugin Wasm.
+  - **Points de terminaison natifs sans Wasm** :
+    - Enregistrement des routes natives `/api/v1/admin/avatar-packs`, `/api/v1/admin/avatar-packs/upload`, `/api/v1/admin/avatar-packs/source`, `/api/v1/admin/avatar-packs/{pack}`, `/api/v1/admin/avatar-packs/{pack}/images`, et `/api/v1/admin/avatars/assign-missing`.
+    - Support complet pour l'envoi de fichiers locaux (PNG, JPEG, WebP, max 2 Mo par image, 64 Mo par import) ou l'import direct depuis des dépôts GitHub (par exemple `cedev-1/jellyfin-avatars`).
+    - Compatibilité modèle de données : initialisation transparente d'une entrée `native` dans `extensions` et `extension_publishers` (`active=1`, permission `avatars`) pour satisfaire les contraintes d'intégrité référentielle SQL sans migration disruptive.
+
+- **Robustesse Docker / PostgreSQL (`MEDIA_ASSETS_PATH`)** :
+  - Dans `crates/core/src/identity.rs`, fallback sécurisé sur `/data/assets` lorsque la base de données est distante (PostgreSQL) sans chemin de base de données local, évitant l'erreur `Configuration` au démarrage sous Docker.
+  - Déclaration explicite de `MEDIA_ASSETS_PATH=/data/assets` dans le `Dockerfile`.
+
+- **Vérifications et tests validés** :
+  - `cargo fmt --check` : 100 % conforme.
+  - `cargo test -p media-poc --lib` : 112 tests unitaires et d'intégration validés.
+  - `npm test --prefix apps/web` : 29/29 fichiers de tests passés (176 tests).
+  - `npm run check --prefix apps/web` : 0 erreur Svelte / TypeScript.
+
 ## 27 octobre 2026 — Correction CI : Résolution de `MEDIA_WEB_DIST` pour les tests navigateur et `cargo fmt`
 
 - **Correction du test navigateur Playwright `product_tests::mixed_playlists`** :

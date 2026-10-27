@@ -57,6 +57,7 @@ pub struct LibraryOptions {
     pub save_subtitles_to_media: bool,
     pub intro_detection_enabled: bool,
     pub subtitle_download_enabled: bool,
+    pub poster_rotation_enabled: bool,
 }
 impl Default for LibraryOptions {
     fn default() -> Self {
@@ -98,6 +99,7 @@ impl Default for LibraryOptions {
             save_subtitles_to_media: false,
             intro_detection_enabled: false,
             subtitle_download_enabled: false,
+            poster_rotation_enabled: false,
         }
     }
 }

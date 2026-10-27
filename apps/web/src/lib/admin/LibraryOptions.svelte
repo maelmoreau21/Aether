@@ -33,6 +33,24 @@
       <div class="image-grid">{#each images as [key, label, description] (key)}<label class="image-option"><input type="checkbox" bind:checked={options[key]} aria-label={label} /><span><strong>{label}</strong><small>{description}</small></span></label>{/each}</div>
     </details>
   {/if}
+  {#if kind !== 'music'}
+    <section class="option-section" aria-labelledby="poster-rotator-heading">
+      <div class="section-heading">
+        <div>
+          <h3 id="poster-rotator-heading">Rotation des affiches (Poster Rotator)</h3>
+          <p>Fait défiler dynamiquement les affiches alternatives disponibles pour les titres de cette bibliothèque.</p>
+        </div>
+        <span class="status">Natif</span>
+      </div>
+      <label class="toggle-row">
+        <input type="checkbox" bind:checked={options.posterRotationEnabled} aria-label="Activer la rotation des affiches pour cette bibliothèque" />
+        <span>
+          <strong>Activer Poster Rotator sur cette bibliothèque</strong>
+          <small>Les affiches des médias de cette bibliothèque alternent automatiquement. Les images choisies manuellement restent prioritaires.</small>
+        </span>
+      </label>
+    </section>
+  {/if}
   <AdvancedLibraryOptions bind:options {kind} />
 </div>
 

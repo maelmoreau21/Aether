@@ -23,7 +23,7 @@ try {
     let json = {};
     if (path.endsWith('/auth/me')) json = { user: { id: 'test-admin', login: 'admin', role: 'administrator' }, csrfToken: token };
     else if (path.endsWith('/auth/status')) json = { initialized: true };
-    else if (path.endsWith('/preferences')) json = { locale: 'fr', theme: 'dark' };
+    else if (path.endsWith('/preferences')) json = { locale: 'fr', theme: 'dark', artworkRotation: { enabled: true, enableMovies: true, enableSeries: true, rotationMode: 'sequential', minHoursBetweenSwitches: 0, poolSize: 4, preferredLanguage: 'fr', fallbackLanguage: 'en', includeUnknownLanguage: true, allowAnyLanguageFallback: true } };
     else if (path.endsWith('/catalog/film')) json = work;
     else if (path.endsWith('/catalog')) json = { items: url.searchParams.get('kind') === 'series' ? [] : [work], total: 1, offset: 0, limit: 24 };
     else if (path.endsWith('/works/film/images')) json = { images };
@@ -35,6 +35,9 @@ try {
     else if (path.endsWith('/progress')) json = { items: [] };
     else if (path.endsWith('/lists')) json = { lists: [] };
     else if (path.includes('/feedback/')) json = { favorite: false, liked: null };
+    else if (path.endsWith('/account/sessions')) json = { sessions: [] };
+    else if (path.endsWith('/account/avatar/extensions')) json = { extensions: [] };
+    else if (path.endsWith('/account/avatar/collections')) json = { packs: [] };
     else if (path.endsWith('/account/avatar')) { await route.fulfill({ status: 404 }); return; }
     else if (path.endsWith('/server')) json = { name: 'Synthetic' };
     await route.fulfill({ json });
@@ -53,7 +56,7 @@ try {
   assert.equal(await decoded('.backdrop-art-image'), firstBackdrop);
   token = 'synthetic-session-two'; await page.reload();
   assert.notEqual(await decoded('.detail-poster-column .poster-image'), first);
-  assert.notEqual(await decoded('.backdrop-art-image'), firstBackdrop);
+  assert.equal(await decoded('.backdrop-art-image'), firstBackdrop);
   await page.getByRole('button', { name: "Plus d'actions et informations" }).click();
   await page.getByText('Modifier les images', { exact: true }).click();
   const dialog = page.getByRole('dialog', { name: `Modifier les images · ${work.title}` });
@@ -72,7 +75,15 @@ try {
   await nextVisit.waitForFunction(() => { const image = document.querySelector('.detail-poster-column .poster-image'); return image?.complete && image.naturalWidth > 0; });
   assert.notEqual(await nextVisit.locator('.detail-poster-column .poster-image').getAttribute('src'), currentPoster, 'new tab must rotate even with the same authentication session');
   await nextVisit.close();
+  await page.goto(`${origin}/app/settings/#display`);
+  const libraries = page.getByRole('group', { name: 'Bibliothèques concernées' });
+  const filmLibrary = libraries.getByRole('checkbox', { name: /Films/ });
+  await filmLibrary.waitFor({ timeout: 8000 }).catch(async error => { console.log('settings text:', await page.locator('body').innerText()); throw error; });
+  await filmLibrary.uncheck();
+  assert.equal(await filmLibrary.isChecked(), false, 'the last library can be unchecked');
+  await filmLibrary.check();
+  assert.equal(await filmLibrary.isChecked(), true, 'a library can be re-enabled');
   assert.deepEqual(errors, []);
-  await writeFile(`${output}/result.json`, JSON.stringify({ mockApi: true, browser: browser.version(), decodedRoles: ['poster', 'backdrop', 'logo', 'illustration'], reloadStable: true, nextSessionChanged: true, newVisitWithoutLoginChanged: true, collection: collected, pageErrors: errors }, null, 2));
-  console.log('PASS: decoded artwork roles, reload stability, next-session changes, collection CSRF/body/status, mobile overflow. Mock API only.');
+  await writeFile(`${output}/result.json`, JSON.stringify({ mockApi: true, browser: browser.version(), decodedRoles: ['poster', 'backdrop', 'logo', 'illustration'], reloadStable: true, nextSessionChanged: true, newVisitWithoutLoginChanged: true, collection: collected, emptyLibrarySelectionToggle: true, pageErrors: errors }, null, 2));
+  console.log('PASS: decoded artwork roles, reload stability, next-session changes, collection CSRF/body/status, library selection and mobile overflow. Mock API only.');
 } finally { await browser.close(); }

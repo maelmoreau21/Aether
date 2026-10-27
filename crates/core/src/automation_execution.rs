@@ -59,7 +59,7 @@ pub(crate) async fn dispatch(
         // Dropping the invocation kills its child before releasing admission.
         let now = media_contracts::protocol::unix_now();
         let outcome = match result {
-            Ok(value) => crate::automation::complete(&auth.store, &job, &link, &value, now).await.and_then(|accepted| if accepted { Ok(()) } else { Err(sqlx::Error::Protocol("stale result".into())) }).map_err(|_|"automation_stale_or_persistence_failed".to_owned()),
+            Ok(value) => crate::automation::complete_with_marker_sources(&auth.store, &job, &link, &value.value, &value.marker_sources, now).await.and_then(|accepted| if accepted { Ok(()) } else { Err(sqlx::Error::Protocol("stale result".into())) }).map_err(|_|"automation_stale_or_persistence_failed".to_owned()),
             Err(error) => Err(error),
         };
         if let Err(error) = outcome

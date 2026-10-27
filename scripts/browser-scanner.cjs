@@ -9,7 +9,8 @@ const out = process.env.MEDIA_REPORT_DIR || (long ? 'target/player-long' : 'targ
 // Keep previous evidence; each successful run replaces its own reports only.
 fs.mkdirSync(out, {recursive: true});
 (async () => {
-  const browser = await chromium.launch({channel:'chrome', headless:true});
+  const executablePath = process.env.MEDIA_BROWSER_EXECUTABLE;
+  const browser = await chromium.launch({ ...(executablePath ? { executablePath } : { channel: process.env.MEDIA_BROWSER_CHANNEL || 'chrome' }), headless:true });
   const report = {browser:browser.version(), os:require('node:os').release(), headless:true, restart, results:{}};
   const preparations=[];
   try {

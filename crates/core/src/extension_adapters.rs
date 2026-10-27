@@ -14,7 +14,9 @@ pub(super) struct WorkContext {
 }
 pub(super) fn authorize_operation(manifest: &Manifest, operation: &str) -> Result<(), Error> {
     let permission = match operation {
-        "metadata.propose" | "metadata.search" | "metadata.details" => "metadata.read",
+        "metadata.propose" | "metadata.search" | "metadata.details" | "lyrics.get" => {
+            "metadata.read"
+        }
         "metadata.images" => "images",
         "avatars.list" | "avatars.generate" => "avatars",
         "intro.detect"
@@ -191,6 +193,43 @@ pub(super) fn validate_result(operation: &str, result: Value) -> Result<Value, E
     }
     Ok(result)
 }
+// The guest may only report on the exact copies it received. Bind boundaries
+// to the input duration too, including responses from the provider cache.
+pub(super) fn marker_result_matches_input(input: &Value, result: &Value) -> bool {
+    let Some(inputs) = input["episodes"].as_array() else {
+        return false;
+    };
+    let Some(outputs) = result.as_array() else {
+        return false;
+    };
+    if inputs.len() != 2 || outputs.len() > inputs.len() {
+        return false;
+    }
+    let mut seen = std::collections::HashSet::new();
+    outputs.iter().all(|output| {
+        let Some(id) = output["episodeId"].as_str() else {
+            return false;
+        };
+        let Some(source) = inputs.iter().find(|entry| entry["id"].as_str() == Some(id)) else {
+            return false;
+        };
+        let Some(duration) = source["duration"]
+            .as_f64()
+            .filter(|d| d.is_finite() && *d > 0.0)
+        else {
+            return false;
+        };
+        seen.insert(id)
+            && output["markers"].as_array().is_some_and(|markers| {
+                markers.len() <= 8
+                    && markers.iter().all(|marker| {
+                        valid_timeline_marker(marker)
+                            && marker["end"].as_f64().is_some_and(|end| end <= duration)
+                    })
+            })
+    })
+}
+
 fn valid_timeline_marker(marker: &Value) -> bool {
     let (Some(start), Some(end), Some(confidence)) = (
         marker["start"].as_f64(),
@@ -221,6 +260,37 @@ fn valid_timeline_marker(marker: &Value) -> bool {
 #[cfg(test)]
 mod marker_tests {
     use super::*;
+
+    #[test]
+    fn detection_results_are_bound_to_submitted_copies_and_durations() {
+        let input = json!({"episodes":[{"id":"a","duration":120.0},{"id":"b","duration":90.0}]});
+        let marker = json!({"id":"m","start":10.0,"end":40.0,"confidence":0.95,"markerType":"intro","method":"fingerprint"});
+        let valid = json!([{"episodeId":"a","markers":[marker.clone()]},{"episodeId":"b","markers":[marker.clone()]}]);
+        assert!(marker_result_matches_input(&input, &valid));
+        let mut unknown = valid.clone();
+        unknown[1]["episodeId"] = json!("other");
+        assert!(!marker_result_matches_input(&input, &unknown));
+        let mut duplicate = valid.clone();
+        duplicate[1]["episodeId"] = json!("a");
+        assert!(!marker_result_matches_input(&input, &duplicate));
+        let mut past_end = valid.clone();
+        past_end[1]["markers"][0]["end"] = json!(91.0);
+        assert!(!marker_result_matches_input(&input, &past_end));
+        let mut bad_confidence = valid;
+        bad_confidence[0]["markers"][0]["confidence"] = json!(1.1);
+        assert!(!marker_result_matches_input(&input, &bad_confidence));
+    }
+
+    #[test]
+    fn lyrics_operation_requires_metadata_permission() {
+        let mut manifest = Manifest::default();
+        assert_eq!(
+            authorize_operation(&manifest, "lyrics.get").unwrap_err().0,
+            StatusCode::FORBIDDEN
+        );
+        manifest.permissions.push("metadata.read".into());
+        assert!(authorize_operation(&manifest, "lyrics.get").is_ok());
+    }
 
     #[test]
     fn marker_operations_require_the_dedicated_permission() {

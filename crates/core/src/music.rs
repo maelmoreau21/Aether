@@ -1,7 +1,7 @@
 //! Music catalogue, independent of film identities. Node owns scanning and file resolution.
 use crate::{
     auth::AuthState,
-    database::{query, query_scalar},
+    database::{query, query_as, query_scalar},
     identity::IdentityStore,
 };
 use axum::{
@@ -67,12 +67,26 @@ async fn lyrics(
 ) -> Result<Json<Value>, StatusCode> {
     detail(&auth, &headers, &id).await?;
     let text: String = query_scalar("SELECT lyrics FROM music_tracks WHERE id=?")
-        .bind(id)
+        .bind(&id)
         .fetch_one(&auth.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let provenance: Option<(String, String, String)> = query_as(
+        "SELECT extension_id, provider_id, value_json FROM automatic_metadata_provenance WHERE work_id=? AND field_name='lyrics'"
+    ).bind(&id).fetch_optional(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let provider = provenance.filter(|(_, _, value)| {
+        !text.is_empty()
+            && serde_json::from_str::<String>(value).ok().as_deref() == Some(text.as_str())
+    });
+    let source = if text.is_empty() {
+        "unavailable"
+    } else if provider.is_some() {
+        "extension"
+    } else {
+        "library"
+    };
     Ok(Json(
-        json!({"text":text,"source":if text.is_empty(){"unavailable"}else{"library"}}),
+        json!({"text": text, "source": source, "provenance": provider.map(|(extension, id, _)| json!({"extensionId": extension, "providerId": id}))}),
     ))
 }
 async fn allowed(auth: &AuthState, headers: &HeaderMap, library: &str) -> Result<(), StatusCode> {
@@ -349,7 +363,17 @@ pub async fn publish_track(
             "lyrics exceed snapshot limit",
         ));
     }
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,available,lyrics,cover_path,cover_size,cover_modified_ns,cover_mime) SELECT ?,id,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,? FROM libraries WHERE id=? AND root=? AND enabled=1 AND kind='music' ON CONFLICT(library_id,root_snapshot,relative_path) DO UPDATE SET size=excluded.size,modified_ns=excluded.modified_ns,title=excluded.title,artist=excluded.artist,album=excluded.album,album_artist=excluded.album_artist,track_number=excluded.track_number,disc_number=excluded.disc_number,duration=excluded.duration,codec=excluded.codec,mime=excluded.mime,scan_id=excluded.scan_id,available=1,lyrics=excluded.lyrics,cover_path=excluded.cover_path,cover_size=excluded.cover_size,cover_modified_ns=excluded.cover_modified_ns,cover_mime=excluded.cover_mime")
+    // Preserve an externally supplied value only when its stored provenance still
+    // describes the current text. The upsert rechecks this snapshot atomically.
+    let cached: Option<(String, String)> = query_as("SELECT t.lyrics,p.value_json FROM music_tracks t JOIN automatic_metadata_provenance p ON p.work_id=t.id AND p.field_name='lyrics' WHERE t.library_id=? AND t.root_snapshot=? AND t.relative_path=?")
+        .bind(library).bind(root).bind(&track.relative_path).fetch_optional(&store.pool).await.map_err(std::io::Error::other)?;
+    let (cached_text, cached_json) = cached
+        .filter(|(text, value)| {
+            !text.is_empty()
+                && serde_json::from_str::<String>(value).ok().as_deref() == Some(text.as_str())
+        })
+        .unwrap_or_default();
+    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,available,lyrics,cover_path,cover_size,cover_modified_ns,cover_mime) SELECT ?,id,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,? FROM libraries WHERE id=? AND root=? AND enabled=1 AND kind='music' ON CONFLICT(library_id,root_snapshot,relative_path) DO UPDATE SET size=excluded.size,modified_ns=excluded.modified_ns,title=excluded.title,artist=excluded.artist,album=excluded.album,album_artist=excluded.album_artist,track_number=excluded.track_number,disc_number=excluded.disc_number,duration=excluded.duration,codec=excluded.codec,mime=excluded.mime,scan_id=excluded.scan_id,available=1,lyrics=CASE WHEN excluded.lyrics='' AND music_tracks.size=excluded.size AND music_tracks.modified_ns=excluded.modified_ns AND music_tracks.title=excluded.title AND music_tracks.artist=excluded.artist AND music_tracks.album=excluded.album AND music_tracks.lyrics=? AND EXISTS(SELECT 1 FROM automatic_metadata_provenance p WHERE p.work_id=music_tracks.id AND p.field_name='lyrics' AND p.value_json=?) THEN music_tracks.lyrics ELSE excluded.lyrics END,cover_path=excluded.cover_path,cover_size=excluded.cover_size,cover_modified_ns=excluded.cover_modified_ns,cover_mime=excluded.cover_mime")
         .bind(uuid::Uuid::new_v4().to_string())
         .bind(root)
         .bind(track.relative_path)
@@ -372,6 +396,8 @@ pub async fn publish_track(
         .bind(track.cover_mime)
         .bind(library)
         .bind(root)
+        .bind(cached_text)
+        .bind(cached_json)
         .execute(&store.pool)
         .await
         .map_err(std::io::Error::other)?;

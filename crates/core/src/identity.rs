@@ -102,12 +102,16 @@ fn plugin_path(database: Option<&Path>) -> Result<std::path::PathBuf, IdentityEr
 /// Local asset directory: `MEDIA_ASSETS_PATH`, else `assets` next to the database.
 fn assets_path(database: Option<&Path>) -> Result<std::path::PathBuf, IdentityError> {
     let path = std::env::var_os("MEDIA_ASSETS_PATH")
+        .filter(|p| !p.is_empty())
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
-            database
-                .and_then(Path::parent)
-                .unwrap_or(Path::new("data"))
-                .join("assets")
+            if let Some(parent) = database.and_then(Path::parent) {
+                parent.join("assets")
+            } else if Path::new("/data").is_dir() {
+                std::path::PathBuf::from("/data/assets")
+            } else {
+                Path::new("data").join("assets")
+            }
         });
     std::path::absolute(path).map_err(|_| IdentityError::Configuration)
 }

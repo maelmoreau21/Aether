@@ -2363,12 +2363,14 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
             .await
             {
                 Ok((status, _headers, resp_bytes)) => {
-                    backoff = Duration::from_secs(1);
                     if status.is_success() {
                         let Ok(cmd) = serde_json::from_slice::<NodeCommandEnvelope>(&resp_bytes)
                         else {
+                            tokio::time::sleep(backoff).await;
+                            backoff = (backoff * 2).min(Duration::from_secs(5));
                             continue;
                         };
+                        backoff = Duration::from_secs(1);
                         match cmd.command_type {
                             NodeCommandType::Ping => {}
                             NodeCommandType::Task => {
@@ -2480,6 +2482,9 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                                 }
                             }
                         }
+                    } else {
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(Duration::from_secs(5));
                     }
                 }
                 Err(_err) => {
@@ -2756,6 +2761,63 @@ async fn send_stream_uplink_error(
 mod stream_signature_tests {
     use super::*;
     use http_body_util::BodyExt;
+
+    #[tokio::test]
+    async fn malformed_signed_channel_responses_back_off_then_reconnect() {
+        let (_data, state) = state().await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        state.identity.write().unwrap().core_internal_url = Some(format!("http://{addr}"));
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let recorded = calls.clone();
+        let app = Router::new().route(
+            "/internal/v1/core/nodes/{id}/channel",
+            post(move |headers: HeaderMap| {
+                let recorded = recorded.clone();
+                async move {
+                    let count = recorded.fetch_add(1, Ordering::SeqCst);
+                    let nonce = headers.get(HDR_NONCE).unwrap().to_str().unwrap();
+                    let payload = if count == 0 {
+                        serde_json::json!({})
+                    } else {
+                        serde_json::json!({"commandId":"test","commandType":"revoke","payload":{}})
+                    };
+                    signed_json_response(
+                        "test-stream-secret",
+                        &NodeId::new("signature-node"),
+                        "signature-key",
+                        nonce,
+                        StatusCode::OK,
+                        &payload,
+                    )
+                }
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let worker = start_channel_worker(state.clone());
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while calls.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "malformed responses must not cause a busy loop"
+        );
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !state.identity.read().unwrap().revoked {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        worker.abort();
+        server.abort();
+    }
 
     #[tokio::test]
     async fn background_tasks_resolve_only_owned_inventory_targets() {

@@ -45,6 +45,13 @@ class FreshSchema(unittest.TestCase):
                     "INSERT INTO durable_tasks(id,owner,idempotency_key,node_id,created_at,updated_at,available_at) "
                     "VALUES('invalid','user','invalid','local',1,1,1)"
                 )
+            connection.execute("INSERT INTO assets(sha256,size,mime,created_at) VALUES(?,1,'image/png',0)", ('a' * 64,))
+            connection.execute("INSERT INTO avatar_packs(id,name,source) VALUES('native-pack','Pack','upload')")
+            connection.execute("INSERT INTO avatar_images(id,pack_id,name,sha256) VALUES('image','native-pack','one',?)", ('a' * 64,))
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("INSERT INTO avatar_images(id,pack_id,name,sha256) VALUES('bad','missing','one',?)", ('a' * 64,))
+            connection.execute("DELETE FROM avatar_packs WHERE id='native-pack'")
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM avatar_images").fetchone()[0], 0)
             self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
 
 

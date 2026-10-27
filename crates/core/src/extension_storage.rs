@@ -431,6 +431,26 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn initialization_keeps_empty_installation_free_of_phantom_extensions() {
+        let root = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&root.path().join("core.sqlite3"))
+            .await
+            .unwrap();
+        let auth = crate::auth::AuthState::new(store.clone(), "http://localhost".into())
+            .await
+            .unwrap();
+        crate::extensions::initialize(&auth).await.unwrap();
+        crate::extensions::initialize(&auth).await.unwrap();
+        let count: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM extensions")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(sync_installed(&store).await.unwrap(), 0);
+        assert!(check_health(&store).await.healthy);
+    }
+
+    #[tokio::test]
     async fn installed_files_are_bounded_verified_and_removed() {
         let root = tempfile::tempdir().unwrap();
         let store = IdentityStore::open(&root.path().join("core.sqlite3"))

@@ -1,6 +1,6 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { selectArtwork } from './artwork-selection';
-import { session, type Session } from '../auth/session';
+import { invalidateSession, session, type Session } from '../auth/session';
 import type { Work } from './api';
 import { setArtworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
 
@@ -14,7 +14,7 @@ beforeEach(() => {
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) });
   const visit = new Map<string, string>();
   vi.stubGlobal('sessionStorage', { getItem: (key: string) => visit.get(key) ?? null, setItem: (key: string, value: string) => visit.set(key, value), clear: () => visit.clear() });
-  session.set(null);
+  invalidateSession();
   setArtworkRotationPolicy(policy);
 });
 
@@ -117,4 +117,17 @@ test('language restrictions reject unavailable images and keep the fallback', ()
   const item = { ...work, imageVariants: [variant('de', 'poster', 'de'), variant('unknown', 'poster')] };
   expect(selectArtwork(item, current).poster).toBe('/poster');
   expect(selectArtwork({ ...item, imageVariants: [...item.imageVariants, variant('english', 'poster', 'en')] }, current).poster).toBe('/images/english');
+});
+
+
+test('an explicitly empty library selection disables rotation for every library', () => {
+  const item = { ...work, imageVariants: [variant('a', 'poster'), variant('b', 'poster')] };
+  setArtworkRotationPolicy({ ...policy, enabledLibraries: [] });
+  expect(selectArtwork(item, current).poster).toBe('/images/a');
+  expect(localStorage.getItem('media_artwork_choices_viewer')).toBeNull();
+  setArtworkRotationPolicy({ ...policy, enabledLibraries: ['another-library'] });
+  expect(selectArtwork(item, current).poster).toBe('/images/a');
+  setArtworkRotationPolicy({ ...policy, enabledLibraries: ['library'] });
+  selectArtwork(item, current);
+  expect(localStorage.getItem('media_artwork_choices_viewer')).not.toBeNull();
 });

@@ -123,9 +123,14 @@ pub(super) fn validate_result(operation: &str, result: Value) -> Result<Value, E
             let items: Vec<SearchResultItem> =
                 serde_json::from_value(result.clone()).map_err(|_| invalid())?;
             if items.len() > 100
-                || items
-                    .iter()
-                    .any(|v| v.id.is_empty() || v.id.len() > 256 || v.title.len() > 512)
+                || items.iter().any(|v| {
+                    v.id.is_empty()
+                        || v.id.len() > 256
+                        || v.title.len() > 512
+                        || v.artist.as_ref().is_some_and(|artist| {
+                            artist.len() > 512 || artist.chars().any(char::is_control)
+                        })
+                })
             {
                 return Err(invalid());
             }

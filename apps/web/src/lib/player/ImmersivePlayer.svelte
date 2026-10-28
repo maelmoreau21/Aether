@@ -14,6 +14,7 @@
   import { chooseSource, playbackMime, audioLanguage, audioSelectionNotice } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
   import { revalidateMediaDescriptor } from '../catalog/api';
+  import { bufferedAhead } from './startup-buffer';
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
   let dialog: HTMLDialogElement;
@@ -36,7 +37,7 @@
   let markerEnd = $state(0);
   let markerSaving = $state(false);
   let markerError = $state('');
-  let metrics = $state({ width: 0, height: 0, frames: 0, dropped: 0, buffered: 0, ready: 0, network: 0 });
+  let metrics = $state({ width: 0, height: 0, frames: 0, dropped: 0, buffered: 0, audioBuffered: null as number | null, ready: 0, network: 0 });
   const selectedSource = $derived(active?.sources.find(source => source.audioTrackId === audio));
   let loadStage = $state('Chargement de votre séance…');
   let audio = $state('');
@@ -378,7 +379,8 @@
       for (let i = 0; i < video.buffered.length; i++) {
         if (video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)) buffered = video.buffered.end(i) - video.currentTime;
       }
-      metrics = { width: video.videoWidth, height: video.videoHeight, frames: quality?.totalVideoFrames ?? 0, dropped: quality?.droppedVideoFrames ?? 0, buffered, ready: video.readyState, network: video.networkState };
+      const separateAudio = surface.querySelector<HTMLAudioElement>('audio[data-active-audio="true"]');
+      metrics = { width: video.videoWidth, height: video.videoHeight, frames: quality?.totalVideoFrames ?? 0, dropped: quality?.droppedVideoFrames ?? 0, buffered, audioBuffered: separateAudio ? bufferedAhead(separateAudio) : null, ready: video.readyState, network: video.networkState };
     };
     update();
     const timer = setInterval(update, 1000);
@@ -448,6 +450,7 @@
         <dt>Vidéo décodée</dt><dd>{metrics.width} × {metrics.height}</dd>
         <dt>Images / perdues</dt><dd>{metrics.frames} / {metrics.dropped}</dd>
         <dt>Vidéo en mémoire tampon</dt><dd>{metrics.buffered.toFixed(1)} s</dd>
+        <dt>Audio séparé en mémoire tampon</dt><dd>{metrics.audioBuffered === null ? 'Non utilisé' : `${metrics.audioBuffered.toFixed(1)} s`}</dd>
         <dt>Position / durée</dt><dd>{playback.position.toFixed(1)} / {playback.duration.toFixed(1)} s</dd>
         <dt>Vitesse</dt><dd>{playback.speed}×</dd>
         <dt>readyState / networkState</dt><dd>{metrics.ready} / {metrics.network}</dd>

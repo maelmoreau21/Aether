@@ -7,7 +7,7 @@
 > sont désactivés par défaut. Les anciens packs d’extension restent stockés et
 > accessibles tant que leur extension est active ; ils ne sont pas convertis.
 > Les images importées sont normalisées et les contenus SVG restent validés.
-> Les anciennes descriptions de politique d’extension ci-dessous sont historiques.
+> Les anciennes descriptions de politique d’extension ci-dessous sont historiques : les réglages d’une extension active ne modifient pas les autorisations natives d’import ou de suppression d’avatar.
 
 ## Comportement
 

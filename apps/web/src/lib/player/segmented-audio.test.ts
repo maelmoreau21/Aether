@@ -81,11 +81,11 @@ describe('segmented audio seek cancellation',()=>{
     expect(fetcher.mock.calls.map(call=>call[0])).toEqual(['/chunks/5','/chunks/0']);
     expect(appendBuffer).toHaveBeenCalledTimes(2);
   });
-  it('keeps packet-copy preparation away from startup and requests the next window with four seconds of lead',async()=>{
+  it('keeps preparation away from startup and requests the next window eight seconds before the boundary',async()=>{
     const {audio}=harness();
     const fetcher=vi.fn().mockImplementation(()=>Promise.resolve(new Response(new Uint8Array([1,2,3]))));vi.stubGlobal('fetch',fetcher);
     await audio.fill();expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/chunks/0']);
-    (audio as unknown as {element:{currentTime:number}}).element.currentTime=7;
+    (audio as unknown as {element:{currentTime:number}}).element.currentTime=2;
     await audio.fill();expect(fetcher.mock.calls.map(c=>c[0])).toEqual(['/chunks/0','/chunks/0','/chunks/1']);
   });
   it('loads only the saved-position window on a resumed session',async()=>{

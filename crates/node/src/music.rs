@@ -97,6 +97,9 @@ where
                 continue;
             }
             if kind.is_dir() {
+                if crate::scanner::directory_is_ignored(&root.join(&path)) {
+                    continue;
+                }
                 if directories.len() >= 10000 {
                     return Err(io::Error::other("too many directories"));
                 }
@@ -231,4 +234,27 @@ where
         }
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn music_scan_respects_directory_ignore_markers() {
+        let root = tempfile::tempdir().unwrap();
+        for (index, marker) in [".nomedia", ".ignore", ".aetherignore"].iter().enumerate() {
+            let directory = root.path().join(format!("excluded-{index}"));
+            tokio::fs::create_dir(&directory).await.unwrap();
+            tokio::fs::write(directory.join(marker), b"").await.unwrap();
+            // Probing this invalid audio would fail the scan if the marker were ignored.
+            tokio::fs::write(directory.join("broken.mp3"), b"not audio")
+                .await
+                .unwrap();
+        }
+        let count = scan(root.path(), &AtomicBool::new(false), |_| async { Ok(()) })
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 }

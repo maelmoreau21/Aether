@@ -278,6 +278,9 @@ fn default_media_type() -> MediaType {
 pub struct SearchResultItem {
     pub id: String,
     pub title: String,
+    /// Exact credited artist for music search; absent for non-music or unknown results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

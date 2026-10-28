@@ -65,6 +65,20 @@ fn metadata_input_with_settings(input: Value, mut settings: Value) -> Value {
     value
 }
 
+fn music_album_search_input(track: &str, artist: &str, album: &str) -> Option<Value> {
+    if artist.trim().is_empty()
+        || artist.eq_ignore_ascii_case("unknown artist")
+        || album.trim().is_empty()
+        || album.eq_ignore_ascii_case("unknown album")
+    {
+        return None;
+    }
+    Some(
+        json!({"title":album, "artist":artist, "album":album, "trackTitle":track,
+        "mediaType":"music", "externalIds":{"artist":artist}}),
+    )
+}
+
 fn lyrics_request_input(title: &str, artist: &str, album: &str, duration: Option<f64>) -> Value {
     json!({
         "track": title,
@@ -72,6 +86,26 @@ fn lyrics_request_input(title: &str, artist: &str, album: &str, duration: Option
         "album": album,
         "durationSecs": duration.filter(|value| value.is_finite() && *value >= 0.0 && *value <= u32::MAX as f64).map(|value| value.round() as u32),
     })
+}
+
+// A process-local key prevents offline guessing of low-entropy provider secrets
+// from cache keys. Old cache entries naturally miss after restart.
+fn provider_cache_context(
+    payload: &Value,
+    config: &Value,
+    generation: &str,
+    package_sha: &str,
+    music_search: bool,
+) -> Result<Value, serde_json::Error> {
+    static KEY: std::sync::OnceLock<ring::hmac::Key> = std::sync::OnceLock::new();
+    let key = KEY.get_or_init(|| {
+        ring::hmac::Key::new(ring::hmac::HMAC_SHA256, uuid::Uuid::new_v4().as_bytes())
+    });
+    let tag = ring::hmac::sign(key, &serde_json::to_vec(config)?);
+    Ok(
+        json!({"request": payload, "generation": generation, "packageSha256": package_sha,
+        "settingsTag": STANDARD.encode(tag.as_ref()), "musicMatchingVersion": if music_search { 2 } else { 0 }}),
+    )
 }
 
 type Error = (StatusCode, Json<Value>);
@@ -1516,6 +1550,13 @@ pub(crate) async fn run_automated(
     let payload = if let Some((title, artist, album, duration)) = &music_track {
         if operation == "lyrics.get" {
             lyrics_request_input(title, artist, album, *duration)
+        } else if operation == "metadata.search" {
+            music_album_search_input(title, artist, album).ok_or_else(|| {
+                err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "music_identity_incomplete",
+                )
+            })?
         } else {
             json!({
                 "title": title,
@@ -1659,11 +1700,14 @@ pub(crate) async fn run_automated(
         allowed_hosts: package.manifest.http_hosts.clone(),
         auth_headers: Default::default(),
     };
-    // Prevent results admitted under older, weaker matching rules from being reused.
-    let mut cache_payload = payload.clone();
-    if music_track.is_some() && operation == "metadata.search" {
-        cache_payload["matchingPolicyVersion"] = json!(2);
-    }
+    let cache_payload = provider_cache_context(
+        &payload,
+        &invocation.input.input["config"],
+        generation,
+        &package.sha256,
+        music_track.is_some() && operation == "metadata.search",
+    )
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "cache_context_invalid"))?;
     let now = media_contracts::protocol::unix_now();
     let mut conn = auth.store.pool().acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
@@ -1874,18 +1918,78 @@ fn music_details_match(details: &Value, candidate: &Value) -> bool {
         .as_str()
         .filter(|id| !id.is_empty())
         .is_some_and(|id| details["providerId"].as_str() == Some(id));
-    let title_matches = details["title"].as_str().is_none_or(|title| {
+    let title_matches = details["title"].as_str().is_some_and(|title| {
         candidate["title"]
             .as_str()
             .is_some_and(|expected| normalize_title(title) == normalize_title(expected))
     });
-    id_matches && title_matches
+    let artists = details["actors"].as_array().map(|credits| {
+        credits
+            .iter()
+            .filter(|credit| credit["role"].as_str() == Some("artist"))
+            .filter_map(|credit| credit["name"].as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    });
+    let artist_matches = candidate["artist"]
+        .as_str()
+        .zip(artists.as_deref())
+        .is_some_and(|(expected, actual)| {
+            !actual.is_empty() && normalize_title(expected) == normalize_title(actual)
+        });
+    id_matches && title_matches && artist_matches
 }
 
 #[cfg(test)]
 mod configuration_tests {
     use super::*;
     use media_extension_sdk::MetadataInput;
+    #[test]
+    fn music_album_search_uses_album_and_explicit_artist() {
+        let input = music_album_search_input("Track", "Artist", "Album").unwrap();
+        assert_eq!(input["title"], "Album");
+        assert_eq!(input["trackTitle"], "Track");
+        assert_eq!(input["externalIds"]["artist"], "Artist");
+        assert!(music_album_search_input("Track", "Artist", "Unknown Album").is_none());
+        assert!(music_album_search_input("Track", "", "Album").is_none());
+    }
+
+    #[test]
+    fn provider_cache_depends_on_settings_generation_and_package_without_disclosing_secrets() {
+        let payload = json!({"title":"Song"});
+        let settings = json!({"api_key":"example-secret", "language":"fr"});
+        let original =
+            provider_cache_context(&payload, &settings, "gen1", "package1", true).unwrap();
+        assert_eq!(
+            original,
+            provider_cache_context(&payload, &settings, "gen1", "package1", true).unwrap()
+        );
+        assert!(!original.to_string().contains("example-secret"));
+        assert_ne!(
+            original,
+            provider_cache_context(
+                &payload,
+                &json!({"api_key":"different"}),
+                "gen1",
+                "package1",
+                true
+            )
+            .unwrap()
+        );
+        assert_ne!(
+            original,
+            provider_cache_context(&payload, &settings, "gen2", "package1", true).unwrap()
+        );
+        assert_ne!(
+            original,
+            provider_cache_context(&payload, &settings, "gen1", "package2", true).unwrap()
+        );
+        assert_ne!(
+            original,
+            provider_cache_context(&payload, &settings, "gen1", "package1", false).unwrap()
+        );
+    }
+
     #[test]
     fn music_candidates_and_details_require_consistent_identity() {
         let input = json!({"title":"Song", "artist":"Muse", "duration":180});
@@ -1909,15 +2013,23 @@ mod configuration_tests {
             .is_none()
         );
         assert!(music_details_match(
+            &json!({"providerId":"42", "title":"Song", "actors":[{"name":"Muse", "role":"artist"}]}),
+            &candidate
+        ));
+        assert!(!music_details_match(
+            &json!({"providerId":"43", "title":"Song", "actors":[{"name":"Muse", "role":"artist"}]}),
+            &candidate
+        ));
+        assert!(!music_details_match(
+            &json!({"providerId":"42", "title":"Other", "actors":[{"name":"Muse", "role":"artist"}]}),
+            &candidate
+        ));
+        assert!(!music_details_match(
+            &json!({"providerId":"42", "title":"Song", "actors":[{"name":"Other", "role":"artist"}]}),
+            &candidate
+        ));
+        assert!(!music_details_match(
             &json!({"providerId":"42", "title":"Song"}),
-            &candidate
-        ));
-        assert!(!music_details_match(
-            &json!({"providerId":"43", "title":"Song"}),
-            &candidate
-        ));
-        assert!(!music_details_match(
-            &json!({"providerId":"42", "title":"Other"}),
             &candidate
         ));
     }

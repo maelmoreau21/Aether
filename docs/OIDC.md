@@ -106,7 +106,10 @@ compte est refusée ; un compte ne peut avoir qu'un sujet par issuer. Aucune fus
 ni déplacement silencieux. La session d'origine est révoquée, une nouvelle session
 Core est créée ; le mot de passe et le rôle local sont conservés. La liaison d'un
 administrateur confirme une identité de ce compte déjà administrateur, sans
-promotion. Un administrateur local actif est requis avant de commencer OIDC.
+promotion. Le rôle d'un compte local lié reste inchangé même si l'IdP indique un
+groupe administrateur, y compris lors des connexions suivantes ; seul un
+administrateur Aether peut le modifier. Un administrateur local actif est requis
+avant de commencer OIDC.
 
 ## Texte du bouton de connexion
 

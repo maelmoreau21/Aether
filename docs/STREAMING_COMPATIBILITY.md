@@ -1,5 +1,9 @@
 # Compatibilité observée — P0 natif et limite de sélection audio
 
+## Préchargement audio segmenté — 28 octobre 2026
+
+La fenêtre Opus suivante est demandée jusqu'à huit secondes avant sa limite après le chargement initial, au lieu de quatre. Les données de lecture montrent la réserve de l'audio séparé ainsi que celle de la vidéo et les images perdues. Les tests unitaires ciblés couvrent l'anticipation et la synchronisation ; aucune mesure sur Pixel 7a, NAS ou réseau réel ne démontre encore une réduction des saccades.
+
 ## MP4 original et audio segmenté — 22 octobre 2026
 
 MP4 AV1 10 bits + deux Opus 5.1 : Chrome et Edge décodent les fenêtres audio
@@ -469,3 +473,19 @@ Résumé machine : `evidence/2026-10-18/player-verification.json`.
 `MEDIA_BROWSER_EXECUTABLE` permet de choisir un exécutable pour `scripts/browser-streaming-performance.cjs`. EdgeCore 155.0.4283.62 sous Windows a été lancé headless sur les fixtures représentatives MP4 et MKV AV1/Opus, une répétition chacune : ouverture, deux changements audio segmentés et seek ont produit image et signal PCM selon le banc synthétique. La préparation utilise FFmpeg pour copier des paquets, sans réencodage. Le serveur HTTP est simulé : ce résultat ne valide ni Svelte, ni Core/Node, ni sortie audio physique, ni un navigateur Edge installé en usage normal. Les valeurs ponctuelles ne démontrent aucune amélioration avant/après ; le premier signal audio mesuré pour la source originale a été tardif (14,5 s MP4 et 8,5 s MKV), à investiguer avant de conclure à un fonctionnement fiable. Rapports locaux : `target/stabilisation-edgecore-mp4/report.json` et `target/stabilisation-edgecore-mkv/report.json`.
 
 Le parcours applicatif `browser_scanner`, exécuté avec `MEDIA_BROWSER_EXECUTABLE` vers EdgeCore 155.0.4283.62 sous Windows, a également réussi sur les fixtures MP4 puis MKV après redémarrage du Core (1 test, 41,28 s). Il couvre scan incrémental, changements FR/EN, PCM, pause/seek, sous-titres internes et externes et reprise. Première image après clic observée : 194 ms MP4 puis 98 ms MKV, mesures uniques locales sans comparaison de référence. Rapports : `target/stabilisation-edgecore-app/`. Ce n'est ni une lecture de plusieurs heures ni un test de Node distant ou de NAS.
+
+### 28 octobre 2026 — diagnostic de la première mesure audio
+
+Le banc synthétique conserve désormais des échantillons bornés des horloges
+média et WebAudio, de l'état du contexte et du signal. Une répétition EdgeCore
+155.0.4283.62 par conteneur ne reproduit pas les délais de 14,5 s / 8,5 s :
+le premier signal de la source originale apparaît à 552 ms en MP4 et 413 ms
+en MKV. Pour le MP4, à 512 ms, le contexte indique `running` mais son horloge
+et celle de la vidéo sont encore à zéro, alors que la vidéo n'est pas en pause
+et annonce `readyState=4` ; le signal apparaît environ 40 ms plus tard.
+Le banc connecte la vidéo à WebAudio pour mesurer le PCM : cette observation
+ne permet pas de distinguer la cause des anciens retards ni de conclure au
+comportement sans ce graphe, sur Edge installé, sur haut-parleurs physiques ou
+sur un vrai Node. Ce sont des essais uniques sans comparaison avant/après.
+Rapports locaux : `target/edge-audio-clock-mp4-20261028/report.json` et
+`target/edge-audio-clock-mkv-20261028/report.json`.

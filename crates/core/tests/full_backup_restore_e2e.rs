@@ -197,3 +197,79 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
 
     store_b.close().await;
 }
+
+#[tokio::test]
+async fn restore_assets_cli_rejects_partial_extension_sync() {
+    let root = tempfile::tempdir().unwrap();
+    let extracted = root.path().join("extracted");
+    std::fs::create_dir(&extracted).unwrap();
+    let media = root.path().join("media");
+    std::fs::create_dir(&media).unwrap();
+    for (name, invalid) in [("healthy", false), ("partial", true)] {
+        let target = root.path().join(name);
+        std::fs::create_dir(&target).unwrap();
+        let db = target.join("core.sqlite3");
+        let store = IdentityStore::open(&db).await.unwrap();
+        let key = generate_key();
+        let package = create_package(&key, "fixture.extension", "1.0.0", valid_wasm());
+        media_poc::database::query(
+            "INSERT INTO extension_publishers(id,public_key,active) VALUES(?,?,1)",
+        )
+        .bind(&package.publisher_id)
+        .bind("fixture-key")
+        .execute(store.pool())
+        .await
+        .unwrap();
+        media_poc::database::query(
+            "INSERT INTO extensions(id,publisher_id,package_json,generation) VALUES(?,?,?,?)",
+        )
+        .bind(&package.manifest.id)
+        .bind(&package.publisher_id)
+        .bind(serde_json::to_string(&package).unwrap())
+        .bind("fixture-generation")
+        .execute(store.pool())
+        .await
+        .unwrap();
+        if invalid {
+            media_poc::database::query(
+                "INSERT INTO extensions(id,publisher_id,package_json,generation) VALUES(?,?,?,?)",
+            )
+            .bind("broken.extension")
+            .bind(&package.publisher_id)
+            .bind("{}")
+            .bind("broken-generation")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        }
+        store.close().await;
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_media-restore-assets"))
+            .arg(&extracted)
+            .current_dir(&target)
+            .env("MEDIA_DB_ENGINE", "sqlite")
+            .env("MEDIA_DB_PATH", &db)
+            .env_remove("MEDIA_DB_URL")
+            .env("MEDIA_LIBRARY_ROOT", &media)
+            .env("MEDIA_ASSETS_PATH", target.join("assets"))
+            .env("MEDIA_PLUGINS_PATH", target.join("plugins"))
+            .output()
+            .await
+            .unwrap();
+        if invalid {
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("restore is INCOMPLETE"));
+            assert!(
+                !String::from_utf8_lossy(&output.stdout).contains("extension storage is healthy")
+            );
+        } else {
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("extension storage is healthy")
+            );
+        }
+    }
+}

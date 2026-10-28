@@ -848,10 +848,7 @@ where
             continue;
         }
         if metadata.is_dir() {
-            if path.join(".nomedia").exists()
-                || path.join(".ignore").exists()
-                || path.join(".aetherignore").exists()
-            {
+            if directory_is_ignored(&path) {
                 continue;
             }
             match tokio::fs::read_dir(&path).await {
@@ -1294,6 +1291,12 @@ where
     crate::trim_memory();
 
     Ok(report)
+}
+
+pub(crate) fn directory_is_ignored(path: &Path) -> bool {
+    [".nomedia", ".ignore", ".aetherignore"]
+        .iter()
+        .any(|marker| path.join(marker).exists())
 }
 
 #[cfg(test)]

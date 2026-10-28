@@ -1,5 +1,9 @@
 # Bibliothèques et permissions P1 — 16 octobre 2026
 
+Les scans vidéo et musicaux ignorent les sous-dossiers contenant `.nomedia`,
+`.ignore` ou `.aetherignore`. Ces marqueurs restent des fichiers locaux en
+lecture seule ; les exclusions configurées s'appliquent aussi aux deux types.
+
 > Plusieurs dossiers et plusieurs nœuds dans une même bibliothèque :
 > [contrat du 22 octobre 2026](LIBRARY_FOLDERS.md). Les descriptions historiques
 > d'une seule racine ci-dessous décrivent le premier jalon.

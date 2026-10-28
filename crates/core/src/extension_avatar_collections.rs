@@ -7,6 +7,36 @@ use std::collections::BTreeMap;
 static IMPORTS: Semaphore = Semaphore::const_new(1);
 const IMAGE_MAX: usize = 2 * 1024 * 1024;
 
+// A route parameter can only denote an extension; native calls use the enum
+// variant directly, so no externally supplied id can impersonate native scope.
+#[derive(Debug)]
+enum CollectionScope {
+    Native,
+    Extension(String),
+}
+impl<'de> Deserialize<'de> for CollectionScope {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::Extension)
+    }
+}
+impl CollectionScope {
+    fn is_native(&self) -> bool {
+        matches!(self, Self::Native)
+    }
+    fn extension_id(&self) -> &str {
+        match self {
+            Self::Extension(id) => id,
+            Self::Native => "",
+        }
+    }
+    fn audit_id(&self) -> &str {
+        match self {
+            Self::Extension(id) => id,
+            Self::Native => "native-avatar",
+        }
+    }
+}
+
 pub(super) fn router() -> Router<AuthState> {
     Router::new()
         // Native admin avatar-packs routes
@@ -84,11 +114,11 @@ async fn native_upload(
     headers: HeaderMap,
     body: axum::extract::Multipart,
 ) -> Result<Json<Value>, Error> {
-    upload(state, headers, Path("\u{1}".into()), body).await
+    upload(state, headers, Path(CollectionScope::Native), body).await
 }
 
 async fn native_list(state: State<AuthState>, headers: HeaderMap) -> Result<Json<Value>, Error> {
-    list(state, headers, Path("\u{1}".into())).await
+    list(state, headers, Path(CollectionScope::Native)).await
 }
 
 async fn native_import(
@@ -96,7 +126,7 @@ async fn native_import(
     headers: HeaderMap,
     body: Json<Import>,
 ) -> Result<Json<Value>, Error> {
-    import(state, headers, Path("\u{1}".into()), body).await
+    import(state, headers, Path(CollectionScope::Native), body).await
 }
 
 async fn native_source(
@@ -104,7 +134,7 @@ async fn native_source(
     headers: HeaderMap,
     body: Json<Source>,
 ) -> Result<Json<Value>, Error> {
-    source(state, headers, Path("\u{1}".into()), body).await
+    source(state, headers, Path(CollectionScope::Native), body).await
 }
 
 async fn native_remove(
@@ -112,7 +142,7 @@ async fn native_remove(
     headers: HeaderMap,
     Path(pack): Path<String>,
 ) -> Result<StatusCode, Error> {
-    remove(state, headers, Path(("\u{1}".into(), pack))).await
+    remove(state, headers, Path((CollectionScope::Native, pack))).await
 }
 
 async fn native_rename(
@@ -121,7 +151,7 @@ async fn native_rename(
     Path(pack): Path<String>,
     body: Json<Rename>,
 ) -> Result<StatusCode, Error> {
-    rename(state, headers, Path(("\u{1}".into(), pack)), body).await
+    rename(state, headers, Path((CollectionScope::Native, pack)), body).await
 }
 
 async fn native_admin_images(
@@ -129,7 +159,7 @@ async fn native_admin_images(
     headers: HeaderMap,
     Path(pack): Path<String>,
 ) -> Result<Json<Value>, Error> {
-    admin_images(state, headers, Path(("\u{1}".into(), pack))).await
+    admin_images(state, headers, Path((CollectionScope::Native, pack))).await
 }
 
 async fn native_admin_image(
@@ -137,7 +167,7 @@ async fn native_admin_image(
     headers: HeaderMap,
     Path((pack, image)): Path<(String, String)>,
 ) -> Result<axum::response::Response, Error> {
-    admin_image(state, headers, Path(("\u{1}".into(), pack, image))).await
+    admin_image(state, headers, Path((CollectionScope::Native, pack, image))).await
 }
 
 async fn native_remove_image(
@@ -145,22 +175,22 @@ async fn native_remove_image(
     headers: HeaderMap,
     Path((pack, image)): Path<(String, String)>,
 ) -> Result<StatusCode, Error> {
-    remove_image(state, headers, Path(("\u{1}".into(), pack, image))).await
+    remove_image(state, headers, Path((CollectionScope::Native, pack, image))).await
 }
 
 async fn native_assign_missing(
     state: State<AuthState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, Error> {
-    assign_missing(state, headers, Path("\u{1}".into())).await
+    assign_missing(state, headers, Path(CollectionScope::Native)).await
 }
 
-async fn check(auth: &AuthState, id: &str) -> Result<(), Error> {
-    if id == "\u{1}" {
+async fn check(auth: &AuthState, id: &CollectionScope) -> Result<(), Error> {
+    if id.is_native() {
         return Ok(());
     }
     let stored: Option<String> = query_scalar("SELECT e.package_json FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.id=? AND p.active=1")
-        .bind(id).fetch_optional(auth.store.pool()).await.map_err(db)?;
+        .bind(id.extension_id()).fetch_optional(auth.store.pool()).await.map_err(db)?;
     let package: Package = serde_json::from_str(
         &stored.ok_or_else(|| err(StatusCode::NOT_FOUND, "extension_unavailable"))?,
     )
@@ -256,7 +286,7 @@ fn image_entry(entry: &Entry) -> bool {
 async fn source(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(id): Path<CollectionScope>,
     Json(input): Json<Source>,
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, true).await?;
@@ -278,18 +308,18 @@ async fn source(
 async fn list(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(id): Path<CollectionScope>,
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
     check(&auth, &id).await?;
-    let rows: Vec<(String, String, String, i64)> = if id == "\u{1}" {
+    let rows: Vec<(String, String, String, i64)> = if id.is_native() {
         query_as("SELECT p.id,p.name,p.source,COUNT(i.id) FROM avatar_packs p LEFT JOIN avatar_images i ON i.pack_id=p.id GROUP BY p.id,p.name,p.source ORDER BY p.name")
             .fetch_all(auth.store.pool())
             .await
             .map_err(db)?
     } else {
         query_as("SELECT p.id,p.name,p.source,COUNT(i.id) FROM extension_avatar_packs p LEFT JOIN extension_avatar_images i ON i.pack_id=p.id WHERE p.extension_id=? GROUP BY p.id,p.name,p.source ORDER BY p.name")
-            .bind(id)
+            .bind(id.extension_id())
             .fetch_all(auth.store.pool())
             .await
             .map_err(db)?
@@ -301,7 +331,7 @@ async fn list(
 async fn import(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(id): Path<CollectionScope>,
     Json(input): Json<Import>,
 ) -> Result<Json<Value>, Error> {
     let actor = admin(&auth, &headers, true).await?;
@@ -413,8 +443,8 @@ async fn import(
         if packs >= 32 {
             return Err(err(StatusCode::CONFLICT, "avatar_pack_limit"));
         }
-        let mut insert = query(if id == "\u{1}" { "INSERT INTO avatar_packs(id,name,source) VALUES(?,?,?)" } else { "INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES(?,?,?,?)" }).bind(&pack);
-        if id != "\u{1}" { insert = insert.bind(&id); }
+        let mut insert = query(if id.is_native() { "INSERT INTO avatar_packs(id,name,source) VALUES(?,?,?)" } else { "INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES(?,?,?,?)" }).bind(&pack);
+        if !id.is_native() { insert = insert.bind(id.extension_id()); }
         insert.bind(input.name.trim())
             .bind(format!(
                 "https://github.com/{owner}/{repo}/tree/{sha}/{}",
@@ -424,7 +454,7 @@ async fn import(
             .await
             .map_err(db)?;
         for (name, sha256) in stored_images {
-            query(if id == "\u{1}" { "INSERT INTO avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" } else { "INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" })
+            query(if id.is_native() { "INSERT INTO avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" } else { "INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" })
                 .bind(uuid::Uuid::new_v4().to_string())
                 .bind(&pack)
                 .bind(name)
@@ -433,7 +463,7 @@ async fn import(
                 .await
                 .map_err(db)?;
         }
-        audit(&mut tx, &actor.user.id, if id == "\u{1}" { "native-avatar" } else { &id }, "avatars.pack.imported").await?;
+        audit(&mut tx, &actor.user.id, id.audit_id(), "avatars.pack.imported").await?;
         tx.commit().await.map_err(db)?;
         Ok(Json(json!({"id":pack,"count":count})))
     })
@@ -443,7 +473,7 @@ async fn import(
 async fn upload(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(id): Path<CollectionScope>,
     mut form: axum::extract::Multipart,
 ) -> Result<Json<Value>, Error> {
     let actor = admin(&auth, &headers, true).await?;
@@ -544,14 +574,14 @@ async fn upload(
     }
     let pack = uuid::Uuid::new_v4().to_string();
     let count = stored_images.len();
-    let mut insert = query(if id == "\u{1}" { "INSERT INTO avatar_packs(id,name,source) VALUES(?,?,'upload')" } else { "INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES(?,?,?,'upload')" }).bind(&pack);
-    if id != "\u{1}" { insert = insert.bind(&id); }
+    let mut insert = query(if id.is_native() { "INSERT INTO avatar_packs(id,name,source) VALUES(?,?,'upload')" } else { "INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES(?,?,?,'upload')" }).bind(&pack);
+    if !id.is_native() { insert = insert.bind(id.extension_id()); }
     insert.bind(name.trim())
         .execute(&mut *tx)
         .await
         .map_err(db)?;
     for (name, sha256) in stored_images {
-        query(if id == "\u{1}" { "INSERT INTO avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" } else { "INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" })
+        query(if id.is_native() { "INSERT INTO avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" } else { "INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" })
             .bind(uuid::Uuid::new_v4().to_string())
             .bind(&pack)
             .bind(name)
@@ -560,7 +590,7 @@ async fn upload(
             .await
             .map_err(db)?;
     }
-    audit(&mut tx, &actor.user.id, if id == "\u{1}" { "native-avatar" } else { &id }, "avatars.pack.uploaded").await?;
+    audit(&mut tx, &actor.user.id, id.audit_id(), "avatars.pack.uploaded").await?;
     tx.commit().await.map_err(db)?;
     Ok(Json(json!({"id":pack,"count":count})))
     }).await.map_err(|_|err(StatusCode::GATEWAY_TIMEOUT,"avatar_import_timeout"))?
@@ -568,12 +598,12 @@ async fn upload(
 async fn remove(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Path((id, pack)): Path<(String, String)>,
+    Path((id, pack)): Path<(CollectionScope, String)>,
 ) -> Result<StatusCode, Error> {
     admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
     check(&auth, &id).await?;
-    if id == "\u{1}" {
+    if id.is_native() {
         query("DELETE FROM avatar_packs WHERE id=?")
             .bind(pack)
             .execute(auth.store.pool())
@@ -582,7 +612,7 @@ async fn remove(
     } else {
         query("DELETE FROM extension_avatar_packs WHERE id=? AND extension_id=?")
             .bind(pack)
-            .bind(id)
+            .bind(id.extension_id())
             .execute(auth.store.pool())
             .await
             .map_err(db)?;
@@ -597,7 +627,7 @@ struct Rename {
 async fn rename(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Path((id, pack)): Path<(String, String)>,
+    Path((id, pack)): Path<(CollectionScope, String)>,
     Json(input): Json<Rename>,
 ) -> Result<StatusCode, Error> {
     admin(&auth, &headers, true).await?;
@@ -609,7 +639,7 @@ async fn rename(
     }
     let _lock = MUTATIONS.lock().await;
     check(&auth, &id).await?;
-    if id == "\u{1}" {
+    if id.is_native() {
         query("UPDATE avatar_packs SET name=? WHERE id=?")
             .bind(input.name.trim())
             .bind(pack)
@@ -620,7 +650,7 @@ async fn rename(
         query("UPDATE extension_avatar_packs SET name=? WHERE id=? AND extension_id=?")
             .bind(input.name.trim())
             .bind(pack)
-            .bind(id)
+            .bind(id.extension_id())
             .execute(auth.store.pool())
             .await
             .map_err(db)?;
@@ -630,11 +660,11 @@ async fn rename(
 async fn admin_images(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Path((id, pack)): Path<(String, String)>,
+    Path((id, pack)): Path<(CollectionScope, String)>,
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
     check(&auth, &id).await?;
-    let rows: Vec<(String, String)> = if id == "\u{1}" {
+    let rows: Vec<(String, String)> = if id.is_native() {
         query_as("SELECT i.id,i.name FROM avatar_images i JOIN avatar_packs p ON p.id=i.pack_id WHERE p.id=? ORDER BY i.name LIMIT 500")
             .bind(&pack)
             .fetch_all(auth.store.pool())
@@ -643,15 +673,18 @@ async fn admin_images(
     } else {
         query_as("SELECT i.id,i.name FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.id=? AND p.extension_id=? ORDER BY i.name LIMIT 500")
             .bind(&pack)
-            .bind(&id)
+            .bind(id.extension_id())
             .fetch_all(auth.store.pool())
             .await
             .map_err(db)?
     };
-    let base = if id == "\u{1}" {
+    let base = if id.is_native() {
         format!("/api/v1/admin/avatar-packs/{pack}/images")
     } else {
-        format!("/api/v1/admin/extensions/{id}/avatar-packs/{pack}/images")
+        format!(
+            "/api/v1/admin/extensions/{}/avatar-packs/{pack}/images",
+            id.extension_id()
+        )
     };
     Ok(Json(
         json!({"images":rows.into_iter().map(|(image,name)|json!({"id":image,"name":name,"url":format!("{base}/{image}")})).collect::<Vec<_>>()}),
@@ -660,16 +693,16 @@ async fn admin_images(
 async fn admin_image(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Path((id, pack, image)): Path<(String, String, String)>,
+    Path((id, pack, image)): Path<(CollectionScope, String, String)>,
 ) -> Result<axum::response::Response, Error> {
     admin(&auth, &headers, false).await?;
     check(&auth, &id).await?;
-    let query_str = if id == "\u{1}" {
+    let query_str = if id.is_native() {
         "SELECT i.sha256 FROM avatar_images i JOIN avatar_packs p ON p.id=i.pack_id WHERE p.id=? AND i.id=?"
     } else {
         "SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? AND p.id=? AND i.id=?"
     };
-    let sha256: String = if id == "\u{1}" {
+    let sha256: String = if id.is_native() {
         query_scalar(query_str)
             .bind(pack)
             .bind(image)
@@ -678,7 +711,7 @@ async fn admin_image(
             .map_err(db)?
     } else {
         query_scalar(query_str)
-            .bind(id)
+            .bind(id.extension_id())
             .bind(pack)
             .bind(image)
             .fetch_optional(auth.store.pool())
@@ -695,27 +728,27 @@ async fn admin_image(
 async fn remove_image(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Path((id, pack, image)): Path<(String, String, String)>,
+    Path((id, pack, image)): Path<(CollectionScope, String, String)>,
 ) -> Result<StatusCode, Error> {
     admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
     check(&auth, &id).await?;
-    if id == "\u{1}" {
+    if id.is_native() {
         query("DELETE FROM avatar_images WHERE id=? AND pack_id=? AND EXISTS(SELECT 1 FROM avatar_packs p WHERE p.id=?)").bind(image).bind(&pack).bind(pack).execute(auth.store.pool()).await.map_err(db)?;
     } else {
-        query("DELETE FROM extension_avatar_images WHERE id=? AND pack_id=? AND EXISTS(SELECT 1 FROM extension_avatar_packs p WHERE p.id=? AND p.extension_id=?)").bind(image).bind(&pack).bind(pack).bind(id).execute(auth.store.pool()).await.map_err(db)?;
+        query("DELETE FROM extension_avatar_images WHERE id=? AND pack_id=? AND EXISTS(SELECT 1 FROM extension_avatar_packs p WHERE p.id=? AND p.extension_id=?)").bind(image).bind(&pack).bind(pack).bind(id.extension_id()).execute(auth.store.pool()).await.map_err(db)?;
     }
     Ok(StatusCode::NO_CONTENT)
 }
 async fn assign_missing(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(id): Path<CollectionScope>,
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
     check(&auth, &id).await?;
-    let images: Vec<String> = if id == "\u{1}" {
+    let images: Vec<String> = if id.is_native() {
         query_scalar(
             "SELECT i.sha256 FROM avatar_images i JOIN avatar_packs p ON p.id=i.pack_id LIMIT 500",
         )
@@ -724,7 +757,7 @@ async fn assign_missing(
         .map_err(db)?
     } else {
         query_scalar("SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? LIMIT 500")
-            .bind(id)
+            .bind(id.extension_id())
             .fetch_all(auth.store.pool())
             .await
             .map_err(db)?
@@ -973,6 +1006,18 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
+        let spoofed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/extensions/%01/avatar-packs")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(!spoofed.status().is_success());
         let count: i64 = query_scalar("SELECT COUNT(*) FROM extensions")
             .fetch_one(store.pool())
             .await

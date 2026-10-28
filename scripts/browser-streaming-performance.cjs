@@ -125,6 +125,17 @@ async function instrument(page, strategy) {
       // Observe audible presentation across ALL elements, not DOM order.
       const element = audios.find(a=>!a.paused&&!a.muted) || audios[0] || video;
       const sample = signal(element);
+      // Preserve bounded timeline evidence even before the strict PCM oracle
+      // accepts a sample. In particular, distinguish a stalled media clock
+      // or suspended AudioContext from silence observed on a running clock.
+      const elapsedMs = now - active.start;
+      if (sample.db > -80 && active.firstNonSilentMs === undefined) active.firstNonSilentMs = elapsedMs;
+      if ((active.clockSamples?.length ?? 0) < 45 && elapsedMs >= (active.nextClockSampleMs ?? 0)) {
+        (active.clockSamples ??= []).push({ elapsedMs, mediaTime: video.currentTime, audioTime: element.currentTime,
+          contextTime: ctx.currentTime, contextState: ctx.state, paused: element.paused, muted: element.muted,
+          readyState: element.readyState, seeking: element.seeking, sample });
+        active.nextClockSampleMs = elapsedMs + 500;
+      }
       if (active.kind === 'switch') { active.pcmPolls = (active.pcmPolls || 0) + 1; active.maxPollGapMs = Math.max(active.maxPollGapMs || 0, delta); if (sample.db < -80 || element.paused || element.muted) { active.silentPolls = (active.silentPolls || 0) + 1; active.observedSilenceMs = (active.observedSilenceMs || 0) + delta; } }
       if (active.firstAudioMs !== undefined) return;
       active.lastSignal = sample;

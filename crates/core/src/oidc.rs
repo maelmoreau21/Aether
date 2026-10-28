@@ -692,7 +692,7 @@ impl Oidc {
                         .await
                         .map_err(db)?;
 
-                if is_admin {
+                if is_admin && !has_local_cred {
                     crate::database::query("UPDATE users SET role='administrator', display_name=COALESCE(?, display_name), sso_username=COALESCE(?, sso_username) WHERE id=?")
                         .bind(&display_name)
                         .bind(&sso_username)
@@ -737,7 +737,7 @@ impl Oidc {
             (None, target) => {
                 let id = target.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 crate::database::query(
-                    "INSERT INTO users(id,role,display_name,sso_username) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET role=CASE WHEN excluded.role='administrator' THEN 'administrator' ELSE users.role END, display_name=COALESCE(excluded.display_name, users.display_name), sso_username=COALESCE(excluded.sso_username, users.sso_username)",
+                    "INSERT INTO users(id,role,display_name,sso_username) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET display_name=COALESCE(excluded.display_name, users.display_name), sso_username=COALESCE(excluded.sso_username, users.sso_username)",
                 )
                 .bind(&id)
                 .bind(role)
@@ -1370,6 +1370,70 @@ mod tests {
             StatusCode::BAD_GATEWAY
         );
     }
+    #[tokio::test]
+    async fn oidc_admin_group_does_not_promote_a_linked_local_user() {
+        let mut f = fixture().await;
+        f.s.config.as_mut().unwrap().admin_groups = vec!["media-admins".into()];
+        crate::database::query("INSERT INTO users(id,role) VALUES('local-user','user')")
+            .execute(&f.s.auth.store.pool)
+            .await
+            .unwrap();
+        crate::database::query("INSERT INTO local_credentials(user_id,login,password_hash) SELECT 'local-user','local-user',password_hash FROM local_credentials WHERE login='rescue'")
+            .execute(&f.s.auth.store.pool).await.unwrap();
+        let login = req(
+            &f.s,
+            "/api/v1/auth/login",
+            "POST",
+            "",
+            "",
+            serde_json::json!({"login":"local-user","password":PASSWORD}),
+        )
+        .await;
+        assert_eq!(login.status(), StatusCode::OK);
+        let cookie = session_cookie(&login);
+        let csrf = body(login).await["csrfToken"].as_str().unwrap().to_owned();
+        let link = req(
+            &f.s,
+            "/api/v1/auth/oidc/link",
+            "POST",
+            &cookie,
+            &csrf,
+            serde_json::json!({"password":PASSWORD}),
+        )
+        .await;
+        assert_eq!(link.status(), StatusCode::OK);
+        let browser = link.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        let url = Url::parse(body(link).await["url"].as_str().unwrap()).unwrap();
+        let pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
+        let now = jsonwebtoken::get_current_timestamp();
+        *f.provider.claims.lock().unwrap() = serde_json::json!({"iss":f.provider.issuer,"sub":"local-subject","aud":"client","iat":now,"exp":now+300,"nonce":pairs["nonce"],"groups":["media-admins"]});
+        let linked = finish(&f, &browser, &pairs["state"]).await;
+        assert_eq!(linked.status(), StatusCode::OK);
+        let role: String =
+            crate::database::query_scalar("SELECT role FROM users WHERE id='local-user'")
+                .fetch_one(&f.s.auth.store.pool)
+                .await
+                .unwrap();
+        assert_eq!(role, "user");
+
+        let (browser, state) = begin(&f).await;
+        f.provider.claims.lock().unwrap()["sub"] = serde_json::json!("local-subject");
+        f.provider.claims.lock().unwrap()["groups"] = serde_json::json!(["media-admins"]);
+        assert_eq!(finish(&f, &browser, &state).await.status(), StatusCode::OK);
+        let role: String =
+            crate::database::query_scalar("SELECT role FROM users WHERE id='local-user'")
+                .fetch_one(&f.s.auth.store.pool)
+                .await
+                .unwrap();
+        assert_eq!(role, "user");
+    }
+
     #[tokio::test]
     async fn oidc_link_requires_local_proof_and_retains_rescue_account() {
         let f = fixture().await;

@@ -436,6 +436,13 @@ mod tests {
         let store = IdentityStore::open(&root.path().join("core.sqlite3"))
             .await
             .unwrap();
+        store
+            .bootstrap(
+                "test-admin",
+                zeroize::Zeroizing::new("disposable fixture password".into()),
+            )
+            .await
+            .unwrap();
         let auth = crate::auth::AuthState::new(store.clone(), "http://localhost".into())
             .await
             .unwrap();

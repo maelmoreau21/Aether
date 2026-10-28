@@ -160,7 +160,7 @@ export class ExternalAudio {
   }
   activate() {
     if (this.active || this.stopped) return;
-    this.active = true; this.previousMuted = this.video.muted; this.video.muted = true;
+    this.active = true; this.audio.dataset.activeAudio = 'true'; this.previousMuted = this.video.muted; this.video.muted = true;
     this.video.addEventListener('pause', this.videoPause); this.video.addEventListener('waiting', this.wait);
     this.video.addEventListener('seeking', this.wait); this.video.addEventListener('playing', this.resume);
     this.video.addEventListener('seeked', this.afterSeek); this.video.addEventListener('volumechange', this.settings);

@@ -278,6 +278,14 @@ après normalisation des espaces et de la casse. Une durée fournie des deux cô
 est contrôlée. Les détails obtenus doivent conserver l'identifiant du candidat
 et ne pas contredire son titre. Les anciens résultats enregistrés sous les règles
 de correspondance précédentes ne sont pas réutilisés. Une réponse ambiguë ou
-incomplète ne provoque aucune adoption automatique. Les fournisseurs renvoyant
-uniquement l'artiste dans un champ descriptif ne sont pas associés automatiquement ;
-leur adaptation au contrat reste à valider.
+incomplète ne provoque aucune adoption automatique. Le champ optionnel structuré `artist` des résultats musicaux porte le crédit
+artiste exact. Les sources MusicBrainz et Discogs ont été adaptées pour le fournir ;
+les paquets précédemment publiés ne sont pas modifiés. Le Core recherche l'album
+avec son artiste lorsque les deux sont connus, sans assimiler titre de piste et
+titre de sortie. Les résultats incomplets ne sont pas associés automatiquement.
+
+Le cache automatique des fournisseurs dépend aussi des réglages effectifs, de
+la génération et de l'empreinte du paquet. Les réglages ne sont pas enregistrés
+en clair dans sa clé : une signature HMAC avec une clé aléatoire en mémoire les
+isole. Cette clé change au redémarrage, ce qui invalide alors le cache de ce
+processus ; les enregistrements expirés restent soumis au nettoyage habituel.

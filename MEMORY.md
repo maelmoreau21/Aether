@@ -1,3 +1,25 @@
+## 28 octobre 2026 — Commandes vidéo sur téléphone
+
+- Audio Opus segmenté : la fenêtre suivante est demandée huit secondes avant la limite au lieu de quatre, après le chargement initial. Les données de lecture affichent aussi la réserve de l'audio séparé. Tests unitaires ciblés : 20 réussis ; aucune preuve sur Pixel 7a, NAS ou réseau réel, ni identification certaine de la cause des saccades.
+- Les commandes du lecteur se répartissent sur deux lignes sur écran étroit, avec une zone tactile plus grande pour la barre de progression. Le déplacement dans la vidéo est appliqué au relâchement, afin d'éviter des recherches successives pendant le glissement. Les tests unitaires du tampon et de la vidéo progressive passent ; aucun essai sur téléphone réel et aucune cause des saccades en lecture continue n'ont été établis.
+
+## 28 octobre 2026 — Politique d’avatars native
+
+- La portée des collections d’avatars est désormais un type explicite : 3 tests ciblés réussis, anciennes ressources conservées. Les routes natives restent dans le module des extensions ; aucun plugin n’est requis.
+- OIDC : les comptes locaux liés conservent leur rôle ; les tests liaison/reconnexion et refus de promotion par simple claim réussissent avec un IdP synthétique, sans Authentik réel.
+- Le scan musical respecte les marqueurs d’exclusion de dossiers ; test Node ciblé réussi sur fixtures locales, sans NAS.
+- Fournisseurs : cache lié à la configuration/génération/paquet, correspondance musicale renforcée, champs artiste structurés côté Core/SDK et sources MusicBrainz/Discogs. Tests synthétiques réussis ; ni paquet Wasm publié ou testé de bout en bout, ni service réel.
+- EdgeCore : les essais répétés du banc donnent 552 ms et 413 ms pour le premier signal, sans reproduire les délais anciens. Les horloges média et WebAudio ont été instrumentées ; cause initiale non établie.
+
+- `cargo test --locked -p media-poc --test backup_bundle -j 1 -- --test-threads=1` : 4/4 réussis sur archives jetables, intégrité, corruption, destinations existantes et certificat. Le test du format des deux moteurs ne constitue pas une restauration PostgreSQL réelle. Archives courantes non chiffrées : elles contiennent des secrets.
+
+- Les tests Rust ciblés `music_candidates_and_details_require_consistent_identity` et `initialization_keeps_empty_installation_free_of_phantom_extensions` réussissent. Ils ne prouvent ni les fournisseurs réels ni la restauration complète.
+
+- Media Node : `cargo test --locked -p media-node --lib malformed_signed_channel_responses_back_off_then_reconnect -j 1 -- --nocapture` réussit ; le test local couvre un délai après réponse signée mal formée puis reconnexion. Il ne prouve pas un réseau distant réel.
+
+- La politique d’import et de suppression d’avatars ne consulte plus les réglages des extensions actives. La politique native reste autoritaire ; test `cargo test --locked -p media-poc --test account avatar_policy_is_independent_of_active_plugins -j 1 -- --nocapture` réussi. Ceci remplace la décision contraire mentionnée dans la note du 27 octobre ci-dessous.
+- Les collections natives restent implémentées dans un module partagé avec les anciennes routes d’extension et utilisent un marqueur interne ; le découplage structurel complet reste ouvert. Aucune migration ni suppression des anciennes données.
+
 ## 27 octobre 2026 — Correction des régressions CI (Avatar Policy & Browser Playlists)
 
 - **Avatar policy & plugins actifs (`crates/core/tests/account.rs`)** :

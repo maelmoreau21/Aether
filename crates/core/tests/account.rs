@@ -314,7 +314,7 @@ async fn sso_local_credentials_policy_csrf_and_recent_login() {
 }
 
 #[tokio::test]
-async fn avatar_policy_enforced_for_active_plugins() {
+async fn avatar_policy_is_independent_of_active_plugins() {
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("avatar-policy.db"))
         .await
@@ -361,23 +361,33 @@ async fn avatar_policy_enforced_for_active_plugins() {
     .unwrap();
     assert_eq!(
         body(req(&app, path, "GET", &cookie, "", json!(null)).await).await,
-        json!({"uploadAllowed":false,"removeAllowed":false})
+        json!({"uploadAllowed":true,"removeAllowed":true})
     );
-    for method in ["PUT", "DELETE"] {
-        assert_eq!(
-            req(
-                &app,
-                "/api/v1/account/avatar",
-                method,
-                &cookie,
-                &csrf,
-                json!(null)
-            )
-            .await
-            .status(),
-            StatusCode::FORBIDDEN
-        );
-    }
+    media_poc::database::query("INSERT INTO avatar_policy(singleton,allow_custom,allow_gravatar,assign_on_create) VALUES(1,0,0,0) ON CONFLICT(singleton) DO UPDATE SET allow_custom=0")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        body(req(&app, path, "GET", &cookie, "", json!(null)).await).await,
+        json!({"uploadAllowed":false,"removeAllowed":true})
+    );
+    media_poc::database::query("UPDATE avatar_policy SET allow_custom=1 WHERE singleton=1")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        req(
+            &app,
+            "/api/v1/account/avatar",
+            "DELETE",
+            &cookie,
+            &csrf,
+            json!(null)
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
     media_poc::database::query("UPDATE extensions SET enabled=0")
         .execute(store.pool())
         .await

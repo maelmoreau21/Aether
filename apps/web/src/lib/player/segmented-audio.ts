@@ -121,8 +121,9 @@ export class SegmentedAudio extends ExternalAudio {
     try {
       // At most the current window and one ahead; never copy the full episode.
       // Do not launch the next packet-copy job while the first frames decode.
-      // Request it with four seconds of lead instead of immediately on startup.
-      const nearingBoundary = (current + 1) * SECONDS - target <= 4;
+      // Give the Node and a mobile connection more time to prepare the next
+      // window, while leaving startup dedicated to the current window.
+      const nearingBoundary = (current + 1) * SECONDS - target <= 8;
       for (const chunk of onlyCurrent || !nearingBoundary ? [current] : [current, current + 1]) {
         if (this.closed || epoch !== this.seekEpoch) return;
         const ranges=this.buffer.buffered;

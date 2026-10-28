@@ -427,7 +427,7 @@
       step="0.01"
       value={playback.position}
       disabled={busy || !playback.duration}
-      oninput={event => onSeek(Number(event.currentTarget.value))}
+      onchange={event => onSeek(Number(event.currentTarget.value))}
       onpointermove={event => {
         const rect = event.currentTarget.getBoundingClientRect();
         hoverTime = Math.max(0, Math.min(playback.duration, ((event.clientX - rect.left) / rect.width) * playback.duration));
@@ -895,6 +895,18 @@
       flex-wrap: wrap;
       row-gap: 8px;
     }
+    .left-controls, .right-controls {
+      width: 100%;
+      justify-content: center;
+      gap: 4px;
+      min-width: 0;
+    }
+    .left-controls { flex-wrap: wrap; }
+    .control-btn { min-width: 44px; min-height: 44px; }
+    .time { margin-left: 4px; }
+    .remaining-time { display: none; }
+    .progress-line { margin-bottom: 4px; }
+    .seek { height: 44px; }
     .volume-group {
       display: none;
     }
@@ -903,7 +915,12 @@
       right: 16px;
       bottom: calc(100% - 70px);
       width: min(340px, calc(100vw - 32px));
+      box-sizing: border-box;
+      max-height: max(100px, calc(100dvh - 220px));
     }
+  }
+  @media (max-width: 380px) {
+    .chapter-btn { display: none; }
   }
   .skip-marker-overlay {
     position: absolute;

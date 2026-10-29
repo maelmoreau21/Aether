@@ -144,3 +144,12 @@ bibliothèque, état et actions avant les détails techniques. Les erreurs d’a
 survivent aux actualisations automatiques. Aucun état d’arrêt ou de reprise
 n’est inventé ; garde du lease et contrats conservés. Preuves et limites :
 [Tâches UX](UX_TASKS_2026_10_29.md).
+
+## Jalon musique du 29 octobre 2026
+
+Albums/artistes puis groupe sélectionné, sans répéter toute la liste des titres.
+Pochettes carrées, initiales d’artistes faute de portrait, replis d’images neutres.
+La portée des regroupements par page est explicite. Lecture principale visible,
+file/playlist/format en actions secondaires. Barre mobile compacte au-dessus de
+la navigation, file et paroles dans un dialogue natif avec transport fixe et
+options de lecture. État/contrats conservés ; [preuves et limites musique](UX_MUSIC_2026_10_29.md).

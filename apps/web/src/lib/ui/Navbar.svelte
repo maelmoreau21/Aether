@@ -139,7 +139,7 @@
     .mobile-nav [aria-current='page'],.mobile-nav .active { color:var(--color-accent); background:var(--color-accent-soft); }
     .library-dialog { margin:auto 0 0; width:100%; max-height:85dvh; border-radius:var(--radius-xl) var(--radius-xl) 0 0; padding:20px 16px calc(20px + env(safe-area-inset-bottom,0px)); }
     :global(body:has(.mobile-nav)) { padding-bottom:calc(64px + env(safe-area-inset-bottom,0px)); }
-    :global(body.music-playing:has(.mobile-nav)) { padding-bottom:calc(244px + env(safe-area-inset-bottom,0px)); }
+    :global(body.music-playing:has(.mobile-nav)) { padding-bottom:calc(var(--music-player-height,110px) + 88px + env(safe-area-inset-bottom,0px)); }
     :global(body:has(.mobile-nav) .music-player) { bottom:calc(64px + env(safe-area-inset-bottom,0px)); padding-bottom:0; }
   }
 </style>

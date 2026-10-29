@@ -1,3 +1,10 @@
+## 29 octobre 2026 — UX, musique et lecteur persistant
+
+- Vues albums/artistes puis sélection d’un groupe, portée explicitement limitée aux 100 morceaux chargés, focus aller/retour. Pochettes et replis mutualisés dans MusicArtwork, initiales d’artistes faute de portrait. Lecture visible, file/playlist/format dans un menu ; mode inline AddToPlaylist sans popovers imbriqués.
+- Barre compacte et espace réservé ajusté à sa hauteur réelle, au-dessus de la navigation mobile ; curseur tactile 44 px. Dialogue natif file/paroles, transport fixe, Échap/focus, répétition/mélange/volume/arrêt conservés. Moteur audio, Media Session, API, RBAC et médias personnels préservés.
+- Check 0 erreur (CatalogGrid:90 préexistant), lint, build et 177 tests réussis. Banc musique 23 scénarios aux huit largeurs/deux thèmes avec vrai décodage Opus synthétique ; fondations 25 scénarios sans anomalie avant ajustement tactile final, matrice musique rejouée ensuite. CLI Playwright utilisé avec compte synthétique user. Captures inspectées dans output/playwright/ux-music ; rapport docs/UX_MUSIC_2026_10_29.md. Pas de preuve Core/NAS/Range réel, sortie sonore ou téléphone physique.
+- Script Core playlists adapté à la fermeture du dialogue avant navigation, vérifié syntaxiquement seulement. Aucun push. Suite : recherche/filtres, listes, téléchargements/hors ligne.
+
 ## 29 octobre 2026 — UX, tâches et indexations
 
 - File d’opérations en premier, filtre par état explicitement limité à la page chargée, planifications/automatisation et ajout repliables. Cartes centrées sur type/bibliothèque/état/serveur/actions, détails techniques et résultat conservés. Erreurs d’action séparées du chargement : le polling ne les efface plus. Garde du lease et idempotence conservées, aucun changement backend/API/RBAC.

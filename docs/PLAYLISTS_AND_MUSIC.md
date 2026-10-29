@@ -1,5 +1,10 @@
 # Playlists, musique et installation des extensions
 
+> Refonte UX du 29 octobre : album/artiste sélectionné sans liste exhaustive
+> répétée, actions secondaires par morceau, lecteur compact et dialogue natif
+> file/paroles/options. Fermer ce panneau avant d’interagir avec la navigation.
+> Contrats inchangés ; validation et limites : [jalon musique](UX_MUSIC_2026_10_29.md).
+
 ## Utilisation
 
 La page **Playlists** rassemble films, séries et morceaux. Le propriétaire peut

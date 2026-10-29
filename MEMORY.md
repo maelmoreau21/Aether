@@ -1,3 +1,8 @@
+## 29 octobre 2026 — Correction Bake GHCR
+
+- `docker/bake-action@v6` devait recevoir les fichiers temporaires générés par `docker/metadata-action@v5` avec le préfixe `cwd://`; sans cela, le run échouait sur `lstat .../docker-metadata-action-bake.json: no such file or directory`.
+- Correctif appliqué dans `.github/workflows/publish.yml` pour les trois images et documenté dans `docs/CI_GHCR.md`. `docker buildx bake -f docker-bake.ci.hcl --print runtime runtime-core runtime-node` passe localement; actionlint n'est pas installé localement.
+
 ## 29 octobre 2026 — Navigation du menu profil
 
 - Les destinations « Mon profil & Préférences » et « Tableau de bord » du menu profil utilisent désormais une navigation SvelteKit explicite après fermeture du popover, tout en conservant leurs `href` pour l’ouverture dans un nouvel onglet.

@@ -94,9 +94,9 @@ jobs:
         with:
           files: |
             docker-bake.ci.hcl
-            ${{ steps.meta-standalone.outputs.bake-file }}
-            ${{ steps.meta-core.outputs.bake-file }}
-            ${{ steps.meta-node.outputs.bake-file }}
+            cwd://${{ steps.meta-standalone.outputs.bake-file }}
+            cwd://${{ steps.meta-core.outputs.bake-file }}
+            cwd://${{ steps.meta-node.outputs.bake-file }}
           push: ${{ inputs.push }}
           load: ${{ !inputs.push }}
           set: |

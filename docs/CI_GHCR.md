@@ -300,6 +300,11 @@ Le heredoc shell commence avec des lignes non indentées au niveau YAML ; elles
 terminent le bloc `run: |`. Le parseur essaie donc de lire les tags d'images
 comme des clés YAML. L'appel réutilisable propage cette erreur dans la CI.
 Les tags sont maintenant produits par `docker/metadata-action`.
+Avec `docker/bake-action@v6`, les fichiers Bake générés par
+`docker/metadata-action` doivent être passés avec le préfixe `cwd://` :
+ils sont créés dans le répertoire temporaire du runner et ne font pas partie
+du contexte Git. Sans ce préfixe, Bake échoue avec
+`lstat .../docker-metadata-action-bake.json: no such file or directory`.
 Le lancement manuel historique pouvait également étiqueter le SHA courant comme
 une autre branche sans passer les tests : ce paramètre a été supprimé.
 

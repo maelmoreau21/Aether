@@ -22,10 +22,6 @@ FROM rust:slim-bookworm AS rust-builder
 
 # Keep release builds usable on memory-constrained hosts; operators can override.
 ARG CARGO_BUILD_JOBS=1
-ARG GIT_BRANCH=develop
-ARG MEDIA_VERSION=""
-ENV GIT_BRANCH=${GIT_BRANCH}
-ENV MEDIA_VERSION=${MEDIA_VERSION}
 
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
@@ -74,8 +70,16 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Copy actual workspace crates (shared contracts, node, and core with migrations)
 COPY crates/ ./crates/
 
+# Version changes must not invalidate the dependency compilation layer above.
+ARG GIT_BRANCH=develop
+ARG MEDIA_VERSION=""
+ENV GIT_BRANCH=${GIT_BRANCH}
+ENV MEDIA_VERSION=${MEDIA_VERSION}
+
 # Clean dummy binary/deps artifacts, recompile actual release binaries, and strip symbols
-RUN touch crates/shared/src/lib.rs \
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    touch crates/shared/src/lib.rs \
           crates/shared/build.rs \
           crates/node/src/lib.rs \
           crates/node/src/bin/aether-node.rs \

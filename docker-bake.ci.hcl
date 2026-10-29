@@ -2,6 +2,10 @@ variable "GIT_BRANCH" {
   default = "develop"
 }
 
+variable "MEDIA_VERSION" {
+  default = ""
+}
+
 group "default" {
   targets = ["runtime", "runtime-core", "runtime-node"]
 }
@@ -13,9 +17,10 @@ target "common" {
   platforms = ["linux/amd64"]
   args = {
     GIT_BRANCH = GIT_BRANCH
+    MEDIA_VERSION = MEDIA_VERSION
     CARGO_BUILD_JOBS = "2"
   }
-  cache-from = ["type=gha,scope=ci-images", "type=gha,scope=runtime", "type=gha,scope=runtime-core", "type=gha,scope=runtime-node"]
+  cache-from = ["type=gha,scope=publish-images", "type=gha,scope=ci-images", "type=gha,scope=runtime", "type=gha,scope=runtime-core", "type=gha,scope=runtime-node"]
 }
 
 target "runtime" {

@@ -38,16 +38,6 @@ jobs:
     # Uniquement push direct / workflow_dispatch sur main ou develop, ou workflow_call validé.
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || inputs.is_release)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: aether
-            target: runtime
-          - image: aether-core
-            target: runtime-core
-          - image: aether-node
-            target: runtime-node
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,9 +53,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/metadata-action@v5
-        id: meta
+        id: meta-standalone
         with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          bake-target: runtime
+          images: ghcr.io/${{ github.repository_owner }}/aether
           tags: |
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' && !inputs.is_release }}
             type=raw,value=latest,enable=${{ inputs.is_release }}
@@ -73,80 +64,93 @@ jobs:
             type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' && inputs.is_release }}
             type=sha,format=long
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/metadata-action@v5
+        id: meta-core
+        with:
+          bake-target: runtime-core
+          images: ghcr.io/${{ github.repository_owner }}/aether-core
+          tags: |
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' && !inputs.is_release }}
+            type=raw,value=latest,enable=${{ inputs.is_release }}
+            type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' && inputs.is_release }}
+            type=sha,format=long
+
+      - uses: docker/metadata-action@v5
+        id: meta-node
+        with:
+          bake-target: runtime-node
+          images: ghcr.io/${{ github.repository_owner }}/aether-node
+          tags: |
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' && !inputs.is_release }}
+            type=raw,value=latest,enable=${{ inputs.is_release }}
+            type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' && inputs.is_release }}
+            type=sha,format=long
+
+      # One solve shares Rust/Web/FFmpeg stages across all three published images.
+      - uses: docker/bake-action@v6
         id: build
         with:
-          context: .
-          target: ${{ matrix.target }}
-          platforms: linux/amd64
-          build-args: |
-            GIT_BRANCH=${{ github.ref_name }}
-            MEDIA_VERSION=${{ inputs.version }}
+          files: |
+            docker-bake.ci.hcl
+            ${{ steps.meta-standalone.outputs.bake-file }}
+            ${{ steps.meta-core.outputs.bake-file }}
+            ${{ steps.meta-node.outputs.bake-file }}
           push: ${{ inputs.push }}
           load: ${{ !inputs.push }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
-
-      - name: Vérifier le téléchargement et le rattachement de l'image
-        if: inputs.push
+          set: |
+            runtime.cache-to=type=gha,mode=max,scope=publish-images
         env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          GIT_BRANCH: ${{ github.ref_name }}
+          MEDIA_VERSION: ${{ inputs.version }}
+
+      - name: Vérifier les trois images (provenance, version et runtime Node)
+        env:
+          BUILD_METADATA: ${{ steps.build.outputs.metadata }}
+          OWNER: ${{ github.repository_owner }}
           EXPECTED_SOURCE: ${{ github.server_url }}/${{ github.repository }}
           EXPECTED_REVISION: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          ref="${IMAGE}@${DIGEST}"
-          docker pull "$ref"
-          test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$ref")" = "$EXPECTED_SOURCE"
-          test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")" = "$EXPECTED_REVISION"
-
-      - name: Vérifier le runtime Node optimisé
-        if: matrix.target == 'runtime-node'
-        env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          set -euo pipefail
-          target_ref="${IMAGE}@${DIGEST}"
-          if [ "${{ inputs.push }}" != "true" ]; then
-            target_ref="${{ matrix.image }}:${{ inputs.version || 'test' }}"
-          fi
-          docker run --rm --entrypoint sh "$target_ref" -ec '
-            ffprobe -version | head -n 1 | grep -F "ffprobe version 9.0.2"
-            ffmpeg -version | head -n 1 | grep -F "ffmpeg version 9.0.2"
-            test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
-          '
-          test "$(docker inspect --format '{{.Size}}' "$target_ref")" -lt 200000000
-
-      - name: Vérifier la commande version du conteneur
-        env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-          BINARY: ${{ matrix.image }}
           EXPECTED_VERSION: ${{ inputs.version }}
+          PUSH_IMAGES: ${{ inputs.push }}
         run: |
           set -euo pipefail
-          target_ref="${IMAGE}@${DIGEST}"
-          if [ "${{ inputs.push }}" != "true" ]; then
-            target_ref="${{ matrix.image }}:${{ inputs.version || 'test' }}"
-          fi
-          output=$(docker run --rm "$target_ref" "$BINARY" --version)
-          echo "Sortie version du binaire : $output"
-          if [ -n "$EXPECTED_VERSION" ]; then
-            echo "$output" | grep -F "$EXPECTED_VERSION"
-          fi
-
-      - name: Enregistrer l'empreinte de l'image
-        run: |
           mkdir -p digests
-          echo "${{ steps.build.outputs.digest }}" > "digests/${{ matrix.image }}.digest"
+          for pair in aether:runtime aether-core:runtime-core aether-node:runtime-node; do
+            image=${pair%:*}
+            target=${pair#*:}
+            # metadata-action normalizes repository names to lowercase.
+            image_repo="ghcr.io/${OWNER,,}/$image"
+            if [ "$PUSH_IMAGES" = "true" ]; then
+              digest=$(jq -er --arg target "$target" '.[$target]["containerimage.digest"] | select(startswith("sha256:"))' <<< "$BUILD_METADATA")
+              target_ref="${image_repo}@${digest}"
+              docker pull "$target_ref"
+              printf '%s\n' "$digest" > "digests/$image.digest"
+            else
+              target_ref="${image_repo}:sha-${EXPECTED_REVISION}"
+            fi
+            test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$target_ref")" = "$EXPECTED_SOURCE"
+            test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$target_ref")" = "$EXPECTED_REVISION"
+            output=$(docker run --rm "$target_ref" "$image" --version)
+            echo "$image : $output"
+            if [ -n "$EXPECTED_VERSION" ]; then
+              echo "$output" | grep -F -- "$EXPECTED_VERSION"
+            fi
+            if [ "$target" = "runtime-node" ]; then
+              docker run --rm --entrypoint sh "$target_ref" -ec '
+                ffprobe -version | head -n 1 | grep -F "ffprobe version 9.0.2"
+                ffmpeg -version | head -n 1 | grep -F "ffmpeg version 9.0.2"
+                test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
+              '
+              test "$(docker inspect --format '{{.Size}}' "$target_ref")" -lt 200000000
+            fi
+          done
 
       - name: Sauvegarder les digests en artifact
+        if: inputs.push
         uses: actions/upload-artifact@v4
         with:
-          name: digest-${{ matrix.image }}
-          path: digests/${{ matrix.image }}.digest
+          name: digest-images
+          path: digests/*.digest
+          if-no-files-found: error
           retention-days: 1

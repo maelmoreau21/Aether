@@ -1,5 +1,46 @@
 # CI et publication GHCR
 
+## Publication mutualisée et partition Rust allégée — 29 octobre 2026
+
+Diagnostic du [run 40931283481](https://github.com/maelmoreau21/Aether/actions/runs/40931283481) :
+la publication standalone recompile les dépendances en 4 min 56 s puis les
+binaires en 9 min 01 s, bien qu'un job Images ait déjà construit les runtimes.
+`MEDIA_VERSION` était déclaré avant la précompilation : chaque nouvelle version
+invalidait cette couche. Les trois publications utilisaient aussi trois runners
+compilant chacun les mêmes neuf binaires, avec une seule tâche Cargo.
+
+La publication réutilise maintenant le plan Bake partagé par la validation,
+avec deux tâches Cargo, trois jeux de métadonnées/tags et un seul export de cache
+`publish-images`. Elle importe aussi le cache `ci-images`. Les arguments de
+version/branche sont déclarés après la précompilation des dépendances ; les deux
+commandes Cargo montent les caches registry/git. La compilation finale reste
+nécessaire lorsque la version embarquée ou les sources changent. Les profils
+release et la limite locale par défaut d'une tâche Cargo restent conservés.
+
+Les trois images sont toujours vérifiées : téléchargement par digest après
+push, labels source/révision, commande version, FFmpeg/ffprobe 9.0.2 et taille
+Node inférieure à 200 Mo. Le mode sans push utilise désormais le tag SHA réellement
+chargé. Les trois fichiers digest sont regroupés dans `digest-images`, compatible
+avec le téléchargement `digest-*` de la release. La publication reste sérialisée,
+interdite aux PR et conditionnée aux mêmes contrôles sur develop.
+
+Rust conserve ses trois partitions d'intégration ; une quatrième entrée `checks`
+exécute en parallèle format, Clippy, unitaires, ABI et contrats PostgreSQL/OIDC/
+multi-Node. PostgreSQL ne démarre que pour cette entrée. Le contrôle agrégé
+`Rust (Format, Clippy, Tests)` exige toujours la réussite de toute la matrice.
+Les commandes supplémentaires utilisent les mêmes features que les unitaires,
+pour éviter les recompilations dues à l'alternance des features. Aucun test
+obligatoire n'est retiré. Le quatrième runner peut augmenter les minutes cumulées
+et le gain dépend du nombre de runners disponibles.
+
+Validation locale : actionlint 1.7.12 sur les trois workflows, 14 tests de politique
+de release, 3 tests de couverture des partitions, plans `docker buildx bake --print`
+avec métadonnées synthétiques (version vide, bêta et stable), vérification des
+gates de publication et syntaxe Bash réussis ; `git diff --check` réussi.
+Daemon Docker indisponible : aucune construction/exécution de conteneur ni
+publication réelle dans ce jalon. Une première reconstruction de cache est
+attendue ; aucun gain de temps après modification n'est encore mesuré sur GitHub.
+
 ## Réduction des compilations et des runs obsolètes — 29 octobre 2026
 
 Les profils Cargo dev/test omettent les symboles de débogage dans ce workflow

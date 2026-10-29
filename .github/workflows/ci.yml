@@ -43,16 +43,18 @@ jobs:
     concurrency:
       group: ci-rust-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
-    name: Rust (partition ${{ matrix.shard }})
+    name: Rust (${{ matrix.shard == 'checks' && 'contrôles et contrats' || format('partition {0}', matrix.shard) }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2]
+        # Keep the three integration partitions; run the former partition-0
+        # prerequisites/contracts in parallel instead of serializing them.
+        shard: [0, 1, 2, checks]
     services:
       postgres:
-        image: postgres:18-alpine
+        image: ${{ matrix.shard == 'checks' && 'postgres:18-alpine' || '' }}
         env:
           POSTGRES_DB: media_test
           POSTGRES_USER: media_test
@@ -83,7 +85,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: rust
-          save-if: ${{ matrix.shard == 0 }}
+          save-if: ${{ matrix.shard == 'checks' }}
 
       - name: Cache des fixtures synthétiques
         id: cache-fixtures
@@ -127,52 +129,53 @@ jobs:
         run: python3 scripts/validate-prepared-fixtures.py
 
       - name: Valider les métriques de comparaison des lecteurs
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: node scripts/player-comparison-stats.test.cjs
 
       - name: Valider les statistiques de marge de sécurité
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: node scripts/safe-margin-stats.test.cjs
 
       - name: Valider la récupération audio bornée
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: node --test scripts/audio-seek-policy.test.cjs
 
       - name: Vérifier le formatage (cargo fmt)
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: cargo fmt --check
 
       - name: Analyse statique stricte (cargo clippy)
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
 
       - name: Exécuter les tests unitaires (cargo test --lib --bins)
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: cargo test --locked --workspace --all-features --lib --bins
 
       - name: Vérifier l'ABI du SDK avec un module Rust de test
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: |
           cargo build --locked -p media-extension-sdk-fixture --target wasm32-unknown-unknown --release
-          cargo test --locked -p media-poc --test extensions real_rust_sdk_module_executes -- --ignored
+          cargo test --locked --all-features -p media-poc --test extensions real_rust_sdk_module_executes -- --ignored
 
       - name: Exécuter les tests d'intégration (cargo test --test '*')
+        if: matrix.shard != 'checks'
         # Disques/CPU séparés entre partitions. Aucun test retiré ; les tests
         # restent séquentiels au sein de chaque runner, y compris les benchmarks.
         run: python3 scripts/ci-integration-shard.py --index ${{ matrix.shard }} --count 3
 
       - name: Vérifier la couverture des partitions de tests
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: python3 scripts/test-ci-integration-shard.py
 
       - name: Contrats PostgreSQL 18 (HTTP, OIDC, deux Nodes)
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         env:
           MEDIA_TEST_POSTGRES_URL: postgres://media_test:ci-only-disposable-password@127.0.0.1:5432/media_test?sslmode=disable
         run: |
-          cargo test --locked -p media-poc --test postgres -- --ignored --test-threads=1
-          cargo test --locked -p media-poc --lib oidc::tests -- --test-threads=1
-          cargo test --locked -p media-poc --test distributed_multi_node -- --test-threads=1
+          cargo test --locked --all-features -p media-poc --test postgres -- --ignored --test-threads=1
+          cargo test --locked --all-features -p media-poc --lib oidc::tests -- --test-threads=1
+          cargo test --locked --all-features -p media-poc --test distributed_multi_node -- --test-threads=1
 
   # Keep the existing required-check name and gate publication on all partitions.
   rust:

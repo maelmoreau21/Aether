@@ -1,3 +1,10 @@
+## 29 octobre 2026 — Réduction du temps CI et publication Docker
+
+- Run 40931283481 : publication standalone 4 min 56 s de dépendances puis 9 min 01 s de binaires. Les arguments version/branche invalidaient la précompilation et les trois jobs de publication reconstruisaient les mêmes binaires.
+- Publication des trois images dans un seul solve Bake, deux tâches Cargo, caches CI/publication mutualisés ; version déclarée après la précompilation et mounts registry/git aux deux étapes. Contrôles provenance/version/runtime Node conservés, digests groupés dans `digest-images` compatible release ; aucun profil release dégradé.
+- Trois partitions Rust d'intégration conservées ; contrôles/unitaires/ABI/PostgreSQL dans une quatrième entrée parallèle, avec PostgreSQL seulement sur celle-ci. Features harmonisées pour éviter des recompilations. Gate Rust agrégée et gates de publication conservées ; davantage de runners/minutes cumulées possibles.
+- Actionlint 1.7.12, politique release 14/14, répartition 3/3, plans Bake synthétiques vide/bêta/stable, gates et syntaxe Bash réussis. Pas de build Docker réel (daemon arrêté), de nouveau run GitHub, de push ou de publication ; gain distant non mesuré. Détails : `docs/CI_GHCR.md`.
+
 ## 29 octobre 2026 — Lecteur, annulation et préparations partagées
 
 - Audio : attentes annulées à pause/fermeture, mises à jour MSE bornées et nettoyées, arrêt des préparations répétées après erreur terminale, erreurs d'un seek dépassé ignorées. Vidéo progressive : attente de progression et de premier fragment annulables ; watchdog natif libère l'audio et invalide la source pour permettre une vraie relance.

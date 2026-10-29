@@ -1,3 +1,9 @@
+## 29 octobre 2026 — Récupération explicite des leases de cache
+
+- `CacheDirectory` libère explicitement le verrou de son fichier `lease` avant
+  la suppression du répertoire. Les tests ciblés `cache_dirs` et la suite
+  `cargo test --locked --workspace --all-features --lib --bins` passent.
+
 ## 29 octobre 2026 — Reprise après délai de seek vidéo
 
 - Correction supplémentaire : un événement seeked ancien ne termine plus le chargement avant résolution de la progression et demande effective du seek ; régression reproduite puis corrigée, 32 tests NativePlayer réussis. Les chemins audio externe, préparations et repli vidéo ne garantissent pas tous une lecture progressive sans préparation complète.

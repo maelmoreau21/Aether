@@ -286,7 +286,12 @@ async fn artwork_batch_is_bounded_resumable_and_requires_admin_csrf() {
         .unwrap();
     media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
     media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('folder','Folder','films','local','synthetic-child',1)").execute(store.pool()).await.unwrap();
-    media_poc::database::query("INSERT INTO library_folders(library_id,parent_id,active) VALUES('folder','films',1)").execute(store.pool()).await.unwrap();
+    media_poc::database::query(
+        "INSERT INTO library_folders(library_id,parent_id,active) VALUES('folder','films',1)",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
     for (id, ids) in [("a", "{}"), ("b", "{\"tmdb\":\"42\"}")] {
         media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES(?,?,?,?,?)")
             .bind(id).bind(if id == "a" { "films" } else { "folder" }).bind(id).bind(id).bind(ids).execute(store.pool()).await.unwrap();
@@ -306,14 +311,54 @@ async fn artwork_batch_is_bounded_resumable_and_requires_admin_csrf() {
     .await;
     let csrf = login["csrfToken"].as_str().unwrap();
     let endpoint = "/api/v1/admin/artwork/collect-batch";
-    assert_ne!(call(&app, "GET", "/api/v1/admin/artwork/works?libraryId=films", "", "", json!({})).await.0, StatusCode::OK);
-    assert_eq!(call(&app, "GET", "/api/v1/admin/artwork/works?libraryId=films&limit=101", &cookie, "", json!({})).await.0, StatusCode::BAD_REQUEST);
-    let (status, listed, _) = call(&app, "GET", "/api/v1/admin/artwork/works?libraryId=films&limit=1", &cookie, "", json!({})).await;
+    assert_ne!(
+        call(
+            &app,
+            "GET",
+            "/api/v1/admin/artwork/works?libraryId=films",
+            "",
+            "",
+            json!({})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            "/api/v1/admin/artwork/works?libraryId=films&limit=101",
+            &cookie,
+            "",
+            json!({})
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    let (status, listed, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&limit=1",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{listed}");
     assert_eq!(listed["items"][0]["workId"], "a");
     assert_eq!(listed["items"][0]["posterCount"], 0);
     assert_eq!(listed["nextCursor"], "a");
-    let (_, listed, _) = call(&app, "GET", "/api/v1/admin/artwork/works?libraryId=films&limit=1&after=a", &cookie, "", json!({})).await;
+    let (_, listed, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&limit=1&after=a",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
     assert_eq!(listed["items"][0]["workId"], "b");
     assert!(listed["nextCursor"].is_null());
     let request = json!({"libraryId":"films", "limit":1});

@@ -4797,3 +4797,8 @@ scénarios NFO et affiches ne sont pas relancés.
 Le scénario navigateur Séries a été adapté à l'interface actuelle, notamment
 au chargement de la couverture et aux panneaux repliés. Le test complet passe
 sous Windows/Chrome 156 ; la CI Linux reste à confirmer.
+# 29 octobre 2026 — test navigateur playlists
+
+Les commandes audio du test ciblent le panneau musique ouvert pour éviter les
+doublons du lecteur réduit. Le test ciblé avec navigateur activé passe sous
+Windows/Chrome 156 ; la CI Linux reste à confirmer.

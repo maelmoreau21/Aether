@@ -1,5 +1,12 @@
 # CI et publication GHCR
 
+## Parcours playlists — 29 octobre 2026
+
+Le lecteur réduit et le panneau ouvert possèdent tous deux des commandes de
+navigation audio. Le test cible maintenant les commandes du panneau. Le test
+`product_tests::mixed_playlists` passe sous Windows avec
+`MEDIA_TEST_PLAYLIST_BROWSER=1` et Chrome 156 ; la CI Linux reste à confirmer.
+
 ## Parcours Séries — 29 octobre 2026
 
 Le test attendait une classe `loaded` supprimée de la couverture. Il vérifie

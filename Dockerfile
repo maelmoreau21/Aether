@@ -20,6 +20,8 @@ RUN npm run build
 # ==============================================================================
 FROM rust:slim-bookworm AS rust-builder
 
+# Keep release builds usable on memory-constrained hosts; operators can override.
+ARG CARGO_BUILD_JOBS=1
 ARG GIT_BRANCH=develop
 ARG MEDIA_VERSION=""
 ENV GIT_BRANCH=${GIT_BRANCH}

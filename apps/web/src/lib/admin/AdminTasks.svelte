@@ -344,9 +344,10 @@
     {/if}
   {:else}
     <header class="list-header">
-      <h2 id="tasks-heading">Tâches planifiées</h2>
-      <button class="refresh" disabled={refreshing} onclick={() => void refresh()}><Icon name="refresh" size={18} /> Actualiser</button>
+      <h2 id="tasks-heading">Tâches et indexations</h2>
     </header>
+    <DistributedTasks {active} {libraries} {nodes} />
+    <details class="plans-section"><summary>Planifications et lancement manuel</summary><p class="section-intro">Choisissez une opération pour régler sa fréquence ou la lancer maintenant.</p><button class="refresh" disabled={refreshing} onclick={() => void refresh()}><Icon name="refresh" size={18} /> Actualiser les planifications</button>
     {#each categories as category (category)}
       <div class="category">
         <h3>{category}</h3>
@@ -358,7 +359,8 @@
                 <span class="clock"><Icon name="clock" size={26} /></span>
                 <span class="task-copy">
                   <span class="task-title">{task.name}</span>
-                  <span class="task-subtitle">{task.running ? 'En cours…' : lastRun(task)}</span>
+                  <span class="task-subtitle">{task.running ? 'En cours…' : task.plan ? outcomes[task.plan.outcome] ?? task.plan.outcome : 'Aucun lancement planifié'}</span>
+                  <span class="task-subtitle">{lastRun(task)}</span>
                   {#if task.reason}<span class="task-subtitle">{task.reason}</span>{/if}
                 </span>
               </a>
@@ -372,8 +374,8 @@
         </div>
       </div>
     {/each}
-    <DistributedTasks {active} {libraries} {nodes} />
-    <AutomationTasks {active} {libraries} />
+    </details>
+    <details class="automation-section"><summary>Automatisation des métadonnées</summary><AutomationTasks {active} {libraries} /></details>
   {/if}
   {#if scanError}<p class="feedback error" role="alert">{scanError}</p>{/if}
   {#if backupError}<p class="feedback error" role="alert">{backupError}</p>{/if}
@@ -405,6 +407,9 @@
 
 <style>
   section { min-width: 0; color: var(--text-primary); }
+  .plans-section,.automation-section { margin-top:32px; border-top:1px solid var(--border-subtle); }
+  .plans-section > summary,.automation-section > summary { cursor:pointer; padding:20px 0; min-height:44px; font-size:18px; font-weight:600; }
+  .section-intro { margin:0; color:var(--text-secondary); line-height:1.6; }
   h2 { font-size: clamp(24px, 2.2vw, 32px); font-weight: 400; margin: 0; overflow-wrap: anywhere; }
   .list-header, .detail-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .category { margin-top: 32px; } .category > h3 { font-size: 24px; font-weight: 400; margin: 0 0 18px; }
@@ -412,7 +417,7 @@
   .task-row { display: flex; align-items: center; min-height: 96px; padding-right: 20px; }
   .task-row:hover { background: var(--bg-elevated); }
   .task-link { display: flex; align-items: center; gap: 20px; flex: 1; min-width: 0; padding: 20px 24px; }
-  .clock { display: grid; place-items: center; flex-shrink: 0; width: 52px; height: 52px; border-radius: 50%; background: var(--accent-primary); color: var(--color-on-accent); }
+  .clock { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; color: var(--text-secondary); }
   .task-copy { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
   .task-title { font-size: 18px; } .task-subtitle { font-size: 14px; color: var(--text-secondary); line-height: 1.45; }
   button { font: inherit; color: var(--text-primary); min-height: 44px; padding: 10px 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); }

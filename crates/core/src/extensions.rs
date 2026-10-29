@@ -1721,6 +1721,12 @@ pub(crate) async fn run_automated(
     .await
     .map_err(db)?
     {
+        if operation == "lyrics.get" && !lyrics_result_matches_input(&payload, &cached) {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_lyrics_origin",
+            ));
+        }
         if operation == "intro.detect" && !adapters::marker_result_matches_input(&payload, &cached)
         {
             return Err(err(
@@ -1743,6 +1749,12 @@ pub(crate) async fn run_automated(
         Some(job),
     )
     .await?;
+    if operation == "lyrics.get" && !lyrics_result_matches_input(&payload, &result) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_lyrics_origin",
+        ));
+    }
     if operation == "intro.detect" && !adapters::marker_result_matches_input(&payload, &result) {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -1844,6 +1856,41 @@ pub(crate) async fn run_automated(
         value: result,
         marker_sources,
     })
+}
+
+fn lyrics_result_matches_input(input: &Value, result: &Value) -> bool {
+    let Some(track) = input["track"]
+        .as_str()
+        .map(normalize_title)
+        .filter(|s| !s.is_empty())
+    else {
+        return false;
+    };
+    let Some(artist) = input["artist"]
+        .as_str()
+        .map(normalize_title)
+        .filter(|s| !s.is_empty() && s != "unknown artist")
+    else {
+        return false;
+    };
+    if result["trackName"]
+        .as_str()
+        .is_none_or(|s| normalize_title(s) != track)
+        || result["artistName"]
+            .as_str()
+            .is_none_or(|s| normalize_title(s) != artist)
+    {
+        return false;
+    }
+    match (
+        input["durationSecs"].as_f64(),
+        result["durationSecs"].as_f64(),
+    ) {
+        (Some(a), Some(b)) => {
+            a > 0.0 && b > 0.0 && ((a - b).abs() <= 5.0 || (a - b).abs() / a <= 0.05)
+        }
+        _ => true,
+    }
 }
 
 fn normalize_title(title: &str) -> String {
@@ -2032,6 +2079,18 @@ mod configuration_tests {
             &json!({"providerId":"42", "title":"Song"}),
             &candidate
         ));
+    }
+
+    #[test]
+    fn lyrics_match_track_artist_and_duration() {
+        let input = lyrics_request_input("Song", "Artist", "Album", Some(180.0));
+        let mut result = json!({"id":42,"trackName":"Song","artistName":"Artist","durationSecs":181,"instrumental":false});
+        assert!(lyrics_result_matches_input(&input, &result));
+        result["artistName"] = json!("Different");
+        assert!(!lyrics_result_matches_input(&input, &result));
+        result["artistName"] = json!("Artist");
+        result["durationSecs"] = json!(300);
+        assert!(!lyrics_result_matches_input(&input, &result));
     }
 
     #[test]

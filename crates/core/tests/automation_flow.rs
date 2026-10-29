@@ -1458,6 +1458,105 @@ async fn provider_cache_stores_deduplicates_and_expires() {
     tx.commit().await.unwrap();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn signed_synthetic_lyrics_wasm_is_applied_with_provenance() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use media_poc::{auth::AuthState, scans::ScanJobs, scheduler};
+    use ring::{
+        rand::SystemRandom,
+        signature::{Ed25519KeyPair, KeyPair},
+    };
+    use sha2::{Digest, Sha256};
+    use std::{sync::Arc, time::Duration};
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("lyrics-wasm.sqlite");
+    let store = IdentityStore::open(&path).await.unwrap();
+    setup(&store).await;
+    query("UPDATE extensions SET enabled=0 WHERE id='fixture.metadata'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('music','Music','music','node-1','/synthetic-music',1)").execute(store.pool()).await.unwrap();
+    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,duration,codec,mime,scan_id,available,lyrics) VALUES('song','music','/synthetic-music','song.opus',1,'1','Song','Artist','Album','Artist',180,'opus','audio/ogg','scan',1,'')").execute(store.pool()).await.unwrap();
+    let output = json!({"apiVersion":1,"result":{"id":42,"trackName":"Song","artistName":"Artist","durationSecs":180,"instrumental":false,"plain":"Words","synced":"[00:01]Words"}}).to_string();
+    let data = output
+        .bytes()
+        .map(|byte| format!("\\{byte:02x}"))
+        .collect::<String>();
+    let wasm=wat::parse_str(format!(r#"(module (memory (export "memory") 1 256) (data (i32.const 4096) "{data}") (func (export "media_alloc") (param i32) (result i32) i32.const 1024) (func (export "media_run") (param i32 i32) (result i64) i64.const {}))"#, (4096u64<<32)|output.len() as u64)).unwrap();
+    let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
+    let signing = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
+    let mut package = media_extension_sdk::Package {
+        manifest: media_extension_sdk::Manifest {
+            api_version: 1,
+            id: "fixture.lyrics".into(),
+            name: "Fixture lyrics".into(),
+            version: "1.0.0".into(),
+            description: "Synthetic lyrics".into(),
+            author: "Test".into(),
+            license: "MIT".into(),
+            repository: "https://example.invalid/lyrics".into(),
+            permissions: vec!["metadata.read".into(), "metadata.write".into()],
+            category: Some("Lyrics".into()),
+            ..Default::default()
+        },
+        publisher_id: "fixture-publisher".into(),
+        wasm: STANDARD.encode(&wasm),
+        sha256: format!("{:x}", Sha256::digest(&wasm)),
+        signature: String::new(),
+    };
+    package.signature = STANDARD.encode(signing.sign(&package.signing_bytes().unwrap()).as_ref());
+    media_poc::extensions::validate_package(&package, signing.public_key().as_ref()).unwrap();
+    query("UPDATE extension_publishers SET public_key=? WHERE id='fixture-publisher'")
+        .bind(STANDARD.encode(signing.public_key().as_ref()))
+        .execute(store.pool())
+        .await
+        .unwrap();
+    media_poc::extension_storage::persist(&store, &package)
+        .await
+        .unwrap();
+    query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture.lyrics','fixture-publisher',?,1,'generation')").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
+    query("INSERT INTO extension_grants(extension_id,library_id) VALUES('fixture.lyrics','music')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let mut tx = store.pool().begin().await.unwrap();
+    automation::emit_music_snapshot(&mut tx, "music", media_contracts::protocol::unix_now())
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let jobs = Arc::new(ScanJobs::default());
+    let completed = tokio::time::timeout(Duration::from_secs(30),async {
+        loop {
+            scheduler::dispatch_once(&auth,temp.path(),&jobs,media_contracts::protocol::unix_now()).await.unwrap();
+            let state:Option<(String,String)>=query_as("SELECT t.status,t.error FROM durable_tasks t JOIN automation_task_links l ON l.task_id=t.id WHERE l.extension_id='fixture.lyrics'").fetch_optional(store.pool()).await.unwrap();
+            if let Some((status,error))=state { if status=="completed" { break; } assert_ne!(status,"error","task failed: {error}"); }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }).await;
+    if completed.is_err() {
+        let tasks: Vec<(String, String, String)> =
+            query_as("SELECT category,status,error FROM durable_tasks")
+                .fetch_all(store.pool())
+                .await
+                .unwrap();
+        let events: Vec<(String, Option<i64>)> =
+            query_as("SELECT kind,dispatched_at FROM automation_events")
+                .fetch_all(store.pool())
+                .await
+                .unwrap();
+        panic!("synthetic lyrics worker timed out: tasks={tasks:?} events={events:?}");
+    }
+    let (lyrics,provider):(String,String)=query_as("SELECT t.lyrics,p.provider_id FROM music_tracks t JOIN automatic_metadata_provenance p ON p.work_id=t.id AND p.field_name='lyrics' WHERE t.id='song'").fetch_one(store.pool()).await.unwrap();
+    assert_eq!(lyrics, "[00:01]Words");
+    assert_eq!(provider, "42");
+    jobs.shutdown().await;
+    store.close().await;
+}
+
 #[tokio::test]
 async fn music_automation_pipeline_and_lyrics_provenance() {
     let temp = tempfile::tempdir().unwrap();

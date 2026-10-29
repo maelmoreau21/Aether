@@ -15,6 +15,8 @@ const output='target/extension-catalogue-ui';fs.mkdirSync(output,{recursive:true
   const r=route.request(),u=new URL(r.url()),p=u.pathname,method=r.method();let data={};
   if(method!=='GET')mutations.push({path:p,method});
   if(p==='/api/v1/auth/me')data={user:{id:'fixture-admin',login:'admin',role:'administrator'},csrfToken:'fixture'};
+  else if(p==='/api/v1/admin/activity')data={sessions:[]};
+  else if(p==='/api/v1/admin/api-keys')data={keys:[]};
   else if(p==='/api/v1/account/sessions')data={sessions:[]};
   else if(p==='/api/v1/account/avatar/extensions')data={extensions:installed.filter(e=>e.enabled&&e.manifest.permissions.includes('avatars')).map(e=>({id:e.manifest.id,name:e.manifest.name}))};
   else if(p==='/api/v1/account/avatar/collections')data={packs};
@@ -49,19 +51,29 @@ const output='target/extension-catalogue-ui';fs.mkdirSync(output,{recursive:true
  });
  await page.goto(origin+'/app/admin/libraries/#extensions-section');const panel=page.locator('#extensions-section');
 
- const menu=page.getByRole('button',{name:'Menu',exact:true});
+ const menu=page.locator('.mobile-menu-toggle');
+ const openNavigation=async()=>{await page.waitForFunction(()=>innerWidth>=1100?document.querySelector('.desktop-sidebar'):document.querySelector('#admin-navigation'));if(await menu.isVisible() && await menu.getAttribute('aria-expanded')==='false')await menu.click();};
  await panel.getByRole('heading',{name:'Extensions',exact:true}).waitFor();
+ await page.locator('.desktop-sidebar').waitFor();
+ assert((await panel.boundingBox()).x>250,'Desktop content leaves room for persistent navigation');
+ await page.setViewportSize({width:390,height:1000});
+ await page.locator('#admin-navigation').waitFor({state:'attached'});
  assert.equal(await page.locator('#admin-navigation').isVisible(),false);
- assert((await panel.boundingBox()).x<70,'No permanent sidebar space');
+ assert((await panel.boundingBox()).x<70,'Mobile navigation leaves the content width available');
  await menu.click();await page.getByRole('dialog',{name:'Menu d’administration'}).waitFor();
  await page.keyboard.press('Shift+Tab');assert(await page.locator('#admin-navigation').evaluate(el=>el.contains(document.activeElement)));
  await page.keyboard.press('Escape');await page.waitForFunction(()=>document.querySelector('.mobile-menu-toggle').getAttribute('aria-expanded')==='false');assert.equal(await menu.getAttribute('aria-expanded'),'false');assert(await menu.evaluate(el=>el===document.activeElement));
- await menu.click();await page.mouse.click(800,500);assert.equal(await menu.getAttribute('aria-expanded'),'false');
+ await menu.click();await page.mouse.click(380,500);assert.equal(await menu.getAttribute('aria-expanded'),'false');
  await menu.click();await page.locator('.admin-sidebar a[href$="#libraries-section"]').click();assert.equal(await menu.getAttribute('aria-expanded'),'false');
 
  await menu.click();await page.locator('.admin-sidebar a[href$="#overview"]').click();
  for(const width of [1440,390]){await page.setViewportSize({width,height:1000});await page.screenshot({path:`${output}/overview-${width}.png`,fullPage:true});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}
- await menu.click();await page.locator('.admin-sidebar a[href$="#extensions-section"]').click();
+ await openNavigation();await page.locator('.admin-sidebar a[href$="#extensions-section"]').click();
+ if(process.env.MEDIA_UI_NAVIGATION_ONLY==='1'){
+  await panel.getByRole('heading',{name:'Extensions',exact:true}).waitFor();assert.deepEqual(errors,[]);
+  const navigationReport={passed:true,browser:browser.version(),scope:'Admin navigation only; synthetic APIs. Extension installation/configuration/avatar flows were not run.',checks:['persistent desktop sidebar','mobile drawer','Escape and focus return','outside dismissal','navigation between extensions, libraries and overview','desktop/mobile resizing'],errors};
+  fs.writeFileSync(output+'/navigation-report.json',JSON.stringify(navigationReport,null,2));console.log(JSON.stringify(navigationReport,null,2));return;
+ }
  await panel.getByRole('button',{name:'Actualiser les dépôts',exact:true}).click();
  await panel.locator('.catalogue-card').nth(catalog.extensions.length-1).waitFor();assert.equal(await panel.locator('.catalogue-card').count(),catalog.extensions.length);assert(!/[├┬�]/u.test(await panel.innerText()));
  for(const current of ['dark','light']){
@@ -70,7 +82,7 @@ const output='target/extension-catalogue-ui';fs.mkdirSync(output,{recursive:true
    await page.setViewportSize({width,height:1000});
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
    await page.screenshot({path:`${output}/catalogue-${theme}-${width}.png`,fullPage:true});
-   await menu.click();await page.screenshot({path:`${output}/menu-${theme}-${width}.png`,fullPage:true});await page.getByRole('button',{name:'Fermer le menu',exact:true}).click();
+   await openNavigation();await page.screenshot({path:`${output}/menu-${theme}-${width}.png`,fullPage:true});if(await menu.isVisible())await page.getByRole('button',{name:'Fermer le menu',exact:true}).click();
   }
  }
  const avatar=panel.locator('.catalogue-card').filter({hasText:'Aether Avatars'});

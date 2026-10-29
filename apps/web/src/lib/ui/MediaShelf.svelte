@@ -128,6 +128,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    min-width: 0;
   }
 
   h2 {
@@ -151,6 +152,7 @@
     display: flex;
     align-items: center;
     gap: 16px;
+    flex-shrink: 0;
   }
 
   .shelf-action-btn {
@@ -176,6 +178,7 @@
   }
 
   .view-all-link {
+    min-height: 44px;
     font-size: 13px;
     font-weight: 600;
     color: var(--color-accent);
@@ -226,8 +229,8 @@
     gap: 16px;
     overflow-x: auto;
     scroll-behavior: smooth;
-    padding: 12px 14px 18px;
-    margin: -4px -6px 0;
+    padding: 6px 4px 12px;
+    margin: 0 -4px;
     scrollbar-width: none;
     -ms-overflow-style: none;
     scroll-snap-type: x mandatory;
@@ -251,6 +254,9 @@
   }
 
   @media (max-width: 640px) {
+    .shelf-header { gap: 8px; margin-bottom: 12px; align-items: start; }
+    h2 { font-size: 18px; line-height: 1.3; }
+    .view-all-link { font-size: 12px; white-space: nowrap; }
     .shelf-container {
       margin: 0;
     }
@@ -260,7 +266,8 @@
     }
 
     .shelf-track.carousel :global(> *) {
-      flex: 0 0 145px;
+      flex: 0 0 calc((100vw - 64px) / 2.15);
     }
+    .shelf-track.carousel { gap: 12px; }
   }
 </style>

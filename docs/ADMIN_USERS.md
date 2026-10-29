@@ -1,5 +1,11 @@
 # Administration des comptes
 
+Les éditeurs de comptes et de groupes placent le focus dans la fenêtre, le
+maintiennent à l'intérieur pendant la navigation au clavier et le rendent au
+contrôle d'origine à la fermeture. Échap et le clic sur le fond ferment l'éditeur.
+Le test `node scripts/browser-admin-modal-focus.cjs` vérifie ce comportement
+dans un document synthétique avec Chrome headless ; il ne teste pas les API Core.
+
 Parcours local dans la console : création de comptes locaux, modification du nom affiché et du rôle, désactivation/réactivation sans suppression, remplacement du mot de passe local. Les deux rôles restent `administrator` et `user`. Un nouveau compte n'obtient aucune bibliothèque implicitement. Les accès hérités de groupes sont signalés dans l'annuaire.
 
 L’annuaire présente une grille de comptes avec avatar personnel (ou initiales), rôle, type de connexion, état et nombre de bibliothèques actives accessibles. Une fiche séparée regroupe Profil, Accès, Contrôle parental et Mot de passe. Les droits directs restent distingués des droits hérités des groupes. La sélection de toutes les bibliothèques ne concerne que les bibliothèques actuelles ; elle n’accorde pas automatiquement les futures bibliothèques.

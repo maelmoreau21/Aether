@@ -41,6 +41,10 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (source, target) = paths(std::env::args_os().skip(1))?;
+    #[cfg(windows)]
+    eprintln!(
+        "Windows: recovered files inherit the destination folder's ACL. Verify access to the folder and any copies; Aether does not validate or restrict these ACLs."
+    );
     let summary = media_poc::backup_bundle::extract(&source, &target).await?;
     println!(
         "Recovery files extracted. Keep the output directory private: config.json contains sensitive settings."

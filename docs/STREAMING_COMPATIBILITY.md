@@ -489,3 +489,9 @@ comportement sans ce graphe, sur Edge installé, sur haut-parleurs physiques ou
 sur un vrai Node. Ce sont des essais uniques sans comparaison avant/après.
 Rapports locaux : `target/edge-audio-clock-mp4-20261028/report.json` et
 `target/edge-audio-clock-mkv-20261028/report.json`.
+
+## 28 octobre 2026 — AV1 8 bits et Opus 7.1, banc local
+
+Chrome 156.0.8078.48 et EdgeCore 155.0.4283.62 headless sous Windows : une répétition par combinaison MP4/MKV AV1 8 bits + Opus mono FR/EN a réussi dans `browser-streaming-performance.cjs` (ouverture, signal PCM, deux changements de piste et seek). Pour la fixture 8 bits, `MEDIA_PERFORMANCE_ENGLISH_HZ=880` ajuste l'oracle à la fréquence synthétique connue ; le réglage par défaut reste 1050 Hz. Le serveur Range est synthétique et les essais ne valident pas l'interface/Core/Node. Rapports `target/stabilisation-8bit-{chrome,edge}-{mp4,mkv}/`.
+
+`browser-dual-opus.cjs` avec `MEDIA_TEST_SEGMENTED=1` a réussi sur les deux navigateurs avec le MP4 AV1 10 bits et deux pistes Opus 7.1 : changements de piste, signal PCM, seek et annulation. Rapports `target/stabilisation-71-{chrome,edge}/`. Le banc HTTP local et le mélange audio navigateur ne prouvent ni la sortie physique 7.1 ni la lecture longue, NAS ou réseau distant.

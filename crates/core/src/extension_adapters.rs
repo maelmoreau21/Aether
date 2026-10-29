@@ -1,6 +1,6 @@
 //! Generic host adapters: no provider names, credentials or host inference.
 use super::*;
-use media_extension_sdk::{MediaImage, SearchResultItem, StructuredMetadata};
+use media_extension_sdk::{Lyrics, MediaImage, SearchResultItem, StructuredMetadata};
 
 #[derive(sqlx::FromRow)]
 pub(super) struct WorkContext {
@@ -138,6 +138,36 @@ pub(super) fn validate_result(operation: &str, result: Value) -> Result<Value, E
         "metadata.details" => {
             let _: StructuredMetadata =
                 serde_json::from_value(result.clone()).map_err(|_| invalid())?;
+        }
+        "lyrics.get" => {
+            let lyrics: Lyrics = serde_json::from_value(result.clone()).map_err(|_| invalid())?;
+            if lyrics.track_name.trim().is_empty()
+                || lyrics.track_name.len() > 512
+                || lyrics.artist_name.trim().is_empty()
+                || lyrics.artist_name.len() > 512
+                || lyrics
+                    .album_name
+                    .as_ref()
+                    .is_some_and(|value| value.len() > 512)
+                || lyrics
+                    .plain
+                    .as_ref()
+                    .is_some_and(|value| value.len() > 32768)
+                || lyrics
+                    .synced
+                    .as_ref()
+                    .is_some_and(|value| value.len() > 32768)
+                || lyrics.synced_lines.len() > 4096
+                || lyrics
+                    .synced_lines
+                    .iter()
+                    .any(|line| line.text.len() > 32768)
+                || lyrics
+                    .duration_secs
+                    .is_some_and(|d| !d.is_finite() || d <= 0.0)
+            {
+                return Err(invalid());
+            }
         }
         "metadata.images" => {
             let images: Vec<MediaImage> =
@@ -284,6 +314,19 @@ mod marker_tests {
         let mut bad_confidence = valid;
         bad_confidence[0]["markers"][0]["confidence"] = json!(1.1);
         assert!(!marker_result_matches_input(&input, &bad_confidence));
+    }
+
+    #[test]
+    fn lyrics_result_is_typed_and_bounded() {
+        let result = json!({"id":42,"trackName":"Song","artistName":"Artist","instrumental":false,"plain":"Words"});
+        assert!(validate_result("lyrics.get", result.clone()).is_ok());
+        assert!(validate_result("lyrics.get", json!({"lyrics":"untyped"})).is_err());
+        let mut bad = result.clone();
+        bad["synced"] = json!("x".repeat(32769));
+        assert!(validate_result("lyrics.get", bad).is_err());
+        let mut bad = result;
+        bad["trackName"] = json!("");
+        assert!(validate_result("lyrics.get", bad).is_err());
     }
 
     #[test]

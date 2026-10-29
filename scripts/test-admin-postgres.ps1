@@ -45,7 +45,7 @@ fn main(){
     $env:PATH = $testStage + [IO.Path]::PathSeparator + $env:PATH
     & cargo test --locked -p media-poc --test admin_postgres -- --ignored --test-threads=1
     if ($LASTEXITCODE -ne 0) { throw 'Full PostgreSQL backup/restore validation failed.' }
-    Write-Host 'Real PostgreSQL 18 full encrypted backup and restore passed.'
+    Write-Host 'Real PostgreSQL 18 full unencrypted backup and restore passed.'
 } finally {
     $env:PATH = $savedPath
     $env:POSTGRES_PASSWORD = $savedPgPassword

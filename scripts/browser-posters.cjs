@@ -30,6 +30,7 @@ fs.mkdirSync(out, {recursive:true});
       if (phase === 'initial') {
         await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();
         await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
+        await page.getByRole('tab', {name:'Sources et dossiers', exact:true}).click();
         await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
         await page.getByRole('dialog').getByRole('button',{name:'Enregistrer',exact:true}).click();
         await page.getByRole('heading',{name:'Films scanner navigateur',exact:true}).waitFor();

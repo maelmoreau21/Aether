@@ -25,6 +25,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    #[cfg(windows)]
+    eprintln!(
+        "Windows: backup files inherit the destination folder's ACL. Verify access to the folder and any copies; Aether does not validate or restrict these ACLs."
+    );
+
     let media_root = std::env::var_os("MEDIA_LIBRARY_ROOT")
         .or_else(|| std::env::var_os("MEDIA_FIXTURE_DIR"))
         .map(PathBuf::from)

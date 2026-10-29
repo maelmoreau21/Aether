@@ -147,6 +147,8 @@ impl Scheduler {
         Self(
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_secs(15));
+                let mut cache_cursor = String::new();
+                let mut cache_ticks = 0u8;
                 loop {
                     interval.tick().await;
                     if jobs.is_cancelled() {
@@ -154,6 +156,20 @@ impl Scheduler {
                     }
                     if run_due(&auth, &root, &jobs, now()).await.is_err() {
                         eprintln!("Scheduled scan tick failed; retrying on next tick");
+                    }
+                    cache_ticks += 1;
+                    if cache_ticks >= 4 {
+                        cache_ticks = 0;
+                        if crate::automation::purge_provider_cache_batch(
+                            &auth.store,
+                            &mut cache_cursor,
+                            now(),
+                        )
+                        .await
+                        .is_err()
+                        {
+                            eprintln!("Provider cache cleanup failed; retrying on next tick");
+                        }
                     }
                 }
             }),

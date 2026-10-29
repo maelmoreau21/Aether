@@ -4,6 +4,8 @@ SQLite reste le moteur par défaut en standalone et en distribué. Un Core uniqu
 peut utiliser un PostgreSQL 18 externe ; aucun conteneur de base n'est ajouté aux
 Compose de déploiement. Les Media Nodes ne se connectent jamais à cette base.
 
+Les champs de temps Unix du schéma initial PostgreSQL utilisent `bigint` pour représenter les dates au-delà de 2038. Ce changement concerne uniquement les bases vierges ; aucune migration des bases existantes n'est fournie. `scripts/test-fresh-schema.py` et `scripts/test-fresh-postgres-schema.ps1` ont été exécutés avec des dates supérieures à 2³¹. Le parcours `scripts/test-admin-postgres.ps1` a réussi sur un conteneur PostgreSQL 18 jetable : sauvegarde complète non chiffrée et restauration dans une autre base. Il ne prouve pas un déploiement NAS ou une restauration PostgreSQL des fichiers assets.
+
 ## Configuration
 
 ```dotenv

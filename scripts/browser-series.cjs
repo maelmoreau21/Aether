@@ -41,12 +41,13 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByRole('button', {name:'Ajouter une bibliothèque', exact:true}).click();
     await page.locator('#library-name').fill('Séries Navigateur');
     await page.locator('#library-kind').selectOption('series');
-    await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
+    await page.getByRole('tab', {name:'Sources et dossiers', exact:true}).click();
+        await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
     await page.getByRole('button', {name:'Enregistrer', exact:true}).click();
     await page.getByRole('heading', {name:'Séries Navigateur', exact:true}).waitFor();
 
     // Grant library access directly on series-user-b in Users section
-    if (await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
+    if (await page.locator('.mobile-menu-toggle').isVisible() && await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
     await page.locator('.admin-sidebar a[href$="#users-section"]').click();
     const accounts = page.locator('#users-section');
     const userRow = accounts.locator('tr').filter({hasText: 'series-user-b'});
@@ -58,7 +59,7 @@ fs.mkdirSync(out, {recursive: true});
     await accounts.getByRole('button', {name: 'Appliquer', exact: true}).click();
     await page.getByText('Compte enregistré avec succès.').waitFor();
 
-    if (await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
+    if (await page.locator('.mobile-menu-toggle').isVisible() && await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
     await page.locator('.admin-sidebar a[href$="#libraries-section"]').click();
     await page.getByLabel('Actions Séries Navigateur', {exact:true}).click();
     await page.getByRole('button', {name:'Actualiser la bibliothèque', exact:true}).click();

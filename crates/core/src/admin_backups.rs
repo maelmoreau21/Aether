@@ -1,4 +1,4 @@
-//! Administrator-only encrypted SQLite/PostgreSQL backups. Archive names and source paths are server owned.
+//! Administrator-only SQLite/PostgreSQL backups. Archives are unencrypted and contain secrets.
 use crate::{auth::AuthState, identity::Role};
 use axum::{
     Json, Router,

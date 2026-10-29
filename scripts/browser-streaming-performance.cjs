@@ -18,6 +18,8 @@ const baseline = process.env.MEDIA_PERFORMANCE_BASELINE === '1';
 const baselineRef = process.env.MEDIA_PERFORMANCE_BASE_REF || 'HEAD';
 const baselineCommit = execFileSync('git', ['rev-parse', '--verify', `${baselineRef}^{commit}`], {cwd: root, encoding: 'utf8'}).trim();
 const audioDelayMs = Number(process.env.MEDIA_PERFORMANCE_AUDIO_DELAY_MS || 0);
+const englishHz = Number(process.env.MEDIA_PERFORMANCE_ENGLISH_HZ || 1050);
+if (!Number.isFinite(englishHz) || englishHz < 100 || englishHz > 10000) throw new Error('English audio frequency must be 100..10000 Hz');
 if (!Number.isFinite(audioDelayMs) || audioDelayMs < 0 || audioDelayMs > 2000) throw new Error('audio delay must be 0..2000 ms');
 if (!Number.isInteger(rounds) || rounds < 1 || rounds > 30) throw new Error('rounds must be 1..30');
 const container = path.extname(fixture) === '.mkv' ? 'x-matroska' : 'mp4';
@@ -29,6 +31,7 @@ const report = {
   scope: 'Production NativePlayer in synthetic click harness; localhost Range server; no Svelte/Core/Node/NAS proof',
   cacheContract: 'First trial: fresh browser context + empty preparation cache. OS disk cache is uncontrolled and not called cold. Warm trials reuse context and explicitly listed prepared chunks.',
   audioOracle: 'WebAudio FFT decoded PCM, 8 ms polling; not physical speaker onset or proof of discrete surround output',
+  switchEnglishFrequencyHz: englishHz,
   originalAudioSelection: 'Browser default multi-audio track; language cannot be asserted from metadata. Measured PCM signal is reported.',
   fixture: { path: path.relative(root, fixture), bytes: fs.statSync(fixture).size, probe },
   baselineCommit, playerModuleSha256: {},
@@ -79,7 +82,7 @@ async function instrument(page, strategy) {
   for (const name of ['startup-buffer', 'errors', 'compatibility', 'source-selection', 'external-audio', 'segmented-audio', 'native']) {
     await page.addScriptTag({ content: `window[${JSON.stringify(name)}]={};(function(exports,require){${compile(name)}\n})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);` });
   }
-  await page.evaluate(({ probe, container, strategy }) => {
+  await page.evaluate(({ probe, container, strategy, englishHz }) => {
     const video = document.querySelector('video'), ctx = new AudioContext(), attached = new WeakMap();
     window.videoLoadCount = 0; video.addEventListener('loadstart',()=>window.videoLoadCount++);
     for (const name of ['pause','playing','waiting','seeking','seeked']) video.addEventListener(name,()=>{if(active){active.videoEvents??=[];active.videoEvents.push({name,atMs:performance.now()-active.start,time:video.currentTime});}});
@@ -139,7 +142,7 @@ async function instrument(page, strategy) {
       if (active.kind === 'switch') { active.pcmPolls = (active.pcmPolls || 0) + 1; active.maxPollGapMs = Math.max(active.maxPollGapMs || 0, delta); if (sample.db < -80 || element.paused || element.muted) { active.silentPolls = (active.silentPolls || 0) + 1; active.observedSilenceMs = (active.observedSilenceMs || 0) + delta; } }
       if (active.firstAudioMs !== undefined) return;
       active.lastSignal = sample;
-      const matches = active.kind !== 'switch' || (element.dataset.internalAudioTrack===active.track&&(active.track === 'internal-2' ? sample.hz > 950 && sample.hz < 1150 : sample.hz > 400 && sample.hz < 900));
+      const matches = active.kind !== 'switch' || (element.dataset.internalAudioTrack===active.track&&(active.track === 'internal-2' ? Math.abs(sample.hz - englishHz) < 100 : sample.hz > 400 && sample.hz < 900));
       if (!element.paused && !element.muted && sample.db > -80 && matches && Math.abs(element.currentTime-video.currentTime)<.15 && (active.kind !== 'seek' || (!element.seeking && Math.abs(video.currentTime - active.target) < .4))) {
         active.firstAudioMs = performance.now() - active.start; active.audioSignal = sample; active.driftSeconds = Math.abs(element.currentTime - video.currentTime);
       }
@@ -163,7 +166,7 @@ async function instrument(page, strategy) {
     let seekIndex=0;
     document.querySelector('#seek').onclick = () => { const trial = begin('seek'); const duration=Number(probe.format.duration); const targets=duration>100?[900,1800,duration-20,2]:[6,1]; trial.target=targets[seekIndex++%targets.length]; player.seek(trial.target); };
     window.stopBenchmark = async () => { clearInterval(poll); video.cancelVideoFrameCallback(frameId); player?.destroy(); await ctx.close(); };
-  }, { probe, container, strategy });
+  }, { probe, container, strategy, englishHz });
 }
 function summarize(trials, field) {
   const numbers = trials.map(t => t[field]).filter(Number.isFinite).sort((a, b) => a - b);

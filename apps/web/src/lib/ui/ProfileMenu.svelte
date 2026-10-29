@@ -201,6 +201,8 @@
     margin: 0;
     width: 270px;
     max-width: calc(100vw - 32px);
+    max-height: calc(100dvh - 96px);
+    overflow-y: auto;
     padding: 10px;
     border: 1px solid var(--color-line);
     border-radius: 14px;

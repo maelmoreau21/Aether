@@ -23,6 +23,7 @@
   let error = $state('');
   let notice = $state('');
   const usable = $derived(libraries.filter(l => !l.id.startsWith('fixture-')));
+  const statuses: Record<string, string> = { queued:'En attente', running:'En cours', completed:'Terminée', succeeded:'Réussie', error:'Échec', failed:'Échec', cancelled:'Annulée', paused:'Suspendue', interrupted:'Interrompue' };
   async function refresh() {
     busy = true; error = '';
     try {
@@ -87,19 +88,26 @@
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if history.length}
     <h4>Derniers traitements</h4>
-    <table><thead><tr><th>Extension</th><th>Bibliothèque</th><th>État</th><th>Tentatives</th><th>Durée</th><th>Échec</th></tr></thead><tbody>
-      {#each history.slice(0, 25) as task (task.id)}<tr><td>{task.extensionId}</td><td>{task.libraryId}</td><td>{task.status}</td><td>{task.attempt}</td><td>{task.durationSeconds == null ? '—' : `${task.durationSeconds} s`}</td><td>{task.error || '—'}</td></tr>{/each}
-    </tbody></table>
+    <div class="history-list" role="region" aria-label="Derniers traitements des métadonnées">
+      {#each history.slice(0, 25) as task (task.id)}<article><header><strong>{extensions.find(extension => extension.manifest.id === task.extensionId)?.manifest.name ?? 'Traitement de métadonnées'}</strong><span>{statuses[task.status] ?? task.status}</span></header><p>{libraries.find(library => library.id === task.libraryId)?.name ?? task.libraryId}</p><p class="history-meta">{task.attempt} tentative(s) · Durée : {task.durationSeconds == null ? 'indisponible' : `${task.durationSeconds} s`}</p>{#if task.error}<p class="history-error">{task.error}</p>{/if}<details><summary>Détails du traitement</summary><p>Extension : {task.extensionId}</p><p>Identifiant : {task.id} · Opération : {task.operation} · Priorité : {task.priority}</p></details></article>{/each}
+    </div>
   {/if}
   {#if quotas.length}<h4>Quotas fournisseurs</h4><ul>{#each quotas as quota (quota.provider)}<li>{quota.provider} : intervalle {quota.minIntervalSeconds} s, {quota.maxConcurrent} en parallèle ; prochain appel après {new Date(quota.nextAllowedAt * 1000).toLocaleString()}</li>{/each}</ul>{/if}
   {#if sources.length}<h4>Provenance récente</h4><ul>{#each sources.slice(0, 15) as source (`${source.workId}:${source.field}`)}<li>{source.workId} · {source.field} : {source.extensionId}{source.providerId ? ` (${source.providerId})` : ''}, priorité {source.priority}</li>{/each}</ul>{/if}
 </section>
 <style>
-  section { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+  section { min-width:0; padding-bottom:16px; }
+  h3 { font-size:20px; font-weight:600; }
   form { display: flex; flex-wrap: wrap; align-items: end; gap: .8rem; }
-  label { display: grid; gap: .35rem; }
-  select, input, button { padding: .6rem; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; }
-  p { max-width: 75ch; }
-  table { width: 100%; border-collapse: collapse; margin-top: .8rem; }
-  th, td { padding: .45rem; border-bottom: 1px solid var(--border); text-align: left; }
+  label { display: grid; gap: .5rem; flex:1 1 200px; min-width:0; font-size:14px; }
+  select, input, button { min-height:44px; min-width:0; max-width:100%; padding:10px 12px; font:inherit; color:var(--text-primary); background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-md); }
+  p,li { max-width:75ch; line-height:1.6; overflow-wrap:anywhere; color:var(--text-secondary); }
+  [role=alert] { padding:12px; border-left:3px solid var(--status-error); background:var(--color-danger-soft); }
+  .history-list { min-width:0; }
+  article { padding:20px 0; border-block-start:1px solid var(--border-subtle); overflow-wrap:anywhere; }
+  article header { display:flex; align-items:start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  article p { margin:8px 0; } .history-meta,details { font-size:13px; color:var(--text-secondary); }
+  .history-error { padding:12px; border-left:3px solid var(--status-error); background:var(--color-danger-soft); color:var(--text-primary); }
+  summary { min-height:44px; padding-block:12px; cursor:pointer; }
+  @media(max-width:640px) { select,input { font-size:16px; } form > button { flex:1 1 200px; } }
 </style>

@@ -80,3 +80,67 @@ regroupements musicaux et le changement de saison sans navigation passent.
 Références sélectionnées : `docs/evidence/2026-10-23/cinema-ui/`.
 Contraste calculé des CTA lecture : 8,14:1 sombre, 5,18:1 clair ; ce calcul ne
 constitue pas un audit WCAG complet de tous les états et composants.
+
+## Jalon UX du 28 octobre 2026 — navigation et découverte
+
+Le shell utilise désormais une navigation mobile/tablette nommée jusqu’à 900 px
+(Accueil, Bibliothèques, Recherche, Playlists). Les bibliothèques personnalisées
+restent accessibles dans un dialogue natif défilant ; Téléchargements est accessible
+dans ce dialogue et directement dans le header desktop. Le lecteur musical se
+place au-dessus de cette navigation sur petit écran. La route hors ligne garde son
+indépendance de la session réseau.
+
+L’accueil privilégie reprise puis ajouts récents films/séries. Les rangées au hasard,
+classiques, formats courts et genres répétant le même sous-ensemble sont retirées
+de l’accueil ; ces œuvres restent dans le catalogue. Une sélection fondée sur les
+notes réellement présentes peut suivre. Le hero est stable dans la page chargée,
+avec vrai backdrop, logo ou titre et deux actions. Cartes simplifiées : affiche 2:3,
+titre, année/note disponible, progression et états utiles. Replis d’images neutres.
+Les règles de langue, variantes manuelles et rotation restent dans selectArtwork.
+
+Audit, décisions, protocole navigateur, limites et prochains jalons :
+[Refonte UX 2026-10-28](UX_REDESIGN_2026_10_28.md).
+Ce jalon ne constitue pas la refonte complète des fiches ou de l’administration.
+
+## Jalon fiches du 29 octobre 2026
+
+Les fiches film/série utilisent `DetailHero.svelte` : logo ou titre unique,
+backdrop réel seulement, poster 2:3 desktop et composition adaptée au téléphone.
+La lecture précède les commandes secondaires ; les versions et l’inventaire
+technique sont repliables. Les résumés longs sont extensibles, les images cassées
+reviennent au texte ou à une surface neutre.
+
+Un seul select de saison pilote les épisodes. Les lignes desktop et cartes
+mobile gardent les vignettes 16:9, une lecture visible et les commandes avancées
+repliables. Pagination et callbacks existants conservés. Méthode, preuves et
+limites : [Fiches UX 2026-10-29](UX_DETAILS_2026_10_29.md).
+
+## Jalon administration du 29 octobre 2026
+
+`AdminShell.svelte` porte le cadre et une liste unique de rubriques. Sidebar
+persistante à partir de 1100 px ; dialogue natif en dessous, avec fermeture fixe
+et liste défilante. Fragments existants et liens de tâches conservés. Une seule
+navigation est rendue à la fois ; focus et défilement sont rétablis après sélection.
+
+La vue d’ensemble affiche d’abord serveur, Nodes, lecteurs et indexations, sur
+deux colonnes sur téléphone. Les erreurs de diagnostic restent visibles et les
+informations techniques secondaires restent disponibles. Méthode et limites :
+[Administration UX 2026-10-29](UX_ADMIN_2026_10_29.md).
+
+## Jalon bibliothèques du 29 octobre 2026
+
+L’éditeur distingue six tâches : Général, Sources et dossiers, Métadonnées et
+images, Indexation, Accès et Avancé. Rail desktop, sélecteur mobile/tablette et
+paysage bas, contenu défilant et actions fixes. Les groupes techniques sont
+repliables ; la validation révèle le champ invalide avant de lui donner le focus.
+Un dossier doit être explicitement ajouté avant enregistrement. Réglages et
+contrats conservés ; détails et limites : [Bibliothèques UX](UX_LIBRARIES_2026_10_29.md).
+
+## Jalon tâches du 29 octobre 2026
+
+La file d’opérations précède les planifications et l’automatisation, désormais
+repliables. Filtres par état limités explicitement à la page chargée ; type,
+bibliothèque, état et actions avant les détails techniques. Les erreurs d’action
+survivent aux actualisations automatiques. Aucun état d’arrêt ou de reprise
+n’est inventé ; garde du lease et contrats conservés. Preuves et limites :
+[Tâches UX](UX_TASKS_2026_10_29.md).

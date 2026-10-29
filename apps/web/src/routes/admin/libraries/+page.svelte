@@ -5,15 +5,16 @@
 <script lang="ts">
   import { invalidateCatalog } from '../../../lib/catalog/page-cache';
   import { onMount } from 'svelte';
-  import { asset, resolve } from '$app/paths';
-  import { goto } from '$app/navigation';
+  import { asset } from '$app/paths';
+
   import { session, type AuthUser } from '../../../lib/auth/session';
-  import ProfileMenu from '../../../lib/ui/ProfileMenu.svelte';
+  import AdminShell from '../../../lib/admin/AdminShell.svelte';
+  import { adminDestinations, adminDestinationLabel, adminSectionHashes } from '../../../lib/admin/navigation';
   import Icon from '../../../lib/ui/Icon.svelte';
   import type { Library, Scan, AdminNode, CoreHealth, EnrollmentToken, RefreshMode } from '../../../lib/admin/types';
   import AdminSettings from '../../../lib/admin/AdminSettings.svelte';
   import { DEFAULT_NAME } from '../../../lib/config/brand';
-  import { serverPresentation } from '../../../lib/config/presentation';
+
   import AdminOverview from '../../../lib/admin/AdminOverview.svelte';
   import { defaultLibraryOptions } from '../../../lib/admin/types';
   import AdminLibraries from '../../../lib/admin/AdminLibraries.svelte';
@@ -26,7 +27,7 @@
   import AdminApiKeys from '../../../lib/admin/AdminApiKeys.svelte';
   import AvatarCollections from '../../../lib/admin/AvatarCollections.svelte';
   import type { UserGroup } from '../../../lib/admin/request';
-  import { t } from '../../../lib/i18n';
+  import { t, locale } from '../../../lib/i18n';
 
   let scans = $state<Record<string, Scan>>({});
   let pending = $state<string[]>([]);
@@ -37,6 +38,7 @@
   let roots = $state<string[]>([]);
   let nodes = $state<AdminNode[]>([]);
   let coreHealth = $state<CoreHealth | null>(null);
+  let nodesError = $state('');
 
   let loading = $state(true);
   let saving = $state(false);
@@ -147,6 +149,7 @@
     }
     loading = true;
     error = '';
+    nodesError = '';
     try {
       // Independent diagnostics must not delay the library administration screen.
       void request<CoreHealth>('/api/v1/health').then(value => coreHealth = value).catch(() => {});
@@ -154,7 +157,7 @@
         request<{ libraries: Library[] }>('/api/v1/admin/libraries'),
         request<{ users: AuthUser[] }>('/api/v1/admin/users'),
         request<{ roots: string[]; localRoots?: string[] }>('/api/v1/admin/roots'),
-        request<{ nodes: AdminNode[] }>('/api/v1/admin/nodes').catch(() => ({ nodes: [] as AdminNode[] })),
+        request<{ nodes: AdminNode[] }>('/api/v1/admin/nodes').catch(() => { nodesError = 'État des Media Nodes indisponible. Réessayez pour vérifier les serveurs.'; return { nodes: [] as AdminNode[] }; }),
         request<{ groups: UserGroup[] }>('/api/v1/admin/groups')
       ]);
       libraries = data.libraries;
@@ -329,42 +332,13 @@
     }
   }
 
-  let menuOpen = $state(false);
-  let navigationDialog = $state<HTMLDialogElement>();
-  let menuButton = $state<HTMLButtonElement>();
-  function openMenu() {
-    if (!navigationDialog || navigationDialog.open) return;
-    menuOpen = true;
-    navigationDialog.showModal();
-    navigationDialog.querySelector<HTMLAnchorElement>('[aria-current="page"]')?.focus();
-  }
-  function closeMenu() { navigationDialog?.close(); menuOpen = false; menuButton?.focus(); }
-  $effect(() => {
-    if (!menuOpen) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = previous; };
-  });
   let selectedTaskId = $state<string | null>(null);
   let currentHash = $state('#overview');
-  const sectionTitle = $derived(({
-    '#overview': $t('admin_nav_overview'), '#general-section': 'Général', '#network-section': 'Réseau', '#libraries-section': $t('admin_nav_libraries'),
-    '#nodes-section': $t('admin_nav_nodes'), '#users-section': $t('admin_nav_users'),
-    '#groups-section': 'Groupes',
-    '#tasks-section': $t('admin_nav_tasks'), '#backups-section': 'Sauvegardes',
-    '#api-keys-section': 'Clés API', '#avatars-section': 'Avatars', '#extensions-section': 'Extensions'
-  } as Record<string, string>)[currentHash]);
-  function chooseSection(hash: string) { currentHash = hash; closeMenu(); }
-  function navigateHome(event: MouseEvent) {
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault();
-    void goto(resolve('/'));
-  }
-
-  const sections = new Set(['#overview', '#general-section', '#network-section', '#libraries-section', '#nodes-section', '#users-section', '#tasks-section', '#backups-section', '#groups-section', '#api-keys-section', '#avatars-section', '#extensions-section']);
+  const sectionTitle = $derived(adminDestinationLabel(adminDestinations.find(link => link.hash === currentHash) ?? adminDestinations[0], $t, $locale === 'en'));
+  function chooseSection(hash: string) { currentHash = hash; selectedTaskId = null; }
   function selectedSection() {
     const section = window.location.hash.split('?')[0];
-    return sections.has(section) ? section : '#overview';
+    return adminSectionHashes.has(section) ? section : '#overview';
   }
 
   onMount(() => {
@@ -394,18 +368,7 @@
   <title>{sectionTitle} — Administration — {DEFAULT_NAME}</title>
 </svelte:head>
 
-<header class="admin-header">
-  <div class="header-left">
-    <a class="brand admin-brand" href={resolve('/')} onclick={navigateHome} title="Retour à l’accueil" aria-label={`${$serverPresentation.serverName || DEFAULT_NAME}, accueil`}><img src={asset('images/brand-mark.svg')} width="28" height="28" alt="" /><span class="brand-text">{$serverPresentation.serverName || DEFAULT_NAME}</span></a>
-    {#if administrator}<button class="mobile-menu-toggle" bind:this={menuButton} type="button" aria-expanded={menuOpen} aria-controls="admin-navigation" disabled={loading} onclick={openMenu}><Icon name="menu" size={18} /><span>Menu</span></button>{/if}
-    <a class="back-link" href={resolve('/')} onclick={navigateHome}><Icon name="chevron-left" size={14} /><span>Retour</span></a>
-  </div>
-  <div class="header-right">
-    <ProfileMenu />
-  </div>
-</header>
-
-<main>
+<AdminShell title={sectionTitle} {currentHash} {administrator} onnavigate={chooseSection}>
   {#if !administrator}
     <div class="error-banner" role="alert">
       <div class="banner-content">
@@ -448,100 +411,6 @@
         <p>Chargement des données administratives…</p>
       </div>
     {:else}
-      <div class="admin-dashboard-container">
-        <dialog bind:this={navigationDialog} id="admin-navigation" class="admin-nav-dialog admin-sidebar" aria-label="Menu d’administration" onclose={() => { menuOpen=false;menuButton?.focus(); }} onpointerdown={event => { if(event.target===event.currentTarget) closeMenu(); }}>
-          <div class="drawer-heading"><a class="admin-brand" href={resolve('/')} onclick={navigateHome} aria-label="Accueil"><img src={asset('images/brand-mark.svg')} width="28" height="28" alt="" /><span>{$serverPresentation.serverName || DEFAULT_NAME}</span></a><a class="back-link" href={resolve('/')} onclick={navigateHome}>Retour</a><button type="button" aria-label="Fermer le menu" onclick={closeMenu}><Icon name="close" size={20} /></button></div>
-          <nav class="sidebar-sections" aria-label="Sections d’administration">
-          <div class="sidebar-group">
-            <span class="group-label">{$t('admin_category_server')}</span>
-            <a
-              href="#overview"
-              class="sidebar-nav-item"
-              class:active={currentHash === '#overview'}
-              aria-current={currentHash === '#overview' ? 'page' : undefined}
-              onclick={() => chooseSection('#overview')}
-            >
-              <span class="nav-icon"><Icon name="sparkles" size={16} /></span>
-              <span class="nav-text">{$t('admin_nav_overview')}</span>
-            </a>
-          </div>
-
-          <div class="sidebar-group server-settings-nav">
-            {#each [['#general-section', 'Général', 'settings'], ['#network-section', 'Réseau', 'globe']] as [hash, label, icon] (hash)}
-              <a href={resolve(`admin/libraries/#${hash.slice(1)}`)} class="sidebar-nav-item" class:active={currentHash === hash} aria-current={currentHash === hash ? 'page' : undefined} onclick={() => chooseSection(hash)}><span class="nav-icon"><Icon name={icon as 'settings' | 'globe'} size={18} /></span><span class="nav-text">{label}</span></a>
-            {/each}
-          </div>
-          <div class="sidebar-group">
-            <span class="group-label">{$t('admin_category_media')}</span>
-            <a
-              href="#libraries-section"
-              class="sidebar-nav-item"
-              class:active={currentHash === '#libraries-section'}
-              aria-current={currentHash === '#libraries-section' ? 'page' : undefined}
-              onclick={() => chooseSection('#libraries-section')}
-            >
-              <span class="nav-icon"><Icon name="film" size={16} /></span>
-              <span class="nav-text">{$t('admin_nav_libraries')}</span>
-            </a>
-            <a
-              href="#nodes-section"
-              class="sidebar-nav-item"
-              class:active={currentHash === '#nodes-section'}
-              aria-current={currentHash === '#nodes-section' ? 'page' : undefined}
-              onclick={() => chooseSection('#nodes-section')}
-            >
-              <span class="nav-icon"><Icon name="server" size={16} /></span>
-              <span class="nav-text">{$t('admin_nav_nodes')}</span>
-            </a>
-          </div>
-
-          <div class="sidebar-group">
-            <span class="group-label">{$t('admin_category_access')}</span>
-            <a
-              href="#users-section"
-              class="sidebar-nav-item"
-              class:active={currentHash === '#users-section'}
-              aria-current={currentHash === '#users-section' ? 'page' : undefined}
-              onclick={() => chooseSection('#users-section')}
-            >
-              <span class="nav-icon"><Icon name="users" size={16} /></span>
-              <span class="nav-text">{$t('admin_nav_users')}</span>
-            </a>
-            <a href="#groups-section" class="sidebar-nav-item" class:active={currentHash === '#groups-section'}
-              aria-current={currentHash === '#groups-section' ? 'page' : undefined}
-              onclick={() => chooseSection('#groups-section')}>
-              <span class="nav-icon"><Icon name="users" size={16} /></span>
-              <span class="nav-text">Groupes d’utilisateurs</span>
-            </a>
-            <a href="#avatars-section" class="sidebar-nav-item" class:active={currentHash === '#avatars-section'}
-              aria-current={currentHash === '#avatars-section' ? 'page' : undefined}
-              onclick={() => chooseSection('#avatars-section')}>
-              <span class="nav-icon"><Icon name="sparkles" size={16} /></span>
-              <span class="nav-text">Avatars</span>
-            </a>
-          </div>
-          <div class="sidebar-group">
-            <span class="group-label">Maintenance</span>
-            {#each [
-              ['#tasks-section', $t('admin_nav_tasks'), 'clock'],
-              ['#backups-section', 'Sauvegardes', 'server'],
-              ['#api-keys-section', 'Clés API', 'shield'],
-              ['#extensions-section', 'Extensions', 'sparkles']
-            ] as [hash, label, icon] (hash)}
-              <a href={resolve(`admin/libraries/#${hash.slice(1)}`)} class="sidebar-nav-item" class:active={currentHash === hash}
-                aria-current={currentHash === hash ? 'page' : undefined}
-                onclick={() => chooseSection(hash)}>
-                <span class="nav-icon"><Icon name={icon as 'server' | 'users' | 'shield' | 'sparkles' | 'clock'} size={16} /></span>
-                <span class="nav-text">{label}</span>
-              </a>
-            {/each}
-          </div>
-          </nav>
-        </dialog>
-
-        <!-- Main Admin Content Area -->
-        <div class="admin-content-area">
-          <h1 class="sr-only">Administration</h1>
           <AdminSettings section={currentHash} />
 
           <!-- Section 1: Dashboard Overview -->
@@ -551,6 +420,7 @@
             {nodes}
             {libraries}
             {scans}
+            {nodesError}
           />
           </div>
 
@@ -583,6 +453,7 @@
 
           <!-- Section 3: Media Nodes -->
           <div hidden={currentHash !== "#nodes-section"}>
+          {#if nodesError}<div class="error-banner" role="alert"><p>{nodesError}</p><button class="small-btn" onclick={load}>Réessayer</button></div>{/if}
           <AdminNodes
             {nodes}
             {pairing}
@@ -626,18 +497,10 @@
             </div>
           {/if}
           <AdminCapabilities section={currentHash.slice(1)} />
-        </div>
-      </div>
     {/if}
   {/if}
-</main>
+</AdminShell>
 
 <style>
-  .admin-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px var(--page-gutter);border-bottom:1px solid var(--color-line);background:var(--color-surface);position:sticky;top:0;z-index:100;min-height:60px;box-sizing:border-box;}
-  .header-left{display:flex;align-items:center;gap:16px;min-width:0;}.admin-brand{display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:var(--color-text);font-weight:700;font-size:16px;margin-right:6px;cursor:pointer;}.admin-brand:hover{opacity:.9;}.back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--color-muted);text-decoration:none;}.back-link:hover{color:var(--color-text);}.mobile-menu-toggle{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--color-line);border-radius:var(--radius-sm);background:var(--color-raised);color:var(--color-text);padding:8px 12px;min-height:40px;font:inherit;font-size:13px;cursor:pointer;}.mobile-menu-toggle:disabled{opacity:.5;cursor:default;}
-  main{max-width:1600px;margin:0 auto;padding:24px var(--page-gutter) 64px;}.admin-dashboard-container{display:block;min-width:0;}.admin-content-area{display:flex;flex-direction:column;gap:20px;min-width:0;}
-  .admin-nav-dialog{position:fixed;inset:0 auto 0 0;width:min(280px,90vw);height:100dvh;max-height:100dvh;max-width:none;box-sizing:border-box;margin:0;padding:16px;border:0;border-right:1px solid var(--color-line);background:var(--color-surface);color:var(--color-text);overflow-y:auto;overscroll-behavior:contain;}.admin-nav-dialog::backdrop{background:rgb(0 0 0 / .4);}.drawer-heading{display:flex;align-items:center;justify-content:space-between;padding:0 8px 16px;border-bottom:1px solid var(--color-line);}.drawer-heading button{display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--color-text);cursor:pointer;}.drawer-heading button:hover{background:var(--color-raised);}.sidebar-sections{display:grid;gap:14px;padding-top:16px;}.sidebar-group{display:grid;gap:3px;}.server-settings-nav{margin-top:-12px;}.group-label{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--color-muted);padding:0 10px 4px;text-transform:uppercase;}.sidebar-nav-item{display:flex;align-items:center;gap:10px;min-height:40px;padding:8px 10px;border-radius:var(--radius-sm);color:var(--color-muted);text-decoration:none;font-size:13px;box-sizing:border-box;}.sidebar-nav-item:hover{background:var(--color-raised);color:var(--color-text);}.sidebar-nav-item.active{background:var(--color-accent-soft);color:var(--color-accent);font-weight:600;}.nav-icon{display:inline-flex;flex-shrink:0;}.nav-text{min-width:0;overflow-wrap:anywhere;}.sidebar-nav-item:focus-visible,.mobile-menu-toggle:focus-visible,.drawer-heading button:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;}
   .error-banner,.notice-banner{padding:12px 16px;border-radius:var(--radius-sm);margin-bottom:20px;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:12px;}.banner-content{display:flex;align-items:center;gap:10px;min-width:0;overflow-wrap:anywhere;}.banner-content p{margin:0;}.error-banner{background:var(--color-danger-soft);border:1px solid var(--color-danger);color:var(--color-danger);}.notice-banner{background:var(--color-success-soft);border:1px solid var(--color-success);color:var(--color-success);}.small-btn{border:1px solid currentColor;background:transparent;color:inherit;border-radius:var(--radius-sm);padding:6px 12px;font:inherit;cursor:pointer;}.loading-state{display:flex;flex-direction:column;align-items:center;gap:16px;padding:60px 0;color:var(--color-muted);}.logo-spinner{width:48px;height:48px;display:block;margin:0 auto;}
-  .admin-content-area :global(:where(section,article,form,fieldset,header,label,details,.card)){min-width:0;}.admin-content-area :global(:where(h2,h3,p,dd,code,label,button,summary)){overflow-wrap:anywhere;}.admin-content-area :global(:where(input,select,button)){max-width:100%;}
-  @media(max-width:480px){main{padding:20px 16px 48px;}.admin-header{padding:8px 16px;}.header-left{gap:10px;}.admin-brand .brand-text{display:none;}}
 </style>

@@ -29,6 +29,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not copy the schema.' }
     & docker exec $containerId psql --username postgres --dbname media_test --set ON_ERROR_STOP=1 --quiet --file /tmp/schema.sql
     if ($LASTEXITCODE -ne 0) { throw 'Fresh PostgreSQL schema failed.' }
+    $timestampCheck = @'
+INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES('timestamp-test',2147483648,1);
+INSERT INTO users(id,role,created_at,disabled_at) VALUES('timestamp-test','user',2147483648,2147483648);
+INSERT INTO api_keys(id,name,user_id,token_hash,created_at,expires_at,revoked_at,scope) VALUES('timestamp-key','test','timestamp-test','synthetic',2147483648,9999999999,2147483648,'catalog:read');
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND (column_name LIKE '%\_at' ESCAPE '\' OR column_name='window_started') AND data_type='integer') THEN RAISE EXCEPTION '32-bit timestamp column remains'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM api_keys WHERE id='timestamp-key' AND created_at=2147483648 AND expires_at=9999999999 AND revoked_at=2147483648) THEN RAISE EXCEPTION 'API key timestamp mismatch'; END IF;
+END $$;
+'@
+    $timestampCheck | & docker exec -i $containerId psql --username postgres --dbname media_test --set ON_ERROR_STOP=1 --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL timestamp validation failed.' }
     Write-Host 'Fresh PostgreSQL schema: OK'
 }
 finally {

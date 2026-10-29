@@ -52,6 +52,10 @@ class FreshSchema(unittest.TestCase):
                 connection.execute("INSERT INTO avatar_images(id,pack_id,name,sha256) VALUES('bad','missing','one',?)", ('a' * 64,))
             connection.execute("DELETE FROM avatar_packs WHERE id='native-pack'")
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM avatar_images").fetchone()[0], 0)
+            connection.execute("INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES('timestamp-test',2147483648,1)")
+            connection.execute("INSERT INTO users(id,role,created_at,disabled_at) VALUES('timestamp-test','user',2147483648,2147483648)")
+            connection.execute("INSERT INTO api_keys(id,name,user_id,token_hash,created_at,expires_at,revoked_at,scope) VALUES('timestamp-key','test','timestamp-test','synthetic',2147483648,9999999999,2147483648,'catalog:read')")
+            self.assertEqual(connection.execute("SELECT created_at,expires_at,revoked_at FROM api_keys WHERE id='timestamp-key'").fetchone(), (2147483648, 9999999999, 2147483648))
             self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
 
 

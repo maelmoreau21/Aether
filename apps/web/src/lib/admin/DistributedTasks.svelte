@@ -26,6 +26,8 @@
   let loaded = $state(false);
   let mutating = $state(false);
   let error = $state('');
+  let loadError = $state('');
+  let statusFilter = $state('all');
   let notice = $state('');
   let observedAt = $state(0);
   let results = $state<Record<string, string>>({});
@@ -33,6 +35,7 @@
   let resultLoading = $state<Record<string, boolean>>({});
   let submission: { signature: string; key: string } | null = null;
   const availableLibraries = $derived(libraries.filter(library => library.enabled && !library.id.startsWith('fixture-')));
+  const visibleJobs = $derived(jobs.filter(job => statusFilter === 'all' || job.status === statusFilter));
 
   async function refresh(nextOffset = offset) {
     if (loading) return;
@@ -44,8 +47,8 @@
       results = Object.fromEntries(Object.entries(results).filter(([id]) => visible.has(id)));
       resultErrors = Object.fromEntries(Object.entries(resultErrors).filter(([id]) => visible.has(id)));
       resultLoading = Object.fromEntries(Object.entries(resultLoading).filter(([id]) => visible.has(id)));
-      offset = nextOffset; observedAt = Math.floor(Date.now() / 1000); loaded = true; error = '';
-    } catch (cause) { error = cause instanceof Error ? cause.message : 'Le suivi des tâches est indisponible.'; }
+      offset = nextOffset; observedAt = Math.floor(Date.now() / 1000); loaded = true; loadError = '';
+    } catch (cause) { loadError = cause instanceof Error ? cause.message : 'Le suivi des tâches est indisponible.'; }
     finally { loading = false; }
   }
   $effect(() => {
@@ -100,8 +103,9 @@
 </script>
 
 <section aria-labelledby="distributed-tasks-heading">
-  <header><h3 id="distributed-tasks-heading">File de tâches distribuées</h3><button disabled={loading} onclick={() => void refresh()}>Actualiser la file</button></header>
-  <p class="explanation">Chaque tâche attend dans une file persistante et s’exécute sur le nœud qui possède les médias. La suspension et l’annulation prennent effet aux points d’arrêt du traitement.</p>
+  <header><h3 id="distributed-tasks-heading">Suivi des opérations</h3><button disabled={loading} onclick={() => void refresh()}>Actualiser la file</button></header>
+  <p class="explanation">Indexations et traitements sur vos serveurs. La suspension et l’annulation prennent effet aux points d’arrêt du traitement.</p>
+  <details class="enqueue"><summary>Ajouter une tâche</summary><p class="form-help">Choisissez une bibliothèque. Les traitements avancés utilisent les identifiants déjà présents dans l’inventaire.</p>
   <form onsubmit={enqueue}>
     <label>Bibliothèque<select aria-label="Bibliothèque cible" bind:value={libraryId} disabled={mutating}><option value="">Choisir une bibliothèque</option>{#each availableLibraries as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
     <label>Type de tâche<select aria-label="Type de tâche" bind:value={category} disabled={mutating}>{#each Object.entries(categories) as [value, title] (value)}<option {value}>{title}</option>{/each}</select></label>
@@ -110,23 +114,22 @@
     {#if category === 'image'}<label>Largeur<select aria-label="Largeur de l’image" bind:value={width} disabled={mutating}><option value={320}>320 px</option><option value={640}>640 px</option><option value={1280}>1280 px</option></select></label>{/if}
     <button type="submit" disabled={!libraryId || mutating || (category !== 'scan' && !targetId.trim())}>{category === 'scan' ? 'Planifier un scan' : 'Planifier la tâche'}</button>
   </form>
-  {#if error}<p class="error" role="alert">{error}</p>{/if}
+  </details>
+  {#if error}<p class="error queue-action-error" role="alert">{error}</p>{/if}
+  {#if loadError}<div class="error queue-load-error" role="alert"><p>{loadError}</p>{#if loaded}<p>Les données affichées proviennent de la dernière actualisation réussie.</p>{/if}<button disabled={loading} onclick={() => void refresh()}>Réessayer le chargement</button></div>{/if}
   {#if notice}<p class="notice" role="status">{notice}</p>{/if}
   {#if loaded}
+    <div class="queue-tools"><label>État des tâches<select bind:value={statusFilter}><option value="all">Tous les états</option>{#each Object.entries(labels) as [value, title] (value)}<option {value}>{title}</option>{/each}</select></label><p>{visibleJobs.length} sur {jobs.length} tâches de cette page{#if observedAt}<span>Actualisé à {new Date(observedAt * 1000).toLocaleTimeString()}</span>{/if}</p></div>
     <div class="jobs" aria-busy={loading}>
-      {#each jobs as job (job.id)}
+      {#each visibleJobs as job (job.id)}
         <article aria-label={`Tâche ${job.id}`}>
-          <div class="job-heading"><strong>{libraries.find(library => library.id === job.libraryId)?.name ?? job.libraryId}</strong><span class="status">{labels[job.status] ?? job.status}</span></div>
+          <div class="job-heading"><div><h4>{categories[job.category] ?? job.category}</h4><p>{libraries.find(library => library.id === job.libraryId)?.name ?? job.libraryId}</p></div><span class="status" class:failed={job.status === 'error'}>{labels[job.status] ?? job.status}</span></div>
           <dl>
-            <div><dt>Propriétaire</dt><dd>{job.owner}</dd></div>
             <div><dt>Nœud exécutant</dt><dd>{nodes.find(node => node.id === job.nodeId)?.name ?? (job.nodeId === 'local' ? 'Nœud local' : job.nodeId || 'En attente d’attribution')}</dd></div>
             <div><dt>Durée</dt><dd>{duration(job)}</dd></div>
-            <div><dt>Tentatives</dt><dd>{job.attempt}</dd></div><div><dt>Échecs</dt><dd>{job.failureCount ?? '—'} / {job.maxAttempts}</dd></div>
           </dl>
-          {#if job.processedItems === undefined || job.progress === 100}<div class="progress"><progress max="100" value={job.progress} aria-label="Progression de la tâche"></progress><span>{job.progress} %</span></div>{/if}
+          {#if !['error', 'cancelled'].includes(job.status) && (job.processedItems === undefined || job.progress === 100)}<div class="progress"><progress max="100" value={job.progress} aria-label="Progression de la tâche"></progress><span>{job.progress} %</span></div>{/if}
           {#if job.processedItems !== undefined}<p class="processed">{job.processedItems} éléments traités{job.progress < 100 ? ' · Total encore inconnu' : ''}</p>{/if}
-          <details><summary>Détails de la tâche</summary><p>Identifiant : {job.id}</p><p>Créée le {date(job.createdAt)} · Mise à jour le {date(job.updatedAt)}</p><p>Catégorie : {categories[job.category] ?? job.category} · Priorité : {job.priority}</p>{#if job.targetId}<p>Cible : {job.targetId}</p>{/if}{#if job.leaseUntil}<p>Attribution valable jusqu’au {date(job.leaseUntil)}</p>{/if}</details>
-          {#if job.category !== 'scan'}<details ontoggle={(event) => { if (event.currentTarget.open) void loadResult(job); }}><summary>Résultat du traitement</summary>{#if resultLoading[job.id]}<p role="status">Chargement du résultat…</p>{:else if resultErrors[job.id]}<p class="job-error" role="alert">{resultErrors[job.id]}</p><button onclick={() => void loadResult(job)}>Réessayer</button>{:else if results[job.id]}<pre>{results[job.id]}</pre>{/if}</details>{/if}
           {#if job.error}<p class="job-error">{job.error}</p>{/if}
           {#if ['queued', 'running', 'paused'].includes(job.status)}
             <div class="actions">
@@ -134,18 +137,24 @@
               <button disabled={mutating} onclick={() => void control(job, 'cancel')}>Annuler</button>
             </div>
           {/if}
+          <details><summary>Détails de la tâche</summary><p>Identifiant : {job.id}</p><p>Propriétaire : {job.owner} · Tentatives : {job.attempt} · Échecs : {job.failureCount ?? '—'} / {job.maxAttempts}</p><p>Créée le {date(job.createdAt)} · Mise à jour le {date(job.updatedAt)}</p><p>Catégorie : {categories[job.category] ?? job.category} · Priorité : {job.priority}</p>{#if job.targetId}<p>Cible : {job.targetId}</p>{/if}{#if job.leaseUntil}<p>Attribution valable jusqu’au {date(job.leaseUntil)}</p>{/if}</details>
+          {#if job.category !== 'scan'}<details ontoggle={(event) => { if (event.currentTarget.open) void loadResult(job); }}><summary>Résultat du traitement</summary>{#if resultLoading[job.id]}<p role="status">Chargement du résultat…</p>{:else if resultErrors[job.id]}<p class="job-error" role="alert">{resultErrors[job.id]}</p><button onclick={() => void loadResult(job)}>Réessayer</button>{:else if results[job.id]}<pre>{results[job.id]}</pre>{/if}</details>{/if}
         </article>
-      {:else}<p class="empty">Aucune tâche sur cette page.</p>{/each}
+      {:else}<div class="empty"><p>{jobs.length ? 'Aucune tâche de cette page ne correspond à cet état.' : 'Aucune tâche sur cette page.'}</p>{#if statusFilter !== 'all'}<button onclick={() => statusFilter = 'all'}>Afficher tous les états</button>{/if}</div>{/each}
     </div>
     <nav aria-label="Pages des tâches"><button disabled={loading || offset === 0} onclick={() => void refresh(Math.max(0, offset - limit))}>Précédent</button><span>Page {Math.floor(offset / limit) + 1}</span><button disabled={loading || jobs.length < limit} onclick={() => void refresh(offset + limit)}>Suivant</button></nav>
   {:else if loading}<p role="status">Chargement des tâches…</p>{/if}
 </section>
 
 <style>
-  section { margin-top: 36px; min-width: 0; }
+  section { margin-top: 24px; min-width: 0; }
   header, .job-heading, .actions, nav, .progress { display: flex; align-items: center; gap: 12px; }
   header, .job-heading { justify-content: space-between; }
-  h3 { margin: 0; font-size: 24px; font-weight: 400; }
+  h3 { margin: 0; font-size: 21px; font-weight: 600; }
+  h4 { margin:0; font-size:17px; font-weight:600; } .job-heading > div { min-width:0; } .job-heading p { margin:6px 0 0; font-size:14px; color:var(--text-secondary); }
+  .queue-tools { display:flex; align-items:end; justify-content:space-between; gap:16px; margin:24px 0 16px; }
+  .queue-tools label { flex:0 1 260px; min-width:0; } .queue-tools p { margin:0; text-align:right; font-size:12px; color:var(--text-secondary); line-height:1.6; } .queue-tools span { display:block; }
+  .enqueue { border-block:1px solid var(--border-subtle); padding-block:4px; } .enqueue > summary { font-size:14px; color:var(--text-primary); }
   .explanation, dt, details, .empty { color: var(--text-secondary); line-height: 1.6; }
   form { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
   label { display: grid; gap: 8px; flex: 1; min-width: min(240px, 100%); }
@@ -154,12 +163,12 @@
   button { flex-shrink: 0; } button:hover:not(:disabled) { background: var(--bg-elevated); }
   .jobs { display: grid; gap: 12px; } article { padding: 20px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); min-width: 0; overflow-wrap: anywhere; }
   .job-heading { align-items: start; } .status { color: var(--text-secondary); flex-shrink: 0; }
-  dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; font-size: 14px; } dd { margin: 4px 0 0; } dt { font-size: 12px; }
+  dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; font-size: 14px; } dd { margin: 4px 0 0; } dt { font-size: 12px; }
   .progress { margin: 16px 0; } progress { flex: 1; min-width: 0; accent-color: var(--accent-primary); } .progress span { font-variant-numeric: tabular-nums; font-size: 13px; }
   .processed { color: var(--text-secondary); font-size: 13px; }
-  details { font-size: 13px; } details p { margin: 8px 0; } summary { cursor: pointer; min-height: 32px; }
+  details { font-size: 13px; } details p { margin: 8px 0; } summary { cursor: pointer; min-height: 44px; padding-block:12px; } .failed { color:var(--text-primary); font-weight:600; } .empty { padding:24px 0; border-block:1px solid var(--border-subtle); }
   pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; font-size: 12px; }
-  .actions { margin-top: 12px; flex-wrap: wrap; } nav { justify-content: end; margin-top: 16px; flex-wrap: wrap; } nav span { color: var(--text-secondary); font-size: 14px; }
+  .actions { margin: 12px 0; flex-wrap: wrap; } nav { justify-content: end; margin-top: 16px; flex-wrap: wrap; } nav span { color: var(--text-secondary); font-size: 14px; }
   .error, .job-error, .notice { padding: 12px; line-height: 1.5; overflow-wrap: anywhere; } .error, .job-error { background: var(--color-danger-soft); border-left: 3px solid var(--status-error); } .notice { background: var(--color-success-soft); }
-  @media (max-width: 640px) { header { flex-wrap: wrap; } dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } article { padding: 14px; } .job-heading { flex-wrap: wrap; } }
+  @media (max-width: 640px) { header { flex-wrap: wrap; } article { padding: 14px; } .job-heading { flex-wrap: wrap; } .queue-tools { align-items:stretch; flex-direction:column; gap:8px; } .queue-tools label { flex:auto; } .queue-tools p { text-align:left; } input,select { font-size:16px; } }
 </style>

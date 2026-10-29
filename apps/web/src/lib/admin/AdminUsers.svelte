@@ -4,6 +4,7 @@
   import type { Library } from './types';
   import { session, readSession, type AuthUser } from '../auth/session';
   import Icon from '../ui/Icon.svelte';
+  import { modalFocus } from './modal-focus';
   import { locale, t } from '../i18n';
 
   interface Props {
@@ -288,7 +289,7 @@
 
   {#if editorOpen}
     <!-- DSM Dialog / Modal Panel -->
-    <div class="dsm-modal-backdrop" onclick={(e) => { if (e.target === e.currentTarget) { editorOpen = false; } }}>
+    <div class="dsm-modal-backdrop" use:modalFocus={() => { editorOpen = false; }}>
       <div class="dsm-modal" role="dialog" aria-modal="true" aria-labelledby="modal-user-title">
         <div class="dsm-modal-header">
           <div class="modal-title-wrap">

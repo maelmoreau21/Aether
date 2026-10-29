@@ -3,6 +3,7 @@
   import type { AuthUser } from '../auth/session';
   import type { Library } from './types';
   import Icon from '../ui/Icon.svelte';
+  import { modalFocus } from './modal-focus';
 
   let {
     groups,
@@ -178,7 +179,7 @@
 
   {#if editorOpen}
     <!-- DSM Dialog / Modal Panel -->
-    <div class="dsm-modal-backdrop" onclick={(e) => { if (e.target === e.currentTarget) { editorOpen = false; } }}>
+    <div class="dsm-modal-backdrop" use:modalFocus={() => { editorOpen = false; }}>
       <div class="dsm-modal" role="dialog" aria-modal="true" aria-labelledby="modal-group-title">
         <div class="dsm-modal-header">
           <div class="modal-title-wrap">

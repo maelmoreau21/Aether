@@ -37,7 +37,7 @@ Les archives `MDBK0001` chiffrées ne sont plus lisibles avec le binaire courant
 
 ## Limites connues
 
-- Les étapes 2 et 3 restent deux commandes. L'import et l'audit sont testés sur SQLite (`backup_carries_assets_and_restore_is_verified_on_a_fresh_store`, qui couvre aussi l'idempotence) ; le binaire `media-restore-assets` lui-même n'a pas été exécuté de bout en bout. Restauration PostgreSQL non testée (base externe requise).
+- Les étapes 2 et 3 restent deux commandes. L'import et l'audit sont testés sur SQLite (`backup_carries_assets_and_restore_is_verified_on_a_fresh_store`, qui couvre aussi l'idempotence) ; le binaire `media-restore-assets` lui-même n'a pas été exécuté de bout en bout. La restauration de la base PostgreSQL et de la configuration a été testée sur PostgreSQL 18 jetable avec `scripts/test-admin-postgres.ps1` ; ce test ne prouve pas la restauration des assets sur PostgreSQL ni un déploiement réel.
 - Les fichiers de `/data/plugins` (paquets Wasm) ne sont pas dans l'archive. Après restauration, les extensions concernées doivent être réinstallées depuis leur dépôt signé ; la conservation de leurs données lors de cette réinstallation n'a pas été testée sur une restauration.
 - Les sauvegardes planifiées sont maintenant des tâches `durable_tasks` (cible `backup`) : bail, fencing, limite de 1 h, préemption par la lecture. Un crash entre la réservation de l'échéance et la mise en file saute une exécution jusqu'à l'intervalle suivant. Une sauvegarde manuelle (`POST`) et une planifiée peuvent se chevaucher (archives distinctes).
 - La liste d'assets est prise après le snapshot SQL ; un asset ajouté entre les deux est embarqué sans ligne SQL (inoffensif, nettoyé par le collecteur).

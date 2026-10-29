@@ -1,3 +1,57 @@
+## 29 octobre 2026 — UX, tâches et indexations
+
+- File d’opérations en premier, filtre par état explicitement limité à la page chargée, planifications/automatisation et ajout repliables. Cartes centrées sur type/bibliothèque/état/serveur/actions, détails techniques et résultat conservés. Erreurs d’action séparées du chargement : le polling ne les efface plus. Garde du lease et idempotence conservées, aucun changement backend/API/RBAC.
+- Check 0 erreur (avertissement CatalogGrid:90 existant), lint, build et 177 tests réussis. Banc tâches : 23 scénarios aux huit largeurs/deux thèmes, commandes et erreurs/retry, pagination 50, résultat, idempotence et paysage ; non-régression admin : 23 scénarios. Captures représentatives inspectées dans `target/ux-tasks/`. API synthétiques, sans preuve d’exécution Core/Node/NAS ni téléphone physique. Rapport : `docs/UX_TASKS_2026_10_29.md`.
+- Aucun push. Suite : parcours musique/lecteur persistant, recherche, listes et téléchargements. Travaux concurrents comptes/groupes/backend préservés.
+
+## 29 octobre 2026 — UX, édition des bibliothèques
+
+- Éditeur en six rubriques, rail desktop/sélecteur mobile et paysage bas, contenu défilant et actions fixes. Groupes avancés repliables, réglages conservés entre rubriques ; validation qui ouvre et focalise le champ invalide même masqué. Ajout de dossier explicite obligatoire, doublons et limite 32 conservés ; aucun changement Core/API/RBAC ou médias personnels.
+- Check (0 erreur, avertissement existant CatalogGrid:90), lint, build et 177 tests réussis. Banc bibliothèques : 20 scénarios aux huit largeurs et deux thèmes, payload complet conservé, création films/séries/musique, navigateur de dossiers, erreur/retry et focus ; shell admin : 23 scénarios réussis. Captures inspectées dans `target/ux-libraries/`. APIs synthétiques, pas de preuve de persistance Core/NAS ou téléphone physique. Un essai admin interrompu par reconstruction du preview a été relancé avec succès après redémarrage.
+- Scripts Core séries/distribué/NFO/posters/scanner adaptés aux rubriques, syntaxe vérifiée seulement. Rapport : `docs/UX_LIBRARIES_2026_10_29.md`. Aucun push ; prochaine priorité : tâches/indexations puis harmonisation musique, recherche, listes et téléchargements.
+
+## 29 octobre 2026 — UX, cadre administrateur et vue d’ensemble
+
+- Cadre extrait dans `AdminShell.svelte`, douze destinations centralisées dans `navigation.ts`. Sidebar persistante dès 1100 px, dialogue natif mobile/tablette, focus et scroll après sélection, historique/fragments et liens de tâches conservés. Les annuaires restent montés ; filtre utilisateurs conservé lors d’un aller-retour. Travaux concurrents comptes/groupes/sauvegardes préservés.
+- Vue d’ensemble : serveur, Nodes, lecteurs et indexations prioritaires, grille mobile à deux colonnes. Les erreurs de chargement des Nodes et d’activité sont visibles, pas assimilées à des zéros confirmés. Aucun changement backend, API ou rôle.
+- Check (0 erreur, avertissement existant `CatalogGrid.svelte:90`), lint, build statique et 177 tests unitaires réussis. Banc administrateur : 23 scénarios aux huit largeurs et deux thèmes, 192 sélections de rubriques ; fondations : 25 scénarios sans anomalie. Mode navigation du test extensions réussi. Captures représentatives inspectées dans `target/ux-admin/`. APIs synthétiques, sans preuve Core/NAS/SSO/téléphone physique.
+- Test historique extensions complet exécuté mais arrêté sur l’ancien sélecteur « Actualiser les dépôts », absent du composant actuel non modifié ; aucun succès du parcours complet revendiqué. Les scripts Core séries/distribué sont adaptés à la sidebar mais seulement vérifiés syntaxiquement dans ce jalon. Rapport : `docs/UX_ADMIN_2026_10_29.md`. Aucun push ; prochaine priorité : parcours d’édition des bibliothèques.
+
+## 29 octobre 2026 — UX, fiches films et séries
+
+- `DetailHero.svelte` mutualise titre/logo, métadonnées disponibles, résumé extensible, backdrop réel et composition mobile/desktop. Les affiches ne servent plus de panorama. Lecture avant les outils ; versions et inventaire technique du film repliables, téléchargement conservé parmi les actions secondaires.
+- Série : un seul select de saison, épisodes illustrés 16:9, lecture visible, résumés/suivi et versions repliables. Pagination locale et `episodesPage` conservées. « Voir les épisodes » déplace localement focus/scroll sans navigation de route ; sa destination visible est vérifiée en paysage.
+- `npm run check` (0 erreur, avertissement existant `CatalogGrid.svelte:90`), lint et build statique réussis ; 177 tests unitaires réussis. `browser-ux-details.cjs` : 23 scénarios réussis aux huit largeurs et deux thèmes, plus deux lancements/décodages depuis film/épisode avec fixture légale MP4 AV1 10 bits/Opus, pause/reprise/seek clavier/sortie. `browser-ux-foundations.cjs` : 25 scénarios réussis sans anomalie. Captures représentatives inspectées ; preuves dans `target/ux-details/`.
+- APIs et transport média interceptés : aucun nouveau résultat Core/Node, NAS, MKV, écoute humaine ou téléphone physique. Contrat et limites : `docs/UX_DETAILS_2026_10_29.md`. Moteur vidéo, backend, droits, médias personnels et travaux concurrents conservés. Aucun push. Prochain jalon : navigation administrateur persistante desktop et accessible mobile avec conservation des fragments.
+
+## 28 octobre 2026 — UX, premier jalon navigation et accueil
+
+- Audit priorisé et suite : `docs/UX_REDESIGN_2026_10_28.md`. Navigation mobile/tablette nommée, sélecteur de bibliothèques avec liste défilante et actions fixes, accueil reprise/ajouts récents, hero à deux actions, affiches simplifiées, flèches de reprise accessibles et lecteur musical dégagé. Thèmes, logo et sélection manuelle/linguistique/rotation des images conservés.
+- `npm run check` : zéro erreur, un avertissement préexistant dans `CatalogGrid.svelte:90`. `npm run lint`, `npm test` (177/177, 29 fichiers) et `npm run build` réussis. `git diff --check` sur les fichiers du jalon réussi.
+- `node scripts/browser-ux-foundations.cjs` : 25 scénarios, 100 prises de capture, aucune anomalie restante dans le rapport final. Chrome 156.0.8078.48 Windows headless, huit largeurs 320–1920 px, clair/sombre, paysage/toucher simulé, clavier/menus et états absents/erreurs. Captures inspectées dans `target/ux-foundations/`. APIs et SVG synthétiques : aucune preuve NAS, téléphone physique, décodage vidéo ou écoute musicale réelle.
+- Fiches et administration non entièrement refondues. Prochaine priorité : lecture et informations secondaires des fiches film/série, puis navigation admin persistante desktop avec conservation des fragments. Aucun push ni déploiement ; travaux préexistants utilisateurs/groupes et backend conservés.
+
+## 28 octobre 2026 — Validations complémentaires
+
+- Suite Rust complète relancée après correction du montage multi-Node et du schéma : unités Core 126 réussies, premières intégrations réussies, puis arrêtée à la demande de rapidité pendant le parcours distribué ; la suite complète n’est pas validée. Le test multi-Node corrigé a passé séparément.
+
+- Suite Rust complète interrompue par un échec de classement multi-Node : le test supposait un remplacement immédiat du RTT malgré la moyenne mobile. Montage corrigé et scénario ciblé réussi avec deux Nodes TCP locaux ; nouvelle suite complète en cours.
+- PostgreSQL : 28 colonnes initiales de temps Unix en `bigint`, sans migration ni modification des données existantes. Schémas SQLite/PostgreSQL vierges et `scripts/test-admin-postgres.ps1` réussis : sauvegarde/restauration dans une autre base PostgreSQL 18 jetable ; restauration des assets PostgreSQL et NAS non validés.
+
+- `cargo clippy --locked --all-targets -j 1 -- -D warnings` réussi avant les derniers ajustements des messages de sauvegarde. Les CLI backup/recover recompilent (`cargo check` ciblé) ; sous Windows les ACL sont héritées et non contrôlées, avertissements ajoutés sans modification d’ACL.
+
+- Les images Docker `runtime`, `runtime-core`, `runtime-node` se construisent localement avec `CARGO_BUILD_JOBS=1` par défaut ; les sources frontend ont évolué pendant les builds, qui ne garantissent donc pas l’état courant final. Aucune publication ou validation NAS.
+- Bancs synthétiques Chrome 156 et EdgeCore 155 : AV1 8 bits/Opus mono MP4 et MKV, puis MP4 AV1 10 bits et deux pistes Opus 7.1, ouverture/changements/seek et PCM réussis. Ni sortie 7.1 physique, ni réseau distant, ni lecture continue de plusieurs heures.
+
+- `lyrics.get` : validateur et contrôles avant écriture corrigés ; 4 tests unitaires et un parcours Core/worker Wasm synthétique signé/SQLite réussissent. Purge du cache expiré par lots de 64 dans le scheduler : test SQLite réussi ; PostgreSQL, charge et service LRCLIB réel non testés.
+
+- `powershell -NoProfile -File scripts/test-postgres.ps1` : contrat HTTP PostgreSQL 18, 8 tests OIDC avec IdP simulé et scénario distribué à deux Nodes locaux réussis. Base Docker temporaire détruite par le script ; aucun test multi-machine ou Authentik réel.
+
+- Le schéma initial PostgreSQL 18 passe sur une base Docker jetable ; son contrat HTTP et la réouverture passent, ainsi que huit tests OIDC avec fournisseur simulé. Pas de preuve Authentik réel.
+- `restore_assets_cli_rejects_partial_extension_sync` réussit sur installations jetables ; des fichiers Core ont toutefois changé pendant la compilation, donc cette preuve couvre le binaire compilé et non nécessairement tous les derniers changements.
+- Administration : focus initial, confinement clavier, Échap et restauration du focus ajoutés aux éditeurs comptes/groupes ; test Chrome sur DOM synthétique et ESLint réussis, Svelte check sans erreur, un avertissement existant.
+- `lyrics.get` : rejet du validateur constaté et correctif préparé ; test de worker Wasm synthétique à exécuter avant toute validation.
+
 ## 28 octobre 2026 — Commandes vidéo sur téléphone
 
 - Audio Opus segmenté : la fenêtre suivante est demandée huit secondes avant la limite au lieu de quatre, après le chargement initial. Les données de lecture affichent aussi la réserve de l'audio séparé. Tests unitaires ciblés : 20 réussis ; aucune preuve sur Pixel 7a, NAS ou réseau réel, ni identification certaine de la cause des saccades.

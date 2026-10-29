@@ -32,6 +32,8 @@ type MusicCurrentRow = (
     String,
     String,
     String,
+    String,
+    String,
 );
 
 pub struct EventInput<'a> {
@@ -163,6 +165,25 @@ pub async fn purge_expired_cache(
         .execute(&mut **tx)
         .await?
         .rows_affected();
+    Ok(affected)
+}
+
+/// Examine at most 64 primary-key-ordered entries in a background pass.
+/// The caller holds the cursor; wrapping eventually revisits unexpired entries.
+pub async fn purge_provider_cache_batch(
+    store: &IdentityStore,
+    cursor: &mut String,
+    now: i64,
+) -> Result<u64, sqlx::Error> {
+    let keys: Vec<String> = query_scalar("SELECT cache_key FROM automation_provider_cache WHERE cache_key>? ORDER BY cache_key LIMIT 64")
+        .bind(&*cursor).fetch_all(store.pool()).await?;
+    let Some(last) = keys.last() else {
+        cursor.clear();
+        return Ok(0);
+    };
+    let affected = query("DELETE FROM automation_provider_cache WHERE cache_key IN (SELECT cache_key FROM automation_provider_cache WHERE cache_key>? AND cache_key<=? AND expires_at<=? ORDER BY cache_key LIMIT 64)")
+        .bind(&*cursor).bind(last).bind(now).execute(store.pool()).await?.rows_affected();
+    *cursor = last.clone();
     Ok(affected)
 }
 
@@ -1298,6 +1319,7 @@ async fn current_fingerprint_matches(
 ) -> Result<bool, sqlx::Error> {
     let current:Option<FingerprintState>=query_as("SELECT e.package_json,COALESCE(p.config_revision,''),COALESCE(p.algorithm_version,'1'),COALESCE(s.settings_json,'{}'),a.modified_ns,CAST(a.size AS TEXT),CAST(a.available AS TEXT),source.root_snapshot,COALESCE(p.operation,''),lib.options_json,a.probe_json FROM extensions e LEFT JOIN automation_policies p ON p.extension_id=e.id AND p.library_id=COALESCE((SELECT own.library_id FROM automation_policies own WHERE own.extension_id=e.id AND own.library_id=?),(SELECT parent_id FROM library_folders WHERE library_id=? AND active=1 LIMIT 1)) LEFT JOIN extension_settings s ON s.extension_id=e.id JOIN inventory_assets a ON a.id=? JOIN inventory_sources source ON source.id=a.source_id JOIN libraries lib ON lib.id=a.library_id WHERE e.id=? AND source.root_snapshot=lib.root AND COALESCE(p.mode,'automatic')!='disabled'")
  .bind(library).bind(library).bind(asset).bind(&link.extension_id).fetch_optional(&mut **tx).await?;
+    let mut music_fingerprint = None;
     let (
         package,
         config,
@@ -1314,12 +1336,17 @@ async fn current_fingerprint_matches(
         Some(c) => c,
         None => {
             let music_curr: Option<MusicCurrentRow> = query_as(
-                "SELECT e.package_json,COALESCE(p.config_revision,''),COALESCE(p.algorithm_version,'1'),COALESCE(s.settings_json,'{}'),t.modified_ns,t.size,t.available,t.root_snapshot,COALESCE(p.operation,''),lib.options_json,t.title || ':' || t.artist || ':' || t.album FROM extensions e LEFT JOIN automation_policies p ON p.extension_id=e.id AND p.library_id=COALESCE((SELECT own.library_id FROM automation_policies own WHERE own.extension_id=e.id AND own.library_id=?),(SELECT parent_id FROM library_folders WHERE library_id=? AND active=1 LIMIT 1)) LEFT JOIN extension_settings s ON s.extension_id=e.id JOIN music_tracks t ON t.id=? JOIN libraries lib ON lib.id=t.library_id WHERE e.id=? AND t.root_snapshot=lib.root AND COALESCE(p.mode,'automatic')!='disabled'"
+                "SELECT e.package_json,COALESCE(p.config_revision,''),COALESCE(p.algorithm_version,'1'),COALESCE(s.settings_json,'{}'),t.modified_ns,t.size,t.available,t.root_snapshot,COALESCE(p.operation,''),lib.options_json,t.title,t.artist,t.album FROM extensions e LEFT JOIN automation_policies p ON p.extension_id=e.id AND p.library_id=COALESCE((SELECT own.library_id FROM automation_policies own WHERE own.extension_id=e.id AND own.library_id=?),(SELECT parent_id FROM library_folders WHERE library_id=? AND active=1 LIMIT 1)) LEFT JOIN extension_settings s ON s.extension_id=e.id JOIN music_tracks t ON t.id=? JOIN libraries lib ON lib.id=t.library_id WHERE e.id=? AND t.root_snapshot=lib.root AND COALESCE(p.mode,'automatic')!='disabled'"
             )
             .bind(library).bind(library).bind(asset).bind(&link.extension_id).fetch_optional(&mut **tx).await?;
-            let Some((pkg, cfg, alg, sett, modif, sz, avail, rt, op, opt, tag)) = music_curr else {
+            let Some((pkg, cfg, alg, sett, modif, sz, avail, rt, op, opt, title, artist, album)) =
+                music_curr
+            else {
                 return Ok(false);
             };
+            music_fingerprint = Some(hash(&(
+                asset, sz, &modif, avail, &rt, &title, &artist, &album,
+            ))?);
             (
                 pkg,
                 cfg,
@@ -1331,7 +1358,7 @@ async fn current_fingerprint_matches(
                 rt,
                 op,
                 opt,
-                tag,
+                String::new(),
             )
         }
     };
@@ -1345,6 +1372,10 @@ async fn current_fingerprint_matches(
             .any(|p| p == "playback.markers")
         {
             "intro.parse_chapters"
+        } else if package.manifest.category.as_deref() == Some("Lyrics")
+            || package.manifest.permissions.iter().any(|p| p == "lyrics")
+        {
+            "lyrics.get"
         } else if package.manifest.http_hosts.is_empty() {
             "metadata.propose"
         } else {
@@ -1364,8 +1395,12 @@ async fn current_fingerprint_matches(
     let available = available
         .parse::<i64>()
         .map_err(|_| sqlx::Error::Protocol("invalid source availability".into()))?;
-    let probe_digest = format!("{:x}", Sha256::digest(probe.as_bytes()));
-    let file_fingerprint = hash(&(asset, size, &modified, available, &root, probe_digest))?;
+    let file_fingerprint = if let Some(fingerprint) = music_fingerprint {
+        fingerprint
+    } else {
+        let probe_digest = format!("{:x}", Sha256::digest(probe.as_bytes()));
+        hash(&(asset, size, &modified, available, &root, probe_digest))?
+    };
     let settings: Value = serde_json::from_str(&settings)
         .map_err(|_| sqlx::Error::Protocol("invalid extension settings".into()))?;
     let options: Value = serde_json::from_str(&options)
@@ -1470,5 +1505,61 @@ mod marker_source_tests {
                 .unwrap()
         );
         tx.rollback().await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod provider_cache_cleanup_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cleanup_is_bounded_and_wraps_without_deleting_live_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("cache.sqlite"))
+            .await
+            .unwrap();
+        for index in 0..130 {
+            query("INSERT INTO automation_provider_cache(cache_key,provider,operation,query_hash,response_json,expires_at,created_at) VALUES(?, 'fixture', 'search', 'hash', '{}', ?, 0)")
+                .bind(format!("key-{index:03}")).bind(if index % 2 == 0 { 10i64 } else { 100i64 }).execute(store.pool()).await.unwrap();
+        }
+        let mut cursor = String::new();
+        assert_eq!(
+            purge_provider_cache_batch(&store, &mut cursor, 20)
+                .await
+                .unwrap(),
+            32
+        );
+        assert_eq!(cursor, "key-063");
+        assert_eq!(
+            purge_provider_cache_batch(&store, &mut cursor, 20)
+                .await
+                .unwrap(),
+            32
+        );
+        assert_eq!(
+            purge_provider_cache_batch(&store, &mut cursor, 20)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            purge_provider_cache_batch(&store, &mut cursor, 20)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(cursor.is_empty());
+        let remaining: i64 = query_scalar("SELECT COUNT(*) FROM automation_provider_cache")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(remaining, 65);
+        assert_eq!(
+            purge_provider_cache_batch(&store, &mut cursor, 200)
+                .await
+                .unwrap(),
+            64
+        );
+        store.close().await;
     }
 }

@@ -14,7 +14,7 @@ const CHUNK: usize = 65536;
 pub enum BundleError {
     #[error("backup I/O failed")]
     Io(#[from] std::io::Error),
-    #[error("backup authentication or format validation failed")]
+    #[error("backup checksum or format validation failed")]
     InvalidBundle,
     #[error("backup target already exists")]
     TargetExists,

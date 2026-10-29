@@ -1224,9 +1224,9 @@ CREATE TABLE api_keys (
     name text NOT NULL,
     user_id text NOT NULL,
     token_hash text NOT NULL,
-    created_at integer NOT NULL,
-    expires_at integer NOT NULL,
-    revoked_at integer,
+    created_at bigint NOT NULL,
+    expires_at bigint NOT NULL,
+    revoked_at bigint,
     scope text NOT NULL,
     CONSTRAINT api_keys_name_check CHECK (((length(name) >= 1) AND (length(name) <= 80))),
     CONSTRAINT api_keys_scope_check CHECK ((scope = 'catalog:read'::text))
@@ -1246,8 +1246,8 @@ CREATE TABLE assets (
     sha256 text NOT NULL,
     size integer NOT NULL,
     mime text NOT NULL,
-    created_at integer NOT NULL,
-    orphaned_at integer,
+    created_at bigint NOT NULL,
+    orphaned_at bigint,
     CONSTRAINT assets_mime_check CHECK (((length(mime) >= 3) AND (length(mime) <= 100))),
     CONSTRAINT assets_sha256_check CHECK ((length(sha256) = 64)),
     CONSTRAINT assets_size_check CHECK ((size > 0))
@@ -1416,7 +1416,7 @@ CREATE TABLE backup_schedule (
 
 CREATE TABLE bootstrap_state (
     singleton integer NOT NULL,
-    completed_at integer DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
+    completed_at bigint DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
     CONSTRAINT bootstrap_state_singleton_check CHECK ((singleton = 1))
 );
 
@@ -1506,8 +1506,8 @@ CREATE TABLE user_groups (
 CREATE TABLE users (
     id text NOT NULL,
     role text NOT NULL,
-    created_at integer DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
-    disabled_at integer,
+    created_at bigint DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
+    disabled_at bigint,
     display_name text,
     sso_username text,
     CONSTRAINT users_role_check CHECK ((role = ANY (ARRAY['administrator'::text, 'user'::text])))
@@ -1672,7 +1672,7 @@ CREATE TABLE extension_repositories (
     name text NOT NULL,
     url text NOT NULL,
     manifest_json text NOT NULL,
-    refreshed_at integer NOT NULL
+    refreshed_at bigint NOT NULL
 );
 
 
@@ -1851,7 +1851,7 @@ CREATE TABLE inventory_works (
     editorial_json text DEFAULT '{}'::text NOT NULL,
     title_sort text DEFAULT ''::text NOT NULL,
     kind text DEFAULT 'film'::text NOT NULL,
-    added_at integer,
+    added_at bigint,
     manual_json text,
     minimum_age integer,
     display_title_sort text DEFAULT ''::text NOT NULL,
@@ -1884,7 +1884,7 @@ CREATE TABLE libraries (
     enabled integer NOT NULL,
     excluded_patterns text DEFAULT ''::text NOT NULL,
     options_json text DEFAULT '{}'::text NOT NULL,
-    next_metadata_refresh_at integer DEFAULT 0 NOT NULL,
+    next_metadata_refresh_at bigint DEFAULT 0 NOT NULL,
     CONSTRAINT libraries_enabled_check CHECK ((enabled = ANY (ARRAY[0, 1]))),
     CONSTRAINT libraries_kind_check CHECK ((kind = ANY (ARRAY['films'::text, 'series'::text, 'music'::text]))),
     CONSTRAINT libraries_name_check CHECK (((length(name) >= 1) AND (length(name) <= 100)))
@@ -1913,7 +1913,7 @@ CREATE TABLE local_credentials (
     user_id text NOT NULL,
     login text NOT NULL,
     password_hash text NOT NULL,
-    updated_at integer DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
+    updated_at bigint DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
     CONSTRAINT local_credentials_login_check CHECK ((((length(login) >= 3) AND (length(login) <= 64)) AND (login ~ '^[a-z0-9._-]+$'::text)))
 );
 
@@ -1921,7 +1921,7 @@ CREATE TABLE local_credentials (
 
 CREATE TABLE login_throttle (
     throttle_key text NOT NULL,
-    window_started integer NOT NULL,
+    window_started bigint NOT NULL,
     attempts integer NOT NULL
 );
 
@@ -1965,8 +1965,8 @@ CREATE TABLE media_match_candidates (
     reason text NOT NULL,
     status text DEFAULT 'pending'::text NOT NULL,
     merge_id text,
-    created_at integer DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
-    updated_at integer DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
+    created_at bigint DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
+    updated_at bigint DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
     CONSTRAINT media_match_candidates_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'rejected'::text, 'undone'::text])))
 );
 
@@ -1979,8 +1979,8 @@ CREATE TABLE media_merge_history (
     origin text NOT NULL,
     candidate_id text,
     snapshot_json text NOT NULL,
-    created_at integer DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
-    undone_at integer,
+    created_at bigint DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
+    undone_at bigint,
     CONSTRAINT media_merge_history_origin_check CHECK ((origin = ANY (ARRAY['auto'::text, 'manual'::text, 'candidate'::text])))
 );
 
@@ -1996,9 +1996,9 @@ CREATE TABLE media_nodes (
     key_id text DEFAULT 'local'::text NOT NULL,
     shared_secret text DEFAULT ''::text NOT NULL,
     roots_json text DEFAULT '[]'::text NOT NULL,
-    paired_at integer DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
-    last_seen_at integer,
-    revoked_at integer,
+    paired_at bigint DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
+    last_seen_at bigint,
+    revoked_at bigint,
     version text,
     connection_mode text DEFAULT 'outbound'::text NOT NULL,
     CONSTRAINT media_nodes_id_check CHECK (((length(id) >= 1) AND (length(id) <= 128))),
@@ -2055,9 +2055,9 @@ CREATE TABLE music_tracks (
 CREATE TABLE node_enrollment_tokens (
     id text NOT NULL,
     token_hash text NOT NULL,
-    created_at integer DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
-    expires_at integer NOT NULL,
-    used_at integer,
+    created_at bigint DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
+    expires_at bigint NOT NULL,
+    used_at bigint,
     used_by_node_id text,
     CONSTRAINT node_enrollment_tokens_id_check CHECK (((length(id) >= 1) AND (length(id) <= 128)))
 );
@@ -2070,7 +2070,7 @@ CREATE TABLE oidc_flows (
     nonce text NOT NULL,
     verifier text NOT NULL,
     link_session_hash text,
-    expires_at integer NOT NULL
+    expires_at bigint NOT NULL
 );
 
 
@@ -2106,7 +2106,7 @@ CREATE TABLE parental_policies (
 CREATE TABLE personal_list_items (
     list_id text NOT NULL,
     work_id text NOT NULL,
-    added_at integer DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
+    added_at bigint DEFAULT (EXTRACT(epoch FROM now()))::bigint NOT NULL,
     "position" integer DEFAULT 0 NOT NULL
 );
 
@@ -2273,9 +2273,9 @@ CREATE TABLE server_settings (
 CREATE TABLE sessions (
     token_hash text NOT NULL,
     user_id text NOT NULL,
-    created_at integer NOT NULL,
-    last_seen_at integer NOT NULL,
-    expires_at integer NOT NULL,
+    created_at bigint NOT NULL,
+    last_seen_at bigint NOT NULL,
+    expires_at bigint NOT NULL,
     device_label text DEFAULT 'Navigateur'::text NOT NULL
 );
 

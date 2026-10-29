@@ -8,12 +8,23 @@
   import { selectArtwork } from './artwork-selection';
   import { imagePreviewUrl } from './image-url';
   let { works = [] }: { works?: Work[] } = $props();
-  function thumbnail(id: string, seriesId?: string) { const work=works.find(work=>work.id===(seriesId || id)); const artwork=selectArtwork(work, $session); return imagePreviewUrl(artwork.thumb || artwork.landscape || artwork.backdrop || artwork.poster,640); }
+  function thumbnail(id: string, seriesId?: string) { const work=works.find(work=>work.id===(seriesId || id)); const artwork=selectArtwork(work, $session); return imagePreviewUrl(artwork.thumb || artwork.landscape || artwork.backdrop,640); }
+  let failedImages = $state<string[]>([]);
 
   let error = $state('');
   let track = $state<HTMLDivElement>();
   let canScrollLeft = $state(false);
   let canScrollRight = $state(false);
+
+  $effect(() => {
+    if (!track) return;
+    const resize = new ResizeObserver(updateScrollState);
+    resize.observe(track);
+    const content = new MutationObserver(updateScrollState);
+    content.observe(track, { childList: true });
+    updateScrollState();
+    return () => { resize.disconnect(); content.disconnect(); };
+  });
 
   onMount(() => {
     void loadHistory().catch(e => (error = e.message));
@@ -36,7 +47,7 @@
     const distance = track.clientWidth * 0.75;
     track.scrollBy({
       left: direction === 'left' ? -distance : distance,
-      behavior: 'smooth'
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
     });
   }
 </script>
@@ -52,14 +63,13 @@
     </div>
 
     {#if continuing.length > 2}
-      <div class="carousel-nav" aria-hidden="true">
+      <div class="carousel-nav">
         <button
           type="button"
           class="nav-arrow"
           disabled={!canScrollLeft}
           onclick={() => scroll('left')}
           aria-label="Faire défiler vers la gauche"
-          tabindex="-1"
         >
           <Icon name="chevron-left" size={18} />
         </button>
@@ -69,7 +79,6 @@
           disabled={!canScrollRight}
           onclick={() => scroll('right')}
           aria-label="Faire défiler vers la droite"
-          tabindex="-1"
         >
           <Icon name="chevron-right" size={18} />
         </button>
@@ -108,13 +117,14 @@
       onscroll={updateScrollState}
     >
       {#each continuing as item (item.workId)}
+        {@const image = thumbnail(item.workId,item.seriesId)}
         <a
           class="continue-card"
           href={resolve(`${item.kind === 'episode' ? 'series/' : 'films/'}?work=${encodeURIComponent(item.seriesId ?? item.workId)}`)}
           aria-label={`Reprendre la lecture de ${item.title}`}
         >
           <div class="card-thumb">
-            {#if thumbnail(item.workId,item.seriesId)}<img class="resume-image" src={thumbnail(item.workId,item.seriesId)} alt="" loading="lazy" />{/if}
+            {#if image && !failedImages.includes(image)}<img class="resume-image" src={image} alt="" width="640" height="360" loading="lazy" decoding="async" onerror={() => failedImages = [...failedImages, image]} />{/if}
             <div class="thumb-bg" aria-hidden="true">
               <span class="thumb-letter">{(item.title ?? 'M').charAt(0)}</span>
             </div>
@@ -158,7 +168,7 @@
   .card-thumb { position:relative; }
   .thumb-overlay,.card-progress-track { z-index:2; }
   .continue-shelf {
-    margin: 36px 0;
+    margin: 0;
   }
 
   .shelf-header {

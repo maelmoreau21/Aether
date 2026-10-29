@@ -902,7 +902,8 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
     );
     let work_id = cat_json["items"][0]["id"].as_str().unwrap().to_owned();
 
-    // Give Node 1 a lower latency so it is deterministically ranked #1
+    // Heartbeats mark both Nodes connected. Their RTT samples are smoothed
+    // against earlier real requests, so a single sample cannot set ordering.
     let hb_n1 = HeartbeatPayload {
         protocol_version: PROTOCOL_VERSION.into(),
         version: Some("v1.0.0".into()),
@@ -937,6 +938,15 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
         .node_registry()
         .record_heartbeat(&node2_id, &hb_n2, Some(25), unix_now());
 
+    // Set explicit test telemetry after the real scans. Leave a wide margin so
+    // an incidental concurrent heartbeat cannot reverse the intended ranking.
+    store
+        .node_registry()
+        .set_telemetry(&node1_id, Some(0), 0, 0);
+    store
+        .node_registry()
+        .set_telemetry(&node2_id, Some(1_000), 0, 0);
+
     // Fetch work detail and verify edition sources are ranked with Node 1 first and Node 2 second
     let (det_st, _, det_body) = http_request(
         &core_origin,
@@ -962,7 +972,7 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
     assert_eq!(sources[1]["nodeId"], node2_id);
     assert!(
         sources[0]["score"].as_i64().unwrap() > sources[1]["score"].as_i64().unwrap(),
-        "Node 1 (3ms RTT) must have a higher score than Node 2 (25ms RTT)"
+        "Node 1 must have a higher score with explicitly controlled telemetry"
     );
 
     let primary_asset_id = sources[0]["playbackMediaId"].as_str().unwrap().to_owned();

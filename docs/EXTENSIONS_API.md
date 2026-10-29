@@ -288,4 +288,10 @@ Le cache automatique des fournisseurs dépend aussi des réglages effectifs, de
 la génération et de l'empreinte du paquet. Les réglages ne sont pas enregistrés
 en clair dans sa clé : une signature HMAC avec une clé aléatoire en mémoire les
 isole. Cette clé change au redémarrage, ce qui invalide alors le cache de ce
-processus ; les enregistrements expirés restent soumis au nettoyage habituel.
+processus. Le scheduler examine au plus 64 entrées par minute, par clé primaire,
+pour supprimer les entrées expirées sans balayage complet dans les requêtes HTTP.
+
+La réponse `lyrics.get` doit respecter le type `Lyrics` du SDK ; le Core borne
+les textes et vérifie le titre, l’artiste et la durée lorsqu’elle est disponible
+avant application, y compris pour les réponses en cache. Un fournisseur qui ne
+peut pas confirmer l’identité renvoie une erreur sans interrompre la lecture.

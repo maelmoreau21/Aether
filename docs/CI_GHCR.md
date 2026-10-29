@@ -1,5 +1,13 @@
 # CI et publication GHCR
 
+## Parcours Séries — 29 octobre 2026
+
+Le test attendait une classe `loaded` supprimée de la couverture. Il vérifie
+maintenant le chargement réel de l'image et suit les panneaux, sélecteurs et
+menus actuels. Le scénario complet passe localement sous Windows avec Chrome
+156.0.8078.48, y compris lecture, permissions et changement de compte. La
+relance du job GitHub Linux reste nécessaire.
+
 ## Sélection des versions dans les parcours navigateur — 29 octobre 2026
 
 Le journal GitHub montre que les deux scans Films aboutissent, puis que le

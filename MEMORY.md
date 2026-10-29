@@ -4792,3 +4792,8 @@ NFO et affiches ouvrent désormais ce panneau avant la sélection ; la validatio
 du job GitHub Linux reste à faire. Le scénario scanner ouvre aussi le panneau de
 suivi et passe localement sous Windows/Chrome, avant et après redémarrage ; les
 scénarios NFO et affiches ne sont pas relancés.
+# 29 octobre 2026 — parcours CI Séries
+
+Le scénario navigateur Séries a été adapté à l'interface actuelle, notamment
+au chargement de la couverture et aux panneaux repliés. Le test complet passe
+sous Windows/Chrome 156 ; la CI Linux reste à confirmer.

@@ -71,7 +71,7 @@ fs.mkdirSync(out, {recursive: true});
 
     await page.goto(origin+'/app/');
     await page.locator('.hero-banner h1').waitFor();
-    await page.waitForFunction(()=>document.querySelector('.backdrop-img.loaded'));
+    await page.waitForFunction(()=>{const image=document.querySelector('.backdrop-img');return image?.complete && image.naturalWidth>0;});
     await page.waitForTimeout(550);
     for (const theme of ['light','dark']) {
       await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
@@ -104,10 +104,10 @@ fs.mkdirSync(out, {recursive: true});
     // Verify seasons dropdown and episode list
     const seasonSelect = page.locator('select[aria-label="Saison"]');
     await seasonSelect.waitFor();
-    await page.getByRole('navigation',{name:'Saisons disponibles'}).waitFor();
     assert.equal(await page.locator('.main-nav a[href*="search"]').count(),0);
     assert.equal(await page.locator('main + footer').count(),0);
-    assert.equal(await page.getByRole('link',{name:'Recherche rapide'}).count(),1);
+    assert.equal(await page.getByRole('link',{name:'Rechercher',exact:true}).count(),1);
+    await page.locator('.personal-panel summary').click();
     const favoriteSaved=page.waitForResponse(r=>r.url().includes('/api/v1/feedback/')&&r.request().method()==='PUT');
     await page.getByRole('button',{name:'Ajouter aux favoris',exact:true}).click();
     assert.equal((await favoriteSaved).status(),200);
@@ -125,6 +125,7 @@ fs.mkdirSync(out, {recursive: true});
     } finally {releaseRating();await page.unrouteAll({behavior:'wait'});}
     assert.equal((await ratingSaved).status(),200);
     await page.reload();
+    await page.locator('.personal-panel summary').click();
     await page.getByRole('button',{name:'Retirer des favoris',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'4,5 sur 5',exact:true}).getAttribute('aria-pressed'),'true');
     await page.locator('summary[aria-label="Ajouter à une playlist"]').click();
@@ -140,8 +141,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('summary[aria-label="Ajouter à une playlist"]').click();
     report.results.quickFeedbackAndListMenu=true;
     await page.getByText('Synthetic Actor',{exact:true}).waitFor();
-    await page.locator('.season-shortcuts img').first().scrollIntoViewIfNeeded();
-    await page.waitForFunction(() => [...document.querySelectorAll('.season-shortcuts img')].some(img => img.complete && img.naturalWidth > 0));
+    await page.locator('.season-image').scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => {const img=document.querySelector('.season-image');return img?.complete && img.naturalWidth > 0;});
     await page.locator('.episode-thumb').first().scrollIntoViewIfNeeded();
     await page.waitForFunction(() => [...document.querySelectorAll('.episode-thumb')].some(img => img.complete && img.naturalWidth > 0));
     report.results.localArtwork = true;
@@ -151,27 +152,28 @@ fs.mkdirSync(out, {recursive: true});
         await page.setViewportSize({width,height:900});
         await page.evaluate(()=>window.scrollTo(0,0));
         await page.waitForTimeout(150);
-        assert.ok(await page.getByRole('link',{name:'Recherche rapide'}).isVisible(),`search visible at ${width}`);
+        assert.ok(await page.getByRole('link',{name:width === 390 ? 'Recherche' : 'Rechercher',exact:true}).isVisible(),`search visible at ${width}`);
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false,`${theme} ${width} overflow`);
         const back=page.getByRole('link',{name:'Toutes les séries',exact:false});
         assert.equal(await back.count(),0);
         await page.screenshot({path:`${out}/detail-${theme}-${width}.png`,fullPage:true});
       }
     }
-    await page.getByRole('navigation',{name:'Saisons disponibles'}).getByRole('button',{name:'Saison 2',exact:false}).click();
+    await seasonSelect.selectOption('2');
     await page.getByRole('button',{name:'Lire Season Two Episode',exact:true}).waitFor();
     await seasonSelect.selectOption('1');
     const singleVersionRow = page.locator('article.episode').filter({
-      has: page.locator('.episode-number').filter({hasText:/^02$/})
+      has: page.locator('.episode-meta').filter({hasText:/^Épisode 2(?:\s|·|$)/})
     });
     await singleVersionRow.locator('h3').waitFor();
     assert.equal(await singleVersionRow.count(),1,'The second episode fixture must be present');
     assert.equal(await singleVersionRow.getByRole('combobox').count(),0,'A mono-version episode must not display a Version selector');
-    report.results.catalogueChanges={privateFeedbackPersisted:true,seasonShortcuts:true,responsiveThemes:true};
+    report.results.catalogueChanges={privateFeedbackPersisted:true,seasonSelection:true,responsiveThemes:true};
 
     await page.screenshot({path:`${out}/series-detail.png`});
 
     // 5. Select Version and Play Episode 1
+    await page.locator('article.episode').filter({has:page.getByRole('heading',{name:'Episode One',exact:true})}).locator('.episode-versions summary').click();
     const chapterVersion=page.getByRole('combobox',{name:'Version de Episode One'});
     await chapterVersion.focus();
     await chapterVersion.selectOption({label:'MP4'});
@@ -318,12 +320,10 @@ fs.mkdirSync(out, {recursive: true});
     const filmCard = page.locator('.media-card').filter({hasText:'Synthetic Film'});
     await filmCard.waitFor();
     await filmCard.click();
-    await page.getByRole('heading',{name:'Vidéo, audio et sous-titres'}).waitFor();
+    await page.locator('.versions-panel summary').click();
     await page.getByText('Film Actor',{exact:true}).waitFor();
-    assert.match(await page.locator('.tech-specs-card').innerText(),/français/);
-    assert.equal(await page.locator('.tech-specs-card .audio-track-spec').filter({hasText:'français'}).count(),1);
-    assert.ok(await page.locator('.tech-specs-card .language-label svg').count() >= 2);
-    assert.match(await page.locator('.tech-specs-card').innerText(),/anglais/);
+    assert.match(await page.locator('.specs-grid').innerText(),/français/);
+    assert.match(await page.locator('.specs-grid').innerText(),/anglais/);
     for (const theme of ['light','dark']) {
       await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
       for (const width of [390,1440]) {
@@ -338,6 +338,7 @@ fs.mkdirSync(out, {recursive: true});
 
     // 9a. Real account switch in SPA (series-admin -> cache filled -> logout -> login series-user-b with real HttpOnly cookies)
     await seasonSelect.selectOption('1');
+    await page.locator('article.episode').filter({has:page.getByRole('heading',{name:'Episode One',exact:true})}).locator('.episode-versions summary').click();
     const ep1Select = page.locator('select[aria-label="Version de Episode One"]');
     await ep1Select.waitFor();
 
@@ -388,7 +389,8 @@ fs.mkdirSync(out, {recursive: true});
     assert.match(await page.locator('.profile-trigger').textContent(), /series-user-b/);
 
     // Navigate via SPA links to Series -> Browser Series (no full page reload)
-    await page.getByRole('navigation', {name: /^(Navigation principale|Main navigation)$/}).getByRole('link', {name: 'Séries Navigateur', exact: true}).click();
+    await page.getByRole('navigation', {name:'Navigation principale',exact:true}).getByRole('button',{name:'Bibliothèques',exact:true}).click();
+    await page.getByRole('dialog',{name:'Bibliothèques'}).getByRole('link',{name:/Séries Navigateur/}).click();
     await card.waitFor();
     const mediaCallsBeforeDetailB = requestedMediaUrls.length;
     await card.click();
@@ -403,6 +405,7 @@ fs.mkdirSync(out, {recursive: true});
 
     // Verify Episode 1 options reverted to uncached generic labels ('Version 1', 'Version 2') because Session A cache was purged!
     const ep1SelectB = page.locator('select[aria-label="Version de Episode One"]');
+    await page.locator('article.episode').filter({has:page.getByRole('heading',{name:'Episode One',exact:true})}).locator('.episode-versions summary').click();
     await ep1SelectB.waitFor();
     const initialLabelsB = await ep1SelectB.locator('option:not([value="auto"])').allTextContents();
     assert.deepEqual(

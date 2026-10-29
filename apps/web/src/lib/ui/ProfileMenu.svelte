@@ -42,6 +42,13 @@
       panel.hidePopover();
     }
   }
+
+  function navigate(event: MouseEvent, destination: 'settings/' | 'admin/libraries/#overview') {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    panel.hidePopover();
+    void goto(resolve(destination));
+  }
 </script>
 
 <div class="profile-access">
@@ -79,14 +86,14 @@
     </div>
 
     <nav aria-label="Menu profil">
-      <a class="profile-entry" href={resolve('settings/')} onclick={() => panel.hidePopover()}>
+      <a class="profile-entry" href={resolve('settings/')} onclick={(event) => navigate(event, 'settings/')}>
         <Icon name="profile" size={17} />
         <span>{$t('profile_settings')}</span>
         <Icon name="chevron" size={13} />
       </a>
 
       {#if $session?.user.role === 'administrator'}
-        <a class="profile-entry" href={resolve('admin/libraries/#overview')} onclick={() => panel.hidePopover()}>
+        <a class="profile-entry" href={resolve('admin/libraries/#overview')} onclick={(event) => navigate(event, 'admin/libraries/#overview')}>
           <Icon name="settings" size={17} />
           <span>{$t('admin_dashboard')}</span>
           <Icon name="chevron" size={13} />

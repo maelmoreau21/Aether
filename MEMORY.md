@@ -1,3 +1,8 @@
+## 29 octobre 2026 — Navigation du menu profil
+
+- Les destinations « Mon profil & Préférences » et « Tableau de bord » du menu profil utilisent désormais une navigation SvelteKit explicite après fermeture du popover, tout en conservant leurs `href` pour l’ouverture dans un nouvel onglet.
+- Check Web : `npm run check --prefix apps/web` (0 erreur, avertissement CatalogGrid:90 préexistant), `npm run lint --prefix apps/web` et `npm test --prefix apps/web` (187 tests réussis).
+
 ## 29 octobre 2026 — Réduction du temps CI et publication Docker
 
 - Run 40931283481 : publication standalone 4 min 56 s de dépendances puis 9 min 01 s de binaires. Les arguments version/branche invalidaient la précompilation et les trois jobs de publication reconstruisaient les mêmes binaires.

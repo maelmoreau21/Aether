@@ -150,6 +150,13 @@
     if (media.failoverFrom) triedMediaIds.add(media.failoverFrom);
     busy = true; error = ''; notice = ''; wake();
     try {
+      // Progress and account preferences are independent reads. Start both
+      // before choosing a track so a cold preferences request does not delay
+      // the saved position request; track selection still waits for preferences.
+      const tracker = !restore && media.workId && !media.synthetic
+        ? new ProgressTracker(media.workId, message => { if (current === generation) notice = message; }) : undefined;
+      if (tracker) progressTracker = tracker;
+      const resume = tracker?.load();
       // Preferences are optional: an outage must not prevent authorized playback.
       // preferences() is cleared by session generation changes.
       let preferenceNotice = '';
@@ -159,10 +166,6 @@
       readPlaybackPreferences();
       const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))));
       if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
-      const tracker = !restore && media.workId && !media.synthetic
-        ? new ProgressTracker(media.workId, message => { if (current === generation) notice = message; }) : undefined;
-      if (tracker) progressTracker = tracker;
-      const resume = tracker?.load();
       await engine.load(media, source.audioTrackId, restore?.position ?? resume ?? 0);
       if (current !== generation) return;
       const autoFailoverMsg = failoverNotice || (media.failoverFrom ? 'Basculement automatique sur un nœud disponible.' : '');

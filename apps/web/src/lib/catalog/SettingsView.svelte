@@ -170,7 +170,7 @@
       </div>
             <div hidden={current !== 'display'}>
         <form class="card offsets" onsubmit={saveArtworkRotation}>
-          <h2>Rotation des affiches (Poster Rotator)</h2>
+          <h2>Rotation des affiches</h2>
           <p class="muted">La rotation utilise les affiches déjà présentes en local. Les images choisies manuellement restent prioritaires.</p>
           <label><span>Activer la rotation automatique</span><input type="checkbox" bind:checked={artworkRotation.enabled} onchange={() => artworkEdited = true} /></label>
 

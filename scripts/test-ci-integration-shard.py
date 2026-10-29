@@ -31,6 +31,14 @@ class CoverageTests(unittest.TestCase):
         ]}
         self.assertEqual(sharding.integration_targets(metadata), ["http", "ranges"])
 
+    def test_long_targets_are_distributed_without_dropping_new_targets(self):
+        targets = ["scanner_performance", "global_catalogue_consolidation", "admin_users", "new_target"]
+        shards = [sharding.shard_targets(targets, i, 3) for i in range(3)]
+        self.assertEqual(sorted(sum(shards, [])), sorted(targets))
+        self.assertNotEqual(next(i for i, shard in enumerate(shards) if "scanner_performance" in shard),
+                            next(i for i, shard in enumerate(shards) if "global_catalogue_consolidation" in shard))
+        self.assertEqual(shards, [sharding.shard_targets(reversed(targets), i, 3) for i in range(3)])
+
     def test_invalid_partition_cannot_silently_skip_tests(self):
         for index, count in [(-1, 3), (3, 3), (0, 0)]:
             with self.assertRaises(ValueError):

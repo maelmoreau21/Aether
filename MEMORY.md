@@ -1,3 +1,8 @@
+## 29 octobre 2026 — Reprise après délai de seek vidéo
+
+- Correction supplémentaire : un événement seeked ancien ne termine plus le chargement avant résolution de la progression et demande effective du seek ; régression reproduite puis corrigée, 32 tests NativePlayer réussis. Les chemins audio externe, préparations et repli vidéo ne garantissent pas tous une lecture progressive sans préparation complète.
+- Après un timeout de seek initial sans relais distinct, une seule nouvelle tentative recharge la même source à la position demandée ; relais prioritaire, erreurs de métadonnées non retentées, fermeture annulable et échec final explicite. 31 tests ciblés NativePlayer réussis. Cause de l'incident personnel NL non établie ; aucun NAS ni fichier personnel testé.
+
 ## 29 octobre 2026 — Correction Bake GHCR
 
 - `docker/bake-action@v6` devait recevoir les fichiers temporaires générés par `docker/metadata-action@v5` avec le préfixe `cwd://`; sans cela, le run échouait sur `lstat .../docker-metadata-action-bake.json: no such file or directory`.
@@ -4840,3 +4845,11 @@ Optimisation complémentaire : annulation des validations obsolètes par job
 sur toutes les refs sans annuler les publications, construction des trois
 images dans un même solve Bake avec export de cache commun unique. Plan Bake
 et actionlint validés ; daemon Docker indisponible pour un build réel.
+## 29 octobre 2026 — Retrait du plugin Avatar du catalogue
+
+- Les avatars et la rotation des affiches disposent de parcours natifs existants. Le dépôt voisin retire les sources, le paquet Avatar et les références de publication ; Poster Rotator y était déjà absent. Le catalogue distant reste inchangé jusqu’à publication.
+- Les anciennes installations et collections liées aux extensions ne sont pas migrées ni supprimées automatiquement. L’administration les signale désormais ; leur suppression peut entraîner la perte des collections associées. Les données et modifications préexistantes sont conservées.
+## 29 octobre 2026 — Intégration des réglages d’images et d’avatars
+
+- Les écrans parlent de rotation des affiches sans nom de plugin. Le profil choisit dans la galerie du serveur sans générateur d’extension ; Gravatar n’est plus proposé dans l’interface. Les champs et routes historiques restent présents pour compatibilité et ne constituent pas une suppression backend ni une migration des collections d’extension.
+- La rotation actuelle utilise les variantes existantes et la collecte reste manuelle par œuvre ; elle ne reproduit pas les tâches planifiées et la gestion globale du projet Jellyfin. La migration des collections historiques et une refonte complète restent ouvertes.

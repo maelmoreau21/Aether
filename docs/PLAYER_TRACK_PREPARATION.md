@@ -1,5 +1,27 @@
 # P3/P4 — préparation des pistes (18 octobre 2026)
 
+## Reprise après délai vidéo — 29 octobre 2026
+
+Les requêtes de progression et de préférences démarrent en parallèle ; le choix
+de piste attend toujours les préférences et le seek attend la progression.
+Le délai de connexion directe (2,5 s pour les métadonnées lorsqu'un relais est
+disponible) ne s'applique plus au seek : la position et le seek disposent chacun
+de leur propre délai borné. Une progression expirée est distinguée d'un seek
+expiré ; seul ce dernier peut être retenté sur la même source sans relais.
+
+Le lecteur ignore aussi les événements `seeked` antérieurs à la résolution de
+la progression et au seek effectivement demandé : ils ne peuvent plus valider
+prématurément la reprise. Un test reproduit la course avec progression retardée.
+
+Lorsqu'un seek initial expire et qu'aucun relais distinct ni repli utilisable
+ne sont proposés, le lecteur recharge une seule fois la même source à la
+position demandée. Lorsque le repli progressif est disponible, ou qu'une vidéo
+préparée existe, il est essayé après l'échec sans refaire le seek sur la même URL. Les
+erreurs de métadonnées ne déclenchent pas cette nouvelle tentative ; un relais
+disponible reste prioritaire. Chaque attente est bornée à dix secondes et la
+fermeture l'annule. Ce comportement ne démontre pas la cause d'un incident
+réseau ou d'un fichier particulier ; une seconde expiration reste explicite.
+
 ## Annulation et préparations partagées — 29 octobre 2026
 
 Les demandes froides d'un même composant vidéo, audio complet ou sous-titre

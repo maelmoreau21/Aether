@@ -8,7 +8,7 @@ const report={scope:'Production Svelte admin shell; synthetic intercepted APIs, 
 const library={id:'lib-film',name:'Films de voyage — Bibliothèque personnelle',kind:'films',nodeId:'local',root:'/synthetic/films',enabled:true,userIds:['visual'],folders:[{nodeId:'local',root:'/synthetic/films'}]};
 const users=[{id:'visual',login:'visual',displayName:'Administrateur de test',role:'administrator',sso:false,disabledAt:null},{id:'reader',login:'lecteur',displayName:'Compte de test',role:'user',sso:false,disabledAt:null}];
 const node={id:'local',name:'Serveur local',kind:'local',status:'connected',keyId:'test',roots:['/synthetic/films'],version:'test',pairedAt:1,libraries:[],scans:[]};
-const routes=[['overview','#overview'],['general-section','#general-section'],['network-section','#network-section'],['libraries-section','#libraries-section'],['nodes-section','#nodes-section'],['avatars-section','section[aria-label="Collections d’avatars"]'],['users-section','#users-section'],['groups-section','#groups-section'],['api-keys-section','#api-keys-section'],['tasks-section','#tasks-section'],['backups-section','#backups-section'],['extensions-section','#extensions-section']];
+const routes=[['overview','#overview'],['general-section','#general-section'],['network-section','#network-section'],['libraries-section','#libraries-section'],['artwork-section','#artwork-admin-title'],['nodes-section','#nodes-section'],['avatars-section','section[aria-label="Collections d’avatars"]'],['users-section','#users-section'],['groups-section','#groups-section'],['api-keys-section','#api-keys-section'],['tasks-section','#tasks-section'],['backups-section','#backups-section'],['extensions-section','#extensions-section']];
 async function setup(browser,width,theme,mode='normal',height=900){
  const state=await fixturePage(browser,width,theme,'normal',height);let fail=mode==='error';const requests=[];
  state.page.on('request',request=>{if(request.url().includes('/api/v1/admin/'))requests.push(request.url());});
@@ -50,10 +50,10 @@ async function run(){const browser=await chromium.launch({channel:'chrome',headl
  for(const theme of ['light','dark'])for(const width of [320,360,390,430,768,1024,1440,1920]){
   const {page,context,errors}=await setup(browser,width,theme);
   await page.goto(base+'admin/libraries/#overview');await page.locator('#overview').waitFor();
-  if(width>=1100){await page.locator('.desktop-sidebar').waitFor();assert.equal(await page.locator('.mobile-menu-toggle').isVisible(),false);assert.equal(await page.locator('.admin-sidebar a').count(),12);}
+  if(width>=1100){await page.locator('.desktop-sidebar').waitFor();assert.equal(await page.locator('.mobile-menu-toggle').isVisible(),false);assert.equal(await page.locator('.admin-sidebar a').count(),13);}
   else{
    const menu=page.locator('.mobile-menu-toggle');await menu.focus();await page.keyboard.press('Enter');await page.locator('#admin-navigation:modal').waitFor();
-   assert.equal(await page.locator('#admin-navigation a').count(),12);await shot(page,`${theme}-${width}-menu`);
+   assert.equal(await page.locator('#admin-navigation a').count(),13);await shot(page,`${theme}-${width}-menu`);
    await page.keyboard.press('Escape');await page.waitForFunction(()=>document.querySelector('.mobile-menu-toggle').getAttribute('aria-expanded')==='false');assert(await menu.evaluate(el=>el===document.activeElement));
   }
   await bounds(page,'overview');await shot(page,`${theme}-${width}-overview`);
@@ -70,7 +70,7 @@ async function run(){const browser=await chromium.launch({channel:'chrome',headl
   // The skip link must keep the selected section instead of navigating to overview.
   const selectedURL=page.url();await page.locator('.skip-admin').focus();await page.keyboard.press('Enter');assert.equal(page.url(),selectedURL);assert.equal(await page.evaluate(()=>document.activeElement.id),'admin-main-content');
   await choose(page,'libraries-section');await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();await page.getByRole('dialog',{name:'Ajouter une bibliothèque',exact:true}).waitFor();await page.keyboard.press('Escape');await page.waitForFunction(()=>!document.querySelector('.library-editor')?.open);
-  assert.deepEqual(errors,[]);report.scenarios.push({theme,width,sections:12,history:true,filterPreserved:true,keyboard:true,editor:true,overflow:false});await context.close();console.log('PASS',theme,width);
+  assert.deepEqual(errors,[]);report.scenarios.push({theme,width,sections:13,history:true,filterPreserved:true,keyboard:true,editor:true,overflow:false});await context.close();console.log('PASS',theme,width);
  }
  for(const mode of ['empty','error','loading','user']){
   const{page,context,errors,requests}=await setup(browser,390,'dark',mode);await page.goto(base+'admin/libraries/#libraries-section');

@@ -3820,6 +3820,29 @@ pub async fn descriptor_for_user(
         ));
         source["audioOffsetSeconds"] = json!(track.offset_seconds);
         source["tracks"] = json!(track.probe.streams);
+        // External audio shares the original video. Expose the same bounded
+        // AV1 packet-copy fallback as an internal audio selection, so a failed
+        // browser seek/decode does not strand the external track on the
+        // original container. Only advertise it with a real codec config and
+        // finite duration; the player still tests browser MSE support.
+        if let (Some(video), Some(duration)) = (video_source, duration)
+            && let Some(mime) = av1_video_mime(video)
+            && matches!(
+                row.get::<String, _>("mime").as_str(),
+                "video/mp4" | "video/webm" | "video/x-matroska"
+            )
+        {
+            source["durationSeconds"] = json!(duration);
+            source["videoMime"] = json!(mime);
+            source["videoStreamUrl"] = json!(format!(
+                "/api/v1/assets/{asset_id}/prepared/video-stream-{}-",
+                video.index
+            ));
+            if source_obj["mime"] == "video/x-matroska" {
+                source["preparedVideoUrl"] =
+                    json!(format!("/api/v1/assets/{asset_id}/prepared/video"));
+            }
+        }
         sources.push(source);
     }
     let total_dur = probe

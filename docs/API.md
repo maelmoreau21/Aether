@@ -499,3 +499,9 @@ par une extension ; `source` vaut `library`, `extension` ou `unavailable`.
 Pour une valeur d'extension encore identique à sa provenance, `provenance`
 contient `extensionId` et `providerId` ; sinon il vaut `null`. Les paroles locales
 priment sur une provenance périmée. Cette route ne lance pas de recherche réseau.
+> Galerie d'avatars : `GET /api/v1/admin/avatars/migrate-legacy` compte les
+> collections historiques et leurs images ; `POST` à la même adresse les
+> transfère atomiquement, avec session administrateur et CSRF. Réponse
+> `{packs,images}` ; conflit d'identifiants : 409, sans transfert. La
+> désinstallation de l'ancienne extension est bloquée tant qu'elle possède des
+> collections. Voir [collections d'avatars](PLUGIN_SETTINGS_AND_COLLECTIONS.md).

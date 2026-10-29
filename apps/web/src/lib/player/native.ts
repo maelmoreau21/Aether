@@ -7,7 +7,9 @@ import { chooseSource } from './source-selection';
 import { AudioSelectionRetainedError } from './errors';
 import { unsupportedAudio } from './compatibility';
 
-// One finite source replacement. No retries, silent fallback or player-specific API in the UI.
+class VideoSeekTimeoutError extends Error {}
+
+// Bounded source replacement; failures and recovery remain visible to the UI.
 export class NativePlayer implements Player {
   private media?: Media;
   private source?: Source;
@@ -120,6 +122,7 @@ export class NativePlayer implements Player {
     let resumeReplacement = false;
     let replacementPauseRevision: number | undefined;
     const segmented = Boolean(source.audioSegmentUrl && SegmentedAudio.supported());
+    const canTryProgressive = Boolean(source.videoStreamUrl && source.videoMime && Number.isFinite(source.durationSeconds) && source.durationSeconds! > 0 && ProgressiveVideo.supported(source.videoMime));
     const audioUrl = segmented ? source.audioSegmentUrl! : source.externalAudioUrl;
     const createAudio = () => segmented
       ? new SegmentedAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError, {mode: source.audioSegmentMode, trackId: source.audioTrackId})
@@ -203,6 +206,7 @@ export class NativePlayer implements Player {
     const loadCandidate = (candidateUrl: string, timeoutMs=10000) =>
       new Promise<void>((resolve, reject) => {
         let settled = false;
+        let timer: ReturnType<typeof setTimeout>;
         const finish = (error?: Error) => {
           if (settled) return;
           settled = true;
@@ -217,10 +221,16 @@ export class NativePlayer implements Player {
           }
           else resolve();
         };
-        const seeked = () => finish();
+        let awaitingSeek = false;
+        let seekTarget = 0;
+        const seeked = () => { if (awaitingSeek && !this.video.seeking && Math.abs(this.video.currentTime - seekTarget) <= .25) finish(); };
         let metadataReceived = false;
         const metadata = () => {
+          if (metadataReceived) return;
           metadataReceived = true;
+          // The direct-node connection deadline must not consume the separate
+          // saved-progress and media-seek budgets on slow storage or networks.
+          armTimeout(10000);
           this.video.volume = volume;
           this.video.playbackRate = speed;
           // Resolve saved progress alongside metadata, before audio windows load.
@@ -229,7 +239,7 @@ export class NativePlayer implements Player {
           void Promise.resolve(position).then(position => {
             if (settled || this.destroyed) return;
             const target = Number.isFinite(position) ? Math.max(0, Math.min(position, Math.max(0, this.video.duration - 0.05))) : 0;
-            if (target > 0 && Math.abs(this.video.currentTime - target) > .001) this.video.currentTime = target;
+            if (target > 0 && Math.abs(this.video.currentTime - target) > .001) { seekTarget = target; awaitingSeek = true; armTimeout(10000); this.video.currentTime = target; }
             else finish();
           }, error => finish(error instanceof Error ? error : new Error(String(error))));
         };
@@ -239,13 +249,14 @@ export class NativePlayer implements Player {
               `Source ${source.language.toUpperCase()} illisible : réseau, conteneur ou codec non pris en charge.`
             )
           );
-        const timer = setTimeout(
-          () =>
-            finish(
-              new Error(`Délai ${metadataReceived ? 'de seek' : 'de lecture des métadonnées'} expiré après ${timeoutMs / 1000} s (networkState=${this.video.networkState}, readyState=${this.video.readyState}, MediaError=${this.video.error?.code ?? 'aucune'}). ${metadataReceived ? 'Position demandée non atteinte.' : 'Index du conteneur ou données vidéo non reçus/lisibles.'} Cause codec, conteneur ou transport non déterminée ; consulter les diagnostics HTTP du navigateur et du Media Node.`)
-            ),
-          timeoutMs
-        );
+        const armTimeout = (milliseconds: number) => {
+          clearTimeout(timer);
+          const stage = !metadataReceived ? 'de lecture des métadonnées' : awaitingSeek ? 'de seek' : 'de chargement de la position';
+          timer = setTimeout(() => finish(
+            new (awaitingSeek ? VideoSeekTimeoutError : Error)(`Délai ${stage} expiré après ${milliseconds / 1000} s (networkState=${this.video.networkState}, readyState=${this.video.readyState}, MediaError=${this.video.error?.code ?? 'aucune'}). ${awaitingSeek ? 'Position demandée non atteinte.' : metadataReceived ? 'Position de reprise indisponible.' : 'Index du conteneur ou données vidéo non reçus/lisibles.'} Cause non déterminée ; consulter les diagnostics HTTP du navigateur et du Media Node.`)
+          ), milliseconds);
+        };
+        armTimeout(timeoutMs);
         this.cancel = () => finish(new Error('Lecteur fermé.'));
         this.video.addEventListener('loadedmetadata', metadata);
         this.video.addEventListener('seeked', seeked);
@@ -287,13 +298,16 @@ export class NativePlayer implements Player {
           if (fallbackUrl && !this.destroyed) {
             this.status('Chargement de la vidéo…');
             await loadVideo(fallbackUrl,7500);
+          } else if (primaryErr instanceof VideoSeekTimeoutError && !canTryProgressive && !source.preparedVideoUrl && !this.destroyed) {
+            this.status('Reprise du chargement vidéo après interruption…');
+            await loadVideo(primaryUrl, 10000);
           } else {
             throw primaryErr;
           }
         }
       } catch (originalError) {
         if (this.destroyed) throw originalError;
-        if(source.videoStreamUrl && source.videoMime && Number.isFinite(source.durationSeconds) && source.durationSeconds!>0 && ProgressiveVideo.supported(source.videoMime)) {
+        if(canTryProgressive && source.videoStreamUrl && source.videoMime) {
           this.status('Vidéo originale non lisible. Lecture progressive sans réencodage…');
           const progressive=new ProgressiveVideo(this.video,source.videoStreamUrl,source.durationSeconds!,source.videoMime,message=>{
             this.pause();this.externalAudio?.destroy();this.externalAudio=undefined;this.progressiveVideo?.destroy();this.progressiveVideo=undefined;this.source=undefined;this.onError(message);

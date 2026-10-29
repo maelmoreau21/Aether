@@ -1,11 +1,25 @@
 # Plugins : installation libre, paramètres et collections d’avatars
 
+> Mise à jour du 29 octobre : les avatars sont gérés dans la galerie native.
+> L'administrateur peut consulter `GET /api/v1/admin/avatars/migrate-legacy`
+> puis lancer `POST` à la même adresse avec CSRF : `{packs, images}` indique le
+> nombre de collections et d'images de l'ancienne extension `avatars`, y compris
+> lorsqu'elle est désactivée. Le transfert conserve leurs identifiants et leurs
+> assets et retire les anciennes lignes dans une même transaction ; une collision
+> d'identifiant renvoie 409 sans transfert. L'opération peut être répétée.
+> La désinstallation de l'ancienne extension est refusée tant que ses
+> collections n'ont pas été transférées ou supprimées explicitement.
+> Les collections d'autres extensions ne sont pas déplacées. Les photos déjà
+> choisies par les comptes sont inchangées. Gravatar n'est plus proposé ; son
+> ancienne route renvoie 410, sans requête externe. La colonne de politique est
+> conservée pour compatibilité des bases et anciens clients.
+
 > Les collections natives sont indépendantes des extensions : administration via
 > `/api/v1/admin/avatar-packs`, politique via `/api/v1/admin/avatar-policy` et
 > galerie via `/api/v1/account/avatar/collections`. La politique native autorise
-> les images personnalisées par défaut ; Gravatar et l’attribution à la création
-> sont désactivés par défaut. Les anciens packs d’extension restent stockés et
-> accessibles tant que leur extension est active ; ils ne sont pas convertis.
+> les images personnalisées par défaut ; l’attribution à la création est
+> désactivée par défaut. Les anciens packs d’extension restent accessibles tant
+> que leur extension est active, jusqu'à leur éventuel transfert décrit ci-dessus.
 > Les images importées sont normalisées et les contenus SVG restent validés.
 > Les anciennes descriptions de politique d’extension ci-dessous sont historiques : les réglages d’une extension active ne modifient pas les autorisations natives d’import ou de suppression d’avatar.
 

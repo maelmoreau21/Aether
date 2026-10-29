@@ -253,6 +253,14 @@ pub fn router(auth: AuthState) -> Router {
             axum::routing::post(image_collection::collect),
         )
         .route(
+            "/api/v1/admin/artwork/collect-batch",
+            axum::routing::post(image_collection::collect_batch),
+        )
+        .route(
+            "/api/v1/admin/artwork/works",
+            get(image_collection::list_works),
+        )
+        .route(
             "/api/v1/admin/extensions/{id}",
             put(configure).delete(uninstall),
         )
@@ -897,6 +905,17 @@ async fn uninstall(
     let _lock = MUTATIONS.lock().await;
     let mut conn = auth.store.pool().acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
+    if id == "avatars" {
+        let packs: i64 =
+            query_scalar("SELECT COUNT(*) FROM extension_avatar_packs WHERE extension_id=?")
+                .bind(&id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db)?;
+        if packs != 0 {
+            return Err(err(StatusCode::CONFLICT, "avatar_migration_required"));
+        }
+    }
     crate::extension_data_lifecycle::uninstall(&mut tx, &id, input.delete_data)
         .await
         .map_err(db)?;

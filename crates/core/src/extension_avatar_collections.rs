@@ -68,6 +68,10 @@ pub(super) fn router() -> Router<AuthState> {
             "/api/v1/admin/avatars/assign-missing",
             axum::routing::post(native_assign_missing),
         )
+        .route(
+            "/api/v1/admin/avatars/migrate-legacy",
+            get(legacy_migration_status).post(migrate_legacy),
+        )
         // Extension-scoped routes (preserved for compatibility)
         .route(
             "/api/v1/admin/extensions/{id}/avatar-packs/upload",
@@ -99,7 +103,7 @@ pub(super) fn router() -> Router<AuthState> {
         )
         .route(
             "/api/v1/account/avatar/gravatar",
-            get(gravatar_policy).post(gravatar),
+            get(gravatar_removed).post(gravatar_removed),
         )
         .route("/api/v1/account/avatar/collections", get(account_packs))
         .route("/api/v1/account/avatar/collections/{pack}", get(images))
@@ -107,6 +111,51 @@ pub(super) fn router() -> Router<AuthState> {
             "/api/v1/account/avatar/collections/{pack}/{image}",
             get(image).post(apply),
         )
+}
+
+// Only the first-party retired extension is migrated. Third-party extension
+// collections retain their existing lifecycle and permissions.
+async fn legacy_migration_status(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, false).await?;
+    let (packs, images): (i64, i64) = query_as("SELECT (SELECT COUNT(*) FROM extension_avatar_packs WHERE extension_id='avatars'), (SELECT COUNT(*) FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id='avatars')")
+        .fetch_one(auth.store.pool()).await.map_err(db)?;
+    Ok(Json(json!({"packs":packs,"images":images})))
+}
+
+async fn migrate_legacy(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, Error> {
+    let actor = admin(&auth, &headers, true).await?;
+    let _lock = MUTATIONS.lock().await;
+    let mut tx = auth.store.pool().begin().await.map_err(db)?;
+    let conflicts: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM avatar_packs n JOIN extension_avatar_packs p ON p.id=n.id WHERE p.extension_id='avatars') + (SELECT COUNT(*) FROM avatar_images n JOIN extension_avatar_images i ON i.id=n.id JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id='avatars')")
+        .fetch_one(&mut *tx).await.map_err(db)?;
+    if conflicts != 0 {
+        return Err(err(StatusCode::CONFLICT, "avatar_migration_id_conflict"));
+    }
+    // Unique constraint violations abort the whole transaction, so neither a
+    // conflicting pack nor an image can silently overwrite native content.
+    let packs = query("INSERT INTO avatar_packs(id,name,source) SELECT id,name,source FROM extension_avatar_packs WHERE extension_id='avatars'")
+        .execute(&mut *tx).await.map_err(db)?.rows_affected();
+    let images = query("INSERT INTO avatar_images(id,pack_id,name,sha256) SELECT i.id,i.pack_id,i.name,i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id='avatars'")
+        .execute(&mut *tx).await.map_err(db)?.rows_affected();
+    query("DELETE FROM extension_avatar_packs WHERE extension_id='avatars'")
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+    if packs != 0 {
+        audit(&mut tx, &actor.user.id, "avatars", "avatars.packs.migrated").await?;
+    }
+    tx.commit().await.map_err(db)?;
+    Ok(Json(json!({"packs":packs,"images":images})))
+}
+
+async fn gravatar_removed() -> StatusCode {
+    StatusCode::GONE
 }
 
 async fn native_upload(
@@ -801,86 +850,6 @@ pub(crate) async fn assign_new_user(auth: &AuthState, user: &str) -> Result<(), 
     }
     Ok(())
 }
-async fn allows_gravatar(auth: &AuthState) -> Result<bool, Error> {
-    let policy = crate::avatars::load_policy(auth)
-        .await
-        .map_err(|s| err(s, "avatar_policy_unavailable"))?;
-    Ok(policy.allow_custom && policy.allow_gravatar)
-}
-async fn gravatar_policy(
-    State(auth): State<AuthState>,
-    headers: HeaderMap,
-) -> Result<Json<Value>, Error> {
-    auth.authenticate(&headers)
-        .await
-        .map_err(|s| err(s, "authentication_required"))?;
-    Ok(Json(json!({"allowed":allows_gravatar(&auth).await?})))
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Gravatar {
-    email: String,
-}
-async fn gravatar(
-    State(auth): State<AuthState>,
-    headers: HeaderMap,
-    Json(input): Json<Gravatar>,
-) -> Result<StatusCode, Error> {
-    let actor = auth
-        .authenticate(&headers)
-        .await
-        .map_err(|s| err(s, "authentication_required"))?;
-    auth.require_csrf(&headers, &actor)
-        .map_err(|s| err(s, "csrf_required"))?;
-    if !allows_gravatar(&auth).await? {
-        return Err(err(StatusCode::FORBIDDEN, "gravatar_disabled"));
-    }
-    let email = input.email.trim().to_lowercase();
-    if email.len() > 254 || !email.contains('@') || email.chars().any(char::is_control) {
-        return Err(err(StatusCode::BAD_REQUEST, "invalid_email"));
-    }
-    let _slot = IMPORTS
-        .try_acquire()
-        .map_err(|_| err(StatusCode::CONFLICT, "avatar_import_busy"))?;
-    let digest = Sha256::digest(email.as_bytes());
-    let hash = digest
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
-    let data = repositories::fetch(
-        &format!("https://www.gravatar.com/avatar/{hash}?s=256&d=404"),
-        IMAGE_MAX,
-    )
-    .await?;
-    let data = tokio::task::spawn_blocking(move || {
-        let mime = match image::guess_format(&data) {
-            Ok(image::ImageFormat::Png) => "image/png",
-            Ok(image::ImageFormat::Jpeg) => "image/jpeg",
-            Ok(image::ImageFormat::WebP) => "image/webp",
-            _ => return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE),
-        };
-        crate::avatars::normalize(data.into(), mime)
-    })
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "avatar_decode_failed"))?
-    .map_err(|s| err(s, "invalid_avatar_image"))?;
-    let _lock = MUTATIONS.lock().await;
-    let _policy_guard = crate::avatars::POLICY_LOCK.read().await;
-    if !allows_gravatar(&auth).await? {
-        return Err(err(StatusCode::FORBIDDEN, "gravatar_disabled"));
-    }
-    auth.authenticate(&headers)
-        .await
-        .map_err(|s| err(s, "authentication_required"))?;
-    let meta = auth
-        .store
-        .assets
-        .put_bytes(&data, "image/png")
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?;
-    query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET sha256=excluded.sha256").bind(actor.user.id).bind(&meta.sha256).execute(auth.store.pool()).await.map_err(db)?;
-    Ok(StatusCode::NO_CONTENT)
-}
 async fn account_packs(
     State(auth): State<AuthState>,
     headers: HeaderMap,
@@ -1149,7 +1118,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(settings.status(), StatusCode::NO_CONTENT);
-        assert!(!allows_gravatar(&auth).await.unwrap());
         query("INSERT INTO users(id,role) VALUES('new-user','user')")
             .execute(store.pool())
             .await
@@ -1161,6 +1129,177 @@ mod tests {
                 .await
                 .unwrap(),
             1
+        );
+    }
+    #[tokio::test]
+    async fn legacy_avatar_migration_is_atomic_and_idempotent() {
+        use axum::{body::Body, http::Request};
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+        let root = tempfile::tempdir().unwrap();
+        let store = crate::identity::IdentityStore::open(&root.path().join("migration.sqlite"))
+            .await
+            .unwrap();
+        store
+            .bootstrap(
+                "admin",
+                zeroize::Zeroizing::new("disposable avatar password".into()),
+            )
+            .await
+            .unwrap();
+        let auth = AuthState::new(store.clone(), "http://localhost".into())
+            .await
+            .unwrap();
+        let app = crate::auth::router(auth.clone()).merge(super::super::router(auth.clone()));
+        let login = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/login")
+                    .header("origin", "http://localhost")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"login":"admin","password":"disposable avatar password"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let cookie = login.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        let body = login.into_body().collect().await.unwrap().to_bytes();
+        let csrf = serde_json::from_slice::<Value>(&body).unwrap()["csrfToken"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let asset = store
+            .assets
+            .put_bytes(b"fixture", "image/png")
+            .await
+            .unwrap();
+        query("INSERT INTO extension_publishers(id,public_key,active) VALUES('old','key',0)")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('avatars','old','{}',0,'old')").execute(store.pool()).await.unwrap();
+        query("INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES('legacy','avatars','Galerie','upload')").execute(store.pool()).await.unwrap();
+        query("INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES('legacy-image','legacy','Image',?)").bind(&asset.sha256).execute(store.pool()).await.unwrap();
+        let uninstall = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/v1/admin/extensions/avatars")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::ORIGIN, "http://localhost")
+                    .header("x-csrf-token", &csrf)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"deleteData":true}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(uninstall.status(), StatusCode::CONFLICT);
+        let uri = "/api/v1/admin/avatars/migrate-legacy";
+        let anonymous = app
+            .clone()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+        let status = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(status.status(), StatusCode::OK);
+        assert_eq!(
+            serde_json::from_slice::<Value>(
+                &status.into_body().collect().await.unwrap().to_bytes()
+            )
+            .unwrap(),
+            json!({"packs":1,"images":1})
+        );
+        let denied = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header(header::COOKIE, &cookie)
+                    .header(header::ORIGIN, "http://localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        query("INSERT INTO avatar_packs(id,name,source) VALUES('legacy','Conflit','upload')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let call = || {
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::COOKIE, &cookie)
+                .header(header::ORIGIN, "http://localhost")
+                .header("x-csrf-token", &csrf)
+                .body(Body::empty())
+                .unwrap()
+        };
+        assert_eq!(
+            app.clone().oneshot(call()).await.unwrap().status(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM extension_avatar_images WHERE id='legacy-image'"
+            )
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+            1
+        );
+        query("DELETE FROM avatar_packs WHERE id='legacy'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let migrated = app.clone().oneshot(call()).await.unwrap();
+        assert_eq!(migrated.status(), StatusCode::OK);
+        assert_eq!(
+            serde_json::from_slice::<Value>(
+                &migrated.into_body().collect().await.unwrap().to_bytes()
+            )
+            .unwrap(),
+            json!({"packs":1,"images":1})
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM avatar_images WHERE id='legacy-image'")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            1
+        );
+        let repeated = app.clone().oneshot(call()).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(
+                &repeated.into_body().collect().await.unwrap().to_bytes()
+            )
+            .unwrap(),
+            json!({"packs":0,"images":0})
         );
     }
     #[tokio::test]
@@ -1570,7 +1709,7 @@ mod tests {
             )
             .await
             .0,
-            StatusCode::FORBIDDEN
+            StatusCode::GONE
         );
 
         assert_eq!(
@@ -1614,78 +1753,10 @@ mod tests {
             0
         );
         query("INSERT INTO avatar_policy(singleton,allow_custom,allow_gravatar,assign_on_create) VALUES(1,1,1,0)").execute(store.pool()).await.unwrap();
-        let gravatar_url = format!(
-            "https://www.gravatar.com/avatar/{:x}?s=256&d=404",
-            Sha256::digest(b"fixture@example.invalid")
-        );
-        let mut jpeg = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgb8(image::load_from_memory(&data).unwrap().to_rgb8())
-            .write_to(&mut jpeg, image::ImageFormat::Jpeg)
-            .unwrap();
-        repositories::test_documents()
-            .lock()
-            .unwrap()
-            .insert(gravatar_url.clone(), jpeg.into_inner());
-        assert_eq!(
-            call(
-                &app,
-                "/api/v1/account/avatar/gravatar",
-                "POST",
-                cookie,
-                "",
-                json!({"email":"fixture@example.invalid"})
-            )
-            .await
-            .0,
-            StatusCode::FORBIDDEN
-        );
-        assert_eq!(
-            call(
-                &app,
-                "/api/v1/account/avatar/gravatar",
-                "POST",
-                cookie,
-                csrf,
-                json!({"email":" Fixture@Example.Invalid "})
-            )
-            .await
-            .0,
-            StatusCode::NO_CONTENT
-        );
-        assert_eq!(
-            call(
-                &app,
-                "/api/v1/admin/extensions/any-author-avatar/settings",
-                "PUT",
-                cookie,
-                csrf,
-                json!({"allow_gravatar":true,"disallow_custom_avatars":true})
-            )
-            .await
-            .0,
-            StatusCode::NO_CONTENT
-        );
         query("UPDATE avatar_policy SET allow_custom=0 WHERE singleton=1")
             .execute(store.pool())
             .await
             .unwrap();
-        assert_eq!(
-            call(
-                &app,
-                "/api/v1/account/avatar/gravatar",
-                "POST",
-                cookie,
-                csrf,
-                json!({"email":"fixture@example.invalid"})
-            )
-            .await
-            .0,
-            StatusCode::FORBIDDEN
-        );
-        repositories::test_documents()
-            .lock()
-            .unwrap()
-            .remove(&gravatar_url);
         assert_eq!(
             call(&app, gallery_url, "DELETE", cookie, "", json!(null))
                 .await

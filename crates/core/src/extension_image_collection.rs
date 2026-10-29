@@ -101,6 +101,143 @@ fn yes() -> bool {
     true
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct CollectBatch {
+    library_id: String,
+    #[serde(default)]
+    after: Option<String>,
+    #[serde(default = "one")]
+    limit: usize,
+    #[serde(default = "default_languages")]
+    languages: Vec<String>,
+    #[serde(default = "yes")]
+    include_neutral: bool,
+    #[serde(default = "default_max")]
+    max_images: usize,
+}
+
+fn one() -> usize {
+    1
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct ListWorks {
+    library_id: String,
+    #[serde(default)]
+    after: Option<String>,
+    #[serde(default = "page_size")]
+    limit: usize,
+}
+fn page_size() -> usize {
+    25
+}
+
+pub(super) async fn list_works(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Query(input): Query<ListWorks>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, false).await?;
+    if input.limit == 0 || input.limit > 100 {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_limit"));
+    }
+    if input
+        .after
+        .as_ref()
+        .is_some_and(|v| v.len() > 256 || v.chars().any(char::is_control))
+    {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_cursor"));
+    }
+    let exists: i64 =
+        query_scalar("SELECT COUNT(*) FROM libraries WHERE id=? AND kind IN ('films','series')")
+            .bind(&input.library_id)
+            .fetch_one(auth.store.pool())
+            .await
+            .map_err(db)?;
+    if exists == 0 {
+        return Err(err(StatusCode::NOT_FOUND, "unknown_library"));
+    }
+    let rows: Vec<(String,String,i64)> = query_as("SELECT w.id,w.title,(SELECT COUNT(*) FROM work_image_entries i WHERE i.work_id=w.id AND i.kind='poster') FROM inventory_works w WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND w.id>? ORDER BY w.id LIMIT ?")
+        .bind(&input.library_id).bind(&input.library_id).bind(input.after.as_deref().unwrap_or(""))
+        .bind((input.limit + 1) as i64).fetch_all(auth.store.pool()).await.map_err(db)?;
+    let more = rows.len() > input.limit;
+    let mut last = None;
+    let items: Vec<Value> = rows
+        .into_iter()
+        .take(input.limit)
+        .map(|(id, title, count)| {
+            last = Some(id.clone());
+            json!({"workId":id,"title":title,"posterCount":count})
+        })
+        .collect();
+    Ok(Json(
+        json!({"items":items,"nextCursor":if more {last} else {None}}),
+    ))
+}
+
+/// Explicit, resumable batches: never enqueue an unbounded library scan.
+pub(super) async fn collect_batch(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Json(input): Json<CollectBatch>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, true).await?;
+    if input.limit != 1 || input.max_images == 0 || input.max_images > 12 {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_limit"));
+    }
+    if input
+        .after
+        .as_ref()
+        .is_some_and(|v| v.len() > 256 || v.chars().any(char::is_control))
+    {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_cursor"));
+    }
+    languages(&json!({"languages":input.languages}))?;
+    let exists: i64 =
+        query_scalar("SELECT COUNT(*) FROM libraries WHERE id=? AND kind IN ('films','series')")
+            .bind(&input.library_id)
+            .fetch_one(auth.store.pool())
+            .await
+            .map_err(db)?;
+    if exists == 0 {
+        return Err(err(StatusCode::NOT_FOUND, "unknown_library"));
+    }
+    let works: Vec<(String, String)> = query_as(
+        "SELECT id,title FROM inventory_works WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND id>? ORDER BY id LIMIT ?",
+    )
+    .bind(&input.library_id)
+    .bind(&input.library_id)
+    .bind(input.after.as_deref().unwrap_or(""))
+    .bind((input.limit + 1) as i64)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
+    let more = works.len() > input.limit;
+    let mut items = Vec::new();
+    let mut last = None;
+    for (work_id, title) in works.into_iter().take(input.limit) {
+        let request = Collect {
+            work_id: work_id.clone(),
+            languages: input.languages.clone(),
+            include_neutral: input.include_neutral,
+            max_images: input.max_images,
+        };
+        let item = match collect(State(auth.clone()), headers.clone(), Json(request)).await {
+            Ok(Json(result)) => json!({"workId":work_id,"title":title,"result":result}),
+            Err((status, Json(body))) => {
+                json!({"workId":work_id,"title":title,"error":{"status":status.as_u16(),"code":body["error"]}})
+            }
+        };
+        last = Some(work_id);
+        items.push(item);
+    }
+    Ok(Json(
+        json!({"items":items,"nextCursor":if more { last } else { None }}),
+    ))
+}
+
 pub(super) async fn collect(
     State(auth): State<AuthState>,
     headers: HeaderMap,

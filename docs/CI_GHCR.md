@@ -1,5 +1,29 @@
 # CI et publication GHCR
 
+## Équilibrage des partitions — 29 octobre 2026
+
+Le run GitHub `40945793905` a passé respectivement 282, 478 et 383 secondes
+dans les commandes d'intégration Rust, après installation et cache. Les mêmes
+tests sont désormais répartis par durée observée, les plus longs en premier,
+au lieu d'une alternance alphabétique. La liste des cibles reste découverte
+par `cargo metadata` ; aucune cible connue ou nouvelle n'est exclue. Les noms
+présents dans plusieurs crates restent ensemble, les durées inconnues valent
+une seconde et les égalités sont résolues de façon déterministe.
+
+Sur les 57 cibles actuelles et avec les durées du run cité, la simulation
+donne des charges de 340/340/340 secondes contre 245/439/336 secondes pour
+l'ancien découpage. Ce calcul exclut compilation, cache, démarrage du runner
+et variabilité des tests : ce n'est ni une mesure du nouveau workflow ni une
+promesse de 99 secondes gagnées. Les poids devront être révisés si les durées
+ou les cibles changent. Aucun contrôle, profil, ni ordre des gates de publication
+n'a été supprimé. Les mêmes suites continuent de s'exécuter séquentiellement
+dans chaque partition.
+
+Vérification locale : `python scripts/test-ci-integration-shard.py` (4 tests)
+et `python scripts/ci-integration-shard.py --index N --count 3 --list` pour
+N = 0, 1, 2 ; couverture et ordre déterministe vérifiés. Pas de nouveau run
+GitHub ni de publication réalisés pour cette modification.
+
 ## Publication mutualisée et partition Rust allégée — 29 octobre 2026
 
 Diagnostic du [run 40931283481](https://github.com/maelmoreau21/Aether/actions/runs/40931283481) :

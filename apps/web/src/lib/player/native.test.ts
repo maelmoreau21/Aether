@@ -204,7 +204,46 @@ describe('native source replacement', () => {
     const seek=expect(player.selectAudio('en')).rejects.toThrow('de seek');
     video.currentTime=0; // A new browser resource resets its timeline before metadata.
     video.dispatchEvent(new Event('loadedmetadata'));
+    await vi.advanceTimersByTimeAsync(10000);
+    video.currentTime=0;
+    video.dispatchEvent(new Event('loadedmetadata'));
     await vi.advanceTimersByTimeAsync(10000);await seek;player.destroy();
+  });
+  it('retries a timed-out initial video seek once at the saved position', async () => {
+    vi.useFakeTimers();const {video,player}=setup();video.auto=false;
+    const loading=player.load(media, 'fr', 5);
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(video.loads).toBe(2);video.currentTime=0;
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    expect(video.currentTime).toBe(5);video.dispatchEvent(new Event('seeked'));
+    await loading;player.destroy();
+  });
+  it('starts an available prepared fallback immediately after a seek timeout', async () => {
+    vi.useFakeTimers();const {video,player}=setup();video.auto=false;
+    const fetcher=vi.fn().mockResolvedValue({ok:true});vi.stubGlobal('fetch',fetcher);
+    const loading=player.load({...media,sources:[{...media.sources[0],prepareVideo:false,preparedVideoUrl:'/prepared/video'}]},'fr',5);
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(fetcher).toHaveBeenCalledWith('/prepared/video',expect.objectContaining({method:'HEAD'}));
+    expect(video.src).toBe('/prepared/video');expect(video.loads).toBe(2);
+    video.currentTime=0;video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    video.dispatchEvent(new Event('seeked'));await loading;player.destroy();
+  });
+  it('ignores an obsolete seeked event before saved progress resolves', async () => {
+    const {video,player}=setup();video.auto=false;
+    let resolvePosition!:(position:number)=>void;
+    let completed=false;
+    const loading=player.load(media,'fr',new Promise<number>(resolve=>{resolvePosition=resolve;})).then(()=>{completed=true;});
+    video.dispatchEvent(new Event('loadedmetadata'));
+    video.dispatchEvent(new Event('seeked'));await Promise.resolve();await Promise.resolve();
+    expect(completed).toBe(false);
+    resolvePosition(5);await vi.waitFor(()=>expect(video.currentTime).toBe(5));
+    video.seeking=true;video.dispatchEvent(new Event('seeked'));
+    await Promise.resolve();expect(completed).toBe(false);video.seeking=false;
+    video.currentTime=2;video.dispatchEvent(new Event('seeked'));
+    await Promise.resolve();expect(completed).toBe(false);video.currentTime=5;
+    video.dispatchEvent(new Event('seeked'));await loading;player.destroy();
   });
   it('reads indexed MP4 video directly and prepares only audio on the legacy fallback',async()=>{
     const fetcher=vi.fn().mockResolvedValue({ok:true});vi.stubGlobal('fetch',fetcher);
@@ -294,6 +333,22 @@ describe('native source replacement', () => {
     await vi.advanceTimersByTimeAsync(1);expect(video.src).toBe('/relay');
     video.dispatchEvent(new Event('loadedmetadata'));await loading;
     expect(error).not.toHaveBeenCalled();expect(video.loads).toBe(2);
+  });
+  it('gives a connected Node a separate seek budget after metadata', async()=>{
+    vi.useFakeTimers();const {video,player}=setup();video.auto=false;
+    const direct={...media,sources:[{...media.sources[0],directUrl:'https://node.invalid/content',relayUrl:'/relay'}]};
+    const loading=player.load(direct,'fr',5);
+    await vi.advanceTimersByTimeAsync(2000);
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(video.src).toBe('https://node.invalid/content');expect(video.loads).toBe(1);
+    video.dispatchEvent(new Event('seeked'));await loading;player.destroy();
+  });
+  it('reports a stalled progress lookup without retrying it as a video seek', async()=>{
+    vi.useFakeTimers();const {video,player}=setup();video.auto=false;
+    const loading=expect(player.load(media,'fr',new Promise<number>(()=>{}))).rejects.toThrow('chargement de la position');
+    video.dispatchEvent(new Event('loadedmetadata'));await vi.advanceTimersByTimeAsync(10000);
+    await loading;expect(video.loads).toBe(1);player.destroy();
   });
   it('serializes preparation to respect the single Node worker',async()=>{
     const replies:((value:Response)=>void)[]=[];

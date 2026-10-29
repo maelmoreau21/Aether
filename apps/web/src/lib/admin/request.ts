@@ -12,6 +12,8 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
   if (!response.ok) {
     const detail = await response.json().catch(() => null) as { error?: string; pluginError?: string } | null;
     const messages: Record<string,string> = {
+      avatar_migration_required: 'Transférez d’abord les anciennes collections dans Administration → Avatars avant de désinstaller cette extension.',
+      avatar_migration_id_conflict: 'Le transfert est impossible : des identifiants de collection ou d’image sont déjà utilisés. Aucune collection n’a été modifiée.',
       plugin_storage_failed: 'Le serveur ne peut pas enregistrer cette extension. Consultez les journaux du serveur pour connaître la cause exacte.',
       plugin_storage_permission_denied: 'Le serveur ne peut pas accéder au stockage des extensions. Vérifiez les droits du dossier configuré par MEDIA_PLUGINS_PATH.',
       plugin_storage_conflict: 'Une autre version du paquet existe déjà sur disque. Désinstallez cette extension avant de la réinstaller. Si elle est absente des Installées, consultez les journaux du serveur.',

@@ -29,7 +29,7 @@
         <div class="image-grid">{#each images as [key, label, description] (key)}<label class="image-option"><input type="checkbox" bind:checked={options[key]} aria-label={label} /><span><strong>{label}</strong><small>{description}</small></span></label>{/each}</div>
       </section>
       <section class="option-section" aria-labelledby="poster-rotator-heading"><h3 id="poster-rotator-heading">Rotation des affiches</h3>
-        <label class="toggle-row"><input type="checkbox" bind:checked={options.posterRotationEnabled} aria-label="Activer la rotation des affiches pour cette bibliothèque" /><span><strong>Alterner les affiches disponibles</strong><small>Poster Rotator utilise les variantes disponibles. Les images choisies manuellement restent prioritaires.</small></span></label>
+        <label class="toggle-row"><input type="checkbox" bind:checked={options.posterRotationEnabled} aria-label="Activer la rotation des affiches pour cette bibliothèque" /><span><strong>Alterner les affiches disponibles</strong><small>Les affiches disponibles sont alternées. Les images choisies manuellement restent prioritaires.</small></span></label>
       </section>
     {/if}
   {:else if section === 'indexing'}

@@ -10,6 +10,7 @@ export const adminNavigation: { label: string; englishLabel: string; links: Admi
   ] },
   { label: 'Médiathèque', englishLabel: 'Media library', links: [
     { hash: '#libraries-section', label: 'Bibliothèques', key: 'admin_nav_libraries', icon: 'film' },
+    { hash: '#artwork-section', label: 'Images', englishLabel: 'Artwork', icon: 'image' },
     { hash: '#nodes-section', label: 'Nœuds de stockage', key: 'admin_nav_nodes', icon: 'server' },
     { hash: '#avatars-section', label: 'Avatars', icon: 'image' }
   ] },

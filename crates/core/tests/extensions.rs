@@ -269,6 +269,92 @@ async fn call(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn artwork_batch_is_bounded_resumable_and_requires_admin_csrf() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "batch-admin",
+            Zeroizing::new("synthetic batch password".into()),
+        )
+        .await
+        .unwrap();
+    media_poc::libraries::initialize_local(&store)
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('folder','Folder','films','local','synthetic-child',1)").execute(store.pool()).await.unwrap();
+    media_poc::database::query("INSERT INTO library_folders(library_id,parent_id,active) VALUES('folder','films',1)").execute(store.pool()).await.unwrap();
+    for (id, ids) in [("a", "{}"), ("b", "{\"tmdb\":\"42\"}")] {
+        media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES(?,?,?,?,?)")
+            .bind(id).bind(if id == "a" { "films" } else { "folder" }).bind(id).bind(id).bind(ids).execute(store.pool()).await.unwrap();
+    }
+    let auth = AuthState::new(store, "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = extensions::router(auth.clone()).merge(auth::router(auth));
+    let (_, login, cookie) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        "",
+        json!({"login":"batch-admin","password":"synthetic batch password"}),
+    )
+    .await;
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let endpoint = "/api/v1/admin/artwork/collect-batch";
+    assert_ne!(call(&app, "GET", "/api/v1/admin/artwork/works?libraryId=films", "", "", json!({})).await.0, StatusCode::OK);
+    assert_eq!(call(&app, "GET", "/api/v1/admin/artwork/works?libraryId=films&limit=101", &cookie, "", json!({})).await.0, StatusCode::BAD_REQUEST);
+    let (status, listed, _) = call(&app, "GET", "/api/v1/admin/artwork/works?libraryId=films&limit=1", &cookie, "", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["items"][0]["workId"], "a");
+    assert_eq!(listed["items"][0]["posterCount"], 0);
+    assert_eq!(listed["nextCursor"], "a");
+    let (_, listed, _) = call(&app, "GET", "/api/v1/admin/artwork/works?libraryId=films&limit=1&after=a", &cookie, "", json!({})).await;
+    assert_eq!(listed["items"][0]["workId"], "b");
+    assert!(listed["nextCursor"].is_null());
+    let request = json!({"libraryId":"films", "limit":1});
+    assert_ne!(
+        call(&app, "POST", endpoint, &cookie, "", request.clone())
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            endpoint,
+            &cookie,
+            csrf,
+            json!({"libraryId":"films","limit":6})
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    let (status, first, _) = call(&app, "POST", endpoint, &cookie, csrf, request).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["items"][0]["error"]["code"], "external_ids_required");
+    assert_eq!(first["nextCursor"], "a");
+    let (_, second, _) = call(
+        &app,
+        "POST",
+        endpoint,
+        &cookie,
+        csrf,
+        json!({"libraryId":"films","after":"a"}),
+    )
+    .await;
+    assert_eq!(second["items"][0]["workId"], "b");
+    assert_eq!(second["items"][0]["result"]["providers"], 0);
+    assert!(second["nextCursor"].is_null());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn image_collection_uses_only_enabled_providers_and_skips_known_sources() {
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("db.sqlite"))

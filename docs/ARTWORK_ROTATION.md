@@ -1,5 +1,10 @@
 # Images multiples et rotation native — 27 octobre 2026
 
+Mise à jour du 29 octobre : Administration → Images permet d'examiner les
+œuvres d'une bibliothèque et de lancer une collecte séquentielle. Les réglages
+visibles utilisent uniquement le nom « Rotation des affiches ». La collecte
+n'est pas encore une tâche durable ou planifiée. Voir les limites ci-dessous.
+
 ## Décision
 
 La conservation des variantes, leurs représentations privées et la déduplication
@@ -58,6 +63,19 @@ de synchronisation entre appareils. Une seule variante disponible reste stable.
 
 ## API et bornes
 
+`GET /api/v1/admin/artwork/works?libraryId=...&limit=25&after=...` liste les
+œuvres par identifiant, avec curseur `nextCursor` et nombre de variantes
+d'affiches applicatives (sans affiches locales ou ancienne affiche manuelle).
+Limite 1–100 ; les dossiers actifs de la bibliothèque sont inclus.
+`POST /api/v1/admin/artwork/collect-batch` exige administrateur et CSRF :
+`{libraryId, after?, limit:1, languages, includeNeutral, maxImages}`. Chaque
+appel traite au plus une œuvre et retourne `items` et `nextCursor` ; chaque
+élément contient son résultat de collecte ou une erreur explicite. Les bornes
+et permissions de la collecte par œuvre restent applicables. Le curseur permet
+une reprise par le client ; un appel interrompu peut être répété et les images
+déjà importées sont dédupliquées. La progression de l'interface est en mémoire
+dans la page et ne survit pas à sa fermeture.
+
 Les paramètres `artworkRotation` sont persistés par l'API des préférences du
 compte. Une liste explicite de bibliothèques vide désactive la rotation partout ;
 une sélection absente conserve les anciens réglages par type de média. Pool 1–24 et intervalle 0–720 heures : les valeurs hors limites sont
@@ -106,10 +124,10 @@ et les originaux locaux ne sont pas rétroactivement décodés pour cette étape
 
 ## Limites et prochain jalon
 
-La collecte est une action explicite par œuvre. La rotation native sélectionne
-les affiches déjà présentes et ne télécharge aucune image. Aucun balayage automatique de
-toute la médiathèque, quota disque administrable ou tâche planifiée de collecte
-distante n'est annoncé. La catégorie `image` du moteur distribué existant
+La collecte peut être lancée explicitement sur une bibliothèque depuis une page
+ouverte. La rotation native sélectionne les affiches déjà présentes et ne
+télécharge aucune image. Aucun quota disque administrable ou tâche planifiée de
+collecte distante n'est annoncé. La catégorie `image` du moteur distribué existant
 prépare des images locales inventoriées ; elle ne constitue pas un contrat
 d'exécution des fournisseurs de métadonnées. Le prochain jalon est un job de
 collecte durable reprenable, avec budgets par bibliothèque et fournisseur.

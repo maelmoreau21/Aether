@@ -78,6 +78,7 @@ fs.mkdirSync(out, {recursive:true});
       assert.equal(await page.locator('.detail-info-column script, .detail-info-column img').count(),0);
     }
     await page.screenshot({path:`${out}/detail-${phase}.png`});
+    await page.locator('.versions-panel summary').click();
     await page.getByRole('button',{name:'Sélectionner la version MP4',exact:true}).click();
     await page.locator('.hero-cta').click();
     const startPosition = await page.locator('video').evaluate(video=>video.currentTime);

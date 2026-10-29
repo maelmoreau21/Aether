@@ -4784,3 +4784,11 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
 - Le Core sert l'interface depuis `apps/web/build`, relatif à son répertoire de travail (`/app` dans les images Docker). La variable de configuration du chemin Web a été supprimée du code, des images, des exemples Compose, des scripts et de la documentation courante.
 - Les tests d'intégration fournissent un répertoire Web temporaire directement au constructeur du routeur ; le banc de mesure copie le build Web de ses artefacts dans son répertoire de travail avant de démarrer le Core.
 - Vérification ciblée : `cargo test --locked -p media-poc --test static_web --test adversarial_challenge` (6 tests passés), test unitaire `configured_web_dist_uses_build_directory` (1 passé), `rustfmt --check --edition 2024 --config skip_children=true` sur les trois fichiers Rust touchés, syntaxe Node/Python et validation des deux exemples Compose. Aucun build Docker ni test navigateur réel pour ce changement.
+# 29 octobre 2026 — scénarios navigateur et panneau des versions
+
+Le journal CI fourni montre les scans initial et incrémental réussis, puis un
+échec de sélection MP4 dans le panneau des versions replié. Les scripts scanner,
+NFO et affiches ouvrent désormais ce panneau avant la sélection ; la validation
+du job GitHub Linux reste à faire. Le scénario scanner ouvre aussi le panneau de
+suivi et passe localement sous Windows/Chrome, avant et après redémarrage ; les
+scénarios NFO et affiches ne sont pas relancés.

@@ -64,6 +64,7 @@ fs.mkdirSync(out, {recursive: true});
     await card.click();
     await page.getByRole('heading',{name:'Scanner Film',exact:true}).waitFor();
     const container=restart?'MKV':'MP4';
+    await page.locator('.versions-panel summary').click();
     await page.getByRole('button',{name:`Sélectionner la version ${container}`,exact:true}).click();
     // Browser clock at the actual Svelte click handler boundary; excludes
     // Playwright dispatch latency. rVFC means compositor submission, not photons.
@@ -289,6 +290,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForFunction(async()=>{ const r=await fetch('/api/v1/progress'); const data=await r.json(); return data.items.some(item=>item.position>3.8); });
     // The final-window and long-seek regressions can legitimately mark watched.
     // Establish the unwatched precondition before testing the manual toggle.
+    await page.locator('.personal-panel summary').click();
     if (await page.getByRole('button',{name:'Marquer non vu',exact:true}).isVisible()) await page.getByRole('button',{name:'Marquer non vu',exact:true}).click();
     await page.getByRole('button',{name:'Marquer comme vu',exact:true}).click();
     await page.getByRole('button',{name:'Marquer non vu',exact:true}).waitFor();

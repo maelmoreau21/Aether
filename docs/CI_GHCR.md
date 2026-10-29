@@ -1,5 +1,18 @@
 # CI et publication GHCR
 
+## Sélection des versions dans les parcours navigateur — 29 octobre 2026
+
+Le journal GitHub montre que les deux scans Films aboutissent, puis que le
+sélecteur de version expire : il se trouve désormais dans le panneau replié
+« Versions et informations techniques ». Les scénarios scanner, NFO et
+affiches ouvrent ce panneau avant de sélectionner une version. Une relance du
+job Linux reste nécessaire pour confirmer l'ensemble du parcours en CI. Le
+scénario scanner ouvre aussi le panneau de suivi avant les contrôles vu/non vu.
+Après reconstruction Web, `cargo test --locked -p media-poc --test
+browser_scanner -- --ignored --nocapture` réussit sous Windows avec Chrome
+156.0.8078.48, en MP4 puis en MKV après redémarrage. NFO et affiches ne sont
+pas relancés ici.
+
 ## Parcours administrateur navigateur — 27 octobre 2026
 
 Le run CI 40466113909 échouait avant le scan Films : l'administration ouvre

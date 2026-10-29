@@ -1,5 +1,29 @@
 # CI et publication GHCR
 
+## Réduction des compilations et des runs obsolètes — 29 octobre 2026
+
+Les profils Cargo dev/test omettent les symboles de débogage dans ce workflow
+(`CARGO_PROFILE_DEV_DEBUG=0`, `CARGO_PROFILE_TEST_DEBUG=0`). Les assertions et
+contrôles de débordement restent actifs. L'objectif est de réduire le temps
+de liaison, le disque et les transferts de cache ; un premier run peut devoir
+reconstruire les artefacts avec ce réglage.
+
+Films et Séries sont exécutés par une seule commande Cargo ciblant leurs deux
+tests pour mutualiser la compilation. `MEDIA_SCANNER_REPORT_DIR` réserve le
+dossier Films, sans changer le dossier Séries ni les validations de rapports.
+Les nouveaux commits annulent les jobs de validation obsolètes de la même ref,
+y compris sur les branches ; les jobs de publication ne sont pas interrompus.
+Les trois images Docker utilisent désormais un seul job Buildx Bake pour
+partager les étapes Rust/Web/FFmpeg, avec deux tâches Cargo de compilation
+et un seul export de cache des étapes communes. Les anciens caches restent
+lisibles. Les trois images sont chargées et le contrôle du runtime Node reste
+obligatoire. Le plan Bake a été validé avec `docker buildx bake --print` ;
+une construction réelle n'a pas été exécutée (daemon Docker indisponible).
+Aucun contrôle obligatoire
+n'est retiré. Actionlint 1.7.12, parsing YAML, vérification des dossiers et
+`git diff --check` passent localement ; le gain réel et l'exécution Linux sont
+à mesurer au prochain run GitHub.
+
 ## Parcours playlists — 29 octobre 2026
 
 Le lecteur réduit et le panneau ouvert possèdent tous deux des commandes de

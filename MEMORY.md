@@ -4802,3 +4802,15 @@ sous Windows/Chrome 156 ; la CI Linux reste à confirmer.
 Les commandes audio du test ciblent le panneau musique ouvert pour éviter les
 doublons du lecteur réduit. Le test ciblé avec navigateur activé passe sous
 Windows/Chrome 156 ; la CI Linux reste à confirmer.
+# 29 octobre 2026 — coût de la CI
+
+Le workflow CI omet les symboles de débogage Cargo dev/test, groupe les cibles
+navigateur Films/Séries dans une commande et annule les anciens runs de PR de
+la même ref. Les contrôles et portes de publication restent présents. Le
+dossier Films utilise MEDIA_SCANNER_REPORT_DIR pour préserver celui de Séries.
+Actionlint et contrôles statiques passent ; aucun gain distant mesuré à ce stade.
+
+Optimisation complémentaire : annulation des validations obsolètes par job
+sur toutes les refs sans annuler les publications, construction des trois
+images dans un même solve Bake avec export de cache commun unique. Plan Bake
+et actionlint validés ; daemon Docker indisponible pour un build réel.

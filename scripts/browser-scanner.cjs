@@ -5,7 +5,7 @@ const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('isolated test origin required');
 const restart = process.env.MEDIA_TEST_RESTART === '1';
 const long = process.env.MEDIA_TEST_LONG === '1';
-const out = process.env.MEDIA_REPORT_DIR || (long ? 'target/player-long' : 'target/browser-scanner');
+const out = process.env.MEDIA_SCANNER_REPORT_DIR || process.env.MEDIA_REPORT_DIR || (long ? 'target/player-long' : 'target/browser-scanner');
 // Keep previous evidence; each successful run replaces its own reports only.
 fs.mkdirSync(out, {recursive: true});
 (async () => {

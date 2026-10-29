@@ -14,8 +14,17 @@ on:
 permissions:
   contents: read
 
+# Preserve debug assertions and overflow checks; omit only debug symbols.
+# This reduces test linking time, disk use and Cargo cache transfers.
+env:
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+
 jobs:
   workflows:
+    concurrency:
+      group: ci-workflows-${{ github.ref }}
+      cancel-in-progress: true
     name: Validation des workflows
     runs-on: ubuntu-latest
     steps:
@@ -31,6 +40,9 @@ jobs:
   # 1. Vérifications et tests Rust (Core & Node)
   # =========================================================================
   rust-tests:
+    concurrency:
+      group: ci-rust-${{ github.ref }}-${{ matrix.shard }}
+      cancel-in-progress: true
     name: Rust (partition ${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -179,6 +191,9 @@ jobs:
   # 2. Audit de sécurité des dépendances Rust
   # =========================================================================
   security-audit:
+    concurrency:
+      group: ci-audit-${{ github.ref }}
+      cancel-in-progress: true
     name: Audit de sécurité (cargo audit)
     runs-on: ubuntu-latest
     steps:
@@ -195,6 +210,9 @@ jobs:
   # Ce job s'exécutera automatiquement dès que apps/web sera initialisé.
   # =========================================================================
   frontend:
+    concurrency:
+      group: ci-frontend-${{ github.ref }}
+      cancel-in-progress: true
     name: Frontend SvelteKit
     runs-on: ubuntu-latest
     defaults:
@@ -233,6 +251,9 @@ jobs:
   # 4. Parcours navigateur réels (Films & Séries sous Chrome headless)
   # =========================================================================
   browser:
+    concurrency:
+      group: ci-browser-${{ github.ref }}
+      cancel-in-progress: true
     name: Navigateur Chrome (Films & Séries)
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -303,15 +324,12 @@ jobs:
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
         run: python3 scripts/prepare-p1.py
 
-      - name: Exécuter le parcours navigateur Films (scan, incrémental, lecture, seek, redémarrage Core)
+      - name: Exécuter les parcours Films et Séries (scan, lecture, redémarrage, permissions et sessions)
         env:
           # Keep generation aligned with report validation and artifact upload,
           # independently of the script's local default under target/.
-          MEDIA_REPORT_DIR: docs/evidence/2026-10-16/scanner
-        run: cargo test --locked --test browser_scanner -- --ignored --nocapture
-
-      - name: Exécuter le parcours navigateur Séries (scan, saisons, lecture, 403, transition cookies HttpOnly)
-        run: cargo test --locked --test browser_series -- --ignored --nocapture
+          MEDIA_SCANNER_REPORT_DIR: docs/evidence/2026-10-16/scanner
+        run: cargo test --locked -p media-poc --test browser_scanner --test browser_series -- --ignored --nocapture
 
       - name: Vérifier playlists, partage connecté, musique persistante et paroles
         env:
@@ -383,29 +401,22 @@ jobs:
             docs/evidence/2026-10-22/playlists/ci/
 
   images:
-    name: Image Docker (${{ matrix.target }})
+    concurrency:
+      group: ci-images-${{ github.ref }}
+      cancel-in-progress: true
+    name: Images Docker (compilation partagée)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [runtime, runtime-core, runtime-node]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: docker/bake-action@v6
         with:
-          context: .
-          target: ${{ matrix.target }}
-          platforms: linux/amd64
-          build-args: |
-            GIT_BRANCH=${{ github.ref_name }}
+          files: docker-bake.ci.hcl
           load: true
           push: false
-          tags: media-ci:${{ matrix.target }}
-          cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+        env:
+          GIT_BRANCH: ${{ github.ref_name }}
       - name: Vérifier le runtime Node optimisé avant publication
-        if: matrix.target == 'runtime-node'
         run: |
           set -euo pipefail
           docker run --rm --entrypoint sh media-ci:runtime-node -ec '

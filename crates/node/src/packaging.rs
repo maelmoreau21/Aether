@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    io::AsyncReadExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     process::Command,
     sync::{Mutex, Semaphore},
 };
@@ -253,11 +253,11 @@ impl Preparations {
                 "preparation busy; retry explicitly",
             )
         };
-        // Identical cold windows share a key gate before seeking admission to
+        // Identical cold components share a key gate before seeking admission to
         // the single FFmpeg worker. Followers consume no worker queue slots.
         // Cancellation drops both guards; if the leader is cancelled, the next
         // interested request can take over without a detached background job.
-        let (_joined, _key_guard) = if matches!(component, Component::AudioChunk(..)) {
+        let (_joined, _key_guard) = {
             drop(cache);
             let joined = self.joiners.try_acquire().map_err(|_| busy())?;
             let gate = {
@@ -274,7 +274,12 @@ impl Preparations {
                     gate
                 }
             };
-            let guard = tokio::time::timeout(Duration::from_secs(25), gate.lock_owned())
+            let wait_seconds = if matches!(component, Component::AudioChunk(..)) {
+                limits.seconds.min(20) + 5
+            } else {
+                limits.seconds + 5
+            };
+            let guard = tokio::time::timeout(Duration::from_secs(wait_seconds), gate.lock_owned())
                 .await
                 .map_err(|_| busy())?;
             cache = self.cache.lock().await;
@@ -285,9 +290,7 @@ impl Preparations {
                 log.complete = true;
                 return Ok(opened.with_cache_lease(directory));
             }
-            (Some(joined), Some(guard))
-        } else {
-            (None, None)
+            (joined, guard)
         };
         let _worker = match self.worker.try_acquire() {
             Ok(permit) => permit,
@@ -486,6 +489,10 @@ impl Preparations {
                     "unsupported packaging or stream",
                 ));
             }
+            // Tokio's File may still have a blocking write in flight after copy
+            // reports the final bytes. Publish only after that write completes;
+            // dropping the file alone does not wait for it or report its error.
+            output.flush().await?;
             input.verify_unchanged_sync()?;
             Ok::<_, io::Error>(size)
         };
@@ -625,6 +632,62 @@ mod tests {
         assert_eq!(preparations.worker.available_permits(), 1);
         assert_eq!(preparations.waiters.available_permits(), 8);
         assert_eq!(preparations.joiners.available_permits(), 64);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn identical_cold_full_components_share_one_published_file() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/generated/representative");
+        for component in [
+            Component::Video,
+            Component::Audio(1),
+            Component::Subtitle(4),
+        ] {
+            let source = OpenedFile::open_in_root(&root, Path::new("representative.mp4"))
+                .await
+                .unwrap();
+            let preparations = Arc::new(Preparations::default());
+            let mut tasks = tokio::task::JoinSet::new();
+            let start = Arc::new(tokio::sync::Barrier::new(8));
+            for _ in 0..8 {
+                let preparations = preparations.clone();
+                let root = root.clone();
+                let start = start.clone();
+                let size = source.size();
+                let modified = source.modified_ns().to_owned();
+                tasks.spawn(async move {
+                    start.wait().await;
+                    preparations
+                        .prepare(
+                            &root,
+                            Path::new("representative.mp4"),
+                            size,
+                            &modified,
+                            component,
+                        )
+                        .await
+                });
+            }
+            let mut paths = Vec::new();
+            let mut files = Vec::new();
+            let mut failures = Vec::new();
+            while let Some(result) = tasks.join_next().await {
+                match result.unwrap() {
+                    Ok(file) => {
+                        assert!(file.size() > 0);
+                        paths.push(file.canonical_path().to_owned());
+                        files.push(file);
+                    }
+                    Err(error) => failures.push(error.to_string()),
+                }
+            }
+            assert!(failures.is_empty(), "{component:?}: {failures:?}");
+            assert_eq!(paths.len(), 8);
+            assert!(paths.iter().all(|path| path == &paths[0]));
+            assert_eq!(preparations.cache.lock().await.entries.len(), 1);
+            assert_eq!(preparations.worker.available_permits(), 1);
+            assert_eq!(preparations.joiners.available_permits(), 64);
+        }
     }
 
     #[tokio::test]

@@ -32,8 +32,10 @@ export class NativePlayer implements Player {
     if (this.video.paused || this.busy || this.stallTimer) return;
     this.stallTimer = setTimeout(() => {
       this.stallTimer = undefined;
-      this.video.pause();
+      this.pause();
       this.progressiveVideo?.destroy();this.progressiveVideo=undefined;
+      this.externalAudio?.destroy();this.externalAudio=undefined;
+      this.source=undefined;
       this.onError('Lecture bloquée pendant 10 secondes. Rechargez explicitement la source.');
     }, 10000);
   };

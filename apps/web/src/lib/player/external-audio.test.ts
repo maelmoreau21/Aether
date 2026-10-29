@@ -17,6 +17,22 @@ function setup() {
   return { video, audio, error, bridge };
 }
 describe('independent audio timeline',()=>{
+  it('cancels a readiness wait immediately on pause, before startup buffering begins',async()=>{
+    vi.useFakeTimers();const {audio,bridge}=setup();await bridge.load('/audio');
+    audio.readyState=1;audio.seeking=true;
+    const buffering=expect(bridge.bufferForPlayback()).rejects.toThrow('annulé');
+    bridge.pause();await buffering;
+    expect(vi.getTimerCount()).toBe(1); // Only the active clock synchronizer remains.
+    bridge.destroy();expect(vi.getTimerCount()).toBe(0);
+  });
+  it('cancels a pending audio start on pause without a later readiness event restarting it',async()=>{
+    vi.useFakeTimers();const {video,audio,bridge}=setup();await bridge.load('/audio');await video.play();
+    audio.readyState=1;audio.seeking=true;const played=vi.spyOn(audio,'play');
+    const playing=expect(bridge.play()).rejects.toThrow('annulé');
+    bridge.pause();await playing;
+    audio.readyState=4;audio.seeking=false;audio.dispatchEvent(new Event('canplay'));
+    expect(played).not.toHaveBeenCalled();bridge.destroy();expect(vi.getTimerCount()).toBe(0);
+  });
   it('replaces an unfinished audio seek when the user seeks back to a retained window',async()=>{
     const {video,audio,bridge}=setup();video.duration=3500;audio.duration=3500;await bridge.load('/audio');
     video.currentTime=900;video.dispatchEvent(new Event('seeked'));expect(audio.currentTime).toBe(900);

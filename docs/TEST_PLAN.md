@@ -1,5 +1,31 @@
 > Mission 4 : scénarios réels standalone/Core + deux Nodes, interruption/reprise, idempotence, contrôles et bancs explicites 10 000 tâches / 100 Nodes simulés : [méthode et résultats du moteur distribué](DISTRIBUTED_TASKS.md). Les essais HTTP Range restent distincts du décodage navigateur et des machines physiques.
 
+## Fiabilité lecteur — 29 octobre 2026
+
+Régressions ajoutées : fermeture pendant attente de progression vidéo,
+supersession avant premier fragment, source rechargeable après watchdog,
+annulation audio avant disponibilité, fin d'attente MSE bornée/nettoyée,
+arrêt des préparations périodiques après erreur terminale, rejet d'erreurs
+MSE devenues obsolètes après seek. Le test Rust
+`packaging::tests::identical_cold_full_components_share_one_published_file`
+demande huit fois simultanément chaque composant vidéo/audio/sous-titre et
+vérifie un seul fichier publié, les leases et la restitution des permis.
+La reprise à 29,844173 s dans une chronologie de deux heures vérifie aussi
+que le chargement initial demande les fenêtres 2 et 3, afin de ne pas attendre
+indéfiniment la fin du seek dans les dernières fractions d'une fenêtre.
+
+Le banc `browser-streaming-performance.cjs` peut figer tous les modules d'une
+révision via `MEDIA_PERFORMANCE_PLAYER_REF`, choisir les positions par
+`MEDIA_PERFORMANCE_SEEK_TARGETS` et exercer 1/4/8/16 sessions avec
+`MEDIA_PERFORMANCE_SESSIONS`. Les sources sont figées avant lancement et leurs
+empreintes figurent dans le rapport. Il conserve son serveur HTTP synthétique :
+ses résultats ne remplacent pas le banc Core/Node Rust. Les petits échantillons
+de latence restent exploratoires ; décoder des extraits d'un conteneur de deux
+heures ne prouve pas une endurance de deux heures.
+
+Résultats réellement exécutés, commandes et limites :
+[rapport du 29 octobre](PLAYER_RELIABILITY_2026_10_29.md).
+
 ## Flux progressifs et Node Rust — 24 octobre 2026
 
 Méthode et preuves : [STREAMING_SYSTEM_BENCHMARK.md](STREAMING_SYSTEM_BENCHMARK.md).

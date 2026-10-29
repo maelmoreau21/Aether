@@ -30,6 +30,25 @@ function setup() {
 }
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();vi.useRealTimers();});
 describe('progressive packet-copy video',()=>{
+  it('cancels a load waiting for saved progress when the player closes',async()=>{
+    const {player,source,fetcher}=setup();
+    const loading=expect(player.load(new Promise<number>(()=>{}))).rejects.toThrow('Lecteur fermé');
+    source.dispatchEvent(new Event('sourceopen'));player.destroy();
+    await loading;expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('settles an obsolete first-fragment wait when a newer seek supersedes it',async()=>{
+    const {player,source,fetcher}=setup();
+    fetcher.mockImplementation((_url,options)=>new Promise((_resolve,reject)=>{
+      options.signal?.addEventListener('abort',()=>reject(new Error('aborted')),{once:true});
+    }));
+    const loading=expect(player.load(0)).rejects.toThrow('annulée');
+    source.dispatchEvent(new Event('sourceopen'));
+    await vi.waitFor(()=>expect(fetcher).toHaveBeenCalledOnce());
+    player.activate();
+    const video=(player as unknown as {video:HTMLVideoElement}).video;
+    video.currentTime=20;video.dispatchEvent(new Event('seeking'));
+    await loading;player.destroy();
+  });
   it('aborts the reader and reports a technical error when a long GOP prevents encoded buffer release',async()=>{
     vi.useFakeTimers();const {player,source,buffer,deliver,aborted,error}=setup();
     const state=player as unknown as {retained:EncodedVideoBuffer};state.retained=new EncodedVideoBuffer(initialization().byteLength+10);

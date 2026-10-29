@@ -11,6 +11,7 @@ export class ExternalAudio {
   private cancellations = new Set<() => void>();
   private stopped = false;
   private startup?: AbortController;
+  private playbackWait?: AbortController;
   private active = false;
   private waiting = false;
   private failed = false;
@@ -39,7 +40,7 @@ export class ExternalAudio {
     this.onError('Audio externe interrompu : source indisponible, incompatible ou bloquée pendant 10 secondes.');
   };
   private videoPause = () => { this.audio.pause(); if (!this.holdingVideo) this.clearStall(); };
-  pause() { this.startup?.abort(); this.resumeEpoch++; this.holdingVideo = false; this.clearStall(); this.audio.pause(); }
+  pause() { this.startup?.abort(); this.playbackWait?.abort(); this.resumeEpoch++; this.holdingVideo = false; this.clearStall(); this.audio.pause(); }
   isBuffering() { return this.holdingVideo; }
   private naturalTail() {
     const target = this.video.currentTime - this.offset;
@@ -56,7 +57,7 @@ export class ExternalAudio {
     if (this.naturalTail()) { this.recover(); return; }
     if (this.video.duration - this.audio.duration > ExternalAudio.END_TOLERANCE) this.error();
   };
-  private wait = () => { this.waiting = true; this.audio.pause(); };
+  private wait = () => { this.resumeEpoch++; this.waiting = true; this.audio.pause(); };
   private resume = () => { this.waiting = false; this.resync(); };
   private afterSeek = () => {
     this.waiting = false;
@@ -119,20 +120,24 @@ export class ExternalAudio {
   setOffset(seconds: number) {
     if (Number.isFinite(seconds) && Math.abs(seconds) <= 30) { this.offset = seconds; this.afterSeek(); }
   }
-  private async ready() {
+  private async ready(signal?: AbortSignal) {
+    if (signal?.aborted) throw new Error('Démarrage annulé.');
     if (!this.audio.seeking && this.audio.readyState >= 2) return;
     await new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => {
         clearTimeout(timeout);
         this.audio.removeEventListener('seeked', check); this.audio.removeEventListener('canplay', check);
         this.audio.removeEventListener('error', failed); this.cancellations.delete(cancel);
+        signal?.removeEventListener('abort', aborted);
         if (error) reject(error); else resolve();
       };
       const check = () => { if (!this.audio.seeking && this.audio.readyState >= 2) finish(); };
       const failed = () => finish(new Error('Audio externe Ogg/Opus illisible.'));
+      const aborted = () => finish(new Error('Démarrage annulé.'));
       const timeout = setTimeout(() => finish(new Error('Chargement ou seek audio expiré après 10 secondes.')), 10000);
       const cancel = () => finish(new Error('Lecteur fermé.')); this.cancellations.add(cancel);
       this.audio.addEventListener('seeked', check); this.audio.addEventListener('canplay', check); this.audio.addEventListener('error', failed);
+      signal?.addEventListener('abort', aborted, {once:true});
       check();
     });
   }
@@ -173,10 +178,13 @@ export class ExternalAudio {
   async bufferForPlayback() {
     if (this.naturalTail()) return;
     if (!this.align(true)) return;
-    await this.ready();
-    if (this.stopped || this.failed) throw new Error('Piste audio interrompue.');
+    this.startup?.abort();
     const startup = new AbortController(); this.startup = startup;
-    try { await waitForStartupBuffer(this.audio, startup.signal); }
+    try {
+      await this.ready(startup.signal);
+      if (this.stopped || this.failed) throw new Error('Piste audio interrompue.');
+      await waitForStartupBuffer(this.audio, startup.signal);
+    }
     finally { if (this.startup === startup) this.startup = undefined; }
   }
   async play() {
@@ -186,13 +194,18 @@ export class ExternalAudio {
     if (this.video.currentTime < this.offset) { this.audio.pause(); return; }
     const target = this.video.currentTime - this.offset;
     if (Number.isFinite(this.audio.duration) && target >= this.audio.duration) throw new Error('La piste audio externe se termine avant cette position.');
-    this.align(); await this.ready();
-    if (this.stopped || this.failed) throw new Error('Piste audio interrompue.');
-    if (!this.video.paused) await this.audio.play();
+    this.playbackWait?.abort();
+    const waiting = new AbortController(); this.playbackWait = waiting;
+    const epoch = this.resumeEpoch;
+    try {
+      this.align(); await this.ready(waiting.signal);
+      if (this.stopped || this.failed) throw new Error('Piste audio interrompue.');
+      if (epoch === this.resumeEpoch && !this.video.paused && !this.video.seeking) await this.audio.play();
+    } finally { if (this.playbackWait === waiting) this.playbackWait = undefined; }
   }
   destroy() {
     if (this.stopped) return;
-    this.stopped = true; this.startup?.abort(); for (const cancel of this.cancellations) cancel(); this.cancellations.clear();
+    this.stopped = true; this.startup?.abort(); this.playbackWait?.abort(); for (const cancel of this.cancellations) cancel(); this.cancellations.clear();
     clearInterval(this.timer); this.clearStall();
     this.video.removeEventListener('pause', this.videoPause); this.video.removeEventListener('waiting', this.wait); this.video.removeEventListener('seeking', this.wait);
     this.video.removeEventListener('playing', this.resume); this.video.removeEventListener('seeked', this.afterSeek);

@@ -271,6 +271,17 @@ describe('native source replacement', () => {
     expect(video.paused).toBe(true); expect(error).toHaveBeenCalledTimes(1); expect(video.loads).toBe(1);
     await vi.advanceTimersByTimeAsync(60000); expect(error).toHaveBeenCalledTimes(1);
   });
+  it('invalidates stalled audio so an explicit reload of the same track performs a real recovery', async () => {
+    vi.useFakeTimers(); const { video, player, error } = setup();
+    const prepared={...media,sources:media.sources.map(s=>({...s,url:'/same-video',externalAudioUrl:`/audio-${s.language}`}))};
+    await player.load(prepared);await player.play();
+    const destroy=vi.spyOn(ExternalAudio.prototype,'destroy');
+    video.dispatchEvent(new Event('stalled'));await vi.advanceTimersByTimeAsync(10000);
+    expect(error).toHaveBeenCalledOnce();expect(destroy).toHaveBeenCalledOnce();
+    await expect(player.play()).rejects.toThrow('indisponible');
+    await player.selectAudio('fr');expect(video.loads).toBe(2);
+    destroy.mockRestore();player.destroy();
+  });
   it('cancels pending work on teardown', async () => {
     const { video, player } = setup(); video.auto = false;
     const result = expect(player.load(media)).rejects.toThrow('fermé'); player.destroy(); await result;

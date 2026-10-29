@@ -35,7 +35,7 @@ export class ProgressiveVideo {
     void this.opened.catch(()=>{});
   }
   async load(position: number | Promise<number>) {
-    const [saved]=await Promise.all([position,this.opened]);
+    const [saved]=await Promise.race([Promise.all([position,this.opened]),this.failure]);
     if(this.closed)throw new Error('Lecteur fermé.');
     const target=Number.isFinite(saved)?Math.max(0,Math.min(saved,Math.max(0,this.duration-.05))):0;
     await this.start(target,false);
@@ -74,7 +74,10 @@ export class ProgressiveVideo {
   private async start(position: number, clear: boolean) {
     this.restarting=clear;
     this.controller?.abort();const controller=new AbortController();this.controller=controller;const signal=controller.signal,epoch=++this.epoch;
-    let ready!:()=>void;const first=new Promise<void>(resolve=>{ready=resolve;});
+    let ready!:()=>void, rejectFirst!:(error:Error)=>void;
+    const first=new Promise<void>((resolve,reject)=>{ready=resolve;rejectFirst=reject;});
+    const cancelled=()=>rejectFirst(new Error('Lecture vidéo annulée.'));
+    signal.addEventListener('abort',cancelled,{once:true});
     const current=()=>!this.closed && epoch===this.epoch && !signal.aborted;
     const run=async()=>{
       if(clear)await this.exclusive(async()=>{
@@ -150,7 +153,8 @@ export class ProgressiveVideo {
     void run().catch(error=>{
       if(!current())return;const failure=error instanceof Error?error:new Error(String(error));this.failed=failure;this.rejectFailure(failure);controller.abort();if(this.active)this.onError(failure.message);
     });
-    await Promise.race([first,this.failure]);
+    try { await Promise.race([first,this.failure]); }
+    finally { signal.removeEventListener('abort',cancelled); }
   }
   destroy() {
     if(this.closed)return;this.closed=true;this.epoch++;this.controller?.abort();this.video.removeEventListener('seeking',this.seeked);

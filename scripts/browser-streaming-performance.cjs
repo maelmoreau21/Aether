@@ -17,6 +17,20 @@ const rounds = Number(process.env.MEDIA_PERFORMANCE_ROUNDS || 5);
 const baseline = process.env.MEDIA_PERFORMANCE_BASELINE === '1';
 const baselineRef = process.env.MEDIA_PERFORMANCE_BASE_REF || 'HEAD';
 const baselineCommit = execFileSync('git', ['rev-parse', '--verify', `${baselineRef}^{commit}`], {cwd: root, encoding: 'utf8'}).trim();
+// Freeze every module before opening a browser. A comparison must not mix
+// revisions if another agent saves a source file between browser contexts.
+const playerRef = process.env.MEDIA_PERFORMANCE_PLAYER_REF;
+const playerCommit = playerRef ? execFileSync('git', ['rev-parse', '--verify', `${playerRef}^{commit}`], {cwd: root, encoding: 'utf8'}).trim() : null;
+const playerModules = ['startup-buffer', 'errors', 'compatibility', 'source-selection', 'external-audio', 'segmented-audio', 'mp4-timeline', 'mp4-fragments', 'encoded-video-buffer', 'progressive-video', 'native'];
+const playerSources = Object.fromEntries(playerModules.map(name => [name,
+  playerCommit || (baseline && name === 'native')
+    ? execFileSync('git', ['show', `${playerCommit || baselineCommit}:apps/web/src/lib/player/${name}.ts`], {cwd: root, encoding: 'utf8'})
+    : fs.readFileSync(path.join(root, 'apps/web/src/lib/player', `${name}.ts`), 'utf8'),
+]));
+const concurrentSessions = Number(process.env.MEDIA_PERFORMANCE_SESSIONS || (process.env.MEDIA_PERFORMANCE_CONCURRENT === '1' ? 4 : 0));
+if (![0, 1, 4, 8, 16].includes(concurrentSessions)) throw new Error('concurrent sessions must be 0, 1, 4, 8 or 16');
+const seekTargets = process.env.MEDIA_PERFORMANCE_SEEK_TARGETS?.split(',').map(Number);
+if (seekTargets && (!seekTargets.length || seekTargets.some(value => !Number.isFinite(value) || value < 0))) throw new Error('seek targets must be finite nonnegative seconds');
 const audioDelayMs = Number(process.env.MEDIA_PERFORMANCE_AUDIO_DELAY_MS || 0);
 const englishHz = Number(process.env.MEDIA_PERFORMANCE_ENGLISH_HZ || 1050);
 if (!Number.isFinite(englishHz) || englishHz < 100 || englishHz > 10000) throw new Error('English audio frequency must be 100..10000 Hz');
@@ -34,9 +48,43 @@ const report = {
   switchEnglishFrequencyHz: englishHz,
   originalAudioSelection: 'Browser default multi-audio track; language cannot be asserted from metadata. Measured PCM signal is reported.',
   fixture: { path: path.relative(root, fixture), bytes: fs.statSync(fixture).size, probe },
-  baselineCommit, playerModuleSha256: {},
+  baselineCommit, playerCommit, playerSnapshot: 'All player modules frozen in memory before browser launch; hashes identify measured code', playerModuleSha256: {},
   simulatedAudioResponseDelayMs: audioDelayMs, strategies: [], preparations, requests,
 };
+async function launchBrowser() {
+  if (process.env.MEDIA_BROWSER_CHANNEL !== 'firefox') {
+    const executablePath = process.env.MEDIA_BROWSER_EXECUTABLE;
+    return chromium.launch({ ...(executablePath ? { executablePath } : { channel: process.env.MEDIA_BROWSER_CHANNEL || 'chrome' }), headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+  }
+  if (concurrentSessions) throw new Error('Firefox WebDriver harness supports serial contexts only');
+  const { firefoxAdapter } = require('./browser-matrix.cjs');
+  const contexts = [];
+  let version;
+  return {
+    version: () => version,
+    contexts: () => contexts,
+    newContext: async () => {
+      const driver = await firefoxAdapter(); version = driver.version;
+      report.browser = version; report.driver = `geckodriver ${driver.driver}`;
+      const page = {
+        goto: driver.goto, evaluate: driver.evaluate, click: driver.click,
+        addScriptTag: ({ content }) => driver.evaluate(content => { const script = document.createElement('script'); script.textContent = content; document.head.append(script); }, content),
+        waitForTimeout: ms => new Promise(resolve => setTimeout(resolve, ms)),
+        waitForFunction: async (fn, arg, { timeout }) => {
+          const deadline = performance.now() + timeout;
+          while (!await driver.evaluate(fn, arg)) {
+            if (performance.now() >= deadline) throw new Error(`Firefox waitForFunction timeout after ${timeout} ms`);
+            await new Promise(resolve => setTimeout(resolve, 20));
+          }
+        },
+      };
+      let closed = false;
+      const context = { newPage: async () => page, pages: () => [page], close: async () => { if (!closed) { closed = true; await driver.close(); } } };
+      contexts.push(context); return context;
+    },
+    close: async () => { for (const context of contexts) await context.close(); },
+  };
+}
 const server = http.createServer(async (req, res) => {
   const name = new URL(req.url, 'http://localhost').pathname;
   if (name === '/') {
@@ -72,17 +120,17 @@ const server = http.createServer(async (req, res) => {
   stream.pipe(res);
 });
 function compile(name) {
-  const source = baseline && name === 'native' ? execFileSync('git', ['show', `${baselineCommit}:apps/web/src/lib/player/native.ts`], {cwd: root, encoding: 'utf8'}) : fs.readFileSync(path.join(root, 'apps/web/src/lib/player', `${name}.ts`), 'utf8');
+  const source = playerSources[name];
   const hash = createHash('sha256').update(source).digest('hex');
   if (report.playerModuleSha256[name] && report.playerModuleSha256[name] !== hash) throw new Error(`Player module changed during benchmark: ${name}`);
   report.playerModuleSha256[name] = hash;
   return ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 }
 async function instrument(page, strategy) {
-  for (const name of ['startup-buffer', 'errors', 'compatibility', 'source-selection', 'external-audio', 'segmented-audio', 'native']) {
+  for (const name of playerModules) {
     await page.addScriptTag({ content: `window[${JSON.stringify(name)}]={};(function(exports,require){${compile(name)}\n})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);` });
   }
-  await page.evaluate(({ probe, container, strategy, englishHz }) => {
+  await page.evaluate(({ probe, container, strategy, englishHz, seekTargets }) => {
     const video = document.querySelector('video'), ctx = new AudioContext(), attached = new WeakMap();
     window.videoLoadCount = 0; video.addEventListener('loadstart',()=>window.videoLoadCount++);
     for (const name of ['pause','playing','waiting','seeking','seeked']) video.addEventListener(name,()=>{if(active){active.videoEvents??=[];active.videoEvents.push({name,atMs:performance.now()-active.start,time:video.currentTime});}});
@@ -164,20 +212,20 @@ async function instrument(page, strategy) {
       catch (error) { trial.error = String(error); }
     };
     let seekIndex=0;
-    document.querySelector('#seek').onclick = () => { const trial = begin('seek'); const duration=Number(probe.format.duration); const targets=duration>100?[900,1800,duration-20,2]:[6,1]; trial.target=targets[seekIndex++%targets.length]; player.seek(trial.target); };
+    document.querySelector('#seek').onclick = () => { const trial = begin('seek'); const duration=Number(probe.format.duration); const targets=seekTargets || (duration>100?[900,1800,duration-20,2]:[6,1]); trial.target=targets[seekIndex++%targets.length]; player.seek(trial.target); };
     window.stopBenchmark = async () => { clearInterval(poll); video.cancelVideoFrameCallback(frameId); player?.destroy(); await ctx.close(); };
-  }, { probe, container, strategy, englishHz });
+  }, { probe, container, strategy, englishHz, seekTargets });
 }
 function summarize(trials, field) {
   const numbers = trials.map(t => t[field]).filter(Number.isFinite).sort((a, b) => a - b);
-  return numbers.length ? { n: numbers.length, min: numbers[0], median: numbers[Math.floor(numbers.length / 2)], p95: numbers[Math.ceil(numbers.length * .95) - 1], max: numbers.at(-1) } : null;
+  const middle = Math.floor(numbers.length / 2);
+  return numbers.length ? { n: numbers.length, min: numbers[0], median: numbers.length % 2 ? numbers[middle] : (numbers[middle - 1] + numbers[middle]) / 2, p95: numbers[Math.ceil(numbers.length * .95) - 1], max: numbers.at(-1) } : null;
 }
 (async () => {
   let browser;
   try {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    const executablePath = process.env.MEDIA_BROWSER_EXECUTABLE;
-    browser = await chromium.launch({ ...(executablePath ? { executablePath } : { channel: process.env.MEDIA_BROWSER_CHANNEL || 'chrome' }), headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+    browser = await launchBrowser();
     report.browser = browser.version(); report.ffmpeg = execFileSync('ffmpeg', ['-version'], { encoding: 'utf8' }).split('\n')[0];
     for (const strategy of ['original', 'segmented']) {
       const context = await browser.newContext(), page = await context.newPage();
@@ -210,13 +258,15 @@ function summarize(trials, field) {
       }
       await page.evaluate(() => window.stopBenchmark()); await context.close();
     }
-    if (process.env.MEDIA_PERFORMANCE_CONCURRENT === '1') {
+    if (concurrentSessions) {
       const contexts = [], pages = [];
-      for(let i=0;i<4;i++) { const context=await browser.newContext(); contexts.push(context); const page=await context.newPage(); await page.goto(`http://127.0.0.1:${server.address().port}/`); await instrument(page,'segmented'); pages.push(page); }
+      for(let i=0;i<concurrentSessions;i++) { const context=await browser.newContext(); contexts.push(context); const page=await context.newPage(); await page.goto(`http://127.0.0.1:${server.address().port}/`); await instrument(page,'segmented'); pages.push(page); }
       const cpuBefore=process.cpuUsage(),memoryBefore=process.memoryUsage();
       await Promise.all(pages.map(async page=>{await page.click('#start'); await page.waitForFunction(()=>{const t=window.trials.at(-1);return t.error||(t.firstFrameMs!==undefined&&t.firstAudioMs!==undefined&&t.playReadyMs!==undefined);},null,{timeout:20000});}));
       await Promise.all(pages.map(page=>page.waitForTimeout(1000)));
-      report.concurrent={sessions:4,cache:'fresh browser contexts, audio chunks explicitly warmed by previous serial trials',results:await Promise.all(pages.map(page=>page.evaluate(()=>({trial:window.trials.at(-1),frames:document.querySelector('video').getVideoPlaybackQuality().totalVideoFrames,dropped:document.querySelector('video').getVideoPlaybackQuality().droppedVideoFrames,errors:window.errors})))),httpHarnessOnly:{cpuMicroseconds:process.cpuUsage(cpuBefore),rssBefore:memoryBefore.rss,rssAfter:process.memoryUsage().rss,scope:'Node.js fixture HTTP process only, excludes Chrome, Rust Core/Node and FFmpeg children'}};
+      report.concurrent={sessions:concurrentSessions,cache:'fresh browser contexts, audio chunks explicitly warmed by previous serial trials',results:await Promise.all(pages.map(page=>page.evaluate(()=>({trial:window.trials.at(-1),frames:document.querySelector('video').getVideoPlaybackQuality().totalVideoFrames,dropped:document.querySelector('video').getVideoPlaybackQuality().droppedVideoFrames,errors:window.errors})))),httpHarnessOnly:{cpuMicroseconds:process.cpuUsage(cpuBefore),rssBefore:memoryBefore.rss,rssAfter:process.memoryUsage().rss,scope:'Node.js fixture HTTP process only, excludes Chrome, Rust Core/Node and FFmpeg children'}};
+      report.concurrent.passed=report.concurrent.results.every(row=>!row.trial.error&&row.errors.length===0&&row.frames>0&&Number.isFinite(row.trial.firstAudioMs));
+      if(!report.concurrent.passed)process.exitCode=1;
       await Promise.all(pages.map(page=>page.evaluate(()=>window.stopBenchmark()))); await Promise.all(contexts.map(context=>context.close()));
     }
     if(report.strategies.some(strategy=>!strategy.passed))process.exitCode=1;

@@ -26,6 +26,7 @@ export class SegmentedAudio extends ExternalAudio {
   private activated = false;
   private preparationError?: Error;
   private rejectBuffer?: (error: Error) => void;
+  private pendingUpdates = new Set<() => void>();
 
   constructor(private element: HTMLVideoElement, offset: number, private reportError: (message: string) => void, private timeline?: AudioTimeline) {
     super(element, offset, reportError); this.offsetSeconds = offset;
@@ -85,7 +86,13 @@ export class SegmentedAudio extends ExternalAudio {
       this.rejectLoad?.(this.preparationError);
       this.rejectBuffer?.(this.preparationError);
     }
-    else {this.element.pause();this.reportError(error instanceof Error ? error.message : String(error));}
+    else {
+      // A terminal window failure requires an explicit player retry. Keeping
+      // the interval alive would prepare the same failed window four times/s.
+      this.preparationError = error instanceof Error ? error : new Error(String(error));
+      clearInterval(this.interval);
+      this.element.pause();this.reportError(this.preparationError.message);
+    }
   }); };
   override activate() {
     this.assertReady();
@@ -108,8 +115,12 @@ export class SegmentedAudio extends ExternalAudio {
     await new Promise<void>((resolve,reject)=>{
       const done=()=>{cleanup();resolve();};
       const fail=()=>{cleanup();reject(new Error('Segment Opus rejeté par le navigateur.'));};
-      const cleanup=()=>{buffer.removeEventListener('updateend',done);buffer.removeEventListener('error',fail);buffer.removeEventListener('abort',fail);};
+      const cancel=()=>{cleanup();reject(new Error('Lecteur fermé.'));};
+      const timeout=setTimeout(()=>{cleanup();reject(new Error('Mise en tampon du segment Opus expirée après 10 secondes.'));},10000);
+      const cleanup=()=>{clearTimeout(timeout);this.pendingUpdates.delete(cancel);buffer.removeEventListener('updateend',done);buffer.removeEventListener('error',fail);buffer.removeEventListener('abort',fail);};
+      this.pendingUpdates.add(cancel);
       buffer.addEventListener('updateend',done,{once:true});buffer.addEventListener('error',fail,{once:true});buffer.addEventListener('abort',fail,{once:true});
+      if(this.closed)cancel();
     });
   }
   private async fill(onlyCurrent = false) {
@@ -120,11 +131,14 @@ export class SegmentedAudio extends ExternalAudio {
     const current = Math.floor(target / SECONDS);
     try {
       // At most the current window and one ahead; never copy the full episode.
-      // Do not launch the next packet-copy job while the first frames decode.
+      // Keep ordinary startup dedicated to the current window. Close to its
+      // end, the decoder may need packets from the next window to complete a
+      // seek/HAVE_FUTURE_DATA; waiting for load() first would deadlock startup.
       // Give the Node and a mobile connection more time to prepare the next
-      // window, while leaving startup dedicated to the current window.
-      const nearingBoundary = (current + 1) * SECONDS - target <= 8;
-      for (const chunk of onlyCurrent || !nearingBoundary ? [current] : [current, current + 1]) {
+      // window during playback. Neither path loads more than two windows.
+      const remaining = (current + 1) * SECONDS - target;
+      const needsFollowingWindow = remaining <= (onlyCurrent ? .5 : 8);
+      for (const chunk of needsFollowingWindow ? [current, current + 1] : [current]) {
         if (this.closed || epoch !== this.seekEpoch) return;
         const ranges=this.buffer.buffered;
         const retained=Array.from({length:ranges.length},(_,i)=>i).some(i=>ranges.start(i)<=chunk*SECONDS+.05 && ranges.end(i)>=Math.min(this.duration(),(chunk+1)*SECONDS)-.05);
@@ -178,6 +192,11 @@ export class SegmentedAudio extends ExternalAudio {
         await this.idle();
         if (!this.closed && epoch === this.seekEpoch && this.mediaSource.readyState === 'open') this.mediaSource.endOfStream();
       }
+    } catch (error) {
+      // Fetch errors already check the epoch. A SourceBuffer update can also
+      // fail after a seek superseded this fill; its result must not invalidate
+      // the new position or a replacement track transaction.
+      if (!this.closed && epoch === this.seekEpoch) throw error;
     } finally {
       this.filling=false;
       // A seek may have arrived while fetch or SourceBuffer was finishing.
@@ -190,6 +209,7 @@ export class SegmentedAudio extends ExternalAudio {
   override destroy() {
     if(this.closed)return;
     this.closed=true;clearInterval(this.interval);this.controller?.abort();
+    for(const cancel of this.pendingUpdates)cancel();
     this.element.removeEventListener('seeking',this.seekChanged);
     if(this.opened)this.mediaSource.removeEventListener('sourceopen',this.opened);
     this.rejectOpen?.(new Error('Lecteur fermé.'));this.rejectOpen=undefined;

@@ -173,7 +173,20 @@
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
-      await engine.selectSubtitle(usableSubtitle); subtitle = usableSubtitle;
+      // Embedded subtitle extraction can take substantially longer than the
+      // first video/audio data. Start it now but do not hold playback for it.
+      const subtitleLoading = engine.selectSubtitle(usableSubtitle);
+      subtitle = usableSubtitle;
+      void subtitleLoading.catch(error => {
+        if (current === generation && subtitle === usableSubtitle) {
+          subtitle = null;
+          notice = error instanceof Error ? error.message : 'Sous-titres indisponibles.';
+        }
+      });
+      // Legacy audio windows share the Node's single FFmpeg worker with
+      // subtitle extraction. Keep their existing ordering so an extraction
+      // cannot starve the next audio window during playback.
+      if (source.audioSegmentUrl && source.audioSegmentMode !== 'absolute') await subtitleLoading;
       if (restore) { engine.setVolume(restore.volume); engine.setSpeed(restore.speed); }
       if (current !== generation) return;
       const skipPreferences = preferences();

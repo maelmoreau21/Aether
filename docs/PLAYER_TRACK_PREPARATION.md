@@ -1,5 +1,19 @@
 # P3/P4 — préparation des pistes (18 octobre 2026)
 
+## Sous-titres au démarrage — 30 octobre 2026
+
+La préparation du sous-titre initial démarre en parallèle : la lecture vidéo et
+audio peut commencer avant la fin d'une extraction intégrée. Exception : les
+fenêtres audio préparées par FFmpeg partagent son worker avec les sous-titres ;
+leur ordre initial reste conservé pour éviter d'affamer l'audio. Le sous-titre
+apparaît lorsqu'il est prêt ; en mode parallèle, un échec est signalé sans
+arrêter la lecture. Une
+sélection manuelle ultérieure et la fermeture invalident les résultats périmés.
+Ce changement ne prouve pas que les sous-titres expliquent un incident donné,
+ni que le démarrage est instantané sur un NAS ou un navigateur particulier.
+En cas d'échec initial, la console indique désormais la position demandée, la
+position effective et l'état de seek, sans inclure l'URL ou les jetons média.
+
 ## Reprise après délai vidéo — 29 octobre 2026
 
 Les requêtes de progression et de préférences démarrent en parallèle ; le choix

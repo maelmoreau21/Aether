@@ -216,7 +216,7 @@ export class NativePlayer implements Player {
           this.video.removeEventListener('error', failed);
           this.cancel = undefined;
           if (error) {
-            console.info('[media playback]',{stage:metadataReceived ? 'seek-failed' : 'metadata-failed',networkState:this.video.networkState,readyState:this.video.readyState,mediaError:this.video.error?.code ?? null});
+            console.info('[media playback]',{stage:metadataReceived ? (awaitingSeek ? 'seek-failed' : 'progress-failed') : 'metadata-failed',networkState:this.video.networkState,readyState:this.video.readyState,mediaError:this.video.error?.code ?? null,requestedPosition:awaitingSeek ? seekTarget : null,actualPosition:this.video.currentTime,seeking:this.video.seeking});
             reject(error);
           }
           else resolve();

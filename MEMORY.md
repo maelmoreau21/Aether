@@ -1,3 +1,7 @@
+## 30 octobre 2026 — Sous-titres et démarrage lecteur
+
+- La préparation du sous-titre initial ne bloque plus le démarrage vidéo/audio, sauf pour les fenêtres audio FFmpeg qui partagent son worker ; une erreur reste visible, et la fermeture ou un choix manuel empêchent une réponse périmée de modifier le choix courant. Les diagnostics d'échec initial enregistrent positions demandée/effective et état de seek sans URL. Cause de l'incident réel non établie et gain sur NAS non mesuré.
+
 ## 29 octobre 2026 — Récupération explicite des leases de cache
 
 - `CacheDirectory` libère explicitement le verrou de son fichier `lease` avant

@@ -58,6 +58,10 @@ pub struct LibraryOptions {
     pub intro_detection_enabled: bool,
     pub subtitle_download_enabled: bool,
     pub poster_rotation_enabled: bool,
+    pub artwork_deduplicate: bool,
+    pub artwork_similarity: u8,
+    pub artwork_min_poster_width: u16,
+    pub artwork_min_poster_height: u16,
 }
 impl Default for LibraryOptions {
     fn default() -> Self {
@@ -100,6 +104,10 @@ impl Default for LibraryOptions {
             intro_detection_enabled: false,
             subtitle_download_enabled: false,
             poster_rotation_enabled: false,
+            artwork_deduplicate: true,
+            artwork_similarity: 5,
+            artwork_min_poster_width: 0,
+            artwork_min_poster_height: 0,
         }
     }
 }
@@ -166,6 +174,9 @@ impl LibraryOptions {
             && matches!(self.online_refresh_interval_days, 0 | 30 | 60 | 90)
             && (1..=60).contains(&self.trickplay_interval_seconds)
             && (160..=1920).contains(&self.trickplay_width)
+            && self.artwork_similarity <= 16
+            && self.artwork_min_poster_width <= 4096
+            && self.artwork_min_poster_height <= 4096
             && self.subtitle_languages.len() <= 16
             && self
                 .subtitle_languages
@@ -240,6 +251,35 @@ fn valid_providers(providers: &[ProviderPreference]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn artwork_policy_defaults_and_bounds_are_stable() {
+        let defaults: LibraryOptions = serde_json::from_str("{}").unwrap();
+        assert!(defaults.artwork_deduplicate);
+        assert_eq!(defaults.artwork_similarity, 5);
+        assert_eq!(
+            (
+                defaults.artwork_min_poster_width,
+                defaults.artwork_min_poster_height
+            ),
+            (0, 0)
+        );
+        let custom: LibraryOptions = serde_json::from_value(serde_json::json!({"artworkDeduplicate":false,"artworkSimilarity":16,"artworkMinPosterWidth":4096,"artworkMinPosterHeight":4096})).unwrap();
+        assert!(custom.validate());
+        let saved = serde_json::to_value(custom).unwrap();
+        assert_eq!(saved["artworkDeduplicate"], false);
+        for value in [
+            serde_json::json!({"artworkSimilarity":17}),
+            serde_json::json!({"artworkMinPosterWidth":4097}),
+            serde_json::json!({"artworkMinPosterHeight":4097}),
+        ] {
+            assert!(
+                !serde_json::from_value::<LibraryOptions>(value)
+                    .unwrap()
+                    .validate()
+            );
+        }
+    }
 
     #[test]
     fn embedded_titles_are_opt_in_bounded_and_secondary_to_nfo() {

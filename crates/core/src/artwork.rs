@@ -219,6 +219,8 @@ pub(crate) struct ImageQuery {
     pub(crate) provider: Option<String>,
     #[serde(skip)]
     pub(crate) source_url_hash: Option<String>,
+    #[serde(skip)]
+    pub(crate) apply_collection_policy: bool,
 }
 async fn read(
     State(auth): State<AuthState>,
@@ -317,6 +319,7 @@ impl Fingerprint {
         height: i64,
         other_width: i64,
         other_height: i64,
+        tolerance: u32,
     ) -> bool {
         // A crop or a different aspect ratio may change the composition substantially.
         if height <= 0
@@ -345,7 +348,7 @@ impl Fingerprint {
         else {
             return false;
         };
-        (hash ^ other_hash).count_ones() <= 5
+        (hash ^ other_hash).count_ones() <= tolerance
             && colors
                 .iter()
                 .zip(other_colors)
@@ -464,6 +467,30 @@ pub(crate) async fn upload(
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
+    // Provider additions use the owning library's policy; uploads and explicit
+    // replacements keep their existing behaviour. Child folders inherit the
+    // options of the parent library.
+    let policy = if options.append && options.apply_collection_policy {
+        let settings: String = query_scalar("SELECT COALESCE(parent.options_json,l.options_json) FROM inventory_works w JOIN libraries l ON l.id=w.library_id LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 LEFT JOIN libraries parent ON parent.id=f.parent_id WHERE w.id=?")
+            .bind(&work).fetch_one(&auth.store.pool).await.map_err(db)?;
+        let policy: crate::library_options::LibraryOptions =
+            serde_json::from_str(&settings).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if !policy.validate() {
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+        if kind == "poster"
+            && (encoded.width < i64::from(policy.artwork_min_poster_width)
+                || encoded.height < i64::from(policy.artwork_min_poster_height))
+        {
+            return Ok((
+                StatusCode::OK,
+                Json(json!({"skipped":true,"reason":"poster_too_small"})),
+            ));
+        }
+        Some(policy)
+    } else {
+        None
+    };
     let mut stored_variants = Vec::with_capacity(encoded.variants.len());
     for (width, mime, data) in &encoded.variants {
         let meta = auth
@@ -482,9 +509,19 @@ pub(crate) async fn upload(
         let candidates: Vec<(String, String, i64, i64)> = query_as("SELECT id,fingerprint,width,height FROM work_image_entries WHERE work_id=? AND kind=? AND COALESCE(language,'')=COALESCE(?,'') AND fingerprint IS NOT NULL")
             .bind(&work).bind(&kind).bind(&language).fetch_all(&mut *tx).await.map_err(db)?;
         if let Some((id, _, _, _)) = candidates.iter().find(|(_, fingerprint, width, height)| {
-            encoded
-                .fingerprint
-                .similar(fingerprint, encoded.width, encoded.height, *width, *height)
+            if policy.as_ref().is_some_and(|p| !p.artwork_deduplicate) {
+                return false;
+            }
+            encoded.fingerprint.similar(
+                fingerprint,
+                encoded.width,
+                encoded.height,
+                *width,
+                *height,
+                policy
+                    .as_ref()
+                    .map_or(5, |p| u32::from(p.artwork_similarity)),
+            )
         }) {
             if let Some(source) = &options.source_url_hash {
                 query("INSERT INTO artwork_image_sources(work_id,source_url_hash,image_id) VALUES(?,?,?) ON CONFLICT(work_id,source_url_hash) DO UPDATE SET image_id=excluded.image_id")
@@ -671,6 +708,149 @@ async fn order(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn provider_artwork_policy_inherits_library_and_preserves_manual_uploads() {
+        use axum::{body::Body, http::Request};
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+            .await
+            .unwrap();
+        store
+            .bootstrap(
+                "admin",
+                zeroize::Zeroizing::new("synthetic artwork password".into()),
+            )
+            .await
+            .unwrap();
+        crate::libraries::initialize_local(&store).await.unwrap();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES('parent','Parent','films','local','parent',1,?)")
+            .bind(r#"{"artworkDeduplicate":true,"artworkSimilarity":5,"artworkMinPosterWidth":20,"artworkMinPosterHeight":20}"#)
+            .execute(store.pool()).await.unwrap();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('child','Child','films','local','child',1)").execute(store.pool()).await.unwrap();
+        query(
+            "INSERT INTO library_folders(library_id,parent_id,active) VALUES('child','parent',1)",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        query("INSERT INTO inventory_works(id,library_id,identity_key,title) VALUES('work','child','work','Test')").execute(store.pool()).await.unwrap();
+        let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+        let app = crate::auth::router(auth.clone());
+        let login = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/login")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::ORIGIN, "http://127.0.0.1:3000")
+                    .body(Body::from(
+                        r#"{"login":"admin","password":"synthetic artwork password"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let cookie = login.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        let body = login.into_body().collect().await.unwrap().to_bytes();
+        let csrf = serde_json::from_slice::<Value>(&body).unwrap()["csrfToken"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_TYPE, "image/png".parse().unwrap());
+        headers.insert(header::ORIGIN, "http://127.0.0.1:3000".parse().unwrap());
+        headers.insert(header::COOKIE, cookie.parse().unwrap());
+        headers.insert("x-csrf-token", csrf.parse().unwrap());
+        let mut png = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            12,
+            18,
+            image::Rgb([255, 0, 0]),
+        ))
+        .write_to(&mut png, ImageFormat::Png)
+        .unwrap();
+        let bytes = Bytes::from(png.into_inner());
+        let provider = || ImageQuery {
+            append: true,
+            provider: Some("test".into()),
+            apply_collection_policy: true,
+            ..Default::default()
+        };
+        let result = upload(
+            State(auth.clone()),
+            Path(("work".into(), "poster".into())),
+            Query(provider()),
+            headers.clone(),
+            bytes.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.1.0["reason"], "poster_too_small");
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM work_image_entries")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            0
+        );
+        let manual = upload(
+            State(auth.clone()),
+            Path(("work".into(), "poster".into())),
+            Query(ImageQuery::default()),
+            headers.clone(),
+            bytes.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(manual.0, StatusCode::CREATED);
+        query("UPDATE libraries SET options_json=? WHERE id='parent'")
+            .bind(r#"{"artworkDeduplicate":true,"artworkSimilarity":5}"#)
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let duplicate = upload(
+            State(auth.clone()),
+            Path(("work".into(), "poster".into())),
+            Query(provider()),
+            headers.clone(),
+            bytes.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(duplicate.1.0["duplicate"], true);
+        query("UPDATE libraries SET options_json=? WHERE id='parent'")
+            .bind(r#"{"artworkDeduplicate":false}"#)
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let retained = upload(
+            State(auth),
+            Path(("work".into(), "poster".into())),
+            Query(provider()),
+            headers,
+            bytes,
+        )
+        .await
+        .unwrap();
+        assert_eq!(retained.0, StatusCode::CREATED);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM work_image_entries")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            2
+        );
+    }
     #[test]
     fn perceptual_signature_compares_decoded_pixels_and_preserves_language() {
         let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(120, 180, |x, y| {
@@ -678,13 +858,13 @@ mod tests {
         }));
         let signature = Fingerprint::of(&image);
         let resized = image.resize_exact(240, 360, image::imageops::FilterType::Triangle);
-        assert!(signature.similar(&Fingerprint::of(&resized).0, 120, 180, 240, 360));
+        assert!(signature.similar(&Fingerprint::of(&resized).0, 120, 180, 240, 360, 5));
         let mut jpeg = Vec::new();
         image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 70)
             .encode_image(&image)
             .unwrap();
         let recompressed = image::load_from_memory(&jpeg).unwrap();
-        assert!(signature.similar(&Fingerprint::of(&recompressed).0, 120, 180, 120, 180));
+        assert!(signature.similar(&Fingerprint::of(&recompressed).0, 120, 180, 120, 180, 5));
         let opaque = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
             120,
             180,
@@ -700,7 +880,8 @@ mod tests {
             120,
             180,
             120,
-            180
+            180,
+            5
         ));
         let blue = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
             120,
@@ -712,9 +893,13 @@ mod tests {
             180,
             image::Rgb([255, 0, 0]),
         ));
-        assert!(!Fingerprint::of(&blue).similar(&Fingerprint::of(&red).0, 120, 180, 120, 180));
-        assert!(!signature.similar(&signature.0, 120, 180, 180, 120));
-        assert!(!signature.similar("invalid", 120, 180, 120, 180));
+        assert!(!Fingerprint::of(&blue).similar(&Fingerprint::of(&red).0, 120, 180, 120, 180, 5));
+        assert!(!signature.similar(&signature.0, 120, 180, 180, 120, 5));
+        assert!(!signature.similar("invalid", 120, 180, 120, 180, 5));
+        let fingerprint = Fingerprint(format!("{:016x}:{}", 0u64, "00".repeat(48)));
+        let near = format!("{:016x}:{}", 0b111u64, "00".repeat(48));
+        assert!(!fingerprint.similar(&near, 120, 180, 120, 180, 2));
+        assert!(fingerprint.similar(&near, 120, 180, 120, 180, 3));
         assert!(valid_language("fr-CA"));
         assert!(valid_language("zh-Hant-TW"));
         assert!(!valid_language("fr--CA"));

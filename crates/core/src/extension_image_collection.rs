@@ -433,6 +433,7 @@ pub(super) async fn collect(
                 .language
                 .filter(|v| !v.is_empty() && v != "00" && v != "und"),
             append: true,
+            apply_collection_policy: true,
         };
         match tokio::time::timeout_at(
             deadline,
@@ -446,7 +447,9 @@ pub(super) async fn collect(
         .await
         {
             Ok(Ok(result)) => {
-                if result.0["duplicate"].as_bool() == Some(true) {
+                if result.0["skipped"].as_bool() == Some(true) {
+                    skipped += 1;
+                } else if result.0["duplicate"].as_bool() == Some(true) {
                     duplicates += 1;
                 } else {
                     downloaded += 1;

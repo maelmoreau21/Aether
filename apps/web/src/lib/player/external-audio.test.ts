@@ -44,6 +44,26 @@ describe('independent audio timeline',()=>{
     await bridge.load('/audio',false,'audio/mp4; codecs="opus"',6);
     expect(audio.currentTime).toBe(6);expect(video.muted).toBe(false);bridge.destroy();
   });
+  it('loads metadata in parallel with delayed saved progress and aligns to the requested position',async()=>{
+    const {video,audio,bridge}=setup();video.currentTime=0;audio.auto=false;
+    let resolvePosition!:(value:number)=>void;
+    const loading=bridge.load('/audio',false,undefined,new Promise<number>(resolve=>{resolvePosition=resolve;}));
+    expect(audio.src).toBe('/audio');audio.dispatchEvent(new Event('loadedmetadata'));
+    await Promise.resolve();expect(audio.currentTime).toBe(0);
+    resolvePosition(6);await loading;expect(audio.currentTime).toBe(6);bridge.destroy();
+  });
+  it('cancels a delayed saved-position wait on closure and ignores a late result',async()=>{
+    vi.useFakeTimers();const {audio,bridge}=setup();let resolvePosition!:(value:number)=>void;
+    const loading=expect(bridge.load('/audio',false,undefined,new Promise<number>(resolve=>{resolvePosition=resolve;}))).rejects.toThrow('fermé');
+    await vi.advanceTimersByTimeAsync(0);bridge.destroy();await loading;
+    resolvePosition(6);await vi.advanceTimersByTimeAsync(0);expect(audio.currentTime).toBe(0);expect(vi.getTimerCount()).toBe(0);
+  });
+  it('cleans up the saved-position wait when metadata fails',async()=>{
+    vi.useFakeTimers();const {audio,bridge}=setup();audio.auto=false;
+    const loading=expect(bridge.load('/audio',false,undefined,new Promise<number>(()=>{}))).rejects.toThrow('illisible');
+    audio.dispatchEvent(new Event('error'));await loading;
+    expect(vi.getTimerCount()).toBe(0);bridge.destroy();
+  });
   it('lets the video finish a normal Opus packet tail without a ten-second stall',async()=>{
     vi.useFakeTimers();const {video,audio,error,bridge}=setup();await bridge.load('/audio');
     audio.duration=11.96;video.currentTime=11.96;audio.currentTime=11.96;

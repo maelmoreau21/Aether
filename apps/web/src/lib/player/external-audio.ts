@@ -141,23 +141,44 @@ export class ExternalAudio {
       check();
     });
   }
-  async load(url: string, activate = true, mime = 'audio/ogg; codecs="opus"', initialPosition?: number) {
+  async load(url: string, activate = true, mime = 'audio/ogg; codecs="opus"', initialPosition?: number | Promise<number>) {
     const format = mime.startsWith('audio/mp4') ? 'MP4/Opus segmenté' : 'Ogg/Opus';
     if (!this.audio.canPlayType(mime)) throw new Error(`Ce navigateur ne déclare pas la lecture audio ${mime}.`);
-    await new Promise<void>((resolve, reject) => {
+    let cancelMetadata: (() => void) | undefined;
+    let cancelPosition: (() => void) | undefined;
+    const metadata = new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => {
         clearTimeout(timeout); this.audio.removeEventListener('loadedmetadata', ready); this.audio.removeEventListener('error', failed); this.cancellations.delete(cancel);
+        cancelMetadata = undefined;
         if (error) reject(error); else resolve();
       };
       const ready = () => finish();
       const failed = () => finish(new Error(`Audio externe ${format} illisible (MediaError ${this.audio.error?.code ?? '?'}).`));
       const timeout = setTimeout(() => finish(new Error('Chargement audio externe expiré après 10 secondes.')), 10000);
       const cancel = () => finish(new Error('Lecteur fermé.')); this.cancellations.add(cancel);
+      cancelMetadata = cancel;
       this.audio.addEventListener('loadedmetadata', ready); this.audio.addEventListener('error', failed);
       this.audio.src = url; this.audio.load();
     });
+    const positionReady = initialPosition === undefined ? undefined : new Promise<number>((resolve, reject) => {
+      let settled = false;
+      const finish = (value?: number, error?: Error) => {
+        if (settled) return;
+        settled = true; clearTimeout(timeout); this.cancellations.delete(cancel); cancelPosition = undefined;
+        if (error) reject(error); else resolve(value!);
+      };
+      const cancel = () => finish(undefined, new Error('Lecteur fermé.'));
+      const timeout = setTimeout(() => finish(undefined, new Error('Position audio indisponible après 10 secondes.')), 10000);
+      cancelPosition = cancel; this.cancellations.add(cancel);
+      Promise.resolve(initialPosition).then(value => finish(value), error => finish(undefined, error instanceof Error ? error : new Error(String(error))));
+    });
+    let saved: number | undefined;
+    try { [, saved] = await Promise.all([metadata, positionReady]); }
+    catch (error) { cancelMetadata?.(); cancelPosition?.(); throw error; }
+    if (this.stopped) throw new Error('Lecteur fermé.');
     this.settings();
-    const position = initialPosition ?? this.video.currentTime;
+    const requested = saved ?? this.video.currentTime;
+    const position = Number.isFinite(requested) ? Math.max(0, requested) : 0;
     if (position >= this.offset && Number.isFinite(this.audio.duration) && position - this.offset >= this.audio.duration && !this.naturalTail()) throw new Error('La piste audio externe se termine avant cette position.');
     this.align(true, position); if (!this.naturalTail()) await this.ready();
     if (this.stopped) throw new Error('Lecteur fermé.');

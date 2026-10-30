@@ -137,6 +137,19 @@ describe('native source replacement', () => {
     expect(fetcher).toHaveBeenCalledWith('/prepared/video',expect.objectContaining({method:'HEAD'}));
     expect(error).not.toHaveBeenCalled();player.destroy();
   });
+  it('uses the prepared video fallback when progressive MSE is unavailable', async () => {
+    const {video,player}=setup();video.auto=false;video.readyState=1;
+    vi.stubGlobal('MediaSource',undefined);
+    const fetcher=vi.fn().mockResolvedValue({ok:true});vi.stubGlobal('fetch',fetcher);
+    const source={...media.sources[0],url:'/original.mkv',prepareVideo:false,preparedVideoUrl:'/prepared/video',videoStreamUrl:'/progressive-',videoMime:'video/mp4; codecs="av01.0.08M.10"',durationSeconds:12};
+    const loading=player.load({...media,sources:[source]});
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();await Promise.resolve();
+    video.dispatchEvent(new Event('error'));
+    await vi.waitFor(()=>expect(video.src).toBe('/prepared/video'));
+    video.dispatchEvent(new Event('loadedmetadata'));await loading;
+    expect(fetcher).toHaveBeenCalledWith('/prepared/video',expect.objectContaining({method:'HEAD'}));
+    player.destroy();
+  });
   it('cancels a startup reserve on pause without starting playback after late data', async () => {
     const {video,player}=setup();await player.load(media);
     video.buffered={length:1,start:()=>0,end:()=>.01};
@@ -201,12 +214,13 @@ describe('native source replacement', () => {
     const metadata=expect(player.load(media)).rejects.toThrow('métadonnées');
     await vi.advanceTimersByTimeAsync(10000);await metadata;
     video.auto=true;await player.load(media);video.auto=false;video.currentTime=5;
-    const seek=expect(player.selectAudio('en')).rejects.toThrow('de seek');
+    const seek=expect(player.selectAudio('en')).rejects.toThrow('Position demandée 5.00 s, atteinte 4.00 s (seeking=true)');
     video.currentTime=0; // A new browser resource resets its timeline before metadata.
     video.dispatchEvent(new Event('loadedmetadata'));
     await vi.advanceTimersByTimeAsync(10000);
     video.currentTime=0;
     video.dispatchEvent(new Event('loadedmetadata'));
+    await Promise.resolve();video.currentTime=4;video.seeking=true;
     await vi.advanceTimersByTimeAsync(10000);await seek;player.destroy();
   });
   it('retries a timed-out initial video seek once at the saved position', async () => {

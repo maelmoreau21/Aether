@@ -14,7 +14,7 @@ const options = {
  onlineRefreshIntervalDays:90,realtimeMonitoring:true,automaticCollections:true,introDetectionEnabled:true,
  saveNfoToMedia:false,saveImagesToMedia:false,trickplayEnabled:true,trickplayDuringScan:true,trickplaySaveToMedia:false,
  trickplayIntervalSeconds:15,trickplayWidth:640,chapterImagesEnabled:true,chapterImagesDuringScan:true,chapterImagesSaveToMedia:false,
- subtitleDownloadEnabled:true,subtitleLanguages:['fr','en'],subtitleOnlyMissing:false,subtitleMatchAudio:true,subtitleRequireHash:false,saveSubtitlesToMedia:false,posterRotationEnabled:true
+ subtitleDownloadEnabled:true,subtitleLanguages:['fr','en'],subtitleOnlyMissing:false,subtitleMatchAudio:true,subtitleRequireHash:false,saveSubtitlesToMedia:false,posterRotationEnabled:true,artworkDeduplicate:true,artworkSimilarity:5,artworkMinPosterWidth:0,artworkMinPosterHeight:0
 };
 const library={id:'lib-film',name:'Voyages et archives — Une bibliothèque personnelle aux titres très longs',kind:'films',enabled:true,nodeId:'local',root:'/synthetic/films',folders:[{nodeId:'local',root:'/synthetic/films'},{nodeId:'remote',root:'/synthetic/archives/'+ 'souvenirs-'.repeat(15)}],userIds:['visual','reader'],excludedPatterns:'bonus, trailers',options};
 const sections={general:'Général',sources:'Sources et dossiers',metadata:'Métadonnées et images',indexing:'Indexation',access:'Accès',advanced:'Avancé'};
@@ -28,17 +28,17 @@ async function fixture(browser,width,theme,height=900){const state=await setup(b
  return {...state,saved,failNext(){fail=true;},slow(){delay=700;}};
 }
 (async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});report.browser=browser.version();try{
- for(const theme of ['dark','light'])for(const width of [320,360,390,430,768,1024,1440,1920]){
+ for(const theme of (process.env.MEDIA_UI_FAST ? ['dark'] : ['dark','light']))for(const width of (process.env.MEDIA_UI_FAST ? [390,1440] : [320,360,390,430,768,1024,1440,1920])){
   const {page,context,errors,saved}=await fixture(browser,width,theme);await page.goto(base+'admin/libraries/#libraries-section');await page.getByRole('button',{name:'Gérer '+library.name,exact:true}).click();await page.locator('.library-editor:modal').waitFor();await bounds(page);await shot(page,`${theme}-${width}-general`);
   if(width>800){await page.getByRole('tab',{name:'Général',exact:true}).focus();await page.keyboard.press('End');assert.equal(await page.getByRole('tab',{name:'Avancé',exact:true}).getAttribute('aria-selected'),'true');await page.keyboard.press('Home');await page.keyboard.press('ArrowDown');assert.equal(await page.getByRole('tab',{name:'Sources et dossiers',exact:true}).getAttribute('aria-selected'),'true');}
   await choose(page,'general');await page.locator('#library-name').fill('Archives modifiées');
   await choose(page,'sources');assert.equal(await page.locator('.folders li').count(),2);await bounds(page);await shot(page,`${theme}-${width}-sources`);
-  await choose(page,'metadata');await page.locator('#library-metadata-country').fill('JP');await shot(page,`${theme}-${width}-metadata`);
+  await choose(page,'metadata');await page.locator('#library-metadata-country').fill('JP');await page.locator('#artwork-similarity').fill('8');await page.locator('#artwork-min-width').fill('400');await page.locator('#artwork-min-height').fill('600');await shot(page,`${theme}-${width}-metadata`);
   await choose(page,'indexing');await page.locator('#library-excluded').fill('bonus, trailers, cache');
   await choose(page,'access');await page.getByText('Les autorisations se gèrent dans les rubriques',{exact:false}).waitFor();
   await choose(page,'advanced');assert.equal(await page.locator('.advanced-section').count(),6);await page.locator('#library-providers-heading').click();await page.getByRole('button',{name:'Ajouter un fournisseur — Métadonnées',exact:true}).click();await choose(page,'general');await page.getByRole('button',{name:'Enregistrer',exact:true}).click();
   await page.waitForFunction(()=>document.activeElement?.id==='metadata-providers-2');assert.equal(saved.length,0);await page.locator('#metadata-providers-2').fill('provider-c');await bounds(page);await shot(page,`${theme}-${width}-advanced`);
-  await page.getByRole('button',{name:'Enregistrer',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.library-editor').open);assert.equal(saved.length,1);assert.deepEqual(saved[0],{name:'Archives modifiées',kind:'films',nodeId:library.nodeId,root:library.root,folders:library.folders,enabled:true,userIds:library.userIds,excludedPatterns:'bonus, trailers, cache',options:{...options,metadataCountryCode:'JP',metadataProviders:[...options.metadataProviders,{id:'provider-c',enabled:true}]}});
+  await page.getByRole('button',{name:'Enregistrer',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.library-editor').open);assert.equal(saved.length,1);assert.deepEqual(saved[0],{name:'Archives modifiées',kind:'films',nodeId:library.nodeId,root:library.root,folders:library.folders,enabled:true,userIds:library.userIds,excludedPatterns:'bonus, trailers, cache',options:{...options,artworkSimilarity:8,artworkMinPosterWidth:400,artworkMinPosterHeight:600,metadataCountryCode:'JP',metadataProviders:[...options.metadataProviders,{id:'provider-c',enabled:true}]}});
   assert.deepEqual(errors,[]);report.scenarios.push({width,theme,allSections:true,keyboard:true,payloadPreserved:true,hiddenValidation:true,overflow:false});await context.close();console.log('PASS',theme,width);
  }
  for(const kind of ['films','series','music']){

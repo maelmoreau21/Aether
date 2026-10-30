@@ -5,6 +5,8 @@ const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('isolated test origin required');
 const restart = process.env.MEDIA_TEST_RESTART === '1';
 const long = process.env.MEDIA_TEST_LONG === '1';
+const rapidOnly = process.env.MEDIA_TEST_EXTERNAL_RAPID === '1';
+if (rapidOnly && restart) { console.log('Targeted external-audio MP4 scenario: restart/MKV phase intentionally skipped.'); process.exit(0); }
 const out = process.env.MEDIA_SCANNER_REPORT_DIR || process.env.MEDIA_REPORT_DIR || (long ? 'target/player-long' : 'target/browser-scanner');
 // Keep previous evidence; each successful run replaces its own reports only.
 fs.mkdirSync(out, {recursive: true});
@@ -181,7 +183,7 @@ fs.mkdirSync(out, {recursive: true});
       assert.equal(await page.locator('.player-error').count(),0);
       report.results.finalAudioWindowAndBackwardSeek=true;
     }
-    if (long) {
+    if (long && !rapidOnly) {
       const cdp = await context.newCDPSession(page); await cdp.send('Performance.enable');
       const before = await cdp.send('Performance.getMetrics');
       report.results.long = {duration:await page.locator('video').evaluate(v=>v.duration),seeks:[]};
@@ -260,6 +262,28 @@ fs.mkdirSync(out, {recursive: true});
       source.disconnect(); await context.close(); return peak;
     });
     assert.ok(pcm>.001, `external audio PCM peak ${pcm}`);
+    if (rapidOnly) {
+      const events=[];
+      page.on('response',response=>{const u=new URL(response.url());if(u.pathname.includes('/stream/v1/')||u.pathname.includes('/prepared/')||u.pathname.includes('/audio/')||/\/assets\/[^/]+\/content$/.test(u.pathname))events.push({path:u.pathname,method:response.request().method(),status:response.status(),range:response.request().headers().range,timing:response.request().timing()});});
+      await page.keyboard.press('Shift');
+      await page.locator('button.return').click();
+      await page.waitForFunction(()=>!document.querySelector('dialog#player')?.hasAttribute('open'));
+      const reopenedAt=Date.now();await page.locator('.hero-cta').click();
+      await page.waitForFunction(()=>{const v=document.querySelector('video'),a=document.querySelector('audio[data-external-audio]'),slider=document.querySelector('input[aria-label="Position"]');return v&&a&&!v.paused&&!a.paused&&a.currentSrc.includes('/audio/')&&slider&&!slider.disabled;});
+      const reopenPlayingMs=Date.now()-reopenedAt;
+      const targets=long?[2,2700,5380,3,4200,600]:[1,9,2,8,3,.25], last=targets.at(-1), started=Date.now();
+      await page.keyboard.press('Shift');
+      const slider=page.getByRole('slider',{name:'Position',exact:true});
+      await slider.waitFor();
+      for(const target of targets){await slider.evaluate((element,value)=>{element.value=String(value);element.dispatchEvent(new Event('input',{bubbles:true}));element.dispatchEvent(new Event('change',{bubbles:true}));},target);await page.waitForTimeout(100);}
+      await page.waitForFunction(last=>{const v=document.querySelector('video'),a=document.querySelector('audio[data-external-audio]');return v&&a&&!v.seeking&&!a.seeking&&!v.paused&&!a.paused&&Math.abs(v.currentTime-last)<1.5&&Math.abs(v.currentTime-a.currentTime)<.3;},last,{timeout:15000});
+      const settledMs=Date.now()-started;
+      await page.waitForTimeout(10500);
+      const state=await page.evaluate(()=>({error:document.querySelector('.player-error')?.textContent||null,video:{position:document.querySelector('video')?.currentTime,paused:document.querySelector('video')?.paused,frames:document.querySelector('video')?.getVideoPlaybackQuality().totalVideoFrames},audio:{position:document.querySelector('audio[data-external-audio]')?.currentTime,paused:document.querySelector('audio[data-external-audio]')?.paused}}));
+      report.results.externalRapid={targets,reopenPlayingMs,settledMs,state,events,pcmBeforeSeek:pcm,scope:'targeted MP4 external audio; not the full scanner/restart suite'};
+      assert.equal(state.error,null);assert.ok(state.video.frames>0);report.passed=true;
+      await context.close();return;
+    }
     await page.evaluate(()=>{const video=document.querySelector('video');video.pause();video.currentTime=4;});
     await page.waitForFunction(()=>{const video=document.querySelector('video');return !video.seeking && video.paused && Math.abs(video.currentTime-4)<0.3;});
     await page.waitForFunction(()=>{const a=document.querySelector('audio[data-external-audio]');return a && a.paused && Math.abs(a.currentTime-4)<.3;});

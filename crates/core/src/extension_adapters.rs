@@ -569,6 +569,8 @@ pub(super) struct ImportImage {
     pub(super) language: Option<String>,
     #[serde(default)]
     pub(super) append: bool,
+    #[serde(skip)]
+    pub(super) apply_collection_policy: bool,
 }
 pub(super) async fn import_image(
     State(auth): State<AuthState>,
@@ -702,6 +704,7 @@ pub(super) async fn import_image(
             language: input.language,
             provider: Some(id),
             source_url_hash: Some(format!("{:x}", Sha256::digest(input.url.as_bytes()))),
+            apply_collection_policy: input.apply_collection_policy,
             ..Default::default()
         }),
         headers,

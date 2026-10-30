@@ -28,8 +28,16 @@
       <section class="option-section" aria-labelledby="local-images-heading"><h3 id="local-images-heading">Images locales</h3><p>Illustrations à importer au prochain scan. Les originaux restent en lecture seule.</p>
         <div class="image-grid">{#each images as [key, label, description] (key)}<label class="image-option"><input type="checkbox" bind:checked={options[key]} aria-label={label} /><span><strong>{label}</strong><small>{description}</small></span></label>{/each}</div>
       </section>
-      <section class="option-section" aria-labelledby="poster-rotator-heading"><h3 id="poster-rotator-heading">Rotation des affiches</h3>
-        <label class="toggle-row"><input type="checkbox" bind:checked={options.posterRotationEnabled} aria-label="Activer la rotation des affiches pour cette bibliothèque" /><span><strong>Alterner les affiches disponibles</strong><small>Les affiches disponibles sont alternées. Les images choisies manuellement restent prioritaires.</small></span></label>
+      <section class="option-section" aria-labelledby="image-quality-heading">
+        <h3 id="image-quality-heading">Images des fournisseurs</h3>
+        <p>Ces réglages s’appliquent aux prochaines collectes de cette bibliothèque. Les images déjà enregistrées et les ajouts manuels restent inchangés.</p>
+        <label class="toggle-row"><input type="checkbox" bind:checked={options.artworkDeduplicate} /><span><strong>Écarter les images visuellement similaires</strong><small>Les images d’une même œuvre, d’un même type et d’une même langue sont comparées après téléchargement et décodage. Cette estimation peut ne pas reconnaître tous les doublons.</small></span></label>
+        {#if options.artworkDeduplicate}<div><label for="artwork-similarity">Tolérance aux différences</label><input id="artwork-similarity" type="number" min="0" max="16" step="1" required bind:value={options.artworkSimilarity} /><p class="hint">De 0 à 16. Une valeur élevée écarte davantage d’images proches, mais risque aussi d’écarter des affiches différentes. Valeur recommandée : 5.</p></div>{/if}
+        <div class="language-grid"><div><label for="artwork-min-width">Largeur minimale d’une affiche (px)</label><input id="artwork-min-width" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterWidth} /></div><div><label for="artwork-min-height">Hauteur minimale d’une affiche (px)</label><input id="artwork-min-height" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterHeight} /></div></div>
+        <p class="hint">0 désactive la limite correspondante. Les dimensions sont vérifiées après téléchargement.</p>
+      </section>
+      <section class="option-section" aria-labelledby="artwork-rotation-heading"><h3 id="artwork-rotation-heading">Rotation des affiches</h3>
+        <p>Chaque utilisateur choisit les bibliothèques concernées dans ses préférences d’affichage. Les images choisies manuellement restent prioritaires.</p>
       </section>
     {/if}
   {:else if section === 'indexing'}

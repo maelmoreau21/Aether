@@ -258,9 +258,13 @@ export class NativePlayer implements Player {
         const armTimeout = (milliseconds: number) => {
           clearTimeout(timer);
           const stage = !metadataReceived ? 'de lecture des métadonnées' : awaitingSeek ? 'de seek' : 'de chargement de la position';
-          timer = setTimeout(() => finish(
-            new (awaitingSeek ? VideoSeekTimeoutError : Error)(`Délai ${stage} expiré après ${milliseconds / 1000} s (networkState=${this.video.networkState}, readyState=${this.video.readyState}, MediaError=${this.video.error?.code ?? 'aucune'}). ${awaitingSeek ? 'Position demandée non atteinte.' : metadataReceived ? 'Position de reprise indisponible.' : 'Index du conteneur ou données vidéo non reçus/lisibles.'} Cause non déterminée ; consulter les diagnostics HTTP du navigateur et du Media Node.`)
-          ), milliseconds);
+          timer = setTimeout(() => {
+            const actual = Number.isFinite(this.video.currentTime) ? this.video.currentTime.toFixed(2) : 'indisponible';
+            const detail = awaitingSeek
+              ? `Position demandée ${seekTarget.toFixed(2)} s, atteinte ${actual} s (seeking=${this.video.seeking}).`
+              : metadataReceived ? 'Position de reprise indisponible.' : 'Index du conteneur ou données vidéo non reçus/lisibles.';
+            finish(new (awaitingSeek ? VideoSeekTimeoutError : Error)(`Délai ${stage} expiré après ${milliseconds / 1000} s (networkState=${this.video.networkState}, readyState=${this.video.readyState}, MediaError=${this.video.error?.code ?? 'aucune'}). ${detail} Cause non déterminée ; consulter les diagnostics HTTP du navigateur et du Media Node.`));
+          }, milliseconds);
         };
         armTimeout(timeoutMs);
         this.cancel = () => finish(new Error('Lecteur fermé.'));
@@ -332,8 +336,10 @@ export class NativePlayer implements Player {
             }
           }
         } else {
-          if(source.videoStreamUrl)throw new Error(`La lecture vidéo progressive n’est pas disponible pour ce navigateur ou ce descripteur (${source.videoMime??'codec MSE absent'}). Aucun remux intégral automatique.`);
-          if(!source.preparedVideoUrl)throw originalError;
+          if(!source.preparedVideoUrl) {
+            if(source.videoStreamUrl)throw new Error(`La lecture vidéo progressive n’est pas disponible pour ce navigateur ou ce descripteur (${source.videoMime??'codec MSE absent'}). Aucun remux intégral automatique.`);
+            throw originalError;
+          }
           this.status('Vidéo originale non lisible sur ce navigateur. Préparation sans réencodage…');
           await this.prepareUrl(source.preparedVideoUrl);
           await loadCandidate(source.preparedVideoUrl);

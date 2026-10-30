@@ -49,6 +49,10 @@ export interface LibraryOptions {
   subtitleOnlyMissing: boolean; subtitleMatchAudio: boolean; subtitleRequireHash: boolean;
   saveSubtitlesToMedia: boolean;
   posterRotationEnabled?: boolean;
+  artworkDeduplicate: boolean;
+  artworkSimilarity: number;
+  artworkMinPosterWidth: number;
+  artworkMinPosterHeight: number;
 }
 export function defaultLibraryOptions(): LibraryOptions {
   return { preferredMetadataLanguage: 'fr', metadataCountryCode: 'FR', readLocalNfo: true,
@@ -61,7 +65,8 @@ export function defaultLibraryOptions(): LibraryOptions {
     chapterImagesEnabled: false, chapterImagesDuringScan: false, chapterImagesSaveToMedia: false,
     subtitleDownloadEnabled: false, subtitleLanguages: ['fr'], subtitleOnlyMissing: true, subtitleMatchAudio: false,
     subtitleRequireHash: true, saveSubtitlesToMedia: false,
-    posterRotationEnabled: false };
+    posterRotationEnabled: false, artworkDeduplicate: true, artworkSimilarity: 5,
+    artworkMinPosterWidth: 0, artworkMinPosterHeight: 0 };
 }
 export interface LibraryFolder { nodeId: string; root: string }
 export interface Library {

@@ -11,7 +11,7 @@
   import { PlaybackPresence } from './presence';
   import { session, getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
-  import { chooseSource, playbackMime, audioLanguage, audioSelectionNotice } from './source-selection';
+  import { chooseSource, playbackMime, audioLanguage } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
   import { revalidateMediaDescriptor } from '../catalog/api';
   import { bufferedAhead } from './startup-buffer';
@@ -169,7 +169,7 @@
       await engine.load(media, source.audioTrackId, restore?.position ?? resume ?? 0);
       if (current !== generation) return;
       const autoFailoverMsg = failoverNotice || (media.failoverFrom ? 'Basculement automatique sur un nœud disponible.' : '');
-      notice = autoFailoverMsg || preferenceNotice || audioSelectionNotice(media, source, preferredLanguage);
+      notice = autoFailoverMsg || preferenceNotice;
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);

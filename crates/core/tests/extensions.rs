@@ -293,9 +293,15 @@ async fn artwork_batch_is_bounded_resumable_and_requires_admin_csrf() {
     .await
     .unwrap();
     for (id, ids) in [("a", "{}"), ("b", "{\"tmdb\":\"42\"}")] {
-        media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES(?,?,?,?,?)")
-            .bind(id).bind(if id == "a" { "films" } else { "folder" }).bind(id).bind(id).bind(ids).execute(store.pool()).await.unwrap();
+        media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json,title_sort) VALUES(?,?,?,?,?,?)")
+            .bind(id).bind(if id == "a" { "films" } else { "folder" }).bind(id).bind(if id == "b" { "ÉB" } else { id }).bind(ids).bind(if id == "b" { "éb" } else { id }).execute(store.pool()).await.unwrap();
     }
+    media_poc::database::query("INSERT INTO work_image_entries(id,work_id,kind,position,width,height) VALUES('poster-b','b','poster',0,12,18)").execute(store.pool()).await.unwrap();
+    media_poc::database::query("UPDATE inventory_works SET manual_json=? WHERE id='a'")
+        .bind(r#"{"title":"Nom choisi"}"#)
+        .execute(store.pool())
+        .await
+        .unwrap();
     let auth = AuthState::new(store, "http://127.0.0.1:3000".into())
         .await
         .unwrap();
@@ -348,6 +354,7 @@ async fn artwork_batch_is_bounded_resumable_and_requires_admin_csrf() {
     .await;
     assert_eq!(status, StatusCode::OK, "{listed}");
     assert_eq!(listed["items"][0]["workId"], "a");
+    assert_eq!(listed["items"][0]["title"], "Nom choisi");
     assert_eq!(listed["items"][0]["posterCount"], 0);
     assert_eq!(listed["nextCursor"], "a");
     let (_, listed, _) = call(
@@ -361,6 +368,59 @@ async fn artwork_batch_is_bounded_resumable_and_requires_admin_csrf() {
     .await;
     assert_eq!(listed["items"][0]["workId"], "b");
     assert!(listed["nextCursor"].is_null());
+    let (_, filtered, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&posters=with&q=B",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(filtered["items"].as_array().unwrap().len(), 1);
+    assert_eq!(filtered["items"][0]["workId"], "b");
+    assert_eq!(filtered["items"][0]["posterCount"], 1);
+    let (_, accented, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&q=%C3%89b",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(accented["items"][0]["workId"], "b");
+    let (_, filtered, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&posters=without",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(filtered["items"].as_array().unwrap().len(), 1);
+    assert_eq!(filtered["items"][0]["workId"], "a");
+    let (_, literal, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&q=%25",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert!(literal["items"].as_array().unwrap().is_empty());
+    let (_, renamed, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&q=choisi",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(renamed["items"][0]["title"], "Nom choisi");
     let request = json!({"libraryId":"films", "limit":1});
     assert_ne!(
         call(&app, "POST", endpoint, &cookie, "", request.clone())

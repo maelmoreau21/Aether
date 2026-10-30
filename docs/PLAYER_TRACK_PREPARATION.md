@@ -1,5 +1,14 @@
 # P3/P4 — préparation des pistes (18 octobre 2026)
 
+## Seeks répétés — 30 octobre 2026
+
+Le watchdog vidéo repart de zéro à chaque nouveau seek et se désarme quand le
+navigateur a terminé le seek et dispose de données. Une attente réellement
+bloquée reste signalée. Une fenêtre audio MSE demandée après un seek n'attend
+plus la fin d'une opération devenue obsolète pour commencer son téléchargement ;
+le nouvel append attend toujours la fin de l'opération MSE. Les plages déjà
+présentes sont réutilisées. Tests et limites : [mesures locales](PLAYER_SEEK_2026_10_30.md).
+
 ## Sous-titres au démarrage — 30 octobre 2026
 
 La préparation du sous-titre initial démarre en parallèle : la lecture vidéo et

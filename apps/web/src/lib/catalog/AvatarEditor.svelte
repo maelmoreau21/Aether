@@ -21,10 +21,12 @@
   let allImages = $state<AvatarItem[]>([]);
   let selectedItem = $state<AvatarItem | null>(null);
   let modalLoading = $state(false);
+  let requestGeneration = 0;
 
   async function openModal() {
     const userId = $session?.user.id;
     if (!userId) return;
+    const generation = ++requestGeneration;
     showModal = true;
     dialog?.showModal();
     error = '';
@@ -37,20 +39,21 @@
       });
       if (!response.ok) throw new Error('Impossible de charger la galerie des avatars.');
       const data = await response.json() as { packs: typeof collections };
-      if ($session?.user.id !== userId || !dialog?.open) return;
+      if ($session?.user.id !== userId || !dialog?.open || generation !== requestGeneration) return;
       collections = data.packs;
       selectedPack = collections[0]?.id ?? '';
       if (selectedPack) await loadPack(selectedPack);
       else allImages = [];
     } catch (cause) {
-      if ($session?.user.id === userId && dialog?.open) error = cause instanceof Error ? cause.message : 'Photos indisponibles.';
+      if ($session?.user.id === userId && dialog?.open && generation === requestGeneration) error = cause instanceof Error ? cause.message : 'Photos indisponibles.';
     } finally {
-      modalLoading = false;
+      if (generation === requestGeneration) modalLoading = false;
     }
   }
 
   async function loadPack(pack: string) {
     const userId = $session?.user.id;
+    const generation = ++requestGeneration;
     selectedPack = pack; selectedItem = null; allImages = []; error = ''; modalLoading = true;
     try {
       const response = await fetch(`/api/v1/account/avatar/collections/${encodeURIComponent(pack)}`, {
@@ -58,12 +61,12 @@
       });
       if (!response.ok) throw new Error('Impossible de charger cette collection.');
       const data = await response.json() as { images: { id: string; name: string; url: string }[] };
-      if ($session?.user.id === userId && selectedPack === pack && dialog?.open)
+      if ($session?.user.id === userId && generation === requestGeneration && dialog?.open)
         allImages = data.images.map(img => ({ id: `${pack}-${img.id}`, name: img.name || 'Avatar', url: img.url }));
     } catch (cause) {
-      if ($session?.user.id === userId && selectedPack === pack && dialog?.open)
+      if ($session?.user.id === userId && generation === requestGeneration && dialog?.open)
         error = cause instanceof Error ? cause.message : 'Collection indisponible.';
-    } finally { if (selectedPack === pack) modalLoading = false; }
+    } finally { if (generation === requestGeneration) modalLoading = false; }
   }
 
   function closeModal() {
@@ -207,7 +210,7 @@
       class="avatar-modal"
       aria-labelledby="modal-avatar-title"
       oncancel={(event) => { if (busy) event.preventDefault(); }}
-      onclose={() => { showModal = false; selectedItem = null; galleryButton?.focus(); }}
+      onclose={() => { requestGeneration++; showModal = false; selectedItem = null; galleryButton?.focus(); }}
     >
         <div class="modal-header">
           <h3 id="modal-avatar-title">Choisir une photo de profil</h3>

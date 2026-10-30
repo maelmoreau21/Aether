@@ -129,9 +129,26 @@ pub(super) struct ListWorks {
     after: Option<String>,
     #[serde(default = "page_size")]
     limit: usize,
+    #[serde(default)]
+    q: Option<String>,
+    #[serde(default)]
+    posters: Option<String>,
 }
 fn page_size() -> usize {
     25
+}
+
+fn effective_title(title: String, editorial: &str, manual: Option<&str>) -> String {
+    let mut value: Value = serde_json::from_str(editorial).unwrap_or_else(|_| json!({}));
+    if let (Some(target), Some(fields)) = (
+        value.as_object_mut(),
+        manual
+            .and_then(|text| serde_json::from_str::<Value>(text).ok())
+            .and_then(|v| v.as_object().cloned()),
+    ) {
+        target.extend(fields);
+    }
+    value["title"].as_str().map(str::to_owned).unwrap_or(title)
 }
 
 pub(super) async fn list_works(
@@ -150,6 +167,23 @@ pub(super) async fn list_works(
     {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_cursor"));
     }
+    let search = input.q.as_deref().unwrap_or("").trim();
+    if search.len() > 100 || search.chars().any(char::is_control) {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_query"));
+    }
+    let filter = input.posters.as_deref().unwrap_or("all");
+    if !matches!(filter, "all" | "with" | "without") {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_filter"));
+    }
+    // Treat LIKE metacharacters in the user's text literally.
+    let pattern = format!(
+        "%{}%",
+        search
+            .to_lowercase()
+            .replace('!', "!!")
+            .replace('%', "!%")
+            .replace('_', "!_")
+    );
     let exists: i64 =
         query_scalar("SELECT COUNT(*) FROM libraries WHERE id=? AND kind IN ('films','series')")
             .bind(&input.library_id)
@@ -159,17 +193,18 @@ pub(super) async fn list_works(
     if exists == 0 {
         return Err(err(StatusCode::NOT_FOUND, "unknown_library"));
     }
-    let rows: Vec<(String,String,i64)> = query_as("SELECT w.id,w.title,(SELECT COUNT(*) FROM work_image_entries i WHERE i.work_id=w.id AND i.kind='poster') FROM inventory_works w WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND w.id>? ORDER BY w.id LIMIT ?")
+    let rows: Vec<(String,String,String,Option<String>,i64)> = query_as("SELECT w.id,w.title,w.editorial_json,w.manual_json,(SELECT COUNT(*) FROM work_image_entries i WHERE i.work_id=w.id AND i.kind='poster') FROM inventory_works w WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND w.id>? AND (CASE WHEN w.display_title_sort != '' THEN w.display_title_sort WHEN w.title_sort != '' THEN w.title_sort ELSE LOWER(w.title) END) LIKE ? ESCAPE '!' AND (?='all' OR (?='with' AND EXISTS(SELECT 1 FROM work_image_entries i WHERE i.work_id=w.id AND i.kind='poster')) OR (?='without' AND NOT EXISTS(SELECT 1 FROM work_image_entries i WHERE i.work_id=w.id AND i.kind='poster'))) ORDER BY w.id LIMIT ?")
         .bind(&input.library_id).bind(&input.library_id).bind(input.after.as_deref().unwrap_or(""))
+        .bind(pattern).bind(filter).bind(filter).bind(filter)
         .bind((input.limit + 1) as i64).fetch_all(auth.store.pool()).await.map_err(db)?;
     let more = rows.len() > input.limit;
     let mut last = None;
     let items: Vec<Value> = rows
         .into_iter()
         .take(input.limit)
-        .map(|(id, title, count)| {
+        .map(|(id, title, editorial, manual, count)| {
             last = Some(id.clone());
-            json!({"workId":id,"title":title,"posterCount":count})
+            json!({"workId":id,"title":effective_title(title, &editorial, manual.as_deref()),"posterCount":count})
         })
         .collect();
     Ok(Json(
@@ -204,8 +239,8 @@ pub(super) async fn collect_batch(
     if exists == 0 {
         return Err(err(StatusCode::NOT_FOUND, "unknown_library"));
     }
-    let works: Vec<(String, String)> = query_as(
-        "SELECT id,title FROM inventory_works WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND id>? ORDER BY id LIMIT ?",
+    let works: Vec<(String, String, String, Option<String>)> = query_as(
+        "SELECT id,title,editorial_json,manual_json FROM inventory_works WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND id>? ORDER BY id LIMIT ?",
     )
     .bind(&input.library_id)
     .bind(&input.library_id)
@@ -217,7 +252,8 @@ pub(super) async fn collect_batch(
     let more = works.len() > input.limit;
     let mut items = Vec::new();
     let mut last = None;
-    for (work_id, title) in works.into_iter().take(input.limit) {
+    for (work_id, title, editorial, manual) in works.into_iter().take(input.limit) {
+        let title = effective_title(title, &editorial, manual.as_deref());
         let request = Collect {
             work_id: work_id.clone(),
             languages: input.languages.clone(),

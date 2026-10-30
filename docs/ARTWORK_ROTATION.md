@@ -66,7 +66,13 @@ de synchronisation entre appareils. Une seule variante disponible reste stable.
 `GET /api/v1/admin/artwork/works?libraryId=...&limit=25&after=...` liste les
 œuvres par identifiant, avec curseur `nextCursor` et nombre de variantes
 d'affiches applicatives (sans affiches locales ou ancienne affiche manuelle).
-Limite 1–100 ; les dossiers actifs de la bibliothèque sont inclus.
+Limite 1–100 ; les dossiers actifs de la bibliothèque sont inclus. Les filtres
+optionnels `q` (100 octets maximum) et `posters=all|with|without` s'appliquent
+avant pagination ; les caractères `%`, `_` et `!` sont recherchés littéralement.
+La recherche utilise les titres normalisés du catalogue. Le repli SQL pour les
+anciens titres et la normalisation des titres manuels peuvent traiter les accents
+différemment selon la base de données. Le filtre d'affiches ne compte que les
+variantes applicatives.
 `POST /api/v1/admin/artwork/collect-batch` exige administrateur et CSRF :
 `{libraryId, after?, limit:1, languages, includeNeutral, maxImages}`. Chaque
 appel traite au plus une œuvre et retourne `items` et `nextCursor` ; chaque

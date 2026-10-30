@@ -310,6 +310,31 @@ describe('native source replacement', () => {
     expect(video.paused).toBe(true); expect(error).toHaveBeenCalledTimes(1); expect(video.loads).toBe(1);
     await vi.advanceTimersByTimeAsync(60000); expect(error).toHaveBeenCalledTimes(1);
   });
+  it('gives the latest seek its own stall deadline', async () => {
+    vi.useFakeTimers();const {video,player,error}=setup();
+    await player.load(media);await player.play();
+    video.dispatchEvent(new Event('waiting'));
+    await vi.advanceTimersByTimeAsync(9000);
+    video.seeking=true;video.dispatchEvent(new Event('seeking'));
+    await vi.advanceTimersByTimeAsync(9000);expect(error).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);expect(error).toHaveBeenCalledOnce();player.destroy();
+  });
+  it('clears the seek deadline when the latest position has playable data', async () => {
+    vi.useFakeTimers();const {video,player,error}=setup();
+    await player.load(media);await player.play();
+    video.seeking=true;video.dispatchEvent(new Event('seeking'));
+    video.seeking=false;video.readyState=3;video.dispatchEvent(new Event('seeked'));
+    await vi.advanceTimersByTimeAsync(11000);expect(error).not.toHaveBeenCalled();player.destroy();
+  });
+  it('keeps the seek deadline when seeked has no playable data and disarms it on manual pause', async () => {
+    vi.useFakeTimers();const {video,player,error}=setup();
+    await player.load(media);await player.play();
+    video.seeking=true;video.dispatchEvent(new Event('seeking'));
+    video.seeking=false;video.readyState=1;video.dispatchEvent(new Event('seeked'));
+    await vi.advanceTimersByTimeAsync(9000);expect(error).not.toHaveBeenCalled();
+    player.pause();video.dispatchEvent(new Event('pause'));
+    await vi.advanceTimersByTimeAsync(2000);expect(error).not.toHaveBeenCalled();player.destroy();
+  });
   it('invalidates stalled audio so an explicit reload of the same track performs a real recovery', async () => {
     vi.useFakeTimers(); const { video, player, error } = setup();
     const prepared={...media,sources:media.sources.map(s=>({...s,url:'/same-video',externalAudioUrl:`/audio-${s.language}`}))};

@@ -16,6 +16,7 @@ export class SegmentedAudio extends ExternalAudio {
   private closed = false;
   private filling = false;
   private seekEpoch = 0;
+  private seekController = new AbortController();
   private offsetSeconds: number;
   private loaded = new Set<number>();
   private prefix = '';
@@ -74,7 +75,7 @@ export class SegmentedAudio extends ExternalAudio {
       if (activate) this.activate();
     } catch (error) { this.destroy(); throw error; }
   }
-  private seekChanged = () => {this.seekEpoch++;this.controller?.abort();this.schedule();};
+  private seekChanged = () => {this.seekEpoch++;this.seekController.abort();this.seekController=new AbortController();this.controller?.abort();this.schedule();};
   private schedule = () => { if (this.preparationError) return; void this.fill(this.loading).catch(error => {
     if (this.closed) return;
     if (!this.activated) {
@@ -109,24 +110,28 @@ export class SegmentedAudio extends ExternalAudio {
     catch (error) { super.pause(); throw error; }
     finally { this.rejectBuffer = undefined; }
   }
-  private async idle() {
+  private async idle(signal?: AbortSignal) {
+    if (signal?.aborted) throw new Error('Seek audio remplacé.');
     if (!this.buffer?.updating) return;
     const buffer = this.buffer;
     await new Promise<void>((resolve,reject)=>{
       const done=()=>{cleanup();resolve();};
       const fail=()=>{cleanup();reject(new Error('Segment Opus rejeté par le navigateur.'));};
       const cancel=()=>{cleanup();reject(new Error('Lecteur fermé.'));};
+      const superseded=()=>{cleanup();reject(new Error('Seek audio remplacé.'));};
       const timeout=setTimeout(()=>{cleanup();reject(new Error('Mise en tampon du segment Opus expirée après 10 secondes.'));},10000);
-      const cleanup=()=>{clearTimeout(timeout);this.pendingUpdates.delete(cancel);buffer.removeEventListener('updateend',done);buffer.removeEventListener('error',fail);buffer.removeEventListener('abort',fail);};
+      const cleanup=()=>{clearTimeout(timeout);this.pendingUpdates.delete(cancel);buffer.removeEventListener('updateend',done);buffer.removeEventListener('error',fail);buffer.removeEventListener('abort',fail);signal?.removeEventListener('abort',superseded);};
       this.pendingUpdates.add(cancel);
       buffer.addEventListener('updateend',done,{once:true});buffer.addEventListener('error',fail,{once:true});buffer.addEventListener('abort',fail,{once:true});
-      if(this.closed)cancel();
+      signal?.addEventListener('abort',superseded,{once:true});
+      if(this.closed)cancel();else if(signal?.aborted)superseded();
     });
   }
   private async fill(onlyCurrent = false) {
     if (this.closed || this.filling || !this.buffer || this.mediaSource.readyState === 'closed') return;
     this.filling = true;
     const epoch = this.seekEpoch;
+    const signal = this.seekController?.signal;
     const target = Math.max(0, this.position() - this.offsetSeconds);
     const current = Math.floor(target / SECONDS);
     try {
@@ -140,9 +145,11 @@ export class SegmentedAudio extends ExternalAudio {
       const needsFollowingWindow = remaining <= (onlyCurrent ? .5 : 8);
       for (const chunk of needsFollowingWindow ? [current, current + 1] : [current]) {
         if (this.closed || epoch !== this.seekEpoch) return;
-        const ranges=this.buffer.buffered;
-        const retained=Array.from({length:ranges.length},(_,i)=>i).some(i=>ranges.start(i)<=chunk*SECONDS+.05 && ranges.end(i)>=Math.min(this.duration(),(chunk+1)*SECONDS)-.05);
-        if(!retained)this.loaded.delete(chunk);
+        const retained=()=>{
+          const ranges=this.buffer!.buffered;
+          return Array.from({length:ranges.length},(_,i)=>i).some(i=>ranges.start(i)<=chunk*SECONDS+.05 && ranges.end(i)>=Math.min(this.duration(),(chunk+1)*SECONDS)-.05);
+        };
+        if(retained())this.loaded.add(chunk);else this.loaded.delete(chunk);
         if (chunk * SECONDS >= this.duration() || this.loaded.has(chunk) || this.closed) continue;
         const controller = new AbortController(); this.controller = controller;
         const timeout = setTimeout(()=>controller.abort(), 20000);
@@ -169,19 +176,22 @@ export class SegmentedAudio extends ExternalAudio {
           throw error;
         } finally {clearTimeout(timeout);if(this.controller===controller)this.controller=undefined;}
         if (this.closed || epoch !== this.seekEpoch) return;
-        await this.idle();
+        await this.idle(signal);
         if (this.closed || epoch !== this.seekEpoch) return;
+        // An append from the previous seek may have completed while this
+        // request was in flight. Reuse it instead of appending it twice.
+        if(retained()){this.loaded.add(chunk);continue;}
         const start = chunk * SECONDS;
         this.buffer.timestampOffset = this.timeline?.mode === 'absolute' ? 0 : Math.max(0, start - 1);
         this.buffer.appendWindowEnd = Infinity;
         this.buffer.appendWindowStart = start;
         this.buffer.appendWindowEnd = Math.min(this.duration(), start + SECONDS);
-        this.buffer.appendBuffer(bytes);await this.idle();this.loaded.add(chunk);
+        this.buffer.appendBuffer(bytes);await this.idle(signal);this.loaded.add(chunk);
       }
       // Bound browser buffers even on long episodes and repeated seeks.
       for (const chunk of [...this.loaded]) {
         if (Math.abs(chunk-current)>3 && !this.closed) {
-          await this.idle();this.buffer.remove(chunk*SECONDS,(chunk+1)*SECONDS);await this.idle();this.loaded.delete(chunk);
+          await this.idle(signal);if(this.closed || epoch !== this.seekEpoch)return;this.buffer.remove(chunk*SECONDS,(chunk+1)*SECONDS);await this.idle(signal);this.loaded.delete(chunk);
         }
       }
       // Without EOS an Opus packet ending just before the video's final frame
@@ -189,7 +199,7 @@ export class SegmentedAudio extends ExternalAudio {
       // reopens an ended MediaSource; do not reject that state above.
       const last = Math.ceil(this.duration() / SECONDS) - 1;
       if (!this.closed && epoch === this.seekEpoch && this.loaded.has(last) && this.mediaSource.readyState === 'open') {
-        await this.idle();
+        await this.idle(signal);
         if (!this.closed && epoch === this.seekEpoch && this.mediaSource.readyState === 'open') this.mediaSource.endOfStream();
       }
     } catch (error) {
@@ -208,7 +218,7 @@ export class SegmentedAudio extends ExternalAudio {
   override setOffset(seconds: number) {if(!Number.isFinite(seconds)||Math.abs(seconds)>30)return;this.offsetSeconds=seconds;super.setOffset(seconds);this.schedule();}
   override destroy() {
     if(this.closed)return;
-    this.closed=true;clearInterval(this.interval);this.controller?.abort();
+    this.closed=true;clearInterval(this.interval);this.seekController.abort();this.controller?.abort();
     for(const cancel of this.pendingUpdates)cancel();
     this.element.removeEventListener('seeking',this.seekChanged);
     if(this.opened)this.mediaSource.removeEventListener('sourceopen',this.opened);

@@ -17,9 +17,21 @@
   let selected = $state<Item | null>(null);
   let page = $state<WorkPage | null>(null), pageLoading = $state(false), pageError = $state('');
   let pageCursor = $state<string | null>(null), previousCursors = $state<(string | null)[]>([]), pageGeneration = 0;
+  let search = $state(''), posterFilter = $state('all'), appliedSearch = $state(''), appliedFilter = $state('all'), filterError = $state('');
   let destroyed = false;
   onDestroy(() => { destroyed = true; stopRequested = true; pageGeneration++; });
   const videoLibraries = $derived(libraries.filter(library => library.kind !== 'music' && library.enabled));
+  function collectionError(error: { status: number; code: string }): string {
+    const messages: Record<string, string> = {
+      external_ids_required: 'Identifiants externes manquants',
+      unknown_work: 'Média introuvable',
+      work_denied: 'Accès au média refusé',
+      too_many_providers: 'Trop de fournisseurs configurés',
+      invalid_package: 'Paquet de fournisseur invalide',
+      invalid_output: 'Réponse de fournisseur invalide'
+    };
+    return messages[error.code] ?? `Collecte impossible (HTTP ${error.status})`;
+  }
   function reset() { cursor = null; started = false; finished = false; processed = 0; downloaded = 0; errors = 0; partial = 0; recent = []; problems = []; omittedProblems = 0; error = ''; }
   async function loadPage(after: string | null = null) {
     const generation = ++pageGeneration;
@@ -27,6 +39,8 @@
     try {
       const params = new URLSearchParams({ libraryId, limit: '25' });
       if (after) params.set('after', after);
+      if (appliedSearch) params.set('q', appliedSearch);
+      if (appliedFilter !== 'all') params.set('posters', appliedFilter);
       const response = await fetch(`/api/v1/admin/artwork/works?${params}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
       if (!response.ok) throw new Error(`Liste des médias indisponible (HTTP ${response.status}).`);
       const result = await response.json() as WorkPage;
@@ -39,8 +53,14 @@
   }
   async function previousPage() { const previous = previousCursors.at(-1) ?? null; if (await loadPage(previous)) previousCursors = previousCursors.slice(0, -1); }
   async function nextPage() { if (!page?.nextCursor) return; const current = pageCursor; if (await loadPage(page.nextCursor)) previousCursors = [...previousCursors, current]; }
+  function applyFilters() {
+    const query = search.trim();
+    if (new TextEncoder().encode(query).length > 100) { filterError = 'Le titre recherché dépasse 100 octets. Réduisez sa longueur.'; return; }
+    filterError = ''; appliedSearch = query; appliedFilter = posterFilter; page = null; previousCursors = []; pageCursor = null; void loadPage();
+  }
   function changeLibrary() {
     reset(); page = null; pageCursor = null; previousCursors = []; pageError = ''; pageLoading = false; pageGeneration++;
+    search = appliedSearch; posterFilter = appliedFilter; filterError = '';
     if (libraryId) void loadPage();
   }
   async function run() {
@@ -90,6 +110,7 @@
   <header><h2 id="artwork-admin-title">Images des médiathèques</h2><p>Enrichissez les films et séries avec les images des fournisseurs activés. Les fichiers de vos médias restent inchangés.</p></header>
   <div class="panel">
     <label>Bibliothèque<select bind:value={libraryId} disabled={busy || (started && !finished)} onchange={changeLibrary}><option value="">Choisir une bibliothèque</option>{#each videoLibraries as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
+    {#if libraryId}<form class="filters" onsubmit={(event) => { event.preventDefault(); applyFilters(); }}><label>Rechercher un titre<input type="search" bind:value={search} maxlength="100" /></label><label>Variantes enregistrées<select bind:value={posterFilter}><option value="all">Toutes les œuvres</option><option value="with">Avec variante</option><option value="without">Sans variante</option></select></label><button type="submit" disabled={pageLoading}>Rechercher</button></form>{#if filterError}<p class="error" role="alert">{filterError}</p>{/if}<p>Pour certains titres, respectez la casse et les accents.</p>{/if}
     {#if pageLoading}<p role="status">Chargement des médias…</p>{/if}
     {#if pageError}<p class="error" role="alert">{pageError}</p><button type="button" onclick={() => void loadPage(pageCursor)}>Réessayer</button>{/if}
     {#if page && !pageError}<h3>Affiches disponibles</h3><p>Ouvrez un média pour consulter, ajouter ou retirer ses images. Le compteur indique les variantes enregistrées dans Aether ; les affiches locales ne sont pas comptées.</p><ul class="works">{#each page.items as item (item.workId)}<li><span><strong>{item.title}</strong><small>{item.posterCount} variante{item.posterCount > 1 ? 's' : ''} enregistrée{item.posterCount > 1 ? 's' : ''}</small></span><button type="button" onclick={() => selected = item}>Gérer les images</button></li>{:else}<li>Aucun média dans cette bibliothèque.</li>{/each}</ul><div class="actions"><button type="button" disabled={pageLoading || !previousCursors.length} onclick={() => void previousPage()}>Page précédente</button><button type="button" disabled={pageLoading || !page.nextCursor} onclick={() => void nextPage()}>Page suivante</button></div>{/if}
@@ -110,8 +131,8 @@
     {#if busy}<p role="status">{stopRequested ? 'Fin de l’œuvre en cours…' : 'Collecte en cours. Vous pouvez demander un arrêt après l’œuvre en cours.'}</p>{/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     {#if started}<div class="results" aria-live="polite"><strong>{finished ? 'Parcours terminé' : busy ? 'Progression' : 'Collecte interrompue'}</strong><p>{processed} œuvre{processed > 1 ? 's' : ''} examinée{processed > 1 ? 's' : ''} · {downloaded} image{downloaded > 1 ? 's' : ''} ajoutée{downloaded > 1 ? 's' : ''} · {errors} erreur{errors > 1 ? 's' : ''} · {partial} collecte{partial > 1 ? 's' : ''} partielle{partial > 1 ? 's' : ''}</p><p>La progression est conservée dans cette page uniquement. Une collecte partielle peut être relancée depuis la fiche du média.</p></div>{/if}
-    {#if recent.length}<details><summary>Derniers résultats</summary><ul>{#each recent as item (item.workId)}<li><strong>{item.title || item.workId}</strong> — {item.error ? `échec (${item.error.code})` : `${item.result?.downloaded ?? 0} image(s) ajoutée(s)${item.result?.partial ? ' · résultat partiel' : ''}`} <button type="button" onclick={() => selected = item}>Gérer les images</button></li>{/each}</ul></details>{/if}
-    {#if problems.length}<details><summary>Œuvres à vérifier ({problems.length}{omittedProblems ? ` et ${omittedProblems} autres` : ''})</summary><p>Les résultats partiels ou en erreur peuvent être relancés individuellement dans « Gérer les images ».</p><ul>{#each problems as item (item.workId)}<li><strong>{item.title || item.workId}</strong> — {item.error ? `échec (${item.error.code})` : item.result?.partial ? 'résultat partiel' : 'erreur de fournisseur'} <button type="button" onclick={() => selected = item}>Gérer les images</button></li>{/each}</ul></details>{/if}
+    {#if recent.length}<details><summary>Derniers résultats</summary><ul>{#each recent as item (item.workId)}<li><strong>{item.title || item.workId}</strong> — {item.error ? collectionError(item.error) : `${item.result?.downloaded ?? 0} image(s) ajoutée(s)${item.result?.partial ? ' · résultat partiel' : ''}`} <button type="button" onclick={() => selected = item}>Gérer les images</button></li>{/each}</ul></details>{/if}
+    {#if problems.length}<details><summary>Œuvres à vérifier ({problems.length}{omittedProblems ? ` et ${omittedProblems} autres` : ''})</summary><p>Les résultats partiels ou en erreur peuvent être relancés individuellement dans « Gérer les images ».</p><ul>{#each problems as item (item.workId)}<li><strong>{item.title || item.workId}</strong> — {item.error ? collectionError(item.error) : item.result?.partial ? 'résultat partiel' : 'erreur de fournisseur'} <button type="button" onclick={() => selected = item}>Gérer les images</button></li>{/each}</ul></details>{/if}
   </div>
   <div class="panel"><h3>Affichage et gestion des affiches</h3><p>Chaque utilisateur choisit la rotation dans ses préférences d’affichage. Les affiches sont sélectionnées parmi les variantes disponibles ; la collecte ne modifie pas les images choisies manuellement.</p><p>Pour gérer les images d’un média à tout moment, ouvrez sa fiche dans le catalogue puis choisissez « Modifier les images » dans son menu.</p></div>
 </section>
@@ -128,5 +149,6 @@
   .error { color:var(--status-error); } .results { margin-top:20px; padding:16px; border:1px solid var(--color-line); border-radius:var(--radius-sm); } .results p { margin-bottom:0; }
   details { margin-top:18px; } summary { cursor:pointer; } li { margin:8px 0; overflow-wrap:anywhere; font-size:13px; }
   .works { padding:0; list-style:none; } .works li { display:flex; align-items:center; justify-content:space-between; gap:12px; border-top:1px solid var(--color-line); padding:12px 0; } .works small { display:block; color:var(--color-muted); margin-top:4px; }
-  @media(max-width:650px) { .panel { padding:16px; } fieldset { grid-template-columns:minmax(0,1fr); } .actions button { width:100%; } }
+  .filters { display:grid; grid-template-columns:2fr 1fr auto; gap:12px; align-items:end; margin:20px 0; }
+  @media(max-width:650px) { .panel { padding:16px; } fieldset,.filters { grid-template-columns:minmax(0,1fr); } .actions button { width:100%; } }
 </style>

@@ -41,12 +41,18 @@ export class NativePlayer implements Player {
       this.onError('Lecture bloquée pendant 10 secondes. Rechargez explicitement la source.');
     }, 10000);
   };
+  // A newer seek supersedes the previous wait. Its timeout must measure the
+  // new position, not accumulated time spent on obsolete requests.
+  private seeking = () => { this.clearStall(); this.stalled(); };
+  private seeked = () => { if (!this.video.seeking && this.video.readyState >= 3) this.clearStall(); };
   constructor(private video: HTMLVideoElement, private onError: (message: string) => void) {
     video.addEventListener('error', this.mediaError);
     video.addEventListener('waiting', this.stalled);
     video.addEventListener('stalled', this.stalled);
     video.addEventListener('playing', this.clearStall);
     video.addEventListener('pause', this.clearStall);
+    video.addEventListener('seeking', this.seeking);
+    video.addEventListener('seeked', this.seeked);
   }
   private mediaError = () => {
     if(this.busy)return;
@@ -452,6 +458,8 @@ export class NativePlayer implements Player {
     this.video.removeEventListener('stalled', this.stalled);
     this.video.removeEventListener('playing', this.clearStall);
     this.video.removeEventListener('pause', this.clearStall);
+    this.video.removeEventListener('seeking', this.seeking);
+    this.video.removeEventListener('seeked', this.seeked);
     this.video.pause(); this.video.removeAttribute('src'); this.video.load();
   }
 }

@@ -48,6 +48,48 @@ describe('segmented audio seek cancellation',()=>{
     for(const cancel of pendingUpdates)cancel();await cancelled;
     expect(pendingUpdates.size).toBe(0);expect(vi.getTimerCount()).toBe(0);
   });
+  it('cancels a superseded SourceBuffer wait immediately without aborting its update',async()=>{
+    vi.useFakeTimers();const buffer=Object.assign(new EventTarget(),{updating:true});
+    const pendingUpdates=new Set<()=>void>();const controller=new AbortController();
+    const state=Object.assign(Object.create(SegmentedAudio.prototype),{closed:false,buffer,pendingUpdates}) as {idle:(signal:AbortSignal)=>Promise<void>};
+    const old=expect(state.idle(controller.signal)).rejects.toThrow('Seek audio remplacé');
+    controller.abort();await old;
+    expect(buffer.updating).toBe(true);expect(pendingUpdates.size).toBe(0);expect(vi.getTimerCount()).toBe(0);
+  });
+  it('starts fetching the latest seek while the previous SourceBuffer update is still pending',async()=>{
+    class AudioElement extends EventTarget {dataset={};pause=vi.fn();}
+    class Source extends EventTarget {readyState='open';duration=60;}
+    vi.stubGlobal('Audio',AudioElement);vi.stubGlobal('MediaSource',Source);
+    vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:test');vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
+    vi.spyOn(ExternalAudio.prototype,'destroy').mockImplementation(()=>{});
+    const video=Object.assign(new EventTarget(),{currentTime:0,duration:60,insertAdjacentElement:vi.fn(),pause:vi.fn()});
+    const buffer=Object.assign(new EventTarget(),{updating:true,buffered:{length:0},appendBuffer:vi.fn(),remove:vi.fn()});
+    const player=new SegmentedAudio(video as unknown as HTMLVideoElement,0,vi.fn());
+    const state=player as unknown as {buffer:typeof buffer;prefix:string;fill:(onlyCurrent?:boolean)=>Promise<void>;seekChanged:()=>void};
+    state.buffer=buffer;state.prefix='/chunks/';
+    const fetcher=vi.fn().mockImplementation(()=>Promise.resolve(new Response(new Uint8Array([1,2,3]))));vi.stubGlobal('fetch',fetcher);
+    const old=state.fill(true);await vi.waitFor(()=>expect(fetcher).toHaveBeenCalledOnce());
+    video.currentTime=30;state.seekChanged();
+    await vi.waitFor(()=>expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(fetcher.mock.calls[1][0]).toBe('/chunks/3');expect(buffer.updating).toBe(true);expect(buffer.appendBuffer).not.toHaveBeenCalled();
+    buffer.updating=false;buffer.dispatchEvent(new Event('updateend'));await old;player.destroy();
+  });
+  it('reuses a window already buffered by a superseded append without another request',async()=>{
+    const {audio,appendBuffer}=harness();
+    const state=audio as unknown as {buffer:{buffered:{length:number;start:(index:number)=>number;end:(index:number)=>number}}};
+    state.buffer.buffered={length:1,start:()=>0,end:()=>10};
+    const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);
+    await audio.fill(true);
+    expect(fetcher).not.toHaveBeenCalled();expect(appendBuffer).not.toHaveBeenCalled();
+  });
+  it('does not append a fetched window twice when a prior update finishes during the request',async()=>{
+    const {audio,appendBuffer}=harness();
+    const state=audio as unknown as {buffer:{buffered:{length:number;start:(index:number)=>number;end:(index:number)=>number}}};
+    audio.idle=vi.fn(async()=>{state.buffer.buffered={length:1,start:()=>0,end:()=>10};});
+    const fetcher=vi.fn().mockResolvedValue(new Response(new Uint8Array([1,2,3])));vi.stubGlobal('fetch',fetcher);
+    await audio.fill(true);
+    expect(fetcher).toHaveBeenCalledOnce();expect(appendBuffer).not.toHaveBeenCalled();
+  });
   it('rejects pending commit buffering after an inactive candidate window fails without reporting a fatal presentation error', async()=>{
     vi.useFakeTimers();
     class AudioElement extends EventTarget {dataset={};pause=vi.fn();}

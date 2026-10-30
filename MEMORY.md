@@ -1,3 +1,8 @@
+## 30 octobre 2026 — Seeks répétés et langue audio
+
+- Avertissement sur la langue audio de remplacement retiré ; choix automatique et manuel conservés. Le watchdog repart à chaque seek et se désarme seulement quand les données vidéo sont disponibles, tout en signalant un blocage réel. L'audio segmenté annule l'attente MSE devenue obsolète, demande la nouvelle fenêtre et réutilise les plages déjà présentes sans append doublé.
+- 75 tests ciblés lecteur réussis. Chrome/HTTP synthétique : six seeks rapprochés sur MP4 et piste NL externe atteignent la dernière position avec PCM ; pas de preuve NAS ou de cause exacte pour le film personnel. Mesures et limitations : `docs/PLAYER_SEEK_2026_10_30.md`.
+
 ## 30 octobre 2026 — Sous-titres et démarrage lecteur
 
 - La préparation du sous-titre initial ne bloque plus le démarrage vidéo/audio, sauf pour les fenêtres audio FFmpeg qui partagent son worker ; une erreur reste visible, et la fermeture ou un choix manuel empêchent une réponse périmée de modifier le choix courant. Les diagnostics d'échec initial enregistrent positions demandée/effective et état de seek sans URL. Cause de l'incident réel non établie et gain sur NAS non mesuré.
@@ -4863,3 +4868,8 @@ et actionlint validés ; daemon Docker indisponible pour un build réel.
 
 - Les écrans parlent de rotation des affiches sans nom de plugin. Le profil choisit dans la galerie du serveur sans générateur d’extension ; Gravatar n’est plus proposé dans l’interface. Les champs et routes historiques restent présents pour compatibilité et ne constituent pas une suppression backend ni une migration des collections d’extension.
 - La rotation actuelle utilise les variantes existantes et la collecte reste manuelle par œuvre ; elle ne reproduit pas les tâches planifiées et la gestion globale du projet Jellyfin. La migration des collections historiques et une refonte complète restent ouvertes.
+## 30 octobre 2026 — Images et avatars natifs
+
+- Administration Images : inventaire paginé, recherche par titre et filtre des variantes, édition par œuvre, collecte bornée une œuvre par requête avec arrêt et reprise dans la page. Rotation selon les préférences du compte ; collecte durable/planifiée, reprise après fermeture et rotation serveur restent à faire. Les variantes locales ne figurent pas dans le compteur.
+- Avatars : transfert transactionnel des anciennes collections, refus de désinstallation avant transfert, galerie native par collection et protection contre les réponses périmées. Anciennes routes Gravatar désactivées ; données et photos conservées. Test Core migration SQLite réussi ; Chrome synthétique mobile/bureau valide transfert et choix de galerie, y compris changement rapide de collection.
+- Web : check sans erreur (avertissement CatalogGrid préexistant), lint, 197 tests et build réussis ; essais Images Chrome sur API synthétiques aux largeurs 390/1440. Test Core ciblé de collecte, pagination, filtres, recherche et CSRF réussi sur SQLite. Aucune preuve NAS, fournisseur réel ou PostgreSQL pour ces ajouts. Travaux lecteur concurrents préservés.

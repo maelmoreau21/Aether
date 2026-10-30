@@ -12,6 +12,7 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
   if (!response.ok) {
     const detail = await response.json().catch(() => null) as { error?: string; pluginError?: string } | null;
     const messages: Record<string,string> = {
+      avatar_collection_full: 'Cette collection ne peut pas contenir plus de 500 images.',
       avatar_migration_required: 'Transférez d’abord les anciennes collections dans Administration → Avatars avant de désinstaller cette extension.',
       avatar_migration_id_conflict: 'Le transfert est impossible : des identifiants de collection ou d’image sont déjà utilisés. Aucune collection n’a été modifiée.',
       plugin_storage_failed: 'Le serveur ne peut pas enregistrer cette extension. Consultez les journaux du serveur pour connaître la cause exacte.',

@@ -505,3 +505,12 @@ priment sur une provenance périmée. Cette route ne lance pas de recherche rés
 > `{packs,images}` ; conflit d'identifiants : 409, sans transfert. La
 > désinstallation de l'ancienne extension est bloquée tant qu'elle possède des
 > collections. Voir [collections d'avatars](PLUGIN_SETTINGS_AND_COLLECTIONS.md).
+> Collecte d’images : les options de bibliothèque `artworkDeduplicate`,
+> `artworkSimilarity`, `artworkMinPosterWidth` et `artworkMinPosterHeight`
+> définissent la détection et les dimensions minimales. Valeurs, portée,
+> héritage et limites : [Images et rotation](ARTWORK_ROTATION.md).
+
+L'envoi multipart `POST /api/v1/admin/avatar-packs/upload` accepte soit `name`
+pour créer une collection, soit `packId` pour ajouter à une collection native
+existante, avec les champs `images`. Les deux champs sont exclusifs ; une
+collection est limitée à 500 images. Session administrateur et CSRF requis.

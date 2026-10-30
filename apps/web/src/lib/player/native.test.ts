@@ -24,6 +24,17 @@ const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr',
 function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
+  it('starts external audio metadata immediately and supplies the saved resume position', async () => {
+    const {video,player}=setup();video.auto=false;
+    const load=vi.spyOn(ExternalAudio.prototype,'load');
+    const position=Promise.resolve(6);
+    const loading=player.load({...media,sources:[{...media.sources[0],externalAudioUrl:'/external.opus'}]},'fr',position);
+    expect(load).toHaveBeenCalledWith('/external.opus',false,undefined,position);
+    expect(video.loads).toBe(1);
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    video.dispatchEvent(new Event('seeked'));await loading;
+    player.destroy();load.mockRestore();
+  });
   it('preloads the saved audio window in parallel with video metadata when the descriptor supplies duration', async()=>{
     const {video,player}=setup();video.auto=false;
     vi.stubGlobal('MediaSource',class {});
@@ -183,7 +194,7 @@ describe('native source replacement', () => {
     const load=vi.spyOn(ExternalAudio.prototype,'load').mockImplementationOnce(()=>new Promise<void>(resolve=>{ready=resolve;}));
     const activate=vi.spyOn(ExternalAudio.prototype,'activate');
     const loading=player.load({...media,sources:[{...media.sources[0],externalAudioUrl:'/audio'}]});
-    expect(load).toHaveBeenCalledWith('/audio',false);
+    expect(load).toHaveBeenCalledWith('/audio',false,undefined,0);
     expect(video.loads).toBe(1);expect(activate).not.toHaveBeenCalled();
     video.dispatchEvent(new Event('loadedmetadata'));
     await Promise.resolve();expect(activate).not.toHaveBeenCalled();

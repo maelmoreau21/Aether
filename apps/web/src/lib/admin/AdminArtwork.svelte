@@ -12,7 +12,7 @@
   type WorkPage = { items: { workId: string; title: string; posterCount: number }[]; nextCursor: string | null };
   let libraryId = $state(''), languages = $state('fr, en'), includeNeutral = $state(true), maxImages = $state(12);
   let busy = $state(false), stopRequested = $state(false), cursor = $state<string | null>(null), started = $state(false), finished = $state(false);
-  let processed = $state(0), downloaded = $state(0), duplicates = $state(0), errors = $state(0), partial = $state(0), recent = $state<Item[]>([]), error = $state('');
+  let processed = $state(0), downloaded = $state(0), duplicates = $state(0), skipped = $state(0), errors = $state(0), partial = $state(0), recent = $state<Item[]>([]), error = $state('');
   let problems = $state<Item[]>([]), omittedProblems = $state(0);
   let selected = $state<Item | null>(null);
   let page = $state<WorkPage | null>(null), pageLoading = $state(false), pageError = $state('');
@@ -32,7 +32,7 @@
     };
     return messages[error.code] ?? `Collecte impossible (HTTP ${error.status})`;
   }
-  function reset() { cursor = null; started = false; finished = false; processed = 0; downloaded = 0; duplicates = 0; errors = 0; partial = 0; recent = []; problems = []; omittedProblems = 0; error = ''; }
+  function reset() { cursor = null; started = false; finished = false; processed = 0; downloaded = 0; duplicates = 0; skipped = 0; errors = 0; partial = 0; recent = []; problems = []; omittedProblems = 0; error = ''; }
   async function loadPage(after: string | null = null) {
     const generation = ++pageGeneration;
     pageLoading = true; pageError = '';
@@ -90,6 +90,7 @@
         for (const item of batch.items) {
           downloaded += item.result?.downloaded ?? 0;
           duplicates += item.result?.duplicates ?? 0;
+          skipped += item.result?.skipped ?? 0;
           errors += (item.error ? 1 : 0) + (item.result?.errors?.length ?? 0);
           if (item.result?.partial) partial += 1;
           if (item.error || item.result?.partial || item.result?.errors?.length) {
@@ -131,7 +132,7 @@
     </div>
     {#if busy}<p role="status">{stopRequested ? 'Fin de l’œuvre en cours…' : 'Collecte en cours. Vous pouvez demander un arrêt après l’œuvre en cours.'}</p>{/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
-    {#if started}<div class="results" aria-live="polite"><strong>{finished ? 'Parcours terminé' : busy ? 'Progression' : 'Collecte interrompue'}</strong><p>{processed} œuvre{processed > 1 ? 's' : ''} examinée{processed > 1 ? 's' : ''} · {downloaded} image{downloaded > 1 ? 's' : ''} ajoutée{downloaded > 1 ? 's' : ''} · {duplicates} image{duplicates > 1 ? 's' : ''} similaire{duplicates > 1 ? 's' : ''} écartée{duplicates > 1 ? 's' : ''} · {errors} erreur{errors > 1 ? 's' : ''} · {partial} collecte{partial > 1 ? 's' : ''} partielle{partial > 1 ? 's' : ''}</p><p>La progression est conservée dans cette page uniquement. Une collecte partielle peut être relancée depuis la fiche du média.</p></div>{/if}
+    {#if started}<div class="results" aria-live="polite"><strong>{finished ? 'Parcours terminé' : busy ? 'Progression' : 'Collecte interrompue'}</strong><p>{processed} œuvre{processed > 1 ? 's' : ''} examinée{processed > 1 ? 's' : ''} · {downloaded} image{downloaded > 1 ? 's' : ''} ajoutée{downloaded > 1 ? 's' : ''} · {duplicates} image{duplicates > 1 ? 's' : ''} similaire{duplicates > 1 ? 's' : ''} écartée{duplicates > 1 ? 's' : ''} · {skipped} image{skipped > 1 ? 's' : ''} ignorée{skipped > 1 ? 's' : ''} · {errors} erreur{errors > 1 ? 's' : ''} · {partial} collecte{partial > 1 ? 's' : ''} partielle{partial > 1 ? 's' : ''}</p><p>Les images ignorées comprennent les adresses déjà connues, les ensembles pleins et les affiches trop petites. La progression reste dans cette page ; une collecte partielle peut être relancée depuis la fiche du média.</p></div>{/if}
     {#if recent.length}<details><summary>Derniers résultats</summary><ul>{#each recent as item (item.workId)}<li><strong>{item.title || item.workId}</strong> — {item.error ? collectionError(item.error) : `${item.result?.downloaded ?? 0} image(s) ajoutée(s)${item.result?.partial ? ' · résultat partiel' : ''}`} <button type="button" onclick={() => selected = item}>Gérer les images</button></li>{/each}</ul></details>{/if}
     {#if problems.length}<details><summary>Œuvres à vérifier ({problems.length}{omittedProblems ? ` et ${omittedProblems} autres` : ''})</summary><p>Les résultats partiels ou en erreur peuvent être relancés individuellement dans « Gérer les images ».</p><ul>{#each problems as item (item.workId)}<li><strong>{item.title || item.workId}</strong> — {item.error ? collectionError(item.error) : item.result?.partial ? 'résultat partiel' : 'erreur de fournisseur'} <button type="button" onclick={() => selected = item}>Gérer les images</button></li>{/each}</ul></details>{/if}
   </div>

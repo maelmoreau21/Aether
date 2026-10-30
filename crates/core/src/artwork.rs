@@ -135,6 +135,7 @@ pub fn router(auth: AuthState) -> Router {
             "/api/v1/works/{work}/images/order",
             axum::routing::put(order),
         )
+        .route("/api/v1/works/{work}/images/similar", get(similar_images))
         .route(
             "/api/v1/works/{work}/images/{id}",
             get(read).post(upload).delete(remove),
@@ -356,6 +357,97 @@ impl Fingerprint {
                 .sum::<u32>()
                 <= 48 * 10
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SimilarQuery {
+    #[serde(default = "default_similarity")]
+    threshold: u32,
+}
+fn default_similarity() -> u32 {
+    5
+}
+
+/// Read-only suggestions. Never deletes artwork, even when a match is found.
+async fn similar_images(
+    State(auth): State<AuthState>,
+    Path(work): Path<String>,
+    Query(options): Query<SimilarQuery>,
+    headers: HeaderMap,
+) -> Result<(HeaderMap, Json<Value>), StatusCode> {
+    let actor = auth.authenticate(&headers).await?;
+    if actor.user.role != Role::Administrator {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    allowed(&auth, &headers, &work, false).await?;
+    if options.threshold > 16 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let rows: Vec<(String, String, Option<String>, i64, i64, Option<String>)> = query_as(
+        "SELECT id,kind,language,width,height,fingerprint FROM work_image_entries WHERE work_id=? ORDER BY kind,position,id LIMIT 65"
+    ).bind(&work).fetch_all(auth.store.pool()).await.map_err(db)?;
+    if rows.len() > 64 {
+        return Err(StatusCode::CONFLICT);
+    }
+    let mut pairs = Vec::new();
+    let mut truncated = false;
+    'outer: for (index, (id, kind, language, width, height, fingerprint)) in rows.iter().enumerate()
+    {
+        let Some(fingerprint) = fingerprint else {
+            continue;
+        };
+        let signature = Fingerprint(fingerprint.clone());
+        for (other_id, other_kind, other_language, other_width, other_height, other_fingerprint) in
+            rows.iter().skip(index + 1)
+        {
+            if kind == other_kind
+                && language.as_deref().unwrap_or("") == other_language.as_deref().unwrap_or("")
+                && other_fingerprint.as_ref().is_some_and(|other| {
+                    signature.similar(
+                        other,
+                        *width,
+                        *height,
+                        *other_width,
+                        *other_height,
+                        options.threshold,
+                    )
+                })
+            {
+                if pairs.len() == 128 {
+                    truncated = true;
+                    break 'outer;
+                }
+                pairs.push(json!({"first":id,"second":other_id}));
+            }
+        }
+    }
+    let uncompared = rows
+        .iter()
+        .filter(|row| {
+            row.5.as_ref().is_none_or(|fingerprint| {
+                !Fingerprint(fingerprint.clone()).similar(
+                    fingerprint,
+                    row.3,
+                    row.4,
+                    row.3,
+                    row.4,
+                    0,
+                )
+            })
+        })
+        .count();
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(
+        header::CACHE_CONTROL,
+        "private, no-store"
+            .parse()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    );
+    Ok((
+        response_headers,
+        Json(json!({"pairs":pairs,"uncompared":uncompared,"truncated":truncated})),
+    ))
 }
 
 struct Encoded {
@@ -735,7 +827,7 @@ mod tests {
         .execute(store.pool())
         .await
         .unwrap();
-        query("INSERT INTO inventory_works(id,library_id,identity_key,title) VALUES('work','child','work','Test')").execute(store.pool()).await.unwrap();
+        query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','child','work','Test','{}')").execute(store.pool()).await.unwrap();
         let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
             .await
             .unwrap();
@@ -834,7 +926,7 @@ mod tests {
             .await
             .unwrap();
         let retained = upload(
-            State(auth),
+            State(auth.clone()),
             Path(("work".into(), "poster".into())),
             Query(provider()),
             headers,
@@ -850,6 +942,94 @@ mod tests {
                 .unwrap(),
             2
         );
+        let app = router(auth);
+        let uri = "/api/v1/works/work/images/similar?threshold=5";
+        let anonymous = app
+            .clone()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+        query("INSERT INTO users(id,role) VALUES('reader','user')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        query("INSERT INTO library_permissions(library_id,user_id) VALUES('child','reader')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let token = "b".repeat(64);
+        query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?, 'reader',unixepoch(),unixepoch(),unixepoch()+3600)").bind(crate::auth::hash(&token)).execute(store.pool()).await.unwrap();
+        let reader = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::COOKIE, format!("media_session={token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reader.status(), StatusCode::FORBIDDEN);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::CACHE_CONTROL],
+            "private, no-store"
+        );
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let suggestions: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(suggestions["pairs"].as_array().unwrap().len(), 1);
+        assert_eq!(suggestions["uncompared"], 0);
+        let invalid = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/works/work/images/similar?threshold=17")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM work_image_entries")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            2
+        );
+        for index in 0..16 {
+            query("INSERT INTO work_image_entries(id,work_id,kind,position,width,height,fingerprint) SELECT ?,work_id,kind,position,width,height,fingerprint FROM work_image_entries WHERE work_id='work' LIMIT 1")
+                .bind(format!("extra-{index}"))
+                .execute(store.pool()).await.unwrap();
+        }
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let suggestions: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(suggestions["pairs"].as_array().unwrap().len(), 128);
+        assert_eq!(suggestions["truncated"], true);
     }
     #[test]
     fn perceptual_signature_compares_decoded_pixels_and_preserves_language() {

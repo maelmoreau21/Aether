@@ -13,14 +13,14 @@
   async function migrateLegacy(){busy=true;error='';notice='';try{const result=await adminRequest<typeof legacy>('/api/v1/admin/avatars/migrate-legacy',{method:'POST'});await load();await loadLegacy();notice=`${result.packs} collection(s) et ${result.images} image(s) transférées.`;}catch(e){error=e instanceof Error?e.message:'Transfert impossible.';}finally{busy=false;}}
   async function loadPolicy(){policy=await adminRequest<typeof policy>('/api/v1/admin/avatar-policy');policyLoaded=true;}
   async function savePolicy(){busy=true;error='';notice='';try{await adminRequest('/api/v1/admin/avatar-policy',{method:'PUT',body:JSON.stringify(policy)});notice='Politique enregistrée.';}catch(e){error=e instanceof Error?e.message:'Enregistrement impossible.';try{await loadPolicy();}catch{policyLoaded=false;}}finally{busy=false;}}
-  let uploadName=$state('Mes avatars'),uploadFiles=$state<File[]>([]);
+  let uploadName=$state('Mes avatars'),uploadTarget=$state(''),uploadFiles=$state<File[]>([]);
   let uploadInput=$state<HTMLInputElement>();
   const endpoint=$derived(extensionId ? `/api/v1/admin/extensions/${encodeURIComponent(extensionId)}/avatar-packs` : `/api/v1/admin/avatar-packs`);
   const assignMissingEndpoint=$derived(extensionId ? `/api/v1/admin/extensions/${encodeURIComponent(extensionId)}/avatars/assign-missing` : `/api/v1/admin/avatars/assign-missing`);
   type Avatar={id:string;name:string;url:string};
   let selected=$state(''),images=$state<Avatar[]>([]),renaming=$state('');
   async function showPack(id:string){selected=id;renaming=packs.find(pack=>pack.id===id)?.name??'';images=[];if(!id)return;const result=await adminRequest<{images:Avatar[]}>(`${endpoint}/${encodeURIComponent(id)}/images`);if(selected===id)images=result.images;}
-  async function load(){packs=(await adminRequest<{packs:Pack[]}>(endpoint)).packs;await showPack(packs.some(pack=>pack.id===selected)?selected:packs[0]?.id??'');}
+  async function load(){packs=(await adminRequest<{packs:Pack[]}>(endpoint)).packs;if(uploadTarget&&!packs.some(pack=>pack.id===uploadTarget))uploadTarget='';await showPack(packs.some(pack=>pack.id===selected)?selected:packs[0]?.id??'');}
   async function galleryAction(action:()=>Promise<unknown>,message:string){busy=true;error='';notice='';try{await action();await load();notice=message;}catch(e){error=e instanceof Error?e.message:'Action impossible.';}finally{busy=false;}}
   async function assignMissing(){busy=true;error='';notice='';try{const result=await adminRequest<{count:number}>(assignMissingEndpoint,{method:'POST'});notice=`${result.count} compte${result.count>1?'s':''} ${result.count>1?'ont':'a'} reçu un avatar.`;}catch(e){error=e instanceof Error?e.message:'Attribution impossible.';}finally{busy=false;}}
 
@@ -31,7 +31,7 @@
   async function upload(){
     if(!uploadFiles.length||uploadFiles.length>500||uploadFiles.some(file=>file.size>2*1024*1024)||uploadFiles.reduce((sum,file)=>sum+file.size,0)>64*1024*1024){error='Choisissez de 1 à 500 images de 2 Mo maximum, 64 Mo au total.';return;}
     busy=true;error='';notice='';
-    try{const form=new FormData();form.append('name',uploadName);for(const file of uploadFiles)form.append('images',file);const result=await adminRequest<{count:number}>(endpoint+'/upload',{method:'POST',body:form});await load();notice=`${result.count} avatar${result.count>1?'s':''} envoyé${result.count>1?'s':''} au serveur.`;uploadFiles=[];if(uploadInput)uploadInput.value='';}catch(e){error=e instanceof Error?e.message:'Envoi impossible.';}finally{busy=false;}
+    try{const form=new FormData();if(uploadTarget)form.append('packId',uploadTarget);else form.append('name',uploadName);for(const file of uploadFiles)form.append('images',file);const result=await adminRequest<{id:string;count:number}>(endpoint+'/upload',{method:'POST',body:form});selected=result.id;await load();notice=`${result.count} avatar${result.count>1?'s':''} envoyé${result.count>1?'s':''} au serveur.`;uploadFiles=[];if(uploadInput)uploadInput.value='';}catch(e){error=e instanceof Error?e.message:'Envoi impossible.';}finally{busy=false;}
   }
 
 </script>
@@ -55,10 +55,11 @@
   <button disabled={busy||!packs.some(pack=>pack.count>0)} onclick={()=>void assignMissing()}>Attribuer les avatars manquants maintenant</button>
   <details class="upload" open><summary>Ajouter des images</summary>
     <form onsubmit={event=>{event.preventDefault();void upload();}}>
-      <label>Nom de la collection<input required maxlength="100" bind:value={uploadName} disabled={busy} /></label>
+      <label>Destination<select bind:value={uploadTarget} disabled={busy}><option value="">Nouvelle collection</option>{#each packs as pack (pack.id)}<option value={pack.id}>{pack.name} · {pack.count} avatars</option>{/each}</select></label>
+      {#if !uploadTarget}<label>Nom de la collection<input required maxlength="100" bind:value={uploadName} disabled={busy} /></label>{/if}
       <label>Images<input type="file" bind:this={uploadInput} required multiple accept="image/png,image/jpeg,image/webp" disabled={busy} onchange={event=>uploadFiles=Array.from(event.currentTarget.files??[])} /></label>
       <button disabled={busy||!uploadFiles.length}>Ajouter les avatars</button>
-    </form><small>PNG, JPEG, WebP · 2 Mo par image · 64 Mo par import.</small>
+    </form><small>PNG, JPEG, WebP · 2 Mo par image · 64 Mo par import · 500 images par collection.</small>
   </details>
   <details class="upload"><summary>Importer un pack depuis GitHub</summary>
   <form onsubmit={event=>{event.preventDefault();void discover();}}>

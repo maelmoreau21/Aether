@@ -36,6 +36,8 @@ mod adapters;
 pub(crate) mod collections;
 #[path = "extension_image_collection.rs"]
 mod image_collection;
+#[path = "extension_artwork_rotation.rs"]
+mod artwork_rotation;
 #[path = "extension_repositories.rs"]
 pub(crate) mod repositories;
 
@@ -251,6 +253,10 @@ pub fn router(auth: AuthState) -> Router {
         .route(
             "/api/v1/admin/extensions/images/collect",
             axum::routing::post(image_collection::collect),
+        )
+        .route(
+            "/api/v1/admin/artwork/rotate",
+            axum::routing::post(artwork_rotation::rotate),
         )
         .route(
             "/api/v1/admin/artwork/collect-batch",

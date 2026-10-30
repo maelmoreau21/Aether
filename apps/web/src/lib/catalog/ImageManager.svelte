@@ -12,6 +12,7 @@
   let error=$state(''),busy=$state(false),loading=$state(true),adding=$state(false);
   let fileInput=$state<HTMLInputElement>();
   let imageLanguages=$state(preferences().locale==='en'?'en, fr':'fr, en'),includeNeutral=$state(true),collectionMessage=$state('');
+  let similarityThreshold=$state(5),similarPairs=$state<{first:string;second:string}[] | null>(null),uncompared=$state(0),similarVisible=$state(20),similarTruncated=$state(false);
   const kinds=$derived(library?['poster','backdrop']:Object.keys(labels));
   const base=$derived(workId?`/api/v1/works/${encodeURIComponent(workId)}/images`:`/api/v1/admin/libraries/${encodeURIComponent(library?.id??'')}/images`);
   const imageUrl=(entry:Entry,small=true)=>workId?`${entry.url}${entry.url.includes('?')?'&':'?'}width=${small?320:1280}`:entry.url;
@@ -29,12 +30,12 @@
       const response=await fetch(`${base}/${kind}${workId&&replacing?`?replace=${encodeURIComponent(replacing.id)}`:''}`,{method:workId?'POST':'PUT',headers:{'x-csrf-token':$session?.csrfToken??'','content-type':file.type},body:file,signal:AbortSignal.timeout(20000)});
       if(!response.ok)throw new Error(response.status===422?'Image trop grande, corrompue ou dimensions non acceptées (4096 px maximum).':`Image non enregistrée (HTTP ${response.status}).`);
       if(library){entries=[...entries.filter(e=>e.kind!==kind),{id:kind,kind,url:`${base}/${kind}?v=${crypto.randomUUID()}`,origin:'manual'}];}else await load();
-      adding=false;replacing=null;await onchanged();
+      adding=false;replacing=null;similarPairs=null;await onchanged();
     }catch(cause){error=cause instanceof Error?cause.message:'Erreur';}finally{busy=false;if(fileInput)fileInput.value='';}
   }
   async function remove(entry:Entry){
     if(busy)return;busy=true;error='';
-    try{const response=await fetch(`${base}/${entry.id}`,{method:'DELETE',headers:{'x-csrf-token':$session?.csrfToken??''},signal:AbortSignal.timeout(8000)});if(!response.ok)throw new Error('Image non retirée.');if(library)entries=entries.filter(e=>e.id!==entry.id);else await load();await onchanged();}catch(cause){error=cause instanceof Error?cause.message:'Erreur';}finally{busy=false;}
+    try{const response=await fetch(`${base}/${entry.id}`,{method:'DELETE',headers:{'x-csrf-token':$session?.csrfToken??''},signal:AbortSignal.timeout(8000)});if(!response.ok)throw new Error('Image non retirée.');if(library)entries=entries.filter(e=>e.id!==entry.id);else await load();similarPairs=null;await onchanged();}catch(cause){error=cause instanceof Error?cause.message:'Erreur';}finally{busy=false;}
   }
   async function move(entry:Entry,direction:number){
     const images=entries.filter(e=>e.kind==='backdrop');const index=images.findIndex(e=>e.id===entry.id),next=index+direction;
@@ -58,9 +59,17 @@
       if(!response.ok)throw new Error(`Collecte indisponible (HTTP ${response.status}). Vérifiez les fournisseurs activés et les identifiants du média.`);
       const result=await response.json();
       collectionMessage=`${result.downloaded??0} images téléchargées · ${result.duplicates??0} doublons évités · ${result.skipped??0} ignorées · ${Array.isArray(result.errors)?result.errors.length:result.errors??0} erreurs.${result.partial?' Collecte partielle : relancez pour continuer.':''}`;
-      await load();await onchanged();
+      await load();similarPairs=null;await onchanged();
     }catch(cause){collectionMessage='';error=cause instanceof Error?cause.message:'Collecte indisponible.';}finally{busy=false;}
   }
+  async function findSimilar(){
+    if(busy||!workId)return;
+    if(!Number.isInteger(similarityThreshold)||similarityThreshold<0||similarityThreshold>16){error='Choisissez une tolérance entre 0 et 16.';return;}
+    busy=true;error='';similarPairs=null;similarVisible=20;
+    try{const response=await fetch(`${base}/similar?threshold=${similarityThreshold}`,{cache:'no-store',signal:AbortSignal.timeout(15000)});if(!response.ok)throw new Error('Comparaison des images indisponible.');const result=await response.json() as {pairs:{first:string;second:string}[];uncompared:number;truncated:boolean};similarPairs=result.pairs;uncompared=result.uncompared;similarTruncated=result.truncated;}
+    catch(cause){error=cause instanceof Error?cause.message:'Comparaison impossible.';}finally{busy=false;}
+  }
+  function removeSimilar(id:string){const entry=entries.find(item=>item.id===id);if(entry&&window.confirm('Retirer cette image ? Les fichiers des médias ne seront pas modifiés.'))void remove(entry);}
 </script>
 <dialog bind:this={dialog} class="image-manager" aria-labelledby="image-manager-title" onclose={onclose} oncancel={event=>{if(busy)event.preventDefault();}}>
   <header><button type="button" aria-label="Fermer l’éditeur d’images" disabled={busy} onclick={()=>dialog.close()}>←</button><h2 id="image-manager-title">Modifier les images · {title}</h2></header>
@@ -70,11 +79,25 @@
     {#if workId && $session?.user.role==='administrator'}
       <section class="collection-panel" aria-label="Collecte d’images">
         <h3>Enrichir les images</h3>
-        <p>Les fournisseurs activés recherchent les images à partir des identifiants de ce média. Les doublons visuels sont écartés. Les variantes changent à chaque nouvelle visite dans un onglet ; une image ajoutée manuellement reste prioritaire.</p>
+        <p>Les fournisseurs activés recherchent les images à partir des identifiants de ce média. Les règles de qualité de la bibliothèque s’appliquent à la collecte ; une image ajoutée manuellement reste prioritaire.</p>
         <label>Langues et secours, dans l’ordre<input bind:value={imageLanguages} disabled={busy} placeholder="fr, en" maxlength="100" /></label>
         <label class="neutral-language"><input type="checkbox" bind:checked={includeNeutral} disabled={busy} />Inclure les images sans langue déclarée</label>
         <button type="button" disabled={busy||loading} onclick={collect}>Collecter les images</button>
         {#if collectionMessage}<p role="status">{collectionMessage}</p>{/if}
+      </section>
+      <section class="collection-panel" aria-label="Images similaires">
+        <h3>Comparer les images enregistrées</h3>
+        <p>Repérez les images proches avant de choisir celles à retirer. La comparaison est une estimation et ne supprime rien automatiquement. Les images locales et les anciennes affiches ne sont pas comparées.</p>
+        <label>Tolérance aux différences<input type="number" min="0" max="16" step="1" bind:value={similarityThreshold} disabled={busy} /></label>
+        <button type="button" disabled={busy||loading} onclick={findSimilar}>Rechercher les images similaires</button>
+        {#if similarPairs !== null}
+          <p role="status">{similarPairs.length} paire{similarPairs.length>1?'s':''} trouvée{similarPairs.length>1?'s':''}. Images sans empreinte non comparées : {uncompared}.</p>
+          {#if similarTruncated}<p>La liste est limitée à 128 paires. Relancez la comparaison après avoir retiré les images voulues.</p>{/if}
+          {#each similarPairs.slice(0,similarVisible) as pair (`${pair.first}:${pair.second}`)}
+            <div class="similar-pair">{#each [pair.first,pair.second] as id (id)}{@const entry=entries.find(item=>item.id===id)}{#if entry}<div><img src={imageUrl(entry)} alt={`${labels[entry.kind]} de ${title}`} loading="lazy" /><p>{provenance(entry)}</p><button type="button" disabled={busy} onclick={()=>removeSimilar(id)}>Retirer cette image</button></div>{/if}{/each}</div>
+          {/each}
+          {#if similarVisible<similarPairs.length}<button type="button" onclick={()=>similarVisible+=20}>Afficher davantage de résultats</button>{/if}
+        {/if}
       </section>
     {/if}
     {#if adding}<form class="upload-panel" onsubmit={event=>event.preventDefault()}><fieldset disabled={busy}>
@@ -107,6 +130,7 @@
 <dialog class="zoom" bind:this={preview} aria-label="Aperçu de l’image"><button type="button" onclick={()=>preview.close()}>Fermer</button>{#if selected}<img src={imageUrl(selected,false)} alt={`${labels[selected.kind]} de ${title}`} />{/if}</dialog>
 <style>
   .collection-panel { display:grid;gap:12px;padding:18px;background:var(--color-raised);border-radius:var(--radius-md); } .collection-panel p { margin:0; } .collection-panel label { display:grid;gap:6px; } .collection-panel .neutral-language { display:flex;align-items:center;gap:10px; } .neutral-language input { min-height:20px;width:20px; } .collection-panel button { justify-self:start;padding:8px 14px; }
+  .similar-pair { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; } .similar-pair img { width:100%;height:180px;object-fit:contain;background:var(--color-bg); } .similar-pair div { min-width:0; }
   .image-manager { width:min(1500px,calc(100vw - 24px));max-width:none;max-height:calc(100dvh - 24px);padding:0;border:1px solid var(--color-line);border-radius:14px;background:var(--color-surface);color:var(--color-text); }
   dialog::backdrop { background:rgb(0 0 0 / .8); } header { position:sticky;top:0;display:flex;align-items:center;gap:14px;padding:12px 18px;background:var(--color-surface);border-bottom:1px solid var(--color-line);z-index:2; } h2 { font-size:17px;font-weight:600;margin:0;overflow-wrap:anywhere; } .manager-content { padding:24px; } section { margin-bottom:36px; } .section-heading { display:flex;align-items:center;gap:14px;margin-bottom:22px; } h3 { font-size:18px;margin:0; } button { color:var(--color-text);background:transparent;border:1px solid var(--color-line);border-radius:6px;min-width:40px;min-height:40px;font:inherit;cursor:pointer; } button:disabled { opacity:.4;cursor:default; } button:hover:not(:disabled) { background:var(--color-raised); } .round { border-radius:50%;font-size:26px; }
   .image-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,270px),1fr));gap:24px; } .image-card { border:1px solid var(--color-line);border-radius:12px;overflow:hidden;min-width:0; } .image-preview { display:block;width:100%;aspect-ratio:16/9;border:0;border-radius:0;padding:0;background:var(--color-bg); } .image-preview img { width:100%;height:100%;object-fit:contain; } .card-caption { text-align:center;padding:10px; } h4 { font-size:16px;font-weight:500;margin:0; } p { color:var(--color-muted);font-size:13px;line-height:1.5; } .card-caption p { margin:4px 0; } .card-actions { display:flex;justify-content:center;gap:4px; } .card-actions button { border:0;font-size:22px; } .card-actions .danger:hover { color:var(--color-danger,var(--color-text)); } .upload-panel { background:var(--color-raised);border-radius:var(--radius-md);margin-bottom:26px;padding:18px; } fieldset { min-width:0;display:grid;gap:12px;border:0;margin:0;padding:0; } input,select { max-width:100%;min-height:44px;color:var(--color-text);background:var(--color-surface);border:1px solid var(--color-line);border-radius:6px;padding:8px; } .zoom { max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-line);border-radius:var(--radius-md); } .zoom img { display:block;max-width:100%;max-height:80dvh;object-fit:contain;margin-top:12px; }

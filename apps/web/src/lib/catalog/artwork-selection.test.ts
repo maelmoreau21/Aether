@@ -82,6 +82,15 @@ test('disabled rotation leaves posters fixed and does not write rotation history
   expect(localStorage.getItem('media_artwork_choices_viewer')).toBeNull();
 });
 
+test('server poster choice is shared unless a manual image or personal rotation takes priority', () => {
+  const images = [variant('a', 'poster', 'fr'), variant('server', 'poster', 'en', 'provider', -1)];
+  setArtworkRotationPolicy({ ...policy, enabled: false });
+  expect(selectArtwork({ ...work, imageVariants: images }, current).poster).toBe('/images/server');
+  expect(selectArtwork({ ...work, imageVariants: [...images, variant('manual', 'poster', null, 'manual')] }, current).poster).toBe('/images/manual');
+  setArtworkRotationPolicy({ ...policy, preferredLanguage: 'fr', allowAnyLanguageFallback: false });
+  expect(selectArtwork({ ...work, imageVariants: images }, current).poster).toBe('/images/a');
+});
+
 test('media type, pool size and sequential setting control rotation', () => {
   setArtworkRotationPolicy({ ...policy, rotationMode: 'sequential', poolSize: 2 });
   const item = { ...work, imageVariants: [variant('a', 'poster'), variant('b', 'poster'), variant('c', 'poster')] };

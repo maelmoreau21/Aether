@@ -42,8 +42,8 @@ export class ExternalAudio {
   private videoPause = () => { this.audio.pause(); if (!this.holdingVideo) this.clearStall(); };
   pause() { this.startup?.abort(); this.playbackWait?.abort(); this.resumeEpoch++; this.holdingVideo = false; this.clearStall(); this.audio.pause(); }
   isBuffering() { return this.holdingVideo; }
-  private naturalTail() {
-    const target = this.video.currentTime - this.offset;
+  private naturalTail(position = this.video.currentTime) {
+    const target = position - this.offset;
     // Compare encoded durations; an explicit offset may intentionally make
     // audio finish earlier than video and must not become a truncation error.
     const gap = this.video.duration - this.audio.duration;
@@ -178,9 +178,13 @@ export class ExternalAudio {
     if (this.stopped) throw new Error('Lecteur fermé.');
     this.settings();
     const requested = saved ?? this.video.currentTime;
-    const position = Number.isFinite(requested) ? Math.max(0, requested) : 0;
-    if (position >= this.offset && Number.isFinite(this.audio.duration) && position - this.offset >= this.audio.duration && !this.naturalTail()) throw new Error('La piste audio externe se termine avant cette position.');
-    this.align(true, position); if (!this.naturalTail()) await this.ready();
+    let position = Number.isFinite(requested) ? Math.max(0, requested) : 0;
+    if (Number.isFinite(this.video.duration)) position = Math.min(position, Math.max(0, this.video.duration - .05));
+    // Audio metadata can arrive before video metadata. Defer the ambiguous
+    // short-tail case until the video duration is known during playback.
+    if (!Number.isFinite(this.video.duration) && Number.isFinite(this.audio.duration) && position - this.offset >= this.audio.duration) position = this.video.currentTime;
+    if (position >= this.offset && Number.isFinite(this.audio.duration) && position - this.offset >= this.audio.duration && !this.naturalTail(position)) throw new Error('La piste audio externe se termine avant cette position.');
+    this.align(true, position); if (!this.naturalTail(position)) await this.ready();
     if (this.stopped) throw new Error('Lecteur fermé.');
     if (activate) this.activate();
   }

@@ -89,11 +89,13 @@
         signal: AbortSignal.timeout(20000)
       });
       if (!response.ok) throw new Error('Impossible d’enregistrer cet avatar.');
+      if ($session?.user.id !== current.user.id || $session.csrfToken !== current.csrfToken) return;
       avatarRevision.update((v) => v + 1);
       notice = 'Photo de profil enregistrée.';
       dialog?.close();
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Modification impossible.';
+      if ($session?.user.id === current.user.id && $session.csrfToken === current.csrfToken)
+        error = cause instanceof Error ? cause.message : 'Modification impossible.';
     } finally {
       busy = false;
     }

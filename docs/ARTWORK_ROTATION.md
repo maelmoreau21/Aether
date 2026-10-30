@@ -63,6 +63,30 @@ de synchronisation entre appareils. Une seule variante disponible reste stable.
 
 ## API et bornes
 
+`GET /api/v1/works/{work}/images/similar?threshold=5` permet à un
+administrateur autorisé à accéder à l'œuvre de comparer ses images
+applicatives enregistrées : `pairs` contient les identifiants des paires,
+`uncompared` compte celles dont l'empreinte est absente ou invalide, et
+`truncated` indique que la limite de 128 paires est atteinte. Le seuil est
+borné à 0–16. Cette opération ne supprime rien ; les images locales et
+anciennes affiches hors de ces variantes ne sont pas comparées.
+
+Les options d'une bibliothèque contrôlent ses prochaines collectes :
+`artworkDeduplicate` (défaut `true`), `artworkSimilarity` (0–16, défaut 5),
+`artworkMinPosterWidth` et `artworkMinPosterHeight` (0–4096 pixels, défaut 0,
+sans minimum). Les dossiers actifs héritent des options de leur bibliothèque
+parente. La tolérance règle la distance dHash ; le contrôle des couleurs et
+des proportions reste actif. La comparaison est limitée à une œuvre, un type
+et une langue. Une valeur élevée peut écarter des images différentes.
+
+La taille et la ressemblance ne sont connues qu'après téléchargement et
+décodage. Les affiches trop petites sont comptées dans `skipped`, les images
+similaires dans `duplicates`. Ces réglages ne suppriment pas les images déjà
+présentes et ne filtrent ni les uploads manuels ni les imports individuels.
+Les empreintes des anciennes images qui en sont dépourvues ne sont pas créées
+rétroactivement. Les URLs déjà connues restent évitées indépendamment de la
+détection visuelle.
+
 `GET /api/v1/admin/artwork/works?libraryId=...&limit=25&after=...` liste les
 œuvres par identifiant, avec curseur `nextCursor` et nombre de variantes
 d'affiches applicatives (sans affiches locales ou ancienne affiche manuelle).

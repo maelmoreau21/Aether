@@ -17,6 +17,20 @@ function setup() {
   return { video, audio, error, bridge };
 }
 describe('independent audio timeline',()=>{
+  it('handles an Opus packet tail at the saved position before the video seeks',async()=>{
+    const {video,audio,bridge}=setup();audio.duration=11.96;video.currentTime=0;
+    await bridge.load('/audio',false,undefined,11.97);
+    expect(audio.paused).toBe(true);bridge.destroy();
+  });
+  it('defers a short audio tail if video duration is still unknown',async()=>{
+    const {video,audio,bridge}=setup();video.duration=NaN;audio.duration=11.96;
+    await bridge.load('/audio',false,undefined,11.97);
+    expect(audio.currentTime).toBe(0);bridge.destroy();
+  });
+  it('clamps saved progress to the video duration when a different edition is shorter',async()=>{
+    const {audio,bridge}=setup();await bridge.load('/audio',false,undefined,100);
+    expect(audio.currentTime).toBeCloseTo(11.95);bridge.destroy();
+  });
   it('cancels a readiness wait immediately on pause, before startup buffering begins',async()=>{
     vi.useFakeTimers();const {audio,bridge}=setup();await bridge.load('/audio');
     audio.readyState=1;audio.seeking=true;

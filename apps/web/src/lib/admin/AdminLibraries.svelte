@@ -152,7 +152,7 @@
     </div>
     <footer class="editor-actions">
       {#if formError || error}<p class="editor-error" role="alert">{formError || error}</p>{/if}
-      <p class="save-hint">{folders.length ? 'Les changements d’import s’appliqueront au prochain scan.' : 'Ajoutez un dossier dans Sources et dossiers.'}</p>
+      <p class="save-hint">{folders.length ? 'Les réglages locaux s’appliquent au prochain scan ; les réglages des fournisseurs aux prochaines collectes.' : 'Ajoutez un dossier dans Sources et dossiers.'}</p>
       <div class="footer-buttons"><button type="button" onclick={() => editor?.close()}>Annuler</button><button class="primary" type="submit" disabled={!folders.length}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div>
     </footer>
   </fieldset></form>

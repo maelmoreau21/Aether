@@ -297,7 +297,7 @@ export class NativePlayer implements Player {
         void audioLoading.catch(() => {});
       } else if (source.externalAudioUrl && !segmented) {
         this.externalAudio = createAudio();
-        audioLoading = this.externalAudio.load(audioUrl!, false);
+        audioLoading = this.externalAudio.load(audioUrl!, false, undefined, position);
         void audioLoading.catch(() => {});
       }
       try {

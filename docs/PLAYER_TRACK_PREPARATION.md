@@ -1,5 +1,25 @@
 # P3/P4 — préparation des pistes (18 octobre 2026)
 
+## Reprise d'une piste audio externe — 30 octobre 2026
+
+Le chargement des métadonnées audio commence en parallèle de la récupération de
+la progression, puis la piste est positionnée directement sur la reprise au
+lieu de valider d'abord la position zéro. Les attentes sont bornées et annulées
+à la fermeture. La courte fin naturelle d'une piste Opus reste acceptée ; si
+la durée vidéo n'est pas encore connue, sa vérification est différée.
+Un délai de seek vidéo affiche les positions demandée et atteinte ainsi que
+l'état de seek, sans URL ou jeton. Ces indications ne suffisent pas toujours
+à identifier la cause d'un incident sur un fichier personnel.
+
+Validation locale : Core/Node autonome Rust reconstruit, Chrome et fichier MP4
+AV1/Opus synthétique de 5 400 s avec audio externe ; reprise et six seeks
+éloignés réussis, puis 10,5 s de lecture sans erreur. La réouverture observée
+à 356 ms et la série de seeks stabilisée à 782 ms sont deux observations
+isolées, pas des percentiles. Rapport brut :
+`target/player-long-external-current-20261030/report.json`. Le premier essai
+avec un Core précompilé plus ancien s'était arrêté à la création de bibliothèque,
+avant la lecture. Aucun NAS, film personnel ou endurance de 90 minutes testé.
+
 ## Seeks répétés — 30 octobre 2026
 
 Le watchdog vidéo repart de zéro à chaque nouveau seek et se désarme quand le

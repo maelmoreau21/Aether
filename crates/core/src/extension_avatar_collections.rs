@@ -533,6 +533,7 @@ async fn upload(
     tokio::time::timeout(Duration::from_secs(300),async {
     let invalid = || err(StatusCode::BAD_REQUEST, "invalid_avatar_upload");
     let mut name = None;
+    let mut pack_id = None;
     let mut staged = Vec::new();
     let mut original = 0usize;
     let mut normalized = 0usize;
@@ -546,6 +547,17 @@ async fn upload(
                 bytes.extend_from_slice(&chunk);
             }
             name = Some(String::from_utf8(bytes).map_err(|_| invalid())?);
+            continue;
+        }
+        if field.name() == Some("packId") && pack_id.is_none() {
+            let mut bytes = Vec::new();
+            while let Some(chunk) = field.chunk().await.map_err(|_| invalid())? {
+                if bytes.len() + chunk.len() > 128 { return Err(invalid()); }
+                bytes.extend_from_slice(&chunk);
+            }
+            let value = String::from_utf8(bytes).map_err(|_| invalid())?;
+            if value.is_empty() || value.chars().any(char::is_control) { return Err(invalid()); }
+            pack_id = Some(value);
             continue;
         }
         if field.name() != Some("images") || staged.len() >= 500 {
@@ -594,9 +606,10 @@ async fn upload(
         }
         staged.push((filename, bytes));
     }
-    let name = name
-        .filter(|name| !name.trim().is_empty() && !name.chars().any(char::is_control))
-        .ok_or_else(invalid)?;
+    if pack_id.is_some() && name.is_some() { return Err(invalid()); }
+    let name = if pack_id.is_none() {
+        Some(name.filter(|name| !name.trim().is_empty() && !name.chars().any(char::is_control)).ok_or_else(invalid)?)
+    } else { None };
     if staged.is_empty() {
         return Err(invalid());
     }
@@ -612,23 +625,29 @@ async fn upload(
         stored_images.push((name, meta.sha256));
     }
     let _lock = MUTATIONS.lock().await;
+    admin(&auth, &headers, true).await?;
     check(&auth, &id).await?;
     let mut tx = auth.store.pool().begin().await.map_err(db)?;
-    let count: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM extension_avatar_packs) + (SELECT COUNT(*) FROM avatar_packs)")
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(db)?;
-    if count >= 32 {
-        return Err(err(StatusCode::CONFLICT, "avatar_pack_limit"));
-    }
-    let pack = uuid::Uuid::new_v4().to_string();
+    let pack = if let Some(pack) = pack_id {
+        let exists: i64 = if id.is_native() {
+            query_scalar("SELECT COUNT(*) FROM avatar_packs WHERE id=?").bind(&pack).fetch_one(&mut *tx).await.map_err(db)?
+        } else {
+            query_scalar("SELECT COUNT(*) FROM extension_avatar_packs WHERE id=? AND extension_id=?").bind(&pack).bind(id.extension_id()).fetch_one(&mut *tx).await.map_err(db)?
+        };
+        if exists == 0 { return Err(err(StatusCode::NOT_FOUND, "avatar_pack_not_found")); }
+        let count: i64 = query_scalar(if id.is_native() { "SELECT COUNT(*) FROM avatar_images WHERE pack_id=?" } else { "SELECT COUNT(*) FROM extension_avatar_images WHERE pack_id=?" }).bind(&pack).fetch_one(&mut *tx).await.map_err(db)?;
+        if count + stored_images.len() as i64 > 500 { return Err(err(StatusCode::CONFLICT, "avatar_collection_full")); }
+        pack
+    } else {
+        let count: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM extension_avatar_packs) + (SELECT COUNT(*) FROM avatar_packs)").fetch_one(&mut *tx).await.map_err(db)?;
+        if count >= 32 { return Err(err(StatusCode::CONFLICT, "avatar_pack_limit")); }
+        let pack = uuid::Uuid::new_v4().to_string();
+        let mut insert = query(if id.is_native() { "INSERT INTO avatar_packs(id,name,source) VALUES(?,?,'upload')" } else { "INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES(?,?,?,'upload')" }).bind(&pack);
+        if !id.is_native() { insert = insert.bind(id.extension_id()); }
+        insert.bind(name.as_deref().unwrap_or_default().trim()).execute(&mut *tx).await.map_err(db)?;
+        pack
+    };
     let count = stored_images.len();
-    let mut insert = query(if id.is_native() { "INSERT INTO avatar_packs(id,name,source) VALUES(?,?,'upload')" } else { "INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES(?,?,?,'upload')" }).bind(&pack);
-    if !id.is_native() { insert = insert.bind(id.extension_id()); }
-    insert.bind(name.trim())
-        .execute(&mut *tx)
-        .await
-        .map_err(db)?;
     for (name, sha256) in stored_images {
         query(if id.is_native() { "INSERT INTO avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" } else { "INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" })
             .bind(uuid::Uuid::new_v4().to_string())
@@ -1015,7 +1034,8 @@ mod tests {
             .unwrap();
         let boundary = "fixture-boundary";
         let mut multipart=format!("--{boundary}\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nPack\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"images\"; filename=\"one.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n").into_bytes();
-        multipart.extend(png.into_inner());
+        let jpeg = png.into_inner();
+        multipart.extend(&jpeg);
         multipart.extend(format!("\r\n--{boundary}--\r\n").as_bytes());
         let response = app
             .clone()
@@ -1041,6 +1061,79 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
+        let append = |pack: &str| {
+            let mut data = format!("--{boundary}\r\nContent-Disposition: form-data; name=\"packId\"\r\n\r\n{pack}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"images\"; filename=\"two.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n").into_bytes();
+            data.extend(&jpeg);
+            data.extend(format!("\r\n--{boundary}--\r\n").as_bytes());
+            data
+        };
+        for (id, token, expected) in [
+            (&pack[..], &csrf[..], StatusCode::OK),
+            ("missing", &csrf[..], StatusCode::NOT_FOUND),
+            (&pack[..], "", StatusCode::FORBIDDEN),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/admin/avatar-packs/upload")
+                        .header(header::COOKIE, &cookie)
+                        .header(header::ORIGIN, "http://localhost")
+                        .header("x-csrf-token", token)
+                        .header(
+                            header::CONTENT_TYPE,
+                            format!("multipart/form-data; boundary={boundary}"),
+                        )
+                        .body(Body::from(append(id)))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected);
+        }
+        let count: i64 = query_scalar("SELECT COUNT(*) FROM avatar_images WHERE pack_id=?")
+            .bind(&pack)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 2);
+        let sha: String = query_scalar("SELECT sha256 FROM avatar_images WHERE pack_id=? LIMIT 1")
+            .bind(&pack)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        query("WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<498) INSERT INTO avatar_images(id,pack_id,name,sha256) SELECT 'filler-' || n,?,'avatar',? FROM seq")
+            .bind(&pack).bind(sha).execute(store.pool()).await.unwrap();
+        let full = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/avatar-packs/upload")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::ORIGIN, "http://localhost")
+                    .header("x-csrf-token", &csrf)
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(append(&pack)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(full.status(), StatusCode::CONFLICT);
+        let count: i64 = query_scalar("SELECT COUNT(*) FROM avatar_images WHERE pack_id=?")
+            .bind(&pack)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 500);
+        query("DELETE FROM avatar_images WHERE id LIKE 'filler-%'")
+            .execute(store.pool())
+            .await
+            .unwrap();
         let response = app
             .clone()
             .oneshot(

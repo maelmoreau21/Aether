@@ -9,7 +9,10 @@ const out = 'target/ux-artwork'; fs.mkdirSync(out, {recursive:true});
   for (const width of [390,1440]) {
    const { page,context,errors }=await setup(browser,width,'dark');
    let calls=0, failList=false, lastQuery=null;
-   await page.route('**/api/v1/works/a/images', route=>route.fulfill({json:{images:[]}}));
+   let images=[{id:'one',kind:'poster',origin:'provider',url:'/ux-art/one',language:'fr'},{id:'two',kind:'poster',origin:'provider',url:'/ux-art/two',language:'fr'}];
+   await page.route('**/api/v1/works/a/images', route=>route.fulfill({json:{images}}));
+   await page.route('**/api/v1/works/a/images/similar?*', route=>route.fulfill({json:{pairs:[{first:'one',second:'two'}],uncompared:1,truncated:false}}));
+   await page.route('**/api/v1/works/a/images/two', route=>{images=images.filter(item=>item.id!=='two');return route.fulfill({status:204});});
    await page.route('**/api/v1/admin/artwork/**', async route=>{
     const url=new URL(route.request().url());
     if(url.pathname.endsWith('/works')) lastQuery=url.searchParams;
@@ -24,7 +27,7 @@ const out = 'target/ux-artwork'; fs.mkdirSync(out, {recursive:true});
    await page.getByText('2 variantes enregistrées').waitFor();
    await page.getByLabel('Rechercher un titre').fill('Premier'); await page.getByLabel('Variantes enregistrées').selectOption('with'); await page.getByRole('button',{name:'Rechercher',exact:true}).click(); await page.getByText('2 variantes enregistrées').waitFor(); assert.equal(lastQuery.get('q'),'Premier'); assert.equal(lastQuery.get('posters'),'with');
    await page.getByLabel('Rechercher un titre').fill(''); await page.getByLabel('Variantes enregistrées').selectOption('all'); await page.getByRole('button',{name:'Rechercher',exact:true}).click(); await page.getByText('2 variantes enregistrées').waitFor();
-   await page.getByRole('button',{name:'Gérer les images'}).first().click(); await page.getByRole('dialog',{name:'Modifier les images · Premier film'}).waitFor(); await page.getByRole('button',{name:'Fermer l’éditeur d’images'}).click();
+   await page.getByRole('button',{name:'Gérer les images'}).first().click(); const editor=page.getByRole('dialog',{name:'Modifier les images · Premier film'}); await editor.waitFor(); await editor.getByRole('button',{name:'Rechercher les images similaires'}).click(); await editor.getByText('1 paire trouvée.',{exact:false}).waitFor(); page.once('dialog',dialog=>dialog.accept()); await editor.getByRole('button',{name:'Retirer cette image'}).last().click(); await page.waitForFunction(()=>!document.querySelector('.similar-pair')); assert.equal(images.length,1); await page.getByRole('button',{name:'Fermer l’éditeur d’images'}).click();
    await page.getByRole('button',{name:'Page suivante'}).click(); await page.getByText('Deuxième film',{exact:true}).waitFor();
    await page.getByRole('button',{name:'Page précédente'}).click(); await page.getByText('Premier film',{exact:true}).waitFor();
    await page.getByRole('button',{name:'Lancer la collecte'}).click();

@@ -101,6 +101,13 @@ export function selectArtwork(work: Work | null | undefined, current: Session | 
       ? policy.enabledLibraries.includes(work.libraryId)
       : ((work.kind === 'film' && (policy.enableMovies ?? true)) || (work.kind === 'series' && (policy.enableSeries ?? true)));
     const rotation = kind === 'poster' && policy.enabled && isLibraryAllowed;
+    if (kind === 'poster' && !rotation) {
+      const serverChoice = candidates.find(image => image.origin === 'provider' && image.position < 0);
+      if (serverChoice) {
+        selected[kind] = serverChoice.url;
+        continue;
+      }
+    }
     const selectionLanguages = rotation ? [policy.preferredLanguage, policy.fallbackLanguage] : languages;
     if (rotation) {
       candidates = candidates.filter(image => {

@@ -68,16 +68,30 @@
     previewFailedSheets = new Set();
     if (!id || media.synthetic) return;
     const controller = new AbortController();
-    void fetch('/api/v1/assets/' + encodeURIComponent(id) + '/trickplay', {
-      credentials: 'same-origin', signal: controller.signal
-    }).then(res => res.ok ? res.json() : null).then(value => {
-      if (controller.signal.aborted || !value) return;
-      if (value.intervalMs >= 1000 && value.width > 0 && value.height > 0 &&
-          value.columns > 0 && value.rows > 0 && value.thumbnailCount > 0 &&
-          value.sheetCount > 0 && typeof value.urlPrefix === 'string' &&
-          value.urlPrefix.startsWith('/api/v1/assets/')) trickplay = value;
-    }).catch(() => {});
-    return () => controller.abort();
+    let retries = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const check = async () => {
+      try {
+        const res = await fetch('/api/v1/assets/' + encodeURIComponent(id) + '/trickplay', {
+          credentials: 'same-origin', signal: controller.signal
+        });
+        const value = await res.json().catch(() => null);
+        if (controller.signal.aborted || !value) return;
+        if (res.ok && value.status === 'ready' &&
+            value.intervalMs >= 1000 && value.width > 0 && value.height > 0 &&
+            value.columns > 0 && value.rows > 0 && value.thumbnailCount > 0 &&
+            value.sheetCount > 0 && typeof value.urlPrefix === 'string' &&
+            value.urlPrefix === '/api/v1/assets/' + encodeURIComponent(id) + '/trickplay/') {
+          trickplay = value;
+          return;
+        }
+        if (res.status === 202 && value.status === 'generating' && retries++ < 30) {
+          timer = setTimeout(() => void check(), 4000);
+        }
+      } catch { /* unavailable: keep the ordinary seek timer */ }
+    };
+    void check();
+    return () => { controller.abort(); if (timer) clearTimeout(timer); };
   });
   const previewFrame = $derived.by(() => {
     if (hoverTime === null || !trickplay || !playback.duration) return null;

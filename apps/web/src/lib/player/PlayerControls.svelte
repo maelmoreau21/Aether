@@ -61,14 +61,10 @@
   let triggers: HTMLDivElement;
   let hoverTime = $state<number | null>(null);
   let trickplay = $state<Media['trickplay']>(null);
-  let previewAssetId = $state('');
-  let previewImageReady = $state(false);
   let previewFailedSheets = $state<Set<number>>(new Set());
   $effect(() => {
     const id = media?.id ?? '';
-    previewAssetId = id;
     trickplay = null;
-    previewImageReady = false;
     previewFailedSheets = new Set();
     if (!id || media.synthetic) return;
     const controller = new AbortController();
@@ -456,7 +452,7 @@
 
   <div class="progress-line">
     {#if hoverTime !== null}
-      <output class="seek-preview" aria-hidden="true">
+      <output class="seek-preview" aria-hidden="true" style:left={playback.duration ? Math.max(10, Math.min(90, hoverTime! / playback.duration * 100)) + '%' : '50%'}>
         {#if previewFrame}
           <span class="trickplay-frame" style:width={previewFrame.width + 'px'} style:height={previewFrame.height + 'px'}>
             <img src={previewFrame.url} alt="" draggable="false"

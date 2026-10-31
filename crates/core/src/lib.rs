@@ -46,6 +46,7 @@ pub mod product;
 #[cfg(test)]
 mod product_tests;
 pub mod progress;
+pub mod trickplay;
 pub mod scans;
 pub mod user_media_policy;
 
@@ -194,6 +195,8 @@ async fn secure_app_with_jobs_and_web_dist(
             get(indexed_subtitle).head(indexed_subtitle),
         )
         .route("/api/v1/media/{id}", get(indexed_descriptor))
+        .route("/api/v1/assets/{id}/trickplay", get(indexed_trickplay))
+        .route("/api/v1/assets/{id}/trickplay/{index}", get(indexed_trickplay_tile).head(indexed_trickplay_tile))
         .route(
             "/api/v1/assets/{id}/image",
             get(indexed_image).head(indexed_image),
@@ -313,6 +316,21 @@ async fn indexed_image(
     request: Request,
 ) -> Response {
     inventory::image(&store, &id, request).await
+}
+
+async fn indexed_trickplay(
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    trickplay::manifest(&store, &id).await
+}
+
+async fn indexed_trickplay_tile(
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path((id, index)): axum::extract::Path<(String, usize)>,
+    request: Request,
+) -> Response {
+    trickplay::tile(&store, &id, index, request).await
 }
 
 async fn indexed_descriptor(

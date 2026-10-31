@@ -37,7 +37,6 @@
   let markerKind = $state<'intro' | 'credits' | 'recap' | 'preview'>('intro');
   let hasAutoSkippedIntro = false;
   let hasAutoSkippedCredits = false;
-  let hasAutoSkippedRecap = false;
   let markerEnabled = $state(true);
   let markerStart = $state(0);
   let markerEnd = $state(0);
@@ -233,7 +232,6 @@
       if (current !== generation) return;
       hasAutoSkippedIntro = false;
       hasAutoSkippedCredits = false;
-      hasAutoSkippedRecap = false;
       const skipPreferences = preferences();
       active = {
         ...media,

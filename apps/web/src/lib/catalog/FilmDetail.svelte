@@ -85,7 +85,7 @@
         {#each playableMedia as item (item.id)}
           {@const vTrack = item.sources[0]?.tracks?.find(t => t.codec_type === 'video')}
           {@const res = videoResolutionBadge(vTrack?.width, vTrack?.height)}
-          <button type="button" class="version-chip" aria-pressed={selected === item.id} aria-label={`Sélectionner la version ${sourceLabel(item)}`} onclick={() => selected = item.id}>
+          <button type="button" class="version-chip" aria-pressed={selected === item.id} onclick={() => selected = item.id}>
             {res ? `${res} (${sourceLabel(item)})` : sourceLabel(item)}
           </button>
         {/each}

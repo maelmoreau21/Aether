@@ -33,8 +33,8 @@
     class:is-watched={isWatched}
     class:compact
     aria-pressed={isWatched}
-    aria-label={isWatched ? 'Vu — cliquer pour marquer comme non vu' : 'Marquer comme vu'}
-    title={isWatched ? 'Déjà vu — cliquer pour marquer comme non vu' : 'Marquer comme vu'}
+    aria-label={saving ? 'Enregistrement…' : isWatched ? 'Marquer non vu' : 'Marquer comme vu'}
+    title={saving ? 'Enregistrement…' : isWatched ? 'Marquer non vu' : 'Marquer comme vu'}
     disabled={saving}
     onclick={toggle}
   >
@@ -44,13 +44,11 @@
     {#if !compact}
       <span class="watch-label">
         {#if saving}
-          …
+          Enregistrement…
         {:else if isWatched}
-          Vu
-        {:else if progress?.position && progress.position > 0}
-          En cours ({Math.floor(progress.position / 60)} min)
+          Marquer non vu
         {:else}
-          Vu
+          Marquer comme vu
         {/if}
       </span>
     {/if}

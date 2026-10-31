@@ -8,6 +8,7 @@
     - Correction de l'auto-déréférencement `&mut conn` (au lieu de `&mut *conn`).
     - Ajout de `#![allow(clippy::type_complexity, clippy::collapsible_if)]` au niveau du module pour les requêtes tuples SQLx volumineuses et blocs conditionnels.
 - **Corrections CI Navigateur Chrome (Films & Séries - Playwright)** :
+  - `apps/web/src/lib/catalog/WatchStatus.svelte` : alignement des labels ARIA et visuels (`Marquer non vu` / `Marquer comme vu` / `Enregistrement…`) sur les sélecteurs stricts de `scripts/browser-scanner.cjs` (lignes 318-322).
   - `apps/web/src/lib/catalog/FilmDetail.svelte` et `SeriesDetail.svelte` : rétablissement du bloc collapsible `<details class="personal-panel">` (`Mon suivi et mes préférences` / `Mes préférences pour cette série`) et du panneau `<details class="versions-panel">` (`Versions et informations techniques`) qui avaient été accidentellement écrasés, tout en retirant les doublons de boutons d'action dans le Hero pour respecter le mode strict Playwright.
 - **Validations réelles** :
   - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 erreur, 0 avertissement.

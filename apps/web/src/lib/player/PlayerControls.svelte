@@ -60,6 +60,46 @@
   let panel = $state<HTMLDivElement>();
   let triggers: HTMLDivElement;
   let hoverTime = $state<number | null>(null);
+  let trickplay = $state<Media['trickplay']>(null);
+  let previewAssetId = $state('');
+  let previewImageReady = $state(false);
+  let previewFailedSheets = $state<Set<number>>(new Set());
+  $effect(() => {
+    const id = media?.id ?? '';
+    previewAssetId = id;
+    trickplay = null;
+    previewImageReady = false;
+    previewFailedSheets = new Set();
+    if (!id || media.synthetic) return;
+    const controller = new AbortController();
+    void fetch('/api/v1/assets/' + encodeURIComponent(id) + '/trickplay', {
+      credentials: 'same-origin', signal: controller.signal
+    }).then(res => res.ok ? res.json() : null).then(value => {
+      if (controller.signal.aborted || !value) return;
+      if (value.intervalMs >= 1000 && value.width > 0 && value.height > 0 &&
+          value.columns > 0 && value.rows > 0 && value.thumbnailCount > 0 &&
+          value.sheetCount > 0 && typeof value.urlPrefix === 'string' &&
+          value.urlPrefix.startsWith('/api/v1/assets/')) trickplay = value;
+    }).catch(() => {});
+    return () => controller.abort();
+  });
+  const previewFrame = $derived.by(() => {
+    if (hoverTime === null || !trickplay || !playback.duration) return null;
+    const count = Math.min(trickplay.thumbnailCount, trickplay.sheetCount * trickplay.columns * trickplay.rows);
+    const frame = Math.max(0, Math.min(count - 1, Math.floor(hoverTime * 1000 / trickplay.intervalMs)));
+    const perSheet = trickplay.columns * trickplay.rows;
+    const sheet = Math.floor(frame / perSheet);
+    if (previewFailedSheets.has(sheet)) return null;
+    const local = frame % perSheet;
+    return {
+      url: trickplay.urlPrefix + sheet,
+      width: trickplay.width, height: trickplay.height,
+      x: (local % trickplay.columns) * trickplay.width,
+      y: Math.floor(local / trickplay.columns) * trickplay.height,
+      fullWidth: trickplay.columns * trickplay.width,
+      fullHeight: trickplay.rows * trickplay.height
+    };
+  });
   let canSkipIntro = $derived(Boolean(media?.intro && playback.position >= media.intro.start && playback.position < media.intro.end));
   let canSkipCredits = $derived(Boolean(media?.credits && playback.position >= media.credits.start && playback.position < media.credits.end));
 
@@ -416,7 +456,19 @@
 
   <div class="progress-line">
     {#if hoverTime !== null}
-      <output class="seek-preview" aria-hidden="true">{clock(hoverTime)}</output>
+      <output class="seek-preview" aria-hidden="true">
+        {#if previewFrame}
+          <span class="trickplay-frame" style:width={previewFrame.width + 'px'} style:height={previewFrame.height + 'px'}>
+            <img src={previewFrame.url} alt="" draggable="false"
+              style:width={previewFrame.fullWidth + 'px'}
+              style:height={previewFrame.fullHeight + 'px'}
+              style:transform={`translate(-${previewFrame.x}px, -${previewFrame.y}px)`}
+              onerror={() => { if (previewFrame) previewFailedSheets = new Set([...previewFailedSheets, Math.floor(hoverTime! * 1000 / trickplay!.intervalMs / (trickplay!.rows * trickplay!.columns))]); }}
+            />
+          </span>
+        {/if}
+        <span>{clock(hoverTime)}</span>
+      </output>
     {/if}
     <input
       class="seek"
@@ -749,8 +801,13 @@
   }
   .seek-preview {
     position: absolute;
-    right: 0;
-    top: -28px;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 100%;
+    display: grid;
+    gap: 4px;
+    justify-items: center;
+    pointer-events: none;
     font-size: 11.5px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
@@ -764,6 +821,15 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   }
 
+  .trickplay-frame {
+    display: block;
+    overflow: hidden;
+    position: relative;
+    border-radius: var(--radius-xs);
+    max-width: min(70vw, 320px);
+    max-height: 180px;
+  }
+  .trickplay-frame img { position: absolute; top: 0; left: 0; max-width: none; }
   .floating-menu {
     position: absolute;
     bottom: calc(100% - 90px);

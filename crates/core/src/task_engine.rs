@@ -156,15 +156,18 @@ async fn enqueue_spec(
         mode,
     } = spec;
     if !(0..=1000).contains(&priority)
-        || !matches!(category, "scan" | "analyze" | "prepare" | "image")
-        || !matches!(width, 320 | 640 | 1280)
+        || !matches!(
+            category,
+            "scan" | "analyze" | "prepare" | "image" | "trickplay"
+        )
+        || !matches!(width, 160 | 240 | 320 | 640 | 1280)
         || target.len() > 128
         || component.len() > 64
         || (category == "scan" && (!target.is_empty() || !component.is_empty() || width != 640))
         || (category != "scan" && (target.is_empty() || mode != "incremental"))
         || (category == "analyze" && !matches!(component, "" | "fingerprint"))
-        || (category == "image" && !component.is_empty())
-        || (category != "image" && width != 640)
+        || (matches!(category, "image" | "trickplay") && !component.is_empty())
+        || (!matches!(category, "image" | "trickplay") && width != 640)
         || (category == "prepare" && !valid_component(component))
         || !matches!(
             mode,

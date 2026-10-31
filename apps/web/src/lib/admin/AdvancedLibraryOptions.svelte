@@ -38,11 +38,11 @@
   <ProviderPriority id="segment-providers" label="Segments média" bind:value={options.segmentProviders} suggestions={providers} />
 </details>
 
-<details class="advanced-section"><summary id="library-trickplay-heading"><span>Trickplay</span><small>Moteur à venir</small></summary>
-  <p class="notice">Préparez les aperçus affichés pendant un déplacement dans la vidéo. Aucun aperçu n’est encore généré par ces réglages.</p>
+<details class="advanced-section"><summary id="library-trickplay-heading"><span>Trickplay</span></summary>
+  <p class="notice">Génération native de planches de miniatures et réutilisation automatique des planches Jellyfin existantes.</p>
   <label class="check"><input type="checkbox" bind:checked={options.trickplayEnabled} /> Activer l’extraction d’images trickplay</label>
   <label class="check"><input type="checkbox" bind:checked={options.trickplayDuringScan} /> Extraire les images trickplay pendant le scan</label>
-  <div class="grid"><div><label for="trickplay-interval">Intervalle entre les aperçus (secondes)</label><input id="trickplay-interval" type="number" min="1" max="60" step="1" required bind:value={options.trickplayIntervalSeconds} /></div><div><label for="trickplay-width">Largeur des aperçus (pixels)</label><input id="trickplay-width" type="number" min="160" max="1920" step="1" required bind:value={options.trickplayWidth} /></div></div>
+  <div class="grid"><div><label for="trickplay-interval">Intervalle entre les aperçus (secondes)</label><input id="trickplay-interval" type="number" min="1" max="60" step="1" required bind:value={options.trickplayIntervalSeconds} /></div><div><label for="trickplay-width">Largeur des aperçus (pixels)</label><input id="trickplay-width" type="number" min="160" max="1920" step="1" required bind:value={options.trickplayWidth} /></div><div><label for="trickplay-quality">Qualité JPEG (1–31, 7 recommandé)</label><input id="trickplay-quality" type="number" min="1" max="31" step="1" required bind:value={options.trickplayQuality} /></div></div>
   <p class="hint">Un intervalle plus court et des images plus grandes demanderont davantage de calcul et de stockage.</p>
 </details>
 

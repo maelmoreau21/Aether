@@ -2787,9 +2787,22 @@ pub async fn relay_from_remote_node(
             .nth(1)
             .and_then(|s| s.split('?').next())
             .map(|s| format!("prepared:{s}"));
-        let target_kind = prepared
-            .as_deref()
-            .unwrap_or(if is_image { "image" } else { "asset" });
+        let target_kind_str = if let Some(index) = path_and_query
+            .split("/trickplay/")
+            .nth(1)
+            .and_then(|s| s.split('?').next())
+        {
+            format!("trickplay:{index}")
+        } else if path_and_query.ends_with("/trickplay") || path_and_query.contains("/trickplay?") {
+            "trickplay".to_string()
+        } else if let Some(ref s) = prepared {
+            s.clone()
+        } else if is_image {
+            "image".to_string()
+        } else {
+            "asset".to_string()
+        };
+        let target_kind = target_kind_str.as_str();
         let parts: Vec<&str> = path_and_query
             .split('?')
             .next()

@@ -1,3 +1,19 @@
+## 31 octobre 2026 — Finalisation et amélioration du système Trickplay (PR #27)
+
+- **Déport de la génération et du stockage vers les Media Nodes** : Le Core assure l'authentification stricte (RBAC `administrator`/`user`), le contrôle des accès aux bibliothèques et le respect du contrôle parental, puis délègue à `LocalNode.trickplay()` ou relaie via protocole interne authentifié (`relay_from_remote_node`). Aucun chemin disque arbitraire n'est accepté depuis le frontend.
+- **Moteur FFmpeg optimisé & Codecs modernes** : Intégration de `format=yuvj420p` dans le filtre vidéo FFmpeg (`fps=...,scale=...:flags=fast_bilinear,format=yuvj420p,tile=...`), garantissant la compatibilité totale avec les sources AV1 10-bit (`yuv420p10le`), HEVC 10-bit, VP9 et H.264 vers des planches JPEG 8-bit.
+- **Gestionnaire de cache persistant & Éviction LRU** : Stockage configurable (`MEDIA_TRICKPLAY_CACHE_DIR`, quota `MEDIA_TRICKPLAY_MAX_CACHE_MB`). Déduplication par empreinte SHA-256 (taille, mtime ns, chemin relatif, durée, largeur, intervalle, qualité JPEG). Éviction LRU automatique à 80 % du quota maximal en cas de dépassement. Nettoyage des dossiers temporaires orphelins résiduels (`*.tmp.*` et `.in_progress` > 24h).
+- **Compatibilité Jellyfin dynamique** : Détection automatique des formats et grilles de planches `{width} - {columns}x{rows}` (ex. 320 - 10x10, 240 - 5x5, etc.), extraction directe des dimensions réelles depuis l'en-tête du premier JPEG (`0.jpg`), comptage des planches consécutives et calcul automatique de l'intervalle réel.
+- **Paramètres d'administration & Options de bibliothèque** : Ajout des réglages serveur globaux (`trickplay_enabled`, `trickplay_quality`, `trickplay_width`, `trickplay_interval_seconds`, `trickplay_auto_generate`, `trickplay_max_cache_mb`) dans `server_settings.rs` et `AdminSettings.svelte` ; surcharge possible par bibliothèque dans `library_options.rs` et `AdvancedLibraryOptions.svelte`.
+- **Expérience SvelteKit & Lecteur** : Prise en charge unifiée souris et tactile (`pointerdown`, `pointermove`, `pointerup`, `pointercancel`, `input`) avec bornage strict de position. Préchargement intelligent des planches adjacentes (`sheet - 1` et `sheet + 1`) via `SvelteSet`. Dégradation gracieuse en cas d'indisponibilité sans impacter la lecture.
+- **Tâches en arrière-plan & Priorité au streaming** : Suspension et yield coopératif de la génération FFmpeg dès que `active_streams > 0`. Reprise rapide (resumable) à partir des planches déjà calculées via fast-seek (`-ss`) et `-start_number`.
+- **Validations réelles** :
+  - `cargo fmt --check` : 0 différence.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --locked --workspace --lib` : 13 tests `media-contracts`, 95 tests `media-node` (dont `parses_jellyfin_grid_folder_name`, `fingerprint_differs_on_modified_source_or_params`, `enforce_quota_evicts_oldest_directories`), 132 tests `media-poc` (dont `trickplay::tests::grid_bounds_are_consistent`, `server_settings::tests::legacy_settings_deserialize_with_trickplay_defaults`, `server_settings::tests::custom_trickplay_settings_roundtrip`, tests `library_options`).
+  - Web : `npm run check` (0 erreur, 1 avertissement préexistant), `npm run lint` (0 erreur, 0 avertissement), `npm test` (30 suites, 215 tests réussis dont 7 tests unitaires `trickplay.test.ts`), `npm run build` (build statique réussi sans erreur).
+  - Documentation mise à jour dans `docs/TRICKPLAY.md`.
+
 ## 31 octobre 2026 — Correction cargo fmt et lint clippy
 
 - Formatage de `crates/core/src/extension_artwork_rotation.rs` et `crates/core/src/extensions.rs` (`cargo fmt`) pour résoudre l'échec de la CI GitHub Actions sur `cargo fmt --check`.

@@ -5,12 +5,30 @@
   let { section }: { section: string } = $props();
   let name = $state(''), welcome = $state(''), ssoLabel = $state('Se connecter avec SSO'), error = $state(''), notice = $state('');
   let blockSsoLocalAccounts=$state(true);
+  let trickplayEnabled = $state(true), trickplayQuality = $state(7), trickplayWidth = $state(320);
+  let trickplayIntervalSeconds = $state(10), trickplayAutoGenerate = $state(false), trickplayMaxCacheMb = $state(5120);
   let loading = $state(true), saving = $state(false);
   let network = $state<{ publicUrl: string; secureCookies: boolean; webPath: string; apiPath: string } | null>(null);
   async function load(target: string) {
     loading = true; error = ''; notice = '';
     try {
-      if (target === '#general-section') { const data = await adminRequest<{ serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean }>('/api/v1/admin/settings'); blockSsoLocalAccounts=data.blockSsoLocalAccounts; name = data.serverName; welcome = data.welcomeMessage; ssoLabel = data.ssoButtonLabel ?? 'Se connecter avec SSO'; }
+      if (target === '#general-section') {
+        const data = await adminRequest<{
+          serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean;
+          trickplayEnabled?: boolean; trickplayQuality?: number; trickplayWidth?: number;
+          trickplayIntervalSeconds?: number; trickplayAutoGenerate?: boolean; trickplayMaxCacheMb?: number;
+        }>('/api/v1/admin/settings');
+        blockSsoLocalAccounts = data.blockSsoLocalAccounts;
+        name = data.serverName;
+        welcome = data.welcomeMessage;
+        ssoLabel = data.ssoButtonLabel ?? 'Se connecter avec SSO';
+        trickplayEnabled = data.trickplayEnabled ?? true;
+        trickplayQuality = data.trickplayQuality ?? 7;
+        trickplayWidth = data.trickplayWidth ?? 320;
+        trickplayIntervalSeconds = data.trickplayIntervalSeconds ?? 10;
+        trickplayAutoGenerate = data.trickplayAutoGenerate ?? false;
+        trickplayMaxCacheMb = data.trickplayMaxCacheMb ?? 5120;
+      }
       else network = await adminRequest('/api/v1/admin/network');
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Chargement impossible.'; }
     finally { loading = false; }
@@ -19,9 +37,31 @@
   async function save(event: SubmitEvent) {
     event.preventDefault(); if (saving) return; saving = true; error = ''; notice = '';
     try {
-      await adminRequest('/api/v1/admin/settings', { method: 'PUT', body: JSON.stringify({ serverName: name, welcomeMessage: welcome, ssoButtonLabel: ssoLabel, blockSsoLocalAccounts }) });
-      const saved = await adminRequest<{ serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean }>('/api/v1/admin/settings');
-      blockSsoLocalAccounts=saved.blockSsoLocalAccounts; name = saved.serverName; welcome = saved.welcomeMessage; ssoLabel = saved.ssoButtonLabel; serverPresentation.set(saved); notice = 'Paramètres enregistrés.';
+      await adminRequest('/api/v1/admin/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          serverName: name, welcomeMessage: welcome, ssoButtonLabel: ssoLabel, blockSsoLocalAccounts,
+          trickplayEnabled, trickplayQuality, trickplayWidth, trickplayIntervalSeconds,
+          trickplayAutoGenerate, trickplayMaxCacheMb
+        })
+      });
+      const saved = await adminRequest<{
+        serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean;
+        trickplayEnabled?: boolean; trickplayQuality?: number; trickplayWidth?: number;
+        trickplayIntervalSeconds?: number; trickplayAutoGenerate?: boolean; trickplayMaxCacheMb?: number;
+      }>('/api/v1/admin/settings');
+      blockSsoLocalAccounts = saved.blockSsoLocalAccounts;
+      name = saved.serverName;
+      welcome = saved.welcomeMessage;
+      ssoLabel = saved.ssoButtonLabel;
+      trickplayEnabled = saved.trickplayEnabled ?? true;
+      trickplayQuality = saved.trickplayQuality ?? 7;
+      trickplayWidth = saved.trickplayWidth ?? 320;
+      trickplayIntervalSeconds = saved.trickplayIntervalSeconds ?? 10;
+      trickplayAutoGenerate = saved.trickplayAutoGenerate ?? false;
+      trickplayMaxCacheMb = saved.trickplayMaxCacheMb ?? 5120;
+      serverPresentation.set(saved);
+      notice = 'Paramètres enregistrés.';
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Enregistrement impossible.'; }
     finally { saving = false; }
   }
@@ -33,6 +73,17 @@
     <label>Message d’accueil<textarea bind:value={welcome} maxlength="500" rows="3"></textarea></label>
     <label>Texte du bouton de connexion SSO<input bind:value={ssoLabel} required maxlength="80" placeholder="Se connecter avec Authentik" /></label>
     <label class="policy-toggle"><input type="checkbox" bind:checked={blockSsoLocalAccounts} />Empêcher les utilisateurs SSO de créer des identifiants locaux</label>
+    <fieldset class="trickplay-fieldset">
+      <legend>Miniatures Trickplay</legend>
+      <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayEnabled} />Activer le système de miniatures Trickplay</label>
+      <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayAutoGenerate} />Génération automatique pendant l'analyse des bibliothèques</label>
+      <div class="trickplay-grid">
+        <label>Qualité JPEG (1–31)<input type="number" min="1" max="31" step="1" required bind:value={trickplayQuality} /></label>
+        <label>Largeur vignettes (px)<input type="number" min="160" max="1920" step="1" required bind:value={trickplayWidth} /></label>
+        <label>Intervalle (secondes)<input type="number" min="1" max="60" step="1" required bind:value={trickplayIntervalSeconds} /></label>
+        <label>Quota cache (Mo)<input type="number" min="128" max="1048576" step="128" required bind:value={trickplayMaxCacheMb} /></label>
+      </div>
+    </fieldset>
     <button type="submit">{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
   </fieldset></form>
   <PlaylistPolicy />
@@ -48,7 +99,10 @@
   {#if loading}<p role="status">Chargement…</p>{/if}{#if error}<p role="alert">{error}</p><button disabled={loading} onclick={() => void load(section)}>Réessayer</button>{/if}{#if notice}<p role="status">{notice}</p>{/if}
 {/if}
 <style>
-  .policy-toggle { display:flex;align-items:center;gap:12px; }.policy-toggle input { width:20px;min-height:20px; }
+  .policy-toggle { display:flex;align-items:center;gap:12px; }
+  .trickplay-fieldset { border: 1px solid var(--border-subtle); padding: 16px; margin-top: 24px; border-radius: var(--radius-sm); }
+  .trickplay-fieldset legend { font-weight: 600; padding: 0 8px; color: var(--text-primary); }
+  .trickplay-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-top: 16px; }.policy-toggle input { width:20px;min-height:20px; }
   h2 { font-size: 28px; font-weight: 400; margin: 0 0 32px; }
   form { max-width: 850px; } fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   label { display: grid; gap: 12px; margin-top: 24px; font-size: 15px; }

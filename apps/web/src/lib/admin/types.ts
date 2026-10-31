@@ -43,7 +43,7 @@ export interface LibraryOptions {
   realtimeMonitoring: boolean; automaticCollections: boolean; introDetectionEnabled: boolean;
   saveNfoToMedia: boolean; saveImagesToMedia: boolean;
   trickplayEnabled: boolean; trickplayDuringScan: boolean; trickplaySaveToMedia: boolean;
-  trickplayIntervalSeconds: number; trickplayWidth: number;
+  trickplayIntervalSeconds: number; trickplayWidth: number; trickplayQuality: number;
   chapterImagesEnabled: boolean; chapterImagesDuringScan: boolean; chapterImagesSaveToMedia: boolean;
   subtitleDownloadEnabled: boolean; subtitleLanguages: string[];
   subtitleOnlyMissing: boolean; subtitleMatchAudio: boolean; subtitleRequireHash: boolean;
@@ -61,7 +61,7 @@ export function defaultLibraryOptions(): LibraryOptions {
     metadataProviders: [], imageProviders: [], similarItemsProviders: [], segmentProviders: [], subtitleProviders: [],
     onlineRefreshIntervalDays: 0, realtimeMonitoring: false, automaticCollections: false, introDetectionEnabled: false,
     saveNfoToMedia: false, saveImagesToMedia: false,
-    trickplayEnabled: false, trickplayDuringScan: false, trickplaySaveToMedia: false, trickplayIntervalSeconds: 10, trickplayWidth: 320,
+    trickplayEnabled: true, trickplayDuringScan: false, trickplaySaveToMedia: false, trickplayIntervalSeconds: 10, trickplayWidth: 320, trickplayQuality: 7,
     chapterImagesEnabled: false, chapterImagesDuringScan: false, chapterImagesSaveToMedia: false,
     subtitleDownloadEnabled: false, subtitleLanguages: ['fr'], subtitleOnlyMissing: true, subtitleMatchAudio: false,
     subtitleRequireHash: true, saveSubtitlesToMedia: false,

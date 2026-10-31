@@ -159,6 +159,7 @@ pub struct NodeServerState {
     pub resources: Arc<crate::resources::Sampler>,
     pub local_node: LocalNode,
     preparations: Arc<crate::packaging::Preparations>,
+    pub trickplay: Arc<crate::trickplay::TrickplayManager>,
 }
 
 pub struct ActiveStreamGuard(Arc<AtomicU32>);
@@ -278,6 +279,12 @@ impl NodeServerState {
         updated_config.data_dir = canonical_data;
         updated_config.allowed_roots = canonical_roots;
 
+        let active_streams = Arc::new(AtomicU32::new(0));
+        let trickplay = Arc::new(
+            crate::trickplay::TrickplayManager::from_env()
+                .with_active_streams(active_streams.clone()),
+        );
+
         Ok(Self {
             resources: Arc::new(crate::resources::Sampler::new(
                 updated_config.data_dir.clone(),
@@ -288,9 +295,10 @@ impl NodeServerState {
             inventory: Arc::new(RwLock::new(inventory)),
             replay_window: Arc::new(ReplayWindow::new()),
             active_scans: Arc::new(Mutex::new(HashMap::new())),
-            active_streams: Arc::new(AtomicU32::new(0)),
+            active_streams,
             local_node: LocalNode,
             preparations: Arc::new(crate::packaging::Preparations::default()),
+            trickplay,
         })
     }
 
@@ -371,6 +379,14 @@ pub fn app_with_state(state: NodeServerState) -> Router {
         .route(
             "/internal/v1/node/assets/{id}/image",
             get(internal_stream_image).head(internal_stream_image),
+        )
+        .route(
+            "/internal/v1/node/assets/{id}/trickplay",
+            get(internal_trickplay_manifest),
+        )
+        .route(
+            "/internal/v1/node/assets/{id}/trickplay/{index}",
+            get(internal_trickplay_tile).head(internal_trickplay_tile),
         )
         .route(
             "/stream/v1/assets/{id}/content",
@@ -1890,6 +1906,217 @@ async fn internal_stream_image(
     }
 }
 
+async fn internal_trickplay_manifest(
+    State(state): State<NodeServerState>,
+    AxumPath(id): AxumPath<String>,
+    req: Request,
+) -> Response {
+    let pq = req
+        .uri()
+        .path_and_query()
+        .map(|v| v.as_str())
+        .unwrap_or("")
+        .to_owned();
+    let (identity, nonce) =
+        match verify_signed_core_call(&state, req.headers(), req.method(), &pq, b"") {
+            Ok(ok) => ok,
+            Err(res) => return res,
+        };
+    let grant = {
+        let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
+        inv.grant_for_asset(&identity.node_id, &id)
+    };
+    let Some(grant) = grant else {
+        return sign_stream_response(
+            node_error_response(NodeErrorCode::UnknownAsset, false),
+            &identity,
+            &nonce,
+        );
+    };
+
+    let duration: f64 = req
+        .uri()
+        .query()
+        .and_then(|q| {
+            q.split('&')
+                .find(|p| p.starts_with("duration="))
+                .and_then(|p| p.strip_prefix("duration="))
+                .and_then(|v| v.parse::<f64>().ok())
+        })
+        .unwrap_or(0.0);
+
+    let interval_ms = req.uri().query().and_then(|q| {
+        q.split('&')
+            .find(|p| p.starts_with("intervalMs="))
+            .and_then(|p| p.strip_prefix("intervalMs="))
+            .and_then(|v| v.parse::<u64>().ok())
+    });
+
+    let width = req.uri().query().and_then(|q| {
+        q.split('&')
+            .find(|p| p.starts_with("width="))
+            .and_then(|p| p.strip_prefix("width="))
+            .and_then(|v| v.parse::<u32>().ok())
+    });
+
+    let quality = req.uri().query().and_then(|q| {
+        q.split('&')
+            .find(|p| p.starts_with("quality="))
+            .and_then(|p| p.strip_prefix("quality="))
+            .and_then(|v| v.parse::<u8>().ok())
+    });
+
+    let (expected_size, expected_mtime) = {
+        let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
+        inv.assets
+            .get(&id)
+            .map(|a| (a.size, a.modified_ns.clone()))
+            .unwrap_or((0, String::new()))
+    };
+
+    let trickplay_req = crate::trickplay::TrickplayRequest {
+        asset_id: id.clone(),
+        media_root: PathBuf::from(&grant.root_snapshot),
+        relative_path: PathBuf::from(&grant.relative_path),
+        duration,
+        size: expected_size,
+        modified_ns: expected_mtime,
+        interval_ms,
+        width,
+        quality,
+    };
+
+    // 1. Check Aether native cache
+    if let Some(cached) = state.trickplay.check_native_cache(&trickplay_req).await {
+        let res = (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "ready",
+                "source": "aether",
+                "intervalMs": cached.interval_ms,
+                "width": cached.width,
+                "height": cached.height,
+                "columns": cached.columns,
+                "rows": cached.rows,
+                "sheetCount": cached.sheet_count,
+                "thumbnailCount": cached.thumbnail_count,
+                "urlPrefix": format!("/api/v1/assets/{id}/trickplay/")
+            })),
+        )
+            .into_response();
+        return sign_stream_response(res, &identity, &nonce);
+    }
+
+    // 2. Check Jellyfin read-only sheets
+    if let Some(jellyfin) = state.trickplay.check_jellyfin(&trickplay_req).await {
+        let res = (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "ready",
+                "source": "jellyfin",
+                "intervalMs": jellyfin.interval_ms,
+                "width": jellyfin.width,
+                "height": jellyfin.height,
+                "columns": jellyfin.columns,
+                "rows": jellyfin.rows,
+                "sheetCount": jellyfin.sheet_count,
+                "thumbnailCount": jellyfin.thumbnail_count,
+                "urlPrefix": format!("/api/v1/assets/{id}/trickplay/")
+            })),
+        )
+            .into_response();
+        return sign_stream_response(res, &identity, &nonce);
+    }
+
+    // 3. Request background generation
+    let queue_status = state.trickplay.enqueue(trickplay_req);
+    let (status, http) = match queue_status {
+        crate::trickplay::QueueStatus::Queued => ("generating", StatusCode::ACCEPTED),
+        crate::trickplay::QueueStatus::Busy => ("busy", StatusCode::SERVICE_UNAVAILABLE),
+        crate::trickplay::QueueStatus::Failed => ("failed", StatusCode::SERVICE_UNAVAILABLE),
+        crate::trickplay::QueueStatus::Disabled => ("disabled", StatusCode::NOT_FOUND),
+    };
+    let res = (http, Json(serde_json::json!({ "status": status }))).into_response();
+    sign_stream_response(res, &identity, &nonce)
+}
+
+async fn internal_trickplay_tile(
+    State(state): State<NodeServerState>,
+    AxumPath((id, index)): AxumPath<(String, usize)>,
+    req: Request,
+) -> Response {
+    let pq = req
+        .uri()
+        .path_and_query()
+        .map(|v| v.as_str())
+        .unwrap_or("")
+        .to_owned();
+    let (identity, nonce) =
+        match verify_signed_core_call(&state, req.headers(), req.method(), &pq, b"") {
+            Ok(ok) => ok,
+            Err(res) => return res,
+        };
+    let grant = {
+        let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
+        inv.grant_for_asset(&identity.node_id, &id)
+    };
+    let Some(grant) = grant else {
+        return sign_stream_response(
+            node_error_response(NodeErrorCode::UnknownAsset, false),
+            &identity,
+            &nonce,
+        );
+    };
+
+    let (expected_size, expected_mtime) = {
+        let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
+        inv.assets
+            .get(&id)
+            .map(|a| (a.size, a.modified_ns.clone()))
+            .unwrap_or((0, String::new()))
+    };
+
+    let trickplay_req = crate::trickplay::TrickplayRequest {
+        asset_id: id,
+        media_root: PathBuf::from(&grant.root_snapshot),
+        relative_path: PathBuf::from(&grant.relative_path),
+        duration: 0.0,
+        size: expected_size,
+        modified_ns: expected_mtime,
+        interval_ms: None,
+        width: None,
+        quality: None,
+    };
+
+    match state.trickplay.open_sheet(&trickplay_req, index).await {
+        Ok(opened) => match crate::stream::serve_opened(opened, &req, "image/jpeg").await {
+            Ok(response) => {
+                let (mut parts, body) = response.into_parts();
+                parts.headers.insert(
+                    axum::http::header::X_CONTENT_TYPE_OPTIONS,
+                    axum::http::HeaderValue::from_static("nosniff"),
+                );
+                parts.headers.insert(
+                    axum::http::header::CACHE_CONTROL,
+                    axum::http::HeaderValue::from_static("public, max-age=86400"),
+                );
+                let res = Response::from_parts(parts, Body::new(body));
+                sign_stream_response(res, &identity, &nonce)
+            }
+            Err(_) => sign_stream_response(
+                node_error_response(NodeErrorCode::StreamError, false),
+                &identity,
+                &nonce,
+            ),
+        },
+        Err(_) => sign_stream_response(
+            node_error_response(NodeErrorCode::UnavailableAsset, false),
+            &identity,
+            &nonce,
+        ),
+    }
+}
+
 #[derive(Deserialize)]
 struct StreamQuery {
     token: Option<String>,
@@ -2595,6 +2822,134 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
         if req.head {
             encode_head_uplink(&mut response);
         }
+        let _ =
+            send_stream_uplink_body(&state, core_url, &identity, &req.stream_id, response).await;
+        return;
+    }
+    if let Some(index_str) = req.target_kind.strip_prefix("trickplay:") {
+        if let Ok(index) = index_str.parse::<usize>() {
+            let (expected_size, expected_mtime) = {
+                let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
+                inv.assets
+                    .get(&req.target_id)
+                    .map(|a| (a.size, a.modified_ns.clone()))
+                    .unwrap_or((0, String::new()))
+            };
+            let trickplay_req = crate::trickplay::TrickplayRequest {
+                asset_id: req.target_id.clone(),
+                media_root: PathBuf::from(&grant.root_snapshot),
+                relative_path: PathBuf::from(&grant.relative_path),
+                duration: 0.0,
+                size: expected_size,
+                modified_ns: expected_mtime,
+                interval_ms: None,
+                width: None,
+                quality: None,
+            };
+            match state.trickplay.open_sheet(&trickplay_req, index).await {
+                Ok(opened) => {
+                    if let Ok(response) =
+                        crate::stream::serve_opened(opened, &synthetic_req, "image/jpeg").await
+                    {
+                        let (mut parts, body) = response.into_parts();
+                        parts.headers.insert(
+                            axum::http::header::X_CONTENT_TYPE_OPTIONS,
+                            axum::http::HeaderValue::from_static("nosniff"),
+                        );
+                        parts.headers.insert(
+                            axum::http::header::CACHE_CONTROL,
+                            axum::http::HeaderValue::from_static("public, max-age=86400"),
+                        );
+                        let mut axum_res = Response::from_parts(parts, Body::new(body));
+                        if req.head {
+                            encode_head_uplink(&mut axum_res);
+                        }
+                        let _ = send_stream_uplink_body(
+                            &state,
+                            core_url,
+                            &identity,
+                            &req.stream_id,
+                            axum_res,
+                        )
+                        .await;
+                        return;
+                    }
+                }
+                Err(_) => {
+                    let _ = send_stream_uplink_error(
+                        &state,
+                        core_url,
+                        &identity,
+                        &req.stream_id,
+                        StatusCode::NOT_FOUND,
+                    )
+                    .await;
+                    return;
+                }
+            }
+        }
+    } else if req.target_kind == "trickplay" {
+        let (expected_size, expected_mtime) = {
+            let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
+            inv.assets
+                .get(&req.target_id)
+                .map(|a| (a.size, a.modified_ns.clone()))
+                .unwrap_or((0, String::new()))
+        };
+        let trickplay_req = crate::trickplay::TrickplayRequest {
+            asset_id: req.target_id.clone(),
+            media_root: PathBuf::from(&grant.root_snapshot),
+            relative_path: PathBuf::from(&grant.relative_path),
+            duration: 0.0,
+            size: expected_size,
+            modified_ns: expected_mtime,
+            interval_ms: None,
+            width: None,
+            quality: None,
+        };
+        let body = if let Some(cached) = state.trickplay.check_native_cache(&trickplay_req).await {
+            serde_json::json!({
+                "status": "ready",
+                "source": "aether",
+                "intervalMs": cached.interval_ms,
+                "width": cached.width,
+                "height": cached.height,
+                "columns": cached.columns,
+                "rows": cached.rows,
+                "sheetCount": cached.sheet_count,
+                "thumbnailCount": cached.thumbnail_count,
+                "urlPrefix": format!("/api/v1/assets/{}/trickplay/", req.target_id)
+            })
+        } else if let Some(jellyfin) = state.trickplay.check_jellyfin(&trickplay_req).await {
+            serde_json::json!({
+                "status": "ready",
+                "source": "jellyfin",
+                "intervalMs": jellyfin.interval_ms,
+                "width": jellyfin.width,
+                "height": jellyfin.height,
+                "columns": jellyfin.columns,
+                "rows": jellyfin.rows,
+                "sheetCount": jellyfin.sheet_count,
+                "thumbnailCount": jellyfin.thumbnail_count,
+                "urlPrefix": format!("/api/v1/assets/{}/trickplay/", req.target_id)
+            })
+        } else {
+            let queue_status = state.trickplay.enqueue(trickplay_req);
+            let status = match queue_status {
+                crate::trickplay::QueueStatus::Queued => "generating",
+                crate::trickplay::QueueStatus::Busy => "busy",
+                crate::trickplay::QueueStatus::Failed => "failed",
+                crate::trickplay::QueueStatus::Disabled => "disabled",
+            };
+            serde_json::json!({ "status": status })
+        };
+        let json_bytes = serde_json::to_vec(&body).unwrap_or_default();
+        let mut response = Response::new(Body::from(json_bytes));
+        *response.status_mut() = StatusCode::OK;
+        response.headers_mut().insert(
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("application/json"),
+        );
         let _ =
             send_stream_uplink_body(&state, core_url, &identity, &req.stream_id, response).await;
         return;

@@ -164,6 +164,49 @@ pub async fn run_task_on_grant(
             }
             Ok(json!({"width":width,"size":image.bytes.len(),"mime":image.mime,"cacheWarm":true}))
         }
+        ("trickplay", ReadTarget::Asset(asset_id)) => {
+            let probe = crate::probe::probe_opened(&opened)
+                .await
+                .map_err(io::Error::other)?;
+            let duration = probe
+                .format
+                .get("duration")
+                .and_then(|v| {
+                    v.as_str()
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .or_else(|| v.as_f64())
+                })
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .ok_or_else(|| io::Error::other("invalid_duration"))?;
+            let mgr = crate::trickplay::global_manager();
+            let req = crate::trickplay::TrickplayRequest {
+                asset_id: asset_id.as_str().to_owned(),
+                media_root: root.to_path_buf(),
+                relative_path: relative.to_path_buf(),
+                duration,
+                size: opened.size(),
+                modified_ns: opened.modified_ns().to_owned(),
+                interval_ms: None,
+                width,
+                quality: None,
+            };
+            let key = mgr.fingerprint(&req);
+            mgr.execute_generation(&req, &key)
+                .await
+                .map_err(io::Error::other)?;
+            let manifest = mgr
+                .check_native_cache(&req)
+                .await
+                .ok_or_else(|| io::Error::other("generation_not_found"))?;
+            Ok(json!({
+                "assetId": asset_id.as_str(),
+                "sheetCount": manifest.sheet_count,
+                "thumbnailCount": manifest.thumbnail_count,
+                "intervalMs": manifest.interval_ms,
+                "width": manifest.width,
+                "height": manifest.height,
+            }))
+        }
         _ => Err(invalid()),
     }
 }

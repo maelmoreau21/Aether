@@ -24,6 +24,7 @@ pub mod stream;
 pub mod subtitles;
 pub mod tasks;
 pub mod transport;
+pub mod trickplay;
 pub mod video_stream;
 
 #[inline]
@@ -111,6 +112,11 @@ impl LocalNode {
             on_batch,
         )
         .await
+    }
+
+    /// Access the node's trickplay manager.
+    pub fn trickplay(&self) -> std::sync::Arc<crate::trickplay::TrickplayManager> {
+        crate::trickplay::global_manager()
     }
 
     /// Open a confined media file handle relative to `root`.

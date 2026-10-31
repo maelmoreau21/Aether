@@ -134,26 +134,6 @@
       >
         <Icon name="search" size={19} />
       </a>
-      <a
-        class="action-icon-btn"
-        class:active={section === 'lists'}
-        href={resolve('lists/')}
-        title="Playlists"
-        aria-label="Playlists"
-        aria-current={section === 'lists' ? 'page' : undefined}
-      >
-        <Icon name="playlist" size={19} />
-      </a>
-      <a
-        class="action-icon-btn"
-        class:active={section === 'downloads'}
-        href={resolve('downloads/')}
-        title="Téléchargements"
-        aria-label="Téléchargements"
-        aria-current={section === 'downloads' ? 'page' : undefined}
-      >
-        <Icon name="download" size={19} />
-      </a>
       <ProfileMenu />
     </div>
   </div>

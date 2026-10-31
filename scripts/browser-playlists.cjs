@@ -33,7 +33,7 @@ const out=process.env.MEDIA_REPORT_DIR||'target/playlists-browser';fs.mkdirSync(
     await page.screenshot({path:out+'/music-lyrics.png'});
     const time=await page.locator('audio').evaluate(a=>a.currentTime);
     await page.getByRole('button',{name:'Fermer le panneau musique',exact:true}).click();
-    await page.getByRole('link',{name:'Playlists',exact:true}).click();
+    await page.getByRole('navigation',{name:'Navigation principale'}).getByRole('link',{name:'Playlists',exact:true}).click();
     await page.waitForFunction(time=>{const a=document.querySelector('audio');return a&&!a.paused&&a.currentTime>=time;},time);
     report.persistentPlayback=true;
     await page.getByLabel('Nouvelle playlist',{exact:true}).fill('Mix browser');

@@ -1,3 +1,17 @@
+## 31 octobre 2026 — Correction du test E2E Playwright mixed_playlists (Navbar & Strict Mode)
+
+- **Correction Playwright Strict Mode sur `scripts/browser-playlists.cjs` et `Navbar.svelte`** :
+  - **Diagnostic** : Dans `Navbar.svelte`, les liens vers **Playlists** et **Téléchargements** étaient présents en double sur desktop : une fois sous forme textuelle dans la navigation principale (`.desktop-nav`), et une deuxième fois sous forme de boutons d'action circulaires avec `aria-label="Playlists"` dans `.header-actions`. Le sélecteur `page.getByRole('link', { name: 'Playlists', exact: true })` de `scripts/browser-playlists.cjs` levait une exception de mode strict Playwright (`resolved to 2 elements`).
+  - **Résolution** :
+    - `apps/web/src/lib/ui/Navbar.svelte` : suppression des boutons d'icônes redondants dans `.header-actions` (`Playlists` et `Téléchargements`), conservant la navigation principale claire et évitant la duplication d'accessibilité.
+    - `scripts/browser-playlists.cjs` : ciblage explicite du lien dans la navigation principale `page.getByRole('navigation', { name: 'Navigation principale' }).getByRole('link', { name: 'Playlists', exact: true })` aligné avec les autres scénarios E2E navigateur (`browser-catalog.cjs`, `browser-series.cjs`).
+  - **Validations réelles** :
+    - `cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1` : 100 % réussi.
+    - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement (`svelte-check`).
+    - `npm --prefix apps/web run lint` : 0 erreur, 0 avertissement (`eslint`).
+    - `npm --prefix apps/web test` : 30 suites de tests, 215 tests unitaires réussis à 100 %.
+    - `npm --prefix apps/web run build` : compilation SSR, client, SW et adapter-static réussie.
+
 ## 31 octobre 2026 — Correction du scan PostgreSQL
 
 - **Corrections CI & Tests E2E Navigateur** :

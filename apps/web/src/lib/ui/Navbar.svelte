@@ -94,34 +94,18 @@
 
     <nav class="desktop-nav" aria-label="Navigation principale">
       <a href={resolve('/')} aria-current={section === 'home' ? 'page' : undefined}>Accueil</a>
-      {#each $accessibleLibraries as library (library.id)}
-        <a
-          class="library-nav-link"
-          href={resolve(`${library.kind}/?library=${encodeURIComponent(library.id)}` as 'films/')}
-          aria-current={currentLibrary?.id === library.id && librarySection ? 'page' : undefined}
-          onpointerenter={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }}
-          onfocus={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }}
-        >
-          {#if library.kind === 'music'}
-            <span class="lib-kind-glyph" aria-hidden="true">♫</span>
-          {:else}
-            <Icon name={library.kind === 'films' ? 'film' : 'tv'} size={15} />
-          {/if}
-          <span>{library.name}</span>
-        </a>
-      {:else}
-        <a href={resolve('films/')} aria-current={section === 'films' ? 'page' : undefined}>
-          <Icon name="film" size={15} /><span>Films</span>
-        </a>
-        <a href={resolve('series/')} aria-current={section === 'series' ? 'page' : undefined}>
-          <Icon name="tv" size={15} /><span>Séries</span>
-        </a>
-      {/each}
-      {#if $accessibleLibraries.length > 6}
-        <button class="all-libraries-btn" class:active={librarySection} aria-haspopup="dialog" aria-expanded={libraryMenuOpen} aria-controls="library-navigation" title="Toutes les bibliothèques" aria-label="Toutes les bibliothèques" onclick={openLibraries}>
-          <Icon name="chevron" size={14} />
-        </button>
-      {/if}
+      <button
+        type="button"
+        class:active={librarySection}
+        aria-haspopup="dialog"
+        aria-expanded={libraryMenuOpen}
+        aria-controls="library-navigation"
+        onclick={openLibraries}
+      >
+        <span>{currentLibrary?.name || 'Bibliothèques'}</span><Icon name="chevron" size={14} />
+      </button>
+      <a href={resolve('lists/')} aria-current={section === 'lists' ? 'page' : undefined}>Playlists</a>
+      <a href={resolve('downloads/')} aria-current={section === 'downloads' ? 'page' : undefined}>Téléchargements</a>
     </nav>
 
     <div class="header-actions">
@@ -312,20 +296,6 @@
     flex-shrink: 0;
   }
 
-  .library-nav-link span {
-    max-width: 220px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .lib-kind-glyph {
-    font-size: 14px;
-    line-height: 1;
-  }
-
-  .all-libraries-btn {
-    padding: 8px 10px !important;
-  }
 
   .desktop-nav button :global(svg) {
     transform: rotate(90deg);

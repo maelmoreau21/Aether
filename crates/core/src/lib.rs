@@ -47,6 +47,7 @@ pub mod product;
 mod product_tests;
 pub mod progress;
 pub mod trickplay;
+pub mod trickplay_native;
 pub mod scans;
 pub mod user_media_policy;
 

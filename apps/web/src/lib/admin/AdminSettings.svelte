@@ -9,6 +9,22 @@
   let trickplayIntervalSeconds = $state(10), trickplayAutoGenerate = $state(false), trickplayMaxCacheMb = $state(5120);
   let loading = $state(true), saving = $state(false);
   let network = $state<{ publicUrl: string; secureCookies: boolean; webPath: string; apiPath: string } | null>(null);
+  let clearingFingerprints = $state(false);
+  let fingerprintNotice = $state('');
+
+  async function clearFingerprintCache() {
+    if (clearingFingerprints) return;
+    clearingFingerprints = true;
+    fingerprintNotice = '';
+    try {
+      const res = await adminRequest<{ cleared?: boolean; message?: string }>('/api/v1/admin/maintenance/clear-fingerprint-cache', { method: 'POST' });
+      fingerprintNotice = res.message ?? 'Cache des empreintes audio vidé avec succès.';
+    } catch (cause) {
+      fingerprintNotice = cause instanceof Error ? cause.message : 'Échec du vidage du cache.';
+    } finally {
+      clearingFingerprints = false;
+    }
+  }
   async function load(target: string) {
     loading = true; error = ''; notice = '';
     try {
@@ -84,6 +100,14 @@
         <label>Quota cache (Mo)<input type="number" min="128" max="1048576" step="128" required bind:value={trickplayMaxCacheMb} /></label>
       </div>
     </fieldset>
+    <fieldset class="trickplay-fieldset">
+      <legend>Empreintes audio des intros et génériques</legend>
+      <p>Les empreintes acoustiques Chromaprint sont conservées en cache sur chaque Media Node pour éviter les réextractions répétées lors des analyses.</p>
+      <button type="button" class="maintenance-btn" disabled={clearingFingerprints} onclick={clearFingerprintCache}>
+        {clearingFingerprints ? 'Nettoyage en cours...' : 'Vider le cache des empreintes audio'}
+      </button>
+      {#if fingerprintNotice}<p class="maintenance-notice">{fingerprintNotice}</p>{/if}
+    </fieldset>
     <button type="submit">{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
   </fieldset></form>
   <PlaylistPolicy />
@@ -102,7 +126,11 @@
   .policy-toggle { display:flex;align-items:center;gap:12px; }
   .trickplay-fieldset { border: 1px solid var(--border-subtle); padding: 16px; margin-top: 24px; border-radius: var(--radius-sm); }
   .trickplay-fieldset legend { font-weight: 600; padding: 0 8px; color: var(--text-primary); }
-  .trickplay-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-top: 16px; }.policy-toggle input { width:20px;min-height:20px; }
+  .trickplay-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-top: 16px; }
+  .maintenance-btn { margin-top: 8px; padding: 10px 18px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); cursor: pointer; font-size: 14px; font-weight: 500; }
+  .maintenance-btn:hover:not(:disabled) { background: var(--border-subtle); }
+  .maintenance-btn:disabled { opacity: 0.6; cursor: wait; }
+  .maintenance-notice { margin-top: 8px; font-size: 13px; color: var(--color-accent); }.policy-toggle input { width:20px;min-height:20px; }
   h2 { font-size: 28px; font-weight: 400; margin: 0 0 32px; }
   form { max-width: 850px; } fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   label { display: grid; gap: 12px; margin-top: 24px; font-size: 15px; }

@@ -174,15 +174,23 @@
   }
 
   function compareVersions(v1: string, v2: string): number {
-    const p1 = (v1 || '0').split('.').map(n => parseInt(n, 10) || 0);
-    const p2 = (v2 || '0').split('.').map(n => parseInt(n, 10) || 0);
-    const len = Math.max(p1.length, p2.length);
+    const parse = (v: string) => {
+      const [core, ...pre] = (v || '0').split('-');
+      const nums = core.split('.').map(n => parseInt(n, 10) || 0);
+      return { nums, pre: pre.join('-') };
+    };
+    const p1 = parse(v1);
+    const p2 = parse(v2);
+    const len = Math.max(p1.nums.length, p2.nums.length);
     for (let i = 0; i < len; i++) {
-      const a = p1[i] ?? 0;
-      const b = p2[i] ?? 0;
+      const a = p1.nums[i] ?? 0;
+      const b = p2.nums[i] ?? 0;
       if (a > b) return 1;
       if (a < b) return -1;
     }
+    if (!p1.pre && p2.pre) return 1;
+    if (p1.pre && !p2.pre) return -1;
+    if (p1.pre && p2.pre) return p1.pre.localeCompare(p2.pre, undefined, { numeric: true });
     return 0;
   }
 
@@ -242,14 +250,21 @@
     });
   }
 
-  async function switchVersion(entry: CatalogueEntry) {
+  const updatableExtensions = $derived(
+    installed
+      .map(ext => ({ ext, upd: getUpdateEntry(ext) }))
+      .filter((item): item is { ext: Installed; upd: CatalogueEntry } => item.upd !== null)
+  );
+
+  async function switchVersion(entry: CatalogueEntry, showNotice = true) {
     const extId = managed?.manifest.id || entry.manifest.id;
     const currentInstalled = installed.find(e => e.manifest.id === extId);
     const wasEnabled = currentInstalled?.enabled ?? false;
     const libraryIds = currentInstalled?.libraryIds ?? [];
     const allLibraries = currentInstalled?.allLibraries ?? (libraryIds.length === 0);
+    const savedSettings = currentInstalled?.settings ?? editingSettings[extId];
 
-    await perform(async () => {
+    const action = async () => {
       if (currentInstalled) {
         await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extId)}`, {
           method: 'DELETE',
@@ -266,8 +281,34 @@
           body: JSON.stringify({ enabled: true, libraryIds, allLibraries })
         });
       }
+      if (savedSettings && Object.keys(savedSettings).length > 0) {
+        try {
+          await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extId)}/settings`, {
+            method: 'PUT',
+            body: JSON.stringify(savedSettings)
+          });
+          editingSettings[extId] = { ...savedSettings };
+        } catch {
+          // Paramètres existants préservés si schéma compatible
+        }
+      }
       managedId = extId;
-    }, `Version ${entry.manifest.version} installée avec succès.`);
+    };
+
+    if (showNotice) {
+      await perform(action, `Version ${entry.manifest.version} installée avec succès.`);
+    } else {
+      await action();
+    }
+  }
+
+  async function updateAllExtensions() {
+    if (updatableExtensions.length === 0) return;
+    await perform(async () => {
+      for (const { upd } of updatableExtensions) {
+        await switchVersion(upd, false);
+      }
+    }, `${updatableExtensions.length} extension(s) mise(s) à jour avec succès.`);
   }
 
 </script>
@@ -524,14 +565,37 @@
       {/if}
     </div>
   {:else}
+  {#if updatableExtensions.length > 0}
+    <div class="update-all-banner" role="region" aria-label="Mises à jour disponibles">
+      <div class="update-all-info">
+        <span class="badge update">Mises à jour</span>
+        <strong>{updatableExtensions.length} extension{updatableExtensions.length > 1 ? 's ont' : ' a'} une nouvelle version disponible.</strong>
+      </div>
+      <button class="primary btn-update-all" disabled={busy} onclick={updateAllExtensions}>
+        <Icon name="download" size={16} /> Tout mettre à jour ({updatableExtensions.length})
+      </button>
+    </div>
+  {/if}
   <div class="installed-filters"><label>Rechercher<input type="search" bind:value={search} /></label><label>État<select bind:value={filter}><option value="all">Toutes</option><option value="enabled">Activées</option><option value="disabled">Désactivées</option></select></label></div>
-  <div class="plugins-grid">{#each visibleExtensions as extension (extension.manifest.id)}<article class="card plugin-card installed-card"><button class="artwork-button" aria-label={`Ouvrir ${displayName(extension.manifest.name)}`} onclick={()=>managedId=extension.manifest.id}>{@render artwork(extension.manifest)}</button><div class="plugin-header"><div class="plugin-title-row"><div class="installed-identity"><span class="extension-icon"><Icon name={extension.manifest.permissions.includes('avatars')?'profile':'globe'} size={22} /></span><div><h3>{displayName(extension.manifest.name)}</h3><small>v{extension.manifest.version}</small></div></div><span class="badge" class:success={extension.enabled}>{extension.enabled?'Activée':'Désactivée'}</span>{#if getUpdateEntry(extension)}<span class="badge update">Mise à jour</span>{/if}</div><p class="plugin-desc">{shortDescription(extension.manifest.description)}</p><button disabled={busy} onclick={()=>{managedId=extension.manifest.id;settingsOpen=true;}}>Paramètres de {displayName(extension.manifest.name)}</button></div></article>{:else}<p>Aucune extension installée.</p>{/each}</div>
+  <div class="plugins-grid">{#each visibleExtensions as extension (extension.manifest.id)}<article class="card plugin-card installed-card"><button class="artwork-button" aria-label={`Ouvrir ${displayName(extension.manifest.name)}`} onclick={()=>managedId=extension.manifest.id}>{@render artwork(extension.manifest)}</button><div class="plugin-header"><div class="plugin-title-row"><div class="installed-identity"><span class="extension-icon"><Icon name={extension.manifest.permissions.includes('avatars')?'profile':'globe'} size={22} /></span><div><h3>{displayName(extension.manifest.name)}</h3><small>v{extension.manifest.version}</small></div></div><span class="badge" class:success={extension.enabled}>{extension.enabled?'Activée':'Désactivée'}</span>{#if getUpdateEntry(extension)}<span class="badge update">Mise à jour</span>{/if}</div><p class="plugin-desc">{shortDescription(extension.manifest.description)}</p>
+        <div class="installed-card-actions">
+          {#if getUpdateEntry(extension)}
+            <button class="primary btn-card-update" disabled={busy} onclick={() => switchVersion(getUpdateEntry(extension)!)}>
+              <Icon name="download" size={14} /> Mettre à jour v{getUpdateEntry(extension)!.manifest.version}
+            </button>
+          {/if}
+          <button disabled={busy} onclick={()=>{managedId=extension.manifest.id;settingsOpen=true;}}>Paramètres de {displayName(extension.manifest.name)}</button>
+        </div></div></article>{:else}<p>Aucune extension installée.</p>{/each}</div>
   {/if}
   {/if}
 </section>
 
 <style>
   section{ min-width:0; }
+.update-all-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:14px 18px;margin:16px 0 20px;background:var(--bg-surface);border:1px solid var(--accent-primary);border-radius:var(--radius-md);}
+.update-all-info{display:flex;align-items:center;gap:12px;}
+.installed-card-actions{display:flex;flex-direction:column;gap:8px;padding-top:10px;}
+.btn-card-update{width:100%;}
 .settings-screen{max-width:880px;padding:24px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md);}
 .settings-screen h2{margin-bottom:24px;}
 h2,h3,h4,strong{ color:var(--text-primary); }

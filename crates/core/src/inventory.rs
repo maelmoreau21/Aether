@@ -3856,6 +3856,8 @@ pub async fn descriptor_for_user(
     let chapter_list = valid_chapters(&probe.chapters, total_dur);
     let mut intro_segment: Option<serde_json::Value> = None;
     let mut credits_segment: Option<serde_json::Value> = None;
+    let mut recap_segment: Option<serde_json::Value> = None;
+    let mut preview_segment: Option<serde_json::Value> = None;
 
     for (i, (start, title)) in chapter_list.iter().enumerate() {
         if initial_work_kind != "episode" {
@@ -3926,6 +3928,8 @@ pub async fn descriptor_for_user(
             match kind.as_str() {
                 "intro" => intro_segment = None,
                 "credits" => credits_segment = None,
+                "recap" => recap_segment = None,
+                "preview" => preview_segment = None,
                 _ => continue,
             }
             if !start.is_finite()
@@ -3944,6 +3948,12 @@ pub async fn descriptor_for_user(
                 }
                 "credits" if credits_segment.is_none() => {
                     credits_segment = Some(json!({"start":start,"end":end}))
+                }
+                "recap" if recap_segment.is_none() => {
+                    recap_segment = Some(json!({"start":start,"end":end}))
+                }
+                "preview" if preview_segment.is_none() => {
+                    preview_segment = Some(json!({"start":start,"end":end}))
                 }
                 _ => {}
             }
@@ -3972,6 +3982,8 @@ pub async fn descriptor_for_user(
         match kind.as_str() {
             "intro" => intro_segment = value,
             "credits" => credits_segment = value,
+            "recap" => recap_segment = value,
+            "preview" => preview_segment = value,
             _ => {}
         }
     }
@@ -3991,7 +4003,9 @@ pub async fn descriptor_for_user(
         "subtitles": subtitles,
         "chapters": chapter_list.iter().map(|(start, title)| json!({"start": start, "title": title})).collect::<Vec<_>>(),
         "intro": intro_segment,
-        "credits": credits_segment
+        "credits": credits_segment,
+        "recap": recap_segment,
+        "preview": preview_segment
     });
     if let Some(orig) = failover_from {
         desc["requestedId"] = json!(orig.clone());

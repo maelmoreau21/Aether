@@ -1108,11 +1108,14 @@ async fn lock_marker_sources(
     target: &str,
     marker_sources: &[(String, String)],
 ) -> Result<bool, sqlx::Error> {
-    if marker_sources.len() != 2
-        || marker_sources[0].0 != target
-        || marker_sources[0].0 == marker_sources[1].0
-    {
+    if marker_sources.len() < 2 || marker_sources.len() > 32 || marker_sources[0].0 != target {
         return Ok(false);
+    }
+    let mut unique = std::collections::HashSet::new();
+    for (asset, _) in marker_sources {
+        if !unique.insert(asset.as_str()) {
+            return Ok(false);
+        }
     }
     // Lock in a stable order until commit so a scan cannot update either
     // revision after validation.
@@ -1155,7 +1158,7 @@ pub(crate) async fn complete_with_marker_sources(
             .flatten()
             .filter_map(|marker| marker["markerType"].as_str())
             .collect();
-        if !found.contains("intro") {
+        if !found.contains("intro") || !found.contains("credits") {
             let source: Option<String> =
                 query_scalar("SELECT fingerprint FROM automation_observations WHERE asset_id=?")
                     .bind(&job.target_id)

@@ -1,3 +1,75 @@
+## 31 octobre 2026 — Finalisation de la détection automatique des intros et génériques (IntroSkipper)
+
+- **Architecture globale & pipeline de bout en bout (IntroSkipper + Core + Node + Web)** :
+  - **Extension Rust/Wasm (Aether-Plugins-IntroSkipper)** :
+    - Algorithme de consensus & clustering multi-épisodes : comparaison par lots de 2 à 8 épisodes sous le plafond Wasm de 64 Ko via encodage compact Base64 (ingerprintsCompact, 	ailFingerprintsCompact).
+    - Robustesse acoustique : calcul de cross-corrélation par fenêtre glissante, seuil de Bit Error Rate strict (< 0.20), boost de confiance pour corroboration multi-épisodes, et rejet automatique des faux positifs isolés (confiance < 0.80 pour vote unique en saison >= 3 épisodes).
+    - Détection intelligente des génériques de fin et scènes post-crédits : si le générique s'arrête plus de 12 secondes avant la fin physique de la vidéo, le marqueur borne précisément le générique sans masquer la scène post-crédits.
+    - Support enrichi des chapitres multilingues : intro, credits, 
+ecap (« Précédemment... ») et preview (« Dans le prochain épisode... »).
+    - Fusion hybride : l'empreinte audio affine les bornes temporelles des chapitres avec confiance 0.99.
+    - Budget Wasm respecté : binaire release compilé à 229 Ko (< 256 Ko limite Aether).
+  - **Media Node (crates/node/src/tasks.rs)** :
+    - Extraction lourde déportée sur le Media Node local hébergeant les fichiers sans solliciter le Core.
+    - Extraction rapide des crédits de fin (	ailFingerprints) sur les 200-300 dernières secondes via fast seek FFmpeg sans relire tout le fichier.
+    - Cache persistant local (MEDIA_FINGERPRINT_CACHE_DIR, data/cache/fingerprints/{asset_id}_{size}_{mtime}.json) avec invalidation automatique sur modification de taille ou timestamp mtime.
+    - Purge du cache d'empreintes via clear_fingerprint_cache().
+    - Priorité absolue aux flux de streaming en direct sur les tâches d'extraction en arrière-plan.
+  - **Core Aether (crates/core/src/*)** :
+    - utomation.rs : verrouillage atomique des sources de markers (lock_marker_sources), émission automatique de la tâche d'extraction dès qu'intro ou crédits manquent dans les chapitres.
+    - 	imeline_markers.rs : nouvelles routes d'administration :
+      - GET /api/v1/admin/assets/{asset}/markers : inspection détaillée des marqueurs automatiques et manuels.
+      - POST /api/v1/admin/seasons/{id}/analyze-markers : mise en file d'attente d'analyse pour toute une saison.
+      - POST /api/v1/admin/works/{id}/analyze-markers : réanalyse d'une série complète.
+      - POST /api/v1/admin/maintenance/clear-fingerprint-cache : vidage du cache d'empreintes audio.
+    - inventory.rs : transmission des marqueurs intro, credits, 
+ecap, preview dans le descripteur média.
+  - **Frontend Web & Lecteur (pps/web/src/*)** :
+    - PlayerControls.svelte :
+      - Visualisation des marqueurs sur la barre de progression (.timeline-markers-track) avec code couleur distinct (Ambre: intro, Violet: générique, Cyan: résumé, Émeraude: aperçu).
+      - Boutons de saut contextuels modernes en pilule floutée (skip-marker-btn : « Passer l'introduction », « Passer le générique », « Passer le résumé »).
+    - ImmersivePlayer.svelte :
+      - Saut automatique configurable sans boucle infinie (hasAutoSkippedIntro, hasAutoSkippedCredits).
+      - Dialogue d'édition et de correction des marqueurs étendu aux 4 types pour les administrateurs avec priorité absolue sur les marqueurs automatiques.
+    - SettingsView.svelte : préférences utilisateur utoSkipIntro et utoSkipCredits (désactivées par défaut).
+    - SeriesDetail.svelte : bouton administrateur « Analyser intros & génériques » sur les saisons.
+    - AdminSettings.svelte : bouton de maintenance « Vider le cache des empreintes audio ».
+- **Validations réelles** :
+  - cargo test --manifest-path Aether-Plugins-IntroSkipper/Cargo.toml : 15/15 tests intro_skipper_tests.rs passés + 1/1 benchmark 24 épisodes (
+epresentative_benchmark.rs) passé avec 100% de précision et 100% de rappel (22/22 intros, 24/24 crédits, 0 faux positif).
+  - cargo test -p media-node : 96/96 tests passés.
+  - cargo test -p media-poc --lib : 138/138 tests passés.
+  - cargo test -p media-poc --test automation_flow : 16/16 tests passés.
+  - 
+pm --prefix apps/web run check : 0 erreur, 0 avertissement (svelte-check).
+  - cargo clippy & cargo fmt sur tous les crates : conformes sans avertissement.
+
+
+## 31 octobre 2026 — Séances communautaires améliorées (Watch Party / SyncPlay)
+
+- **Architecture temps réel & Synchronisation collective (`crates/core/src/parties.rs`, `apps/web/src/lib/syncplay/*`)** :
+  - **Séparation stricte Core / Media Node** : le Core Rust coordonne les événements de synchronisation et l'état en mémoire via WebSockets (`/api/v1/parties/{id}/ws`) ; aucun flux vidéo ou audio ne transite par le Core. Les participants continuent de streamer directement depuis leurs Media Nodes assignés.
+  - **Horloge NTP & Compensation douce de dérive (Smooth Drift Correction)** : synchronisation d'horloge bidirectionnelle ping/pong et calcul de l'offset NTP. Algorithme de compensation doux modifiant légèrement la vitesse de lecture (`0.95x` / `1.05x`) pour les décalages compris entre 0,25s et 1,5s afin d'éviter toute coupure audio ou saccade vidéo. Seul un écart supérieur à 1,5s déclenche un `seek()` correctif.
+  - **Salon d'attente & Compte à rebours** : mode salle d'attente avec état prêt (`ready`), compte à rebours visuel de 3 secondes avant lancement synchronisé, détection du buffering (`wait_for_buffering`) mettant en pause automatique pour attendre les participants en difficulté.
+  - **Permissions et Sécurité stricte (`AGENTS.md`)** : vérification obligatoire des permissions de bibliothèque et du contrôle parental (`parental_allowed`) pour créer une séance, générer une invitation, ou rejoindre une séance. Rôles autorisés limités strictement à `administrator` et `user` (aucun rôle `guest`).
+  - **Interactions collaboratives** : chat textuel intégré, réactions rapides flottantes par emojis avec option silencieuse, sondages en temps réel avec pourcentages, file d'attente collaborative (queue) avec enchaînement d'épisodes, et modération (exclusion, transfert d'hôte).
+  - **UI Svelte 5 intégrée (`apps/web`)** : modale de création et gestion de séances (`WatchPartyModal.svelte`), overlay immersif dans le lecteur (`WatchPartyOverlay.svelte`), bouton d'accès rapide avec badge de notification dans la barre de navigation (`Navbar.svelte`) et dans les outils de fiche média (`WorkTools.svelte`).
+- **Validations réelles** :
+  - `cargo test -p media-poc --lib parties::tests` : 6/6 tests réussis (cycle de vie hub, calcul de position, permissions, contrôle d'accès média, nettoyage automatique des séances et invitations expirées).
+  - `npm --prefix apps/web test` : 31 suites de tests, 219 tests unitaires réussis à 100 % (incluant `sync-math.test.ts`).
+  - `npm --prefix apps/web run lint` : 0 erreur, 0 avertissement (`eslint src`).
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement (`svelte-check`).
+  - `npm --prefix apps/web run build` : compilation SSR, client, service worker et adapter-static réussie.
+
+## 31 octobre 2026 — Automatisation des mises à jour d'extensions et préservation des paramètres
+
+- **Gestion globale et automatisée des mises à jour d'extensions (`AdminExtensions.svelte`)** :
+  - **Préservation des paramètres & clés API lors des mises à jour** : `switchVersion` sauvegarde désormais les `settings` de l'extension installée et les réapplique automatiquement via `PUT /api/v1/admin/extensions/{id}/settings` après installation de la nouvelle version. Les clés API et configurations ne sont plus effacées lors d'un changement de version ou d'une mise à jour.
+  - **Bouton d'action "Tout mettre à jour"** : calcul réactif `updatableExtensions` de toutes les extensions ayant une version supérieure disponible dans le catalogue et affichage d'un bandeau avec bouton `Tout mettre à jour ({count})` pour mettre à jour l'ensemble des extensions en une seule action séquentielle sécurisée.
+  - **Mise à jour directe 1-clic par carte** : intégration d'un bouton direct `Mettre à jour v{version}` sur chaque carte d'extension installée dans `.plugins-grid`, évitant de devoir naviguer dans la vue détaillée et l'historique des révisions pour effectuer la mise à jour.
+  - **Comparaison SemVer conforme** : `compareVersions` gère désormais proprement les versions avec suffixes pré-release (`-beta.X`, `-rc.X`).
+  - **Validations réelles** : `npm --prefix apps/web run check` (0 erreur, 0 warning) et `npm --prefix apps/web run lint` (0 erreur, 0 warning).
+
 ## 31 octobre 2026 — Correction du test E2E Playwright mixed_playlists (Navbar & Strict Mode)
 
 - **Correction Playwright Strict Mode sur `scripts/browser-playlists.cjs` et `Navbar.svelte`** :
@@ -58,15 +130,22 @@
   - Bannière grand format avec zoom doux, triple dégradé vers `#0B0C10`, titres/synopsis localisés (`localizedTitle`, `localizedPlot`), badges et double bouton d'action.
 - **Étape 4 — Rails horizontaux, Cartes modernes & Grilles (`MediaShelf.svelte`, `Poster.svelte`, `ContinueWatching.svelte`, `CatalogGrid.svelte`)** :
   - Carrousels horizontaux fluides avec `scroll-snap-type: x mandatory` et flèches en verre dépoli au survol ; cartes `Poster.svelte` au ratio `2/3` avec zoom `scale(1.06)` et action rapide.
-- **Étape 5 — Fiches Films & Séries ergonomiques (`DetailHero.svelte`, `FilmDetail.svelte`, `SeriesDetail.svelte`, `PersonalFeedback.svelte`, `WatchStatus.svelte`, `EditorialCredits.svelte`, `SimilarWorks.svelte`, `track-labels.ts`)** :
-  - **Résumé complet** : affichage intégral du synopsis sans troncature ni clic requis.
-  - **Favoris ♥ & Note ★ directement accessibles** : intégration des boutons « Favoris » (`♥`), de la notation sur 5 étoiles (`★ Noter`) et du statut « Vu » directement dans la barre d'action principale du Hero à côté de « Lancer le film ».
-  - **Bandeau visuel Qualité, Audio (2.0 / 5.1 / 7.1) & Sous-titres** : remplacement de l'accordéon technique brut par un bandeau clair affichant immédiatement la qualité d'image (`4K Ultra HD`, `1080p Full HD`, `10 bits`), les langues audio avec configuration des canaux (`2.0`, `5.1`, `7.1` via `audioChannelBadge`) et les sous-titres disponibles avec drapeaux.
-  - **Réalisateur, Distribution & Équipe + Titres similaires** : mise en avant des cartes Réalisateur / Scénario et des portraits d'acteurs dans `EditorialCredits.svelte`, suivies d'un rail horizontal de **Films / Séries similaires** (`SimilarWorks.svelte`) basé sur les genres, réalisateurs, acteurs et bibliothèque en commun.
+- **Étape 5 — Fiches Films & Séries ergonomiques inspirées de Jellyfin (`DetailHero.svelte`, `FilmDetail.svelte`, `SeriesDetail.svelte`, `PersonalFeedback.svelte`, `WatchStatus.svelte`, `WorkTools.svelte`, `OfflineDownload.svelte`, `EditorialCredits.svelte`, `SimilarWorks.svelte`, `progress.ts`, `ImmersivePlayer.svelte`, `watch-state.ts`, `track-labels.ts`)** :
+  - **Arrondi des notes IMDb / TMDb** : formatage systématique à 1 décimale (`8,6 / 10` au lieu de `8.601 / 10`) dans `DetailHero.svelte` et sur les badges fournisseurs.
+  - **Correction du menu `...` coupé (`WorkTools.svelte`, `DetailHero.svelte`)** : isolation du découpage de l'image de fond dans `.detail-backdrop-clip` (`overflow: hidden`) et passage de `.detail-hero` en `overflow: visible; z-index: 10` avec `.dropdown-menu` / `.list-dropdown-menu` en `z-index: 300`, permettant d'afficher intégralement toutes les actions (`Informations média`, `Modifier les images`, `Identifier`, `Modifier les métadonnées`, `Ajouter à une playlist…`).
+  - **Barre d'actions unifiée & coche « Vu » automatique dès le générique de fin** :
+    - Sous le titre et la note : bouton `Lancer le film`, bouton coche **« Vu » (`✓`)** (`WatchStatus.svelte`), bouton **« Favoris » (`♥`)** avec les **5 étoiles de notation (`★★★★★`)** juste à sa droite (`PersonalFeedback.svelte`), bouton `+` Playlist, Téléchargement et menu `...`.
+    - Détection automatique de fin de visionnage prenant en compte le **générique de fin** (`isCreditsOrCompleted` dans `progress.ts` et `ImmersivePlayer.svelte` : marqueur `credits`, chapitre `Générique`/`Credits`, ou seuil de 88 % / 8 dernières minutes d'un film).
+    - Bascule manuelle immédiate du bouton « Vu » même sur un média non encore lancé (`fallbackDuration` dans `markWatched`).
+  - **Suppression des accordéons techniques redondants** : retrait complet des panneaux `<details>` « Versions et informations techniques » et « Mon suivi et mes préférences » sous le Hero dans `FilmDetail.svelte` et `SeriesDetail.svelte`.
+  - **Métadonnées structurées, Distribution & équipe et Plus de ce genre façon Jellyfin** :
+    - Tableau aligné `Réalisateur`, `Scénario`, `Genres`, `Titre original`, ligne `Étiquettes` et logos `IMDb` / `TMDB` / `TVDB` dans `DetailHero.svelte`.
+    - Carrousel horizontal **« Distribution & équipe »** (`EditorialCredits.svelte`) avec cartes portraits rectangulaires verticales (`aspect-ratio: 2 / 3`), flèches `<` / `>`, photo, nom et rôle/personnage (acteurs, réalisateurs, scénaristes).
+    - Rail horizontal **« Plus de ce genre »** (`SimilarWorks.svelte`) avec badge coche « Vu » (`✓`) sur les affiches déjà visionnées.
 - **Validations réelles (Zéro régression)** :
   - `npm --prefix apps/web run check` : 0 erreur et 0 avertissement (`svelte-check`).
   - `npm --prefix apps/web run lint` : 0 erreur et 0 avertissement (`eslint src`).
-  - `npm --prefix apps/web test` : 30 suites de tests, 215 tests unitaires réussis à 100 %.
+  - `npm --prefix apps/web test` : 30 suites de tests, 216 tests unitaires réussis à 100 %.
   - `npm --prefix apps/web run build` : compilation de production SSR + Client + Service Worker + `adapter-static` réussie sans erreur.
 
 ## 31 octobre 2026 — Métadonnées complètes, Modale Identifier, Séries TV & Multi-langue dynamique (Netflix-style)

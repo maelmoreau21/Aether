@@ -237,7 +237,7 @@ pub(super) fn marker_result_matches_input(input: &Value, result: &Value) -> bool
     let Some(outputs) = result.as_array() else {
         return false;
     };
-    if inputs.len() != 2 || outputs.len() > inputs.len() {
+    if inputs.len() < 2 || inputs.len() > 32 || outputs.len() > inputs.len() {
         return false;
     }
     let mut seen = std::collections::HashSet::new();

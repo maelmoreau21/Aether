@@ -16,6 +16,7 @@
   import { asset, resolve } from '$app/paths';
   import Icon from './Icon.svelte';
   import ProfileMenu from './ProfileMenu.svelte';
+  import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
   import { serverPresentation } from '../config/presentation';
 
   let { section = 'home', name = 'Aether' }: {
@@ -27,6 +28,22 @@
   let loadingLibraries = $state(false);
   let libraryDialog: HTMLDialogElement;
   let libraryMenuOpen = $state(false);
+  let watchPartyOpen = $state(false);
+  let pendingInvitesCount = $state(0);
+
+  onMount(() => {
+    void loadInvitesCount();
+  });
+
+  async function loadInvitesCount() {
+    try {
+      const res = await fetch('/api/v1/parties/invites');
+      if (res.ok) {
+        const data = await res.json();
+        pendingInvitesCount = (data.invites ?? []).length;
+      }
+    } catch {}
+  }
   let opener: HTMLElement | null = null;
   let isScrolled = $state(false);
   let searchExpanded = $state(false);
@@ -134,6 +151,18 @@
       >
         <Icon name="search" size={19} />
       </a>
+      <button
+        type="button"
+        class="action-icon-btn watch-party-btn"
+        title="Séances Watch Party"
+        aria-label="Séances Watch Party"
+        onclick={() => (watchPartyOpen = true)}
+      >
+        <Icon name="users" size={19} />
+        {#if pendingInvitesCount > 0}
+          <span class="invite-badge">{pendingInvitesCount}</span>
+        {/if}
+      </button>
       <ProfileMenu />
     </div>
   </div>
@@ -186,6 +215,16 @@
     <span aria-hidden="true">↓</span> Téléchargements sur cet appareil <Icon name="chevron" size={16} />
   </a>
 </dialog>
+
+{#if watchPartyOpen}
+  <WatchPartyModal
+    onClose={() => (watchPartyOpen = false)}
+    onJoinParty={(partyId, mediaId) => {
+      watchPartyOpen = false;
+      window.dispatchEvent(new CustomEvent('start-watch-party', { detail: { partyId, mediaId } }));
+    }}
+  />
+{/if}
 
 <style>
   .site-header {
@@ -655,5 +694,23 @@
       bottom: calc(64px + env(safe-area-inset-bottom, 0px));
       padding-bottom: 0;
     }
+  }
+
+  .watch-party-btn {
+    position: relative;
+  }
+  .invite-badge {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    background: var(--accent-primary, #f97316);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
   }
 </style>

@@ -49,6 +49,21 @@ export async function writeProgress(progress: Progress, keepalive = false): Prom
   return saved;
 }
 
+export function isCreditsOrCompleted(position: number, duration: number, creditsStart?: number): boolean {
+  if (!Number.isFinite(duration) || duration <= 0 || position <= 0) return false;
+  if (creditsStart !== undefined && Number.isFinite(creditsStart) && creditsStart > 0 && creditsStart < duration && position >= creditsStart) {
+    return true;
+  }
+  const ratio = position / duration;
+  if (duration >= 3600 && (ratio >= 0.88 || (ratio >= 0.85 && duration - position <= 480))) {
+    return true;
+  }
+  if (duration >= 1200 && ratio >= 0.88) {
+    return true;
+  }
+  return ratio >= 0.9;
+}
+
 export class ProgressTracker {
   private revision = 0;
   private generation = getSessionGeneration();
@@ -56,7 +71,13 @@ export class ProgressTracker {
   private lastSave = Date.now();
   private failed = false;
   private watched = false;
-  constructor(private work: string, private onError: (message: string) => void) {}
+  private creditsStart?: number;
+  constructor(private work: string, private onError: (message: string) => void, creditsStart?: number) {
+    this.creditsStart = creditsStart;
+  }
+  setCreditsStart(creditsStart?: number) {
+    this.creditsStart = creditsStart;
+  }
   async load(): Promise<number> {
     try {
       const progress = await readProgress(this.work);
@@ -72,10 +93,11 @@ export class ProgressTracker {
     this.lastSave = Date.now();
     const position = Math.max(0, Math.min(state.position, state.duration));
     const duration = state.duration;
+    const watched = this.watched || ended || isCreditsOrCompleted(position, duration, this.creditsStart);
     this.queue = this.queue.then(async () => {
       if (this.failed || this.generation !== getSessionGeneration()) return;
       try {
-        const progress = await writeProgress({ workId: this.work, position, duration, watched: this.watched || ended || position / duration >= .95, revision: this.revision }, force);
+        const progress = await writeProgress({ workId: this.work, position, duration, watched, revision: this.revision }, force);
         this.revision = progress.revision; this.watched = progress.watched;
       } catch (error) { this.fail(error); }
     });

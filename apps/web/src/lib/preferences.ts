@@ -10,6 +10,7 @@ export type Preferences = {
   offsets?: { audio: number; subtitle: number }; subtitlePreference?: SubtitlePreference;
   subtitleStyle?: SubtitleStyle;
   skipIntroEnabled?: boolean; skipCreditsEnabled?: boolean;
+  autoSkipIntro?: boolean; autoSkipCredits?: boolean;
   artworkRotation?: ArtworkRotationPolicy;
 };
 let current: Preferences = {};

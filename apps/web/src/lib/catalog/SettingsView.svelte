@@ -37,6 +37,8 @@
   let subtitleOffset = $state(preferences().offsets?.subtitle ?? 0);
   let skipIntroEnabled = $state(preferences().skipIntroEnabled !== false);
   let skipCreditsEnabled = $state(preferences().skipCreditsEnabled !== false);
+  let autoSkipIntro = $state(preferences().autoSkipIntro === true);
+  let autoSkipCredits = $state(preferences().autoSkipCredits === true);
   let offsetsEdited = false;
   let artworkRotation = $state<ArtworkRotationPolicy>({ ...defaultArtworkRotationPolicy, ...preferences().artworkRotation });
   let artworkEdited = false;
@@ -74,6 +76,8 @@
       }
       skipIntroEnabled = saved.skipIntroEnabled !== false;
       skipCreditsEnabled = saved.skipCreditsEnabled !== false;
+      autoSkipIntro = saved.autoSkipIntro === true;
+      autoSkipCredits = saved.autoSkipCredits === true;
       if (!artworkEdited) artworkRotation = { ...defaultArtworkRotationPolicy, ...saved.artworkRotation };
     }).catch(() => {});
     const sync = () => { const hash = window.location.hash.slice(1); const id = hash === 'appearance' ? 'account' : hash === 'sso' ? 'security' : hash; current = pages.some(page => page.id === id) ? id : 'account'; };
@@ -246,6 +250,8 @@
           <h3>Intros et génériques</h3>
           <label><input type="checkbox" bind:checked={skipIntroEnabled} onchange={() => savePreferences({ skipIntroEnabled })} /> Proposer « Passer l'intro »</label>
           <label><input type="checkbox" bind:checked={skipCreditsEnabled} onchange={() => savePreferences({ skipCreditsEnabled })} /> Proposer « Passer le générique »</label>
+          <label><input type="checkbox" bind:checked={autoSkipIntro} onchange={() => savePreferences({ autoSkipIntro })} /> Sauter automatiquement l'introduction</label>
+          <label><input type="checkbox" bind:checked={autoSkipCredits} onchange={() => savePreferences({ autoSkipCredits })} /> Sauter automatiquement le générique de fin</label>
         </section>
 
         <form class="offsets" onsubmit={saveOffsets}>

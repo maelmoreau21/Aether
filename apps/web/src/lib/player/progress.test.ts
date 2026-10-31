@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { session } from '../auth/session';
-import { ProgressTracker, writeProgress, preloadProgress, readProgress } from './progress';
+import { ProgressTracker, writeProgress, preloadProgress, readProgress, isCreditsOrCompleted } from './progress';
 afterEach(()=>{session.set(null);vi.unstubAllGlobals();vi.useRealTimers();});
 const state={position:4,duration:12,paused:true,volume:1,speed:1};
 function login() {session.set({user:{id:'user-a',login:'a',role:'user'},csrfToken:'test-csrf'});}
 describe('user progress',()=>{
+  it('marks media as watched when end credits are reached',()=>{
+    expect(isCreditsOrCompleted(5400, 6000)).toBe(true);
+    expect(isCreditsOrCompleted(5300, 6000)).toBe(true);
+    expect(isCreditsOrCompleted(4800, 6000, 4750)).toBe(true);
+    expect(isCreditsOrCompleted(3000, 6000)).toBe(false);
+  });
   it('consumes a recent hover prefetch once and otherwise reloads the live revision',async()=>{
     login();const fetch=vi.fn().mockImplementation(async()=>Response.json({workId:'work',position:4,duration:12,watched:false,revision:7}));vi.stubGlobal('fetch',fetch);
     preloadProgress('work');preloadProgress('work');

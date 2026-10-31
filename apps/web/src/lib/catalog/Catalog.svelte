@@ -220,6 +220,32 @@
       : resolve(`films/?work=${encodeURIComponent(work.id)}`);
   }
 
+  async function launchWatchParty(partyId: string, targetMediaId?: string) {
+    const current = playableMedia.find(item => item.id === selected) ?? playableMedia[0];
+    const targetId = targetMediaId || current?.id || (allowedIds.includes(selected) ? selected : allowedIds[0]);
+    if (!targetId) return;
+    const controller = new AbortController();
+    episodeLaunchController = controller;
+    launching = true;
+    mediaError = '';
+
+    try {
+      const descriptor = revalidateMediaDescriptor(targetId, controller.signal);
+      void descriptor.catch(() => {});
+      await loadPlayer();
+      await tick();
+      immersive?.joinParty(partyId, descriptor);
+      const item = await descriptor;
+      media = [...media.filter(m => m.id !== item.id), item];
+      selected = item.id;
+    } catch (err) {
+      mediaError = err instanceof Error ? err.message : 'Impossible de rejoindre la séance.';
+      immersive?.close();
+    } finally {
+      launching = false;
+    }
+  }
+
   async function openPlayer(): Promise<void> {
     const current = playableMedia.find(item => item.id === selected) ?? playableMedia[0];
     const targetId = current?.id ?? (allowedIds.includes(selected) ? selected : allowedIds[0]);
@@ -316,7 +342,12 @@
       if(detail?.id===id)void request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}?episodeLimit=24`,controller.signal).then(work=>{if(!controller.signal.aborted&&detail?.id===id)detail=work;}).catch(()=>{});
     };
     window.addEventListener('media-artwork-updated',artworkChanged);
-    return () => {controller.abort();window.removeEventListener('media-artwork-updated',artworkChanged);};
+    const onStartParty = (e: Event) => {
+      const d = (e as CustomEvent<{ partyId: string; mediaId?: string; workId?: string }>).detail;
+      void launchWatchParty(d.partyId, d.mediaId || d.workId);
+    };
+    window.addEventListener('start-watch-party', onStartParty);
+    return () => {controller.abort();window.removeEventListener('media-artwork-updated',artworkChanged);window.removeEventListener('start-watch-party', onStartParty);};
   });
 
   function savePreference(key: string, value: string) {

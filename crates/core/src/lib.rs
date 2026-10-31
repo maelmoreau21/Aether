@@ -39,6 +39,7 @@ pub mod media;
 pub mod music;
 pub mod node;
 pub mod nodes;
+pub mod parties;
 pub mod permissions;
 pub mod playlists;
 pub mod preferences;
@@ -228,6 +229,7 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(preferences::router(auth.clone()))
             .merge(account::router(auth.clone()))
             .merge(music::router(auth.clone()))
+            .merge(parties::router(auth.clone()))
             .merge(playlists::router(auth.clone()))
             .merge(product::router(auth.clone()))
             .merge(artwork::router(auth.clone()))

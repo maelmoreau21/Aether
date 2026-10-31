@@ -1622,7 +1622,7 @@ pub(crate) async fn run_automated(
         let mut episodes = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for (asset, raw, key, source, probe, episode_work, number) in candidates {
-            if episodes.len() >= 2 {
+            if episodes.len() >= 8 {
                 break;
             }
             if seen.contains(&episode_work) {
@@ -1657,6 +1657,27 @@ pub(crate) async fn run_automated(
             if !valid {
                 continue;
             }
+
+            let mut tail_compact = None;
+            if let Some(tail_words) = result["tailFingerprints"]
+                .as_array()
+                .filter(|v| !v.is_empty() && v.len() <= 4000)
+            {
+                let mut tail_bytes = Vec::with_capacity(tail_words.len() * 4);
+                let mut tail_valid = true;
+                for word in tail_words {
+                    if let Some(n) = word.as_u64().filter(|n| *n <= u32::MAX as u64) {
+                        tail_bytes.extend_from_slice(&(n as u32).to_le_bytes());
+                    } else {
+                        tail_valid = false;
+                        break;
+                    }
+                }
+                if tail_valid && !tail_bytes.is_empty() {
+                    tail_compact = Some(STANDARD.encode(tail_bytes));
+                }
+            }
+
             let Ok(probe) = serde_json::from_str::<Value>(&probe) else {
                 continue;
             };
@@ -1669,9 +1690,24 @@ pub(crate) async fn run_automated(
             };
             seen.insert(episode_work);
             marker_sources.push((asset.clone(), source));
-            episodes.push(json!({"id":asset,"seriesId":scope.1,"seasonNumber":scope.2,"episodeNumber":number.parse::<u32>().ok(),"duration":duration,"fingerprintsCompact":STANDARD.encode(bytes),"fingerprintRate":result["fingerprintRate"]}));
+            let mut ep_val = json!({
+                "id": asset,
+                "seriesId": scope.1,
+                "seasonNumber": scope.2,
+                "episodeNumber": number.parse::<u32>().ok(),
+                "duration": duration,
+                "fingerprintsCompact": STANDARD.encode(bytes),
+                "fingerprintRate": result["fingerprintRate"]
+            });
+            if let Some(compact) = tail_compact {
+                ep_val["tailFingerprintsCompact"] = json!(compact);
+            }
+            if let Some(ts) = result["tailStart"].as_f64() {
+                ep_val["tailStart"] = json!(ts);
+            }
+            episodes.push(ep_val);
         }
-        if episodes.len() != 2 || episodes[0]["id"] != job.target_id {
+        if episodes.len() < 2 || episodes[0]["id"] != job.target_id {
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "compatible_fingerprint_peer_required",

@@ -35,6 +35,8 @@ export interface Media {
   trickplay?: { intervalMs: number; width: number; height: number; columns: number; rows: number; sheetCount: number; thumbnailCount: number; urlPrefix: string } | null;
   intro?: { start: number; end: number };
   credits?: { start: number; end: number };
+  recap?: { start: number; end: number };
+  preview?: { start: number; end: number };
   id: string;
   workId?: string;
   title: string;

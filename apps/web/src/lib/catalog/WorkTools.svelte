@@ -1,6 +1,7 @@
 <script lang="ts">
   import ImageManager from './ImageManager.svelte';
   import IdentifyModal from './IdentifyModal.svelte';
+  import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
   import { session } from '../auth/session';
   import type { Work } from './api';
   import type { Media } from '../player/types';
@@ -28,6 +29,7 @@
   let infoOpen = $state(false);
   let listOpen = $state(false);
   let menuOpen = $state(false);
+  let watchPartyOpen = $state(false);
 
   let lists = $state<{ id: string; name: string; owned?: boolean }[]>([]);
   let listName = $state('');
@@ -179,6 +181,18 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
+{#if watchPartyOpen}
+  <WatchPartyModal
+    mediaId={work.id}
+    mediaTitle={work.title}
+    onClose={() => (watchPartyOpen = false)}
+    onJoinParty={(partyId) => {
+      watchPartyOpen = false;
+      window.dispatchEvent(new CustomEvent('start-watch-party', { detail: { partyId, workId: work.id } }));
+    }}
+  />
+{/if}
+
 {#if imagesOpen}
   <ImageManager
     title={work.title}
@@ -292,6 +306,19 @@
       ></button>
 
       <div class="dropdown-menu" role="menu">
+        <button
+          type="button"
+          class="menu-item"
+          role="menuitem"
+          onclick={() => {
+            menuOpen = false;
+            watchPartyOpen = true;
+          }}
+        >
+          <Icon name="users" size={16} />
+          <span>Séance Watch Party</span>
+        </button>
+
         <button
           type="button"
           class="menu-item"
@@ -722,7 +749,7 @@
     align-items: center;
     gap: 10px;
     position: relative;
-    margin-block: 8px;
+    z-index: 40;
     vertical-align: middle;
   }
 
@@ -742,16 +769,17 @@
 
   .list-dropdown-menu {
     position: absolute;
-    top: calc(100% + 8px);
+    top: calc(100% + 10px);
     left: 0;
     min-width: 280px;
-    background: rgba(24, 24, 27, 0.95);
-    backdrop-filter: blur(16px);
+    background: var(--color-surface-elevated);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     border: 1px solid var(--color-line-strong);
     border-radius: var(--radius-md);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-lg);
     padding: 14px;
-    z-index: 100;
+    z-index: 300;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -795,9 +823,11 @@
     width: 44px;
     height: 44px;
     box-sizing: border-box;
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface);
+    border: 1px solid var(--color-line-strong);
+    border-radius: 50%;
+    background: var(--color-glass-raised);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     color: var(--color-text-bright);
     cursor: pointer;
     transition: all var(--transition-fast);
@@ -806,7 +836,7 @@
   .tool-btn:hover {
     color: var(--color-accent);
     border-color: var(--color-accent);
-    background: var(--color-surface-hover);
+    background: var(--color-raised-hover);
     transform: translateY(-1px);
   }
 
@@ -828,7 +858,7 @@
   .backdrop-dismiss {
     position: fixed;
     inset: 0;
-    z-index: 99;
+    z-index: 290;
     background: transparent;
     border: none;
     cursor: default;
@@ -836,19 +866,28 @@
 
   .dropdown-menu {
     position: absolute;
-    top: calc(100% + 8px);
+    top: calc(100% + 10px);
     left: 0;
-    min-width: 230px;
-    background: rgba(24, 24, 27, 0.95);
-    backdrop-filter: blur(16px);
+    min-width: 240px;
+    background: var(--color-surface-elevated);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     border: 1px solid var(--color-line-strong);
     border-radius: var(--radius-md);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
-    padding: 6px;
-    z-index: 100;
+    box-shadow: var(--shadow-lg);
+    padding: 8px;
+    z-index: 300;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
+  }
+
+  @media (max-width: 720px) {
+    .dropdown-menu,
+    .list-dropdown-menu {
+      left: auto;
+      right: 0;
+    }
   }
 
   .menu-item {

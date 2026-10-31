@@ -1116,6 +1116,78 @@ CREATE TRIGGER cache_gen_posters_del AFTER DELETE ON work_posters BEGIN
     UPDATE inventory_cache_generation SET gen = gen + 1 WHERE id = 1;
 END;
 
+CREATE TABLE watch_parties (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    host_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    media_id TEXT NOT NULL,
+    control_mode TEXT NOT NULL DEFAULT 'host_only' CHECK(control_mode IN ('host_only', 'shared', 'request')),
+    state TEXT NOT NULL DEFAULT 'waiting' CHECK(state IN ('waiting', 'playing', 'paused', 'ended')),
+    current_position_ms INTEGER NOT NULL DEFAULT 0,
+    position_updated_at_ms INTEGER NOT NULL DEFAULT 0,
+    is_locked INTEGER NOT NULL DEFAULT 0 CHECK(is_locked IN (0, 1)),
+    wait_for_buffering INTEGER NOT NULL DEFAULT 1 CHECK(wait_for_buffering IN (0, 1)),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    ended_at INTEGER
+) STRICT;
+
+CREATE TABLE watch_party_members (
+    party_id TEXT NOT NULL REFERENCES watch_parties(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'participant' CHECK(role IN ('host', 'participant')),
+    is_ready INTEGER NOT NULL DEFAULT 0 CHECK(is_ready IN (0, 1)),
+    is_buffering INTEGER NOT NULL DEFAULT 0 CHECK(is_buffering IN (0, 1)),
+    joined_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(party_id, user_id)
+) STRICT;
+
+CREATE TABLE watch_party_invites (
+    id TEXT PRIMARY KEY NOT NULL,
+    party_id TEXT NOT NULL REFERENCES watch_parties(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    target_user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    expires_at INTEGER NOT NULL,
+    revoked_at INTEGER
+) STRICT;
+
+CREATE TABLE watch_party_messages (
+    id TEXT PRIMARY KEY NOT NULL,
+    party_id TEXT NOT NULL REFERENCES watch_parties(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content TEXT NOT NULL CHECK(length(content) BETWEEN 1 AND 500),
+    kind TEXT NOT NULL DEFAULT 'chat' CHECK(kind IN ('chat', 'system', 'reaction')),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+) STRICT;
+
+CREATE TABLE watch_party_queue (
+    id TEXT PRIMARY KEY NOT NULL,
+    party_id TEXT NOT NULL REFERENCES watch_parties(id) ON DELETE CASCADE,
+    media_id TEXT NOT NULL,
+    added_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+) STRICT;
+
+CREATE TABLE watch_party_polls (
+    id TEXT PRIMARY KEY NOT NULL,
+    party_id TEXT NOT NULL REFERENCES watch_parties(id) ON DELETE CASCADE,
+    question TEXT NOT NULL CHECK(length(question) BETWEEN 1 AND 200),
+    options_json TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    is_closed INTEGER NOT NULL DEFAULT 0 CHECK(is_closed IN (0, 1)),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+) STRICT;
+
+CREATE TABLE watch_party_poll_votes (
+    poll_id TEXT NOT NULL REFERENCES watch_party_polls(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    option_index INTEGER NOT NULL,
+    PRIMARY KEY(poll_id, user_id)
+) STRICT;
+
 CREATE TABLE schema_version(version INTEGER PRIMARY KEY CHECK(version=1));
 INSERT INTO schema_version(version) VALUES(1);
 
@@ -3758,6 +3830,78 @@ ALTER TABLE ONLY work_posters
 
 ALTER TABLE ONLY work_posters
     ADD CONSTRAINT work_posters_work_id_fkey FOREIGN KEY (work_id) REFERENCES inventory_works(id) ON DELETE CASCADE;
+
+CREATE TABLE watch_parties (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    host_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    media_id TEXT NOT NULL,
+    control_mode TEXT NOT NULL DEFAULT 'host_only' CHECK(control_mode IN ('host_only', 'shared', 'request')),
+    state TEXT NOT NULL DEFAULT 'waiting' CHECK(state IN ('waiting', 'playing', 'paused', 'ended')),
+    current_position_ms BIGINT NOT NULL DEFAULT 0,
+    position_updated_at_ms BIGINT NOT NULL DEFAULT 0,
+    is_locked BIGINT NOT NULL DEFAULT 0 CHECK(is_locked IN (0, 1)),
+    wait_for_buffering BIGINT NOT NULL DEFAULT 1 CHECK(wait_for_buffering IN (0, 1)),
+    created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW())::BIGINT),
+    ended_at BIGINT
+);
+
+CREATE TABLE watch_party_members (
+    party_id TEXT NOT NULL REFERENCES watch_parties(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'participant' CHECK(role IN ('host', 'participant')),
+    is_ready BIGINT NOT NULL DEFAULT 0 CHECK(is_ready IN (0, 1)),
+    is_buffering BIGINT NOT NULL DEFAULT 0 CHECK(is_buffering IN (0, 1)),
+    joined_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW())::BIGINT),
+    last_seen_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW())::BIGINT),
+    PRIMARY KEY(party_id, user_id)
+);
+
+CREATE TABLE watch_party_invites (
+    id TEXT PRIMARY KEY NOT NULL,
+    party_id TEXT NOT NULL REFERENCES watch_parties(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    target_user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+    created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW())::BIGINT),
+    expires_at BIGINT NOT NULL,
+    revoked_at BIGINT
+);
+
+CREATE TABLE watch_party_messages (
+    id TEXT PRIMARY KEY NOT NULL,
+    party_id TEXT NOT NULL REFERENCES watch_parties(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content TEXT NOT NULL CHECK(length(content) BETWEEN 1 AND 500),
+    kind TEXT NOT NULL DEFAULT 'chat' CHECK(kind IN ('chat', 'system', 'reaction')),
+    created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW())::BIGINT)
+);
+
+CREATE TABLE watch_party_queue (
+    id TEXT PRIMARY KEY NOT NULL,
+    party_id TEXT NOT NULL REFERENCES watch_parties(id) ON DELETE CASCADE,
+    media_id TEXT NOT NULL,
+    added_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    position BIGINT NOT NULL DEFAULT 0,
+    created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW())::BIGINT)
+);
+
+CREATE TABLE watch_party_polls (
+    id TEXT PRIMARY KEY NOT NULL,
+    party_id TEXT NOT NULL REFERENCES watch_parties(id) ON DELETE CASCADE,
+    question TEXT NOT NULL CHECK(length(question) BETWEEN 1 AND 200),
+    options_json TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    is_closed BIGINT NOT NULL DEFAULT 0 CHECK(is_closed IN (0, 1)),
+    created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW())::BIGINT)
+);
+
+CREATE TABLE watch_party_poll_votes (
+    poll_id TEXT NOT NULL REFERENCES watch_party_polls(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    option_index BIGINT NOT NULL,
+    PRIMARY KEY(poll_id, user_id)
+);
 
 CREATE TABLE schema_version(version INTEGER PRIMARY KEY CHECK(version=1));
 INSERT INTO schema_version(version) VALUES(1);

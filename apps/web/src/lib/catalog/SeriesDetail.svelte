@@ -48,6 +48,32 @@
   let episodesLoading = $state(false);
   let episodesError = $state('');
   const episodeCount = $derived(activeSeason?.episodeCount ?? activeSeason?.episodes.length ?? 0);
+  let analyzingSeason = $state(false);
+  let analyzeFeedback = $state('');
+
+  async function triggerAnalyzeSeason() {
+    if (!activeSeason || analyzingSeason) return;
+    const account = $session;
+    if (!account || account.user.role !== 'administrator') return;
+    analyzingSeason = true;
+    analyzeFeedback = '';
+    try {
+      const res = await fetch(`/api/v1/admin/seasons/${encodeURIComponent(activeSeason.id)}/analyze-markers`, {
+        method: 'POST',
+        headers: { 'x-csrf-token': account.csrfToken }
+      });
+      if (res.ok) {
+        const body = await res.json().catch(() => ({}));
+        analyzeFeedback = body.message || 'Analyse des marqueurs lancée.';
+      } else {
+        analyzeFeedback = `Erreur (${res.status})`;
+      }
+    } catch {
+      analyzeFeedback = 'Analyse indisponible.';
+    } finally {
+      analyzingSeason = false;
+    }
+  }
   const visibleEpisodes = $derived(work.episodesPage ? pageEpisodes : (activeSeason?.episodes ?? []).slice(episodeOffset, episodeOffset + episodePageSize));
   $effect(() => {
     const currentWork = work;
@@ -79,6 +105,8 @@
         heading?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
       }}><Icon name="play" size={20} />Voir les épisodes</button>
       {#if !work.synthetic}
+        <WatchStatus workId={work.id} />
+        <PersonalFeedback workId={work.id} />
         <WorkTools {work} />
       {/if}
     </div>
@@ -94,6 +122,13 @@
           {#if seasonImage && !failedImages.includes(seasonImage)}<img class="season-image" src={seasonImage} alt="" width="48" height="72" loading="lazy" onerror={() => failedImages = [...failedImages, seasonImage]} />{/if}
           <label class="season-selector-label"><span>Saison</span><select aria-label="Saison" bind:value={season}>{#each work.seasons as item (item.id)}<option value={item.number}>{item.title || (item.number === 0 ? 'Hors-série' : `Saison ${item.number}`)}</option>{/each}</select></label>
           <span class="episode-count">{episodeCount} {episodeCount > 1 ? 'épisodes' : 'épisode'}</span>
+          {#if $session?.user.role === 'administrator' && activeSeason}
+            <button type="button" class="analyze-markers-btn" disabled={analyzingSeason} onclick={triggerAnalyzeSeason} title="Analyser les intros et génériques de cette saison">
+              <Icon name="search" size={15} />
+              <span>{analyzingSeason ? 'Analyse...' : 'Analyser intros & génériques'}</span>
+            </button>
+            {#if analyzeFeedback}<span class="analyze-feedback" role="status">{analyzeFeedback}</span>{/if}
+          {/if}
         </div>
       {/if}
     </div>
@@ -119,7 +154,7 @@
             {#if epDesc}<p class="episode-desc">{epDesc}</p>{/if}
             <div class="episode-actions-row">
               <EpisodePlayer {episode} {media} {immersive} isLaunching={launchingEpisodeId === episode.id} onlaunch={onLaunchEpisode} onselect={() => onSelectEpisode(episode)} />
-              {#if !episode.synthetic}<WatchStatus workId={episode.id} />{/if}
+              {#if !episode.synthetic}<WatchStatus workId={episode.id} {duration} />{/if}
             </div>
           </div>
         </article>
@@ -133,14 +168,14 @@
       </nav>
     {/if}
   </section>
-  {#if !work.synthetic}<details class="personal-panel"><summary>Mes préférences pour cette série</summary><PersonalFeedback workId={work.id} /></details>{/if}
+
   <EditorialCredits {work} />
   <SimilarWorks {work} candidates={similarCandidates} />
 </div>
 
 <style>
   .series-detail-view { padding-bottom: 40px; }
-  .series-hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; width: 100%; margin-top: 8px; }
+  .series-hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; width: 100%; margin: 4px 0 6px; }
   .hero-cta { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 12px 28px; border: 0; border-radius: var(--radius-pill); background: var(--color-play); color: var(--color-on-play); font-size: 15px; font-weight: 700; box-shadow: 0 6px 20px rgba(249, 115, 22, 0.36); transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast); }
   .hero-cta:hover:not(:disabled) { background: var(--color-play-hover, var(--color-play)); transform: translateY(-2px); box-shadow: 0 10px 26px rgba(249, 115, 22, 0.5); }
   .series-shelf { margin-top: 32px; }
@@ -152,6 +187,10 @@
   .season-selector-label { display: grid; gap: 6px; min-width: 0; color: var(--color-muted); font-size: 12px; font-weight: 600; }
   .season-selector-label select { min-height: 44px; width: 100%; max-width: 360px; font-size: 15px; }
   .episode-count { font-size: 13px; color: var(--color-muted); white-space: nowrap; padding: 4px 10px; border-radius: var(--radius-pill); background: var(--color-raised); border: 1px solid var(--color-line); }
+  .analyze-markers-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; border-radius: var(--radius-pill); background: var(--color-raised); color: var(--color-text); border: 1px solid var(--color-line); cursor: pointer; transition: background var(--transition-fast), border-color var(--transition-fast); }
+  .analyze-markers-btn:hover:not(:disabled) { background: var(--color-surface-hover); border-color: var(--color-line-strong); color: var(--color-text-bright); }
+  .analyze-markers-btn:disabled { opacity: 0.6; cursor: wait; }
+  .analyze-feedback { font-size: 12px; color: var(--color-accent); font-weight: 500; }
   .episodes-list { display: grid; gap: 12px; }
   .episode { display: grid; grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); align-items: start; gap: 24px; padding: 18px; border-radius: var(--radius-lg); background: var(--color-surface); border: 1px solid var(--color-line); transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast); }
   .episode:hover { border-color: var(--color-line-strong); background: var(--color-surface-hover); box-shadow: var(--shadow-sm); }
@@ -169,8 +208,4 @@
   .error-banner { color: var(--color-danger); line-height: 1.6; }
   .empty-episodes-box { padding: 36px 24px; border-radius: var(--radius-lg); background: var(--color-surface); border: 1px dashed var(--color-line); color: var(--color-muted); text-align: center; }
   @media (max-width: 640px) { .episode { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 14px; } .season-heading { flex-wrap: wrap; width: 100%; gap: 12px; } .season-selector-label { flex: 1; } .hero-cta { width: 100%; } }
-
-  .personal-panel { border: 1px solid var(--color-line); border-radius: var(--radius-lg); background: var(--color-surface); margin-top: 24px; padding: 4px 18px; }
-  .personal-panel summary { min-height: 44px; padding-block: 12px; cursor: pointer; font-weight: 650; color: var(--color-text-bright); }
-
 </style>

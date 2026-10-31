@@ -198,7 +198,7 @@
 
   function getRevisions(extensionId: string, currentManifest?: Manifest) {
     const matchingEntries = catalogue.filter(e => e.manifest.id === extensionId);
-    const versionMap = new Map<string, CatalogueEntry>();
+    const versionMap = new SvelteMap<string, CatalogueEntry>();
     for (const entry of matchingEntries) {
       if (!versionMap.has(entry.manifest.version)) {
         versionMap.set(entry.manifest.version, entry);
@@ -425,7 +425,7 @@
 
                       {#if rev.changelog}
                         <div class="revision-changelog">
-                          {#each rev.changelog.split('\n').filter(line => line.trim()) as line}
+                          {#each rev.changelog.split('\n').filter(line => line.trim()) as line, idx (idx)}
                             {#if line.trim().startsWith('•') || line.trim().startsWith('*') || line.trim().startsWith('-')}
                               <div class="changelog-item">
                                 <span class="bullet">•</span>

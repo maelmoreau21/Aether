@@ -11,7 +11,7 @@
   import DetailHero from './DetailHero.svelte';
   import type { Media } from '../player/types';
   import { sourceLabel } from './api';
-  import { videoResolutionBadge, colorProfileLabel, inspectedAudioTracks, audioChannelBadge } from '../player/track-labels';
+  import { videoResolutionBadge, containerLabel, colorProfileLabel, inspectedAudioTracks, audioChannelBadge } from '../player/track-labels';
   import WatchStatus from './WatchStatus.svelte';
   import Icon from '../ui/Icon.svelte';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
@@ -112,6 +112,32 @@
     </div>
     {#if mediaError}<p class="error-banner" role="alert">{mediaError}</p>{/if}
   </DetailHero>
+
+  {#if playableMedia.length || allowedIds.length}
+    <details class="versions-panel">
+      <summary>Versions et informations techniques</summary>
+      {#if playableMedia.length > 1}
+        <div class="versions" aria-label="Versions disponibles">
+          <button type="button" onclick={() => { const probe = document.createElement('video'); selected = bestVersion(playableMedia, mime => probe.canPlayType(mime))?.id ?? selected; }}>Meilleure version disponible</button>
+          {#each playableMedia as item (item.id)}<button type="button" aria-pressed={selected === item.id} aria-label={`Sélectionner la version ${sourceLabel(item)}`} onclick={() => selected = item.id}>{sourceLabel(item)}</button>{/each}
+        </div>
+      {/if}
+      {#if currentSelectedMedia}
+        <dl class="specs-grid">
+          <div><dt>Vidéo</dt><dd>{currentVideoTrack?.codec_name?.toUpperCase() ?? 'Codec inconnu'}
+            {#if currentVideoTrack?.width && currentVideoTrack?.height} · {currentVideoTrack.width} × {currentVideoTrack.height}{/if}
+            {#if videoResolutionBadge(currentVideoTrack?.width, currentVideoTrack?.height)} · {videoResolutionBadge(currentVideoTrack?.width, currentVideoTrack?.height)}{/if}
+            {#if colorProfileLabel(currentVideoTrack?.pix_fmt)} · {colorProfileLabel(currentVideoTrack?.pix_fmt)}{/if}
+          </dd></div>
+          <div><dt>Audio ({currentAudioTracks.length})</dt><dd>
+            {#each currentAudioTracks as track, index (index)}<span><LanguageLabel language={track.language} /> · {track.codec_name?.toUpperCase() ?? 'Codec inconnu'}{track.channel_layout || track.channels ? ` · ${track.channel_layout ?? `${track.channels} canaux`}` : ''}{track.tags?.title ? ` · ${track.tags.title}` : ''}</span>{:else}Aucune piste audio analysée{/each}
+          </dd></div>
+          <div><dt>Conteneur</dt><dd>{containerLabel(currentSelectedMedia.sources[0]?.mime)}</dd></div>
+          {#if currentSelectedMedia.subtitles.length}<div><dt>Sous-titres</dt><dd>{#each currentSelectedMedia.subtitles as subtitle (subtitle.id)}<span><LanguageLabel language={subtitle.language} />{subtitle.sourceFormat ? ` · ${subtitle.sourceFormat.toUpperCase()}` : ''}{subtitle.forced ? ' · Forcés' : ''}{subtitle.sdh ? ' · Malentendants' : ''}</span>{/each}</dd></div>{/if}
+        </dl>
+      {:else}<p role="status">Les informations de la version ne sont pas encore disponibles.</p>{/if}
+    </details>
+  {/if}
 
   <EditorialCredits {work} />
   <SimilarWorks {work} candidates={similarCandidates} />
@@ -290,4 +316,17 @@
     .hero-cta { width: 100%; }
     .media-experience-strip { width: 100%; gap: 12px 20px; }
   }
+
+  .versions-panel { border: 1px solid var(--color-line); border-radius: var(--radius-lg); background: var(--color-surface); padding: 4px 18px; margin: 18px 0; box-shadow: var(--shadow-sm); }
+  summary { padding: 14px 4px; min-height: 48px; cursor: pointer; font-size: 15px; font-weight: 650; color: var(--color-text-bright); }
+  .versions { display: flex; gap: 10px; flex-wrap: wrap; padding-block: 12px; border-top: 1px solid var(--color-line-subtle); }
+  .versions button { min-height: 44px; max-width: 100%; overflow-wrap: anywhere; padding: 10px 16px; border: 1px solid var(--color-line-strong); border-radius: var(--radius-pill); background: var(--color-raised); color: var(--color-text); font-size: 13px; font-weight: 500; cursor: pointer; }
+  .versions button:hover { border-color: var(--color-text); color: var(--color-text-bright); }
+  .versions button[aria-pressed='true'] { border-color: var(--color-accent); background: var(--color-accent-soft); color: var(--color-text-bright); font-weight: 650; }
+  .specs-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; padding: 14px 4px 20px; margin: 0; font-size: 14px; line-height: 1.7; border-top: 1px solid var(--color-line-subtle); }
+  dt { color: var(--color-muted); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  dd { margin: 0; overflow-wrap: anywhere; color: var(--color-text-bright); }
+  dd span { display: block; }
+  @media (max-width: 640px) { .specs-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; } }
+
 </style>

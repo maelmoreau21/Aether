@@ -233,7 +233,7 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
                  ALTER TABLE inventory_images ALTER COLUMN size TYPE bigint; \
                  ALTER TABLE assets ALTER COLUMN size TYPE bigint; \
                  ALTER TABLE music_tracks ALTER COLUMN size TYPE bigint; \
-                 ALTER TABLE music_tracks ALTER COLUMN cover_size TYPE bigint;"
+                 ALTER TABLE music_tracks ALTER COLUMN cover_size TYPE bigint;",
             )
             .execute(&mut *tx)
             .await?;

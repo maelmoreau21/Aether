@@ -1,4 +1,10 @@
-## 31 octobre 2026 — Correction du scan PostgreSQL (taille de fichiers > 2,14 Go), Explication TMDb et Historique des révisions / Mises à jour d'extensions (Jellyfin-style)
+## 31 octobre 2026 — Correction du scan PostgreSQL
+
+- **Corrections CI & Tests E2E Navigateur** :
+  - `crates/core/src/database.rs` : virgule de fin ajoutée sur la chaîne SQL brute pour valider `cargo fmt --check`.
+  - `apps/web/src/lib/admin/AdminExtensions.svelte` : utilisation de `SvelteMap` et clé unique `idx` sur le `#each` changelog pour valider `eslint` (`svelte/prefer-svelte-reactivity` et `svelte/require-each-key`).
+  - `apps/web/src/lib/catalog/FilmDetail.svelte` : réintégration de l'accordéon technique `.versions-panel` avec `<summary>` et sélecteur de version pour satisfaire les scénarios E2E Playwright (`browser-scanner.cjs`, `browser-series.cjs`) tout en conservant le bandeau d'expérience visuelle moderne.
+ (taille de fichiers > 2,14 Go), Explication TMDb et Historique des révisions / Mises à jour d'extensions (Jellyfin-style)
 
 - **Correction PostgreSQL `integer out of range` lors du scan (`crates/core/schema.sql`, `crates/core/src/database.rs`)** :
   - **Diagnostic** : Les colonnes `size`, `poster_size`, `series_poster_size`, `cover_size` des tables PostgreSQL `inventory_assets`, `scan_staging_files`, `inventory_images`, `assets` et `music_tracks` étaient typées en `INTEGER` (32 bits signé, maximum ~2,14 Go = 2 147 483 647 octets). Tout fichier multimédia (film 1080p/4K) dépassant 2,14 Go provoquait l'échec de la requête `INSERT INTO inventory_assets` avec `error returned from database: integer out of range at line 1284`, annulant la transaction du scan (0 fichier découvert, 0 analysé).

@@ -94,11 +94,34 @@
 
     <nav class="desktop-nav" aria-label="Navigation principale">
       <a href={resolve('/')} aria-current={section === 'home' ? 'page' : undefined}>Accueil</a>
-      <button class:active={librarySection} aria-haspopup="dialog" aria-expanded={libraryMenuOpen} aria-controls="library-navigation" onclick={openLibraries}>
-        <span>{currentLibrary?.name || 'Bibliothèques'}</span><Icon name="chevron" size={14} />
-      </button>
-      <a href={resolve('lists/')} aria-current={section === 'lists' ? 'page' : undefined}>Playlists</a>
-      <a href={resolve('downloads/')} aria-current={section === 'downloads' ? 'page' : undefined}>Téléchargements</a>
+      {#each $accessibleLibraries as library (library.id)}
+        <a
+          class="library-nav-link"
+          href={resolve(`${library.kind}/?library=${encodeURIComponent(library.id)}` as 'films/')}
+          aria-current={currentLibrary?.id === library.id && librarySection ? 'page' : undefined}
+          onpointerenter={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }}
+          onfocus={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }}
+        >
+          {#if library.kind === 'music'}
+            <span class="lib-kind-glyph" aria-hidden="true">♫</span>
+          {:else}
+            <Icon name={library.kind === 'films' ? 'film' : 'tv'} size={15} />
+          {/if}
+          <span>{library.name}</span>
+        </a>
+      {:else}
+        <a href={resolve('films/')} aria-current={section === 'films' ? 'page' : undefined}>
+          <Icon name="film" size={15} /><span>Films</span>
+        </a>
+        <a href={resolve('series/')} aria-current={section === 'series' ? 'page' : undefined}>
+          <Icon name="tv" size={15} /><span>Séries</span>
+        </a>
+      {/each}
+      {#if $accessibleLibraries.length > 6}
+        <button class="all-libraries-btn" class:active={librarySection} aria-haspopup="dialog" aria-expanded={libraryMenuOpen} aria-controls="library-navigation" title="Toutes les bibliothèques" aria-label="Toutes les bibliothèques" onclick={openLibraries}>
+          <Icon name="chevron" size={14} />
+        </button>
+      {/if}
     </nav>
 
     <div class="header-actions">
@@ -117,14 +140,35 @@
         </form>
       {/if}
       <a
-        class="quick-search-btn"
+        class="quick-search-btn action-icon-btn"
         class:active={section === 'search' || searchExpanded}
         href={resolve('search/')}
         onclick={toggleQuickSearch}
+        title="Rechercher"
         aria-label="Rechercher"
         aria-current={section === 'search' ? 'page' : undefined}
       >
-        <Icon name="search" size={20} />
+        <Icon name="search" size={19} />
+      </a>
+      <a
+        class="action-icon-btn"
+        class:active={section === 'lists'}
+        href={resolve('lists/')}
+        title="Playlists"
+        aria-label="Playlists"
+        aria-current={section === 'lists' ? 'page' : undefined}
+      >
+        <Icon name="playlist" size={19} />
+      </a>
+      <a
+        class="action-icon-btn"
+        class:active={section === 'downloads'}
+        href={resolve('downloads/')}
+        title="Téléchargements"
+        aria-label="Téléchargements"
+        aria-current={section === 'downloads' ? 'page' : undefined}
+      >
+        <Icon name="download" size={19} />
       </a>
       <ProfileMenu />
     </div>
@@ -190,13 +234,13 @@
   }
 
   :global([data-theme="light"]) .site-header:not(.scrolled) {
-    background: linear-gradient(180deg, rgba(239, 236, 230, 0.92) 0%, rgba(239, 236, 230, 0.6) 100%);
+    background: linear-gradient(180deg, rgba(227, 222, 214, 0.92) 0%, rgba(227, 222, 214, 0.6) 100%);
   }
 
   .site-header.scrolled {
     background: var(--color-glass);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
     border-bottom-color: var(--color-line);
     box-shadow: var(--shadow-sm);
   }
@@ -204,11 +248,12 @@
   .header-inner {
     display: flex;
     align-items: center;
-    gap: 28px;
+    gap: 24px;
     min-height: 72px;
-    max-width: 1680px;
+    width: 100%;
+    max-width: none;
     padding: 0 var(--page-gutter);
-    margin: auto;
+    margin: 0;
   }
 
   .brand {
@@ -216,7 +261,7 @@
     align-items: center;
     gap: 10px;
     min-width: 0;
-    flex-shrink: 1;
+    flex-shrink: 0;
     font-family: var(--font-display);
     font-size: 23px;
     font-weight: 800;
@@ -226,11 +271,11 @@
 
   .brand img {
     flex: none;
-    filter: drop-shadow(0 2px 8px rgba(229, 9, 20, 0.25));
+    filter: drop-shadow(0 2px 8px rgba(249, 115, 22, 0.3));
   }
 
   .brand span {
-    max-width: 200px;
+    max-width: 220px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -240,29 +285,46 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    flex: 1 1 auto;
     min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .desktop-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .desktop-nav a,
   .desktop-nav button {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 8px;
-    min-height: 44px;
-    padding: 8px 14px;
+    min-height: 42px;
+    padding: 8px 15px;
     border: 1px solid transparent;
     border-radius: var(--radius-pill);
     background: transparent;
     color: var(--color-muted);
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 550;
     white-space: nowrap;
+    flex-shrink: 0;
   }
 
-  .desktop-nav button span {
-    max-width: 160px;
+  .library-nav-link span {
+    max-width: 220px;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .lib-kind-glyph {
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .all-libraries-btn {
+    padding: 8px 10px !important;
   }
 
   .desktop-nav button :global(svg) {
@@ -275,31 +337,31 @@
   }
 
   .desktop-nav :is(a, button):hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.07);
     color: var(--color-text-bright);
   }
 
   :global([data-theme="light"]) .desktop-nav :is(a, button):hover {
-    background: rgba(28, 25, 23, 0.06);
+    background: rgba(33, 30, 27, 0.07);
   }
 
   [aria-current='page'],
   .desktop-nav .active {
     color: var(--color-text-bright);
-    font-weight: 650;
+    font-weight: 700;
   }
 
   .desktop-nav [aria-current='page'],
   .desktop-nav .active {
     background: var(--color-accent-soft);
-    border-color: rgba(229, 9, 20, 0.28);
+    border-color: rgba(249, 115, 22, 0.35);
     color: var(--color-text-bright);
   }
 
   .header-actions {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     margin-left: auto;
     flex: none;
   }
@@ -348,24 +410,40 @@
     box-shadow: none !important;
   }
 
+  .action-icon-btn,
   .quick-search-btn,
   .close-button {
     display: grid;
     place-items: center;
-    width: 44px;
-    height: 44px;
+    width: 42px;
+    height: 42px;
     border: 1px solid var(--color-line);
     border-radius: var(--radius-full);
-    color: var(--color-text);
-    background: rgba(255, 255, 255, 0.03);
+    color: var(--color-muted);
+    background: rgba(255, 255, 255, 0.04);
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
   }
 
+  :global([data-theme="light"]) .action-icon-btn,
+  :global([data-theme="light"]) .quick-search-btn {
+    background: rgba(33, 30, 27, 0.04);
+  }
+
+  .action-icon-btn:hover,
   .quick-search-btn:hover,
-  .quick-search-btn.active,
   .close-button:hover {
     background: var(--color-raised);
     border-color: var(--color-line-strong);
     color: var(--color-text-bright);
+    transform: translateY(-1px);
+  }
+
+  .action-icon-btn.active,
+  .action-icon-btn[aria-current='page'],
+  .quick-search-btn.active {
+    background: var(--color-accent-soft);
+    border-color: rgba(249, 115, 22, 0.4);
+    color: var(--color-accent);
   }
 
   .mobile-nav {
@@ -450,7 +528,7 @@
   .library-list a:hover,
   .library-list [aria-current='page'] {
     background: var(--color-accent-soft);
-    border-color: rgba(229, 9, 20, 0.3);
+    border-color: rgba(249, 115, 22, 0.35);
   }
 
   .library-icon {
@@ -524,7 +602,7 @@
   @media (min-width: 1920px) {
     .header-inner {
       min-height: 82px;
-      max-width: 1840px;
+      max-width: none;
     }
     .brand {
       font-size: 26px;
@@ -532,7 +610,7 @@
     .desktop-nav a,
     .desktop-nav button {
       font-size: 15px;
-      padding: 10px 16px;
+      padding: 10px 18px;
     }
   }
 

@@ -161,7 +161,7 @@
   <nav class="pagination" aria-label="Pagination musique"><button disabled={busy || offset === 0} onclick={() => load(Math.max(0, offset - 100))}>Précédent</button><span>Page {Math.floor(offset / 100) + 1}</span><button disabled={busy || offset + tracks.length >= total} onclick={() => load(offset + 100)}>Suivant</button></nav>
 </main>
 <style>
-  main { max-width:1440px; margin:auto; padding:40px var(--page-gutter); min-width:0; }
+  main { width:100%; max-width:none; margin:0; padding:32px var(--page-gutter) 80px; min-width:0; }
   .page-heading { margin-bottom:28px; } h1 { margin:4px 0 0; font-size:clamp(30px,4vw,46px); font-weight:600; letter-spacing:-.035em; overflow-wrap:anywhere; } h2 { margin:0; font-size:22px; font-weight:600; letter-spacing:-.02em; overflow-wrap:anywhere; }
   .eyebrow { margin:0; font-size:12px; color:var(--color-muted); } p { color:var(--color-muted); line-height:1.6; } button,input { min-height:44px; font:inherit; padding:10px 14px; background:var(--color-surface); color:var(--color-text); border:1px solid var(--color-line); border-radius:var(--radius-md); }
   button { display:inline-flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; } button:disabled { cursor:default; }

@@ -46,15 +46,9 @@
         {#if work.mpaa}<span class="meta-badge mpaa">{work.mpaa}</span>{/if}
         {#if work.kind === 'series' && work.seasonCount}<span class="meta-pill">{work.seasonCount} {work.seasonCount > 1 ? 'saisons' : 'saison'}</span>{/if}
         {#if work.rating}<span class="meta-badge rating"><Icon name="star" size={12} /> Note {work.rating.toLocaleString('fr-FR')} / 10</span>{/if}
+        {#if work.directors?.length}<span class="meta-pill director-meta">De <strong>{work.directors.join(', ')}</strong></span>{/if}
       </div>
-      {#if synopsis && synopsis.length > 300}
-        <details class="long-synopsis">
-          <summary><span>{synopsis.slice(0, 240).trimEnd()}…</span><span class="read-more">Lire le résumé</span></summary>
-          <p>{synopsis}</p>
-        </details>
-      {:else}
-        <p class="synopsis">{synopsis}</p>
-      {/if}
+      <p class="synopsis">{synopsis}</p>
       {#if work.genres?.length}
         <div class="genres-row">
           {#each work.genres as genre (genre)}
@@ -82,8 +76,8 @@
     position: relative;
     isolation: isolate;
     margin-top: 20px;
-    padding: clamp(28px, 4.5vw, 52px);
-    background: radial-gradient(circle at 80% 15%, rgba(229, 9, 20, 0.12), transparent 55%), var(--color-surface);
+    padding: clamp(28px, 4vw, 52px);
+    background: radial-gradient(circle at 80% 15%, rgba(249, 115, 22, 0.14), transparent 55%), var(--color-surface);
     border: 1px solid var(--color-line);
     border-radius: var(--radius-2xl);
     box-shadow: var(--shadow-lg);
@@ -200,33 +194,17 @@
     color: #FBBF24;
   }
 
-  .synopsis,
-  .long-synopsis {
-    max-width: 65ch;
+  .director-meta strong {
+    color: var(--color-text-bright);
+    font-weight: 650;
+  }
+
+  .synopsis {
+    max-width: 105ch;
     margin: 0;
-    font-size: 15px;
-    line-height: 1.7;
+    font-size: 15.5px;
+    line-height: 1.72;
     color: var(--color-text);
-  }
-
-  .long-synopsis summary {
-    cursor: pointer;
-  }
-
-  .read-more {
-    display: block;
-    color: var(--color-accent);
-    font-size: 13px;
-    font-weight: 600;
-    margin-top: 4px;
-  }
-
-  .long-synopsis[open] summary > span:first-child {
-    display: none;
-  }
-
-  .long-synopsis p {
-    margin: 8px 0 0;
   }
 
   .genres-row {
@@ -269,7 +247,7 @@
 
   @media (min-width: 1600px) {
     .detail-info-column {
-      max-width: 780px;
+      max-width: 1200px;
     }
   }
 

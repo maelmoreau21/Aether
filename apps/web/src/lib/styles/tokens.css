@@ -1,19 +1,20 @@
 /* Design System Aether — Mode Streaming (Netflix / Apple TV+)
-   Palette Dark Cinématique (#0B0C10 / #141414) & Mode Clair ("Pierre Douce")
+   Palette Dark Cinématique (#0B0C10 / Orange Aether #F97316) & Mode Clair Doux Anti-Éblouissement
    Rétrocompatibilité totale avec toutes les variables du projet. */
 
 :root, [data-theme="dark"] {
   color-scheme: dark;
   --color-on-accent: #FFFFFF;
-  --color-play: #E50914;
+  --color-play: #F97316;
   --color-on-play: #FFFFFF;
-  --color-play-hover: #F6121D;
+  --color-play-hover: #FB923C;
 
-  /* Couleurs de marque & États */
+  /* Couleurs de marque & États (Orange/Ambre Aether) */
   --brand-amber: #F59E0B;
-  --brand-red: #E50914;
+  --brand-orange: #F97316;
+  --brand-red: #EA580C;
   --brand-indigo: #6366F1;
-  --brand-gradient: linear-gradient(135deg, #E50914 0%, #B81D24 100%);
+  --brand-gradient: linear-gradient(135deg, #F59E0B 0%, #EA580C 100%);
 
   /* Thème Sombre Profond — Netflix / Apple TV+ */
   --bg-main: #0B0C10;
@@ -28,8 +29,8 @@
   --status-success: #10B981;
   --status-warning: #F59E0B;
   --status-error: #EF4444;
-  --accent-primary: #E50914;
-  --accent-secondary: #6366F1;
+  --accent-primary: #F97316;
+  --accent-secondary: #F59E0B;
 
   /* Surfaces & Canvas Aether */
   --color-canvas: var(--bg-main);
@@ -53,13 +54,13 @@
   --color-muted: #A1A1AA;
   --color-subtle: #8E8E98;
 
-  /* Accent */
-  --color-accent: #E50914;
-  --color-accent-hover: #FF1F2B;
-  --color-accent-soft: rgba(229, 9, 20, 0.16);
-  --color-accent-soft-hover: rgba(229, 9, 20, 0.25);
-  --color-accent-solid: #E50914;
-  --color-accent-glow: rgba(229, 9, 20, 0.42);
+  /* Accent Orange Aether */
+  --color-accent: #F97316;
+  --color-accent-hover: #FB923C;
+  --color-accent-soft: rgba(249, 115, 22, 0.16);
+  --color-accent-soft-hover: rgba(249, 115, 22, 0.26);
+  --color-accent-solid: #EA580C;
+  --color-accent-glow: rgba(249, 115, 22, 0.42);
 
   /* Status Colors */
   --color-success: var(--status-success);
@@ -74,7 +75,7 @@
   --shadow-screen: 0 25px 90px rgba(0, 0, 0, 0.92);
   --shadow-card: 0 6px 20px rgba(0, 0, 0, 0.6);
   --shadow-card-hover: 0 20px 44px rgba(0, 0, 0, 0.88), 0 0 0 1px rgba(255, 255, 255, 0.18);
-  --shadow-glow: 0 0 24px rgba(229, 9, 20, 0.35);
+  --shadow-glow: 0 0 24px rgba(249, 115, 22, 0.35);
 
   /* Gradients */
   --gradient-hero: linear-gradient(to top, #0B0C10 8%, rgba(11, 12, 16, 0.72) 45%, rgba(11, 12, 16, 0.15) 100%);
@@ -91,24 +92,25 @@
 [data-theme="light"] {
   color-scheme: light;
   --color-on-accent: #FFFFFF;
-  --color-play: #C2410C;
+  --color-play: #EA580C;
   --color-on-play: #FFFFFF;
-  --color-play-hover: #9A3412;
+  --color-play-hover: #C2410C;
 
-  --brand-amber: #F59E0B;
-  --brand-red: #E50914;
+  --brand-amber: #D97706;
+  --brand-orange: #EA580C;
+  --brand-red: #C2410C;
   --brand-indigo: #4F46E5;
-  --brand-gradient: var(--color-play);
+  --brand-gradient: linear-gradient(135deg, #F59E0B 0%, #EA580C 100%);
 
-  /* Thème Clair — "Pierre Douce" */
-  --bg-main: #EFECE6;
-  --bg-surface: #FAF9F6;
-  --bg-elevated: #E5E0D8;
-  --border-subtle: #DCD6CC;
+  /* Thème Clair Doux Anti-Éblouissement — "Sable & Pierre Chaude" (sans blanc éblouissant) */
+  --bg-main: #E3DED6;
+  --bg-surface: #ECE8E1;
+  --bg-elevated: #DAD4CA;
+  --border-subtle: #C9C2B6;
 
-  --text-primary: #1C1917;
-  --text-secondary: #57534E;
-  --text-muted: #78716C;
+  --text-primary: #211E1B;
+  --text-secondary: #544E48;
+  --text-muted: #736B63;
 
   --accent-primary: #EA580C;
   --accent-secondary: #D97706;
@@ -118,52 +120,52 @@
   --status-error: #DC2626;
 
   --color-canvas: var(--bg-main);
-  --color-canvas-rgb: 239, 236, 230;
+  --color-canvas-rgb: 227, 222, 214;
   --color-surface: var(--bg-surface);
-  --color-surface-hover: var(--bg-elevated);
+  --color-surface-hover: #E2DDD4;
   --color-raised: var(--bg-elevated);
-  --color-raised-hover: #DBD5CC;
-  --color-overlay: #D8D2C6;
-  --color-glass: rgba(250, 249, 246, 0.85);
-  --color-glass-raised: rgba(229, 224, 216, 0.92);
+  --color-raised-hover: #CFC8BC;
+  --color-overlay: #D2CBC0;
+  --color-glass: rgba(227, 222, 214, 0.85);
+  --color-glass-raised: rgba(236, 232, 225, 0.92);
 
   --color-line: var(--border-subtle);
-  --color-line-subtle: rgba(28, 25, 23, 0.08);
-  --color-line-strong: #C5BEB3;
+  --color-line-subtle: rgba(33, 30, 27, 0.08);
+  --color-line-strong: #B8B0A2;
 
   --color-text: var(--text-primary);
-  --color-text-bright: var(--text-primary);
+  --color-text-bright: #171412;
   --color-muted: var(--text-secondary);
-  --color-subtle: var(--text-secondary);
+  --color-subtle: var(--text-muted);
 
-  --color-accent: #C2410C;
-  --color-accent-hover: #9A3412;
-  --color-accent-soft: rgba(234, 88, 12, 0.12);
-  --color-accent-soft-hover: rgba(234, 88, 12, 0.2);
-  --color-accent-solid: #C2410C;
-  --color-accent-glow: rgba(234, 88, 12, 0.22);
+  --color-accent: #EA580C;
+  --color-accent-hover: #C2410C;
+  --color-accent-soft: rgba(234, 88, 12, 0.14);
+  --color-accent-soft-hover: rgba(234, 88, 12, 0.22);
+  --color-accent-solid: #EA580C;
+  --color-accent-glow: rgba(234, 88, 12, 0.24);
 
   --color-success: var(--status-success);
   --color-warning: var(--status-warning);
   --color-danger: var(--status-error);
   --color-info: #0284C7;
 
-  --shadow-sm: 0 2px 8px rgba(28, 25, 23, 0.06);
-  --shadow-md: 0 8px 24px rgba(28, 25, 23, 0.09);
-  --shadow-lg: 0 16px 40px rgba(28, 25, 23, 0.13);
-  --shadow-screen: 0 20px 80px rgba(28, 25, 23, 0.18);
-  --shadow-card: 0 4px 14px rgba(28, 25, 23, 0.07);
-  --shadow-card-hover: 0 16px 36px rgba(28, 25, 23, 0.14), 0 0 0 1px var(--border-subtle);
-  --shadow-glow: var(--shadow-sm);
+  --shadow-sm: 0 2px 8px rgba(33, 30, 27, 0.07);
+  --shadow-md: 0 8px 24px rgba(33, 30, 27, 0.10);
+  --shadow-lg: 0 16px 40px rgba(33, 30, 27, 0.14);
+  --shadow-screen: 0 20px 80px rgba(33, 30, 27, 0.18);
+  --shadow-card: 0 4px 14px rgba(33, 30, 27, 0.08);
+  --shadow-card-hover: 0 16px 36px rgba(33, 30, 27, 0.15), 0 0 0 1px var(--border-subtle);
+  --shadow-glow: 0 4px 18px rgba(234, 88, 12, 0.25);
 
-  --gradient-hero: linear-gradient(180deg, rgba(239, 236, 230, 0.15) 0%, rgba(239, 236, 230, 0.85) 65%, #EFECE6 100%);
-  --gradient-hero-horizontal: linear-gradient(90deg, #EFECE6 0%, rgba(239, 236, 230, 0.9) 35%, rgba(239, 236, 230, 0.3) 70%, transparent 100%);
-  --gradient-card: linear-gradient(180deg, transparent 40%, rgba(239, 236, 230, 0.96) 100%);
+  --gradient-hero: linear-gradient(180deg, rgba(227, 222, 214, 0.15) 0%, rgba(227, 222, 214, 0.85) 65%, #E3DED6 100%);
+  --gradient-hero-horizontal: linear-gradient(90deg, #E3DED6 0%, rgba(227, 222, 214, 0.9) 35%, rgba(227, 222, 214, 0.3) 70%, transparent 100%);
+  --gradient-card: linear-gradient(180deg, transparent 40%, rgba(227, 222, 214, 0.96) 100%);
   --gradient-accent: var(--brand-gradient);
 
-  --scrollbar-thumb: rgba(28, 25, 23, 0.2);
-  --scrollbar-thumb-hover: rgba(28, 25, 23, 0.35);
-  --skeleton-bg: linear-gradient(90deg, rgba(28, 25, 23, 0.04) 25%, rgba(28, 25, 23, 0.09) 37%, rgba(28, 25, 23, 0.04) 63%);
+  --scrollbar-thumb: rgba(33, 30, 27, 0.22);
+  --scrollbar-thumb-hover: rgba(33, 30, 27, 0.38);
+  --skeleton-bg: linear-gradient(90deg, rgba(33, 30, 27, 0.04) 25%, rgba(33, 30, 27, 0.09) 37%, rgba(33, 30, 27, 0.04) 63%);
 }
 
 :root {
@@ -190,7 +192,7 @@
   --transition-normal: 250ms cubic-bezier(0.25, 0.8, 0.25, 1);
   --transition-smooth: 320ms cubic-bezier(0.16, 1, 0.3, 1);
 
-  /* Spacing */
+  /* Spacing — Pleine largeur fluide */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -199,12 +201,12 @@
   --space-8: 32px;
   --space-12: 48px;
   --space-16: 64px;
-  --page-gutter: clamp(20px, 4.5vw, 64px);
+  --page-gutter: clamp(16px, 2.6vw, 44px);
 }
 
 @media (min-width: 1920px) {
   :root {
-    --page-gutter: clamp(48px, 5vw, 96px);
+    --page-gutter: clamp(32px, 3vw, 64px);
   }
 }
 

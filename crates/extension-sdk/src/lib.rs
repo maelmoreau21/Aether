@@ -97,6 +97,10 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub banner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changelog: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_schema: Option<Vec<ConfigField>>,
 }
 

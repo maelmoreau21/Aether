@@ -797,7 +797,7 @@
     gap: 14px;
     padding: 64px 24px;
     border-radius: var(--radius-xl);
-    background: radial-gradient(circle at 50% 0%, rgba(229, 9, 20, 0.08), transparent 65%), var(--color-surface);
+    background: radial-gradient(circle at 50% 0%, rgba(249, 115, 22, 0.08), transparent 65%), var(--color-surface);
     border: 1px solid var(--color-line);
     color: var(--color-subtle);
     text-align: center;

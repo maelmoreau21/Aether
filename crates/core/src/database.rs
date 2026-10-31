@@ -224,6 +224,20 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
                 "Unsupported database schema version; choose a fresh database".into(),
             ));
         }
+        if !sqlite {
+            sqlx::raw_sql(
+                "ALTER TABLE inventory_assets ALTER COLUMN size TYPE bigint; \
+                 ALTER TABLE scan_staging_files ALTER COLUMN size TYPE bigint; \
+                 ALTER TABLE scan_staging_files ALTER COLUMN poster_size TYPE bigint; \
+                 ALTER TABLE scan_staging_files ALTER COLUMN series_poster_size TYPE bigint; \
+                 ALTER TABLE inventory_images ALTER COLUMN size TYPE bigint; \
+                 ALTER TABLE assets ALTER COLUMN size TYPE bigint; \
+                 ALTER TABLE music_tracks ALTER COLUMN size TYPE bigint; \
+                 ALTER TABLE music_tracks ALTER COLUMN cover_size TYPE bigint;"
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
     } else if tables != 0 {
         return Err(sqlx::Error::Protocol(
             "Database schema is not empty; choose a fresh database".into(),

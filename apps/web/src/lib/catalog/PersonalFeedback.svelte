@@ -41,27 +41,191 @@
   }
 </script>
 <div class="personal-feedback" aria-label="Vos préférences privées" aria-busy={saving}>
-  <button class="heart" disabled={!loaded} aria-label={value.favorite?'Retirer des favoris':'Ajouter aux favoris'} title={value.favorite?'Retirer des favoris':'Ajouter aux favoris'} aria-pressed={value.favorite} onclick={()=>save({...value,favorite:!value.favorite})}>{value.favorite?'♥':'♡'}</button>
-  <div class="stars" role="group" aria-label="Ma note privée sur 5, par demi-étoile" onpointerleave={()=>preview=null}>
-    {#each [1,2,3,4,5] as star(star)}
-      <span class="star"><span class="outline" aria-hidden="true">★</span><span class="fill" class:full={shownRating>=star} class:half-filled={shownRating===star-.5} aria-hidden="true">★</span>
-        {#each [star-.5,star] as rating(rating)}
-          <button class="half" disabled={!loaded} aria-label={`${rating.toLocaleString('fr-FR')} sur 5`} title={`${rating.toLocaleString('fr-FR')} sur 5 — recliquer pour effacer`} aria-pressed={value.rating===rating} onpointerenter={()=>preview=rating} onfocus={()=>preview=rating} onblur={()=>preview=null} onclick={()=>{preview=null;void save({...value,rating:value.rating===rating?null:rating});}}></button>
-        {/each}
-      </span>
-    {/each}
+  <button
+    type="button"
+    class="favorite-btn"
+    disabled={!loaded}
+    aria-label={value.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+    title={value.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+    aria-pressed={value.favorite}
+    onclick={() => save({ ...value, favorite: !value.favorite })}
+  >
+    <span class="heart-glyph" aria-hidden="true">{value.favorite ? '♥' : '♡'}</span>
+    <span class="fav-label">{value.favorite ? 'Favori' : 'Favoris'}</span>
+  </button>
+
+  <div class="rating-pill">
+    <div class="stars" role="group" aria-label="Ma note privée sur 5, par demi-étoile" onpointerleave={() => (preview = null)}>
+      {#each [1, 2, 3, 4, 5] as star (star)}
+        <span class="star">
+          <span class="outline" aria-hidden="true">★</span>
+          <span class="fill" class:full={shownRating >= star} class:half-filled={shownRating === star - 0.5} aria-hidden="true">★</span>
+          {#each [star - 0.5, star] as rating (rating)}
+            <button
+              type="button"
+              class="half"
+              disabled={!loaded}
+              aria-label={`${rating.toLocaleString('fr-FR')} sur 5`}
+              title={`${rating.toLocaleString('fr-FR')} sur 5 — recliquer pour effacer`}
+              aria-pressed={value.rating === rating}
+              onpointerenter={() => (preview = rating)}
+              onfocus={() => (preview = rating)}
+              onblur={() => (preview = null)}
+              onclick={() => {
+                preview = null;
+                void save({ ...value, rating: value.rating === rating ? null : rating });
+              }}
+            ></button>
+          {/each}
+        </span>
+      {/each}
+    </div>
+    {#if shownRating}
+      <span class="rating-value">{shownRating.toLocaleString('fr-FR')}/5</span>
+    {:else}
+      <span class="rating-placeholder">Noter</span>
+    {/if}
   </div>
-  <span class="rating-value">{shownRating?`${shownRating.toLocaleString('fr-FR')} / 5`:''}</span>
-  {#if error}<span role="alert">{error}</span>{/if}
+  {#if error}<span class="feedback-error" role="alert">{error}</span>{/if}
 </div>
+
 <style>
-.personal-feedback { display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-block:12px; }
-button { color:var(--text-secondary);border:0;background:transparent;cursor:pointer; } button:disabled { opacity:.5;cursor:wait; }
-button:focus-visible { outline:2px solid var(--accent-primary);outline-offset:1px;border-radius:3px; }
-.heart { font-size:32px;width:44px;height:44px;padding:0; } .heart[aria-pressed="true"] { color:var(--status-error); }
-.stars { display:flex; } .star { position:relative;display:flex;width:40px;height:44px;font-size:32px;line-height:44px; }
-.outline,.fill { position:absolute;inset:0;pointer-events:none;text-align:center; }.outline { color:var(--text-secondary);opacity:.5; }
-.fill { color:var(--color-accent);clip-path:inset(0 100% 0 0); }.fill.full { clip-path:inset(0); }.fill.half-filled { clip-path:inset(0 50% 0 0); }
-.half { z-index:1;width:50%;height:100%;padding:0;background:transparent; }
-.rating-value { min-width:42px;font-size:12px;color:var(--color-muted); } span[role="alert"] { flex-basis:100%;color:var(--status-error); }
+  .personal-feedback {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+
+  button {
+    color: var(--color-text);
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  button:disabled {
+    opacity: 0.5;
+    cursor: wait;
+  }
+
+  button:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  .favorite-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 16px;
+    border-radius: var(--radius-pill);
+    background: var(--color-glass-raised);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--color-line-strong);
+    color: var(--color-text-bright);
+    font-size: 13.5px;
+    font-weight: 650;
+    transition: all var(--transition-fast);
+  }
+
+  .favorite-btn:hover:not(:disabled) {
+    background: var(--color-raised-hover);
+    border-color: var(--color-text);
+    transform: translateY(-1px);
+  }
+
+  .favorite-btn[aria-pressed="true"] {
+    background: rgba(239, 68, 68, 0.16);
+    border-color: rgba(239, 68, 68, 0.45);
+    color: #F87171;
+  }
+
+  .heart-glyph {
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .rating-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 14px;
+    border-radius: var(--radius-pill);
+    background: var(--color-glass-raised);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--color-line-strong);
+  }
+
+  .stars {
+    display: flex;
+    align-items: center;
+  }
+
+  .star {
+    position: relative;
+    display: flex;
+    width: 26px;
+    height: 36px;
+    font-size: 22px;
+    line-height: 36px;
+  }
+
+  .outline,
+  .fill {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    text-align: center;
+  }
+
+  .outline {
+    color: var(--color-muted);
+    opacity: 0.45;
+  }
+
+  .fill {
+    color: #F59E0B;
+    clip-path: inset(0 100% 0 0);
+  }
+
+  .fill.full {
+    clip-path: inset(0);
+  }
+
+  .fill.half-filled {
+    clip-path: inset(0 50% 0 0);
+  }
+
+  .half {
+    z-index: 1;
+    width: 50%;
+    height: 100%;
+    padding: 0;
+    background: transparent;
+  }
+
+  .rating-value {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #FBBF24;
+    min-width: 32px;
+  }
+
+  .rating-placeholder {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-muted);
+  }
+
+  .feedback-error {
+    flex-basis: 100%;
+    font-size: 12px;
+    color: var(--color-danger);
+  }
 </style>

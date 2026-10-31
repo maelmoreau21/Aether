@@ -112,7 +112,7 @@
   .back-link { display:flex; align-items:center; gap:8px; min-height:44px; font-size:13px; font-weight:500; color:var(--color-muted); transition:color var(--transition-fast); }
   .back-link:hover { color:var(--color-text); }
   .mobile-menu-toggle { display:inline-flex; align-items:center; gap:8px; padding:10px 14px; min-height:44px; border:1px solid var(--color-line-strong); border-radius:var(--radius-sm); background:var(--color-raised); color:var(--color-text); font-size:14px; }
-  .admin-dashboard-container { max-width:1600px; display:grid; grid-template-columns:minmax(0,1fr); gap:32px; padding:28px var(--page-gutter) 64px; margin:auto; }
+  .admin-dashboard-container { width:100%; max-width:none; display:grid; grid-template-columns:minmax(0,1fr); gap:32px; padding:28px var(--page-gutter) 64px; margin:0; }
   .with-sidebar { grid-template-columns:232px minmax(0,1fr); }
   .admin-content-area { display:flex; flex-direction:column; gap:20px; min-width:0; }
   .admin-content-area:focus { outline:none; }

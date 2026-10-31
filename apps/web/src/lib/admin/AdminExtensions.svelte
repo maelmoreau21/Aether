@@ -33,6 +33,8 @@
     checksum?: string;
     banner?: string;
     repository?: string;
+    changelog?: string;
+    releaseDate?: string;
     configSchema?: ConfigField[];
   };
   type SettingValue = string | number | boolean;
@@ -170,6 +172,104 @@
       tab='installed'; catalogueId=null; managedId=entry.manifest.id;
     },'Extension installée. Configurez-la puis activez-la.');
   }
+
+  function compareVersions(v1: string, v2: string): number {
+    const p1 = (v1 || '0').split('.').map(n => parseInt(n, 10) || 0);
+    const p2 = (v2 || '0').split('.').map(n => parseInt(n, 10) || 0);
+    const len = Math.max(p1.length, p2.length);
+    for (let i = 0; i < len; i++) {
+      const a = p1[i] ?? 0;
+      const b = p2[i] ?? 0;
+      if (a > b) return 1;
+      if (a < b) return -1;
+    }
+    return 0;
+  }
+
+  function getUpdateEntry(ext: Installed): CatalogueEntry | null {
+    const entries = catalogue.filter(e => e.manifest.id === ext.manifest.id && e.compatible);
+    if (!entries.length) return null;
+    entries.sort((a, b) => compareVersions(b.manifest.version, a.manifest.version));
+    const latest = entries[0];
+    return compareVersions(latest.manifest.version, ext.manifest.version) > 0 ? latest : null;
+  }
+
+  let openRevisions = $state<Record<string, boolean>>({});
+
+  function getRevisions(extensionId: string, currentManifest?: Manifest) {
+    const matchingEntries = catalogue.filter(e => e.manifest.id === extensionId);
+    const versionMap = new Map<string, CatalogueEntry>();
+    for (const entry of matchingEntries) {
+      if (!versionMap.has(entry.manifest.version)) {
+        versionMap.set(entry.manifest.version, entry);
+      }
+    }
+
+    const currentVersion = currentManifest?.version;
+    const versions = [...versionMap.keys()];
+    if (currentVersion && !versions.includes(currentVersion)) {
+      versions.push(currentVersion);
+    }
+
+    versions.sort((a, b) => compareVersions(b, a));
+
+    return versions.map(v => {
+      const entry = versionMap.get(v) ?? null;
+      const manifest = entry ? entry.manifest : currentManifest!;
+      const cmp = currentVersion ? compareVersions(v, currentVersion) : 0;
+
+      let dateStr: string | null = null;
+      if (manifest.releaseDate) {
+        dateStr = manifest.releaseDate;
+      } else if (entry) {
+        const repo = repositories.find(r => r.id === entry.repositoryId);
+        if (repo?.refreshedAt) {
+          dateStr = new Date(repo.refreshedAt * 1000).toLocaleString();
+        }
+      }
+
+      return {
+        version: v,
+        entry,
+        manifest,
+        releaseDate: dateStr,
+        changelog: manifest.changelog || null,
+        isCurrent: cmp === 0,
+        isNewer: cmp > 0,
+        isOlder: cmp < 0,
+        compatible: entry ? entry.compatible : true
+      };
+    });
+  }
+
+  async function switchVersion(entry: CatalogueEntry) {
+    const extId = managed?.manifest.id || entry.manifest.id;
+    const currentInstalled = installed.find(e => e.manifest.id === extId);
+    const wasEnabled = currentInstalled?.enabled ?? false;
+    const libraryIds = currentInstalled?.libraryIds ?? [];
+    const allLibraries = currentInstalled?.allLibraries ?? (libraryIds.length === 0);
+
+    await perform(async () => {
+      if (currentInstalled) {
+        await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extId)}`, {
+          method: 'DELETE',
+          body: JSON.stringify({ deleteData: false })
+        });
+      }
+      await adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(entry.repositoryId)}/install`, {
+        method: 'POST',
+        body: JSON.stringify({ extensionId: entry.manifest.id, version: entry.manifest.version })
+      });
+      if (currentInstalled && wasEnabled) {
+        await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extId)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ enabled: true, libraryIds, allLibraries })
+        });
+      }
+      managedId = extId;
+    }, `Version ${entry.manifest.version} installée avec succès.`);
+  }
+
 </script>
 
 {#snippet artwork(manifest: Manifest)}
@@ -281,6 +381,105 @@
         <div class="detail-header-main">
           <h2>{displayName(extension.manifest.name)}</h2>
           <p class="detail-description">{shortDescription(extension.manifest.description)}</p>
+
+          <div class="revisions-section">
+            <div class="revisions-heading">
+              <h3>Historique des révisions</h3>
+              {#if getUpdateEntry(extension)}
+                {@const upd = getUpdateEntry(extension)!}
+                <span class="badge update-badge">
+                  Mise à jour v{upd.manifest.version} disponible
+                </span>
+              {/if}
+            </div>
+
+            <div class="revisions-list">
+              {#each getRevisions(extension.manifest.id, extension.manifest) as rev (rev.version)}
+                {@const isOpen = openRevisions[rev.version] ?? (rev.isCurrent || rev.isNewer)}
+                <div class="revision-item" class:current={rev.isCurrent} class:has-update={rev.isNewer}>
+                  <button
+                    type="button"
+                    class="revision-header"
+                    aria-expanded={isOpen}
+                    onclick={() => openRevisions[rev.version] = !isOpen}
+                  >
+                    <div class="revision-title-row">
+                      <span class="revision-version">{rev.version}</span>
+                      {#if rev.releaseDate}
+                        <span class="revision-date">— {rev.releaseDate}</span>
+                      {/if}
+                      {#if rev.isCurrent}
+                        <span class="badge success">Installée</span>
+                      {:else if rev.isNewer}
+                        <span class="badge update">Mise à jour</span>
+                      {/if}
+                    </div>
+                    <span class="revision-chevron" class:rotated={isOpen}>
+                      <Icon name="chevron" size={16} />
+                    </span>
+                  </button>
+
+                  {#if isOpen}
+                    <div class="revision-content">
+                      <h4 class="revision-version-tag">v{rev.version}</h4>
+
+                      {#if rev.changelog}
+                        <div class="revision-changelog">
+                          {#each rev.changelog.split('\n').filter(line => line.trim()) as line}
+                            {#if line.trim().startsWith('•') || line.trim().startsWith('*') || line.trim().startsWith('-')}
+                              <div class="changelog-item">
+                                <span class="bullet">•</span>
+                                <span>{line.replace(/^[\s•*-]+/, '').trim()}</span>
+                              </div>
+                            {:else}
+                              <p class="changelog-p">{line}</p>
+                            {/if}
+                          {/each}
+                        </div>
+                      {:else}
+                        <p class="revision-fallback-desc">{rev.manifest.description || 'Version publiée sans journal de modifications.'}</p>
+                      {/if}
+
+                      <div class="revision-specs">
+                        {#if rev.manifest.targetAbi}
+                          <span class="spec-tag">API Cible : <code>{rev.manifest.targetAbi}</code></span>
+                        {/if}
+                        {#if rev.manifest.minServerVersion}
+                          <span class="spec-tag">Serveur requis : <code>{rev.manifest.minServerVersion}+</code></span>
+                        {/if}
+                      </div>
+
+                      <div class="revision-action-row">
+                        {#if rev.isCurrent}
+                          <span class="installed-tag">
+                            <Icon name="check" size={16} /> Version actuelle installée
+                          </span>
+                        {:else if rev.entry}
+                          <button
+                            type="button"
+                            class="btn-revision-install"
+                            class:btn-revision-update={rev.isNewer}
+                            disabled={busy || !rev.compatible}
+                            onclick={() => void switchVersion(rev.entry!)}
+                          >
+                            <Icon name="download" size={16} />
+                            {rev.isNewer ? `Mettre à jour vers v${rev.version}` : `Installer v${rev.version}`}
+                          </button>
+                          {#if !rev.compatible}
+                            <span class="incompatible-badge">Incompatible avec ce serveur</span>
+                          {/if}
+                        {:else}
+                          <span class="local-only-text">Version locale (non disponible dans les dépôts)</span>
+                        {/if}
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+              {:else}
+                <p class="empty-revisions">Aucune révision disponible.</p>
+              {/each}
+            </div>
+          </div>
         </div>
         <div class="detail-header-side">
           {@render artwork(extension.manifest)}
@@ -326,7 +525,7 @@
     </div>
   {:else}
   <div class="installed-filters"><label>Rechercher<input type="search" bind:value={search} /></label><label>État<select bind:value={filter}><option value="all">Toutes</option><option value="enabled">Activées</option><option value="disabled">Désactivées</option></select></label></div>
-  <div class="plugins-grid">{#each visibleExtensions as extension (extension.manifest.id)}<article class="card plugin-card installed-card"><button class="artwork-button" aria-label={`Ouvrir ${displayName(extension.manifest.name)}`} onclick={()=>managedId=extension.manifest.id}>{@render artwork(extension.manifest)}</button><div class="plugin-header"><div class="plugin-title-row"><div class="installed-identity"><span class="extension-icon"><Icon name={extension.manifest.permissions.includes('avatars')?'profile':'globe'} size={22} /></span><div><h3>{displayName(extension.manifest.name)}</h3><small>v{extension.manifest.version}</small></div></div><span class="badge" class:success={extension.enabled}>{extension.enabled?'Activée':'Désactivée'}</span></div><p class="plugin-desc">{shortDescription(extension.manifest.description)}</p><button disabled={busy} onclick={()=>{managedId=extension.manifest.id;settingsOpen=true;}}>Paramètres de {displayName(extension.manifest.name)}</button></div></article>{:else}<p>Aucune extension installée.</p>{/each}</div>
+  <div class="plugins-grid">{#each visibleExtensions as extension (extension.manifest.id)}<article class="card plugin-card installed-card"><button class="artwork-button" aria-label={`Ouvrir ${displayName(extension.manifest.name)}`} onclick={()=>managedId=extension.manifest.id}>{@render artwork(extension.manifest)}</button><div class="plugin-header"><div class="plugin-title-row"><div class="installed-identity"><span class="extension-icon"><Icon name={extension.manifest.permissions.includes('avatars')?'profile':'globe'} size={22} /></span><div><h3>{displayName(extension.manifest.name)}</h3><small>v{extension.manifest.version}</small></div></div><span class="badge" class:success={extension.enabled}>{extension.enabled?'Activée':'Désactivée'}</span>{#if getUpdateEntry(extension)}<span class="badge update">Mise à jour</span>{/if}</div><p class="plugin-desc">{shortDescription(extension.manifest.description)}</p><button disabled={busy} onclick={()=>{managedId=extension.manifest.id;settingsOpen=true;}}>Paramètres de {displayName(extension.manifest.name)}</button></div></article>{:else}<p>Aucune extension installée.</p>{/each}</div>
   {/if}
   {/if}
 </section>
@@ -488,5 +687,41 @@ dd{margin:0;overflow-wrap:anywhere;color:var(--text-primary);}
 .extension-tabs button{padding:10px 14px;}
 .catalogue-search{max-width:none;}
 }
+
+
+.revisions-section{margin-top:28px;border-top:1px solid var(--border-subtle);padding-top:20px;}
+.revisions-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;}
+.revisions-heading h3{font-size:1.15rem;font-weight:600;color:var(--text-primary);margin:0;}
+.update-badge{background:rgba(0,164,220,0.15);color:#00a4dc;border:1px solid rgba(0,164,220,0.35);font-size:12px;padding:3px 10px;border-radius:12px;}
+.revisions-list{display:flex;flex-direction:column;gap:8px;}
+.revision-item{background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:var(--radius-md);overflow:hidden;transition:border-color .15s;}
+.revision-item.current{border-color:rgba(46,204,113,0.35);}
+.revision-item.has-update{border-color:rgba(0,164,220,0.45);}
+.revision-header{display:flex;justify-content:space-between;align-items:center;width:100%;padding:12px 16px;background:transparent;border:0;cursor:pointer;color:var(--text-primary);text-align:left;}
+.revision-header:hover{background:rgba(255,255,255,0.03);}
+.revision-title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.revision-version{font-weight:600;font-size:14px;}
+.revision-date{font-size:12px;color:var(--text-secondary);}
+.revision-chevron{display:inline-flex;align-items:center;transition:transform .2s ease;color:var(--text-secondary);}
+.revision-chevron.rotated{transform:rotate(180deg);}
+.revision-content{padding:0 16px 16px;border-top:1px solid rgba(255,255,255,0.04);}
+.revision-version-tag{font-size:14px;font-weight:700;color:var(--text-primary);margin:12px 0 8px;}
+.revision-changelog{display:flex;flex-direction:column;gap:6px;margin:8px 0 12px;}
+.changelog-item{display:flex;gap:8px;font-size:13px;line-height:1.5;color:var(--text-secondary);}
+.bullet{color:#00a4dc;flex-shrink:0;}
+.changelog-p{font-size:13px;line-height:1.5;color:var(--text-secondary);margin:4px 0;}
+.revision-fallback-desc{font-size:13px;color:var(--text-secondary);line-height:1.5;margin:8px 0 12px;}
+.revision-specs{display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;}
+.spec-tag{font-size:12px;color:var(--text-secondary);}
+.spec-tag code{background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:11px;}
+.revision-action-row{display:flex;align-items:center;gap:12px;margin-top:8px;}
+.btn-revision-install{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;}
+.btn-revision-install:hover:not(:disabled){border-color:#00a4dc;}
+.btn-revision-update{background:#00a4dc;color:#fff;border-color:#00a4dc;}
+.btn-revision-update:hover:not(:disabled){background:#0093c7;}
+.installed-tag{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:#2ecc71;}
+.badge.update{background:rgba(0,164,220,0.15);color:#00a4dc;border:1px solid rgba(0,164,220,0.35);font-size:11px;padding:2px 8px;border-radius:12px;}
+.incompatible-badge{font-size:12px;color:#e74c3c;}
+.local-only-text,.empty-revisions{font-size:13px;color:var(--text-secondary);}
 
 </style>

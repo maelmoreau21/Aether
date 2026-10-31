@@ -475,8 +475,8 @@
     height: 460px;
     background: radial-gradient(
       ellipse at center,
-      rgba(229, 9, 20, 0.14) 0%,
-      rgba(255, 255, 255, 0.04) 45%,
+      rgba(249, 115, 22, 0.16) 0%,
+      rgba(245, 158, 11, 0.06) 45%,
       transparent 70%
     );
     filter: blur(80px);
@@ -510,7 +510,7 @@
   }
 
   .brand-icon {
-    filter: drop-shadow(0 4px 14px rgba(229, 9, 20, 0.35));
+    filter: drop-shadow(0 4px 14px rgba(249, 115, 22, 0.35));
   }
 
   .brand-title {
@@ -554,10 +554,10 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     padding: 4px 10px;
-    background: var(--color-accent-soft, rgba(229, 9, 20, 0.15));
-    border: 1px solid rgba(229, 9, 20, 0.35);
+    background: var(--color-accent-soft, rgba(249, 115, 22, 0.16));
+    border: 1px solid rgba(249, 115, 22, 0.35);
     border-radius: var(--radius-full, 9999px);
-    color: var(--color-accent, #E50914);
+    color: var(--color-accent, #F97316);
     margin-bottom: 12px;
   }
 
@@ -737,8 +737,8 @@
 
   input:focus {
     outline: none;
-    border-color: var(--color-accent, #E50914);
-    box-shadow: 0 0 0 3px rgba(229, 9, 20, 0.2);
+    border-color: var(--color-accent, #F97316);
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.22);
     background: var(--color-raised-hover, #222227);
   }
 
@@ -754,7 +754,7 @@
     width: 100%;
     min-height: 50px;
     padding: 12px 18px;
-    background: var(--color-play, #E50914);
+    background: var(--color-play, #F97316);
     color: var(--color-on-accent, #ffffff);
     border: none;
     border-radius: var(--radius-sm, 6px);
@@ -767,8 +767,8 @@
   }
 
   .btn-submit:hover:not(:disabled) {
-    background: var(--color-play-hover, #F40612);
-    box-shadow: 0 12px 28px rgba(229, 9, 20, 0.45);
+    background: var(--color-play-hover, #FB923C);
+    box-shadow: 0 12px 28px rgba(249, 115, 22, 0.45);
     transform: translateY(-1px);
   }
 

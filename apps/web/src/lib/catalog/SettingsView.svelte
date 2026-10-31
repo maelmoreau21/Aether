@@ -421,7 +421,7 @@
   .settings-nav a:hover, .settings-nav a.active { background: var(--bg-elevated); color: var(--text-primary); }
   .settings-nav a.active { border-left: 3px solid var(--accent-primary); font-weight: 700; }
   .server-link { margin-top: 20px; border-top: 1px solid var(--border-subtle); padding-top: 16px; }
-  .settings-content { min-width: 0; max-width: 860px; }
+  .settings-content { min-width: 0; max-width: none; }
   .card {
     min-width: 0;
     overflow-wrap: anywhere;

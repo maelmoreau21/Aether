@@ -1,27 +1,48 @@
+## 31 octobre 2026 — Correction du scan PostgreSQL (taille de fichiers > 2,14 Go), Explication TMDb et Historique des révisions / Mises à jour d'extensions (Jellyfin-style)
+
+- **Correction PostgreSQL `integer out of range` lors du scan (`crates/core/schema.sql`, `crates/core/src/database.rs`)** :
+  - **Diagnostic** : Les colonnes `size`, `poster_size`, `series_poster_size`, `cover_size` des tables PostgreSQL `inventory_assets`, `scan_staging_files`, `inventory_images`, `assets` et `music_tracks` étaient typées en `INTEGER` (32 bits signé, maximum ~2,14 Go = 2 147 483 647 octets). Tout fichier multimédia (film 1080p/4K) dépassant 2,14 Go provoquait l'échec de la requête `INSERT INTO inventory_assets` avec `error returned from database: integer out of range at line 1284`, annulant la transaction du scan (0 fichier découvert, 0 analysé).
+  - **Résolution** :
+    - `crates/core/schema.sql` : passage de toutes les colonnes de tailles de fichiers en `BIGINT` dans le schéma PostgreSQL.
+    - `crates/core/src/database.rs` : exécution automatique d'une migration `ALTER TABLE ... TYPE bigint` au démarrage pour toutes les bases PostgreSQL existantes sans perte de données.
+    - Le scan fonctionne désormais sans limite de taille (fichiers de 10 Go, 50 Go, 100 Go+ acceptés sans débordement).
+- **Évolution SDK Extensions (`crates/extension-sdk/src/lib.rs`)** :
+  - Ajout des champs optionnels `changelog` (journal de modifications / release notes) et `release_date` dans le struct `Manifest`.
+- **Gestion des révisions et mises à jour d'extensions façon Jellyfin (`apps/web/src/lib/admin/AdminExtensions.svelte`)** :
+  - **Historique des révisions** :
+    - Accordéon déroulant affichant chaque révision disponible dans les dépôts pour le plugin sélectionné (`vX.Y.Z — date`).
+    - Affichage des notes de version (`changelog`) sous forme de liste à puces ou description détaillée, ainsi que des spécifications d'API requises (`targetAbi`, `minServerVersion`).
+    - Statut visuel immédiat : badge vert `Installée` pour la version active, badge bleu `Mise à jour` pour les versions plus récentes.
+    - Bouton d'action contextuel : `✓ Version actuelle installée` si active, `⬇ Mettre à jour vers v...` si plus récente, `⬇ Installer v...` pour changer ou rétrograder de version en un clic.
+  - **Mise à jour et permutation atomique** : fonction `switchVersion(entry)` qui désinstalle l'ancienne version sans effacer les données de configuration (`deleteData: false`), installe la version cible depuis le dépôt, puis restaure l'état activé et les bibliothèques autorisées.
+  - **Indicateurs dans le catalogue et la grille** : badge `Mise à jour` sur les cartes d'extensions installées dès qu'une version plus récente est détectée dans les dépôts.
+- **Validations réelles** :
+  - `cargo check -p media-poc --lib` : 0 erreur.
+  - `cargo test -p media-poc --lib` : 132 tests réussis à 100 %.
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement (`svelte-check`).
+  - `npm --prefix apps/web test` : 30 suites de tests, 215 tests unitaires réussis à 100 %.
+
 ## 31 octobre 2026 — Refonte UI/UX complète style Netflix / Apple TV+ (Responsive Mobile, Tablette, Desktop & TV)
 
-- **Étape 1 — Thème global, typographie & tokens de design (`apps/web/src/lib/styles/tokens.css`, `apps/web/src/app.html`)** :
-  - Palette sombre profonde cinématographique (`#0B0C10` canvas, `#141418` surface, `#18181B` cartes élevées, `#E50914` rouge cinéma pour les CTA principaux, verre dépoli `rgba(15, 15, 20, 0.78)` et `rgba(20, 20, 26, 0.88)`).
-  - Typographie sans-serif moderne (`Inter`, `Plus Jakarta Sans`, système) avec hiérarchie marquée (`clamp(...)` pour Hero, titres de rails, fiches) et transitions fluides (`cubic-bezier(0.25, 0.8, 0.25, 1)`).
-  - Support multi-écrans : téléphone (`< 640px`), tablette (`641px–1099px`), desktop (`1100px+`) et TV 10-foot UI (`@media (min-width: 1920px)` avec gouttières élargies et focus clavier/télécommande `:focus-visible` haute visibilité). Préservation du mode clair (`[data-theme="light"]`).
-- **Étape 2 — Barre de navigation "Smart Glass" (`Navbar.svelte`, `ProfileMenu.svelte`, `AdminShell.svelte`)** :
-  - Header fixe transparent en haut de page avec dégradé subtil, basculant automatiquement en verre sombre flouté (`backdrop-filter: blur(16px) saturate(180%)`) dès le défilement (`scrollY > 16`).
-  - Barre de recherche extensible et animée directement dans l'en-tête desktop, en complément du bouton d'accès rapide `/search`.
-  - Barre de navigation inférieure (Bottom Tab Bar) ergonomique en verre dépoli sur mobile et tablette, et modale de sélection de bibliothèque unifiée.
+- **Étape 1 — Thème global Orange Aether, Mode Clair anti-éblouissement & Pleine largeur (`apps/web/src/lib/styles/tokens.css`, `apps/web/src/app.html`, `Catalog.svelte`)** :
+  - **Couleur de marque Orange Aether** : remplacement du rouge par l'orange/ambre identitaire d'Aether (`#F97316` / `#EA580C`, dégradé `#F59E0B → #EA580C`, halo `rgba(249, 115, 22, 0.35)`).
+  - **Mode Clair doux anti-éblouissement (`[data-theme="light"]`)** : suppression des blancs éblouissants (`#FAF9F6`) au profit d'une palette chaude « Sable & Pierre » (`--bg-main: #E3DED6`, `--bg-surface: #ECE8E1`, `--bg-elevated: #DAD4CA`) confortable pour les yeux sur grand écran.
+  - **Interface 100 % pleine largeur** : suppression des `max-width` restrictifs (`1600px`, `1680px`, `1320px`) sur `Navbar`, `Catalog`, `DetailHero`, `AdminShell`, `SettingsView`, `lists`, `music` et `downloads` pour exploiter toute la largeur disponible de l'écran (PC, tablette, TV 4K).
+- **Étape 2 — Barre de navigation "Smart Glass" avec vraies bibliothèques & icônes à droite (`Navbar.svelte`, `Icon.svelte`)** :
+  - Affichage direct des **vraies bibliothèques** (`$accessibleLibraries`) dans la barre supérieure à côté d'« Accueil », avec icônes par type (`film`, `tv`, `♫`).
+  - Déplacement de **Playlists** (`lists/`) et **Téléchargements** (`downloads/`) sous forme de petits boutons icônes circulaires collés sur la droite à côté de la recherche et du profil.
 - **Étape 3 — Section Hero Banner immersive (`HeroBanner.svelte`)** :
-  - Bannière pleine largeur (`min-height: clamp(500px, 74vh, 780px)`, jusqu'à `860px` sur TV) avec zoom doux de l'image de fond et triple dégradé directionnel fondant l'image dans `#0B0C10`.
-  - Prise en charge des titres et synopsis traduits (`localizedTitle`, `localizedPlot`), badges de métadonnées (catégorie, année, classification MPAA, note étoilée, saisons, genres) et double bouton d'action (CTA primaire lumineux + bouton secondaire en verre dépoli).
+  - Bannière grand format avec zoom doux, triple dégradé vers `#0B0C10`, titres/synopsis localisés (`localizedTitle`, `localizedPlot`), badges et double bouton d'action.
 - **Étape 4 — Rails horizontaux, Cartes modernes & Grilles (`MediaShelf.svelte`, `Poster.svelte`, `ContinueWatching.svelte`, `CatalogGrid.svelte`)** :
-  - Carrousels horizontaux fluides avec `scroll-snap-type: x mandatory`, gouttières verticales anti-rognage et boutons de défilement circulaires en verre dépoli gauche/droite au survol.
-  - Cartes (`Poster.svelte`) au ratio `2/3` strict avec élévation au survol (`transform: scale(1.06)` en `250ms cubic-bezier(0.25, 0.8, 0.25, 1)`), ombre portée profonde et overlay d'action rapide « Découvrir » sans décaler le layout.
-  - Grille d'exploration modernisée avec barre d'outils en verre dépoli, filtres en pilules et états vides soignés.
-- **Étape 5 — Vues détails, Modales en verre dépoli & Skeletons (`DetailHero.svelte`, `FilmDetail.svelte`, `SeriesDetail.svelte`, `WorkTools.svelte`, `IdentifyModal.svelte`, `ImageManager.svelte`, `EditorialCredits.svelte`, `CatalogSkeleton.svelte`, `SettingsView.svelte`, `login/+page.svelte`, `lists/+page.svelte`)** :
-  - Fiches Films et Séries immersives avec sélecteur de saison en verre dépoli, cartes d'épisodes avec aperçu 16:9, badge de durée et barre de progression.
-  - Harmonisation de toutes les modales (`WorkTools`, `IdentifyModal`, `ImageManager`) avec animations d'ouverture (`modal-pop`) et suppression des anciennes couleurs disparates codées en dur (`#0d1117`, `#161b22`, `#a78bfa`).
-  - Skeleton loaders sombres animés (`shimmer`) pendant le chargement du catalogue.
+  - Carrousels horizontaux fluides avec `scroll-snap-type: x mandatory` et flèches en verre dépoli au survol ; cartes `Poster.svelte` au ratio `2/3` avec zoom `scale(1.06)` et action rapide.
+- **Étape 5 — Fiches Films & Séries ergonomiques (`DetailHero.svelte`, `FilmDetail.svelte`, `SeriesDetail.svelte`, `PersonalFeedback.svelte`, `WatchStatus.svelte`, `EditorialCredits.svelte`, `SimilarWorks.svelte`, `track-labels.ts`)** :
+  - **Résumé complet** : affichage intégral du synopsis sans troncature ni clic requis.
+  - **Favoris ♥ & Note ★ directement accessibles** : intégration des boutons « Favoris » (`♥`), de la notation sur 5 étoiles (`★ Noter`) et du statut « Vu » directement dans la barre d'action principale du Hero à côté de « Lancer le film ».
+  - **Bandeau visuel Qualité, Audio (2.0 / 5.1 / 7.1) & Sous-titres** : remplacement de l'accordéon technique brut par un bandeau clair affichant immédiatement la qualité d'image (`4K Ultra HD`, `1080p Full HD`, `10 bits`), les langues audio avec configuration des canaux (`2.0`, `5.1`, `7.1` via `audioChannelBadge`) et les sous-titres disponibles avec drapeaux.
+  - **Réalisateur, Distribution & Équipe + Titres similaires** : mise en avant des cartes Réalisateur / Scénario et des portraits d'acteurs dans `EditorialCredits.svelte`, suivies d'un rail horizontal de **Films / Séries similaires** (`SimilarWorks.svelte`) basé sur les genres, réalisateurs, acteurs et bibliothèque en commun.
 - **Validations réelles (Zéro régression)** :
-  - `npm --prefix apps/web run check` : 0 erreur et 0 avertissement (`svelte-check` — correction des 4 avertissements Svelte 5 `state_referenced_locally` préexistants dans `CatalogGrid.svelte` et `IdentifyModal.svelte`).
-  - `npm --prefix apps/web run lint` : 0 erreur et 0 avertissement (`eslint src` — correction des 2 erreurs `svelte/require-each-key` dans `IdentifyModal.svelte` et `ImageManager.svelte`).
+  - `npm --prefix apps/web run check` : 0 erreur et 0 avertissement (`svelte-check`).
+  - `npm --prefix apps/web run lint` : 0 erreur et 0 avertissement (`eslint src`).
   - `npm --prefix apps/web test` : 30 suites de tests, 215 tests unitaires réussis à 100 %.
   - `npm --prefix apps/web run build` : compilation de production SSR + Client + Service Worker + `adapter-static` réussie sans erreur.
 

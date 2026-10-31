@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import { resolve } from '$app/paths';
+  import Navbar from '../../lib/ui/Navbar.svelte';
   import { offlineItems,offlineKey,storedOfflineKey,unlockDetails,removeOffline,type OfflineItem,type OfflineDetails } from '../../lib/offline-vault';
   let items = $state<OfflineItem[]>([]);
   let details = $state<Record<string,OfflineDetails>>({});
@@ -30,6 +31,7 @@
   }
   async function remove(id:string){if(selected===id)stop();await removeOffline(id);keys.delete(id);delete details[id];await load();}
 </script>
+<Navbar section="downloads" />
 <main>
   <a href={resolve('/')}>Retour à la médiathèque</a>
   <h1>Téléchargements</h1><p>Vos médias disponibles sur cet appareil, même hors connexion.</p>
@@ -46,5 +48,5 @@
   {#if error}<p role="alert">{error}</p>{/if}
 </main>
 <style>
-main { max-width:1000px;margin:auto;padding:24px; } form,label,article { display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0; } article { border-bottom:1px solid var(--color-line);padding:16px 0; } article>div { flex:1;min-width:150px; } input,button { padding:10px;background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-line);border-radius:var(--radius-sm);font:inherit; } button,summary { cursor:pointer; } button:disabled { opacity:.5;cursor:default; } a { color:var(--color-accent); } video { width:100%;max-height:70vh; } .legacy { margin-block:30px;color:var(--color-muted); } .legacy p { max-width:650px; } [role="alert"] { color:var(--status-error); }
+main { width:100%;max-width:none;margin:0;padding:28px var(--page-gutter) 80px; } form,label,article { display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0; } article { border-bottom:1px solid var(--color-line);padding:16px 0; } article>div { flex:1;min-width:150px; } input,button { padding:10px 14px;background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-line);border-radius:var(--radius-sm);font:inherit; } button,summary { cursor:pointer; } button:disabled { opacity:.5;cursor:default; } a { color:var(--color-accent); } video { width:100%;max-height:70vh; } .legacy { margin-block:30px;color:var(--color-muted); } .legacy p { max-width:650px; } [role="alert"] { color:var(--status-error); }
 </style>

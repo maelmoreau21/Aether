@@ -73,7 +73,7 @@
     border-radius: var(--radius-2xl);
     border: 1px solid var(--color-line);
     overflow: hidden;
-    background: radial-gradient(circle at 80% 20%, rgba(229, 9, 20, 0.14), transparent 55%), var(--color-surface);
+    background: radial-gradient(circle at 80% 20%, rgba(249, 115, 22, 0.14), transparent 55%), var(--color-surface);
     box-shadow: var(--shadow-lg);
   }
 
@@ -113,7 +113,7 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 16px;
-    max-width: 620px;
+    max-width: 780px;
     min-width: 0;
   }
 
@@ -173,7 +173,7 @@
   .kind-badge {
     background: var(--color-accent-soft);
     color: var(--color-text-bright);
-    border: 1px solid rgba(229, 9, 20, 0.35);
+    border: 1px solid rgba(249, 115, 22, 0.35);
     text-transform: uppercase;
   }
 
@@ -242,13 +242,13 @@
     background: var(--color-play);
     color: var(--color-on-play);
     border: 1px solid transparent;
-    box-shadow: 0 6px 22px rgba(229, 9, 20, 0.38);
+    box-shadow: 0 6px 22px rgba(249, 115, 22, 0.38);
   }
 
   .primary:hover:not(:disabled) {
     background: var(--color-play-hover);
     transform: translateY(-2px);
-    box-shadow: 0 10px 28px rgba(229, 9, 20, 0.52);
+    box-shadow: 0 10px 28px rgba(249, 115, 22, 0.52);
   }
 
   .secondary {
@@ -270,7 +270,7 @@
       min-height: 620px;
     }
     .hero-content {
-      max-width: 720px;
+      max-width: 960px;
     }
     .hero-synopsis {
       font-size: 16.5px;

@@ -542,6 +542,7 @@
         {allowedIds}
         bind:selected
         {mediaError}
+        similarCandidates={films}
         onPlay={openPlayer}
       />
       {:catch}<p role="alert">Chargement du film impossible. Rechargez la page pour réessayer.</p>{/await}
@@ -554,6 +555,7 @@
         bind:season
         {media}
         {mediaError}
+        similarCandidates={series}
         {immersive}
         {launchingEpisodeId}
         onLaunchEpisode={launchEpisode}
@@ -623,8 +625,9 @@
   }
 
   main {
-    max-width: 1600px;
-    margin: 0 auto;
+    width: 100%;
+    max-width: none;
+    margin: 0;
     padding: 0 var(--page-gutter) 80px;
     min-height: 75vh;
   }

@@ -44,7 +44,10 @@
     | 'jump-forward'
     | 'chapter-prev'
     | 'chapter-next'
-    | 'trash';
+    | 'trash'
+    | 'playlist'
+    | 'download'
+    | 'heart';
 
   const paths: Record<IconName, string> = {
     menu: 'M4 6h16M4 12h16M4 18h16',
@@ -91,7 +94,10 @@
     'jump-forward': 'm15 14 5-5-5-5M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13',
     'chapter-prev': 'M11 19 4 12l7-7v14ZM20 19 13 12l7-7v14Z',
     'chapter-next': 'M4 5l7 7-7 7V5ZM13 5l7 7-7 7V5Z',
-    trash: 'M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-6 5v6m4-6v6'
+    trash: 'M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-6 5v6m4-6v6',
+    playlist: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+    download: 'M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
+    heart: 'M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78Z'
   };
 </script>
 <script lang="ts">

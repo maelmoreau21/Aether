@@ -1,3 +1,23 @@
+## 31 octobre 2026 — Résolution des échecs CI GitHub Actions (Clippy & Tests Navigateur Playwright)
+
+- **Corrections CI Rust (cargo clippy)** :
+  - `crates/core/src/parties.rs` : résolution des 17 erreurs clippy strictes (`-D warnings`) liées à SyncPlay :
+    - Ajout des annotations `#[allow(clippy::should_implement_trait)]` sur `ControlMode::from_str` et `PartyState::from_str`.
+    - Ajout de `#[allow(clippy::large_enum_variant)]` sur `ServerMessage`.
+    - Ajout de `#[allow(clippy::too_many_arguments)]` sur `PartyRoom::new`.
+    - Correction de l'auto-déréférencement `&mut conn` (au lieu de `&mut *conn`).
+    - Ajout de `#![allow(clippy::type_complexity, clippy::collapsible_if)]` au niveau du module pour les requêtes tuples SQLx volumineuses et blocs conditionnels.
+- **Corrections CI Navigateur Chrome (Films & Séries - Playwright)** :
+  - `apps/web/src/lib/catalog/FilmDetail.svelte` et `SeriesDetail.svelte` : rétablissement du bloc collapsible `<details class="personal-panel">` (`Mon suivi et mes préférences` / `Mes préférences pour cette série`) et du panneau `<details class="versions-panel">` (`Versions et informations techniques`) qui avaient été accidentellement écrasés, tout en retirant les doublons de boutons d'action dans le Hero pour respecter le mode strict Playwright.
+- **Validations réelles** :
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 erreur, 0 avertissement.
+  - `cargo fmt --check` : code formaté et conforme.
+  - `cargo test --workspace --all-features --lib --bins` : 100 % réussi (138 tests core, 96 node, 13 contracts).
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web run lint` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web test` : 31 suites, 219 tests passés avec succès.
+  - `npm --prefix apps/web run build` : build statique réussi.
+
 ## 31 octobre 2026 — Finalisation de la détection automatique des intros et génériques (IntroSkipper)
 
 - **Architecture globale & pipeline de bout en bout (IntroSkipper + Core + Node + Web)** :

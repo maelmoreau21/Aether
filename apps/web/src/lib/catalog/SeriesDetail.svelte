@@ -105,8 +105,6 @@
         heading?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
       }}><Icon name="play" size={20} />Voir les épisodes</button>
       {#if !work.synthetic}
-        <WatchStatus workId={work.id} />
-        <PersonalFeedback workId={work.id} />
         <WorkTools {work} />
       {/if}
     </div>
@@ -169,6 +167,14 @@
     {/if}
   </section>
 
+  {#if !work.synthetic}
+    <details class="personal-panel">
+      <summary>Mes préférences pour cette série</summary>
+      <WatchStatus workId={work.id} />
+      <PersonalFeedback workId={work.id} />
+    </details>
+  {/if}
+
   <EditorialCredits {work} />
   <SimilarWorks {work} candidates={similarCandidates} />
 </div>
@@ -208,4 +214,7 @@
   .error-banner { color: var(--color-danger); line-height: 1.6; }
   .empty-episodes-box { padding: 36px 24px; border-radius: var(--radius-lg); background: var(--color-surface); border: 1px dashed var(--color-line); color: var(--color-muted); text-align: center; }
   @media (max-width: 640px) { .episode { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 14px; } .season-heading { flex-wrap: wrap; width: 100%; gap: 12px; } .season-selector-label { flex: 1; } .hero-cta { width: 100%; } }
+
+  .personal-panel { border: 1px solid var(--color-line); border-radius: var(--radius-lg); background: var(--color-surface); margin-top: 24px; padding: 4px 18px; }
+  .personal-panel summary { min-height: 44px; padding-block: 12px; cursor: pointer; font-weight: 650; color: var(--color-text-bright); }
 </style>

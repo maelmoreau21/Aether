@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity, clippy::collapsible_if)]
+
 //! Synchronized Community Watch Parties (SyncPlay) for Aether.
 //! Media playback coordination runs on Core via WebSockets while video/audio streaming remains strictly on Media Nodes.
 
@@ -67,6 +69,7 @@ impl ControlMode {
             Self::Request => "request",
         }
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "shared" => Self::Shared,
@@ -94,6 +97,7 @@ impl PartyState {
             Self::Ended => "ended",
         }
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "playing" => Self::Playing,
@@ -278,6 +282,7 @@ pub enum ClientMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[allow(clippy::large_enum_variant)]
 pub enum ServerMessage {
     Pong {
         client_epoch_ms: i64,
@@ -407,6 +412,7 @@ pub struct PartyRoom {
 }
 
 impl PartyRoom {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         name: String,
@@ -802,7 +808,7 @@ async fn create_party(
         .acquire()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut tx = begin_write(&mut *conn)
+    let mut tx = begin_write(&mut conn)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

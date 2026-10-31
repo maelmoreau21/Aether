@@ -75,6 +75,8 @@ fn test_structured_metadata_roundtrip() {
             is_primary: true,
         }],
         images: vec![],
+        seasons: vec![],
+        translations: BTreeMap::new(),
     };
 
     let json = serde_json::to_string(&meta).unwrap();

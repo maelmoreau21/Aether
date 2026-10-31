@@ -22,6 +22,7 @@ struct SpriteSource {
     root: PathBuf,
     sheets: PathBuf,
     duration: f64,
+    native: super::trickplay_native::Request,
 }
 
 fn sheet_directory(video: &Path) -> PathBuf {
@@ -32,7 +33,7 @@ fn sheet_directory(video: &Path) -> PathBuf {
 
 async fn source(store: &IdentityStore, asset_id: &str) -> Result<Option<SpriteSource>, sqlx::Error> {
     let row = query(
-        "SELECT a.relative_path, a.probe_json, l.root, l.node_id FROM inventory_assets a \
+        "SELECT a.relative_path, a.size, a.modified_ns, a.probe_json, l.root, l.node_id FROM inventory_assets a \
          JOIN inventory_sources s ON s.id=a.source_id \
          JOIN libraries l ON l.id=a.library_id \
          JOIN media_nodes n ON n.id=l.node_id \
@@ -62,7 +63,8 @@ async fn source(store: &IdentityStore, asset_id: &str) -> Result<Option<SpriteSo
     if media_node::files::validate_relative_components(video).is_err() {
         return Ok(None);
     }
-    Ok(Some(SpriteSource { root: PathBuf::from(root), sheets: sheet_directory(video), duration }))
+    let native = super::trickplay_native::Request { asset_id: asset_id.to_owned(), media_root: PathBuf::from(&root), video: video.to_path_buf(), duration, size: row.get::<i64,_>("size") as u64, modified_ns: row.get("modified_ns") };
+    Ok(Some(SpriteSource { root: PathBuf::from(root), sheets: sheet_directory(video), duration, native }))
 }
 
 fn interval_ms() -> u64 {
@@ -107,31 +109,56 @@ async fn dimensions(opened: OpenedFile) -> Option<(u32,u32)> {
     }).await.ok().flatten()
 }
 
+
+async fn native_available(source: &SpriteSource) -> Option<(super::trickplay_native::Cached,u32,u32)> {
+    let cached = super::trickplay_native::cached(&source.native).await?;
+    let opened = OpenedFile::open_in_root(&cached.root, Path::new("0.jpg")).await.ok()?;
+    let (w,h) = dimensions(opened).await?;
+    Some((cached,w,h))
+}
+
 pub async fn manifest(store: &IdentityStore, asset_id: &str) -> Response {
     let source = match source(store, asset_id).await {
         Ok(Some(source)) => source,
         Ok(None) => return crate::error(StatusCode::NOT_FOUND, "trickplay_unavailable"),
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
     };
-    let Some(count) = sheet_count(&source).await else {
-        return crate::error(StatusCode::NOT_FOUND, "trickplay_unavailable");
+    // Aether-native cache takes priority; legacy Jellyfin sheets are read-only fallback.
+    if let Some((native,width,height)) = native_available(&source).await {
+        let thumbnails = ((source.duration * 1000.0 / native.interval_ms as f64).ceil() as usize)
+            .min(native.count * (COLUMNS * ROWS) as usize);
+        return Json(json!({
+            "status":"ready", "source":"aether", "intervalMs":native.interval_ms,
+            "width":width,"height":height,"columns":COLUMNS,"rows":ROWS,
+            "sheetCount":native.count,"thumbnailCount":thumbnails,
+            "urlPrefix":format!("/api/v1/assets/{asset_id}/trickplay/")
+        })).into_response();
+    }
+    if let Some(count) = sheet_count(&source).await {
+        if let Some(first) = read_sheet(&source, 0).await {
+            if let Some((width,height)) = dimensions(first).await {
+                let interval = interval_ms();
+                let thumbnails = ((source.duration * 1000.0 / interval as f64).ceil() as usize)
+                    .min(count * (COLUMNS * ROWS) as usize);
+                if thumbnails > 0 {
+                    return Json(json!({
+                        "status":"ready","source":"jellyfin","intervalMs":interval,
+                        "width":width,"height":height,"columns":COLUMNS,"rows":ROWS,
+                        "sheetCount":count,"thumbnailCount":thumbnails,
+                        "urlPrefix":format!("/api/v1/assets/{asset_id}/trickplay/")
+                    })).into_response();
+                }
+            }
+        }
+    }
+    let status = super::trickplay_native::enqueue(source.native);
+    let (state,http) = match status {
+        super::trickplay_native::QueueStatus::Queued => ("generating", StatusCode::ACCEPTED),
+        super::trickplay_native::QueueStatus::Busy => ("busy", StatusCode::SERVICE_UNAVAILABLE),
+        super::trickplay_native::QueueStatus::Failed => ("failed", StatusCode::SERVICE_UNAVAILABLE),
+        super::trickplay_native::QueueStatus::Disabled => ("disabled", StatusCode::NOT_FOUND)
     };
-    let Some(first) = read_sheet(&source, 0).await else {
-        return crate::error(StatusCode::NOT_FOUND, "trickplay_unavailable");
-    };
-    let Some((width,height)) = dimensions(first).await else {
-        return crate::error(StatusCode::NOT_FOUND, "trickplay_invalid");
-    };
-    let interval = interval_ms();
-    let thumbnails = ((source.duration * 1000.0 / interval as f64).ceil() as usize)
-        .min(count * (COLUMNS * ROWS) as usize);
-    if thumbnails == 0 { return crate::error(StatusCode::NOT_FOUND, "trickplay_unavailable"); }
-    Json(json!({
-        "intervalMs": interval, "width": width, "height": height,
-        "columns": COLUMNS, "rows": ROWS,
-        "sheetCount": count, "thumbnailCount": thumbnails,
-        "urlPrefix": format!("/api/v1/assets/{asset_id}/trickplay/")
-    })).into_response()
+    (http,Json(json!({"status":state}))).into_response()
 }
 
 pub async fn tile(store: &IdentityStore, asset_id: &str, index: usize, request: Request) -> Response {
@@ -140,7 +167,13 @@ pub async fn tile(store: &IdentityStore, asset_id: &str, index: usize, request: 
         Ok(None) => return crate::error(StatusCode::NOT_FOUND, "trickplay_unavailable"),
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
     };
-    let Some(opened) = read_sheet(&source, index).await else {
+    let native = super::trickplay_native::cached(&source.native).await;
+    let opened = if let Some(native) = native {
+        if index >= native.count { None } else {
+            OpenedFile::open_in_root(&native.root, Path::new(&format!("{index}.jpg"))).await.ok()
+        }
+    } else { read_sheet(&source,index).await };
+    let Some(opened) = opened else {
         return crate::error(StatusCode::NOT_FOUND, "trickplay_tile_unavailable");
     };
     match media_node::serve_opened(opened, &request, "image/jpeg").await {

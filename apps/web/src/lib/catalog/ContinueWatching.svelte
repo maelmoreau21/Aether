@@ -294,9 +294,11 @@
     gap: 18px;
     overflow-x: auto;
     scroll-behavior: smooth;
-    padding: 6px 4px 14px;
+    padding: 12px 8px 18px;
+    margin: -6px -8px;
     scrollbar-width: none;
     -ms-overflow-style: none;
+    scroll-snap-type: x mandatory;
   }
 
   .continue-list::-webkit-scrollbar {
@@ -304,7 +306,8 @@
   }
 
   .continue-card {
-    flex: 0 0 clamp(240px, 24vw, 300px);
+    flex: 0 0 clamp(250px, 24vw, 310px);
+    scroll-snap-align: start;
     display: flex;
     flex-direction: column;
     text-decoration: none;
@@ -313,14 +316,20 @@
     background: var(--color-surface);
     border: 1px solid var(--color-line);
     overflow: hidden;
-    transition: transform var(--transition-normal), border-color var(--transition-normal), box-shadow var(--transition-normal);
+    transition:
+      transform 250ms cubic-bezier(0.25, 0.8, 0.25, 1),
+      border-color 250ms cubic-bezier(0.25, 0.8, 0.25, 1),
+      box-shadow 250ms cubic-bezier(0.25, 0.8, 0.25, 1);
     box-shadow: var(--shadow-card);
   }
 
-  .continue-card:hover {
-    transform: translateY(-4px);
-    border-color: var(--color-accent-soft);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.65), 0 0 16px var(--color-accent-soft);
+  @media (hover: hover) and (pointer: fine) {
+    .continue-card:hover {
+      transform: scale(1.045);
+      border-color: var(--color-line-strong);
+      box-shadow: var(--shadow-card-hover);
+      z-index: 4;
+    }
   }
 
   .card-thumb {

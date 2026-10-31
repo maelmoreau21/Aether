@@ -1,5 +1,6 @@
 <script lang="ts">
   import ImageManager from './ImageManager.svelte';
+  import IdentifyModal from './IdentifyModal.svelte';
   import { session } from '../auth/session';
   import type { Work } from './api';
   import type { Media } from '../player/types';
@@ -23,6 +24,7 @@
   let imagesOpen = $state(false);
   let imagesChanged = $state(false);
   let metadataOpen = $state(false);
+  let identifyOpen = $state(false);
   let infoOpen = $state(false);
   let listOpen = $state(false);
   let menuOpen = $state(false);
@@ -192,6 +194,17 @@
   />
 {/if}
 
+{#if identifyOpen && isAdmin}
+  <IdentifyModal
+    {work}
+    onclose={() => (identifyOpen = false)}
+    onsaved={() => {
+      window.dispatchEvent(new CustomEvent('media-artwork-updated', { detail: { id: work.id } }));
+      window.location.reload();
+    }}
+  />
+{/if}
+
 <!-- Actions bar (Add to playlist + Three dots menu) -->
 <div class="work-tools-container">
   <!-- Quick Playlist Dropdown -->
@@ -304,6 +317,19 @@
           >
             <Icon name="image" size={16} />
             <span>Modifier les images</span>
+          </button>
+
+          <button
+            type="button"
+            class="menu-item"
+            role="menuitem"
+            onclick={() => {
+              menuOpen = false;
+              identifyOpen = true;
+            }}
+          >
+            <Icon name="search" size={16} />
+            <span>Identifier</span>
           </button>
 
           <button
@@ -874,10 +900,12 @@
     max-width: 580px;
     max-height: 90vh;
     overflow-y: auto;
-    background: #18181b;
+    background: var(--color-glass-raised);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border: 1px solid var(--color-line-strong);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
     display: flex;
     flex-direction: column;
   }

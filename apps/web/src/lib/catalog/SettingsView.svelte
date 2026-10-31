@@ -402,32 +402,77 @@
 </div>
 <style>
   .settings-view { padding-top: 24px; }
-  h1 { font-size: 28px; font-weight: 400; margin: 0 0 32px; }
-  .settings-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px; align-items: start; }
-  .settings-nav { display: grid; gap: 4px; }
-  .settings-nav a { display: flex; align-items: center; gap: 14px; padding: 14px; color: var(--text-secondary); font-size: 14px; min-height: 48px; }
+  h1 { font-size: clamp(24px, 2.8vw, 32px); font-weight: 800; letter-spacing: -0.02em; margin: 0 0 32px; }
+  .settings-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 40px; align-items: start; }
+  .settings-nav { display: grid; gap: 6px; }
+  .settings-nav a {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 16px;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    min-height: 48px;
+    border-radius: var(--radius-sm);
+    border-left: 3px solid transparent;
+    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  }
   .settings-nav a:hover, .settings-nav a.active { background: var(--bg-elevated); color: var(--text-primary); }
-  .settings-nav a.active { border-left: 3px solid var(--accent-primary); }
-  .server-link { margin-top: 20px; border-top: 1px solid var(--border-subtle); }
+  .settings-nav a.active { border-left: 3px solid var(--accent-primary); font-weight: 700; }
+  .server-link { margin-top: 20px; border-top: 1px solid var(--border-subtle); padding-top: 16px; }
   .settings-content { min-width: 0; max-width: 860px; }
-  .card { min-width: 0; overflow-wrap: anywhere; padding: 0; }
-  h2 { font-size: 24px; font-weight: 400; margin: 0 0 24px; }
-  h3 { margin: 0; font-size: 18px; font-weight: 500; }
+  .card {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    padding: 24px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    margin-bottom: 24px;
+  }
+  h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.015em; margin: 0 0 20px; }
+  h3 { margin: 0; font-size: 17px; font-weight: 650; }
   .profile-header-row { display: flex; align-items: center; gap: 20px; margin-bottom: 28px; }
   .profile-handle { margin: 6px 0; color: var(--text-secondary); }
-  .role-badge { display: inline-block; margin-top: 8px; padding: 4px 8px; font-size: 12px; background: var(--bg-elevated); }
+  .role-badge { display: inline-block; margin-top: 8px; padding: 4px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border-radius: var(--radius-full); background: var(--bg-elevated); }
   .admin-badge { background: var(--color-accent-soft); color: var(--accent-primary); }
   .profile-info-list { display: grid; gap: 0; }
   .info-row { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--border-subtle); font-size: 14px; }
+  .info-row:last-child { border-bottom: none; padding-bottom: 0; }
   .label { color: var(--text-secondary); }
   .val code { overflow-wrap: anywhere; }
   .muted { color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
   .pref-fields, .offsets { display: grid; gap: 24px; margin-top: 24px; }
-  label { display: grid; gap: 10px; font-size: 14px; }
+  label { display: grid; gap: 10px; font-size: 14px; font-weight: 500; }
   label > span { display: flex; align-items: center; gap: 8px; }
-  select, input { min-width: 0; width: 100%; max-width: 520px; min-height: 44px; border: 1px solid var(--border-subtle); border-radius: 4px; background-color: var(--bg-surface); color: var(--text-primary); }
-  input { padding: 12px; }
-  button { justify-self: start; min-height: 44px; padding: 12px 20px; border: 0; border-radius: 4px; background: var(--color-play); color: var(--color-on-accent); }
+  select, input:not([type="checkbox"]):not([type="range"]):not([type="color"]) {
+    min-width: 0;
+    width: 100%;
+    max-width: 520px;
+    min-height: 44px;
+    padding: 10px 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-elevated);
+    color: var(--text-primary);
+    transition: border-color var(--transition-fast);
+  }
+  select:focus, input:focus { border-color: var(--accent-primary); }
+  button {
+    justify-self: start;
+    min-height: 44px;
+    padding: 12px 22px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--color-play);
+    color: var(--color-on-accent);
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: var(--shadow-glow);
+    transition: background var(--transition-fast), transform var(--transition-fast);
+  }
+  button:hover { background: var(--color-play-hover); transform: translateY(-1px); }
   .offsets { padding-top: 28px; border-top: 1px solid var(--border-subtle); }
   .offsets p { margin: 0; }
   .subtitles-appearance { margin-top: 36px; padding-top: 28px; border-top: 1px solid var(--border-subtle); }
@@ -435,9 +480,9 @@
   .subtitle-preview-box {
     margin: 20px 0;
     padding: 36px 20px;
-    background: linear-gradient(135deg, #181926 0%, #0d0e15 100%);
+    background: linear-gradient(135deg, #18181B 0%, #0B0C10 100%);
     border: 1px solid var(--border-subtle);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -478,10 +523,11 @@
     accent-color: var(--color-play);
   }
   @media (max-width: 760px) {
-    .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 28px; }
-    .settings-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+    .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+    .settings-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
     .settings-nav a { font-size: 13px; padding: 12px; gap: 10px; }
     .server-link { grid-column: 1 / -1; margin-top: 4px; }
+    .card { padding: 18px; }
     .info-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   }
 </style>

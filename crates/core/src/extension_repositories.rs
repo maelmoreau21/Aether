@@ -354,6 +354,11 @@ async fn catalogue(
     let mut entries = Vec::new();
     for (id, name, bytes) in rows {
         for entry in parse_manifest(bytes.as_bytes())?.extensions {
+            // Avatars and Poster Rotator are native built-in features in Aether Core.
+            // Do not expose them in the extensions catalogue.
+            if matches!(entry.manifest.id.as_str(), "avatars" | "poster-rotator") {
+                continue;
+            }
             entries.push(json!({"repositoryId":id,"repositoryName":name,"compatible":compatible(&entry.manifest),"manifest":entry.manifest,"publisherId":entry.publisher_id,"publicKey":entry.public_key}));
         }
     }
@@ -378,6 +383,9 @@ async fn install(
         .into_iter()
         .find(|e| e.manifest.id == input.extension_id && e.manifest.version == input.version)
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_catalogue_version"))?;
+    if matches!(entry.manifest.id.as_str(), "avatars" | "poster-rotator") {
+        return Err(err(StatusCode::BAD_REQUEST, "feature_is_native"));
+    }
     if !compatible(&entry.manifest) {
         return Err(err(StatusCode::BAD_REQUEST, "incompatible_server_version"));
     }

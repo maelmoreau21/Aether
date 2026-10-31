@@ -8,8 +8,9 @@
 
 <script lang="ts">
   import { preloadCatalog } from '../catalog/page-cache';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
   import { session } from '../auth/session';
   import { accessibleLibraries, loadLibraries } from '../catalog/libraries';
   import { asset, resolve } from '$app/paths';
@@ -21,11 +22,17 @@
     section?: 'home' | 'films' | 'series' | 'music' | 'lists' | 'downloads' | 'search' | 'settings' | 'admin';
     name?: string;
   } = $props();
+
   let libraryError = $state('');
   let loadingLibraries = $state(false);
   let libraryDialog: HTMLDialogElement;
   let libraryMenuOpen = $state(false);
   let opener: HTMLElement | null = null;
+  let isScrolled = $state(false);
+  let searchExpanded = $state(false);
+  let headerSearchQuery = $state('');
+  let headerSearchInput = $state<HTMLInputElement>();
+
   const librarySection = $derived(['films', 'series', 'music'].includes(section));
   const currentLibrary = $derived($accessibleLibraries.find(library => library.id === page.url.searchParams.get('library')));
 
@@ -35,26 +42,56 @@
     catch { libraryError = 'Impossible de charger vos bibliothèques.'; }
     finally { loadingLibraries = false; }
   }
+
   $effect(() => { if ($session?.user.id) void refreshLibraries(); });
+
   onMount(() => {
+    const updateScroll = () => { isScrolled = window.scrollY > 12; };
+    updateScroll();
+    window.addEventListener('scroll', updateScroll, { passive: true });
     const refresh = () => { if (document.visibilityState === 'visible') void refreshLibraries(true); };
     window.addEventListener('focus', refresh);
-    return () => window.removeEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener('scroll', updateScroll);
+      window.removeEventListener('focus', refresh);
+    };
   });
+
   function openLibraries(event: MouseEvent) {
     opener = event.currentTarget as HTMLElement;
     libraryDialog.showModal();
     libraryMenuOpen = true;
   }
+
   function closeLibraries() { libraryDialog.close(); }
+
+  async function toggleQuickSearch(event: MouseEvent) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || section === 'search') return;
+    if (window.innerWidth <= 1024) return;
+    event.preventDefault();
+    searchExpanded = !searchExpanded;
+    if (searchExpanded) {
+      await tick();
+      headerSearchInput?.focus();
+    }
+  }
+
+  function submitQuickSearch(event: SubmitEvent) {
+    event.preventDefault();
+    const trimmed = headerSearchQuery.trim();
+    searchExpanded = false;
+    const target = trimmed ? resolve(`search/?q=${encodeURIComponent(trimmed)}` as 'search/') : resolve('search/');
+    void goto(target);
+  }
 </script>
 
-<header class="site-header">
+<header class="site-header" class:scrolled={isScrolled}>
   <div class="header-inner">
     <a class="brand" href={resolve('/')} onpointerenter={() => preloadCatalog('home')} onfocus={() => preloadCatalog('home')} aria-label={`${$serverPresentation.serverName || name}, accueil`}>
       <img src={asset('images/brand-mark.svg')} width="32" height="32" alt="" />
       <span>{$serverPresentation.serverName || name}</span>
     </a>
+
     <nav class="desktop-nav" aria-label="Navigation principale">
       <a href={resolve('/')} aria-current={section === 'home' ? 'page' : undefined}>Accueil</a>
       <button class:active={librarySection} aria-haspopup="dialog" aria-expanded={libraryMenuOpen} aria-controls="library-navigation" onclick={openLibraries}>
@@ -63,8 +100,32 @@
       <a href={resolve('lists/')} aria-current={section === 'lists' ? 'page' : undefined}>Playlists</a>
       <a href={resolve('downloads/')} aria-current={section === 'downloads' ? 'page' : undefined}>Téléchargements</a>
     </nav>
+
     <div class="header-actions">
-      <a class="quick-search-btn" href={resolve('search/')} aria-label="Rechercher" aria-current={section === 'search' ? 'page' : undefined}><Icon name="search" size={20} /></a>
+      {#if searchExpanded}
+        <form class="header-search-form" onsubmit={submitQuickSearch}>
+          <Icon name="search" size={16} />
+          <input
+            bind:this={headerSearchInput}
+            type="search"
+            bind:value={headerSearchQuery}
+            placeholder="Titres, genres, artistes…"
+            aria-label="Recherche rapide"
+            onkeydown={e => { if (e.key === 'Escape') searchExpanded = false; }}
+            onblur={() => { if (!headerSearchQuery.trim()) searchExpanded = false; }}
+          />
+        </form>
+      {/if}
+      <a
+        class="quick-search-btn"
+        class:active={section === 'search' || searchExpanded}
+        href={resolve('search/')}
+        onclick={toggleQuickSearch}
+        aria-label="Rechercher"
+        aria-current={section === 'search' ? 'page' : undefined}
+      >
+        <Icon name="search" size={20} />
+      </a>
       <ProfileMenu />
     </div>
   </div>
@@ -78,68 +139,493 @@
 </nav>
 
 <dialog id="library-navigation" class="library-dialog" bind:this={libraryDialog} aria-labelledby="library-navigation-title" onclose={() => { libraryMenuOpen = false; opener?.focus(); }}>
-  <header class="dialog-heading"><div><p>Votre médiathèque</p><h2 id="library-navigation-title">Bibliothèques</h2></div><button class="close-button" aria-label="Fermer les bibliothèques" onclick={closeLibraries}><Icon name="close" /></button></header>
+  <header class="dialog-heading">
+    <div>
+      <p>Votre médiathèque</p>
+      <h2 id="library-navigation-title">Bibliothèques</h2>
+    </div>
+    <button class="close-button" aria-label="Fermer les bibliothèques" onclick={closeLibraries}><Icon name="close" /></button>
+  </header>
   <nav class="library-list" aria-label="Choisir une bibliothèque">
     {#each $accessibleLibraries as library (library.id)}
-      <a href={resolve(`${library.kind}/?library=${encodeURIComponent(library.id)}` as 'films/')} onclick={closeLibraries} aria-current={currentLibrary?.id === library.id && librarySection ? 'page' : undefined} onpointerenter={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }} onfocus={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }}>
-        <span class="library-icon" aria-hidden="true">{#if library.kind === 'music'}♫{:else}<Icon name={library.kind === 'films' ? 'film' : 'tv'} size={22} />{/if}</span>
-        <span class="library-name"><strong>{library.name}</strong><small>{library.kind === 'music' ? 'Musique' : library.kind === 'films' ? 'Films' : 'Séries'}</small></span><Icon name="chevron" size={16} />
+      <a
+        href={resolve(`${library.kind}/?library=${encodeURIComponent(library.id)}` as 'films/')}
+        onclick={closeLibraries}
+        aria-current={currentLibrary?.id === library.id && librarySection ? 'page' : undefined}
+        onpointerenter={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }}
+        onfocus={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }}
+      >
+        <span class="library-icon" aria-hidden="true">
+          {#if library.kind === 'music'}♫{:else}<Icon name={library.kind === 'films' ? 'film' : 'tv'} size={22} />{/if}
+        </span>
+        <span class="library-name">
+          <strong>{library.name}</strong>
+          <small>{library.kind === 'music' ? 'Musique' : library.kind === 'films' ? 'Films' : 'Séries'}</small>
+        </span>
+        <Icon name="chevron" size={16} />
       </a>
     {/each}
   </nav>
-  {#if libraryError}<p role="alert">{libraryError}</p><button class="retry" disabled={loadingLibraries} onclick={() => refreshLibraries(true)}>Réessayer</button>
-  {:else if loadingLibraries}<p role="status">Chargement des bibliothèques…</p>
-  {:else if !$accessibleLibraries.length}<p>Aucune bibliothèque accessible avec ce compte.</p>{/if}
-  <a class="downloads-link" href={resolve('downloads/')} onclick={closeLibraries}><span aria-hidden="true">↓</span> Téléchargements sur cet appareil <Icon name="chevron" size={16} /></a>
+  {#if libraryError}
+    <p role="alert">{libraryError}</p>
+    <button class="retry" disabled={loadingLibraries} onclick={() => refreshLibraries(true)}>Réessayer</button>
+  {:else if loadingLibraries}
+    <p role="status">Chargement des bibliothèques…</p>
+  {:else if !$accessibleLibraries.length}
+    <p>Aucune bibliothèque accessible avec ce compte.</p>
+  {/if}
+  <a class="downloads-link" href={resolve('downloads/')} onclick={closeLibraries}>
+    <span aria-hidden="true">↓</span> Téléchargements sur cet appareil <Icon name="chevron" size={16} />
+  </a>
 </dialog>
 
 <style>
-  .site-header { position:sticky; top:0; z-index:40; background:var(--color-canvas); border-bottom:1px solid var(--color-line); }
-  .header-inner { display:flex; align-items:center; gap:32px; min-height:72px; max-width:1600px; padding:0 var(--page-gutter); margin:auto; }
-  .brand { display:flex; align-items:center; gap:10px; min-width:0; flex-shrink:1; font-size:23px; font-weight:750; letter-spacing:-.04em; }
-  .brand img { flex:none; }
-  .brand span { max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .desktop-nav { display:flex; align-items:center; gap:8px; min-width:0; }
-  .desktop-nav a,.desktop-nav button { display:flex; align-items:center; gap:8px; min-height:44px; padding:10px 12px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--color-muted); font-size:14px; white-space:nowrap; }
-  .desktop-nav button span { max-width:160px; overflow:hidden; text-overflow:ellipsis; }
-  .desktop-nav button :global(svg) { transform:rotate(90deg); }
-  .desktop-nav :is(a,button):hover { background:var(--color-surface); color:var(--color-text); }
-  [aria-current='page'],.desktop-nav .active { color:var(--color-text); font-weight:650; }
-  .desktop-nav [aria-current='page'],.desktop-nav .active { background:var(--color-accent-soft); }
-  .header-actions { display:flex; align-items:center; gap:12px; margin-left:auto; flex:none; }
-  .quick-search-btn,.close-button { display:grid; place-items:center; width:44px; height:44px; border:1px solid var(--color-line); border-radius:var(--radius-full); color:var(--color-text); background:transparent; }
-  .quick-search-btn:hover,.close-button:hover { background:var(--color-raised); }
-  .mobile-nav { display:none; }
-  .library-dialog { width:min(480px,calc(100% - 32px)); max-width:none; max-height:calc(100dvh - 32px); padding:24px; border:1px solid var(--color-line); border-radius:var(--radius-xl); color:var(--color-text); background:var(--color-surface); overscroll-behavior:contain; }
-  .library-dialog[open] { display:flex; flex-direction:column; }
-  :global(body:has(.library-dialog[open])) { overflow:hidden; }
-  .library-dialog::backdrop { background:rgb(0 0 0 / .6); }
-  .dialog-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px; flex:none; }
-  .dialog-heading p { margin:0 0 6px; font-size:12px; color:var(--color-muted); }
-  h2 { margin:0; font-size:26px; letter-spacing:-.03em; }
-  .library-list { display:flex; flex-direction:column; gap:4px; overflow-y:auto; min-height:0; overscroll-behavior:contain; }
-  .library-list a { display:flex; align-items:center; gap:14px; min-height:72px; padding:12px; border-radius:var(--radius-md); flex:none; }
-  .library-list a:hover,.library-list [aria-current='page'] { background:var(--color-accent-soft); }
-  .library-icon { display:grid; place-items:center; width:44px; height:44px; flex:none; border-radius:var(--radius-sm); background:var(--color-raised); font-size:24px; }
-  .library-name { flex:1; min-width:0; overflow-wrap:anywhere; }
-  .library-name strong { display:block; font-size:15px; }
-  small { display:block; margin-top:4px; color:var(--color-muted); font-size:12px; font-weight:400; }
-  .downloads-link { display:flex; align-items:center; gap:12px; min-height:56px; margin-top:16px; padding-top:16px; border-top:1px solid var(--color-line); font-size:14px; flex:none; }
-  .downloads-link :global(svg) { margin-left:auto; flex:none; }
-  .retry { min-height:44px; padding:10px 16px; border:1px solid var(--color-line); border-radius:var(--radius-sm); background:var(--color-raised); color:inherit; }
-  [role='alert'] { color:var(--color-danger); }
-  @media(max-width:1100px) { .header-inner { gap:20px; } .desktop-nav { gap:2px; } .desktop-nav a,.desktop-nav button { padding-inline:10px; font-size:13px; } .brand span { max-width:120px; } }
-  @media(max-width:900px) {
-    .desktop-nav,.quick-search-btn { display:none; }
-    .header-inner { min-height:64px; gap:16px; }
-    .brand { font-size:21px; } .brand span { max-width:calc(100vw - 150px); }
-    .mobile-nav { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); position:fixed; inset:auto 0 0; z-index:110; background:var(--color-surface); border-top:1px solid var(--color-line); padding:4px 8px calc(4px + env(safe-area-inset-bottom,0px)); }
-    .mobile-nav a,.mobile-nav button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; min-height:56px; min-width:0; border:0; border-radius:var(--radius-sm); padding:4px 0; background:transparent; color:var(--color-muted); font-size:11px; }
-    .mobile-nav a>span:first-child { font-size:23px; line-height:21px; }
-    .mobile-nav [aria-current='page'],.mobile-nav .active { color:var(--color-accent); background:var(--color-accent-soft); }
-    .library-dialog { margin:auto 0 0; width:100%; max-height:85dvh; border-radius:var(--radius-xl) var(--radius-xl) 0 0; padding:20px 16px calc(20px + env(safe-area-inset-bottom,0px)); }
-    :global(body:has(.mobile-nav)) { padding-bottom:calc(64px + env(safe-area-inset-bottom,0px)); }
-    :global(body.music-playing:has(.mobile-nav)) { padding-bottom:calc(var(--music-player-height,110px) + 88px + env(safe-area-inset-bottom,0px)); }
-    :global(body:has(.mobile-nav) .music-player) { bottom:calc(64px + env(safe-area-inset-bottom,0px)); padding-bottom:0; }
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: linear-gradient(180deg, rgba(11, 12, 16, 0.85) 0%, rgba(11, 12, 16, 0.45) 70%, transparent 100%);
+    border-bottom: 1px solid transparent;
+    transition: background var(--transition-normal), border-color var(--transition-normal), backdrop-filter var(--transition-normal), box-shadow var(--transition-normal);
+  }
+
+  :global([data-theme="light"]) .site-header:not(.scrolled) {
+    background: linear-gradient(180deg, rgba(239, 236, 230, 0.92) 0%, rgba(239, 236, 230, 0.6) 100%);
+  }
+
+  .site-header.scrolled {
+    background: var(--color-glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom-color: var(--color-line);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .header-inner {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    min-height: 72px;
+    max-width: 1680px;
+    padding: 0 var(--page-gutter);
+    margin: auto;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex-shrink: 1;
+    font-family: var(--font-display);
+    font-size: 23px;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    color: var(--color-text-bright);
+  }
+
+  .brand img {
+    flex: none;
+    filter: drop-shadow(0 2px 8px rgba(229, 9, 20, 0.25));
+  }
+
+  .brand span {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .desktop-nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .desktop-nav a,
+  .desktop-nav button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 8px 14px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--color-muted);
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .desktop-nav button span {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .desktop-nav button :global(svg) {
+    transform: rotate(90deg);
+    transition: transform var(--transition-fast);
+  }
+
+  .desktop-nav button[aria-expanded='true'] :global(svg) {
+    transform: rotate(-90deg);
+  }
+
+  .desktop-nav :is(a, button):hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--color-text-bright);
+  }
+
+  :global([data-theme="light"]) .desktop-nav :is(a, button):hover {
+    background: rgba(28, 25, 23, 0.06);
+  }
+
+  [aria-current='page'],
+  .desktop-nav .active {
+    color: var(--color-text-bright);
+    font-weight: 650;
+  }
+
+  .desktop-nav [aria-current='page'],
+  .desktop-nav .active {
+    background: var(--color-accent-soft);
+    border-color: rgba(229, 9, 20, 0.28);
+    color: var(--color-text-bright);
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+    flex: none;
+  }
+
+  .header-search-form {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 40px;
+    padding: 0 14px;
+    border-radius: var(--radius-pill);
+    background: var(--color-glass-raised);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--color-accent);
+    color: var(--color-muted);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    animation: expandSearch 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes expandSearch {
+    from {
+      opacity: 0;
+      width: 120px;
+    }
+    to {
+      opacity: 1;
+      width: 240px;
+    }
+  }
+
+  .header-search-form input {
+    width: 185px;
+    min-height: 32px;
+    height: 32px;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--color-text-bright);
+    font-size: 13.5px;
+    box-shadow: none !important;
+  }
+
+  .header-search-form input:focus {
+    outline: none;
+    box-shadow: none !important;
+  }
+
+  .quick-search-btn,
+  .close-button {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-full);
+    color: var(--color-text);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .quick-search-btn:hover,
+  .quick-search-btn.active,
+  .close-button:hover {
+    background: var(--color-raised);
+    border-color: var(--color-line-strong);
+    color: var(--color-text-bright);
+  }
+
+  .mobile-nav {
+    display: none;
+  }
+
+  .library-dialog {
+    width: min(500px, calc(100% - 32px));
+    max-width: none;
+    max-height: calc(100dvh - 32px);
+    padding: 24px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-xl);
+    color: var(--color-text);
+    background: var(--color-glass-raised);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: var(--shadow-lg);
+    overscroll-behavior: contain;
+  }
+
+  .library-dialog[open] {
+    display: flex;
+    flex-direction: column;
+  }
+
+  :global(body:has(.library-dialog[open])) {
+    overflow: hidden;
+  }
+
+  .library-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(6px);
+  }
+
+  .dialog-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex: none;
+  }
+
+  .dialog-heading p {
+    margin: 0 0 4px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-accent);
+  }
+
+  h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 26px;
+    letter-spacing: -0.03em;
+  }
+
+  .library-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    min-height: 0;
+    overscroll-behavior: contain;
+  }
+
+  .library-list a {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 72px;
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    flex: none;
+    transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+  }
+
+  .library-list a:hover,
+  .library-list [aria-current='page'] {
+    background: var(--color-accent-soft);
+    border-color: rgba(229, 9, 20, 0.3);
+  }
+
+  .library-icon {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    flex: none;
+    border-radius: var(--radius-md);
+    background: var(--color-raised);
+    border: 1px solid var(--color-line);
+    font-size: 22px;
+    color: var(--color-text-bright);
+  }
+
+  .library-name {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .library-name strong {
+    display: block;
+    font-size: 15px;
+    color: var(--color-text-bright);
+  }
+
+  small {
+    display: block;
+    margin-top: 4px;
+    color: var(--color-muted);
+    font-size: 12px;
+    font-weight: 400;
+  }
+
+  .downloads-link {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 56px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-line);
+    font-size: 14px;
+    font-weight: 500;
+    flex: none;
+  }
+
+  .downloads-link:hover {
+    color: var(--color-accent-hover);
+  }
+
+  .downloads-link :global(svg) {
+    margin-left: auto;
+    flex: none;
+  }
+
+  .retry {
+    min-height: 44px;
+    padding: 10px 16px;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
+    background: var(--color-raised);
+    color: inherit;
+  }
+
+  [role='alert'] {
+    color: var(--color-danger);
+  }
+
+  @media (min-width: 1920px) {
+    .header-inner {
+      min-height: 82px;
+      max-width: 1840px;
+    }
+    .brand {
+      font-size: 26px;
+    }
+    .desktop-nav a,
+    .desktop-nav button {
+      font-size: 15px;
+      padding: 10px 16px;
+    }
+  }
+
+  @media (max-width: 1100px) {
+    .header-inner {
+      gap: 20px;
+    }
+    .desktop-nav {
+      gap: 2px;
+    }
+    .desktop-nav a,
+    .desktop-nav button {
+      padding-inline: 10px;
+      font-size: 13px;
+    }
+    .brand span {
+      max-width: 120px;
+    }
+    .header-search-form {
+      display: none;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .desktop-nav,
+    .quick-search-btn,
+    .header-search-form {
+      display: none;
+    }
+    .header-inner {
+      min-height: 64px;
+      gap: 16px;
+    }
+    .brand {
+      font-size: 21px;
+    }
+    .brand span {
+      max-width: calc(100vw - 150px);
+    }
+    .mobile-nav {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      position: fixed;
+      inset: auto 0 0;
+      z-index: 110;
+      background: var(--color-glass-raised);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-top: 1px solid var(--color-line);
+      padding: 4px 8px calc(4px + env(safe-area-inset-bottom, 0px));
+    }
+    .mobile-nav a,
+    .mobile-nav button {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      min-height: 56px;
+      min-width: 0;
+      border: 0;
+      border-radius: var(--radius-sm);
+      padding: 4px 0;
+      background: transparent;
+      color: var(--color-muted);
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .mobile-nav a > span:first-child {
+      font-size: 22px;
+      line-height: 21px;
+    }
+    .mobile-nav [aria-current='page'],
+    .mobile-nav .active {
+      color: var(--color-text-bright);
+      background: var(--color-accent-soft);
+    }
+    .library-dialog {
+      margin: auto 0 0;
+      width: 100%;
+      max-height: 85dvh;
+      border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+      padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+    }
+    :global(body:has(.mobile-nav)) {
+      padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    }
+    :global(body.music-playing:has(.mobile-nav)) {
+      padding-bottom: calc(var(--music-player-height, 110px) + 88px + env(safe-area-inset-bottom, 0px));
+    }
+    :global(body:has(.mobile-nav) .music-player) {
+      bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+      padding-bottom: 0;
+    }
   }
 </style>

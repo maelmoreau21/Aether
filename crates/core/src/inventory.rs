@@ -2016,7 +2016,9 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
             "logo": row.try_get::<Option<String>,_>("logo_url").ok().flatten()
                 .or_else(|| metadata["logo_url"].as_str().or_else(|| metadata["logoUrl"].as_str()).map(str::to_owned)),
             "thumb": row.try_get::<Option<String>,_>("thumb_url").ok().flatten()
+                .or_else(|| metadata["thumb_url"].as_str().or_else(|| metadata["thumbUrl"].as_str()).or_else(|| metadata["still_url"].as_str()).or_else(|| metadata["stillUrl"].as_str()).map(str::to_owned))
         },
+        "translations": metadata.get("translations").cloned().unwrap_or_else(|| json!({})),
         "nodeId": node_id.unwrap_or_else(|| "local".to_string()),
         "nodeStatus": node_status.unwrap_or_else(|| "connected".to_string()),
         "available": node_available

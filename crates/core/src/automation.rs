@@ -5,7 +5,7 @@ use crate::{
     task_engine::Job,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Transaction};
 
@@ -766,7 +766,16 @@ pub async fn apply_missing_metadata(
         for (destination, sources) in [
             ("plot", &["plot", "summary", "overview"][..]),
             ("outline", &["outline", "tagline"][..]),
+            ("tagline", &["tagline"][..]),
             ("genres", &["genres"][..]),
+            ("directors", &["directors"][..]),
+            ("writers", &["writers"][..]),
+            ("actors", &["actors"][..]),
+            ("ratings", &["ratings"][..]),
+            ("runtime", &["runtime", "runtimeMinutes"][..]),
+            ("mpaa", &["mpaa"][..]),
+            ("premiered", &["premiered", "releaseDate"][..]),
+            ("year", &["year"][..]),
         ] {
             if manual
                 .as_object()
@@ -778,14 +787,25 @@ pub async fn apply_missing_metadata(
                 .iter()
                 .filter_map(|key| proposal.get(*key))
                 .find(|v| match destination {
-                    "genres" => v.as_array().is_some_and(|items| {
+                    "genres" | "directors" | "writers" => v.as_array().is_some_and(|items| {
                         !items.is_empty()
-                            && items.len() <= 50
+                            && items.len() <= 64
                             && items.iter().all(|item| {
                                 item.as_str()
                                     .is_some_and(|s| !s.is_empty() && s.len() <= 128)
                             })
                     }),
+                    "actors" => v.as_array().is_some_and(|items| {
+                        !items.is_empty()
+                            && items.len() <= 64
+                            && items.iter().all(|item| item.is_object())
+                    }),
+                    "ratings" => v.as_array().is_some_and(|items| {
+                        !items.is_empty()
+                            && items.len() <= 16
+                            && items.iter().all(|item| item.is_object())
+                    }),
+                    "runtime" | "year" => v.as_u64().is_some() || v.as_i64().is_some(),
                     _ => v
                         .as_str()
                         .is_some_and(|s| !s.trim().is_empty() && s.len() <= 16384),
@@ -812,6 +832,128 @@ pub async fn apply_missing_metadata(
             query("INSERT INTO automatic_metadata_provenance(work_id,field_name,extension_id,provider_id,priority,value_json,source_fingerprint,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(work_id,field_name) DO UPDATE SET extension_id=excluded.extension_id,provider_id=excluded.provider_id,priority=excluded.priority,value_json=excluded.value_json,source_fingerprint=excluded.source_fingerprint,updated_at=excluded.updated_at")
                 .bind(&work).bind(destination).bind(extension).bind(&provider_id).bind(priority).bind(value.to_string()).bind(fingerprint).bind(now).execute(&mut **tx).await?;
             changed = true;
+        }
+        if let Some(ext_ids) = proposal
+            .get("externalIds")
+            .or_else(|| proposal.get("external_ids"))
+            .and_then(Value::as_object)
+        {
+            let current_ids_raw: Option<String> =
+                query_scalar("SELECT external_ids_json FROM inventory_works WHERE id=?")
+                    .bind(&work)
+                    .fetch_optional(&mut **tx)
+                    .await?;
+            let mut current_ids: std::collections::BTreeMap<String, String> = current_ids_raw
+                .as_deref()
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or_default();
+            let mut ids_changed = false;
+            for (k, v) in ext_ids {
+                if let Some(str_val) = v.as_str().filter(|s| !s.is_empty())
+                    && !current_ids.contains_key(k)
+                {
+                    current_ids.insert(k.clone(), str_val.to_string());
+                    ids_changed = true;
+                }
+            }
+            if ids_changed {
+                query("UPDATE inventory_works SET external_ids_json=? WHERE id=?")
+                    .bind(serde_json::to_string(&current_ids).unwrap_or_default())
+                    .bind(&work)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+        }
+        if let Some(trans) = proposal.get("translations").filter(|v| v.is_object()) {
+            fields.insert("translations".into(), trans.clone());
+            changed = true;
+        }
+        let kind: Option<String> = query_scalar("SELECT kind FROM inventory_works WHERE id=?")
+            .bind(&work)
+            .fetch_optional(&mut **tx)
+            .await?;
+        if kind.as_deref() == Some("series")
+            && let Some(seasons) = proposal.get("seasons").and_then(Value::as_array)
+        {
+            for season in seasons {
+                let s_num = season
+                    .get("seasonNumber")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                if let Some(s_title) = season
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    let _ = query(
+                        "UPDATE inventory_seasons SET title=? WHERE series_id=? AND season_number=?",
+                    )
+                    .bind(s_title)
+                    .bind(&work)
+                    .bind(s_num as i64)
+                    .execute(&mut **tx)
+                    .await;
+                }
+                if let Some(episodes) = season.get("episodes").and_then(Value::as_array) {
+                    for ep in episodes {
+                        let ep_num = ep.get("episodeNumber").and_then(Value::as_u64).unwrap_or(0);
+                        let ep_work: Option<String> = query_scalar(
+                            "SELECT ep.work_id FROM inventory_episodes ep JOIN inventory_seasons s ON s.id=ep.season_id WHERE s.series_id=? AND s.season_number=? AND ep.episode_number=?",
+                        )
+                        .bind(&work)
+                        .bind(s_num as i64)
+                        .bind(ep_num as i64)
+                        .fetch_optional(&mut **tx)
+                        .await
+                        .unwrap_or(None);
+
+                        if let Some(ep_wid) = ep_work {
+                            let mut ep_meta = serde_json::Map::new();
+                            if let Some(t) = ep
+                                .get("title")
+                                .and_then(Value::as_str)
+                                .filter(|s| !s.trim().is_empty())
+                            {
+                                ep_meta.insert("title".into(), json!(t));
+                                let _ = query(
+                                    "UPDATE inventory_works SET title=? WHERE id=? AND (title LIKE 'S%E%' OR title LIKE 'Episode%' OR title='')",
+                                )
+                                .bind(t)
+                                .bind(&ep_wid)
+                                .execute(&mut **tx)
+                                .await;
+                            }
+                            if let Some(p) = ep
+                                .get("overview")
+                                .and_then(Value::as_str)
+                                .filter(|s| !s.trim().is_empty())
+                            {
+                                ep_meta.insert("plot".into(), json!(p));
+                                ep_meta.insert("outline".into(), json!(p));
+                            }
+                            if let Some(d) = ep.get("airDate").and_then(Value::as_str) {
+                                ep_meta.insert("premiered".into(), json!(d));
+                            }
+                            if let Some(r) = ep.get("runtimeMinutes").and_then(Value::as_u64) {
+                                ep_meta.insert("runtime".into(), json!(r));
+                            }
+                            if let Some(st) = ep.get("stillUrl").and_then(Value::as_str) {
+                                ep_meta.insert("still_url".into(), json!(st));
+                                ep_meta.insert("thumb_url".into(), json!(st));
+                            }
+                            if let Some(rt) = ep.get("rating").and_then(Value::as_f64) {
+                                ep_meta.insert("rating".into(), json!(rt));
+                            }
+                            let ep_json = serde_json::to_string(&ep_meta).unwrap_or_default();
+                            let _ = query("UPDATE inventory_works SET editorial_json=? WHERE id=?")
+                                .bind(&ep_json)
+                                .bind(&ep_wid)
+                                .execute(&mut **tx)
+                                .await;
+                        }
+                    }
+                }
+            }
         }
         if changed {
             query("UPDATE inventory_works SET editorial_json=? WHERE id=?")

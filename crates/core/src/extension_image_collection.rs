@@ -82,6 +82,22 @@ fn kind(value: ImageType) -> &'static str {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct SearchCandidates {
+    pub(super) work_id: String,
+    #[serde(default)]
+    pub(super) provider: Option<String>,
+    #[serde(default)]
+    pub(super) image_type: Option<String>,
+    #[serde(default = "default_languages")]
+    pub(super) languages: Vec<String>,
+    #[serde(default = "yes")]
+    pub(super) include_neutral: bool,
+    #[serde(default)]
+    pub(super) all_languages: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Collect {
     work_id: String,
     #[serde(default = "default_languages")]
@@ -272,6 +288,132 @@ pub(super) async fn collect_batch(
     Ok(Json(
         json!({"items":items,"nextCursor":if more { last } else { None }}),
     ))
+}
+
+pub(super) async fn search_candidates(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Json(input): Json<SearchCandidates>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, true).await?;
+    let ordered = languages(&json!({"languages":input.languages}))?;
+    let context: Option<adapters::WorkContext> = query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
+        .bind(&input.work_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
+    let context = context.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let payload =
+        adapters::metadata_input(&context, &input.work_id, "metadata.search", &json!({}))?;
+    let ids = payload["externalIds"]
+        .as_object()
+        .filter(|ids| !ids.is_empty())
+        .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "external_ids_required"))?;
+    crate::feedback::authorized(&auth, &headers, &input.work_id, false)
+        .await
+        .map_err(|s| err(s, "work_denied"))?;
+    let rows: Vec<(String,String,String)> = query_as("SELECT e.id,e.package_json,e.generation FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.enabled=1 AND p.active=1 ORDER BY e.id LIMIT 65")
+        .fetch_all(auth.store.pool()).await.map_err(db)?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
+    let mut images_out = Vec::new();
+    let mut errors = Vec::new();
+    let mut available_providers = Vec::new();
+
+    for (id, stored, generation) in rows {
+        let package: Package = serde_json::from_str(&stored)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
+        if !["images", "metadata.write"]
+            .iter()
+            .all(|p| package.manifest.permissions.iter().any(|v| v == p))
+        {
+            continue;
+        }
+        if !permitted(&auth, &headers, &id, &context.library_id, &generation).await? {
+            continue;
+        }
+        available_providers.push(json!({
+            "id": id,
+            "name": package.manifest.name,
+        }));
+        if let Some(target) = input
+            .provider
+            .as_deref()
+            .filter(|s| !s.is_empty() && *s != "all")
+            && id != target
+        {
+            continue;
+        }
+        let provider_id = ids.get(&id).and_then(Value::as_str).unwrap_or("");
+        let request = Run {
+            work_id: input.work_id.clone(),
+            operation: "metadata.images".into(),
+            input: json!({"id":provider_id,"languages":ordered,"includeNeutral":input.include_neutral}),
+        };
+        let provider_deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(15));
+        let result = tokio::time::timeout_at(
+            provider_deadline,
+            super::run(
+                State(auth.clone()),
+                headers.clone(),
+                Path(id.clone()),
+                Json(request),
+            ),
+        )
+        .await;
+        match result {
+            Ok(Ok(result)) => {
+                let images: Vec<MediaImage> = serde_json::from_value(result.0["proposal"].clone())
+                    .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
+                for image in images {
+                    let image_kind_str = kind(image.image_type);
+                    if let Some(target_type) = input
+                        .image_type
+                        .as_deref()
+                        .filter(|s| !s.is_empty() && *s != "all")
+                        && image_kind_str != target_type
+                    {
+                        continue;
+                    }
+                    if !input.all_languages {
+                        let matches_lang =
+                            rank(image.language.as_deref(), &ordered, input.include_neutral)
+                                .is_some();
+                        if !matches_lang {
+                            continue;
+                        }
+                    }
+                    images_out.push(json!({
+                        "url": image.url,
+                        "provider": id,
+                        "providerName": package.manifest.name,
+                        "imageType": image_kind_str,
+                        "width": image.width,
+                        "height": image.height,
+                        "language": image.language,
+                        "rating": image.rating,
+                        "voteCount": image.vote_count,
+                        "isPrimary": image.is_primary,
+                    }));
+                }
+            }
+            Ok(Err((status, _))) => errors.push(json!({"provider":id,"status":status.as_u16()})),
+            Err(_) => errors.push(json!({"provider":id,"status":408})),
+        }
+    }
+    // Sort candidate images: higher vote count/rating first, then resolution
+    images_out.sort_by(|a, b| {
+        let vote_b = b.get("voteCount").and_then(Value::as_u64).unwrap_or(0);
+        let vote_a = a.get("voteCount").and_then(Value::as_u64).unwrap_or(0);
+        let rating_b = b.get("rating").and_then(Value::as_f64).unwrap_or(0.0);
+        let rating_a = a.get("rating").and_then(Value::as_f64).unwrap_or(0.0);
+        vote_b.cmp(&vote_a).then_with(|| {
+            rating_b
+                .partial_cmp(&rating_a)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+    Ok(Json(json!({
+        "images": images_out,
+        "providers": available_providers,
+        "errors": errors
+    })))
 }
 
 pub(super) async fn collect(

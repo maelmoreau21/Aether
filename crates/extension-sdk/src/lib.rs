@@ -251,6 +251,56 @@ pub struct StructuredMetadata {
     pub backdrops: Vec<MediaImage>,
     #[serde(default)]
     pub images: Vec<MediaImage>,
+    #[serde(default)]
+    pub seasons: Vec<SeasonMetadata>,
+    #[serde(default)]
+    pub translations: BTreeMap<String, TranslationItem>,
+}
+
+/// Localized translation for title, overview and tagline
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationItem {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tagline: Option<String>,
+}
+
+/// Metadata for an episode within a season
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EpisodeMetadata {
+    pub episode_number: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub air_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_minutes: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub still_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rating: Option<f64>,
+}
+
+/// Metadata for a TV season
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeasonMetadata {
+    pub season_number: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster_url: Option<String>,
+    #[serde(default)]
+    pub episodes: Vec<EpisodeMetadata>,
 }
 
 /// Search query payload sent to the extension

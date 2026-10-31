@@ -1,3 +1,69 @@
+## 31 octobre 2026 — Refonte UI/UX complète style Netflix / Apple TV+ (Responsive Mobile, Tablette, Desktop & TV)
+
+- **Étape 1 — Thème global, typographie & tokens de design (`apps/web/src/lib/styles/tokens.css`, `apps/web/src/app.html`)** :
+  - Palette sombre profonde cinématographique (`#0B0C10` canvas, `#141418` surface, `#18181B` cartes élevées, `#E50914` rouge cinéma pour les CTA principaux, verre dépoli `rgba(15, 15, 20, 0.78)` et `rgba(20, 20, 26, 0.88)`).
+  - Typographie sans-serif moderne (`Inter`, `Plus Jakarta Sans`, système) avec hiérarchie marquée (`clamp(...)` pour Hero, titres de rails, fiches) et transitions fluides (`cubic-bezier(0.25, 0.8, 0.25, 1)`).
+  - Support multi-écrans : téléphone (`< 640px`), tablette (`641px–1099px`), desktop (`1100px+`) et TV 10-foot UI (`@media (min-width: 1920px)` avec gouttières élargies et focus clavier/télécommande `:focus-visible` haute visibilité). Préservation du mode clair (`[data-theme="light"]`).
+- **Étape 2 — Barre de navigation "Smart Glass" (`Navbar.svelte`, `ProfileMenu.svelte`, `AdminShell.svelte`)** :
+  - Header fixe transparent en haut de page avec dégradé subtil, basculant automatiquement en verre sombre flouté (`backdrop-filter: blur(16px) saturate(180%)`) dès le défilement (`scrollY > 16`).
+  - Barre de recherche extensible et animée directement dans l'en-tête desktop, en complément du bouton d'accès rapide `/search`.
+  - Barre de navigation inférieure (Bottom Tab Bar) ergonomique en verre dépoli sur mobile et tablette, et modale de sélection de bibliothèque unifiée.
+- **Étape 3 — Section Hero Banner immersive (`HeroBanner.svelte`)** :
+  - Bannière pleine largeur (`min-height: clamp(500px, 74vh, 780px)`, jusqu'à `860px` sur TV) avec zoom doux de l'image de fond et triple dégradé directionnel fondant l'image dans `#0B0C10`.
+  - Prise en charge des titres et synopsis traduits (`localizedTitle`, `localizedPlot`), badges de métadonnées (catégorie, année, classification MPAA, note étoilée, saisons, genres) et double bouton d'action (CTA primaire lumineux + bouton secondaire en verre dépoli).
+- **Étape 4 — Rails horizontaux, Cartes modernes & Grilles (`MediaShelf.svelte`, `Poster.svelte`, `ContinueWatching.svelte`, `CatalogGrid.svelte`)** :
+  - Carrousels horizontaux fluides avec `scroll-snap-type: x mandatory`, gouttières verticales anti-rognage et boutons de défilement circulaires en verre dépoli gauche/droite au survol.
+  - Cartes (`Poster.svelte`) au ratio `2/3` strict avec élévation au survol (`transform: scale(1.06)` en `250ms cubic-bezier(0.25, 0.8, 0.25, 1)`), ombre portée profonde et overlay d'action rapide « Découvrir » sans décaler le layout.
+  - Grille d'exploration modernisée avec barre d'outils en verre dépoli, filtres en pilules et états vides soignés.
+- **Étape 5 — Vues détails, Modales en verre dépoli & Skeletons (`DetailHero.svelte`, `FilmDetail.svelte`, `SeriesDetail.svelte`, `WorkTools.svelte`, `IdentifyModal.svelte`, `ImageManager.svelte`, `EditorialCredits.svelte`, `CatalogSkeleton.svelte`, `SettingsView.svelte`, `login/+page.svelte`, `lists/+page.svelte`)** :
+  - Fiches Films et Séries immersives avec sélecteur de saison en verre dépoli, cartes d'épisodes avec aperçu 16:9, badge de durée et barre de progression.
+  - Harmonisation de toutes les modales (`WorkTools`, `IdentifyModal`, `ImageManager`) avec animations d'ouverture (`modal-pop`) et suppression des anciennes couleurs disparates codées en dur (`#0d1117`, `#161b22`, `#a78bfa`).
+  - Skeleton loaders sombres animés (`shimmer`) pendant le chargement du catalogue.
+- **Validations réelles (Zéro régression)** :
+  - `npm --prefix apps/web run check` : 0 erreur et 0 avertissement (`svelte-check` — correction des 4 avertissements Svelte 5 `state_referenced_locally` préexistants dans `CatalogGrid.svelte` et `IdentifyModal.svelte`).
+  - `npm --prefix apps/web run lint` : 0 erreur et 0 avertissement (`eslint src` — correction des 2 erreurs `svelte/require-each-key` dans `IdentifyModal.svelte` et `ImageManager.svelte`).
+  - `npm --prefix apps/web test` : 30 suites de tests, 215 tests unitaires réussis à 100 %.
+  - `npm --prefix apps/web run build` : compilation de production SSR + Client + Service Worker + `adapter-static` réussie sans erreur.
+
+## 31 octobre 2026 — Métadonnées complètes, Modale Identifier, Séries TV & Multi-langue dynamique (Netflix-style)
+
+- **Étape 1 — Enrichissement complet des métadonnées vidéo & Casting réel** :
+  - `automation.rs` (`apply_missing_metadata`) sauvegarde désormais exhaustivement `actors` (avec photo `thumb_url`), `directors`, `writers`, `ratings` (fournisseur, score, max), `tagline`, `runtime`, `mpaa`, `premiered`, `year`, et synchronise `external_ids_json` (`tmdb`, `imdb`, `tvdb`).
+  - `EditorialCredits.svelte` affiche les vraies photos d'acteurs avec repli initiales et rôle.
+- **Étape 2 — Modale « Identifier » (Identify) façon Jellyfin** :
+  - Création du module backend `crates/core/src/extension_identify.rs` (`POST /api/v1/admin/extensions/identify/search` et `POST /api/v1/admin/extensions/identify/apply`).
+  - Composant Svelte `IdentifyModal.svelte` accessible depuis la fiche film/série (menu « Identifier » dans `WorkTools.svelte`) avec recherche directe en temps réel (titre, année, sélecteur de fournisseur), cartes de prévisualisation, option de remplacement d'affiches/arrières-plans et application instantanée.
+- **Étape 3 — Métadonnées hiérarchiques des Séries TV (Saisons & Épisodes)** :
+  - Extension du contrat SDK `StructuredMetadata` avec `SeasonMetadata` et `EpisodeMetadata`.
+  - Le plugin TMDb (`Aether-Plugins-TMDb`) extrait désormais les saisons et interroge les épisodes avec titre, synopsis, date de diffusion, durée, note et vignette d'épisode (`still_path`).
+  - `extension_identify.rs` et `automation.rs` synchronisent automatiquement `inventory_seasons` et chaque épisode dans `inventory_episodes` et `inventory_works` (titre, synopsis, `still_url`, `thumb_url`).
+  - `inventory.rs` (`work(&row)`) résout `thumb` depuis `metadata["still_url"]` / `metadata["thumb_url"]`. Les vignettes et résumés d'épisodes s'affichent instantanément dans `SeriesDetail.svelte`.
+- **Étape 4 — Multi-langue dynamique (Profils / Netflix-style)** :
+  - Le plugin TMDb active `translations` via `append_to_response=credits,external_ids,images,translations` pour récupérer les titres et synopsis traduits sans requêtes HTTP supplémentaires.
+  - Exposition de `translations` dans le modèle `Work` et helpers `localizedTitle()`, `localizedPlot()`, `localizedTagline()`.
+  - `Poster.svelte`, `DetailHero.svelte` et `SeriesDetail.svelte` adaptent réactivement le titre, le synopsis et l'affiche selon la langue active du profil (`$locale` : français ou anglais), avec sélection automatique de l'affiche et logo localisés (`selectArtwork`).
+- **Validations réelles** :
+  - `cargo check -p media-poc --lib` : 0 erreur.
+  - `cargo fmt --check` : 0 différence.
+  - `cargo clippy -p media-poc --lib -- -D warnings` : 0 avertissement.
+  - `cargo test -p media-poc --lib` : 132 tests réussis à 100 %.
+  - `cargo check --manifest-path ../Aether-Plugins/Cargo.toml` : tous les plugins compilent sans erreur.
+  - `npm --prefix apps/web run check` : 0 erreur.
+
+## 31 octobre 2026 — Sélecteur visuel d'images en ligne (Jellyfin-like) et assainissement du catalogue
+
+- **Sélecteur visuel d'images en ligne (style Jellyfin)** :
+  - Ajout du point de terminaison `POST /api/v1/admin/extensions/images/candidates` dans `crates/core/src/extension_image_collection.rs` et `extensions.rs`. Interroge en temps réel les extensions d'images actives (TMDb, fanart.tv...) sans sauvegarder les fichiers prématurément sur le disque.
+  - Enrichissement de `apps/web/src/lib/catalog/ImageManager.svelte` avec une modale dédiée « Rechercher des images » inspirée directement de Jellyfin :
+    - Filtrage dynamique par source (`Tout`, `TheMovieDb`, `fanart.tv`), par type d'image (`Affiche`, `Arrière-plan`, `Logo`, `Bannière`, `Vignette`), case `Toutes les langues`, et compteur de résultats.
+    - Grille de cartes candidates avec miniature, source, dimensions réelles (ex. `3840 × 2160`), note/votes TMDb, badge de langue (`FR`, `EN`, `Neutre`), et bouton nuage ☁️ de téléchargement/affectation directe à l'œuvre (`POST /api/v1/admin/extensions/{id}/image`).
+    - Bouton loupe 🔍 ajouté dans chaque en-tête de catégorie et sur chaque carte existante.
+- **Assainissement du catalogue d'extensions** :
+  - Exclusion stricte de `avatars` et `poster-rotator` dans `extension_repositories.rs` lors de la génération du catalogue et de l'installation, ces deux composants étant nativement intégrés dans le Core.
+- **Validations réelles** :
+  - `svelte-check` : 0 erreur.
+  - `cargo test -p media-poc --lib` : 132 tests réussis à 100 %.
+
 ## 31 octobre 2026 — Finalisation et amélioration du système Trickplay (PR #27)
 
 - **Déport de la génération et du stockage vers les Media Nodes** : Le Core assure l'authentification stricte (RBAC `administrator`/`user`), le contrôle des accès aux bibliothèques et le respect du contrôle parental, puis délègue à `LocalNode.trickplay()` ou relaie via protocole interne authentifié (`relay_from_remote_node`). Aucun chemin disque arbitraire n'est accepté depuis le frontend.

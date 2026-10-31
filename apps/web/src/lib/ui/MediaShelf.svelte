@@ -37,14 +37,14 @@
     const resize = new ResizeObserver(updateScrollState);
     resize.observe(track);
     const content = new MutationObserver(updateScrollState);
-    content.observe(track,{childList:true});
+    content.observe(track, { childList: true });
     updateScrollState();
     return () => { resize.disconnect(); content.disconnect(); };
   });
 
   function scroll(direction: 'left' | 'right') {
     if (!track) return;
-    const distance = track.clientWidth * 0.75;
+    const distance = track.clientWidth * 0.78;
     track.scrollBy({
       left: direction === 'left' ? -distance : distance,
       behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
@@ -120,7 +120,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 18px;
+    margin-bottom: 16px;
     gap: 16px;
   }
 
@@ -132,8 +132,9 @@
   }
 
   h2 {
-    font-size: clamp(20px, 2.2vw, 24px);
-    font-weight: 650;
+    font-family: var(--font-display);
+    font-size: clamp(20px, 2.1vw, 25px);
+    font-weight: 700;
     letter-spacing: -0.03em;
     color: var(--color-text-bright);
     margin: 0;
@@ -142,16 +143,17 @@
   .count-badge {
     font-size: 11px;
     font-weight: 700;
-    padding: 2px 8px;
+    padding: 2px 9px;
     border-radius: var(--radius-full);
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--color-raised);
+    border: 1px solid var(--color-line);
     color: var(--color-muted);
   }
 
   .actions-group {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 14px;
     flex-shrink: 0;
   }
 
@@ -159,13 +161,13 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid var(--border-subtle);
+    background: var(--color-raised);
+    border: 1px solid var(--color-line);
     border-radius: var(--radius-pill);
     color: var(--color-accent);
     font-size: 12px;
     font-weight: 600;
-    padding: 4px 12px;
+    padding: 6px 14px;
     cursor: pointer;
     transition: all var(--transition-fast);
   }
@@ -173,15 +175,15 @@
   .shelf-action-btn:hover {
     background: var(--color-accent-soft);
     border-color: var(--color-accent);
-    color: var(--color-accent-hover);
+    color: var(--color-text-bright);
     transform: translateY(-1px);
   }
 
   .view-all-link {
     min-height: 44px;
     font-size: 13px;
-    font-weight: 600;
-    color: var(--color-accent);
+    font-weight: 650;
+    color: var(--color-muted);
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -189,14 +191,14 @@
   }
 
   .view-all-link:hover {
-    color: var(--color-accent-hover);
-    transform: translateX(2px);
+    color: var(--color-text-bright);
+    transform: translateX(3px);
   }
 
   .carousel-nav {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
   }
 
   .nav-arrow {
@@ -205,17 +207,20 @@
     width: 44px;
     height: 44px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid var(--color-line);
-    color: var(--color-text);
+    background: var(--color-glass-raised);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--color-line-strong);
+    color: var(--color-text-bright);
     transition: all var(--transition-fast);
   }
 
   .nav-arrow:hover:not(:disabled) {
-    background: var(--color-accent-soft);
-    border-color: var(--color-accent-soft);
-    color: var(--color-accent-hover);
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-on-accent);
     transform: scale(1.08);
+    box-shadow: 0 4px 16px rgba(229, 9, 20, 0.4);
   }
 
   .nav-arrow:disabled {
@@ -223,14 +228,14 @@
     cursor: default;
   }
 
-  /* Carousel Track */
+  /* Carousel Track — extra vertical padding prevents scale(1.06) hover clipping */
   .shelf-track.carousel {
     display: flex;
-    gap: 16px;
+    gap: 18px;
     overflow-x: auto;
     scroll-behavior: smooth;
-    padding: 6px 4px 12px;
-    margin: 0 -4px;
+    padding: 12px 8px 18px;
+    margin: -6px -8px;
     scrollbar-width: none;
     -ms-overflow-style: none;
     scroll-snap-type: x mandatory;
@@ -241,33 +246,54 @@
   }
 
   .shelf-track.carousel :global(> *) {
-    flex: 0 0 clamp(160px, 13vw, 190px);
+    flex: 0 0 clamp(160px, 13.5vw, 195px);
     scroll-snap-align: start;
   }
 
   /* Grid Track */
   .shelf-track.grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(clamp(160px, 13vw, 190px), 1fr));
-    gap: 22px 18px;
+    grid-template-columns: repeat(auto-fill, minmax(clamp(160px, 13.5vw, 195px), 1fr));
+    gap: 24px 18px;
     padding: 8px 0;
   }
 
+  @media (min-width: 1920px) {
+    .shelf-track.carousel :global(> *) {
+      flex: 0 0 clamp(190px, 12vw, 230px);
+    }
+    .shelf-track.grid {
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    }
+  }
+
   @media (max-width: 640px) {
-    .shelf-header { gap: 8px; margin-bottom: 12px; align-items: start; }
-    h2 { font-size: 18px; line-height: 1.3; }
-    .view-all-link { font-size: 12px; white-space: nowrap; }
+    .shelf-header {
+      gap: 8px;
+      margin-bottom: 12px;
+      align-items: flex-start;
+    }
+    h2 {
+      font-size: 18px;
+      line-height: 1.3;
+    }
+    .view-all-link {
+      font-size: 12px;
+      white-space: nowrap;
+    }
     .shelf-container {
       margin: 0;
     }
-
     .carousel-nav {
       display: none;
     }
-
     .shelf-track.carousel :global(> *) {
       flex: 0 0 calc((100vw - 64px) / 2.15);
     }
-    .shelf-track.carousel { gap: 12px; }
+    .shelf-track.carousel {
+      gap: 12px;
+      padding: 6px 4px 12px;
+      margin: 0 -4px;
+    }
   }
 </style>

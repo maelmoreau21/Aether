@@ -36,6 +36,8 @@ mod adapters;
 mod artwork_rotation;
 #[path = "extension_avatar_collections.rs"]
 pub(crate) mod collections;
+#[path = "extension_identify.rs"]
+mod identify;
 #[path = "extension_image_collection.rs"]
 mod image_collection;
 #[path = "extension_repositories.rs"]
@@ -253,6 +255,18 @@ pub fn router(auth: AuthState) -> Router {
         .route(
             "/api/v1/admin/extensions/images/collect",
             axum::routing::post(image_collection::collect),
+        )
+        .route(
+            "/api/v1/admin/extensions/images/candidates",
+            axum::routing::post(image_collection::search_candidates),
+        )
+        .route(
+            "/api/v1/admin/extensions/identify/search",
+            axum::routing::post(identify::search),
+        )
+        .route(
+            "/api/v1/admin/extensions/identify/apply",
+            axum::routing::post(identify::apply),
         )
         .route(
             "/api/v1/admin/artwork/rotate",

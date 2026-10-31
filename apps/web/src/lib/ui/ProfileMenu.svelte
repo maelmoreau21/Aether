@@ -206,16 +206,18 @@
     position: fixed;
     inset: 76px var(--page-gutter) auto auto;
     margin: 0;
-    width: 270px;
+    width: 280px;
     max-width: calc(100vw - 32px);
     max-height: calc(100dvh - 96px);
     overflow-y: auto;
-    padding: 10px;
-    border: 1px solid var(--color-line);
-    border-radius: 14px;
+    padding: 12px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-lg);
     color: var(--color-text);
-    background: var(--color-raised);
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+    background: var(--color-glass-raised);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: var(--shadow-lg);
   }
   .profile-popover:popover-open {
     animation: reveal 0.14s ease-out;

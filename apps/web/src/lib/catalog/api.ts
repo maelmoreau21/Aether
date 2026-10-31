@@ -27,11 +27,36 @@ export interface Work {
   available?: boolean;
   originalTitle?: string | null; plot?: string | null; outline?: string | null;
   premiered?: string | null; genres?: string[]; rating?: number | null; mpaa?: string | null;
-  actors?: { name:string; role:string }[]; directors?:string[]; writers?:string[];
+  actors?: { name: string; role?: string; thumbUrl?: string | null; thumb_url?: string | null }[]; directors?: string[]; writers?: string[];
   ratings?: { provider:string;value:number;max:number }[];
   externalIds?: Record<string, string>; metadataProvenance?: string | null;
   seasonCount?: number; episodeCount?: number; editions?: Edition[];
   seasons?: { id: string; number: number; title: string; episodeCount?: number; episodes: Work[] }[];
+  translations?: Record<string, { title?: string; overview?: string; plot?: string; tagline?: string }>;
+}
+
+export function localizedTitle(work: Work | null | undefined, locale?: string): string {
+  if (!work) return '';
+  const lang = (locale ?? 'fr').toLowerCase();
+  const shortLang = lang.split('-')[0];
+  const tr = work.translations?.[lang] ?? work.translations?.[shortLang];
+  return tr?.title || work.title || '';
+}
+
+export function localizedPlot(work: Work | null | undefined, locale?: string): string {
+  if (!work) return '';
+  const lang = (locale ?? 'fr').toLowerCase();
+  const shortLang = lang.split('-')[0];
+  const tr = work.translations?.[lang] ?? work.translations?.[shortLang];
+  return tr?.overview || tr?.plot || work.description || work.plot || '';
+}
+
+export function localizedTagline(work: Work | null | undefined, locale?: string): string {
+  if (!work) return '';
+  const lang = (locale ?? 'fr').toLowerCase();
+  const shortLang = lang.split('-')[0];
+  const tr = work.translations?.[lang] ?? work.translations?.[shortLang];
+  return tr?.tagline || work.outline || '';
 }
 export interface CatalogPage { items: Work[]; total: number | null; hasMore?: boolean; offset: number; limit: number; notice: string }
 export interface FetchDescriptorOptions { revalidate?: boolean }

@@ -17,22 +17,39 @@ pub(super) async fn rotate(
     Json(input): Json<RotateRequest>,
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, true).await?;
-    if input.after.as_ref().is_some_and(|v| v.len() > 256 || v.chars().any(char::is_control)) {
+    if input
+        .after
+        .as_ref()
+        .is_some_and(|v| v.len() > 256 || v.chars().any(char::is_control))
+    {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_cursor"));
     }
-    let exists: i64 = query_scalar("SELECT COUNT(*) FROM libraries WHERE id=? AND kind IN ('films','series') AND enabled=1")
-        .bind(&input.library_id).fetch_one(auth.store.pool()).await.map_err(db)?;
-    if exists == 0 { return Err(err(StatusCode::NOT_FOUND, "unknown_library")); }
+    let exists: i64 = query_scalar(
+        "SELECT COUNT(*) FROM libraries WHERE id=? AND kind IN ('films','series') AND enabled=1",
+    )
+    .bind(&input.library_id)
+    .fetch_one(auth.store.pool())
+    .await
+    .map_err(db)?;
+    if exists == 0 {
+        return Err(err(StatusCode::NOT_FOUND, "unknown_library"));
+    }
     let works: Vec<String> = query_scalar("SELECT id FROM inventory_works WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND id>? ORDER BY id LIMIT 2")
         .bind(&input.library_id).bind(&input.library_id).bind(input.after.as_deref().unwrap_or(""))
         .fetch_all(auth.store.pool()).await.map_err(db)?;
-    let Some(work) = works.first() else { return Ok(Json(json!({"items":[],"nextCursor":null}))); };
-    crate::feedback::authorized(&auth, &headers, work, false).await.map_err(|s| err(s, "work_denied"))?;
+    let Some(work) = works.first() else {
+        return Ok(Json(json!({"items":[],"nextCursor":null})));
+    };
+    crate::feedback::authorized(&auth, &headers, work, false)
+        .await
+        .map_err(|s| err(s, "work_denied"))?;
     let _guard = MUTATIONS.lock().await;
     // Serialize concurrent requests within the Core and acquire the DB's write
     // lock before examining order, to prevent half-applied selection updates.
     let mut connection = auth.store.pool().acquire().await.map_err(db)?;
-    let mut tx = crate::database::begin_write(&mut connection).await.map_err(db)?;
+    let mut tx = crate::database::begin_write(&mut connection)
+        .await
+        .map_err(db)?;
     let manual: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM work_image_entries WHERE work_id=? AND kind='poster' AND provider IS NULL) + (SELECT COUNT(*) FROM work_posters WHERE work_id=?)")
         .bind(work).bind(work).fetch_one(&mut *tx).await.map_err(db)?;
     let mut changed = false;
@@ -50,5 +67,7 @@ pub(super) async fn rotate(
         }
     }
     tx.commit().await.map_err(db)?;
-    Ok(Json(json!({"items":[{"workId":work,"changed":changed}],"nextCursor":if works.len()>1 {Some(work)} else {None}})))
+    Ok(Json(
+        json!({"items":[{"workId":work,"changed":changed}],"nextCursor":if works.len()>1 {Some(work)} else {None}}),
+    ))
 }

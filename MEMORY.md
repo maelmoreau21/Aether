@@ -1,3 +1,9 @@
+## 31 octobre 2026 — Correction cargo fmt et lint clippy
+
+- Formatage de `crates/core/src/extension_artwork_rotation.rs` et `crates/core/src/extensions.rs` (`cargo fmt`) pour résoudre l'échec de la CI GitHub Actions sur `cargo fmt --check`.
+- Résolution d'un avertissement clippy `-D warnings` (`clippy::type_complexity`) dans `crates/core/src/artwork.rs` via l'introduction de l'alias de type `ImageEntryRow`.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, les tests de `media-poc` (129 réussis) et `media-node` (88 unitaires + 4 d'intégration réussis) passent.
+
 ## 30 octobre 2026 — Reprise audio externe et diagnostics seek
 
 - Les métadonnées audio externe et la progression sont chargées en parallèle ; la piste est alignée directement à la position de reprise. Attentes bornées et annulables, fin naturelle Opus préservée, position bornée à la durée vidéo connue. L'erreur de seek présente la position demandée, la position atteinte et l'état de seek sans adresse ni jeton. Le repli MKV préparé est maintenant essayé si MSE progressif est indisponible. 59 tests ciblés NativePlayer/ExternalAudio réussis. Chrome + Core/Node autonome reconstruit : reprise, six seeks jusqu'à 5 380 s et 10,5 s de lecture sans erreur sur MP4 synthétique 5 400 s et audio externe ; rapport `target/player-long-external-current-20261030/report.json`. Cause de l'incident MP4 personnel non établie ; pas de preuve NAS ou d'endurance.

@@ -32,12 +32,12 @@ static MUTATIONS: Mutex<()> = Mutex::const_new(());
 
 #[path = "extension_adapters.rs"]
 mod adapters;
+#[path = "extension_artwork_rotation.rs"]
+mod artwork_rotation;
 #[path = "extension_avatar_collections.rs"]
 pub(crate) mod collections;
 #[path = "extension_image_collection.rs"]
 mod image_collection;
-#[path = "extension_artwork_rotation.rs"]
-mod artwork_rotation;
 #[path = "extension_repositories.rs"]
 pub(crate) mod repositories;
 

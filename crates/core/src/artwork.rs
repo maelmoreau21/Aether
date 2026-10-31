@@ -369,6 +369,8 @@ fn default_similarity() -> u32 {
     5
 }
 
+type ImageEntryRow = (String, String, Option<String>, i64, i64, Option<String>);
+
 /// Read-only suggestions. Never deletes artwork, even when a match is found.
 async fn similar_images(
     State(auth): State<AuthState>,
@@ -384,7 +386,7 @@ async fn similar_images(
     if options.threshold > 16 {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let rows: Vec<(String, String, Option<String>, i64, i64, Option<String>)> = query_as(
+    let rows: Vec<ImageEntryRow> = query_as(
         "SELECT id,kind,language,width,height,fingerprint FROM work_image_entries WHERE work_id=? ORDER BY kind,position,id LIMIT 65"
     ).bind(&work).fetch_all(auth.store.pool()).await.map_err(db)?;
     if rows.len() > 64 {

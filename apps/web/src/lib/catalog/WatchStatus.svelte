@@ -16,16 +16,15 @@
   }
 </script>
 <div class="watch-status">
+  <span class="status-badge">{progress?.watched ? 'Vu' : progress?.position ? `En cours · ${Math.floor(progress.position / 60)} min` : 'Non vu'}</span>
   <button
     type="button"
     class="watch-toggle-btn"
     class:is-watched={progress?.watched}
     disabled={saving}
     onclick={toggle}
-    title={progress?.watched ? 'Marquer non vu' : 'Marquer comme vu'}
   >
-    <span class="status-dot" aria-hidden="true">{progress?.watched ? '✓' : '○'}</span>
-    <span>{saving ? 'Enregistrement…' : progress?.watched ? 'Vu' : progress?.position ? `En cours (${Math.floor(progress.position / 60)} min)` : 'Marquer comme vu'}</span>
+    {saving ? 'Enregistrement…' : progress?.watched ? 'Marquer non vu' : 'Marquer comme vu'}
   </button>
   {#if error}<small role="alert">{error}</small>{/if}
 </div>
@@ -34,7 +33,12 @@
     display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
+  }
+  .status-badge {
+    font-size: 13px;
+    color: var(--color-muted);
+    font-weight: 500;
   }
   .watch-toggle-btn {
     display: inline-flex;
@@ -62,9 +66,6 @@
     background: rgba(16, 185, 129, 0.14);
     border-color: rgba(16, 185, 129, 0.4);
     color: #34D399;
-  }
-  .status-dot {
-    font-weight: 800;
   }
   small {
     flex-basis: 100%;

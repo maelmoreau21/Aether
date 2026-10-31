@@ -1,6 +1,7 @@
 ## 31 octobre 2026 — Correction du scan PostgreSQL
 
 - **Corrections CI & Tests E2E Navigateur** :
+  - `apps/web/src/lib/catalog/FilmDetail.svelte` & `SeriesDetail.svelte` : réintégration de l'accordéon `.personal-panel` (`<summary>Mon suivi et mes préférences</summary>` / `<summary>Mes préférences pour cette série</summary>`) contenant `<WatchStatus>` et `<PersonalFeedback>` sans duplication dans le Hero, permettant aux tests E2E Playwright (`browser-scanner.cjs` ligne 317 et `browser-series.cjs` lignes 110 & 128) de basculer le statut vu/non-vu et les favoris sans violation de mode strict.
   - `apps/web/src/lib/catalog/FilmDetail.svelte` : suppression du label d'accessibilité en doublon sur le sélecteur rapide de qualité dans le Hero pour éviter la violation Playwright strict mode (`getByRole('button', { name: 'Sélectionner la version MP4' }) resolved to 2 elements`), ciblant désormais uniquement le bouton de l'accordéon technique `.versions-panel`.
   - `crates/core/src/database.rs` : virgule de fin ajoutée sur la chaîne SQL brute pour valider `cargo fmt --check`.
   - `apps/web/src/lib/admin/AdminExtensions.svelte` : utilisation de `SvelteMap` et clé unique `idx` sur le `#each` changelog pour valider `eslint` (`svelte/prefer-svelte-reactivity` et `svelte/require-each-key`).

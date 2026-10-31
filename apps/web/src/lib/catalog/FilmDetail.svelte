@@ -98,8 +98,6 @@
       </button>
 
       {#if !work.synthetic}
-        <PersonalFeedback workId={work.id} />
-        <WatchStatus workId={work.id} />
         <div class="tools-inline">
           {#if currentSelectedMedia}
             <OfflineDownload options={downloadOptions} url={`/api/v1/assets/${encodeURIComponent(currentSelectedMedia.id)}/content`} title={work.title} mime={currentSelectedMedia.sources.find(source => !source.prepare)?.mime ?? 'application/octet-stream'} />
@@ -136,6 +134,14 @@
           {#if currentSelectedMedia.subtitles.length}<div><dt>Sous-titres</dt><dd>{#each currentSelectedMedia.subtitles as subtitle (subtitle.id)}<span><LanguageLabel language={subtitle.language} />{subtitle.sourceFormat ? ` · ${subtitle.sourceFormat.toUpperCase()}` : ''}{subtitle.forced ? ' · Forcés' : ''}{subtitle.sdh ? ' · Malentendants' : ''}</span>{/each}</dd></div>{/if}
         </dl>
       {:else}<p role="status">Les informations de la version ne sont pas encore disponibles.</p>{/if}
+    </details>
+  {/if}
+
+  {#if !work.synthetic}
+    <details class="personal-panel">
+      <summary>Mon suivi et mes préférences</summary>
+      <WatchStatus workId={work.id} />
+      <PersonalFeedback workId={work.id} />
     </details>
   {/if}
 
@@ -317,7 +323,7 @@
     .media-experience-strip { width: 100%; gap: 12px 20px; }
   }
 
-  .versions-panel { border: 1px solid var(--color-line); border-radius: var(--radius-lg); background: var(--color-surface); padding: 4px 18px; margin: 18px 0; box-shadow: var(--shadow-sm); }
+  .versions-panel, .personal-panel { border: 1px solid var(--color-line); border-radius: var(--radius-lg); background: var(--color-surface); padding: 4px 18px; margin: 18px 0; box-shadow: var(--shadow-sm); }
   summary { padding: 14px 4px; min-height: 48px; cursor: pointer; font-size: 15px; font-weight: 650; color: var(--color-text-bright); }
   .versions { display: flex; gap: 10px; flex-wrap: wrap; padding-block: 12px; border-top: 1px solid var(--color-line-subtle); }
   .versions button { min-height: 44px; max-width: 100%; overflow-wrap: anywhere; padding: 10px 16px; border: 1px solid var(--color-line-strong); border-radius: var(--radius-pill); background: var(--color-raised); color: var(--color-text); font-size: 13px; font-weight: 500; cursor: pointer; }

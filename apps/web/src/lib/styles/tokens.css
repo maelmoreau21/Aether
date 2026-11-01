@@ -40,6 +40,7 @@
   --color-raised: var(--bg-elevated);
   --color-raised-hover: #25252C;
   --color-overlay: #1C1C22;
+  --color-surface-elevated: #18181B;
   --color-glass: rgba(15, 15, 20, 0.78);
   --color-glass-raised: rgba(24, 24, 30, 0.88);
 
@@ -126,6 +127,7 @@
   --color-raised: var(--bg-elevated);
   --color-raised-hover: #CFC8BC;
   --color-overlay: #D2CBC0;
+  --color-surface-elevated: #ECE8E1;
   --color-glass: rgba(227, 222, 214, 0.85);
   --color-glass-raised: rgba(236, 232, 225, 0.92);
 

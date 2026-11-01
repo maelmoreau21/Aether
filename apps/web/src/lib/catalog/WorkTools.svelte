@@ -332,7 +332,24 @@
           <span>Informations média</span>
         </button>
 
+        <button
+          type="button"
+          class="menu-item"
+          role="menuitem"
+          onclick={() => {
+            menuOpen = false;
+            listOpen = true;
+            void loadLists();
+          }}
+        >
+          <Icon name="sparkles" size={16} />
+          <span>Ajouter à une playlist…</span>
+        </button>
+
         {#if isAdmin}
+          <div class="menu-divider" role="separator"></div>
+          <div class="menu-section-header">Administration</div>
+
           <button
             type="button"
             class="menu-item"
@@ -373,20 +390,6 @@
             <span>Modifier les métadonnées</span>
           </button>
         {/if}
-
-        <button
-          type="button"
-          class="menu-item"
-          role="menuitem"
-          onclick={() => {
-            menuOpen = false;
-            listOpen = true;
-            void loadLists();
-          }}
-        >
-          <Icon name="sparkles" size={16} />
-          <span>Ajouter à une playlist…</span>
-        </button>
       </div>
     {/if}
   </div>
@@ -868,18 +871,19 @@
     position: absolute;
     top: calc(100% + 10px);
     left: 0;
-    min-width: 240px;
-    background: var(--color-surface-elevated);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    min-width: 250px;
+    background: #18181c;
+    background: var(--color-surface-elevated, #18181c);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border: 1px solid var(--color-line-strong);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-lg);
-    padding: 8px;
+    box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    padding: 6px;
     z-index: 300;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
   }
 
   @media (max-width: 720px) {
@@ -890,10 +894,25 @@
     }
   }
 
+  .menu-divider {
+    height: 1px;
+    background: var(--color-line);
+    margin: 6px 4px;
+  }
+
+  .menu-section-header {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-muted);
+    padding: 6px 12px 2px;
+  }
+
   .menu-item {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     width: 100%;
     padding: 10px 14px;
     border: none;
@@ -904,13 +923,24 @@
     font-weight: 500;
     text-align: left;
     cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
+    transition: all var(--transition-fast);
+  }
+
+  .menu-item :global(svg) {
+    color: var(--color-muted);
+    transition: color var(--transition-fast), transform var(--transition-fast);
+    flex-shrink: 0;
   }
 
   .menu-item:hover, .menu-item:focus-visible {
     background: var(--color-surface-hover);
-    color: var(--color-accent);
+    color: var(--color-text-bright);
     outline: none;
+  }
+
+  .menu-item:hover :global(svg), .menu-item:focus-visible :global(svg) {
+    color: var(--color-accent);
+    transform: scale(1.1);
   }
 
   /* Modals */

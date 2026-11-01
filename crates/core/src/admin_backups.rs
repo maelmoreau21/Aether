@@ -263,12 +263,21 @@ async fn list(
             Ok(directory) => {
                 let listing_result =
                     tokio::task::spawn_blocking(move || -> Result<Vec<Archive>, StatusCode> {
+                        if !directory.exists() {
+                            return Ok(Vec::new());
+                        }
                         let entries = match std::fs::read_dir(&directory) {
                             Ok(entries) => entries,
                             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                                 return Ok(Vec::new());
                             }
-                            Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+                            Err(err) => {
+                                eprintln!(
+                                    "admin_backups: read_dir error in {:?}: {:?}",
+                                    directory, err
+                                );
+                                return Ok(Vec::new());
+                            }
                         };
                         let mut archives = Vec::new();
                         for entry in entries.take(10_000).flatten() {
@@ -286,8 +295,9 @@ async fn list(
                                 &directory,
                                 DiskPath::new(&name),
                             ) {
-                                let metadata = std::fs::symlink_metadata(entry.path())
-                                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                                let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
+                                    continue;
+                                };
                                 let created_at = metadata
                                     .modified()
                                     .ok()
@@ -310,11 +320,22 @@ async fn list(
                     .await;
                 match listing_result {
                     Ok(Ok(archives)) => (true, None, archives),
-                    _ => (
-                        false,
-                        Some("Impossible de lire les archives de sauvegarde."),
-                        Vec::new(),
-                    ),
+                    Ok(Err(err_code)) => {
+                        eprintln!("admin_backups: listing archives returned {:?}", err_code);
+                        (
+                            false,
+                            Some("Impossible de lire les archives de sauvegarde."),
+                            Vec::new(),
+                        )
+                    }
+                    Err(join_err) => {
+                        eprintln!("admin_backups: join error on listing: {:?}", join_err);
+                        (
+                            false,
+                            Some("Impossible de lire les archives de sauvegarde."),
+                            Vec::new(),
+                        )
+                    }
                 }
             }
             Err(_) => (
@@ -352,7 +373,9 @@ async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
             builder
         };
         #[cfg(not(unix))]
-        let builder = std::fs::DirBuilder::new();
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(not(unix))]
+        builder.recursive(true);
         let result = match builder.create(&path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => {

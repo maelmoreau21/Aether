@@ -1,3 +1,27 @@
+## 1er novembre 2026 — Correction des sauvegardes, refonte du menu média "..." et guidage d'identification
+
+- **Correction du service de sauvegarde (`crates/core/src/admin_backups.rs`)** :
+  - **Résolution de l'erreur "Sauvegarde indisponible / Impossible de lire les archives de sauvegarde"** :
+    - Vérification préalable de l'existence du dossier de sauvegarde (`if !directory.exists() { return Ok(Vec::new()); }`) évitant toute exception I/O avant la création de la première archive sous Windows.
+    - Gestion résiliente des entrées de répertoire : si `std::fs::symlink_metadata` échoue sur un fichier verrouillé ou temporaire, l'entrée est ignorée (`continue`) au lieu de faire échouer tout le listing HTTP.
+    - Création récursive du répertoire cible lors des sauvegardes avec `builder.recursive(true)`.
+- **Refonte et correction du menu d'options média "..." (`WorkTools.svelte`, `tokens.css`)** :
+  - **Suppression de la transparence anormale** : définition de la variable CSS manquante `--color-surface-elevated` dans `tokens.css` (dark `#18181B` et light `#ECE8E1`) avec repli solide pour garantir l'opacité sur les affiches et fonds vidéo.
+  - **Design cinématique Streaming UI** :
+    - Menu déroulant avec fond vitré sombre (`rgba(18, 18, 22, 0.96)`), ombre profonde (`box-shadow`), bordure subtile et padding optimisé.
+    - Séparateur visuel et en-tête de section "Administration" distinct pour regrouper les actions d'édition (images, identifier, métadonnées).
+    - Effets de hover fluides avec mise en avant de l'icône par la couleur d'accent Aether.
+- **Clarification et diagnostic de l'identification de films/séries (`IdentifyModal.svelte`)** :
+  - Contrairement à Jellyfin qui intègre des clés API mutualisées par défaut, Aether fonctionne avec une isolation stricte des extensions (Wasm).
+  - Ajout d'un bandeau explicatif interactif lorsque aucun plugin de métadonnées (`metadata.read`) n'est actif, avec lien direct vers `Administration > Extensions`.
+  - Messages d'état précis en cas d'absence de résultats ou de clé API manquante.
+- **Validations réelles** :
+  - `cargo fmt --check` : 0 divergence.
+  - `cargo test -p media-poc --test admin_backups` : 2/2 tests passés avec succès.
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web run lint` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web test` : 31 suites, 219 tests passés avec succès.
+
 ## 31 octobre 2026 — Résolution des échecs CI GitHub Actions (Clippy & Tests Navigateur Playwright)
 
 - **Corrections CI Rust (cargo clippy)** :

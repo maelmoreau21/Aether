@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { resolve } from '$app/paths';
   import { session } from '../../lib/auth/session';
   import Icon from '../ui/Icon.svelte';
   import type { Work } from './api';
@@ -233,10 +234,35 @@
             <div class="spinner"></div>
             <p>Interrogation des fournisseurs en direct…</p>
           </div>
+        {:else if providersList.length === 0}
+          <div class="no-provider-notice" role="status">
+            <div class="notice-icon">
+              <Icon name="sparkles" size={28} />
+            </div>
+            <div class="notice-content">
+              <h4>Aucun fournisseur de métadonnées actif</h4>
+              <p>
+                Contrairement à Jellyfin qui intègre des clés de métadonnées mutualisées, Aether isole strictement ses connecteurs dans des extensions sécurisées (TMDb, OMDb, IMDb).
+              </p>
+              <p>
+                Pour identifier ce média et importer ses affiches et résumés, installez et activez le plugin <strong>TMDb</strong> ou <strong>OMDb</strong> dans la section Administration.
+              </p>
+              <a href={resolve('admin/libraries/#extensions-section')} class="btn primary-btn notice-link">
+                <Icon name="search" size={15} />
+                <span>Gérer les extensions</span>
+              </a>
+            </div>
+          </div>
         {:else if results.length === 0}
-          <p class="empty-state">
-            Aucun résultat trouvé. Vérifiez l'orthographe du titre, essayez sans année ou vérifiez vos clés API dans les extensions.
-          </p>
+          <div class="empty-state">
+            <Icon name="search" size={24} />
+            <p>
+              Aucun résultat trouvé via {providersList.length === 1 ? providersList[0].name : `${providersList.length} fournisseurs`}.
+            </p>
+            <p class="empty-hint">
+              Vérifiez l'orthographe du titre, essayez sans renseigner l'année, ou assurez-vous que votre clé d'API est bien configurée dans les réglages de l'extension.
+            </p>
+          </div>
         {:else}
           <div class="results-grid">
             {#each results as item (item.provider + ':' + item.id)}
@@ -601,5 +627,61 @@
     background: var(--color-play);
     color: var(--color-on-play);
     border-color: var(--color-play);
+  }
+
+  .no-provider-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 20px;
+    background: rgba(249, 115, 22, 0.08);
+    border: 1px solid rgba(249, 115, 22, 0.25);
+    border-radius: var(--radius-md);
+    margin: 12px 0;
+  }
+  .notice-icon {
+    color: var(--color-accent);
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .notice-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .notice-content h4 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-text-bright);
+  }
+  .notice-content p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--color-muted);
+    line-height: 1.45;
+  }
+  .notice-link {
+    align-self: flex-start;
+    margin-top: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+  }
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px;
+    gap: 8px;
+    color: var(--color-muted);
+    text-align: center;
+  }
+  .empty-hint {
+    font-size: 12.5px;
+    max-width: 440px;
+    opacity: 0.85;
   }
 </style>

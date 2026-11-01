@@ -341,10 +341,21 @@ pub(super) async fn search_candidates(
             continue;
         }
         let provider_id = ids.get(&id).and_then(Value::as_str).unwrap_or("");
+        let media_type = match context.kind.as_str() {
+            "series" => "tv_show",
+            "episode" => "episode",
+            _ => "movie",
+        };
         let request = Run {
             work_id: input.work_id.clone(),
             operation: "metadata.images".into(),
-            input: json!({"id":provider_id,"languages":ordered,"includeNeutral":input.include_neutral}),
+            input: json!({
+                "id": provider_id,
+                "mediaType": media_type,
+                "externalIds": ids,
+                "languages": ordered,
+                "includeNeutral": input.include_neutral
+            }),
         };
         let provider_deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(15));
         let result = tokio::time::timeout_at(
@@ -462,10 +473,21 @@ pub(super) async fn collect(
             continue;
         }
         let provider_id = ids.get(&id).and_then(Value::as_str).unwrap_or("");
+        let media_type = match context.kind.as_str() {
+            "series" => "tv_show",
+            "episode" => "episode",
+            _ => "movie",
+        };
         let request = Run {
             work_id: input.work_id.clone(),
             operation: "metadata.images".into(),
-            input: json!({"id":provider_id,"languages":ordered,"includeNeutral":input.include_neutral}),
+            input: json!({
+                "id": provider_id,
+                "mediaType": media_type,
+                "externalIds": ids,
+                "languages": ordered,
+                "includeNeutral": input.include_neutral
+            }),
         };
         providers += 1;
         let provider_deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(15));

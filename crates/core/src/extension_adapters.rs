@@ -70,9 +70,18 @@ pub(super) fn metadata_input(
             "title":editorial["title"].as_str().unwrap_or(&context.title)}),
         );
     }
+    let title = input
+        .get("title")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| editorial["title"].as_str().unwrap_or(&context.title));
+    let year = input
+        .get("year")
+        .and_then(Value::as_i64)
+        .or_else(|| editorial["year"].as_i64().or(context.year));
     let mut value = json!({"apiVersion":1,"workId":work,"libraryId":context.library_id,
-        "title":editorial["title"].as_str().unwrap_or(&context.title),
-        "year":editorial["year"].as_i64().or(context.year),"mediaType":media_type,"externalIds":ids});
+        "title":title,"year":year,"mediaType":media_type,"externalIds":ids});
     if let Some(language) = input.get("language").and_then(Value::as_str) {
         if !super::image_collection::valid_language(language) {
             return Err(err(StatusCode::BAD_REQUEST, "invalid_language"));

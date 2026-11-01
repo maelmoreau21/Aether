@@ -1,3 +1,51 @@
+## 1er novembre 2026 — Résolution des échecs d'identification, de recherche d'images et intégration de la clé par défaut TMDb (Option B Jellyfin)
+
+- **Intégration de la clé communautaire par défaut pour TMDb (Pattern Jellyfin - Option B) (`crates/core/src/extensions.rs`, `Aether-Plugins-TMDb`)** :
+  - **Résolution automatique des réglages (`resolve_effective_extension_settings`)** :
+    - Si l'administrateur n'a pas renseigné de clé d'API personnelle dans les réglages de l'extension TMDb et qu'aucune variable `TMDB_API_KEY` n'est définie dans l'environnement hôte, le Core injecte automatiquement la clé de projet communautaire open source partagée (`4219e299c89411838049ab0dab19ebd5`).
+    - Priorité absolue conservée : si l'administrateur renseigne sa propre clé ou définit `TMDB_API_KEY`, celle-ci prend le pas sur la clé de repli par défaut.
+    - Champ `api_key` marqué `required: false` dans la déclaration de configuration de TMDb (`Aether-Plugins-TMDb/src/lib.rs`), permettant l'activation immédiate du plugin sans saisie obligatoire.
+- **Diagnostic et correction des blocages d'identification et de recherche d'images (`extension_identify.rs`, `extension_adapters.rs`, `extension_image_collection.rs`, `Aether-Plugins-TMDb`)** :
+  - **Correction du format de type média pour les séries (`extension_identify.rs`)** :
+    - Les requêtes `metadata.search` et `metadata.details` transmettaient `"mediaType": "tvShow"` en camelCase, alors que l'énumération Rust `MediaType` du SDK utilise `#[serde(rename_all = "snake_case")]` (`"tv_show"`). Cette discordance causait une erreur systématique `invalid_search_input` ou `invalid_details_input` lors de toute tentative d'identification d'une série. Corrigé en `"tv_show"`.
+  - **Prise en compte du titre et de l'année de recherche saisis (`extension_adapters.rs`)** :
+    - `metadata_input` écrasait aveuglément les champs `title` et `year` fournis par le formulaire de recherche manuelle avec le titre brut non nettoyé de la base de données. Corrigé pour respecter `input.get("title")` et `input.get("year")` lorsqu'ils sont spécifiés par l'utilisateur.
+  - **Transmission de `externalIds` et `mediaType` lors de la recherche et collecte d'images (`extension_image_collection.rs`)** :
+    - Les requêtes Wasm pour `metadata.images` n'incluaient ni `externalIds`, ni `mediaType`. L'extension TMDb interrogeait le point d'accès `movie/{id}/images` même pour les séries et ne pouvait pas exploiter les identifiants croisés (ex. `imdb`). La charge utile transmet désormais explicitement `mediaType` et `externalIds`.
+  - **Résolution croisée IMDb -> TMDb dans l'extension TMDb (`Aether-Plugins-TMDb/src/lib.rs`)** :
+    - Si l'identifiant fourni est un identifiant IMDb (`tt...`), TMDb effectue automatiquement une résolution via l'endpoint TMDb `/find/{imdb_id}?external_source=imdb_id` pour retrouver l'ID TMDb numérique et servir les affiches et fanarts sans échec.
+  - **Amélioration du guidage utilisateur (`IdentifyModal.svelte`, `ImageManager.svelte`)** :
+    - Message clair indiquant que l'extension **IMDb fonctionne à 100 % sans clé d'API requise**, et explication pédagogique si le média doit être identifié avant la recherche d'images.
+- **Validations réelles** :
+  - `cargo check --workspace` : 0 avertissement, 0 erreur.
+  - `cargo clippy --workspace --all-targets -- -D warnings` : 0 avertissement, 0 erreur.
+  - `cargo test --manifest-path Aether-Plugins/Cargo.toml -p aether-plugin-tmdb` : 5/5 tests passés avec succès.
+  - `cargo fmt --manifest-path Aether-Plugins/Cargo.toml --all -- --check` : 0 divergence.
+  - `cargo fmt --check` (Aether) : 0 divergence.
+  - `npm --prefix apps/web test` : 31 suites, 219 tests passés avec succès (100 %).
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement (`svelte-check`).
+
+## 1er novembre 2026 — Séances privées Watch Party (SyncPlay) sur invitation par pseudo
+
+- **Résolution de l'erreur "Impossible de créer la séance" (`WatchPartyModal.svelte`, `parties.rs`)** :
+  - **Diagnostic** : Les requêtes HTTP de mutation (`POST /api/v1/parties`, `/join`, `/accept`) n'envoyaient ni le header `x-csrf-token: $session.csrfToken`, ni `credentials: 'same-origin'`. Le Core rejetait les requêtes avec un code 403 Forbidden (`require_csrf`), provoquant l'échec immédiat.
+  - **Correction** : Intégration systématique du token CSRF et des cookies de session HttpOnly sur tous les appels d'API SyncPlay.
+  - **Messages d'erreurs explicites** : Définition de `PartyApiError` côté Core Axum retournant des objets JSON `{ "error": "..." }` précis plutôt que des codes de statut bruts.
+- **Principe de confidentialité stricte (Séances privées sur invitation)** :
+  - **Zéro salon public non autorisé** : Les séances sont exclusivement privées (`invite-only`), accessibles uniquement à l'hôte créateur, aux membres acceptés et aux utilisateurs explicitement invités.
+  - **Bannière de garantie Netflix-scale** : Rappel clair que chaque invité conserve son profil audio individuel (VF, VOSTFR), ses sous-titres et son flux direct depuis son Media Node sans surcharge du serveur Core.
+- **Système d'invitation par pseudo (@pseudo) & Sélecteur de média** :
+  - **Recherche et résolution par pseudo** : Champ de recherche avec autocomplétion dynamique (`/api/v1/parties/eligible-users?q=...`) filtrant sur les identifiants, logins SSO et noms d'utilisateurs avec support des puces/chips supprimables (`×`).
+  - **Résolution serveur des pseudos (`inviteUsernames`)** : `POST /api/v1/parties` accepte désormais à la fois `inviteUserIds` et `inviteUsernames`, effectuant la résolution SQL sécurisée et vérifiant les permissions de bibliothèque et le contrôle parental pour chaque invité.
+  - **Support des épisodes dans `can_user_access_media`** : Résolution automatique du `work_id` parent si un identifiant d'épisode (`inventory_episodes`) est passé, évitant tout faux refus d'accès.
+  - **Sélecteur de média intégré** : Si la modale est ouverte depuis la barre de navigation sans média pré-sélectionné, une recherche instantanée dans le catalogue permet de choisir l'œuvre à regarder en 1 clic.
+- **Validations réelles** :
+  - `cargo test -p media-poc --lib parties::tests` : 6/6 tests réussis (dont le test d'accès aux épisodes).
+  - `npm --prefix apps/web test` : 31 suites, 219 tests passés avec succès (100 %).
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement (`svelte-check`).
+  - `npm --prefix apps/web run lint` : 0 erreur, 0 avertissement (`eslint`).
+  - `npm --prefix apps/web run build` : build statique réussi sans erreur.
+
 ## 1er novembre 2026 — Correction des sauvegardes, refonte du menu média "..." et guidage d'identification
 
 - **Correction du service de sauvegarde (`crates/core/src/admin_backups.rs`)** :

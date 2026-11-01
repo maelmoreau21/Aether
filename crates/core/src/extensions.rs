@@ -43,6 +43,26 @@ mod image_collection;
 #[path = "extension_repositories.rs"]
 pub(crate) mod repositories;
 
+const DEFAULT_COMMUNITY_TMDB_API_KEY: &str = "4219e299c89411838049ab0dab19ebd5";
+
+fn resolve_effective_extension_settings(extension_id: &str, mut settings: Value) -> Value {
+    if extension_id == "tmdb"
+        && settings
+            .get("api_key")
+            .and_then(Value::as_str)
+            .is_none_or(|k| k.trim().is_empty())
+    {
+        let env_key = std::env::var("TMDB_API_KEY")
+            .ok()
+            .filter(|k| !k.trim().is_empty());
+        let default_key = env_key.unwrap_or_else(|| DEFAULT_COMMUNITY_TMDB_API_KEY.to_string());
+        if let Some(obj) = settings.as_object_mut() {
+            obj.insert("api_key".into(), json!(default_key));
+        }
+    }
+    settings
+}
+
 fn metadata_input_with_settings(input: Value, mut settings: Value) -> Value {
     // Historical forms saved an empty endpoint. Omit it so the provider can use
     // its official default rather than attempting a request against an empty URL.
@@ -1138,13 +1158,14 @@ async fn run(
             .fetch_optional(auth.store.pool())
             .await
             .map_err(db)?;
-    let mut settings: Value = settings_str
+    let settings: Value = settings_str
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(|| json!({}));
 
     if !settings.is_object() {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_settings"));
     }
+    let mut settings = resolve_effective_extension_settings(&id, settings);
     // The work's library owns metadata language, including historical plugin settings.
     let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
         .bind(&library)
@@ -1559,7 +1580,7 @@ pub(crate) async fn run_automated(
             .fetch_optional(auth.store.pool())
             .await
             .map_err(db)?;
-    let mut settings: Value = raw
+    let settings: Value = raw
         .as_deref()
         .map(serde_json::from_str)
         .transpose()
@@ -1568,6 +1589,7 @@ pub(crate) async fn run_automated(
     if !settings.is_object() {
         return Err(err(StatusCode::CONFLICT, "invalid_settings"));
     }
+    let mut settings = resolve_effective_extension_settings(extension_id, settings);
     let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
         .bind(&job.library_id)
         .fetch_one(auth.store.pool())

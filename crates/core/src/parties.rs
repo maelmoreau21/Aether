@@ -32,6 +32,29 @@ use uuid::Uuid;
 
 type Error = StatusCode;
 
+#[derive(Debug)]
+pub struct PartyApiError(pub StatusCode, pub String);
+
+impl IntoResponse for PartyApiError {
+    fn into_response(self) -> axum::response::Response {
+        (self.0, Json(json!({ "error": self.1 }))).into_response()
+    }
+}
+
+impl From<StatusCode> for PartyApiError {
+    fn from(s: StatusCode) -> Self {
+        let msg = match s {
+            StatusCode::FORBIDDEN => "Accès refusé ou permissions insuffisantes.",
+            StatusCode::NOT_FOUND => "Séance ou ressource introuvable.",
+            StatusCode::BAD_REQUEST => "Données de requête invalides.",
+            StatusCode::GONE => "La séance ou l'invitation a expiré ou est terminée.",
+            StatusCode::UNAUTHORIZED => "Authentification requise.",
+            _ => "Une erreur interne est survenue.",
+        };
+        Self(s, msg.to_string())
+    }
+}
+
 const MAX_CHAT_LENGTH: usize = 500;
 const MAX_STORED_MESSAGES: usize = 100;
 const BROADCAST_CAPACITY: usize = 128;
@@ -679,15 +702,30 @@ pub async fn can_user_access_media(
     user_role: &Role,
     media_id: &str,
 ) -> bool {
-    // 1. Check parental policy
-    let parental_ok = parental_allowed(store, user_id, media_id)
+    let raw_id = media_id.trim();
+    if raw_id.is_empty() {
+        return false;
+    }
+
+    // Resolve if raw_id is an episode ID
+    let resolved_work_id: String =
+        query_scalar("SELECT COALESCE((SELECT work_id FROM inventory_episodes WHERE id = ?), ?)")
+            .bind(raw_id)
+            .bind(raw_id)
+            .fetch_optional(&store.pool)
+            .await
+            .unwrap_or(None)
+            .unwrap_or_else(|| raw_id.to_string());
+
+    // 1. Check parental policy on resolved work
+    let parental_ok = parental_allowed(store, user_id, &resolved_work_id)
         .await
         .unwrap_or(false);
     if !parental_ok {
         return false;
     }
 
-    // 2. Check library permission
+    // 2. Check library permission on resolved work
     let allowed: Option<i64> = query_scalar(
         "SELECT COUNT(*) FROM inventory_works w \
          JOIN libraries l ON l.id = w.library_id \
@@ -698,7 +736,7 @@ pub async fn can_user_access_media(
              WHERE p.library_id = l.id AND p.user_id = ? \
          ))",
     )
-    .bind(media_id)
+    .bind(&resolved_work_id)
     .bind(user_role.as_str())
     .bind(user_id)
     .fetch_optional(&store.pool)
@@ -758,33 +796,48 @@ struct CreatePartyInput {
     pub control_mode: Option<String>,
     pub wait_for_buffering: Option<bool>,
     pub invite_user_ids: Option<Vec<String>>,
+    pub invite_usernames: Option<Vec<String>>,
 }
 
 async fn create_party(
     State((auth, hub)): State<(AuthState, WatchPartyHub)>,
     headers: HeaderMap,
     Json(input): Json<CreatePartyInput>,
-) -> Result<Json<Value>, Error> {
+) -> Result<Json<Value>, PartyApiError> {
     let actor = auth.authenticate(&headers).await?;
     auth.require_csrf(&headers, &actor)?;
 
     let media_id = input.media_id.trim();
     if media_id.is_empty() {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(PartyApiError(
+            StatusCode::BAD_REQUEST,
+            "L'identifiant du média est obligatoire.".to_string(),
+        ));
     }
 
     // Verify actor can access media
     if !can_user_access_media(&auth.store, &actor.user.id, &actor.user.role, media_id).await {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(PartyApiError(
+            StatusCode::FORBIDDEN,
+            "Accès au média refusé par le contrôle parental ou les autorisations de bibliothèque."
+                .to_string(),
+        ));
     }
 
-    // Get media title
-    let media_title: String = query_scalar("SELECT title FROM inventory_works WHERE id = ?")
-        .bind(media_id)
-        .fetch_optional(&auth.store.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .unwrap_or_else(|| "Séance".to_string());
+    // Get media title (works for either a movie work ID or an episode ID)
+    let media_title: String = query_scalar(
+        "SELECT COALESCE( \
+            (SELECT w.title || ' — ' || COALESCE(ep.title, 'Épisode ' || ep.episode_number) \
+             FROM inventory_episodes ep JOIN inventory_works w ON w.id = ep.work_id WHERE ep.id = ?), \
+            (SELECT title FROM inventory_works WHERE id = ?) \
+         )",
+    )
+    .bind(media_id)
+    .bind(media_id)
+    .fetch_optional(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .unwrap_or_else(|| "Séance".to_string());
 
     let party_name = match input.name {
         Some(ref n) if !n.trim().is_empty() => n.trim().to_string(),
@@ -841,43 +894,76 @@ async fn create_party(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Handle initial invites if any
+    // Collect all target user IDs (from explicit user IDs + resolved usernames/pseudos)
+    let mut target_ids: HashSet<String> = HashSet::new();
+
     if let Some(invitees) = input.invite_user_ids {
         for target_id in invitees {
-            if target_id == actor.user.id {
+            let t = target_id.trim();
+            if !t.is_empty() && t != actor.user.id {
+                target_ids.insert(t.to_string());
+            }
+        }
+    }
+
+    if let Some(usernames) = input.invite_usernames {
+        for uname in usernames {
+            let clean = uname.trim().trim_start_matches('@').to_lowercase();
+            if clean.is_empty() {
                 continue;
             }
-            // Check target user access
-            let target_role: Option<String> = query_scalar("SELECT role FROM users WHERE id = ?")
-                .bind(&target_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .unwrap_or(None);
+            let found_id: Option<String> = query_scalar(
+                "SELECT u.id FROM users u \
+                 LEFT JOIN local_credentials c ON c.user_id = u.id \
+                 WHERE lower(COALESCE(u.sso_username, c.login, u.id)) = ? \
+                    OR lower(COALESCE(u.display_name, '')) = ?",
+            )
+            .bind(&clean)
+            .bind(&clean)
+            .fetch_optional(&mut *tx)
+            .await
+            .unwrap_or(None);
 
-            if let Some(r_str) = target_role {
-                let r = if r_str == "administrator" {
-                    Role::Administrator
-                } else {
-                    Role::User
-                };
-                if can_user_access_media(&auth.store, &target_id, &r, media_id).await {
-                    let invite_token = Uuid::new_v4().to_string();
-                    let invite_id = Uuid::new_v4().to_string();
-                    let expiry = now + DEFAULT_INVITE_EXPIRY_SECONDS;
-                    let _ = query(
-                        "INSERT INTO watch_party_invites (id, party_id, token, created_by, target_user_id, created_at, expires_at) \
-                         VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    )
-                    .bind(invite_id)
-                    .bind(&party_id)
-                    .bind(invite_token)
-                    .bind(&actor.user.id)
-                    .bind(&target_id)
-                    .bind(now)
-                    .bind(expiry)
-                    .execute(&mut *tx)
-                    .await;
+            if let Some(uid) = found_id {
+                if uid != actor.user.id {
+                    target_ids.insert(uid);
                 }
+            }
+        }
+    }
+
+    // Handle initial invites
+    for target_id in target_ids {
+        // Check target user role
+        let target_role: Option<String> = query_scalar("SELECT role FROM users WHERE id = ?")
+            .bind(&target_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .unwrap_or(None);
+
+        if let Some(r_str) = target_role {
+            let r = if r_str == "administrator" {
+                Role::Administrator
+            } else {
+                Role::User
+            };
+            if can_user_access_media(&auth.store, &target_id, &r, media_id).await {
+                let invite_token = Uuid::new_v4().to_string();
+                let invite_id = Uuid::new_v4().to_string();
+                let expiry = now + DEFAULT_INVITE_EXPIRY_SECONDS;
+                let _ = query(
+                    "INSERT INTO watch_party_invites (id, party_id, token, created_by, target_user_id, created_at, expires_at) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?)",
+                )
+                .bind(invite_id)
+                .bind(&party_id)
+                .bind(invite_token)
+                .bind(&actor.user.id)
+                .bind(&target_id)
+                .bind(now)
+                .bind(expiry)
+                .execute(&mut *tx)
+                .await;
             }
         }
     }
@@ -1617,24 +1703,50 @@ async fn accept_invite(
 #[derive(Deserialize)]
 struct EligibleQuery {
     pub media_id: Option<String>,
+    pub q: Option<String>,
 }
 
 async fn eligible_users(
     State((auth, _)): State<(AuthState, WatchPartyHub)>,
     Query(query_params): Query<EligibleQuery>,
     headers: HeaderMap,
-) -> Result<Json<Value>, Error> {
+) -> Result<Json<Value>, PartyApiError> {
     let actor = auth.authenticate(&headers).await?;
 
-    let rows: Vec<(String, String, Option<String>, String)> = query_as(
-        "SELECT u.id, COALESCE(u.sso_username, c.login, u.id) AS login, u.display_name, u.role \
-         FROM users u \
-         LEFT JOIN local_credentials c ON c.user_id = u.id \
-         WHERE u.disabled_at IS NULL ORDER BY login",
-    )
-    .fetch_all(&auth.store.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let q_filter = query_params
+        .q
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .trim_start_matches('@')
+        .to_lowercase();
+
+    let rows: Vec<(String, String, Option<String>, String)> = if q_filter.is_empty() {
+        query_as(
+            "SELECT u.id, COALESCE(u.sso_username, c.login, u.id) AS login, u.display_name, u.role \
+             FROM users u \
+             LEFT JOIN local_credentials c ON c.user_id = u.id \
+             WHERE u.disabled_at IS NULL ORDER BY login LIMIT 50",
+        )
+        .fetch_all(&auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    } else {
+        let pattern = format!("%{q_filter}%");
+        query_as(
+            "SELECT u.id, COALESCE(u.sso_username, c.login, u.id) AS login, u.display_name, u.role \
+             FROM users u \
+             LEFT JOIN local_credentials c ON c.user_id = u.id \
+             WHERE u.disabled_at IS NULL \
+               AND (lower(COALESCE(u.sso_username, c.login, u.id)) LIKE ? OR lower(COALESCE(u.display_name, '')) LIKE ?) \
+             ORDER BY login LIMIT 20",
+        )
+        .bind(&pattern)
+        .bind(&pattern)
+        .fetch_all(&auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    };
 
     let mut eligible = Vec::new();
     for (id, login, disp, role_str) in rows {
@@ -1658,7 +1770,7 @@ async fn eligible_users(
             eligible.push(json!({
                 "id": id,
                 "login": login,
-                "displayName": disp.unwrap_or(login),
+                "displayName": disp.unwrap_or_else(|| login.clone()),
                 "role": role_str
             }));
         }
@@ -2763,5 +2875,23 @@ mod tests {
             .await
             .unwrap();
         assert!(can_user_access_media(&store, "user-1", &Role::User, "work-1").await);
+
+        // 5. Episode of work-1 is accessible via episode ID
+        query(
+            "INSERT INTO inventory_seasons (id, series_id, season_number, title) \
+             VALUES ('season-1', 'work-1', 1, 'Saison 1')",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        query(
+            "INSERT INTO inventory_episodes (id, season_id, episode_number, work_id) \
+             VALUES ('ep-101', 'season-1', 1, 'work-1')",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        assert!(can_user_access_media(&store, "user-1", &Role::User, "ep-101").await);
+        assert!(!can_user_access_media(&store, "user-1", &Role::User, "ep-404").await);
     }
 }

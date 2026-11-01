@@ -245,7 +245,7 @@
                 Contrairement à Jellyfin qui intègre des clés de métadonnées mutualisées, Aether isole strictement ses connecteurs dans des extensions sécurisées (TMDb, OMDb, IMDb).
               </p>
               <p>
-                Pour identifier ce média et importer ses affiches et résumés, installez et activez le plugin <strong>TMDb</strong> ou <strong>OMDb</strong> dans la section Administration.
+                Pour identifier ce média et importer ses affiches et résumés, installez et activez le plugin <strong>IMDb (sans clé d'API requise)</strong> ou <strong>TMDb</strong> dans la section Administration.
               </p>
               <a href={resolve('admin/libraries/#extensions-section')} class="btn primary-btn notice-link">
                 <Icon name="search" size={15} />

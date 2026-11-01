@@ -97,7 +97,7 @@ pub(super) async fn search(
         }
 
         let media_type = match kind.as_str() {
-            "series" => "tvShow",
+            "series" => "tv_show",
             _ => "movie",
         };
 
@@ -195,7 +195,7 @@ pub(super) async fn apply(
     }
 
     let media_type = match kind.as_str() {
-        "series" => "tvShow",
+        "series" => "tv_show",
         _ => "movie",
     };
 

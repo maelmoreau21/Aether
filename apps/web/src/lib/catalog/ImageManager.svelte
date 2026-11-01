@@ -267,7 +267,7 @@
       if (!response.ok) {
         const detail = await response.json().catch(() => null);
         if (detail?.error === 'external_ids_required') {
-          throw new Error('Identifiants externes manquants (TMDb, TVDb ou IMDb). Ajoutez-les dans les métadonnées de l\'œuvre.');
+          throw new Error('Ce média n’a pas encore d’identifiant externe (TMDb ou IMDb). Utilisez l’option "Identifier" dans le menu d’actions (...) pour lier la fiche et récupérer ses images officielles.');
         }
         throw new Error(`Recherche indisponible (HTTP ${response.status}).`);
       }

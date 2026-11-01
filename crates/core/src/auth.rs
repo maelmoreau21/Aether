@@ -465,6 +465,7 @@ impl AuthState {
             touch_interval_seconds,
             max_pending_touches,
         );
+        crate::identity::register_active_store(&store);
         let closed: i64 = crate::database::query_scalar(
             "SELECT CAST((EXISTS(SELECT 1 FROM bootstrap_state) OR EXISTS(SELECT 1 FROM users)) AS INTEGER)",
         )

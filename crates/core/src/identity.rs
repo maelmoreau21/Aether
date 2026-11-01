@@ -85,6 +85,18 @@ pub struct IdentityStore {
     pub(crate) node_registry: std::sync::Arc<crate::nodes::NodeRuntimeRegistry>,
     pub(crate) cors_origins: std::sync::Arc<std::sync::RwLock<Vec<String>>>,
 }
+
+static ACTIVE_STORE: std::sync::RwLock<Option<IdentityStore>> = std::sync::RwLock::new(None);
+
+pub fn register_active_store(store: &IdentityStore) {
+    if let Ok(mut lock) = ACTIVE_STORE.write() {
+        *lock = Some(store.clone());
+    }
+}
+
+pub fn active_store() -> Option<IdentityStore> {
+    ACTIVE_STORE.read().ok().and_then(|guard| guard.clone())
+}
 fn plugin_path(database: Option<&Path>) -> Result<std::path::PathBuf, IdentityError> {
     let path = std::env::var_os("MEDIA_PLUGINS_PATH")
         .filter(|p| !p.is_empty())
@@ -208,15 +220,16 @@ impl IdentityStore {
         let mut conn = pool.acquire().await?;
         crate::database::initialize_fresh_schema(&mut conn).await?;
         crate::inventory::backfill_title_sort_unicode(&mut conn).await?;
-        drop(conn);
-        Ok(Self {
+        let store = Self {
             assets: open_assets(&pool, None)?,
             pool,
             plugins_path: plugin_path(None)?,
             task_writes: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             node_registry: std::sync::Arc::new(crate::nodes::NodeRuntimeRegistry::new()),
             cors_origins: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
-        })
+        };
+        register_active_store(&store);
+        Ok(store)
     }
 
     pub async fn open_configured(media_root: &Path) -> Result<Self, IdentityError> {
@@ -344,14 +357,16 @@ impl IdentityStore {
             .execute(&mut *conn)
             .await?;
         drop(conn);
-        Ok(Self {
+        let store = Self {
             assets: open_assets(&pool, Some(path))?,
             pool,
             plugins_path: plugin_path(Some(path))?,
             task_writes: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             node_registry: std::sync::Arc::new(crate::nodes::NodeRuntimeRegistry::new()),
             cors_origins: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
-        })
+        };
+        register_active_store(&store);
+        Ok(store)
     }
 
     pub async fn user(&self, id: &str) -> Result<Option<User>, IdentityError> {

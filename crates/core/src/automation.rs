@@ -958,9 +958,118 @@ pub async fn apply_missing_metadata(
         if changed {
             query("UPDATE inventory_works SET editorial_json=? WHERE id=?")
                 .bind(metadata.to_string())
-                .bind(work)
+                .bind(&work)
                 .execute(&mut **tx)
                 .await?;
+        }
+
+        let (has_poster, has_backdrop): (i64, i64) = query_as(
+            "SELECT CAST((SELECT COUNT(*) FROM work_image_entries WHERE work_id=? AND kind='poster') + (SELECT COUNT(*) FROM work_posters WHERE work_id=?) AS INTEGER), CAST((SELECT COUNT(*) FROM work_image_entries WHERE work_id=? AND kind='backdrop') AS INTEGER)"
+        )
+        .bind(&work)
+        .bind(&work)
+        .bind(&work)
+        .fetch_one(&mut **tx)
+        .await
+        .unwrap_or((0, 0));
+
+        let poster_url = if has_poster == 0 {
+            proposal
+                .get("posterUrl")
+                .or_else(|| proposal.get("poster_url"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| {
+                    proposal
+                        .get("posters")
+                        .and_then(Value::as_array)
+                        .and_then(|arr| arr.first())
+                        .and_then(|p| p.get("url").and_then(Value::as_str))
+                        .map(str::to_string)
+                })
+                .or_else(|| {
+                    proposal
+                        .get("images")
+                        .and_then(Value::as_array)
+                        .and_then(|arr| {
+                            arr.iter().find(|img| {
+                                img.get("imageType").and_then(Value::as_str) == Some("poster")
+                            })
+                        })
+                        .and_then(|p| p.get("url").and_then(Value::as_str))
+                        .map(str::to_string)
+                })
+        } else {
+            None
+        };
+
+        let backdrop_url = if has_backdrop == 0 {
+            proposal
+                .get("backdropUrl")
+                .or_else(|| proposal.get("backdrop_url"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| {
+                    proposal
+                        .get("backdrops")
+                        .and_then(Value::as_array)
+                        .and_then(|arr| arr.first())
+                        .and_then(|p| p.get("url").and_then(Value::as_str))
+                        .map(str::to_string)
+                })
+                .or_else(|| {
+                    proposal
+                        .get("images")
+                        .and_then(Value::as_array)
+                        .and_then(|arr| {
+                            arr.iter().find(|img| {
+                                img.get("imageType").and_then(Value::as_str) == Some("backdrop")
+                            })
+                        })
+                        .and_then(|p| p.get("url").and_then(Value::as_str))
+                        .map(str::to_string)
+                })
+        } else {
+            None
+        };
+
+        if (poster_url.is_some() || backdrop_url.is_some())
+            && let Some(store) = crate::identity::active_store()
+        {
+            let ext_id = extension.to_string();
+            let work_id = work.clone();
+            tokio::spawn(async move {
+                if let Some(url) = poster_url {
+                    let _ = crate::extensions::adapters::import_image_direct(
+                        &store,
+                        &ext_id,
+                        crate::extensions::adapters::ImportImage {
+                            work_id: work_id.clone(),
+                            url,
+                            kind: "poster".into(),
+                            language: None,
+                            append: false,
+                            apply_collection_policy: false,
+                        },
+                    )
+                    .await;
+                }
+                if let Some(url) = backdrop_url {
+                    let _ = crate::extensions::adapters::import_image_direct(
+                        &store,
+                        &ext_id,
+                        crate::extensions::adapters::ImportImage {
+                            work_id: work_id.clone(),
+                            url,
+                            kind: "backdrop".into(),
+                            language: None,
+                            append: false,
+                            apply_collection_policy: false,
+                        },
+                    )
+                    .await;
+                }
+            });
         }
     }
     Ok(())
@@ -1326,15 +1435,15 @@ async fn pump_triggers(
     }
     let sweeps:Vec<(String,String,String,String,String)>=query_as("SELECT id,library_id,extension_id,kind,cursor_asset FROM automation_sweeps WHERE completed_at IS NULL ORDER BY created_at,id LIMIT 1").fetch_all(&mut **tx).await?;
     for (id, library, extension, kind, cursor) in sweeps {
-        let rows:Vec<(String,String,String,String)>=query_as("SELECT a.id,obs.fingerprint,w.editorial_json,COALESCE(w.manual_json,'{}') FROM inventory_assets a JOIN automation_observations obs ON obs.asset_id=a.id JOIN inventory_sources source ON source.id=a.source_id JOIN inventory_versions version ON version.id=source.version_id JOIN inventory_editions edition ON edition.id=version.edition_id JOIN inventory_works w ON w.id=edition.work_id WHERE a.library_id=? AND a.available=1 AND a.id>? ORDER BY a.id LIMIT ?").bind(&library).bind(&cursor).bind(limit+1).fetch_all(&mut **tx).await?;
+        let rows:Vec<(String,String,String,String,i64)>=query_as("SELECT a.id,obs.fingerprint,w.editorial_json,COALESCE(w.manual_json,'{}'),CAST((SELECT COUNT(*) FROM work_image_entries WHERE work_id=w.id AND kind='poster') + (SELECT COUNT(*) FROM work_posters WHERE work_id=w.id) AS INTEGER) FROM inventory_assets a JOIN automation_observations obs ON obs.asset_id=a.id JOIN inventory_sources source ON source.id=a.source_id JOIN inventory_versions version ON version.id=source.version_id JOIN inventory_editions edition ON edition.id=version.edition_id JOIN inventory_works w ON w.id=edition.work_id WHERE a.library_id=? AND a.available=1 AND a.id>? ORDER BY a.id LIMIT ?").bind(&library).bind(&cursor).bind(limit+1).fetch_all(&mut **tx).await?;
         let more = rows.len() as i64 > limit;
-        for (asset, fingerprint, editorial, manual) in rows.into_iter().take(limit as usize) {
+        for (asset, fingerprint, editorial, manual, poster_count) in rows.into_iter().take(limit as usize) {
             query("UPDATE automation_sweeps SET cursor_asset=? WHERE id=?")
                 .bind(&asset)
                 .bind(&id)
                 .execute(&mut **tx)
                 .await?;
-            if kind == "metadata.missing" && !metadata_has_missing_fields(&editorial, &manual) {
+            if kind == "metadata.missing" && poster_count > 0 && !metadata_has_missing_fields(&editorial, &manual) {
                 continue;
             }
             let key = hash(&(&id, &asset))?;

@@ -1561,6 +1561,19 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
         let pack: Value = serde_json::from_slice(&body).unwrap();
         let pack = pack["id"].as_str().unwrap();
+        assert_eq!(
+            call(
+                &app,
+                "/api/v1/admin/extensions/any-author-avatar",
+                "PUT",
+                cookie,
+                csrf,
+                json!({"enabled":false,"allLibraries":false})
+            )
+            .await
+            .0,
+            StatusCode::NO_CONTENT
+        );
         let (_, body, _) = call(
             &app,
             "/api/v1/account/avatar/collections",

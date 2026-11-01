@@ -158,6 +158,24 @@ pub(crate) fn is_excluded(relative_path: &str, name: &str, excluded_patterns: &[
     false
 }
 
+const RELEASE_TAGS: &[&str] = &[
+    "1080p", "1080i", "720p", "720i", "2160p", "4k", "2k", "8k", "uhd", "ultrahd",
+    "480p", "480i", "576p", "576i",
+    "hdr", "hdr10", "hdr10plus", "dv", "dovi", "dolbyvision", "dolby-vision",
+    "bluray", "blu-ray", "bdrip", "brrip", "bdr", "bd", "hdtv", "hdrip", "hdtvrip",
+    "dvd", "dvdrip", "dvdscr", "dvdscreener", "screener",
+    "webrip", "web-rip", "webdl", "web-dl", "web",
+    "remux", "proper", "repack", "rerip", "unrated", "retail", "internal", "limited",
+    "cam", "camrip", "telesync", "telecine",
+    "x264", "x265", "h264", "h265", "hevc", "av1", "xvid", "divx", "divx5",
+    "aac", "ac3", "eac3", "dts", "dtshd", "dts-hd", "truehd", "atmos", "flac",
+    "multi", "multisubs", "vostfr", "vff", "vfq", "truefrench", "subfrench",
+];
+
+fn is_delim(b: u8) -> bool {
+    matches!(b, b'.' | b'_' | b'-' | b' ' | b'(' | b')' | b'[' | b']')
+}
+
 fn metadata_name(name: &str) -> (String, Option<u16>, BTreeMap<String, String>) {
     let mut ids = BTreeMap::new();
     for token in name
@@ -165,8 +183,17 @@ fn metadata_name(name: &str) -> (String, Option<u16>, BTreeMap<String, String>) 
         .skip(1)
         .filter_map(|s| s.split_once(']').map(|p| p.0))
     {
-        if let Some((provider, id)) = token.split_once('-') {
-            let provider = provider.to_ascii_lowercase();
+        let pair = token
+            .split_once('-')
+            .or_else(|| token.split_once('='))
+            .or_else(|| token.split_once(':'));
+        if let Some((raw_provider, raw_id)) = pair {
+            let provider = raw_provider
+                .trim()
+                .to_ascii_lowercase()
+                .trim_end_matches("id")
+                .to_string();
+            let id = raw_id.trim();
             let valid = match provider.as_str() {
                 "tmdb" | "tvdb" => !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()),
                 "imdb" => id
@@ -179,11 +206,30 @@ fn metadata_name(name: &str) -> (String, Option<u16>, BTreeMap<String, String>) 
             }
         }
     }
+
+    let mut working = name.trim();
+    while working.starts_with('[') {
+        if let Some(close_idx) = working.find(']') {
+            let next = working[close_idx + 1..].trim_start();
+            if !next.is_empty() {
+                working = next;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    let bytes = working.as_bytes();
+    let len = bytes.len();
     let mut year = None;
-    let mut end = name.find('[').unwrap_or(name.len());
-    for (start, _) in name.match_indices('(') {
-        if let Some(value) = name.get(start + 1..start + 5)
-            && name.as_bytes().get(start + 5) == Some(&b')')
+    let mut end = len;
+
+    // 1. Check for explicit (YYYY) or [YYYY]
+    for (start, _) in working.match_indices('(') {
+        if let Some(value) = working.get(start + 1..start + 5)
+            && working.as_bytes().get(start + 5) == Some(&b')')
             && let Ok(value) = value.parse::<u16>()
             && (1888..=2100).contains(&value)
         {
@@ -192,10 +238,84 @@ fn metadata_name(name: &str) -> (String, Option<u16>, BTreeMap<String, String>) 
             break;
         }
     }
-    let title = name[..end]
-        .trim()
-        .trim_end_matches(['-', '.', '_', ' '])
+
+    for (start, _) in working.match_indices('[') {
+        if let Some(value) = working.get(start + 1..start + 5)
+            && working.as_bytes().get(start + 5) == Some(&b']')
+            && let Ok(value) = value.parse::<u16>()
+            && (1888..=2100).contains(&value)
+        {
+            if year.is_none() {
+                year = Some(value);
+            }
+            end = end.min(start);
+            break;
+        } else {
+            end = end.min(start);
+        }
+    }
+
+    // 2. If no parenthesized or bracketed year, search for 4-digit year 1900..=2099 delimited by dots/spaces/dashes
+    if year.is_none() {
+        let mut i = 0;
+        while i + 4 <= end {
+            let prev_delim = i == 0 || is_delim(bytes[i - 1]);
+            let next_delim = i + 4 == len || is_delim(bytes[i + 4]);
+            if prev_delim
+                && next_delim
+                && let Ok(val) = working[i..i + 4].parse::<u16>()
+                && (1900..=2099).contains(&val)
+                && i > 0
+            {
+                year = Some(val);
+                end = end.min(i);
+                break;
+            }
+            i += 1;
+        }
+    }
+
+    // 3. Check for release tags before `end`
+    let lower = working.to_ascii_lowercase();
+    let lower_bytes = lower.as_bytes();
+    for &tag in RELEASE_TAGS {
+        let tag_len = tag.len();
+        let mut pos = 0;
+        while let Some(idx) = lower[pos..end].find(tag) {
+            let actual_idx = pos + idx;
+            let prev_delim = actual_idx == 0 || is_delim(lower_bytes[actual_idx - 1]);
+            let next_delim = actual_idx + tag_len == len || actual_idx + tag_len == end || is_delim(lower_bytes[actual_idx + tag_len]);
+            if prev_delim && next_delim && actual_idx > 0 {
+                end = end.min(actual_idx);
+                break;
+            }
+            pos = actual_idx + 1;
+            if pos >= end {
+                break;
+            }
+        }
+    }
+
+    let raw_slice = &working[..end];
+
+    // Clean dots and underscores, replacing them with spaces
+    let mut cleaned = String::with_capacity(raw_slice.len());
+    for c in raw_slice.chars() {
+        if c == '.' || c == '_' {
+            cleaned.push(' ');
+        } else {
+            cleaned.push(c);
+        }
+    }
+
+    // Collapse multiple consecutive spaces and trim
+    let title: String = cleaned
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_matches(['-', '.', '_', ' '])
         .to_owned();
+
     (
         if title.is_empty() {
             name.to_owned()
@@ -323,6 +443,62 @@ pub struct ParsedSeriesEpisode {
     pub episode_title: String,
 }
 
+fn clean_episode_title(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_start_matches('-').trim_matches(['.', '_', '-', ' ']).trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut working = trimmed;
+    while working.starts_with('[') {
+        if let Some(close_idx) = working.find(']') {
+            let next = working[close_idx + 1..].trim_start();
+            if !next.is_empty() {
+                working = next;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    let mut end = working.find('[').unwrap_or(working.len());
+    let lower = working.to_ascii_lowercase();
+    let lower_bytes = lower.as_bytes();
+    for &tag in RELEASE_TAGS {
+        let tag_len = tag.len();
+        let mut pos = 0;
+        while let Some(idx) = lower[pos..end].find(tag) {
+            let actual_idx = pos + idx;
+            let prev_delim = actual_idx == 0 || is_delim(lower_bytes[actual_idx - 1]);
+            let next_delim = actual_idx + tag_len == lower_bytes.len() || actual_idx + tag_len == end || is_delim(lower_bytes[actual_idx + tag_len]);
+            if prev_delim && next_delim {
+                end = end.min(actual_idx);
+                break;
+            }
+            pos = actual_idx + 1;
+            if pos >= end {
+                break;
+            }
+        }
+    }
+    let raw_slice = &working[..end];
+    let cleaned: String = raw_slice
+        .chars()
+        .map(|c| if c == '.' || c == '_' { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_matches(['-', '.', '_', ' '])
+        .to_owned();
+
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(cleaned)
+    }
+}
+
 fn extract_s_e_pattern(stem: &str) -> Option<(u32, u32, Option<String>)> {
     let bytes = stem.as_bytes();
     let len = bytes.len();
@@ -371,23 +547,7 @@ fn extract_s_e_pattern(stem: &str) -> Option<(u32, u32, Option<String>)> {
                             }
                         }
                         let rem = stem[after..].trim();
-                        let title = if let Some(stripped) = rem.strip_prefix('-') {
-                            let t = stripped.trim().trim_matches(['.', '_', '-']).trim();
-                            if !t.is_empty() {
-                                Some(t.to_string())
-                            } else {
-                                None
-                            }
-                        } else if !rem.is_empty() {
-                            let t = rem.trim_matches(['.', '_', '-']).trim();
-                            if !t.is_empty() {
-                                Some(t.to_string())
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
+                        let title = clean_episode_title(rem);
                         return Some((s_val, e_val, title));
                     }
                 }
@@ -434,23 +594,7 @@ fn extract_x_pattern(stem: &str) -> Option<(u32, u32, Option<String>)> {
             };
 
             let rem = stem[end..].trim();
-            let title = if let Some(stripped) = rem.strip_prefix('-') {
-                let t = stripped.trim().trim_matches(['.', '_', '-']).trim();
-                if !t.is_empty() {
-                    Some(t.to_string())
-                } else {
-                    None
-                }
-            } else if !rem.is_empty() {
-                let t = rem.trim_matches(['.', '_', '-']).trim();
-                if !t.is_empty() {
-                    Some(t.to_string())
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            let title = clean_episode_title(rem);
             return Some((s_val, e_val, title));
         }
     }
@@ -502,16 +646,7 @@ fn extract_episode_from_filename(stem: &str) -> Option<(u32, Option<String>)> {
                 let rem_idx =
                     idx + prefix.len() + (after.len() - after_trimmed.len()) + digits.len();
                 let rem = stem[rem_idx..].trim();
-                let title = if let Some(stripped) = rem.strip_prefix('-') {
-                    let t = stripped.trim().trim_matches(['.', '_', '-']).trim();
-                    if !t.is_empty() {
-                        Some(t.to_string())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
+                let title = clean_episode_title(rem);
                 return Some((num, title));
             }
         }
@@ -523,16 +658,7 @@ fn extract_episode_from_filename(stem: &str) -> Option<(u32, Option<String>)> {
         && let Ok(num) = digits.parse::<u32>()
     {
         let rem = trimmed[digits.len()..].trim();
-        let title = if let Some(stripped) = rem.strip_prefix('-') {
-            let t = stripped.trim().trim_matches(['.', '_', '-']).trim();
-            if !t.is_empty() {
-                Some(t.to_string())
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let title = clean_episode_title(rem);
         return Some((num, title));
     }
     None
@@ -1788,4 +1914,47 @@ mod tests {
         assert_eq!(parsed.season_number, 1);
         assert_eq!(parsed.episode_number, 2);
     }
+
+    #[test]
+    fn clean_filename_strips_release_tags_and_parses_unparenthesized_year() {
+        let (title, year, ids) = metadata_name("Mon.Film.2024.1080p.WEBRip.x264");
+        assert_eq!(title, "Mon Film");
+        assert_eq!(year, Some(2024));
+        assert!(ids.is_empty());
+
+        let (title, year, _) = metadata_name("Crouching.Tiger.Hidden.Dragon.4k");
+        assert_eq!(title, "Crouching Tiger Hidden Dragon");
+        assert_eq!(year, None);
+
+        let (title, year, ids) = metadata_name("Super.Movie.1999.720p.BluRay.x264 [tmdb-12345]");
+        assert_eq!(title, "Super Movie");
+        assert_eq!(year, Some(1999));
+        assert_eq!(ids.get("tmdb").map(String::as_str), Some("12345"));
+
+        let (title, year, ids) = metadata_name("Movie.Title.2021.1080p [tmdbid=54321]");
+        assert_eq!(title, "Movie Title");
+        assert_eq!(year, Some(2021));
+        assert_eq!(ids.get("tmdb").map(String::as_str), Some("54321"));
+
+        let (title, year, _) = metadata_name("[HorribleSubs] Made in Abyss - 13 [720p]");
+        assert_eq!(title, "Made in Abyss - 13");
+        assert_eq!(year, None);
+
+        let (title, year, ids) = metadata_name("Gladiator.[2000].1080p.mkv");
+        assert_eq!(title, "Gladiator");
+        assert_eq!(year, Some(2000));
+        assert!(ids.is_empty());
+
+        let (title, year, ids) = metadata_name("Another.Movie [tmdb-1999]");
+        assert_eq!(title, "Another Movie");
+        assert_eq!(year, None);
+        assert_eq!(ids.get("tmdb").map(String::as_str), Some("1999"));
+
+        let ep = parse_series_episode(Path::new("Show/Season 1/Show.S01E01.Pilot.1080p.BluRay.x264.mkv")).unwrap();
+        assert_eq!(ep.episode_title, "Pilot");
+
+        let ep = parse_series_episode(Path::new("Show/Season 1/Show.S01E01.1080p.BluRay.x264.mkv")).unwrap();
+        assert_eq!(ep.episode_title, "S01E01");
+    }
 }
+

@@ -45,6 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .parse()?;
     let bind_addr = parse_bind_addr()?;
     let database = media_poc::identity::IdentityStore::open_configured(&root).await?;
+    media_poc::extensions::bootstrap_essential_plugins(&database).await;
     match media_poc::extension_storage::sync_installed(&database).await {
         Ok(count) => {
             eprintln!(

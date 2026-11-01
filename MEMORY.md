@@ -1,3 +1,34 @@
+## 1er novembre 2026 — Résolution complète du pipeline de métadonnées et d'images (Parité Jellyfin)
+
+- **Nettoyage avancé des noms de fichiers (crates/node/src/scanner.rs)** :
+  - Conversion automatique des séparateurs de scène (points ., underscores _) en espaces.
+  - Détection automatique de l'année 1888..=2100 : entre parenthèses (YYYY), entre crochets [YYYY] ou délimitée sans parenthèses (ex: Movie.Title.2024.1080p.mkv -> titre: "Movie Title", année: Some(2024)).
+  - Élimination des tags de release et codecs standards (1080p, 720p, 2160p, 4k, web-dl, luray, x264, x265, hevc, emux, etc.) pour éviter de polluer la recherche TMDb/IMDb.
+  - Nettoyage des titres d'épisodes de séries (clean_episode_title) avec repli propre sur SxxExx sans les résolutions/codecs.
+- **Auto-amorçage des plugins essentiels (crates/core/src/extensions.rs)** :
+  - ootstrap_essential_plugins insère ou réactive automatiquement 	mdb et imdb avec enabled = 1 et ll_libraries = 1 dès le premier démarrage d'Aether.
+  - Paquets pré-embarqués dans crates/core/embedded_plugins/ pour garantir la présence des plugins sans dépendre d'un téléchargement réseau initial.
+  - install_with_key active désormais par défaut les extensions installées depuis le catalogue (enabled = 1, all_libraries = 1).
+- **Assouplissement du matching TMDb/IMDb (crates/core/src/extensions.rs)** :
+  - 	rusted_metadata_candidate utilise matchable_title pour ignorer les divergences de ponctuation (-, :, ', etc.).
+  - Retient le premier candidat pertinent même en cas d'homonymes multiples au lieu de rejeter silencieusement la correspondance.
+- **Téléchargement automatique des affiches et fanarts (crates/core/src/automation.rs, crates/core/src/extension_adapters.rs)** :
+  - pply_missing_metadata extrait poster_url et ackdrop_url et les importe immédiatement dans le magasin d'images applicatif (rtwork.rs).
+  - Limite de taille d'image augmentée à 10 Mo dans import_image_direct pour accepter les affiches originales haute résolution de TMDb.
+  - Enregistrement systématique de egister_active_store(&store) dans IdentityStore::open_with_timeout et open_postgres.
+- **Déclenchement du scan de métadonnées manquantes (crates/core/src/inventory.rs, AdminLibraries.svelte)** :
+  - complete_scan planifie automatiquement metadata.missing lors des scans en mode missing_metadata ou ull.
+  - Bouton et sélecteur de mode dans l'administration des bibliothèques (AdminLibraries.svelte) permettant de cibler les œuvres sans résumé ou sans affiche.
+- **Validations réelles** :
+  - cargo check --workspace : 0 erreur.
+  - cargo test -p media-node : 93 passés, 0 échec.
+  - cargo test -p media-poc --lib extensions -- --test-threads=1 : 26 passés, 0 échec.
+  - cargo clippy --all-targets -- -D warnings : 0 avertissement.
+  - 
+pm --prefix apps/web test : 31 suites, 220 tests passés.
+  - 
+pm --prefix apps/web run check : 0 erreur, 0 avertissement (svelte-check).
+
 ## 1er novembre 2026 — Parités Jellyfin : seuils de reprise, métadonnées, SyncPlay, CORS et réglages serveur
 
 - **Seuils de reprise & Intégration UI (`progress.ts`, `server_settings.rs`)** :

@@ -1758,6 +1758,18 @@ pub async fn publish_staged_scan(
     )
     .await?;
 
+    if matches!(refresh_mode.as_str(), "missing_metadata" | "full") {
+        let _ = crate::automation::schedule_library(
+            &mut tx,
+            library_id,
+            "metadata.missing",
+            &uuid::Uuid::new_v4().to_string(),
+            None,
+            media_contracts::protocol::unix_now(),
+        )
+        .await;
+    }
+
     query("DELETE FROM scan_staging_files WHERE scan_id=?")
         .bind(scan_id)
         .execute(&mut *tx)

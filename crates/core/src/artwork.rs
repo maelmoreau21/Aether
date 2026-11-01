@@ -528,6 +528,22 @@ pub(crate) async fn upload(
     bytes: Bytes,
 ) -> Result<(StatusCode, Json<Value>), StatusCode> {
     allowed(&auth, &headers, &work, true).await?;
+    let content = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
+    upload_internal(&auth.store, work, kind, options, content, bytes).await
+}
+
+pub(crate) async fn upload_internal(
+    store: &IdentityStore,
+    work: String,
+    kind: String,
+    options: ImageQuery,
+    content: String,
+    bytes: Bytes,
+) -> Result<(StatusCode, Json<Value>), StatusCode> {
     if !ROLES.contains(&kind.as_str())
         || options
             .language
@@ -538,7 +554,7 @@ pub(crate) async fn upload(
         return Err(StatusCode::BAD_REQUEST);
     }
     let language = options.language.as_ref().map(|v| v.to_ascii_lowercase());
-    let existing = entries(&auth.store, std::slice::from_ref(&work))
+    let existing = entries(store, std::slice::from_ref(&work))
         .await
         .map_err(db)?;
     if let Some(replace) = &options.replace
@@ -546,11 +562,6 @@ pub(crate) async fn upload(
     {
         return Err(StatusCode::NOT_FOUND);
     }
-    let content = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_owned();
     let permit = tokio::time::timeout(std::time::Duration::from_secs(8), DECODERS.acquire())
         .await
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
@@ -566,7 +577,7 @@ pub(crate) async fn upload(
     // options of the parent library.
     let policy = if options.append && options.apply_collection_policy {
         let settings: String = query_scalar("SELECT COALESCE(parent.options_json,l.options_json) FROM inventory_works w JOIN libraries l ON l.id=w.library_id LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 LEFT JOIN libraries parent ON parent.id=f.parent_id WHERE w.id=?")
-            .bind(&work).fetch_one(&auth.store.pool).await.map_err(db)?;
+            .bind(&work).fetch_one(&store.pool).await.map_err(db)?;
         let policy: crate::library_options::LibraryOptions =
             serde_json::from_str(&settings).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         if !policy.validate() {
@@ -587,15 +598,14 @@ pub(crate) async fn upload(
     };
     let mut stored_variants = Vec::with_capacity(encoded.variants.len());
     for (width, mime, data) in &encoded.variants {
-        let meta = auth
-            .store
+        let meta = store
             .assets
             .put_bytes(data, mime)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         stored_variants.push((*width, *mime, meta.sha256));
     }
-    let mut connection = auth.store.pool.acquire().await.map_err(db)?;
+    let mut connection = store.pool.acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write(&mut connection)
         .await
         .map_err(db)?;

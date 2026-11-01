@@ -31,7 +31,7 @@ use tokio::{
 static MUTATIONS: Mutex<()> = Mutex::const_new(());
 
 #[path = "extension_adapters.rs"]
-mod adapters;
+pub(crate) mod adapters;
 #[path = "extension_artwork_rotation.rs"]
 mod artwork_rotation;
 #[path = "extension_avatar_collections.rs"]
@@ -52,7 +52,8 @@ fn resolve_effective_extension_settings(extension_id: &str, mut settings: Value)
             .and_then(Value::as_str)
             .is_none_or(|k| k.trim().is_empty())
     {
-        let env_key = std::env::var("TMDB_API_KEY")
+        let env_key = std::env::var("MEDIA_TMDB_API_KEY")
+            .or_else(|_| std::env::var("TMDB_API_KEY"))
             .ok()
             .filter(|k| !k.trim().is_empty());
         let default_key = env_key.unwrap_or_else(|| DEFAULT_COMMUNITY_TMDB_API_KEY.to_string());
@@ -785,15 +786,15 @@ async fn install_with_key(
     let mut tx = auth.store.pool().begin().await.map_err(db)?;
     query("INSERT INTO extension_publishers(id,public_key,active) VALUES(?,?,1) ON CONFLICT(id) DO UPDATE SET active=1")
         .bind(&key_id).bind(&public_key).execute(&mut *tx).await.map_err(db)?;
-    query("INSERT INTO extensions(id,publisher_id,package_json,generation,all_libraries) VALUES(?,?,?,?,?)")
+    query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation,all_libraries) VALUES(?,?,?,1,?,1)")
         .bind(&package.manifest.id)
         .bind(&key_id)
         .bind(bytes)
         .bind(uuid::Uuid::new_v4().to_string())
-        .bind(i64::from(package.manifest.permissions.iter().any(|permission|permission=="metadata.read")))
         .execute(&mut *tx)
         .await
         .map_err(|_| err(StatusCode::CONFLICT, "extension_exists"))?;
+    let _ = crate::automation::emit_extension(&mut tx, &package.manifest.id, media_contracts::protocol::unix_now()).await;
     audit(
         &mut tx,
         &actor.user.id,
@@ -809,6 +810,69 @@ async fn install_with_key(
         StatusCode::CREATED,
         Json(json!({"id": package.manifest.id})),
     ))
+}
+
+pub async fn install_internal_with_key(
+    store: &crate::identity::IdentityStore,
+    package: Package,
+    public_key: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let key = STANDARD.decode(public_key)?;
+    validate_package(&package, &key).map_err(|e| format!("Validation error: {e}"))?;
+    let key_id = format!("key.{:x}", Sha256::digest(&key));
+    let bytes = serde_json::to_string(&package)?;
+    let mut tx = store.pool().begin().await?;
+    query("INSERT INTO extension_publishers(id,public_key,active) VALUES(?,?,1) ON CONFLICT(id) DO UPDATE SET active=1")
+        .bind(&key_id).bind(public_key).execute(&mut *tx).await?;
+    query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation,all_libraries) VALUES(?,?,?,1,?,1) ON CONFLICT(id) DO NOTHING")
+        .bind(&package.manifest.id)
+        .bind(&key_id)
+        .bind(bytes)
+        .bind(uuid::Uuid::new_v4().to_string())
+        .execute(&mut *tx)
+        .await?;
+    let _ = crate::automation::emit_extension(&mut tx, &package.manifest.id, media_contracts::protocol::unix_now()).await;
+    crate::extension_storage::persist(store, &package).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn bootstrap_essential_plugins(store: &crate::identity::IdentityStore) {
+    let tmdb_row: Option<(i64, i64)> = query_as("SELECT enabled, all_libraries FROM extensions WHERE id='tmdb'")
+        .fetch_optional(store.pool())
+        .await
+        .unwrap_or(None);
+    if let Some((enabled, all_libs)) = tmdb_row {
+        if enabled == 0 || all_libs == 0 {
+            let _ = query("UPDATE extensions SET enabled=1, all_libraries=1 WHERE id='tmdb'")
+                .execute(store.pool())
+                .await;
+        }
+    } else {
+        const TMDB_PKG: &str = include_str!("../embedded_plugins/tmdb-0.1.0.package.json");
+        const PUB_KEY: &str = include_str!("../embedded_plugins/publisher-public.txt");
+        if let Ok(pkg) = serde_json::from_str::<Package>(TMDB_PKG) {
+            let _ = install_internal_with_key(store, pkg, PUB_KEY.trim()).await;
+        }
+    }
+
+    let imdb_row: Option<(i64, i64)> = query_as("SELECT enabled, all_libraries FROM extensions WHERE id='imdb'")
+        .fetch_optional(store.pool())
+        .await
+        .unwrap_or(None);
+    if let Some((enabled, all_libs)) = imdb_row {
+        if enabled == 0 || all_libs == 0 {
+            let _ = query("UPDATE extensions SET enabled=1, all_libraries=1 WHERE id='imdb'")
+                .execute(store.pool())
+                .await;
+        }
+    } else {
+        const IMDB_PKG: &str = include_str!("../embedded_plugins/imdb-0.1.0.package.json");
+        const PUB_KEY: &str = include_str!("../embedded_plugins/publisher-public.txt");
+        if let Ok(pkg) = serde_json::from_str::<Package>(IMDB_PKG) {
+            let _ = install_internal_with_key(store, pkg, PUB_KEY.trim()).await;
+        }
+    }
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2031,6 +2095,24 @@ fn normalize_title(title: &str) -> String {
         .join(" ")
         .to_lowercase()
 }
+
+fn matchable_title(s: &str) -> String {
+    s.chars()
+        .filter_map(|c| {
+            if c.is_alphanumeric() {
+                Some(c.to_ascii_lowercase())
+            } else if c.is_whitespace() || matches!(c, '.' | '_' | '-' | ':' | '/' | '\'') {
+                Some(' ')
+            } else {
+                None
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn invocation_year_matches(details: &Value, candidate: &Value) -> bool {
     details["year"].as_i64().is_none_or(|year| {
         candidate["year"]
@@ -2038,19 +2120,36 @@ fn invocation_year_matches(details: &Value, candidate: &Value) -> bool {
             .is_none_or(|expected| year == expected)
     })
 }
+
 fn trusted_metadata_candidate<'a>(items: &'a [Value], input: &Value) -> Option<&'a Value> {
-    let title = normalize_title(input["title"].as_str()?);
+    let raw_title = input["title"].as_str()?;
+    let title = normalize_title(raw_title);
+    let matchable = matchable_title(raw_title);
     let media_type = input["mediaType"].as_str()?;
     let year = input["year"].as_i64();
-    let mut matches = items.iter().filter(|item| {
+
+    let title_matches = |name: &str| {
+        normalize_title(name) == title || (!matchable.is_empty() && matchable_title(name) == matchable)
+    };
+
+    if let Some(expected) = year
+        && let Some(candidate) = items.iter().find(|item| {
+            item["title"]
+                .as_str()
+                .is_some_and(title_matches)
+                && item["mediaType"].as_str() == Some(media_type)
+                && item["year"].as_i64() == Some(expected)
+        })
+    {
+        return Some(candidate);
+    }
+    items.iter().find(|item| {
         item["title"]
             .as_str()
-            .is_some_and(|name| normalize_title(name) == title)
+            .is_some_and(title_matches)
             && item["mediaType"].as_str() == Some(media_type)
-            && year.is_none_or(|expected| item["year"].as_i64() == Some(expected))
-    });
-    let first = matches.next()?;
-    matches.next().is_none().then_some(first)
+            && year.is_none_or(|expected| item["year"].as_i64().is_none_or(|y| y == expected))
+    })
 }
 
 pub fn trusted_music_candidate<'a>(items: &'a [Value], input: &Value) -> Option<&'a Value> {
@@ -2242,8 +2341,14 @@ mod configuration_tests {
             trusted_metadata_candidate(std::slice::from_ref(&candidate), &input).unwrap()["id"],
             "42"
         );
-        assert!(
-            trusted_metadata_candidate(&[candidate.clone(), candidate.clone()], &input).is_none()
+        assert_eq!(
+            trusted_metadata_candidate(&[candidate.clone(), candidate.clone()], &input).unwrap()["id"],
+            "42"
+        );
+        let candidate_no_year = json!({"id":"43","title":"Film Test","mediaType":"movie"});
+        assert_eq!(
+            trusted_metadata_candidate(std::slice::from_ref(&candidate_no_year), &input).unwrap()["id"],
+            "43"
         );
         for other in [
             json!({"id":"42","title":"Film Test","mediaType":"tv_show","year":2024}),
@@ -2293,4 +2398,36 @@ mod configuration_tests {
         );
         assert!(serde_json::from_value::<MetadataInput>(legacy).is_ok());
     }
+
+    #[tokio::test]
+    async fn test_bootstrap_essential_plugins_installs_tmdb_and_imdb_enabled() {
+        let root = tempfile::tempdir().unwrap();
+        let store = crate::identity::IdentityStore::open(&root.path().join("core.sqlite3"))
+            .await
+            .unwrap();
+        let initial_count: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM extensions")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(initial_count, 0);
+
+        bootstrap_essential_plugins(&store).await;
+
+        let tmdb_row: Option<(i64, i64)> = crate::database::query_as(
+            "SELECT enabled, all_libraries FROM extensions WHERE id='tmdb'",
+        )
+        .fetch_optional(store.pool())
+        .await
+        .unwrap();
+        assert_eq!(tmdb_row, Some((1, 1)));
+
+        let imdb_row: Option<(i64, i64)> = crate::database::query_as(
+            "SELECT enabled, all_libraries FROM extensions WHERE id='imdb'",
+        )
+        .fetch_optional(store.pool())
+        .await
+        .unwrap();
+        assert_eq!(imdb_row, Some((1, 1)));
+    }
 }
+

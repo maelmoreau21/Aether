@@ -1,5 +1,6 @@
 //! Generic host adapters: no provider names, credentials or host inference.
 use super::*;
+use crate::identity::IdentityStore;
 use media_extension_sdk::{Lyrics, MediaImage, SearchResultItem, StructuredMetadata};
 
 #[derive(sqlx::FromRow)]
@@ -573,24 +574,23 @@ pub(super) async fn avatar_operation(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct ImportImage {
-    pub(super) work_id: String,
-    pub(super) url: String,
-    pub(super) kind: String,
+pub(crate) struct ImportImage {
+    pub(crate) work_id: String,
+    pub(crate) url: String,
+    pub(crate) kind: String,
     #[serde(default)]
-    pub(super) language: Option<String>,
+    pub(crate) language: Option<String>,
     #[serde(default)]
-    pub(super) append: bool,
+    pub(crate) append: bool,
     #[serde(skip)]
-    pub(super) apply_collection_policy: bool,
+    pub(crate) apply_collection_policy: bool,
 }
-pub(super) async fn import_image(
-    State(auth): State<AuthState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-    Json(input): Json<ImportImage>,
+
+pub(crate) async fn import_image_direct(
+    store: &IdentityStore,
+    id: &str,
+    input: ImportImage,
 ) -> Result<Json<Value>, Error> {
-    admin(&auth, &headers, true).await?;
     if !matches!(
         input.kind.as_str(),
         "poster" | "backdrop" | "logo" | "banner" | "thumb" | "illustration" | "disc" | "landscape"
@@ -606,21 +606,18 @@ pub(super) async fn import_image(
     }
     let library: Option<String> = query_scalar("SELECT library_id FROM inventory_works WHERE id=?")
         .bind(&input.work_id)
-        .fetch_optional(auth.store.pool())
+        .fetch_optional(store.pool())
         .await
         .map_err(db)?;
-    let library = library.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let _library = library.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
     let row: Option<(String, String)> =
-        query_as("SELECT package_json,generation FROM extensions WHERE id=?")
-            .bind(&id)
-            .fetch_optional(auth.store.pool())
+        query_as("SELECT package_json,generation FROM extensions WHERE id=? AND enabled=1")
+            .bind(id)
+            .fetch_optional(store.pool())
             .await
             .map_err(db)?;
-    let (stored, generation) =
+    let (stored, _) =
         row.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
-    if !permitted(&auth, &headers, &id, &library, &generation).await? {
-        return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
-    }
     let package: Package = serde_json::from_str(&stored)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
     for permission in ["images", "metadata.write"] {
@@ -628,11 +625,6 @@ pub(super) async fn import_image(
             return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
         }
     }
-    let _slot = crate::extension_runtime::try_acquire_execution(
-        &id,
-        crate::extension_runtime::ExecutionClass::Interactive,
-    )
-    .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
     let url = reqwest::Url::parse(&input.url)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_image_url"))?;
     let host = url
@@ -689,7 +681,7 @@ pub(super) async fn import_image(
             .await
             .map_err(|_| err(StatusCode::BAD_GATEWAY, "image_download_failed"))?
         {
-            if bytes.len() + chunk.len() > 2 * 1024 * 1024 {
+            if bytes.len() + chunk.len() > 10 * 1024 * 1024 {
                 return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "image_too_large"));
             }
             bytes.extend_from_slice(&chunk);
@@ -698,33 +690,56 @@ pub(super) async fn import_image(
     })
     .await
     .map_err(|_| err(StatusCode::REQUEST_TIMEOUT, "image_timeout"))??;
-    let _lock = MUTATIONS.lock().await;
-    if !permitted(&auth, &headers, &id, &library, &generation).await? {
-        return Err(err(StatusCode::FORBIDDEN, "extension_revoked"));
-    }
-    let mut headers = headers;
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_str(&bytes.1)
-            .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_image_type"))?,
-    );
-    let (_, result) = crate::artwork::upload(
-        State(auth),
-        Path((input.work_id, input.kind)),
-        Query(crate::artwork::ImageQuery {
+
+    let (_, result) = crate::artwork::upload_internal(
+        store,
+        input.work_id,
+        input.kind,
+        crate::artwork::ImageQuery {
             append: input.append,
             language: input.language,
-            provider: Some(id),
+            provider: Some(id.to_string()),
             source_url_hash: Some(format!("{:x}", Sha256::digest(input.url.as_bytes()))),
             apply_collection_policy: input.apply_collection_policy,
             ..Default::default()
-        }),
-        headers,
+        },
+        bytes.1,
         bytes.0.into(),
     )
     .await
     .map_err(|s| err(s, "image_import_failed"))?;
     Ok(result)
+}
+
+pub(super) async fn import_image(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<ImportImage>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, true).await?;
+    let library: Option<String> = query_scalar("SELECT library_id FROM inventory_works WHERE id=?")
+        .bind(&input.work_id)
+        .fetch_optional(auth.store.pool())
+        .await
+        .map_err(db)?;
+    let library = library.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let generation: Option<String> =
+        query_scalar("SELECT generation FROM extensions WHERE id=?")
+            .bind(&id)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let generation = generation.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
+    if !permitted(&auth, &headers, &id, &library, &generation).await? {
+        return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
+    }
+    let _slot = crate::extension_runtime::try_acquire_execution(
+        &id,
+        crate::extension_runtime::ExecutionClass::Interactive,
+    )
+    .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
+    import_image_direct(&auth.store, &id, input).await
 }
 
 #[cfg(test)]

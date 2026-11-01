@@ -159,17 +159,83 @@ pub(crate) fn is_excluded(relative_path: &str, name: &str, excluded_patterns: &[
 }
 
 const RELEASE_TAGS: &[&str] = &[
-    "1080p", "1080i", "720p", "720i", "2160p", "4k", "2k", "8k", "uhd", "ultrahd",
-    "480p", "480i", "576p", "576i",
-    "hdr", "hdr10", "hdr10plus", "dv", "dovi", "dolbyvision", "dolby-vision",
-    "bluray", "blu-ray", "bdrip", "brrip", "bdr", "bd", "hdtv", "hdrip", "hdtvrip",
-    "dvd", "dvdrip", "dvdscr", "dvdscreener", "screener",
-    "webrip", "web-rip", "webdl", "web-dl", "web",
-    "remux", "proper", "repack", "rerip", "unrated", "retail", "internal", "limited",
-    "cam", "camrip", "telesync", "telecine",
-    "x264", "x265", "h264", "h265", "hevc", "av1", "xvid", "divx", "divx5",
-    "aac", "ac3", "eac3", "dts", "dtshd", "dts-hd", "truehd", "atmos", "flac",
-    "multi", "multisubs", "vostfr", "vff", "vfq", "truefrench", "subfrench",
+    "1080p",
+    "1080i",
+    "720p",
+    "720i",
+    "2160p",
+    "4k",
+    "2k",
+    "8k",
+    "uhd",
+    "ultrahd",
+    "480p",
+    "480i",
+    "576p",
+    "576i",
+    "hdr",
+    "hdr10",
+    "hdr10plus",
+    "dv",
+    "dovi",
+    "dolbyvision",
+    "dolby-vision",
+    "bluray",
+    "blu-ray",
+    "bdrip",
+    "brrip",
+    "bdr",
+    "bd",
+    "hdtv",
+    "hdrip",
+    "hdtvrip",
+    "dvd",
+    "dvdrip",
+    "dvdscr",
+    "dvdscreener",
+    "screener",
+    "webrip",
+    "web-rip",
+    "webdl",
+    "web-dl",
+    "web",
+    "remux",
+    "proper",
+    "repack",
+    "rerip",
+    "unrated",
+    "retail",
+    "internal",
+    "limited",
+    "cam",
+    "camrip",
+    "telesync",
+    "telecine",
+    "x264",
+    "x265",
+    "h264",
+    "h265",
+    "hevc",
+    "av1",
+    "xvid",
+    "divx",
+    "divx5",
+    "aac",
+    "ac3",
+    "eac3",
+    "dts",
+    "dtshd",
+    "dts-hd",
+    "truehd",
+    "atmos",
+    "flac",
+    "multi",
+    "multisubs",
+    "vostfr",
+    "vff",
+    "vfq",
+    "truefrench",
+    "subfrench",
 ];
 
 fn is_delim(b: u8) -> bool {
@@ -284,7 +350,9 @@ fn metadata_name(name: &str) -> (String, Option<u16>, BTreeMap<String, String>) 
         while let Some(idx) = lower[pos..end].find(tag) {
             let actual_idx = pos + idx;
             let prev_delim = actual_idx == 0 || is_delim(lower_bytes[actual_idx - 1]);
-            let next_delim = actual_idx + tag_len == len || actual_idx + tag_len == end || is_delim(lower_bytes[actual_idx + tag_len]);
+            let next_delim = actual_idx + tag_len == len
+                || actual_idx + tag_len == end
+                || is_delim(lower_bytes[actual_idx + tag_len]);
             if prev_delim && next_delim && actual_idx > 0 {
                 end = end.min(actual_idx);
                 break;
@@ -444,7 +512,11 @@ pub struct ParsedSeriesEpisode {
 }
 
 fn clean_episode_title(raw: &str) -> Option<String> {
-    let trimmed = raw.trim().trim_start_matches('-').trim_matches(['.', '_', '-', ' ']).trim();
+    let trimmed = raw
+        .trim()
+        .trim_start_matches('-')
+        .trim_matches(['.', '_', '-', ' '])
+        .trim();
     if trimmed.is_empty() {
         return None;
     }
@@ -470,7 +542,9 @@ fn clean_episode_title(raw: &str) -> Option<String> {
         while let Some(idx) = lower[pos..end].find(tag) {
             let actual_idx = pos + idx;
             let prev_delim = actual_idx == 0 || is_delim(lower_bytes[actual_idx - 1]);
-            let next_delim = actual_idx + tag_len == lower_bytes.len() || actual_idx + tag_len == end || is_delim(lower_bytes[actual_idx + tag_len]);
+            let next_delim = actual_idx + tag_len == lower_bytes.len()
+                || actual_idx + tag_len == end
+                || is_delim(lower_bytes[actual_idx + tag_len]);
             if prev_delim && next_delim {
                 end = end.min(actual_idx);
                 break;
@@ -1950,11 +2024,14 @@ mod tests {
         assert_eq!(year, None);
         assert_eq!(ids.get("tmdb").map(String::as_str), Some("1999"));
 
-        let ep = parse_series_episode(Path::new("Show/Season 1/Show.S01E01.Pilot.1080p.BluRay.x264.mkv")).unwrap();
+        let ep = parse_series_episode(Path::new(
+            "Show/Season 1/Show.S01E01.Pilot.1080p.BluRay.x264.mkv",
+        ))
+        .unwrap();
         assert_eq!(ep.episode_title, "Pilot");
 
-        let ep = parse_series_episode(Path::new("Show/Season 1/Show.S01E01.1080p.BluRay.x264.mkv")).unwrap();
+        let ep = parse_series_episode(Path::new("Show/Season 1/Show.S01E01.1080p.BluRay.x264.mkv"))
+            .unwrap();
         assert_eq!(ep.episode_title, "S01E01");
     }
 }
-

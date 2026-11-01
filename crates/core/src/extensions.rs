@@ -794,7 +794,12 @@ async fn install_with_key(
         .execute(&mut *tx)
         .await
         .map_err(|_| err(StatusCode::CONFLICT, "extension_exists"))?;
-    let _ = crate::automation::emit_extension(&mut tx, &package.manifest.id, media_contracts::protocol::unix_now()).await;
+    let _ = crate::automation::emit_extension(
+        &mut tx,
+        &package.manifest.id,
+        media_contracts::protocol::unix_now(),
+    )
+    .await;
     audit(
         &mut tx,
         &actor.user.id,
@@ -831,17 +836,23 @@ pub async fn install_internal_with_key(
         .bind(uuid::Uuid::new_v4().to_string())
         .execute(&mut *tx)
         .await?;
-    let _ = crate::automation::emit_extension(&mut tx, &package.manifest.id, media_contracts::protocol::unix_now()).await;
+    let _ = crate::automation::emit_extension(
+        &mut tx,
+        &package.manifest.id,
+        media_contracts::protocol::unix_now(),
+    )
+    .await;
     crate::extension_storage::persist(store, &package).await?;
     tx.commit().await?;
     Ok(())
 }
 
 pub async fn bootstrap_essential_plugins(store: &crate::identity::IdentityStore) {
-    let tmdb_row: Option<(i64, i64)> = query_as("SELECT enabled, all_libraries FROM extensions WHERE id='tmdb'")
-        .fetch_optional(store.pool())
-        .await
-        .unwrap_or(None);
+    let tmdb_row: Option<(i64, i64)> =
+        query_as("SELECT enabled, all_libraries FROM extensions WHERE id='tmdb'")
+            .fetch_optional(store.pool())
+            .await
+            .unwrap_or(None);
     if let Some((enabled, all_libs)) = tmdb_row {
         if enabled == 0 || all_libs == 0 {
             let _ = query("UPDATE extensions SET enabled=1, all_libraries=1 WHERE id='tmdb'")
@@ -856,10 +867,11 @@ pub async fn bootstrap_essential_plugins(store: &crate::identity::IdentityStore)
         }
     }
 
-    let imdb_row: Option<(i64, i64)> = query_as("SELECT enabled, all_libraries FROM extensions WHERE id='imdb'")
-        .fetch_optional(store.pool())
-        .await
-        .unwrap_or(None);
+    let imdb_row: Option<(i64, i64)> =
+        query_as("SELECT enabled, all_libraries FROM extensions WHERE id='imdb'")
+            .fetch_optional(store.pool())
+            .await
+            .unwrap_or(None);
     if let Some((enabled, all_libs)) = imdb_row {
         if enabled == 0 || all_libs == 0 {
             let _ = query("UPDATE extensions SET enabled=1, all_libraries=1 WHERE id='imdb'")
@@ -2129,14 +2141,13 @@ fn trusted_metadata_candidate<'a>(items: &'a [Value], input: &Value) -> Option<&
     let year = input["year"].as_i64();
 
     let title_matches = |name: &str| {
-        normalize_title(name) == title || (!matchable.is_empty() && matchable_title(name) == matchable)
+        normalize_title(name) == title
+            || (!matchable.is_empty() && matchable_title(name) == matchable)
     };
 
     if let Some(expected) = year
         && let Some(candidate) = items.iter().find(|item| {
-            item["title"]
-                .as_str()
-                .is_some_and(title_matches)
+            item["title"].as_str().is_some_and(title_matches)
                 && item["mediaType"].as_str() == Some(media_type)
                 && item["year"].as_i64() == Some(expected)
         })
@@ -2144,9 +2155,7 @@ fn trusted_metadata_candidate<'a>(items: &'a [Value], input: &Value) -> Option<&
         return Some(candidate);
     }
     items.iter().find(|item| {
-        item["title"]
-            .as_str()
-            .is_some_and(title_matches)
+        item["title"].as_str().is_some_and(title_matches)
             && item["mediaType"].as_str() == Some(media_type)
             && year.is_none_or(|expected| item["year"].as_i64().is_none_or(|y| y == expected))
     })
@@ -2430,4 +2439,3 @@ mod configuration_tests {
         assert_eq!(imdb_row, Some((1, 1)));
     }
 }
-

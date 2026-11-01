@@ -1437,13 +1437,18 @@ async fn pump_triggers(
     for (id, library, extension, kind, cursor) in sweeps {
         let rows:Vec<(String,String,String,String,i64)>=query_as("SELECT a.id,obs.fingerprint,w.editorial_json,COALESCE(w.manual_json,'{}'),CAST((SELECT COUNT(*) FROM work_image_entries WHERE work_id=w.id AND kind='poster') + (SELECT COUNT(*) FROM work_posters WHERE work_id=w.id) AS INTEGER) FROM inventory_assets a JOIN automation_observations obs ON obs.asset_id=a.id JOIN inventory_sources source ON source.id=a.source_id JOIN inventory_versions version ON version.id=source.version_id JOIN inventory_editions edition ON edition.id=version.edition_id JOIN inventory_works w ON w.id=edition.work_id WHERE a.library_id=? AND a.available=1 AND a.id>? ORDER BY a.id LIMIT ?").bind(&library).bind(&cursor).bind(limit+1).fetch_all(&mut **tx).await?;
         let more = rows.len() as i64 > limit;
-        for (asset, fingerprint, editorial, manual, poster_count) in rows.into_iter().take(limit as usize) {
+        for (asset, fingerprint, editorial, manual, poster_count) in
+            rows.into_iter().take(limit as usize)
+        {
             query("UPDATE automation_sweeps SET cursor_asset=? WHERE id=?")
                 .bind(&asset)
                 .bind(&id)
                 .execute(&mut **tx)
                 .await?;
-            if kind == "metadata.missing" && poster_count > 0 && !metadata_has_missing_fields(&editorial, &manual) {
+            if kind == "metadata.missing"
+                && poster_count > 0
+                && !metadata_has_missing_fields(&editorial, &manual)
+            {
                 continue;
             }
             let key = hash(&(&id, &asset))?;

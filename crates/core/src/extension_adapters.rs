@@ -616,8 +616,7 @@ pub(crate) async fn import_image_direct(
             .fetch_optional(store.pool())
             .await
             .map_err(db)?;
-    let (stored, _) =
-        row.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
+    let (stored, _) = row.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
     let package: Package = serde_json::from_str(&stored)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
     for permission in ["images", "metadata.write"] {
@@ -724,12 +723,11 @@ pub(super) async fn import_image(
         .await
         .map_err(db)?;
     let library = library.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
-    let generation: Option<String> =
-        query_scalar("SELECT generation FROM extensions WHERE id=?")
-            .bind(&id)
-            .fetch_optional(auth.store.pool())
-            .await
-            .map_err(db)?;
+    let generation: Option<String> = query_scalar("SELECT generation FROM extensions WHERE id=?")
+        .bind(&id)
+        .fetch_optional(auth.store.pool())
+        .await
+        .map_err(db)?;
     let generation = generation.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
     if !permitted(&auth, &headers, &id, &library, &generation).await? {
         return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));

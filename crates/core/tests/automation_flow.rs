@@ -134,6 +134,10 @@ async fn missing_only_sweep_skips_complete_and_manually_corrected_works() {
         .execute(store.pool())
         .await
         .unwrap();
+    query("INSERT INTO work_image_entries(id,work_id,kind,position,width,height) VALUES('poster-1','work-1','poster',0,500,750)")
+        .execute(store.pool())
+        .await
+        .unwrap();
     let mut tx = store.pool().begin().await.unwrap();
     automation::schedule_library(
         &mut tx,

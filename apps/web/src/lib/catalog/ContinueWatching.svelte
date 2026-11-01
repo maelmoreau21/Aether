@@ -3,6 +3,8 @@
   import { resolve } from '$app/paths';
   import { session } from '../auth/session';
   import { history, loadHistory } from './watch-state';
+  import { isResumable } from '../player/progress';
+  import { serverPresentation } from '../config/presentation';
   import Icon from '../ui/Icon.svelte';
   import type { Work } from './api';
   import { selectArtwork } from './artwork-selection';
@@ -34,7 +36,7 @@
     if ($session) void loadHistory().catch(e => (error = e.message));
   });
 
-  const continuing = $derived($history.filter(item => !item.watched && item.position > 0));
+  const continuing = $derived($history.filter(item => isResumable(item, $serverPresentation)));
 
   function updateScrollState() {
     if (!track) return;

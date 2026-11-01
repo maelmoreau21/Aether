@@ -75,6 +75,12 @@
       const data = await response.json();
       results = data.results ?? [];
       providersList = data.providers ?? [];
+      const failures = (data.errors ?? []) as { providerName?: string; provider: string; error: string }[];
+      if (results.length === 0 && failures.length > 0) {
+        error = failures
+          .map((f) => `${f.providerName ?? f.provider} : ${f.error}`)
+          .join(' · ');
+      }
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Erreur lors de la recherche.';
     } finally {

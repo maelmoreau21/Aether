@@ -1,5 +1,13 @@
 import { writable } from 'svelte/store';
-export const serverPresentation = writable({ serverName: '', welcomeMessage: '' });
+export const serverPresentation = writable<{
+  serverName: string;
+  welcomeMessage: string;
+  minResumePct?: number;
+  maxResumePct?: number;
+  minResumeDurationSeconds?: number;
+  activityLogRetentionDays?: number;
+  corsHosts?: string[];
+}>({ serverName: '', welcomeMessage: '' });
 export async function loadServerPresentation() {
   try {
     const response = await fetch('/api/v1/server', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });

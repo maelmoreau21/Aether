@@ -277,6 +277,13 @@ pub enum ClientMessage {
     RemoveFromQueue {
         queue_id: String,
     },
+    MoveQueueItem {
+        queue_id: String,
+        new_index: usize,
+    },
+    PlayQueueItem {
+        queue_id: String,
+    },
     CreatePoll {
         question: String,
         options: Vec<String>,
@@ -2365,6 +2372,103 @@ async fn handle_client_event(
                 .await;
         }
 
+        ClientMessage::MoveQueueItem {
+            queue_id,
+            new_index,
+        } => {
+            let mut room = room_arc.write().await;
+            if !room.can_user_control(user_id) {
+                let _ = send_error(out_tx, "FORBIDDEN", "Contrôles non autorisés").await;
+                return;
+            }
+
+            if let Some(pos) = room.queue.iter().position(|item| item.id == queue_id) {
+                let item = room.queue.remove(pos);
+                let target_idx = new_index.min(room.queue.len());
+                room.queue.insert(target_idx, item);
+
+                let room_id = room.id.clone();
+                for (idx, q_item) in room.queue.iter_mut().enumerate() {
+                    q_item.position = idx as i64;
+                    let _ = query(
+                        "UPDATE watch_party_queue SET position = ? WHERE id = ? AND party_id = ?",
+                    )
+                    .bind(idx as i64)
+                    .bind(&q_item.id)
+                    .bind(&room_id)
+                    .execute(&hub.store.pool)
+                    .await;
+                }
+
+                let _ = room.broadcast_tx.send(ServerMessage::QueueUpdated {
+                    queue: room.queue.clone(),
+                });
+            }
+        }
+
+        ClientMessage::PlayQueueItem { queue_id } => {
+            let mut room = room_arc.write().await;
+            if !room.can_user_control(user_id) {
+                let _ = send_error(out_tx, "FORBIDDEN", "Contrôles non autorisés").await;
+                return;
+            }
+
+            if let Some(pos) = room.queue.iter().position(|item| item.id == queue_id) {
+                let item = room.queue.remove(pos);
+                let media_id = item.media_id.clone();
+                let media_title = item.media_title.clone();
+
+                room.media_id = media_id.clone();
+                room.media_title = media_title.clone();
+                room.state = PartyState::Waiting;
+                room.position_s = 0.0;
+                room.position_updated_ms = current_epoch_ms();
+                room.seq += 1;
+
+                let host_id = room.host_user_id.clone();
+                for p in room.participants.values_mut() {
+                    p.is_ready = p.user_id == host_id;
+                    p.is_buffering = false;
+                }
+
+                let _ = room.broadcast_tx.send(ServerMessage::MediaChanged {
+                    media_id: media_id.clone(),
+                    media_title,
+                    caused_by_name: display_name.to_string(),
+                });
+
+                let room_id = room.id.clone();
+                for (idx, q_item) in room.queue.iter_mut().enumerate() {
+                    q_item.position = idx as i64;
+                    let _ = query(
+                        "UPDATE watch_party_queue SET position = ? WHERE id = ? AND party_id = ?",
+                    )
+                    .bind(idx as i64)
+                    .bind(&q_item.id)
+                    .bind(&room_id)
+                    .execute(&hub.store.pool)
+                    .await;
+                }
+
+                let _ = room.broadcast_tx.send(ServerMessage::QueueUpdated {
+                    queue: room.queue.clone(),
+                });
+
+                let _ = query("UPDATE watch_parties SET media_id = ?, state = 'waiting', current_position_ms = 0, position_updated_at_ms = ? WHERE id = ?")
+                    .bind(&media_id)
+                    .bind(current_epoch_ms())
+                    .bind(&room.id)
+                    .execute(&hub.store.pool)
+                    .await;
+
+                let _ = query("DELETE FROM watch_party_queue WHERE id = ? AND party_id = ?")
+                    .bind(&queue_id)
+                    .bind(&room.id)
+                    .execute(&hub.store.pool)
+                    .await;
+            }
+        }
+
         ClientMessage::CreatePoll { question, options } => {
             let mut room = room_arc.write().await;
             if !room.can_user_control(user_id) {
@@ -2893,5 +2997,125 @@ mod tests {
         .unwrap();
         assert!(can_user_access_media(&store, "user-1", &Role::User, "ep-101").await);
         assert!(!can_user_access_media(&store, "user-1", &Role::User, "ep-404").await);
+    }
+
+    #[tokio::test]
+    async fn test_queue_reordering_and_playing_from_queue() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("queue_test.sqlite");
+        let store = IdentityStore::open(&db_path).await.unwrap();
+        let hub = WatchPartyHub::new(store.clone());
+
+        query("INSERT INTO users (id, role, display_name) VALUES ('host-1', 'user', 'Host')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO media_nodes (id, name, base_url, status, shared_secret) VALUES ('local', 'Node', 'http://127.0.0.1:8080', 'connected', 'sec') ON CONFLICT(id) DO UPDATE SET status='connected'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO libraries (id, name, kind, node_id, root, enabled) VALUES ('lib-1', 'Films', 'films', 'local', '/media', 1)")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO library_permissions (library_id, user_id) VALUES ('lib-1', 'host-1')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO inventory_works (id, library_id, identity_key, title, external_ids_json) VALUES ('w1', 'lib-1', 'k1', 'Film 1', '{}'), ('w2', 'lib-1', 'k2', 'Film 2', '{}'), ('w3', 'lib-1', 'k3', 'Film 3', '{}')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let now = current_epoch_s();
+        query("INSERT INTO watch_parties (id, name, host_user_id, media_id, control_mode, wait_for_buffering, state, current_position_ms, position_updated_at_ms, created_at) VALUES ('party-q', 'Queue Test Room', 'host-1', 'w1', 'host_only', 1, 'waiting', 0, ?, ?)")
+            .bind(now * 1000)
+            .bind(now)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let room_arc = hub
+            .get_or_load_room("party-q")
+            .await
+            .expect("Room should be loaded");
+
+        let (out_tx, mut _out_rx) = tokio::sync::mpsc::channel(16);
+
+        // 1. Add w2 and w3 to queue
+        handle_client_event(
+            ClientMessage::AddToQueue {
+                media_id: "w2".into(),
+            },
+            &room_arc,
+            "host-1",
+            "Host",
+            &out_tx,
+            &hub,
+        )
+        .await;
+
+        handle_client_event(
+            ClientMessage::AddToQueue {
+                media_id: "w3".into(),
+            },
+            &room_arc,
+            "host-1",
+            "Host",
+            &out_tx,
+            &hub,
+        )
+        .await;
+
+        {
+            let room = room_arc.read().await;
+            assert_eq!(room.queue.len(), 2);
+            assert_eq!(room.queue[0].media_id, "w2");
+            assert_eq!(room.queue[1].media_id, "w3");
+        }
+
+        // 2. Move w3 to the top (index 0)
+        let q_id_w3 = { room_arc.read().await.queue[1].id.clone() };
+        handle_client_event(
+            ClientMessage::MoveQueueItem {
+                queue_id: q_id_w3.clone(),
+                new_index: 0,
+            },
+            &room_arc,
+            "host-1",
+            "Host",
+            &out_tx,
+            &hub,
+        )
+        .await;
+
+        {
+            let room = room_arc.read().await;
+            assert_eq!(room.queue[0].media_id, "w3");
+            assert_eq!(room.queue[1].media_id, "w2");
+        }
+
+        // 3. Play w3 from queue
+        handle_client_event(
+            ClientMessage::PlayQueueItem { queue_id: q_id_w3 },
+            &room_arc,
+            "host-1",
+            "Host",
+            &out_tx,
+            &hub,
+        )
+        .await;
+
+        {
+            let room = room_arc.read().await;
+            assert_eq!(room.media_id, "w3");
+            assert_eq!(room.media_title, "Film 3");
+            assert_eq!(
+                room.queue.len(),
+                1,
+                "Played item must be removed from queue"
+            );
+            assert_eq!(room.queue[0].media_id, "w2");
+        }
     }
 }

@@ -63,7 +63,11 @@ pub(super) async fn search(
 
     let mut results = Vec::new();
     let mut available_providers = Vec::new();
+    let mut errors: Vec<Value> = Vec::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(35);
+    let s_settings = crate::server_settings::load(&auth.store)
+        .await
+        .unwrap_or_default();
 
     for (id, stored, generation) in rows {
         let package: Package = serde_json::from_str(&stored)
@@ -108,6 +112,8 @@ pub(super) async fn search(
                 "title": search_title,
                 "year": search_year,
                 "mediaType": media_type,
+                "language": s_settings.preferred_metadata_language,
+                "country": s_settings.metadata_country_code,
             }),
         };
 
@@ -122,6 +128,28 @@ pub(super) async fn search(
             ),
         )
         .await;
+
+        match &outcome {
+            Err(_) => errors.push(json!({
+                "provider": id,
+                "providerName": package.manifest.name,
+                "error": "provider_timeout",
+            })),
+            Ok(Err((_, body))) => {
+                let code = body
+                    .0
+                    .get("pluginError")
+                    .or_else(|| body.0.get("error"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("provider_error");
+                errors.push(json!({
+                    "provider": id,
+                    "providerName": package.manifest.name,
+                    "error": code,
+                }));
+            }
+            Ok(Ok(_)) => {}
+        }
 
         if let Ok(Ok(res)) = outcome {
             let proposal = res.0["proposal"].clone();
@@ -150,6 +178,7 @@ pub(super) async fn search(
     Ok(Json(json!({
         "results": results,
         "providers": available_providers,
+        "errors": errors,
     })))
 }
 

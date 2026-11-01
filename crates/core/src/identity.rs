@@ -83,6 +83,7 @@ pub struct IdentityStore {
     pub(crate) assets: std::sync::Arc<crate::assets::AssetStore>,
     pub(crate) task_writes: std::sync::Arc<tokio::sync::Mutex<()>>,
     pub(crate) node_registry: std::sync::Arc<crate::nodes::NodeRuntimeRegistry>,
+    pub(crate) cors_origins: std::sync::Arc<std::sync::RwLock<Vec<String>>>,
 }
 fn plugin_path(database: Option<&Path>) -> Result<std::path::PathBuf, IdentityError> {
     let path = std::env::var_os("MEDIA_PLUGINS_PATH")
@@ -214,6 +215,7 @@ impl IdentityStore {
             plugins_path: plugin_path(None)?,
             task_writes: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             node_registry: std::sync::Arc::new(crate::nodes::NodeRuntimeRegistry::new()),
+            cors_origins: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
         })
     }
 
@@ -348,6 +350,7 @@ impl IdentityStore {
             plugins_path: plugin_path(Some(path))?,
             task_writes: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             node_registry: std::sync::Arc::new(crate::nodes::NodeRuntimeRegistry::new()),
+            cors_origins: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
         })
     }
 

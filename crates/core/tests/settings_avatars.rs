@@ -32,6 +32,7 @@ async fn request(
             Request::builder()
                 .uri(path)
                 .method(method)
+                .header("host", "127.0.0.1:3000")
                 .header("origin", ORIGIN)
                 .header("cookie", cookie)
                 .header("x-csrf-token", csrf)
@@ -469,4 +470,95 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
         StatusCode::NOT_FOUND
     );
     reopened.close().await;
+}
+
+#[tokio::test]
+async fn cors_preflight_and_configured_origins_are_enforced() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("cors_test.sqlite");
+    let store = IdentityStore::open(&db).await.unwrap();
+    store
+        .bootstrap("admin", Zeroizing::new(PASSWORD.into()))
+        .await
+        .unwrap();
+    let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
+    let raw_app = auth::router(auth.clone()).merge(server_settings::router(auth.clone()));
+    let app =
+        media_poc::local_security_with_store(raw_app, ORIGIN.into(), Some(store.clone()), vec![]);
+
+    // 1. Initial state: untrusted origin http://client.example.com gets 403 Forbidden
+    let req = Request::builder()
+        .method("OPTIONS")
+        .uri("/api/v1/server")
+        .header(axum::http::header::HOST, "127.0.0.1:3000")
+        .header(axum::http::header::ORIGIN, "http://client.example.com")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // 2. Configure cors_hosts via Admin Settings
+    let (cookie, csrf) = login(&app, "admin").await;
+    let input = json!({
+        "serverName": "CORS Server",
+        "welcomeMessage": "",
+        "ssoButtonLabel": "SSO",
+        "corsHosts": ["http://client.example.com"]
+    })
+    .to_string()
+    .into_bytes();
+    let update = request(
+        &app,
+        "/api/v1/admin/settings",
+        "PUT",
+        &cookie,
+        &csrf,
+        "application/json",
+        input,
+    )
+    .await;
+    assert_eq!(update.status(), StatusCode::NO_CONTENT);
+
+    // 3. Now OPTIONS preflight from http://client.example.com succeeds with 204 No Content
+    let req = Request::builder()
+        .method("OPTIONS")
+        .uri("/api/v1/server")
+        .header(axum::http::header::HOST, "127.0.0.1:3000")
+        .header(axum::http::header::ORIGIN, "http://client.example.com")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        res.headers()
+            .get(axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|v| v.to_str().ok()),
+        Some("http://client.example.com")
+    );
+    assert_eq!(
+        res.headers()
+            .get(axum::http::header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+            .and_then(|v| v.to_str().ok()),
+        Some("true")
+    );
+
+    // 4. GET with allowed Origin succeeds and sets Access-Control-Allow-Origin
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/server")
+        .header(axum::http::header::HOST, "127.0.0.1:3000")
+        .header(axum::http::header::ORIGIN, "http://client.example.com")
+        .header(axum::http::header::COOKIE, &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers()
+            .get(axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|v| v.to_str().ok()),
+        Some("http://client.example.com")
+    );
+
+    store.close().await;
 }

@@ -4,6 +4,8 @@
   import { type Work, localizedTitle } from './api';
   import { locale } from '../i18n';
   import { history } from './watch-state';
+  import { isResumable } from '../player/progress';
+  import { serverPresentation } from '../config/presentation';
   import Icon from '../ui/Icon.svelte';
   import { imagePreviewUrl, isImageLoaded, markImageLoaded } from './image-url';
 
@@ -42,7 +44,7 @@
   const watchProgress = $derived($history.find(item => item.workId === work.id));
   const isWatched = $derived(watchProgress?.watched ?? false);
   const progressRatio = $derived(
-    watchProgress && watchProgress.duration > 0 && !watchProgress.watched
+    watchProgress && isResumable(watchProgress, $serverPresentation) && watchProgress.duration > 0
       ? Math.min(100, Math.max(0, (watchProgress.position / watchProgress.duration) * 100))
       : 0
   );

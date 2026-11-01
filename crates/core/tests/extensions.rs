@@ -2014,8 +2014,15 @@ async fn signed_private_storage_permission_installs_without_implicit_activation(
 async fn private_storage_http_fixture(
     wasm: Vec<u8>,
 ) -> (tempfile::TempDir, IdentityStore, Router, String, String) {
+    private_storage_http_fixture_with_id(wasm, "test.metadata").await
+}
+
+async fn private_storage_http_fixture_with_id(
+    wasm: Vec<u8>,
+    ext_id: &str,
+) -> (tempfile::TempDir, IdentityStore, Router, String, String) {
     let temp = tempfile::tempdir().unwrap();
-    let store = IdentityStore::open(&temp.path().join("http-storage.sqlite"))
+    let store = IdentityStore::open(&temp.path().join(format!("{ext_id}.sqlite")))
         .await
         .unwrap();
     store
@@ -2059,6 +2066,7 @@ async fn private_storage_http_fixture(
         StatusCode::CREATED
     );
     let mut signed = package(&signing, wasm);
+    signed.manifest.id = ext_id.into();
     signed.manifest.permissions.push("storage.private".into());
     signed.signature = STANDARD.encode(signing.sign(&signed.signing_bytes().unwrap()).as_ref());
     assert_eq!(
@@ -2078,7 +2086,7 @@ async fn private_storage_http_fixture(
         call(
             &app,
             "PUT",
-            "/api/v1/admin/extensions/test.metadata",
+            &format!("/api/v1/admin/extensions/{ext_id}"),
             &cookie,
             &csrf,
             json!({"enabled":true,"libraryIds":["films"]})
@@ -2109,11 +2117,12 @@ async fn malicious_storage_guest_hits_host_operation_quota() {
         request.len()
     ))
     .unwrap();
-    let (_temp, _store, app, cookie, csrf) = private_storage_http_fixture(wasm).await;
+    let (_temp, _store, app, cookie, csrf) =
+        private_storage_http_fixture_with_id(wasm, "test.quota").await;
     let (status, result, _) = call(
         &app,
         "POST",
-        "/api/v1/admin/extensions/test.metadata/run",
+        "/api/v1/admin/extensions/test.quota/run",
         &cookie,
         &csrf,
         json!({"workId":"work"}),

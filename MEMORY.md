@@ -1,3 +1,40 @@
+## 1er novembre 2026 — Parités Jellyfin : seuils de reprise, métadonnées, SyncPlay, CORS et réglages serveur
+
+- **Seuils de reprise & Intégration UI (`progress.ts`, `server_settings.rs`)** :
+  - `minResumePct` (0..49, défaut 0), `maxResumePct` (50..100, défaut 90), `minResumeDurationSeconds` (0..86400, défaut 0), `preferredMetadataLanguage` (défaut "fr"), `metadataCountryCode` (défaut "FR").
+  - `isResumable(progress, presentation)` vérifie si le média est terminé (`watched`), si la durée est inférieure au seuil minimal, ou si le pourcentage lu se situe hors de l'intervalle de reprise.
+  - `ProgressTracker.load()` unifié pour utiliser directement `isResumable`, évitant les divergences entre lecteur et affichage catalogue.
+  - Relié de façon réactive dans l'UI du catalogue et du lecteur : `ContinueWatching.svelte`, `FilmDetail.svelte`, `HeroBanner.svelte`, `Poster.svelte`, et `SeriesDetail.svelte`.
+- **Propagation de la langue et du pays vers les extensions (`extensions.rs`, `extension_identify.rs`, `extension_adapters.rs`)** :
+  - `extensions::run` et `run_automated` résolvent la langue et le pays prioritaires depuis les options de la bibliothèque avec repli sur `server_settings::load(&auth.store)`.
+  - Transmission des champs `language` et `country` dans les charges utiles Wasm (`metadata.search`, `metadata.details`, `metadata.identify`).
+  - Optimisation dans `extension_identify.rs` : chargement unique des paramètres serveur avant la boucle d'interrogation des fournisseurs.
+- **File d'attente Watch Party / SyncPlay (`parties.rs`, `sync-client.svelte.ts`, `WatchPartyOverlay.svelte`)** :
+  - Nouveaux messages `MoveQueueItem { queue_id, new_index }` et `PlayQueueItem { queue_id }` gérés côté Core et client.
+  - Réordonnancement dynamique de la file d'attente avec persistance SQL en base (`watch_party_queue.position`) et diffusion `QueueUpdated`.
+  - Lancement direct d'un élément de la file d'attente avec suppression de la file, réindexation contiguë des éléments restants en base et en mémoire, réinitialisation de la position de lecture à zéro et diffusion synchronisée `MediaChanged` / `QueueUpdated`.
+  - Boutons de montée/descente (▲/▼) et de lancement direct (▶ Lancer) intégrés dans l'onglet File d'attente de `WatchPartyOverlay.svelte`.
+- **Réglages serveur additionnels & Application réelle (`server_settings.rs`, `lib.rs`, `identity.rs`, `system_tasks.rs`, `AdminSettings.svelte`)** :
+  - `activity_log_retention_days` (1..=3650 jours, défaut 30) : branché dans `task_clean_sessions` pour purger les sessions inactives selon le seuil configuré (parité Jellyfin `CleanActivityLogTask`).
+  - `cors_hosts` (`Vec<String>`, origines `http://` ou `https://` ou `*`, max 50) : mis en cache dans `IdentityStore.cors_origins` et appliqué en temps réel dans le middleware de sécurité (`local_security_with_store`).
+  - Support complet des requêtes prévol CORS `OPTIONS` (réponse 204 No Content + headers `Access-Control-*`) et insertion automatique de `Access-Control-Allow-Origin: <origin>` et `Access-Control-Allow-Credentials: true` sur les requêtes autorisées.
+- **Validations réelles** :
+  - `cargo test -p media-poc --lib parties::tests` : 7/7 tests passés.
+  - `cargo test -p media-poc --lib server_settings::tests` : 4/4 tests passés.
+  - `cargo test -p media-poc --test settings_avatars` : 2/2 tests passés, incluant `cors_preflight_and_configured_origins_are_enforced`.
+  - `cargo test -p media-poc --test challenger_security_challenge` : 4/4 tests de sécurité stricts passés (rejet de tout attaquant non configuré en 403 Forbidden).
+  - `cargo test -p media-poc --test extensions` : 16/16 tests passés sans conflit de slot d'exécution (isolation de l'ID d'extension pour les tests de quota).
+  - `cargo clippy -p media-poc --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo fmt --check` : 0 divergence.
+  - `npm --prefix apps/web test` : 31 suites, 220 tests passés (100 %).
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement (`svelte-check`).
+
+## 1er novembre 2026 - Diagnostic des recherches d'identification vides
+
+- Identify (extension_identify.rs) : les erreurs des fournisseurs (timeout, cle absente, 401, etc.) n'etaient plus avalees silencieusement ; la reponse expose errors[] et IdentifyModal.svelte les affiche quand aucun resultat n'est trouve.
+- Plugin TMDb : si la recherche avec annee ne renvoie rien, nouvelle tentative sans annee.
+- Verifie : clippy workspace OK, tests plugin TMDb 5/5, svelte-check 0 erreur. Non verifie : appel reseau reel TMDb (cause exacte du resultat vide chez l'utilisateur a confirmer via le message d'erreur affiche).
+
 ## 1er novembre 2026 — Résolution des échecs d'identification, de recherche d'images et intégration de la clé par défaut TMDb (Option B Jellyfin)
 
 - **Intégration de la clé communautaire par défaut pour TMDb (Pattern Jellyfin - Option B) (`crates/core/src/extensions.rs`, `Aether-Plugins-TMDb`)** :

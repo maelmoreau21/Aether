@@ -33,6 +33,38 @@ pub struct Settings {
     pub trickplay_auto_generate: bool,
     #[serde(default = "default_trickplay_cache_mb")]
     pub trickplay_max_cache_mb: u32,
+    #[serde(default = "default_min_resume_pct")]
+    pub min_resume_pct: u8,
+    #[serde(default = "default_max_resume_pct")]
+    pub max_resume_pct: u8,
+    #[serde(default = "default_min_resume_duration")]
+    pub min_resume_duration_seconds: u32,
+    #[serde(default = "default_metadata_language")]
+    pub preferred_metadata_language: String,
+    #[serde(default = "default_metadata_country")]
+    pub metadata_country_code: String,
+    #[serde(default = "default_activity_retention")]
+    pub activity_log_retention_days: u32,
+    #[serde(default)]
+    pub cors_hosts: Vec<String>,
+}
+fn default_activity_retention() -> u32 {
+    30
+}
+fn default_min_resume_pct() -> u8 {
+    0
+}
+fn default_max_resume_pct() -> u8 {
+    90
+}
+fn default_min_resume_duration() -> u32 {
+    0
+}
+fn default_metadata_language() -> String {
+    "fr".into()
+}
+fn default_metadata_country() -> String {
+    "FR".into()
 }
 fn default_true() -> bool {
     true
@@ -72,6 +104,13 @@ struct SettingsInput {
     trickplay_interval_seconds: Option<u16>,
     trickplay_auto_generate: Option<bool>,
     trickplay_max_cache_mb: Option<u32>,
+    min_resume_pct: Option<u8>,
+    max_resume_pct: Option<u8>,
+    min_resume_duration_seconds: Option<u32>,
+    preferred_metadata_language: Option<String>,
+    metadata_country_code: Option<String>,
+    activity_log_retention_days: Option<u32>,
+    cors_hosts: Option<Vec<String>>,
 }
 
 impl Default for Settings {
@@ -87,6 +126,13 @@ impl Default for Settings {
             trickplay_interval_seconds: 10,
             trickplay_auto_generate: false,
             trickplay_max_cache_mb: 5120,
+            min_resume_pct: 0,
+            max_resume_pct: 90,
+            min_resume_duration_seconds: 0,
+            preferred_metadata_language: default_metadata_language(),
+            metadata_country_code: default_metadata_country(),
+            activity_log_retention_days: default_activity_retention(),
+            cors_hosts: Vec::new(),
         }
     }
 }
@@ -173,7 +219,40 @@ async fn write(
             .trickplay_max_cache_mb
             .filter(|&m| (128..=1048576).contains(&m))
             .unwrap_or(previous.trickplay_max_cache_mb),
+        min_resume_pct: input.min_resume_pct.unwrap_or(previous.min_resume_pct),
+        max_resume_pct: input.max_resume_pct.unwrap_or(previous.max_resume_pct),
+        min_resume_duration_seconds: input
+            .min_resume_duration_seconds
+            .unwrap_or(previous.min_resume_duration_seconds),
+        preferred_metadata_language: input
+            .preferred_metadata_language
+            .map(|v| v.trim().to_owned())
+            .unwrap_or(previous.preferred_metadata_language),
+        metadata_country_code: input
+            .metadata_country_code
+            .map(|v| v.trim().to_ascii_uppercase())
+            .unwrap_or(previous.metadata_country_code),
+        activity_log_retention_days: input
+            .activity_log_retention_days
+            .unwrap_or(previous.activity_log_retention_days),
+        cors_hosts: input
+            .cors_hosts
+            .map(|list| {
+                list.into_iter()
+                    .map(|h| h.trim().to_owned())
+                    .filter(|h| !h.is_empty())
+                    .collect()
+            })
+            .unwrap_or(previous.cors_hosts),
     };
+    if !valid_resume(&input)
+        || !valid_language(&input.preferred_metadata_language)
+        || !valid_country(&input.metadata_country_code)
+        || !valid_activity_retention(input.activity_log_retention_days)
+        || !valid_cors_hosts(&input.cors_hosts)
+    {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
     if input.sso_button_label.is_empty()
         || input.sso_button_label.chars().count() > 80
         || input.sso_button_label.chars().any(char::is_control)
@@ -190,7 +269,72 @@ async fn write(
     }
     let json = serde_json::to_string(&input).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     query("INSERT INTO server_settings(singleton,settings_json) VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET settings_json=excluded.settings_json").bind(json).execute(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    if let Ok(mut guard) = auth.store.cors_origins.write() {
+        *guard = input.cors_hosts.clone();
+    }
     Ok(StatusCode::NO_CONTENT)
+}
+pub async fn ensure_cors_origins_warm(store: &IdentityStore) {
+    let empty = store
+        .cors_origins
+        .read()
+        .map(|g| g.is_empty())
+        .unwrap_or(true);
+    if empty
+        && let Ok(settings) = load(store).await
+        && let Ok(mut guard) = store.cors_origins.write()
+    {
+        *guard = settings.cors_hosts;
+    }
+}
+fn valid_resume(s: &Settings) -> bool {
+    (0..=49).contains(&s.min_resume_pct)
+        && (50..=100).contains(&s.max_resume_pct)
+        && s.min_resume_duration_seconds <= 86_400
+}
+/// BCP 47-style primary tag with optional region, e.g. r, pt-BR.
+fn valid_language(v: &str) -> bool {
+    let mut parts = v.split('-');
+    let ok_primary = parts
+        .next()
+        .is_some_and(|p| (2..=3).contains(&p.len()) && p.chars().all(|c| c.is_ascii_lowercase()));
+    let ok_region = parts
+        .next()
+        .is_none_or(|r| r.len() == 2 && r.chars().all(|c| c.is_ascii_uppercase()));
+    ok_primary && ok_region && parts.next().is_none()
+}
+fn valid_country(v: &str) -> bool {
+    v.len() == 2 && v.chars().all(|c| c.is_ascii_uppercase())
+}
+fn valid_activity_retention(days: u32) -> bool {
+    (1..=3650).contains(&days)
+}
+fn valid_cors_hosts(hosts: &[String]) -> bool {
+    if hosts.len() > 50 {
+        return false;
+    }
+    for host in hosts {
+        if host.is_empty() || host.len() > 255 || host.chars().any(char::is_control) {
+            return false;
+        }
+        if host == "*" {
+            continue;
+        }
+        if !(host.starts_with("http://") || host.starts_with("https://")) {
+            return false;
+        }
+        if let Ok(parsed) = url::Url::parse(host) {
+            if parsed.path() != "" && parsed.path() != "/" {
+                return false;
+            }
+            if parsed.query().is_some() || parsed.fragment().is_some() {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    true
 }
 async fn presentation(
     State(auth): State<AuthState>,
@@ -234,6 +378,36 @@ mod tests {
     }
 
     #[test]
+    fn resume_and_metadata_defaults_and_validation() {
+        let s = Settings::default();
+        assert!(valid_resume(&s));
+        assert_eq!(
+            (
+                s.min_resume_pct,
+                s.max_resume_pct,
+                s.min_resume_duration_seconds
+            ),
+            (0, 90, 0)
+        );
+        let legacy: Settings =
+            serde_json::from_str(r#"{"serverName":"a","welcomeMessage":""}"#).unwrap();
+        assert_eq!(legacy.preferred_metadata_language, "fr");
+        assert!(
+            valid_language("fr")
+                && valid_language("pt-BR")
+                && !valid_language("FR")
+                && !valid_language("fr-br")
+                && !valid_language("")
+        );
+        assert!(valid_country("US") && !valid_country("usa"));
+        let bad = Settings {
+            max_resume_pct: 30,
+            ..Settings::default()
+        };
+        assert!(!valid_resume(&bad));
+    }
+
+    #[test]
     fn custom_trickplay_settings_roundtrip() {
         let custom = r#"{
             "serverName": "Aether Custom",
@@ -263,5 +437,33 @@ mod tests {
         assert_eq!(re_parsed.trickplay_interval_seconds, 5);
         assert!(re_parsed.trickplay_auto_generate);
         assert_eq!(re_parsed.trickplay_max_cache_mb, 10240);
+    }
+
+    #[test]
+    fn activity_retention_and_cors_hosts_validation() {
+        let s = Settings::default();
+        assert_eq!(s.activity_log_retention_days, 30);
+        assert!(s.cors_hosts.is_empty());
+        assert!(valid_activity_retention(1));
+        assert!(valid_activity_retention(30));
+        assert!(valid_activity_retention(3650));
+        assert!(!valid_activity_retention(0));
+        assert!(!valid_activity_retention(3651));
+
+        let valid_hosts = vec![
+            "http://localhost:3000".to_string(),
+            "https://app.example.com".to_string(),
+            "*".to_string(),
+        ];
+        assert!(valid_cors_hosts(&valid_hosts));
+
+        let invalid_proto = vec!["ftp://example.com".to_string()];
+        assert!(!valid_cors_hosts(&invalid_proto));
+
+        let invalid_path = vec!["http://example.com/foo".to_string()];
+        assert!(!valid_cors_hosts(&invalid_path));
+
+        let invalid_empty = vec!["".to_string()];
+        assert!(!valid_cors_hosts(&invalid_empty));
     }
 }

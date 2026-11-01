@@ -467,7 +467,7 @@ fn local_security(router: Router, origin: String) -> Router {
     local_security_with_store(router, origin, None, Vec::new())
 }
 
-fn local_security_with_store(
+pub fn local_security_with_store(
     router: Router,
     origin: String,
     store: Option<identity::IdentityStore>,
@@ -519,11 +519,29 @@ fn local_security_with_store(
                     && is_web_route
                     && req.headers().get("sec-fetch-mode").is_some_and(|v| v == "navigate");
 
+                if let Some(s) = &store {
+                    crate::server_settings::ensure_cors_origins_warm(s).await;
+                }
                 // 3. Check Origin header against primary and trusted external origins
-                let origin_header = req.headers().get(header::ORIGIN).and_then(|h| h.to_str().ok());
-                let is_primary_origin = origin_header == Some(origin.as_str());
+                let origin_header = req
+                    .headers()
+                    .get(header::ORIGIN)
+                    .and_then(|h| h.to_str().ok())
+                    .map(|s| s.to_owned());
+                let is_primary_origin = origin_header.as_deref() == Some(origin.as_str());
+                let is_cors_allowed = store.as_ref().is_some_and(|s| {
+                    if let Ok(hosts) = s.cors_origins.read() {
+                        origin_header
+                            .as_deref()
+                            .is_some_and(|cand| hosts.iter().any(|h| h == "*" || h == cand))
+                    } else {
+                        false
+                    }
+                });
                 let is_trusted_external = origin_header
-                    .is_some_and(|cand| allowed_origins.iter().any(|ao| ao.as_str() == cand));
+                    .as_deref()
+                    .is_some_and(|cand| allowed_origins.iter().any(|ao| ao.as_str() == cand))
+                    || is_cors_allowed;
                 let origin_matches = origin_header.is_none() || is_primary_origin || is_trusted_external;
 
                 let is_cross_site = req.headers().get("sec-fetch-site").is_some_and(|h| h == "cross-site");
@@ -539,7 +557,49 @@ fn local_security_with_store(
                 if !allowed {
                     return StatusCode::FORBIDDEN.into_response();
                 }
+
+                if method == axum::http::Method::OPTIONS && origin_matches && origin_header.is_some() {
+                    let mut res = StatusCode::NO_CONTENT.into_response();
+                    let headers = res.headers_mut();
+                    if let Some(oh) = &origin_header
+                        && let Ok(val) = HeaderValue::from_str(oh)
+                    {
+                        headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
+                    }
+                    headers.insert(
+                        header::ACCESS_CONTROL_ALLOW_METHODS,
+                        HeaderValue::from_static("GET, POST, PUT, DELETE, PATCH, OPTIONS"),
+                    );
+                    headers.insert(
+                        header::ACCESS_CONTROL_ALLOW_HEADERS,
+                        HeaderValue::from_static("content-type, authorization, x-csrf-token, range, x-playback-session-id"),
+                    );
+                    headers.insert(
+                        header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+                        HeaderValue::from_static("true"),
+                    );
+                    headers.insert(
+                        header::ACCESS_CONTROL_MAX_AGE,
+                        HeaderValue::from_static("86400"),
+                    );
+                    return res;
+                }
+
                 let mut res = next.run(req).await;
+                if let Some(oh) = &origin_header
+                    && (is_primary_origin || is_trusted_external)
+                    && let Ok(val) = HeaderValue::from_str(oh)
+                {
+                    res.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
+                    res.headers_mut().insert(
+                        header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+                        HeaderValue::from_static("true"),
+                    );
+                    res.headers_mut().insert(
+                        header::ACCESS_CONTROL_EXPOSE_HEADERS,
+                        HeaderValue::from_static("content-range, content-length, etag"),
+                    );
+                }
                 let mut extra_origins = String::new();
                 for ao in &allowed_origins {
                     let origin_str = format!(" {ao}");
@@ -548,6 +608,16 @@ fn local_security_with_store(
                     }
                 }
                 if let Some(store) = &store {
+                    if let Ok(hosts) = store.cors_origins.read() {
+                        for host in hosts.iter() {
+                            if host != "*" {
+                                let origin_str = format!(" {host}");
+                                if !extra_origins.contains(&origin_str) {
+                                    extra_origins.push_str(&origin_str);
+                                }
+                            }
+                        }
+                    }
                     let _ = nodes::ensure_node_registry_warm(store).await;
                     for origin_url in store.node_registry.connected_public_origins() {
                         let origin_str = format!(" {origin_url}");

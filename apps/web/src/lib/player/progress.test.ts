@@ -1,15 +1,31 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { session } from '../auth/session';
-import { ProgressTracker, writeProgress, preloadProgress, readProgress, isCreditsOrCompleted } from './progress';
+import { ProgressTracker, writeProgress, preloadProgress, readProgress, isCreditsOrCompleted, isResumable } from './progress';
 afterEach(()=>{session.set(null);vi.unstubAllGlobals();vi.useRealTimers();});
 const state={position:4,duration:12,paused:true,volume:1,speed:1};
 function login() {session.set({user:{id:'user-a',login:'a',role:'user'},csrfToken:'test-csrf'});}
 describe('user progress',()=>{
+  it('identifies resumable progress adhering to Jellyfin percentage and duration thresholds', () => {
+    const item = { workId: 'w1', position: 100, duration: 1000, watched: false, revision: 1 };
+    expect(isResumable(item)).toBe(true);
+    expect(isResumable({ ...item, watched: true })).toBe(false);
+    expect(isResumable({ ...item, position: 0 })).toBe(false);
+    // Below minResumePct (e.g. 5%)
+    expect(isResumable({ ...item, position: 40 }, { minResumePct: 5 })).toBe(false);
+    expect(isResumable({ ...item, position: 60 }, { minResumePct: 5 })).toBe(true);
+    // Above maxResumePct (e.g. 90%)
+    expect(isResumable({ ...item, position: 910 }, { maxResumePct: 90 })).toBe(false);
+    // Below minResumeDurationSeconds (e.g. 300s)
+    expect(isResumable({ ...item, duration: 200, position: 50 }, { minResumeDurationSeconds: 300 })).toBe(false);
+  });
   it('marks media as watched when end credits are reached',()=>{
     expect(isCreditsOrCompleted(5400, 6000)).toBe(true);
     expect(isCreditsOrCompleted(5300, 6000)).toBe(true);
     expect(isCreditsOrCompleted(4800, 6000, 4750)).toBe(true);
     expect(isCreditsOrCompleted(3000, 6000)).toBe(false);
+    expect(isCreditsOrCompleted(5700, 6000, undefined, 98)).toBe(false);
+    expect(isCreditsOrCompleted(5900, 6000, undefined, 98)).toBe(true);
+    expect(isCreditsOrCompleted(500, 1000, undefined, 50)).toBe(true);
   });
   it('consumes a recent hover prefetch once and otherwise reloads the live revision',async()=>{
     login();const fetch=vi.fn().mockImplementation(async()=>Response.json({workId:'work',position:4,duration:12,watched:false,revision:7}));vi.stubGlobal('fetch',fetch);

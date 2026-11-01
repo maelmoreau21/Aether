@@ -2,7 +2,8 @@
   import WorkTools from './WorkTools.svelte';
   import OfflineDownload from './OfflineDownload.svelte';
   import { bestVersion } from '../player/version-choice';
-  import { preloadProgress } from '../player/progress';
+  import { preloadProgress, isResumable } from '../player/progress';
+  import { serverPresentation } from '../config/presentation';
   import { history } from './watch-state';
   import type { Work } from './api';
   import PersonalFeedback from './PersonalFeedback.svelte';
@@ -20,7 +21,7 @@
     work: Work; playableMedia: Media[]; allowedIds: string[]; selected: string; mediaError?: string; similarCandidates?: Work[]; onPlay: () => Promise<void>;
   } = $props();
   const currentSelectedMedia = $derived(playableMedia.find(item => item.id === selected) ?? playableMedia[0]);
-  const continuing = $derived($history.some(item => item.workId === work.id && !item.watched && item.position > 0));
+  const continuing = $derived($history.some(item => item.workId === work.id && isResumable(item, $serverPresentation)));
   const currentVideoTrack = $derived(currentSelectedMedia?.sources[0]?.tracks?.find(track => track.codec_type === 'video'));
   const currentAudioTracks = $derived(inspectedAudioTracks(currentSelectedMedia));
   const resolutionBadge = $derived(videoResolutionBadge(currentVideoTrack?.width, currentVideoTrack?.height));

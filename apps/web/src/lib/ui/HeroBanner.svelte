@@ -7,6 +7,8 @@
   import Icon from './Icon.svelte';
   import { imagePreviewUrl } from '../catalog/image-url';
   import { history } from '../catalog/watch-state';
+  import { isResumable } from '../player/progress';
+  import { serverPresentation } from '../config/presentation';
 
   let { featured = null, onPlay }: { featured?: Work | null; onPlay?: (work: Work) => void } = $props();
   const detailUrl = $derived(
@@ -21,7 +23,7 @@
   const logoUrl = $derived(imagePreviewUrl(artwork.logo, 640));
   let failedBackdrop = $state('');
   let failedLogo = $state('');
-  const continuing = $derived($history.some(item => item.workId === featured?.id && !item.watched && item.position > 0));
+  const continuing = $derived($history.some(item => item.workId === featured?.id && isResumable(item, $serverPresentation)));
   const displayTitle = $derived(featured ? localizedTitle(featured, $locale) : '');
   const displayPlot = $derived(featured ? localizedPlot(featured, $locale) : '');
 </script>

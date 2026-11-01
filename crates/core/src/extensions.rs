@@ -1183,8 +1183,23 @@ async fn run(
             .as_ref()
             .is_none_or(Vec::is_empty)
         && settings.as_object().is_some_and(|fields| fields.is_empty());
+    let s_settings = crate::server_settings::load(&auth.store)
+        .await
+        .unwrap_or_default();
+    let preferred_lang = if !options.preferred_metadata_language.trim().is_empty() {
+        options.preferred_metadata_language.as_str()
+    } else {
+        s_settings.preferred_metadata_language.as_str()
+    };
+    let country_code = if !options.metadata_country_code.trim().is_empty() {
+        options.metadata_country_code.as_str()
+    } else {
+        s_settings.metadata_country_code.as_str()
+    };
     if !simple_legacy {
-        settings["language"] = json!(options.preferred_metadata_language);
+        settings["language"] = json!(preferred_lang);
+        settings["country"] = json!(country_code);
+        settings["countryCode"] = json!(country_code);
     }
     if input.operation == "metadata.images" {
         image_collection::apply_language_settings(&input.input, &mut settings)?;
@@ -1194,6 +1209,8 @@ async fn run(
         adapters::metadata_input(&context, &input.work_id, &input.operation, &input.input)?;
     if input.operation != "metadata.propose" {
         payload["language"] = settings["language"].clone();
+        payload["country"] = settings["country"].clone();
+        payload["countryCode"] = settings["countryCode"].clone();
     }
     payload = metadata_input_with_settings(payload, settings);
     let operation = input.operation.clone();
@@ -1604,8 +1621,23 @@ pub(crate) async fn run_automated(
             .as_ref()
             .is_none_or(Vec::is_empty)
         && settings.as_object().is_some_and(|v| v.is_empty());
+    let s_settings = crate::server_settings::load(&auth.store)
+        .await
+        .unwrap_or_default();
+    let preferred_lang = if !options.preferred_metadata_language.trim().is_empty() {
+        options.preferred_metadata_language.as_str()
+    } else {
+        s_settings.preferred_metadata_language.as_str()
+    };
+    let country_code = if !options.metadata_country_code.trim().is_empty() {
+        options.metadata_country_code.as_str()
+    } else {
+        s_settings.metadata_country_code.as_str()
+    };
     if !legacy {
-        settings["language"] = json!(options.preferred_metadata_language);
+        settings["language"] = json!(preferred_lang);
+        settings["country"] = json!(country_code);
+        settings["countryCode"] = json!(country_code);
     }
     let mut marker_sources = Vec::new();
     let payload = if let Some((title, artist, album, duration)) = &music_track {
@@ -1782,6 +1814,8 @@ pub(crate) async fn run_automated(
         let mut value = adapters::metadata_input(context, work_id, operation, &json!({}))?;
         if operation != "metadata.propose" {
             value["language"] = settings["language"].clone();
+            value["country"] = settings["country"].clone();
+            value["countryCode"] = settings["countryCode"].clone();
         }
         value
     };

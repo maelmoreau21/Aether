@@ -107,6 +107,8 @@ export type ClientMessage =
   | { type: 'revokeControl'; userId: string }
   | { type: 'changeMedia'; mediaId: string }
   | { type: 'addToQueue'; mediaId: string }
+  | { type: 'moveQueueItem'; queueId: string; newIndex: number }
+  | { type: 'playQueueItem'; queueId: string }
   | { type: 'removeFromQueue'; queueId: string }
   | { type: 'createPoll'; question: string; options: string[] }
   | { type: 'votePoll'; pollId: string; optionIndex: number }

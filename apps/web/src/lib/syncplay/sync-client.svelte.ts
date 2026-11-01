@@ -367,6 +367,14 @@ export class SyncPartyClient {
     this.send({ type: 'addToQueue', mediaId });
   }
 
+  public moveQueueItem(queueId: string, newIndex: number) {
+    this.send({ type: 'moveQueueItem', queueId, newIndex });
+  }
+
+  public playQueueItem(queueId: string) {
+    this.send({ type: 'playQueueItem', queueId });
+  }
+
   public removeFromQueue(queueId: string) {
     this.send({ type: 'removeFromQueue', queueId });
   }

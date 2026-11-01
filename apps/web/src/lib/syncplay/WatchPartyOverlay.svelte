@@ -434,7 +434,7 @@
       {:else if activeTab === 'queue'}
         <div class="queue-pane">
           <div class="queue-list">
-            {#each client.queue as item (item.id)}
+            {#each client.queue as item, idx (item.id)}
               <div class="queue-card">
                 <div class="queue-info">
                   <strong>{item.mediaTitle}</strong>
@@ -445,8 +445,26 @@
                     <button
                       type="button"
                       class="btn-action-small"
+                      title="Monter dans la file"
+                      disabled={idx === 0}
+                      onclick={() => client.moveQueueItem(item.id, idx - 1)}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-action-small"
+                      title="Descendre dans la file"
+                      disabled={idx === client.queue.length - 1}
+                      onclick={() => client.moveQueueItem(item.id, idx + 1)}
+                    >
+                      ▼
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-action-small"
                       title="Lancer maintenant"
-                      onclick={() => client.changeMedia(item.mediaId)}
+                      onclick={() => client.playQueueItem(item.id)}
                     >
                       ▶ Lancer
                     </button>

@@ -7,6 +7,9 @@
   let blockSsoLocalAccounts=$state(true);
   let trickplayEnabled = $state(true), trickplayQuality = $state(7), trickplayWidth = $state(320);
   let trickplayIntervalSeconds = $state(10), trickplayAutoGenerate = $state(false), trickplayMaxCacheMb = $state(5120);
+  let minResumePct = $state(0), maxResumePct = $state(90), minResumeDurationSeconds = $state(0);
+  let metadataLanguage = $state('fr'), metadataCountry = $state('FR');
+  let activityLogRetentionDays = $state(30), corsHosts = $state('');
   let loading = $state(true), saving = $state(false);
   let network = $state<{ publicUrl: string; secureCookies: boolean; webPath: string; apiPath: string } | null>(null);
   let clearingFingerprints = $state(false);
@@ -32,7 +35,8 @@
         const data = await adminRequest<{
           serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean;
           trickplayEnabled?: boolean; trickplayQuality?: number; trickplayWidth?: number;
-          trickplayIntervalSeconds?: number; trickplayAutoGenerate?: boolean; trickplayMaxCacheMb?: number;
+          trickplayIntervalSeconds?: number; trickplayAutoGenerate?: boolean; trickplayMaxCacheMb?: number; minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number; preferredMetadataLanguage?: string; metadataCountryCode?: string;
+          activityLogRetentionDays?: number; corsHosts?: string[];
         }>('/api/v1/admin/settings');
         blockSsoLocalAccounts = data.blockSsoLocalAccounts;
         name = data.serverName;
@@ -44,6 +48,11 @@
         trickplayIntervalSeconds = data.trickplayIntervalSeconds ?? 10;
         trickplayAutoGenerate = data.trickplayAutoGenerate ?? false;
         trickplayMaxCacheMb = data.trickplayMaxCacheMb ?? 5120;
+        minResumePct = data.minResumePct ?? 0; maxResumePct = data.maxResumePct ?? 90;
+        minResumeDurationSeconds = data.minResumeDurationSeconds ?? 0;
+        metadataLanguage = data.preferredMetadataLanguage ?? 'fr'; metadataCountry = data.metadataCountryCode ?? 'FR';
+        activityLogRetentionDays = data.activityLogRetentionDays ?? 30;
+        corsHosts = (data.corsHosts ?? []).join(', ');
       }
       else network = await adminRequest('/api/v1/admin/network');
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Chargement impossible.'; }
@@ -58,13 +67,18 @@
         body: JSON.stringify({
           serverName: name, welcomeMessage: welcome, ssoButtonLabel: ssoLabel, blockSsoLocalAccounts,
           trickplayEnabled, trickplayQuality, trickplayWidth, trickplayIntervalSeconds,
-          trickplayAutoGenerate, trickplayMaxCacheMb
+          trickplayAutoGenerate, trickplayMaxCacheMb,
+          minResumePct, maxResumePct, minResumeDurationSeconds,
+          preferredMetadataLanguage: metadataLanguage, metadataCountryCode: metadataCountry,
+          activityLogRetentionDays,
+          corsHosts: corsHosts.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean)
         })
       });
       const saved = await adminRequest<{
         serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean;
         trickplayEnabled?: boolean; trickplayQuality?: number; trickplayWidth?: number;
-        trickplayIntervalSeconds?: number; trickplayAutoGenerate?: boolean; trickplayMaxCacheMb?: number;
+        trickplayIntervalSeconds?: number; trickplayAutoGenerate?: boolean; trickplayMaxCacheMb?: number; minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number; preferredMetadataLanguage?: string; metadataCountryCode?: string;
+        activityLogRetentionDays?: number; corsHosts?: string[];
       }>('/api/v1/admin/settings');
       blockSsoLocalAccounts = saved.blockSsoLocalAccounts;
       name = saved.serverName;
@@ -76,6 +90,11 @@
       trickplayIntervalSeconds = saved.trickplayIntervalSeconds ?? 10;
       trickplayAutoGenerate = saved.trickplayAutoGenerate ?? false;
       trickplayMaxCacheMb = saved.trickplayMaxCacheMb ?? 5120;
+      minResumePct = saved.minResumePct ?? 0; maxResumePct = saved.maxResumePct ?? 90;
+      minResumeDurationSeconds = saved.minResumeDurationSeconds ?? 0;
+      metadataLanguage = saved.preferredMetadataLanguage ?? 'fr'; metadataCountry = saved.metadataCountryCode ?? 'FR';
+      activityLogRetentionDays = saved.activityLogRetentionDays ?? 30;
+      corsHosts = (saved.corsHosts ?? []).join(', ');
       serverPresentation.set(saved);
       notice = 'Paramètres enregistrés.';
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Enregistrement impossible.'; }
@@ -101,12 +120,35 @@
       </div>
     </fieldset>
     <fieldset class="trickplay-fieldset">
+      <legend>Reprise de lecture</legend>
+      <p>Valeurs de Jellyfin : 5 %, 90 %, 300 s. Par défaut Aether reprend dès le début (0 / 90 / 0).</p>
+      <div class="trickplay-grid">
+        <label>Reprise dès (% de la durée)<input type="number" min="0" max="49" step="1" required bind:value={minResumePct} /></label>
+        <label>Considéré comme vu à (%)<input type="number" min="50" max="100" step="1" required bind:value={maxResumePct} /></label>
+        <label>Durée minimale pour reprendre (s)<input type="number" min="0" max="86400" step="1" required bind:value={minResumeDurationSeconds} /></label>
+      </div>
+    </fieldset>
+    <fieldset class="trickplay-fieldset">
+      <legend>Métadonnées</legend>
+      <div class="trickplay-grid">
+        <label>Langue préférée (ex. fr, en, pt-BR)<input bind:value={metadataLanguage} required maxlength="6" pattern={'[a-z]{2,3}(-[A-Z]{2})?'} /></label>
+        <label>Pays (ex. FR, US)<input bind:value={metadataCountry} required maxlength="2" pattern={'[A-Z]{2}'} /></label>
+      </div>
+    </fieldset>
+    <fieldset class="trickplay-fieldset">
       <legend>Empreintes audio des intros et génériques</legend>
       <p>Les empreintes acoustiques Chromaprint sont conservées en cache sur chaque Media Node pour éviter les réextractions répétées lors des analyses.</p>
       <button type="button" class="maintenance-btn" disabled={clearingFingerprints} onclick={clearFingerprintCache}>
         {clearingFingerprints ? 'Nettoyage en cours...' : 'Vider le cache des empreintes audio'}
       </button>
       {#if fingerprintNotice}<p class="maintenance-notice">{fingerprintNotice}</p>{/if}
+    </fieldset>
+    <fieldset class="trickplay-fieldset">
+      <legend>Journal d'activité & Sécurité CORS</legend>
+      <div class="trickplay-grid">
+        <label>Rétention du journal d'activité (jours)<input type="number" min="1" max="3650" step="1" required bind:value={activityLogRetentionDays} /></label>
+        <label>Origines CORS autorisées (séparées par des virgules)<input bind:value={corsHosts} placeholder="https://app.example.com, http://localhost:3000" /></label>
+      </div>
     </fieldset>
     <button type="submit">{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
   </fieldset></form>

@@ -12,6 +12,8 @@
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
   import DetailHero from './DetailHero.svelte';
   import { history } from './watch-state';
+  import { isResumable } from '../player/progress';
+  import { serverPresentation } from '../config/presentation';
   import WatchStatus from './WatchStatus.svelte';
   import EpisodePlayer from './EpisodePlayer.svelte';
   import Icon from '../ui/Icon.svelte';
@@ -144,10 +146,10 @@
         <article class="episode" aria-label={`Épisode ${episode.number ?? ''} — ${epTitle}`}>
           <div class="episode-artwork">
             {#if thumbnail && !failedImages.includes(thumbnail)}<img class="episode-thumb" src={thumbnail} alt="" width="640" height="360" loading="lazy" decoding="async" onerror={() => failedImages = [...failedImages, thumbnail]} />{:else}<Icon name="tv" size={32} />{/if}
-            {#if progress && !progress.watched && progress.duration > 0}<progress value={progress.position} max={progress.duration} aria-label={`Progression de ${epTitle}`}></progress>{/if}
+            {#if progress && isResumable(progress, $serverPresentation) && progress.duration > 0}<progress value={progress.position} max={progress.duration} aria-label={`Progression de ${epTitle}`}></progress>{/if}
           </div>
           <div class="episode-content">
-            <p class="episode-meta">Épisode {episode.number ?? '—'}{duration && duration > 0 ? ` · ${Math.ceil(duration / 60)} min` : ''}{progress?.watched ? ' · Vu' : progress && progress.position > 0 ? ' · En cours' : ''}</p>
+            <p class="episode-meta">Épisode {episode.number ?? '—'}{duration && duration > 0 ? ` · ${Math.ceil(duration / 60)} min` : ''}{progress?.watched ? ' · Vu' : progress && isResumable(progress, $serverPresentation) ? ' · En cours' : ''}</p>
             <h3>{epTitle}</h3>
             {#if epDesc}<p class="episode-desc">{epDesc}</p>{/if}
             <div class="episode-actions-row">

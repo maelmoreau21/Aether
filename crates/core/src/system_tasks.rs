@@ -543,8 +543,11 @@ async fn task_optimize_database(state: &SystemTasksState) -> Result<TaskReport, 
 /// `clean-sessions`: Delete expired and revoked sessions and tokens
 async fn task_clean_sessions(state: &SystemTasksState) -> Result<TaskReport, TaskFailure> {
     let current_time = now();
-    // Inactivity threshold: 30 days
-    let inactivity_threshold = current_time - (30 * 86400);
+    let s_settings = crate::server_settings::load(&state.auth.store)
+        .await
+        .unwrap_or_default();
+    let retention_days = s_settings.activity_log_retention_days as i64;
+    let inactivity_threshold = current_time - (retention_days * 86400);
     let mut report = TaskReport::default();
     let mut sessions = 0;
     let mut flows = 0;

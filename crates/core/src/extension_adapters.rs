@@ -88,6 +88,9 @@ pub(super) fn metadata_input(
         }
         value["language"] = json!(language);
     }
+    if let Some(country) = input.get("country").and_then(Value::as_str) {
+        value["country"] = json!(country);
+    }
     if operation == "metadata.details" || operation == "metadata.images" {
         let id = input
             .get("id")

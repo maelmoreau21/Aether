@@ -786,11 +786,12 @@ async fn install_with_key(
     let mut tx = auth.store.pool().begin().await.map_err(db)?;
     query("INSERT INTO extension_publishers(id,public_key,active) VALUES(?,?,1) ON CONFLICT(id) DO UPDATE SET active=1")
         .bind(&key_id).bind(&public_key).execute(&mut *tx).await.map_err(db)?;
-    query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation,all_libraries) VALUES(?,?,?,1,?,1)")
+    query("INSERT INTO extensions(id,publisher_id,package_json,generation,all_libraries) VALUES(?,?,?,?,?)")
         .bind(&package.manifest.id)
         .bind(&key_id)
         .bind(bytes)
         .bind(uuid::Uuid::new_v4().to_string())
+        .bind(i64::from(package.manifest.permissions.iter().any(|permission|permission=="metadata.read")))
         .execute(&mut *tx)
         .await
         .map_err(|_| err(StatusCode::CONFLICT, "extension_exists"))?;

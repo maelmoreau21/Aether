@@ -817,7 +817,8 @@ mod tests {
             .await,
         )
         .await;
-        assert_eq!(installed["extensions"][0]["enabled"], true);
+        assert_eq!(installed["extensions"][0]["enabled"], false);
+        assert_eq!(installed["extensions"][0]["libraryIds"], json!([]));
         assert_eq!(
             request(
                 &app,

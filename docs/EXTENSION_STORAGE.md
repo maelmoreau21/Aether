@@ -115,9 +115,8 @@ Core. L'admission existante des exécutions reste bornée.
   uploads incomplets supprimés ; compteurs recalculés transactionnellement.
 - Désinstallation `deleteData=true` : suppression explicite des valeurs, objets
   et références de namespace, en plus de l'historique concerné.
-- Mise à jour : une route en place préserve la donnée durable dans le test
-  actuel, mais ne garantit pas encore consentement, migration privée ni
-  rollback. Voir [Cycle de mise à jour](PLUGIN_UPDATE_LIFECYCLE.md).
+- Mise à jour : migrations signées, snapshot transactionnel privé et rollback
+  explicite : [Cycle de mise à jour](PLUGIN_UPDATE_LIFECYCLE.md).
   Réinstaller avec même ID/éditeur/clé retrouve les résultats
   conservés. Un éditeur ou une clé différente ne peut les lire ; une purge
   explicite est nécessaire avant réutilisation de ce namespace.

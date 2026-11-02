@@ -437,3 +437,14 @@ button:active:not(:disabled) {
     min-height: 44px;
   }
 }
+
+/* Account-owned appearance presets; no injected CSS or remote theme bundle. */
+:root[data-card-size="small"] { --poster-width:140px; --mobile-card-columns:3; --mobile-shelf-columns:2.8; }
+:root[data-card-size="large"] { --poster-width:230px; --mobile-card-columns:1; --mobile-shelf-columns:1.55; }
+:root[data-card-density="compact"] { --card-gap:8px; --card-row-gap:14px; }
+:root[data-accent="blue"] { --color-accent:#60A5FA; --color-accent-hover:#93C5FD; --color-accent-solid:#2563EB; --color-accent-soft:rgb(59 130 246 / .16); --color-accent-glow:rgb(59 130 246 / .4); --accent-primary:var(--color-accent); --color-play:#2563EB; --color-play-hover:#1D4ED8; }
+:root[data-accent="violet"] { --color-accent:#A78BFA; --color-accent-hover:#C4B5FD; --color-accent-solid:#7C3AED; --color-accent-soft:rgb(139 92 246 / .16); --color-accent-glow:rgb(139 92 246 / .4); --accent-primary:var(--color-accent); --color-play:#7C3AED; --color-play-hover:#6D28D9; }
+:root[data-accent="green"] { --color-accent:#34D399; --color-accent-hover:#6EE7B7; --color-accent-solid:#047857; --color-accent-soft:rgb(16 185 129 / .16); --color-accent-glow:rgb(16 185 129 / .4); --accent-primary:var(--color-accent); --color-play:#047857; --color-play-hover:#065F46; }
+:root[data-theme="light"][data-accent="blue"] { --color-accent:#1D4ED8; --color-accent-hover:#1E40AF; }
+:root[data-theme="light"][data-accent="violet"] { --color-accent:#6D28D9; --color-accent-hover:#5B21B6; }
+:root[data-theme="light"][data-accent="green"] { --color-accent:#047857; --color-accent-hover:#065F46; }

@@ -18,21 +18,21 @@
   });
 </script>
 
-<details class="advanced-section"><summary id="library-providers-heading"><span>Fournisseurs et enrichissement</span><small>Préférences préparées</small></summary>
-  <p class="notice">Ces choix sont sauvegardés par bibliothèque. L’exécution automatique des fournisseurs sera disponible lorsque leur raccordement au scan sera ajouté. Les clés et comptes se configurent dans Extensions.</p>
+<details class="advanced-section"><summary id="library-providers-heading"><span>Fournisseurs et enrichissement</span></summary>
+  <p class="notice">Les fournisseurs de métadonnées, images et segments activés sont utilisés dans l’ordre choisi. Une liste vide conserve la politique globale ; une liste renseignée limite les fournisseurs autorisés. Les clés et comptes se configurent dans Extensions.</p>
   {#if providerError}<p role="status">{providerError}</p>{/if}
   <ProviderPriority id="metadata-providers" label="Métadonnées" bind:value={options.metadataProviders} suggestions={providers} />
   <ProviderPriority id="image-providers" label="Images" bind:value={options.imageProviders} suggestions={providers} />
-  <ProviderPriority id="similar-providers" label="Articles similaires" bind:value={options.similarItemsProviders} suggestions={providers} />
+  <ProviderPriority id="similar-providers" label="Articles similaires (moteur à venir)" bind:value={options.similarItemsProviders} suggestions={providers} />
   <label for="online-refresh">Actualiser les métadonnées depuis Internet</label>
   <select id="online-refresh" bind:value={options.onlineRefreshIntervalDays}><option value={0}>Jamais automatiquement</option><option value={30}>Tous les 30 jours</option><option value={60}>Tous les 60 jours</option><option value={90}>Tous les 90 jours</option></select>
-  <p class="hint">Cadence réservée aux futurs fournisseurs ; distincte de l’actualisation des NFO locaux.</p>
+  <p class="hint">Les fournisseurs installés et autorisés actualisent les champs automatiques à cette cadence. Les corrections manuelles restent prioritaires. Cette cadence est distincte de l’actualisation des NFO locaux.</p>
 </details>
 
 {#if kind !== 'music'}
-<details class="advanced-section"><summary id="library-analysis-heading"><span>Analyse et organisation</span><small>Préférences préparées</small></summary>
-  <p class="notice">La surveillance native et les regroupements automatiques ne sont pas encore exécutés. Vos préférences sont conservées pour leur future activation.</p>
-  <label class="check"><input type="checkbox" bind:checked={options.realtimeMonitoring} /> Activer la surveillance en temps réel</label>
+<details class="advanced-section"><summary id="library-analysis-heading"><span>Analyse et organisation</span></summary>
+  <p class="notice">La surveillance vérifie les dossiers via leur Media Node toutes les 60 secondes, selon les tâches en attente. Les collections réunissent dans Playlists les films accessibles appartenant à une même collection identifiée, à partir de deux films.</p>
+  <label class="check"><input type="checkbox" bind:checked={options.realtimeMonitoring} /> Surveiller les modifications (vérification toutes les 60 secondes)</label>
   <label class="check"><input type="checkbox" bind:checked={options.automaticCollections} /> Ajouter automatiquement aux collections</label>
   <label class="check"><input type="checkbox" bind:checked={options.introDetectionEnabled} /> Activer la détection d’intro</label>
   <ProviderPriority id="segment-providers" label="Segments média" bind:value={options.segmentProviders} suggestions={providers} />

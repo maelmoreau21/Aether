@@ -1729,6 +1729,11 @@ async fn prepare_asset(
         .and_then(|s| s.parse::<u32>().ok())
     {
         Some(Component::Audio(index))
+    } else if let Some(index) = component
+        .strip_prefix("subtitle-ass-")
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        Some(Component::AssSubtitle(index))
     } else {
         component
             .strip_prefix("subtitle-")

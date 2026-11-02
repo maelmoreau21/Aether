@@ -42,6 +42,8 @@ mod identify;
 mod image_collection;
 #[path = "extension_repositories.rs"]
 pub(crate) mod repositories;
+#[path = "extension_updates.rs"]
+mod updates;
 
 const DEFAULT_COMMUNITY_TMDB_API_KEY: &str = "4219e299c89411838049ab0dab19ebd5";
 
@@ -236,6 +238,30 @@ pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'st
     if package.wasm.len() > MAX_MODULE * 4 / 3 + 4 {
         return Err("module_too_large");
     }
+    if let Some(migration) = &m.storage_migration {
+        let valid_key = |key: &str| !key.is_empty() && key.len() <= 256;
+        if migration.from_version.len() > 32
+            || migration.key_renames.len() > 32
+            || migration
+                .key_renames
+                .iter()
+                .enumerate()
+                .any(|(index, rename)| {
+                    !valid_key(&rename.from)
+                        || !valid_key(&rename.to)
+                        || rename.from == rename.to
+                        || migration
+                            .key_renames
+                            .iter()
+                            .any(|other| other.from == rename.to)
+                        || migration.key_renames[..index]
+                            .iter()
+                            .any(|other| other.from == rename.from || other.to == rename.to)
+                })
+        {
+            return Err("invalid_storage_migration");
+        }
+    }
     let wasm = STANDARD
         .decode(&package.wasm)
         .map_err(|_| "invalid_module")?;
@@ -312,6 +338,10 @@ pub fn router(auth: AuthState) -> Router {
         .route(
             "/api/v1/admin/extensions/{id}/upgrade",
             axum::routing::post(upgrade),
+        )
+        .route(
+            "/api/v1/admin/extensions/{id}/rollback",
+            axum::routing::post(updates::rollback),
         )
         .route(
             "/api/v1/admin/extensions/{id}/settings",
@@ -516,6 +546,7 @@ struct Installed {
     library_ids: Vec<String>,
     all_libraries: bool,
     settings: Value,
+    rollback_version: Option<String>,
 }
 async fn list(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
@@ -544,6 +575,16 @@ async fn list(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<
         let settings: Value = settings_str
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_else(|| json!({}));
+        let rollback_package: Option<String> = query_scalar(
+            "SELECT package_json FROM extension_update_revisions WHERE extension_id=?",
+        )
+        .bind(&id)
+        .fetch_optional(auth.store.pool())
+        .await
+        .map_err(db)?;
+        let rollback_version = rollback_package
+            .and_then(|bytes| serde_json::from_str::<Package>(&bytes).ok())
+            .map(|previous| previous.manifest.version);
         installed.push(Installed {
             manifest: package.manifest,
             publisher_id: package.publisher_id,
@@ -552,6 +593,7 @@ async fn list(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<
             library_ids: grants,
             all_libraries: all_libraries == 1,
             settings,
+            rollback_version,
         });
     }
     let storage = crate::extension_storage::check_health(&auth.store).await;
@@ -693,38 +735,37 @@ async fn upgrade_with_key(
             "extension_update_requires_authorization",
         ));
     }
-    let stateless = |p: &Package| -> bool {
-        if p.manifest.permissions.iter().any(|v| {
-            !matches!(
-                v.as_str(),
-                "metadata.read" | "metadata.write" | "images" | "providers"
-            )
-        }) {
-            return false;
-        }
-        let Ok(bytes) = STANDARD.decode(&p.wasm) else {
-            return false;
-        };
-        let engine = wasmi::Engine::default();
-        let Ok(module) = wasmi::Module::new(&engine, &bytes) else {
-            return false;
-        };
-        module
-            .imports()
-            .all(|i| i.module() == "aether" && i.name() == "aether_host_http")
-    };
     let private_rows: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM extension_data WHERE extension_id=?) + (SELECT COUNT(*) FROM extension_objects WHERE extension_id=?)")
         .bind(&id).bind(&id).fetch_one(auth.store.pool()).await.map_err(db)?;
-    if !stateless(&installed) || !stateless(&package) || private_rows != 0 {
-        if package.manifest.config_schema != installed.manifest.config_schema {
-            return Err(err(
-                StatusCode::CONFLICT,
-                "extension_settings_compatibility_unverified",
-            ));
-        }
+    let needs_migration = private_rows != 0
+        || installed
+            .manifest
+            .permissions
+            .iter()
+            .any(|p| p == "storage.private");
+    if needs_migration
+        && package
+            .manifest
+            .storage_migration
+            .as_ref()
+            .is_none_or(|m| m.from_version != installed.manifest.version)
+    {
+        let code = if package.manifest.config_schema != installed.manifest.config_schema {
+            "extension_settings_compatibility_unverified"
+        } else {
+            "extension_update_compatibility_unverified"
+        };
+        return Err(err(StatusCode::CONFLICT, code));
+    }
+    if package
+        .manifest
+        .storage_migration
+        .as_ref()
+        .is_some_and(|m| m.from_version != installed.manifest.version)
+    {
         return Err(err(
             StatusCode::CONFLICT,
-            "extension_update_compatibility_unverified",
+            "extension_migration_source_mismatch",
         ));
     }
     // Optional additive fields and presentation changes preserve saved values.
@@ -759,6 +800,9 @@ async fn upgrade_with_key(
             "extension_settings_compatibility_unverified",
         ));
     }
+    if package.manifest.storage_migration.is_some() {
+        updates::verify_candidate(&package).await?;
+    }
     crate::extension_storage::backup_package(&auth.store, &installed)
         .await
         .map_err(storage_error)?;
@@ -766,6 +810,10 @@ async fn upgrade_with_key(
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_package"))?;
     let mut conn = auth.store.pool().acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
+    // The database write lock fences storage operations from old generations.
+    // Snapshot and all declarative migration operations share the package commit.
+    updates::snapshot(&mut tx, &id, &existing_package, &package.sha256).await?;
+    updates::migrate(&mut tx, &id, package.manifest.storage_migration.as_ref()).await?;
     let changed =
         query("UPDATE extensions SET package_json=?,generation=? WHERE id=? AND package_json=?")
             .bind(bytes)
@@ -1125,6 +1173,7 @@ async fn uninstall(
             return Err(err(StatusCode::CONFLICT, "avatar_migration_required"));
         }
     }
+    updates::clear_snapshot(&mut tx, &id).await.map_err(db)?;
     crate::extension_data_lifecycle::uninstall(&mut tx, &id, input.delete_data)
         .await
         .map_err(db)?;
@@ -1793,6 +1842,18 @@ pub(crate) async fn run_automated(
         .map_err(db)?;
     let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
         .map_err(|_| err(StatusCode::CONFLICT, "invalid_library_options"))?;
+    let providers = if operation.starts_with("intro.") {
+        &options.segment_providers
+    } else if operation == "metadata.images" {
+        &options.image_providers
+    } else {
+        &options.metadata_providers
+    };
+    if crate::library_options::LibraryOptions::provider_priority(providers, extension_id, 100)
+        .is_none()
+    {
+        return Err(err(StatusCode::FORBIDDEN, "library_provider_disabled"));
+    }
     let legacy = operation == "metadata.propose"
         && package
             .manifest

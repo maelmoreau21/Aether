@@ -5,7 +5,8 @@ import { CHUNK_SIZE, offlineItem, offlineChunk, unlockDetails } from '../lib/off
 const CACHE=`media-shell-${version}`;
 const SHELL=['/app/downloads/','/app/downloads/index-bootstrap-0.js',...immutable.map(asset=>'/app/'+asset.path.replace(/^\//,''))];
 const ASSETS=new Set(SHELL);
-self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)));});
+// Optional ASS workers/Wasm are fetched only when a subtitle needs them.
+self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL.filter(path=>!path.endsWith('.wasm')&&!path.includes('/workers/')))));});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('media-shell-')&&key!==CACHE).map(key=>caches.delete(key)))));});
 async function keyFromClient(id:string,clientId:string):Promise<CryptoKey|undefined>{
  const client=await self.clients.get(clientId);if(!client)return;

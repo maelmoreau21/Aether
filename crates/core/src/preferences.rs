@@ -16,6 +16,14 @@ struct Preferences {
     #[serde(skip_serializing_if = "Option::is_none")]
     locale: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    home_sections: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    card_size: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    card_density: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accent_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     audio_language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     remember_audio_selections: Option<bool>,
@@ -123,8 +131,29 @@ fn hex_color(value: &str) -> bool {
 }
 impl Preferences {
     fn valid(&self) -> bool {
-        self.skip_back_seconds
-            .is_none_or(|v| matches!(v, 5 | 10 | 15 | 30 | 60))
+        self.home_sections.as_ref().is_none_or(|sections| {
+            sections.len() <= 5
+                && sections.iter().enumerate().all(|(index, section)| {
+                    matches!(
+                        section.as_str(),
+                        "hero" | "continue" | "films" | "series" | "rated"
+                    ) && !sections[..index].contains(section)
+                })
+        }) && self
+            .card_size
+            .as_deref()
+            .is_none_or(|v| matches!(v, "small" | "medium" | "large"))
+            && self
+                .card_density
+                .as_deref()
+                .is_none_or(|v| matches!(v, "comfortable" | "compact"))
+            && self
+                .accent_color
+                .as_deref()
+                .is_none_or(|v| matches!(v, "orange" | "blue" | "violet" | "green"))
+            && self
+                .skip_back_seconds
+                .is_none_or(|v| matches!(v, 5 | 10 | 15 | 30 | 60))
             && self
                 .skip_forward_seconds
                 .is_none_or(|v| matches!(v, 5 | 10 | 15 | 30 | 60))

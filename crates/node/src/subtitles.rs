@@ -399,7 +399,8 @@ pub async fn discover_with_folder(
             }
             let text = std::str::from_utf8(&bytes).map_err(|_| "subtitle must be UTF-8")?;
             let webvtt = to_webvtt(text, &extension).map_err(str::to_owned)?;
-            if total + webvtt.len() > MAX_TOTAL_BYTES {
+            let ass = matches!(extension.as_str(), "ass" | "ssa").then(|| text.to_owned());
+            if total + webvtt.len() + ass.as_ref().map_or(0, String::len) > MAX_TOTAL_BYTES {
                 return Err(format!(
                     "subtitles exceed {} KiB per video",
                     MAX_TOTAL_BYTES / 1024
@@ -413,26 +414,20 @@ pub async fn discover_with_folder(
                     language.to_uppercase(),
                     if forced { " forcés" } else { "" },
                     if sdh { " SDH" } else { "" },
-                    if matches!(extension.as_str(), "ass" | "ssa") {
-                        format!(
-                            "{} (texte, styles non reproduits)",
-                            extension.to_uppercase()
-                        )
-                    } else {
-                        extension.to_uppercase()
-                    }
+                    extension.to_uppercase()
                 ),
                 language,
                 forced,
                 sdh,
                 source_format: extension,
                 webvtt,
+                ass,
             })
         }
         .await;
         match result {
             Ok(track) => {
-                total += track.webvtt.len();
+                total += track.webvtt.len() + track.ass.as_ref().map_or(0, String::len);
                 tracks.push(track);
             }
             Err(message) => issues.push(ScanIssue {
@@ -462,6 +457,24 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[tokio::test]
+    async fn ass_discovery_retains_original_styles_with_a_safe_text_fallback() {
+        let temp = tempfile::tempdir().unwrap();
+        tokio::fs::write(temp.path().join("film.mkv"), b"fixture")
+            .await
+            .unwrap();
+        let ass = "[Script Info]\nTitle: Styled\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.25,0:00:03.50,Default,,0,0,0,,{\\i1}Bonjour{\\i0}";
+        tokio::fs::write(temp.path().join("film.fr.forced.ass"), ass)
+            .await
+            .unwrap();
+        let (tracks, issues) = discover(temp.path(), Path::new("film.mkv")).await;
+        assert!(issues.is_empty(), "{issues:?}");
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].ass.as_deref(), Some(ass));
+        assert!(tracks[0].forced);
+        assert!(tracks[0].webvtt.contains("Bonjour"));
+        assert!(!tracks[0].webvtt.contains("\\i1"));
     }
     #[test]
     fn conversion_validates_times_and_escapes_markup() {

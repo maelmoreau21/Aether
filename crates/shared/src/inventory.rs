@@ -61,6 +61,9 @@ pub struct ExternalSubtitle {
     pub sdh: bool,
     pub source_format: String,
     pub webvtt: String,
+    /// Original ASS/SSA for optional client libass rendering; old snapshots remain valid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ass: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

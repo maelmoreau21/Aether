@@ -5,7 +5,7 @@
   import { loadServerPresentation } from '../lib/config/presentation';
   import { initTheme, setTheme } from '../lib/theme';
   import { setLocale } from '../lib/i18n';
-  import { hydratePreferences, preferenceSyncError } from '../lib/preferences';
+  import { hydratePreferences, preferenceSyncError, preferenceState } from '../lib/preferences';
   import { getSessionGeneration } from '../lib/auth/session';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
@@ -19,6 +19,13 @@
     const refresh=()=>{if(document.visibilityState==='visible'&&!isDownloads)void hydratePreferences().then(saved=>{if(saved){setTheme(saved.theme??'system',false);setLocale(saved.locale??'fr',false);}}).catch(()=>{});};
     window.addEventListener('focus',refresh);
     return()=>window.removeEventListener('focus',refresh);
+  });
+  $effect(() => {
+    const appearance = $preferenceState;
+    if (typeof document === 'undefined') return;
+    document.documentElement.dataset.cardSize = appearance.cardSize ?? 'medium';
+    document.documentElement.dataset.cardDensity = appearance.cardDensity ?? 'comfortable';
+    document.documentElement.dataset.accent = appearance.accentColor ?? 'orange';
   });
   let { children } = $props();
   let verified = $state(false);

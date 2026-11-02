@@ -514,3 +514,80 @@ async fn schedule_reconciliation_tracks_all_durable_scopes_and_pending_retries()
     .unwrap();
     assert_eq!(outcome, "completed");
 }
+
+#[tokio::test]
+async fn monitoring_and_online_refresh_are_durable_and_do_not_duplicate_pending_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = tokio::fs::canonicalize(temp.path()).await.unwrap();
+    let store = IdentityStore::open(&root.join("automation.sqlite"))
+        .await
+        .unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES('auto','Films','films','local',?,1,?)")
+        .bind(root.to_string_lossy().as_ref())
+        .bind(json!({"realtimeMonitoring":true,"onlineRefreshIntervalDays":30}).to_string())
+        .execute(store.pool()).await.unwrap();
+    let jobs = Arc::new(ScanJobs::default());
+    scheduler::run_due(&auth, &root, &jobs, 1000).await.unwrap();
+    scheduler::run_due(&auth, &root, &jobs, 1000).await.unwrap();
+    scheduler::run_due(&auth, &root, &jobs, 1100).await.unwrap();
+    let monitored: i64 = media_poc::database::query_scalar(
+        "SELECT COUNT(*) FROM durable_tasks WHERE owner='library-monitor'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        monitored, 1,
+        "pending monitoring work coalesces even in the next minute"
+    );
+    let sweeps: i64 = media_poc::database::query_scalar("SELECT COUNT(*) FROM automation_sweeps")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(sweeps, 1);
+    media_poc::database::query("UPDATE durable_tasks SET status='completed';")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    media_poc::database::query("UPDATE automation_sweeps SET completed_at=1001")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    scheduler::run_due(&auth, &root, &jobs, 1101).await.unwrap();
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM durable_tasks WHERE owner='library-monitor'"
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap(),
+        2
+    );
+    scheduler::run_due(&auth, &root, &jobs, 1000 + 30 * 86400)
+        .await
+        .unwrap();
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM automation_sweeps")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        2
+    );
+    media_poc::database::query("UPDATE libraries SET enabled=0")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    scheduler::run_due(&auth, &root, &jobs, 1000 + 60 * 86400)
+        .await
+        .unwrap();
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM automation_sweeps")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        2
+    );
+}

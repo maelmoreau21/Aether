@@ -139,6 +139,7 @@ pub enum Component {
     AudioChunk(u32, u32),
     OpusChunk(u32, u32),
     Subtitle(u32),
+    AssSubtitle(u32),
 }
 impl Component {
     pub fn mime(self) -> &'static str {
@@ -147,6 +148,7 @@ impl Component {
             Self::Audio(_) => "audio/ogg",
             Self::AudioChunk(_, _) | Self::OpusChunk(_, _) => "audio/mp4",
             Self::Subtitle(_) => "text/vtt; charset=utf-8",
+            Self::AssSubtitle(_) => "text/plain; charset=utf-8",
         }
     }
 }
@@ -341,7 +343,7 @@ impl Preparations {
             Component::AudioChunk(_, _) | Component::OpusChunk(_, _) => {
                 limits.audio.min(16 * 1024 * 1024)
             }
-            Component::Subtitle(_) => 4 * 1024 * 1024,
+            Component::Subtitle(_) | Component::AssSubtitle(_) => 4 * 1024 * 1024,
         });
         let mut file = input.try_clone_std()?;
         std::io::Seek::rewind(&mut file)?;
@@ -433,6 +435,18 @@ impl Preparations {
                     "webvtt",
                     "-f",
                     "webvtt",
+                ]);
+            }
+            Component::AssSubtitle(index) => {
+                command.args([
+                    "-map",
+                    &format!("0:{index}"),
+                    "-vn",
+                    "-an",
+                    "-c:s",
+                    "ass",
+                    "-f",
+                    "ass",
                 ]);
             }
         }
@@ -594,6 +608,56 @@ mod tests {
         assert!(cache.evict_idle());
         assert!(cache.entries.contains_key("full"));
         assert!(!cache.entries.contains_key("chunk"));
+    }
+    #[tokio::test]
+    async fn original_ass_preparation_retains_styles_from_mkv() {
+        use std::io::Read;
+        let temp = tempfile::tempdir().unwrap();
+        let ass = "[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Liberation Sans,32,&H0000FFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,2,10,10,20,1\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,{\\pos(320,180)\\frz-10}Styled\n";
+        std::fs::write(temp.path().join("styled.ass"), ass).unwrap();
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/generated/representative/representative.mp4");
+        let output = Command::new("ffmpeg")
+            .args(["-v", "error", "-nostdin", "-i"])
+            .arg(fixture)
+            .arg("-i")
+            .arg(temp.path().join("styled.ass"))
+            .args(["-map", "0:v:0", "-map", "1:0", "-c", "copy"])
+            .arg(temp.path().join("styled.mkv"))
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let source = OpenedFile::open_in_root(temp.path(), Path::new("styled.mkv"))
+            .await
+            .unwrap();
+        let prepared = Preparations::default()
+            .prepare(
+                temp.path(),
+                Path::new("styled.mkv"),
+                source.size(),
+                source.modified_ns(),
+                Component::AssSubtitle(1),
+            )
+            .await
+            .unwrap();
+        let mut text = String::new();
+        prepared
+            .try_clone_std()
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
+        assert!(text.contains("Liberation Sans"));
+        assert!(text.contains("\\pos(320,180)\\frz-10"));
+        assert!(text.contains("Styled"));
+        assert_eq!(
+            Component::AssSubtitle(1).mime(),
+            "text/plain; charset=utf-8"
+        );
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn identical_cold_audio_windows_coalesce_without_consuming_worker_waiters() {

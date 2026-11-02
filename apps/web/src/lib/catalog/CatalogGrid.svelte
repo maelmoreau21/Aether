@@ -777,14 +777,14 @@
 
   .media-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(clamp(155px, 12.5vw, 190px), 1fr));
-    gap: 24px 18px;
+    grid-template-columns: repeat(auto-fill, minmax(var(--poster-width, clamp(155px, 12.5vw, 190px)), 1fr));
+    gap: var(--card-row-gap, 24px) var(--card-gap, 18px);
   }
 
   @media (min-width: 1920px) {
     .media-grid {
-      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-      gap: 28px 22px;
+      grid-template-columns: repeat(auto-fill, minmax(var(--poster-width, 210px), 1fr));
+      gap: var(--card-row-gap, 28px) var(--card-gap, 22px);
     }
   }
 
@@ -877,8 +877,8 @@
     }
 
     .media-grid {
-      grid-template-columns: repeat(2, 1fr);
-      gap: 14px 10px;
+      grid-template-columns: repeat(var(--mobile-card-columns, 2), minmax(0, 1fr));
+      gap: var(--card-row-gap, 14px) var(--card-gap, 10px);
     }
   }
 </style>

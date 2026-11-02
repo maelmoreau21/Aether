@@ -1,5 +1,62 @@
 # Réglages de bibliothèque et permissions médias
 
+## Exécution des options — 2 novembre 2026
+
+Les paragraphes historiques ci-dessous décrivent les étapes précédentes. Les
+options suivantes déclenchent désormais un traitement :
+
+- `realtimeMonitoring` : surveillance périodique par scan incrémental dans le
+  Media Node propriétaire. Une bibliothèque au maximum est admise par passage
+  du scheduler (15 s), avec une cadence minimale de 60 s par bibliothèque, une
+  faible priorité (10) et regroupement des demandes déjà en attente. Ce n'est
+  pas un abonnement aux événements natifs du système de fichiers. La charge et
+  le nombre de bibliothèques peuvent augmenter le délai. Les dossiers distants
+  sont parcourus par leur Node ; les originaux restent en lecture seule.
+- `onlineRefreshIntervalDays` : balayage durable des fournisseurs autorisés,
+  immédiatement après activation puis tous les 30/60/90 jours depuis le dernier
+  balayage. Le curseur et les tâches survivent au redémarrage. Les résultats
+  automatiques peuvent être actualisés ; les valeurs manuelles et les NFO non
+  remplacés par un fournisseur restent prioritaires. Les extensions d'analyse
+  d'intro ne sont pas relancées par ce balayage de métadonnées.
+- `metadataProviders`, `imageProviders`, `segmentProviders` : une liste vide
+  conserve les politiques globales ; une liste renseignée est une liste
+  d'autorisation. Les entrées désactivées et les fournisseurs omis ne sont pas
+  admis. L'ordre détermine la priorité des tâches et des champs automatiques ;
+  il ne donne aucun droit supplémentaire ni accès à un fournisseur désactivé.
+  Les recherches et collectes d'images respectent aussi la liste d'images.
+  `similarItemsProviders` reste préparatoire. Le téléchargement des sous-titres
+  est laissé de côté à la demande de l'utilisateur.
+- `automaticCollections` : les films ayant une identité de collection commune
+  apparaissent dans l'onglet Collections de Playlists, à partir de deux films
+  accessibles. Ces listes sont calculées et en lecture seule, sans copie ni
+  écriture de médias. Désactiver l'option, retirer un droit, masquer un film par
+  contrôle parental ou retirer un film fait disparaître les membres concernés
+  dès la requête suivante. Les noms de collection ne sont exposés qu'après ces
+  contrôles. Maximum 10 000 films candidats par requête ; aucune heuristique
+  fondée sur les titres des films n'est utilisée.
+
+Contrat fournisseur : `StructuredMetadata.collection` est optionnel et contient
+`{id, name}`. L'identité doit inclure le fournisseur (ex. `tmdb:726871`). TMDb
+extrait ce champ de `belongs_to_collection`. Les anciens paquets restent lisibles
+mais ne fournissent pas ce champ ; il faut reconstruire et installer une version
+compatible pour voir apparaître les collections.
+
+Contrat HTTP : `GET /api/v1/lists` ajoute les collections avec `automatic: true`,
+`owned: false`, `visibility: "collection"` et `itemCount`. Leur identifiant opaque
+commence par `auto-collection-`. `GET /api/v1/lists/{id}` retourne leurs éléments
+selon les droits vivants ; une collection inaccessible renvoie 404. Les routes
+existantes de modification des listes personnelles ne permettent pas de modifier
+ces collections. Les réglages de partage des playlists ne leur accordent aucun
+accès public.
+
+Validation locale ciblée et limites : voir le bilan du lot dans MEMORY.md. Les
+vérifications SQLite et fournisseur simulé ne prouvent pas PostgreSQL, NAS,
+précision acoustique d'Intro Skipper ni les services externes réels. La dépendance
+SDK Git du dépôt Aether-Plugins reste épinglée : la livraison du champ collection
+nécessite d'abord un commit Core publié puis une mise à jour explicite de cette
+révision ; aucun push, paquet signé ni déploiement n'est réalisé ici.
+
+
 ## Éditeur de bibliothèque — 25 octobre 2026
 
 Les réglages sont regroupés en sections : métadonnées et langue, images locales,

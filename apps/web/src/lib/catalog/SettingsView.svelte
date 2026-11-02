@@ -4,6 +4,7 @@
   import { resolve } from '$app/paths';
   import { session } from '../auth/session';
   import ProfileAvatar from '../ui/ProfileAvatar.svelte';
+  import AppearanceCustomization from './AppearanceCustomization.svelte';
   import AvatarEditor from './AvatarEditor.svelte';
   import OidcSettings from '../auth/OidcSettings.svelte';
   import AccountSecurity from '../auth/AccountSecurity.svelte';
@@ -203,6 +204,7 @@
       </section>
       </div>
             <div hidden={current !== 'display'}>
+        <AppearanceCustomization />
         <section class="card" aria-labelledby="home-preferences-heading">
           <h2 id="home-preferences-heading">Accueil</h2>
           <label class="checkbox-row"><input type="checkbox" bind:checked={hidePlayedInLatest} onchange={() => void saveLatestPreference()} /> Masquer les contenus vus dans les nouveautés</label>

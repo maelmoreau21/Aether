@@ -3831,7 +3831,8 @@ pub async fn descriptor_for_user(
             subtitles.push(json!({ "id": format!("internal-{}", track.index), "language": language,
                 "label": format!("{}{} · intégrés (texte)", language.to_uppercase(), if forced { " forcés" } else { "" }),
                 "forced": forced, "sourceFormat": track.codec_name,
-                "url": format!("/api/v1/assets/{asset_id}/prepared/subtitle-{}", track.index) }));
+                "url": format!("/api/v1/assets/{asset_id}/prepared/subtitle-{}", track.index),
+                "assUrl": matches!(track.codec_name.as_deref(), Some("ass" | "ssa")).then(|| format!("/api/v1/assets/{asset_id}/prepared/subtitle-ass-{}",track.index)) }));
         }
     }
     for (index, track) in audios.iter().enumerate() {
@@ -4125,7 +4126,8 @@ pub async fn prepared(
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
     };
     if let Some(index) = component
-        .strip_prefix("subtitle-")
+        .strip_prefix("subtitle-ass-")
+        .or_else(|| component.strip_prefix("subtitle-"))
         .and_then(|s| s.parse::<u32>().ok())
     {
         let options = match playback_library_options(
@@ -4231,6 +4233,19 @@ pub async fn prepared(
                     && t.codec_name.as_deref() == Some("opus")
             })
             .map(|_| Component::Audio(index))
+    } else if let Some(index) = component
+        .strip_prefix("subtitle-ass-")
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        probe
+            .streams
+            .iter()
+            .find(|t| {
+                t.index == index
+                    && t.codec_type.as_deref() == Some("subtitle")
+                    && matches!(t.codec_name.as_deref(), Some("ass" | "ssa"))
+            })
+            .map(|_| Component::AssSubtitle(index))
     } else if let Some(index) = component
         .strip_prefix("subtitle-")
         .and_then(|s| s.parse::<u32>().ok())
@@ -4485,7 +4500,8 @@ fn subtitle_descriptors(asset_id: &str, text: Option<&str>) -> Result<Vec<Value>
             json!({
                 "id": format!("external-{index}"), "language": track.language, "label": track.label,
                 "forced": track.forced, "sdh": track.sdh, "sourceFormat": track.source_format,
-                "url": format!("/api/v1/assets/{asset_id}/subtitles/{index}")
+                "url": format!("/api/v1/assets/{asset_id}/subtitles/{index}"),
+                "assUrl": track.ass.as_ref().map(|_| format!("/api/v1/assets/{asset_id}/subtitles/{index}?format=ass"))
             })
         })
         .collect())
@@ -4521,11 +4537,27 @@ pub async fn subtitle(
     let Some(track) = tracks.get(index) else {
         return crate::error(StatusCode::NOT_FOUND, "unknown_subtitle");
     };
-    let bytes = track.webvtt.as_bytes();
+    let original = request
+        .uri()
+        .query()
+        .is_some_and(|query| query == "format=ass");
+    let content = if original {
+        let Some(ass) = track.ass.as_deref() else {
+            return crate::error(StatusCode::NOT_FOUND, "original_subtitle_unavailable");
+        };
+        ass
+    } else {
+        &track.webvtt
+    };
+    let bytes = content.as_bytes();
     let mut response = Response::new(Body::empty());
     response.headers_mut().insert(
         header::CONTENT_TYPE,
-        axum::http::HeaderValue::from_static("text/vtt; charset=utf-8"),
+        axum::http::HeaderValue::from_static(if original {
+            "text/plain; charset=utf-8"
+        } else {
+            "text/vtt; charset=utf-8"
+        }),
     );
     response.headers_mut().insert(
         header::CACHE_CONTROL,
@@ -4901,6 +4933,7 @@ mod tests {
     use crate::node::scanner::ScannedFile;
     #[tokio::test]
     async fn embedded_subtitle_preferences_apply_locally_and_before_remote_relay() {
+        use axum::http::StatusCode;
         let temp = tempfile::tempdir().unwrap();
         let store = IdentityStore::open(&temp.path().join("subtitle-options.sqlite"))
             .await
@@ -4912,7 +4945,7 @@ mod tests {
             title: "Film".into(), identity_key: "film".into(), mime: "video/mp4".into(),
             probe: serde_json::from_value(json!({"streams":[
                 {"index":0,"codec_type":"video","codec_name":"av1"},
-                {"index":1,"codec_type":"subtitle","codec_name":"subrip","tags":{"language":"fr"}}
+                {"index":1,"codec_type":"subtitle","codec_name":"ass","tags":{"language":"fr"}}
             ],"format":{}})).unwrap(),
             subtitles: vec![serde_json::from_value(json!({"language":"en","label":"External","forced":false,"sdh":false,"source_format":"webvtt","webvtt":"WEBVTT\n\n"})).unwrap()],
             ..Default::default()
@@ -4939,6 +4972,47 @@ mod tests {
             .bind(&asset)
             .bind(json!([{"language":"en","label":"External","forced":false,"sdh":false,"source_format":"webvtt","webvtt":"WEBVTT\n\n"}]).to_string())
             .execute(&store.pool).await.unwrap();
+        // The original ASS snapshot uses the same authorized media endpoint and
+        // range handling as the safe text fallback, without exposing a disk path.
+        let ass = "[Script Info]\nTitle: Original styles\n";
+        query("UPDATE inventory_subtitles SET subtitles_json=? WHERE asset_id=?")
+            .bind(json!([{"language":"en","label":"External","forced":false,"sdh":false,"source_format":"ass","webvtt":"WEBVTT\n\n","ass":ass}]).to_string())
+            .bind(&asset).execute(&store.pool).await.unwrap();
+        for (method, range, status, expected) in [
+            ("GET", None, StatusCode::OK, ass),
+            ("HEAD", None, StatusCode::OK, ""),
+            (
+                "GET",
+                Some("bytes=0-6"),
+                StatusCode::PARTIAL_CONTENT,
+                "[Script",
+            ),
+        ] {
+            let mut request = axum::extract::Request::builder()
+                .method(method)
+                .uri("/?format=ass");
+            if let Some(range) = range {
+                request = request.header("range", range);
+            }
+            let response = subtitle(
+                &store,
+                &asset,
+                0,
+                request.body(axum::body::Body::empty()).unwrap(),
+            )
+            .await;
+            assert_eq!(response.status(), status);
+            assert_eq!(
+                response.headers()["content-type"],
+                "text/plain; charset=utf-8"
+            );
+            assert_eq!(
+                axum::body::to_bytes(response.into_body(), 1024)
+                    .await
+                    .unwrap(),
+                expected
+            );
+        }
         query("INSERT INTO media_nodes(id,name,kind) VALUES('remote','Remote','remote')")
             .execute(&store.pool)
             .await
@@ -4967,6 +5041,13 @@ mod tests {
                         .iter()
                         .any(|subtitle| subtitle["label"] == "External")
                 );
+                if expected == 2 {
+                    assert!(subtitles.iter().any(|subtitle| {
+                        subtitle["assUrl"]
+                            .as_str()
+                            .is_some_and(|url| url.ends_with("/prepared/subtitle-ass-1"))
+                    }));
+                }
             }
             let request = axum::extract::Request::builder()
                 .body(axum::body::Body::empty())
@@ -4980,6 +5061,15 @@ mod tests {
                 .await
                 .unwrap();
             assert!(String::from_utf8_lossy(&body).contains("embedded_subtitle_disabled"));
+            let request = axum::extract::Request::builder()
+                .body(axum::body::Body::empty())
+                .unwrap();
+            assert_eq!(
+                prepared(&store, &preparations, &asset, "subtitle-ass-1", request)
+                    .await
+                    .status(),
+                StatusCode::UNPROCESSABLE_ENTITY
+            );
         }
         query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES('folder','Folder','films','local','/child',0,'{}')")
             .execute(&store.pool).await.unwrap();

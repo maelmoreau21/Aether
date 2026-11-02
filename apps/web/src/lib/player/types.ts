@@ -29,7 +29,7 @@ export interface Source {
   label?: string;
   audioOffsetSeconds?: number;
 }
-export interface Subtitle { id: string; language: string; label: string; url: string; forced?: boolean; sdh?: boolean; sourceFormat?: string }
+export interface Subtitle { id: string; language: string; label: string; url: string; assUrl?: string | null; forced?: boolean; sdh?: boolean; sourceFormat?: string }
 export interface Media {
   chapters?: { start: number; title: string }[];
   trickplay?: { intervalMs: number; width: number; height: number; columns: number; rows: number; sheetCount: number; thumbnailCount: number; urlPrefix: string } | null;

@@ -309,8 +309,30 @@ pub(super) async fn search_candidates(
     crate::feedback::authorized(&auth, &headers, &input.work_id, false)
         .await
         .map_err(|s| err(s, "work_denied"))?;
-    let rows: Vec<(String,String,String)> = query_as("SELECT e.id,e.package_json,e.generation FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.enabled=1 AND p.active=1 ORDER BY e.id LIMIT 65")
+    let mut rows: Vec<(String,String,String)> = query_as("SELECT e.id,e.package_json,e.generation FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.enabled=1 AND p.active=1 ORDER BY e.id LIMIT 65")
         .fetch_all(auth.store.pool()).await.map_err(db)?;
+    let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
+        .bind(&context.library_id)
+        .fetch_one(auth.store.pool())
+        .await
+        .map_err(db)?;
+    let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
+        .map_err(|_| err(StatusCode::CONFLICT, "invalid_library_options"))?;
+    rows.retain(|(id, _, _)| {
+        crate::library_options::LibraryOptions::provider_priority(&options.image_providers, id, 100)
+            .is_some()
+    });
+    rows.sort_by_key(|(id, _, _)| {
+        std::cmp::Reverse(
+            crate::library_options::LibraryOptions::provider_priority(
+                &options.image_providers,
+                id,
+                100,
+            )
+            .unwrap_or(0),
+        )
+    });
+
     let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
     let mut images_out = Vec::new();
     let mut errors = Vec::new();
@@ -410,6 +432,18 @@ pub(super) async fn search_candidates(
     }
     // Sort candidate images: higher vote count/rating first, then resolution
     images_out.sort_by(|a, b| {
+        let provider_priority = |image: &Value| {
+            crate::library_options::LibraryOptions::provider_priority(
+                &options.image_providers,
+                image["provider"].as_str().unwrap_or(""),
+                100,
+            )
+            .unwrap_or(0)
+        };
+        let provider_order = provider_priority(b).cmp(&provider_priority(a));
+        if !provider_order.is_eq() {
+            return provider_order;
+        }
         let vote_b = b.get("voteCount").and_then(Value::as_u64).unwrap_or(0);
         let vote_a = a.get("voteCount").and_then(Value::as_u64).unwrap_or(0);
         let rating_b = b.get("rating").and_then(Value::as_f64).unwrap_or(0.0);
@@ -450,8 +484,30 @@ pub(super) async fn collect(
     crate::feedback::authorized(&auth, &headers, &input.work_id, false)
         .await
         .map_err(|s| err(s, "work_denied"))?;
-    let rows: Vec<(String,String,String)> = query_as("SELECT e.id,e.package_json,e.generation FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.enabled=1 AND p.active=1 ORDER BY e.id LIMIT 65")
+    let mut rows: Vec<(String,String,String)> = query_as("SELECT e.id,e.package_json,e.generation FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.enabled=1 AND p.active=1 ORDER BY e.id LIMIT 65")
         .fetch_all(auth.store.pool()).await.map_err(db)?;
+    let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
+        .bind(&context.library_id)
+        .fetch_one(auth.store.pool())
+        .await
+        .map_err(db)?;
+    let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
+        .map_err(|_| err(StatusCode::CONFLICT, "invalid_library_options"))?;
+    rows.retain(|(id, _, _)| {
+        crate::library_options::LibraryOptions::provider_priority(&options.image_providers, id, 100)
+            .is_some()
+    });
+    rows.sort_by_key(|(id, _, _)| {
+        std::cmp::Reverse(
+            crate::library_options::LibraryOptions::provider_priority(
+                &options.image_providers,
+                id,
+                100,
+            )
+            .unwrap_or(0),
+        )
+    });
+
     if rows.len() > 64 {
         return Err(err(StatusCode::CONFLICT, "too_many_providers"));
     }
@@ -527,18 +583,30 @@ pub(super) async fn collect(
     candidates
         .sort_by(|a, b| (a.0, kind(a.2.image_type), &a.1).cmp(&(b.0, kind(b.2.image_type), &b.1)));
     let mut buckets: std::collections::BTreeMap<
-        (usize, String, String),
+        (usize, std::cmp::Reverse<i64>, String, String),
         std::collections::VecDeque<MediaImage>,
     > = std::collections::BTreeMap::new();
     for (priority, provider, image) in candidates {
         buckets
-            .entry((priority, kind(image.image_type).into(), provider))
+            .entry((
+                priority,
+                std::cmp::Reverse(
+                    crate::library_options::LibraryOptions::provider_priority(
+                        &options.image_providers,
+                        &provider,
+                        100,
+                    )
+                    .unwrap_or(0),
+                ),
+                kind(image.image_type).into(),
+                provider,
+            ))
             .or_default()
             .push_back(image);
     }
     let mut queue = Vec::new();
     while !buckets.is_empty() {
-        buckets.retain(|(_, _, provider), images| {
+        buckets.retain(|(_, _, _, provider), images| {
             if let Some(image) = images.pop_front() {
                 queue.push((provider.clone(), image));
             }

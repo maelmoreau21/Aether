@@ -1,3 +1,31 @@
+## 2 novembre 2026 — Planificateur, aperçus, Trickplay et sauvegarde NAS
+
+- Planificateur : plans visibles, activation/désactivation conservant le dernier
+  résultat, intervalle effectif, détails chargés avant message introuvable,
+  erreurs structurées et suivi d'état pendant l'ouverture. Navigation tâche
+  limitée à sa rubrique. Toujours intervalles seuls, pas calendrier Jellyfin.
+- Aperçus Identifier/recherche images : URL même origine via route admin
+  `extensions/{id}/image-preview`, téléchargement borné réutilisant les contrôles
+  d'import existants (domaines signés, IP publiques épinglées, HTTPS sans redirect,
+  max10Mio, concurrence4). CSP non élargie, aucun stockage d'aperçu.
+- Trickplay séparé dans sa rubrique ; menu Chapitres flottant retiré, repères
+  et libellés sur la timeline, commandes précédent/suivant conservées.
+- NAS : cause500 démontrée par logs PermissionDenied sur /backups. Propriétaire
+  du seul répertoire volume aether_backups aligné10001:10001→1039:65539, mode0700
+  conservé ; création/lecture/suppression temporaire sous UIDservice réussies.
+  Pas de vraie archive HTTP créée sans session existante. Code diagnostics par
+  étape et affichage erreurs Web ; déploiement nouveau binaire nécessaire.
+- Stockage actuel : avatars/images déjà fichiers AssetStore. NAS observé :
+  PostgreSQL~270Mo, /data/assets~18Mo,210fichiers ; tableassets et user_avatars
+  vides au moment observé, fichiers non supposés tous référencés ni supprimés.
+- Vérifications : sauvegardes HTTP SQLite2/2, refus/rbac aperçu Core1/1,
+  navigation2/2, Chrome planificateur synthétique390/1440, aperçus dans les deux
+  dialogues sous CSPimg-src self, et vrai scénario Séries avec chapitres43,47s.
+  Svelte0/0, lint/build et fmt/diff-check passent ; pas de suite globale.
+- PR plugins12 déjà fusionnée surmain par état GitHub observé pendant ce travail ;
+  aucune nouvelle PR doublon créée. Documentation : UI_REPAIRS_2026_11_02.md et
+  BACKUP_NAS_FIX_2026_11_02.md. Aucune modification des médias du NAS.
+
 ## 2 novembre 2026 — Correction CI des préférences mémorisées
 
 - Run GitHub `41504190433` : seul le navigateur scanner échoue ; tous les jobs

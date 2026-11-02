@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { preferenceState, DEFAULT_HOME_SECTIONS } from '../preferences';
   import { session } from '../auth/session';
   import { selectArtwork } from './artwork-selection';
   import type { Work } from './api';
@@ -22,22 +23,27 @@
 </script>
 
 <div class="catalog-home">
-  <HeroBanner featured={activeFeatured} {onPlay} />
-  <ContinueWatching works={allWorks} />
-  {#if films.length}
-    <MediaShelf title="Films récemment ajoutés" viewAllHref={resolve('films/?sort=added-desc')}>
-      {#each films.slice(0, 16) as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
-    </MediaShelf>
-  {/if}
-  {#if series.length}
-    <MediaShelf title="Séries récemment ajoutées" viewAllHref={resolve('series/?sort=added-desc')}>
-      {#each series.slice(0, 16) as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
-    </MediaShelf>
-  {/if}
-  {#if topRated.length >= 4}
-    <MediaShelf title="Les mieux notés de votre médiathèque">
-      {#each topRated as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
-    </MediaShelf>
+  {#each ($preferenceState.homeSections ?? DEFAULT_HOME_SECTIONS) as section (section)}
+    {#if section === 'hero'}
+      <HeroBanner featured={activeFeatured} {onPlay} />
+    {:else if section === 'continue'}
+      <ContinueWatching works={allWorks} />
+    {:else if section === 'films' && films.length}
+      <MediaShelf title="Films récemment ajoutés" viewAllHref={resolve('films/?sort=added-desc')}>
+        {#each films.slice(0, 16) as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
+      </MediaShelf>
+    {:else if section === 'series' && series.length}
+      <MediaShelf title="Séries récemment ajoutées" viewAllHref={resolve('series/?sort=added-desc')}>
+        {#each series.slice(0, 16) as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
+      </MediaShelf>
+    {:else if section === 'rated' && topRated.length >= 4}
+      <MediaShelf title="Les mieux notés de votre médiathèque">
+        {#each topRated as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
+      </MediaShelf>
+    {/if}
+  {/each}
+  {#if $preferenceState.homeSections?.length === 0}
+    <p>Les sections de l’accueil sont masquées. Vous pouvez les réactiver dans les <a href={resolve('settings/#display')}>paramètres d’affichage</a>.</p>
   {/if}
 </div>
 

@@ -203,6 +203,7 @@ pub async fn run_due(
     if jobs.is_cancelled() {
         return Ok(());
     }
+    run_library_automation(auth, timestamp).await?;
     let due:Option<(String,i64,i64)>=crate::database::query_as("SELECT s.library_id,s.interval_minutes,s.next_run_at FROM scheduled_scans s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE s.enabled=1 AND s.next_run_at<=? AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM scan_jobs j WHERE j.library_id=l.id AND j.status IN ('queued','running')) ORDER BY s.next_run_at,s.library_id LIMIT 1")
         .bind(timestamp).fetch_optional(&auth.store.pool).await?;
     let Some((id, minutes, previous)) = due else {
@@ -234,12 +235,56 @@ pub async fn run_due(
     Ok(())
 }
 
+/// Monitoring polls through the Node scan queue, so Core never traverses remote roots.
+/// One admission per pass, low priority and at most once a minute per library.
+async fn run_library_automation(auth: &AuthState, timestamp: i64) -> Result<(), sqlx::Error> {
+    let watch: Option<String> = crate::database::query_scalar("SELECT l.id FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND n.status!='revoked' AND l.id NOT IN ('fixture-films','fixture-series') AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND CAST(COALESCE(json_extract(l.options_json,'$.realtimeMonitoring'),'0') AS TEXT) IN ('1','true') AND NOT EXISTS(SELECT 1 FROM durable_tasks t WHERE t.owner='library-monitor' AND (t.library_id=l.id OR t.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=l.id AND active=1)) AND (t.status IN ('queued','running','paused') OR t.created_at>?)) ORDER BY COALESCE((SELECT MAX(t.created_at) FROM durable_tasks t WHERE t.library_id=l.id AND t.owner='library-monitor'),0),l.id LIMIT 1")
+        .bind(timestamp-60).fetch_optional(&auth.store.pool).await?;
+    if let Some(library) = watch {
+        queue_scopes_with(
+            auth,
+            &library,
+            &format!("monitor:{}", timestamp / 60),
+            timestamp,
+            "library-monitor",
+            10,
+        )
+        .await?;
+    }
+    let online: Option<(String,String)> = crate::database::query_as("SELECT l.id,l.options_json FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND n.status!='revoked' AND l.id NOT IN ('fixture-films','fixture-series') AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND CAST(COALESCE(json_extract(l.options_json,'$.onlineRefreshIntervalDays'),'0') AS BIGINT)>0 AND NOT EXISTS(SELECT 1 FROM automation_sweeps s WHERE s.library_id=l.id AND s.kind='scheduled' AND s.extension_id='' AND (s.completed_at IS NULL OR s.created_at>?-CAST(json_extract(l.options_json,'$.onlineRefreshIntervalDays') AS BIGINT)*86400)) ORDER BY COALESCE((SELECT MAX(s.created_at) FROM automation_sweeps s WHERE s.library_id=l.id AND s.kind='scheduled' AND s.extension_id=''),0),l.id LIMIT 1")
+        .bind(timestamp).fetch_optional(&auth.store.pool).await?;
+    if let Some((library, _)) = online {
+        let mut tx = auth.store.pool.begin().await?;
+        crate::automation::schedule_library(
+            &mut tx,
+            &library,
+            "scheduled",
+            &format!("online:{timestamp}"),
+            None,
+            timestamp,
+        )
+        .await?;
+        tx.commit().await?;
+    }
+    Ok(())
+}
+
 /// Enqueue each physical folder independently, retaining one visible library.
 async fn queue_scopes(
     auth: &AuthState,
     library: &str,
     key: &str,
     timestamp: i64,
+) -> Result<(), sqlx::Error> {
+    queue_scopes_with(auth, library, key, timestamp, "scheduler", 100).await
+}
+async fn queue_scopes_with(
+    auth: &AuthState,
+    library: &str,
+    key: &str,
+    timestamp: i64,
+    owner: &str,
+    priority: i64,
 ) -> Result<(), sqlx::Error> {
     let mut scopes: Vec<String> = crate::database::query_scalar(
         "SELECT library_id FROM library_folders WHERE parent_id=? AND active=1 ORDER BY library_id",
@@ -252,9 +297,9 @@ async fn queue_scopes(
         crate::task_engine::enqueue(
             &auth.store,
             &scope,
-            "scheduler",
+            owner,
             &format!("{key}:{scope}"),
-            100,
+            priority,
             timestamp,
         )
         .await

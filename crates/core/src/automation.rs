@@ -468,6 +468,25 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
                 }
                 .into();
             }
+            let library_options: crate::library_options::LibraryOptions =
+                serde_json::from_value(options.clone())
+                    .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
+            let providers = if marker_plugin {
+                &library_options.segment_providers
+            } else if c.operation == "metadata.images" {
+                &library_options.image_providers
+            } else {
+                &library_options.metadata_providers
+            };
+            let Some(priority) = crate::library_options::LibraryOptions::provider_priority(
+                providers, &c.id, c.priority,
+            ) else {
+                continue;
+            };
+            c.priority = priority;
+            if kind == "scheduled" && marker_plugin {
+                continue;
+            }
             if c.operation == "lyrics.get" {
                 let existing: Option<String> = query_scalar(
                     "SELECT lyrics FROM music_tracks WHERE id=? AND library_id=? AND available=1",
@@ -478,7 +497,7 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
                 .await?;
                 if existing
                     .as_deref()
-                    .is_none_or(|lyrics| !lyrics.trim().is_empty())
+                    .is_none_or(|lyrics| !lyrics.trim().is_empty() && kind != "scheduled")
                 {
                     continue;
                 }
@@ -515,13 +534,15 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
             .fetch_one(&mut *tx)
             .await?;
             if exists > 0 {
-                if matches!(kind.as_str(), "manual" | "metadata.missing") && pending < 100000 {
+                if matches!(kind.as_str(), "manual" | "metadata.missing" | "scheduled")
+                    && pending < 100000
+                {
                     let reanalyze_markers = kind == "manual"
                         && marker_plugin
                         && fingerprint_ready
                         && event_payload["reanalyzeMarkers"] == true;
                     let restarted=query("UPDATE durable_tasks SET status='queued',failure_count=0,available_at=?,updated_at=?,finished_at=NULL,error='' WHERE (status IN ('error','cancelled') OR (status='completed' AND ?=1)) AND lease_until IS NULL AND id IN (SELECT task_id FROM automation_task_links WHERE extension_id=? AND fingerprint=?)")
-                    .bind(now).bind(now).bind(i64::from(reanalyze_markers)).bind(&c.id).bind(&fingerprint).execute(&mut *tx).await?.rows_affected();
+                    .bind(now).bind(now).bind(i64::from(reanalyze_markers || kind == "scheduled")).bind(&c.id).bind(&fingerprint).execute(&mut *tx).await?.rows_affected();
                     pending += restarted as i64;
                     admitted += restarted;
                 }
@@ -756,6 +777,19 @@ pub async fn apply_missing_metadata(
         let manual: Value = serde_json::from_str(&manual_raw).unwrap_or(Value::Null);
         let priority:i64=query_scalar("SELECT COALESCE((SELECT priority FROM automation_policies WHERE extension_id=? AND library_id=?),(SELECT priority FROM automation_policies WHERE extension_id=? AND library_id=(SELECT parent_id FROM library_folders WHERE library_id=? AND active=1 LIMIT 1)),100)")
             .bind(extension).bind(&library).bind(extension).bind(&library).fetch_one(&mut **tx).await?;
+        let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
+            .bind(&library)
+            .fetch_one(&mut **tx)
+            .await?;
+        let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
+            .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
+        let Some(priority) = crate::library_options::LibraryOptions::provider_priority(
+            &options.metadata_providers,
+            extension,
+            priority,
+        ) else {
+            continue;
+        };
         let provider_id = result["providerId"]
             .as_str()
             .unwrap_or("")
@@ -780,6 +814,7 @@ pub async fn apply_missing_metadata(
             ("mpaa", &["mpaa"][..]),
             ("premiered", &["premiered", "releaseDate"][..]),
             ("year", &["year"][..]),
+            ("collection", &["collection"][..]),
         ] {
             if manual
                 .as_object()
@@ -799,6 +834,19 @@ pub async fn apply_missing_metadata(
                                     .is_some_and(|s| !s.is_empty() && s.len() <= 128)
                             })
                     }),
+                    "collection" => {
+                        v["id"].as_str().is_some_and(|id| {
+                            !id.is_empty()
+                                && id.len() <= 100
+                                && id.bytes().all(|c| {
+                                    c.is_ascii_alphanumeric() || matches!(c, b':' | b'-' | b'_')
+                                })
+                        }) && v["name"].as_str().is_some_and(|name| {
+                            !name.trim().is_empty()
+                                && name.len() <= 300
+                                && !name.chars().any(char::is_control)
+                        })
+                    }
                     "actors" => v.as_array().is_some_and(|items| {
                         !items.is_empty()
                             && items.len() <= 64
@@ -827,7 +875,14 @@ pub async fn apply_missing_metadata(
                     .is_some_and(|(owner, old_priority, old_value)| {
                         serde_json::from_str::<Value>(old_value)
                             .is_ok_and(|ov| current == Some(&ov))
-                            && (owner == extension || priority > *old_priority)
+                            && (owner == extension
+                                || priority
+                                    > crate::library_options::LibraryOptions::provider_priority(
+                                        &options.metadata_providers,
+                                        owner,
+                                        *old_priority,
+                                    )
+                                    .unwrap_or(-1))
                     });
             if !replace {
                 continue;
@@ -977,7 +1032,13 @@ pub async fn apply_missing_metadata(
         .await
         .unwrap_or((0, 0));
 
-        let poster_url = if has_poster == 0 {
+        let images_allowed = crate::library_options::LibraryOptions::provider_priority(
+            &options.image_providers,
+            extension,
+            100,
+        )
+        .is_some();
+        let poster_url = if has_poster == 0 && options.fetch_poster && images_allowed {
             proposal
                 .get("posterUrl")
                 .or_else(|| proposal.get("poster_url"))
@@ -1007,7 +1068,7 @@ pub async fn apply_missing_metadata(
             None
         };
 
-        let backdrop_url = if has_backdrop == 0 {
+        let backdrop_url = if has_backdrop == 0 && options.fetch_backdrop && images_allowed {
             proposal
                 .get("backdropUrl")
                 .or_else(|| proposal.get("backdrop_url"))
@@ -1103,6 +1164,19 @@ pub async fn apply_missing_music_metadata(
     )
     .bind(extension).bind(&library).bind(extension).bind(&library).fetch_one(&mut **tx).await?;
 
+    let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
+        .bind(&library)
+        .fetch_one(&mut **tx)
+        .await?;
+    let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
+        .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
+    let Some(priority) = crate::library_options::LibraryOptions::provider_priority(
+        &options.metadata_providers,
+        extension,
+        priority,
+    ) else {
+        return Ok(());
+    };
     let provider_id = result["providerId"]
         .as_str()
         .or_else(|| result["id"].as_str())
@@ -1439,7 +1513,16 @@ async fn pump_triggers(
     }
     let sweeps:Vec<(String,String,String,String,String)>=query_as("SELECT id,library_id,extension_id,kind,cursor_asset FROM automation_sweeps WHERE completed_at IS NULL ORDER BY created_at,id LIMIT 1").fetch_all(&mut **tx).await?;
     for (id, library, extension, kind, cursor) in sweeps {
-        let rows:Vec<(String,String,String,String,i64)>=query_as("SELECT a.id,obs.fingerprint,w.editorial_json,COALESCE(w.manual_json,'{}'),CAST((SELECT COUNT(*) FROM work_image_entries WHERE work_id=w.id AND kind='poster') + (SELECT COUNT(*) FROM work_posters WHERE work_id=w.id) AS INTEGER) FROM inventory_assets a JOIN automation_observations obs ON obs.asset_id=a.id JOIN inventory_sources source ON source.id=a.source_id JOIN inventory_versions version ON version.id=source.version_id JOIN inventory_editions edition ON edition.id=version.edition_id JOIN inventory_works w ON w.id=edition.work_id WHERE a.library_id=? AND a.available=1 AND a.id>? ORDER BY a.id LIMIT ?").bind(&library).bind(&cursor).bind(limit+1).fetch_all(&mut **tx).await?;
+        let library_kind: String = query_scalar("SELECT kind FROM libraries WHERE id=?")
+            .bind(&library)
+            .fetch_one(&mut **tx)
+            .await?;
+        let rows: Vec<(String, String, String, String, i64)> = if library_kind == "music" {
+            query_as("SELECT t.id,obs.fingerprint,'{}','{}',CAST(CASE WHEN t.cover_path IS NULL OR t.cover_path='' THEN 0 ELSE 1 END AS BIGINT) FROM music_tracks t JOIN automation_observations obs ON obs.asset_id=t.id JOIN libraries l ON l.id=t.library_id WHERE t.library_id=? AND t.available=1 AND t.root_snapshot=l.root AND t.id>? ORDER BY t.id LIMIT ?")
+                .bind(&library).bind(&cursor).bind(limit+1).fetch_all(&mut **tx).await?
+        } else {
+            query_as("SELECT a.id,obs.fingerprint,w.editorial_json,COALESCE(w.manual_json,'{}'),CAST((SELECT COUNT(*) FROM work_image_entries WHERE work_id=w.id AND kind='poster') + (SELECT COUNT(*) FROM work_posters WHERE work_id=w.id) AS INTEGER) FROM inventory_assets a JOIN automation_observations obs ON obs.asset_id=a.id JOIN inventory_sources source ON source.id=a.source_id JOIN inventory_versions version ON version.id=source.version_id JOIN inventory_editions edition ON edition.id=version.edition_id JOIN inventory_works w ON w.id=edition.work_id WHERE a.library_id=? AND a.available=1 AND a.id>? ORDER BY a.id LIMIT ?").bind(&library).bind(&cursor).bind(limit+1).fetch_all(&mut **tx).await?
+        };
         let more = rows.len() as i64 > limit;
         for (asset, fingerprint, editorial, manual, poster_count) in
             rows.into_iter().take(limit as usize)

@@ -39,7 +39,7 @@
   };
   type SettingValue = string | number | boolean;
   type ExtensionSettings = Record<string, SettingValue>;
-  type Installed = { manifest: Manifest; publisherId: string; sha256: string; enabled: boolean; libraryIds: string[]; allLibraries?: boolean; settings?: ExtensionSettings };
+  type Installed = { manifest: Manifest; publisherId: string; sha256: string; enabled: boolean; libraryIds: string[]; allLibraries?: boolean; settings?: ExtensionSettings; rollbackVersion?: string | null };
   type Repository = { id: string; name: string; url: string; refreshedAt: number };
   type CatalogueEntry = { repositoryId: string; repositoryName: string; compatible: boolean; manifest: Manifest; publisherId: string; publicKey: string };
   let tab = $state<'installed' | 'catalogue' | 'repositories'>('installed');
@@ -78,6 +78,7 @@
   let busy = $state(false);
   let error = $state('');
   let notice = $state('');
+  let rollbackConfirmedFor = $state('');
   let filter = $state('all');
   let search = $state('');
   const visibleExtensions = $derived(installed.filter(extension =>
@@ -158,6 +159,16 @@
       });
 
     }, 'Paramètres enregistrés.');
+  }
+  async function rollback(extension: Installed) {
+    if (rollbackConfirmedFor !== extension.manifest.id) return;
+    await perform(async () => {
+      await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}/rollback`, {
+        method: 'POST', body: JSON.stringify({ expectedSha256: extension.sha256, expectedVersion: extension.manifest.version, confirmDataRestore: true })
+      });
+      delete editingSettings[extension.manifest.id];
+      rollbackConfirmedFor = '';
+    }, 'Version et données précédentes restaurées. Vérifiez les paramètres puis réactivez l’extension.');
   }
   async function addRepository(event: SubmitEvent) {
     event.preventDefault();
@@ -407,6 +418,13 @@
             </div>
 
             <div class="revisions-list">
+              {#if extension.rollbackVersion}
+                <div class="revision-item">
+                  <p>Revenir à v{extension.rollbackVersion} restaure les paramètres et les données privées sauvegardés avant la dernière mise à jour. Les changements ultérieurs seront perdus et l’extension sera désactivée.</p>
+                  <label><input type="checkbox" checked={rollbackConfirmedFor === extension.manifest.id} onchange={(event) => rollbackConfirmedFor = event.currentTarget.checked ? extension.manifest.id : ''} /> Je confirme la restauration des données précédentes.</label>
+                  <button type="button" disabled={busy || rollbackConfirmedFor !== extension.manifest.id} onclick={() => void rollback(extension)}>Restaurer v{extension.rollbackVersion}</button>
+                </div>
+              {/if}
               {#each getRevisions(extension.manifest.id, extension.manifest) as rev (rev.version)}
                 {@const isOpen = openRevisions[rev.version] ?? (rev.isCurrent || rev.isNewer)}
                 <div class="revision-item" class:current={rev.isCurrent} class:has-update={rev.isNewer}>

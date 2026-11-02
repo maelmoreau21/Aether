@@ -127,7 +127,7 @@
   .title-group {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--card-gap, 12px);
     min-width: 0;
   }
 
@@ -246,24 +246,24 @@
   }
 
   .shelf-track.carousel :global(> *) {
-    flex: 0 0 clamp(160px, 13.5vw, 195px);
+    flex: 0 0 var(--poster-width, clamp(160px, 13.5vw, 195px));
     scroll-snap-align: start;
   }
 
   /* Grid Track */
   .shelf-track.grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(clamp(160px, 13.5vw, 195px), 1fr));
-    gap: 24px 18px;
+    grid-template-columns: repeat(auto-fill, minmax(var(--poster-width, clamp(160px, 13.5vw, 195px)), 1fr));
+    gap: var(--card-row-gap, 24px) var(--card-gap, 18px);
     padding: 8px 0;
   }
 
   @media (min-width: 1920px) {
     .shelf-track.carousel :global(> *) {
-      flex: 0 0 clamp(190px, 12vw, 230px);
+      flex: 0 0 var(--poster-width, clamp(190px, 12vw, 230px));
     }
     .shelf-track.grid {
-      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(var(--poster-width, 210px), 1fr));
     }
   }
 
@@ -288,10 +288,10 @@
       display: none;
     }
     .shelf-track.carousel :global(> *) {
-      flex: 0 0 calc((100vw - 64px) / 2.15);
+      flex: 0 0 calc((100vw - 64px) / var(--mobile-shelf-columns, 2.15));
     }
     .shelf-track.carousel {
-      gap: 12px;
+      gap: var(--card-gap, 12px);
       padding: 6px 4px 12px;
       margin: 0 -4px;
     }

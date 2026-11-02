@@ -1,3 +1,21 @@
+## 2 novembre 2026 — Correction CI des préférences mémorisées
+
+- Run GitHub `41504190433` : seul le navigateur scanner échoue ; tous les jobs
+  Rust, frontend, workflows, audit et Docker réussissent. Assertion ancienne
+  `audioLanguage === en` alors que le choix manuel est désormais dans
+  `audioTrack.language`, sans écraser la langue configurée.
+- Le scénario vérifie maintenant piste/langue mémorisées et leur conservation
+  après changement refusé. Après redémarrage, il vérifie les sous-titres restés
+  désactivés puis sélectionne explicitement le SRT français, au lieu d'attendre
+  une activation automatique contraire à la préférence enregistrée.
+- Validation ciblée : `cargo test --locked -p media-poc --test browser_scanner
+  -- --ignored --nocapture` passe (54,15 s, Chrome 156/Windows, MP4 puis MKV avec
+  redémarrage). Première relance avait révélé l'attente obsolète des sous-titres.
+  Syntaxe JS et diff-check réussis. Aucun rerun global ni push ; nouvelle CI
+  Linux nécessaire après envoi. Rapports `target/ci-scanner-preference-fix/`.
+- Aether-Plugins : test de découverte releases corrigé séparément pour catalogue
+  develop et version actuelle fanart, quatre tests ciblés réussis. Voir sa mémoire.
+
 ## 2 novembre 2026 — Suite des réglages Jellyfin, accueil et rétention
 
 - Trois sous-agents réutilisés ; tests mutualisés et ciblés conformément à la

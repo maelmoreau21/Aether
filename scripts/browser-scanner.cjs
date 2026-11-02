@@ -102,6 +102,15 @@ fs.mkdirSync(out, {recursive: true});
       assert.equal(await page.getByText('Votre langue précédente est indisponible.',{exact:false}).count(),0);
       report.results.defaultFrench=true;
     }
+    if (restart) {
+      // The previous process ended with subtitles explicitly disabled. That
+      // account choice now survives restart; verify it before choosing SRT.
+      assert.equal(await page.evaluate(async()=>(await(await fetch('/api/v1/preferences')).json()).subtitlePreference?.enabled),false);
+      await page.waitForFunction(()=>[...document.querySelector('video').textTracks].every(t=>t.mode!=='showing'));
+      report.results.rememberedSubtitlesOffAfterRestart=true;
+      await openMenu('subtitles');
+      await page.locator('[data-subtitle-id]').filter({hasText:/FR.*SRT/}).click();
+    }
     await page.waitForFunction(()=>{ const v=document.querySelector('video'); return [...v.textTracks].some(t=>t.mode==='showing' && t.activeCues?.length && t.activeCues[0].text.includes('Sous-titre externe')); });
     // Internal multi-track Opus: decode distinguishable synthetic FR/EN signals.
     report.results.internalSwitches = [];
@@ -134,6 +143,11 @@ fs.mkdirSync(out, {recursive: true});
     }
     // The real Svelte UI must report a rejected language without pausing the
     // retained presentation or overwriting its persisted preference.
+    await page.waitForFunction(async()=>{
+      const saved=await(await fetch('/api/v1/preferences')).json();
+      return saved.audioTrack?.trackId==='internal-2'&&saved.audioTrack?.language==='en';
+    });
+    const retainedPreferences=await page.evaluate(async()=>(await(await fetch('/api/v1/preferences')).json()));
     const retained=await page.locator('video').evaluate(v=>({time:v.currentTime,url:v.currentSrc}));
     const failedLanguageRoute = /\/prepared\/(?:audio-1|opus-2)/;
     await page.route(failedLanguageRoute,route=>route.abort('internetdisconnected'));
@@ -142,7 +156,9 @@ fs.mkdirSync(out, {recursive: true});
     assert.equal(await page.locator('.player-error').count(),0);
     await page.waitForFunction(t=>{const v=document.querySelector('video'),a=document.querySelector('audio');return !v.paused&&a&&!a.paused&&v.currentTime>t;},retained.time);
     assert.equal(await page.locator('video').evaluate(v=>v.currentSrc),retained.url);
-    assert.equal(await page.evaluate(async()=>(await(await fetch('/api/v1/preferences')).json()).audioLanguage),'en');
+    const afterRejectedLanguage=await page.evaluate(async()=>(await(await fetch('/api/v1/preferences')).json()));
+    assert.deepEqual(afterRejectedLanguage.audioTrack,retainedPreferences.audioTrack);
+    assert.equal(afterRejectedLanguage.audioLanguage,retainedPreferences.audioLanguage);
     await page.unroute(failedLanguageRoute);
     report.results.failedLanguageRetainedWithoutPause=true;
     // Reopen with server-persisted indexed language preferences, in both directions.
@@ -156,7 +172,10 @@ fs.mkdirSync(out, {recursive: true});
         return v.paused&&!v.seeking&&Math.abs(v.currentTime-1)<.1&&a&&!a.seeking&&Math.abs(a.currentTime-v.currentTime)<.3;
       });
       await openMenu('audio');await page.locator(`[data-audio-id="${id}"]`).click();
-      await page.waitForFunction(async language=>{const r=await fetch('/api/v1/preferences');return (await r.json()).audioLanguage===language;},language);
+      await page.waitForFunction(async ({id,language})=>{
+        const saved=await(await fetch('/api/v1/preferences')).json();
+        return saved.audioTrack?.trackId===id&&saved.audioTrack?.language===language;
+      },{id,language});
       // A persisted language can predate this selection. Wait for Svelte's
       // completed transaction before closing, otherwise destroy cancels it.
       await openMenu('audio');
@@ -309,6 +328,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.screenshot({path:`${out}/webvtt-rendered${restart?'-restart':''}.png`});
     await openMenu('subtitles'); await page.locator('[data-subtitle-id="off"]').click();
     await page.waitForFunction(()=>[...document.querySelector('video').textTracks].every(t=>t.mode!=='showing'));
+    await page.waitForFunction(async()=>(await(await fetch('/api/v1/preferences')).json()).subtitlePreference?.enabled===false);
     report.results.externalTracks={container,srtRendered:true,webvttRendered:true,externalOpusPcm:pcm,audioVideoSync:true,pausedSeek:true,subtitlesOff:true};
     await page.screenshot({path:`${out}/playback${restart?'-restart':''}.png`});
     await page.keyboard.press('Shift'); await page.locator('button.return').click();

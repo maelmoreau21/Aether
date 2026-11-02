@@ -1,5 +1,18 @@
 # CI et publication GHCR
 
+## Préférences mémorisées du scénario scanner — 2 novembre 2026
+
+Le [run 41504190433](https://github.com/maelmoreau21/Aether/actions/runs/41504190433)
+réussit tous les jobs sauf le navigateur : le scénario attendait la langue du
+choix manuel dans `audioLanguage` au lieu de `audioTrack.language`. Il compare
+désormais la piste mémorisée après un changement refusé et vérifie que la langue
+configurée est conservée. Après redémarrage, le choix sous-titres désactivés est
+vérifié avant sélection explicite du SRT français.
+
+Le test scanner complet MP4/MKV avec redémarrage passe localement sous
+Chrome 156/Windows (54,15 s). Cette vérification ne remplace pas la prochaine
+exécution GitHub Linux ; aucune porte CI n'a été retirée ni affaiblie.
+
 ## Téléchargement de FFmpeg et échecs réseau — 2 novembre 2026
 
 Le [run 41446141236](https://github.com/maelmoreau21/Aether/actions/runs/41446141236)

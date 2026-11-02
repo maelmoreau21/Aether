@@ -31,6 +31,12 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('input[autocomplete="current-password"]').fill('disposable scanner browser password');
     await page.locator('button[type="submit"]').click();
     await page.waitForURL(origin+'/app/');
+    const fixtureProviders = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/admin/extensions');
+      if (!response.ok) throw new Error('Cannot verify fixture provider isolation');
+      return (await response.json()).extensions;
+    });
+    assert(fixtureProviders.every(provider => !provider.enabled), 'Synthetic playback fixtures must not query external providers');
     if (!restart) {
       await page.goto(origin+'/app/admin/libraries/#libraries-section');
       await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();

@@ -1,3 +1,16 @@
+## 2 novembre 2026 — Isolation des scénarios navigateur scanner/séries
+
+- La fixture `Scanner Film (2026) [tmdb-123]` déclenchait désormais les vrais
+  fournisseurs embarqués : son titre changeait et le sélecteur Scanner Film expirait.
+- Les bases temporaires des deux scénarios préinstallent puis désactivent les
+  fournisseurs avant le démarrage Core. Les IDs synthétiques et les assertions
+  de catalogue/lecture restent conservés ; les paramètres produit sont inchangés.
+  Les scripts navigateur vérifient cette isolation avant le scan.
+- Le processus Séries force également SQLite et retire MEDIA_DB_URL hérité.
+- Validation locale : fmt et syntaxe JS réussis ; les deux scénarios navigateur
+  passent (Films avec redémarrage : 80,68 s ; Séries : 72,74 s). Aucun autre test
+  lancé. Une nouvelle CI GitHub reste à exécuter après envoi du correctif.
+
 ## 2 novembre 2026 — Diagnostic réel NAS et corrections métadonnées/images
 
 - SSH NAS en lecture seule : Core 0.2.0-beta.21, PostgreSQL, quatre plugins 0.1.0.

@@ -392,7 +392,7 @@
 
     const kinds = currentSection === 'films' ? ['film'] : currentSection === 'series' ? ['series'] : ['film', 'series'];
     const requests = kinds.map(kind => {
-      const url = `/api/v1/catalog?${new URLSearchParams({ ...filters, ...(currentLibrary ? {library: currentLibrary} : {}), kind, q, sort: sorting, offset: String(start), limit: '24', count: 'false' })}`;
+      const url = `/api/v1/catalog?${new URLSearchParams({ ...filters, ...(currentLibrary ? {library: currentLibrary} : {}), ...(currentSection === 'home' ? { scope: 'latest' } : {}), kind, q, sort: currentSection === 'home' ? 'added-desc' : sorting, offset: String(start), limit: '24', count: 'false' })}`;
       return { kind, url, key: url };
     });
     let cachedKinds = 0;

@@ -2069,6 +2069,7 @@ pub async fn editorial_warnings(
 #[derive(Debug, Clone, Default)]
 pub struct CatalogueFilter {
     pub user_id: Option<String>,
+    pub hide_watched: bool,
     pub genre: Option<String>,
     pub year: Option<i64>,
     pub quality: Option<i64>,
@@ -2189,6 +2190,14 @@ fn push_catalogue_filters(
     has_parental_policy: bool,
     fast_avail: bool,
 ) {
+    if filter.hide_watched
+        && let Some(user) = &filter.user_id
+    {
+        builder
+            .push(" AND NOT EXISTS(SELECT 1 FROM playback_progress watched WHERE watched.user_id=")
+            .push_bind(user)
+            .push(" AND watched.watched=1 AND watched.work_id=COALESCE((SELECT gm.group_id FROM media_group_members gm WHERE gm.work_id=w.id),w.id)) ");
+    }
     if let Some(genre) = &filter.genre {
         let g = genre.trim().to_lowercase();
         if fast_avail {
@@ -2534,7 +2543,10 @@ pub async fn catalogue_page(
         .flatten()
         .unwrap_or(0);
 
+    // Watched status changes independently of inventory generation. Never reuse
+    // inventory-only cached pages for this account-owned filter.
     if state_fp > 0
+        && !filter.hide_watched
         && let Some(lock) = CATALOGUE_CACHE.get()
         && let Ok(mut guard) = lock.lock()
         && let Some(cached_val) = guard.get(&cache_key, state_fp)
@@ -2857,7 +2869,7 @@ pub async fn catalogue_page(
         "notice": "Bibliothèques locales indexées"
     });
 
-    if state_fp > 0 {
+    if state_fp > 0 && !filter.hide_watched {
         let lock = CATALOGUE_CACHE
             .get_or_init(|| std::sync::Mutex::new(BoundedCatalogueCache::from_env()));
         if let Ok(mut guard) = lock.lock() {
@@ -5285,6 +5297,141 @@ mod tests {
                 .unwrap()["total"],
             0
         );
+    }
+
+    #[tokio::test]
+    async fn settings_latest_filters_watched_before_pagination_without_stale_account_cache() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("latest.sqlite"))
+            .await
+            .unwrap();
+        for sql in [
+            "INSERT INTO users(id,role) VALUES('reader','user'),('other','user')",
+            "INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('latest','Latest','films','local','/latest',1)",
+            "INSERT INTO library_permissions(library_id,user_id) VALUES('latest','reader'),('latest','other')",
+            "INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,kind,external_ids_json,has_available_asset) VALUES('a','latest','a','A','a','film','{}',1),('b','latest','b','B','b','film','{}',1),('c','latest','c','C','c','film','{}',1)",
+            "INSERT INTO inventory_editions(id,work_id) SELECT id,id FROM inventory_works",
+            "INSERT INTO inventory_versions(id,edition_id) SELECT id,id FROM inventory_works",
+            "INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) SELECT id,id,'latest','/latest' FROM inventory_works",
+            "INSERT INTO inventory_assets(id,source_id,library_id,relative_path,size,modified_ns,mime,probe_json,available) SELECT id,id,'latest',id||'.mp4',1,'0','video/mp4','{}',1 FROM inventory_works",
+            "INSERT INTO playback_progress(user_id,work_id,position_seconds,duration_seconds,watched,revision,updated_at) VALUES('reader','a',100,100,1,1,1)",
+        ] {
+            query(sql).execute(&store.pool).await.unwrap();
+        }
+        let visible = ["latest".into()];
+        let mut filter = CatalogueFilter {
+            user_id: Some("reader".into()),
+            hide_watched: true,
+            ..Default::default()
+        };
+        let page = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            1,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(page["total"], 2);
+        assert_eq!(page["items"][0]["id"], "b");
+        assert_eq!(page["hasMore"], true);
+        let page = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            1,
+            1,
+            &filter,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(page["total"].is_null());
+        assert_eq!(page["items"][0]["id"], "c");
+        assert_eq!(page["hasMore"], false);
+        // Watched state is shared by canonical copies; filtering must happen
+        // before a representative is selected, not after the page is limited.
+        for sql in [
+            "INSERT INTO media_groups(id,label) VALUES('b','Copies')",
+            "INSERT INTO media_group_members(work_id,group_id) VALUES('b','b'),('c','b')",
+            "INSERT INTO playback_progress(user_id,work_id,position_seconds,duration_seconds,watched,revision,updated_at) VALUES('reader','b',100,100,1,1,1)",
+        ] {
+            query(sql).execute(&store.pool).await.unwrap();
+        }
+        let page = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            2,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(page["total"], 0);
+        query("UPDATE playback_progress SET watched=0 WHERE user_id='reader'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let page = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            2,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(page["total"], 2);
+        filter.user_id = Some("other".into());
+        query("UPDATE playback_progress SET watched=1 WHERE user_id='reader'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let page = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            2,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(page["total"], 2);
+        filter.hide_watched = false;
+        filter.user_id = Some("reader".into());
+        let page = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            2,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(page["total"], 2);
     }
 
     #[test]

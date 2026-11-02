@@ -54,6 +54,26 @@ export function invalidateCatalog(library?: string, notify = true): void {
 }
 onSessionGenerationChange(() => { scrolls.clear(); invalidateCatalog(undefined, false); });
 if (typeof window !== 'undefined') window.addEventListener('media-access-denied', () => invalidateCatalog(undefined, false));
+// Progress affects latest shelves, not the rest of the inventory. Do not
+// trigger a catalog reload while the player is open.
+export function invalidateLatestCatalog(): void {
+  const latest = (key: string) => new URL(key, 'http://localhost').searchParams.get('scope') === 'latest';
+  for (const [key, entry] of pages) {
+    if (!latest(key)) continue;
+    bytes -= entry.bytes;
+    pages.delete(key);
+  }
+  if (typeof sessionStorage !== 'undefined') {
+    try {
+      const keys = Array.from({ length: sessionStorage.length }, (_, i) => sessionStorage.key(i));
+      for (const key of keys) if (key?.startsWith(STORAGE_PREFIX) && latest(decodeURIComponent(key.slice(STORAGE_PREFIX.length)))) sessionStorage.removeItem(key);
+    } catch { /* Optional browser storage. */ }
+  }
+  // Latest requests in flight can finish after a progress update. Cancel those
+  // requests so their stale result cannot be stored again.
+  for (const [key, job] of pending) if (latest(key)) { job.controller.abort(); pending.delete(key); }
+}
+if (typeof window !== 'undefined') window.addEventListener('media-progress-updated', invalidateLatestCatalog);
 
 export function cachedCatalog(key: string): CatalogPage | undefined {
   const entry = pages.get(key);
@@ -108,7 +128,7 @@ export function loadCatalog(key: string, url: string): Promise<CatalogPage> {
   const controller = new AbortController();
   const generation = epoch;
   const promise = request<CatalogPage>(url, controller.signal).then(data => {
-    if (generation !== epoch) throw new DOMException('Cache invalidated', 'AbortError');
+    if (generation !== epoch || controller.signal.aborted) throw new DOMException('Cache invalidated', 'AbortError');
     const size = new TextEncoder().encode(JSON.stringify(data)).byteLength;
     const old = pages.get(key);
     if (old) {
@@ -145,7 +165,7 @@ export function loadCatalog(key: string, url: string): Promise<CatalogPage> {
 export function preloadCatalog(section: 'home' | 'films' | 'series', library?: string): void {
   const kinds = section === 'home' ? ['film', 'series'] : [section === 'films' ? 'film' : 'series'];
   for (const kind of kinds) {
-    const url = `/api/v1/catalog?${new URLSearchParams({ ...(library ? {library} : {}), kind, q: '', sort: section === 'home' ? 'added-desc' : 'title-asc', offset: '0', limit: '24', count: 'false' })}`;
+    const url = `/api/v1/catalog?${new URLSearchParams({ ...(library ? {library} : {}), ...(section === 'home' ? { scope: 'latest' } : {}), kind, q: '', sort: section === 'home' ? 'added-desc' : 'title-asc', offset: '0', limit: '24', count: 'false' })}`;
     void loadCatalog(url, url).catch(() => {});
   }
 }

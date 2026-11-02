@@ -85,3 +85,51 @@ d’appareil physique ou d’un nouveau mode de décodage navigateur, ni de dép
 
 L'entrée Administration → Tableau de bord ouvre « Vue d’ensemble » lorsqu'aucune section n'est indiquée dans l'URL. Les liens directs vers une section continuent d'ouvrir cette section.
 
+## Reprise de lecture côté serveur — 2 novembre 2026
+
+Les champs administrateur `minResumePct` (0–49), `maxResumePct` (50–100) et
+`minResumeDurationSeconds` (0–86400) sont appliqués par Core à chaque nouvelle
+écriture `PUT /api/v1/progress/{work}`, y compris pour les clients autres que Web.
+Les paramètres omis lors d'une modification sont conservés ; les valeurs hors
+bornes produisent une réponse 422 sans enregistrer le formulaire.
+
+Une position positive atteignant le seuil maximal est marquée vue. En dessous
+du pourcentage minimum, ou si le média est plus court que la durée minimum,
+la position enregistrée est zéro ; désactiver la reprise d'un média court ne
+le marque pas automatiquement vu. Le seuil maximal est prioritaire. Une durée
+égale au minimum et un pourcentage égal au minimum permettent la reprise.
+Les commandes explicites « vu » et « non vu » (position zéro) sont conservées.
+
+Les réglages ne réécrivent pas l'historique existant. L'autorisation de l'œuvre,
+le contrôle parental, le CSRF, la séparation des comptes et la détection de conflit
+par `expectedRevision` restent appliqués. La durée reste celle déclarée par le
+client, dans les bornes de l'API existante ; ce calcul n'est pas une preuve que
+l'utilisateur a réellement regardé le média. Les heuristiques Web existantes de
+fin/générique peuvent également envoyer un statut vu explicite.
+
+## Rétention effective du journal des extensions — 2 novembre 2026
+
+Le champ historique `activityLogRetentionDays` (1–3650 jours, 30 par défaut)
+concerne désormais le journal durable `extension_audit`, consultable par
+`GET /api/v1/admin/extensions/audit`. Il ne représente pas un journal général de
+connexions ou de lecture ; `/api/v1/admin/activity` reste une vue des sessions
+actives. Le nettoyage des sessions utilise exclusivement les délais de la
+politique d'authentification (7 jours d'inactivité et expiration absolue).
+
+La tâche système `clean-activity-log` est persistante, activée quotidiennement
+par défaut ; les bases existantes reçoivent cette tâche et un index de rétention
+au démarrage. Les changements de calendrier ou la désactivation sont conservés
+aux démarrages suivants. L'administrateur peut modifier le calendrier et lancer
+la tâche via les routes existantes `/api/v1/admin/tasks/system/{id}/schedule`
+(PUT) et `/api/v1/admin/tasks/system/{id}/run` (POST, réponse 202). Ces mutations
+exigent session administrateur, origine et CSRF ; l'exécution passe par la file
+durable commune, hors requête HTTP, avec priorité à la lecture.
+
+Chaque exécution supprime au plus 500 événements dont `created_at` est strictement
+antérieur à la rétention configurée, en commençant par les plus anciens. Un
+arriéré supérieur à 500 demande plusieurs exécutions ; il n'est pas déclaré
+intégralement purgé. La suppression vérifie le lease et la tentative courante
+dans la requête SQL. Une configuration illisible ou hors bornes refuse la purge.
+Le résumé d'exécution indique le nombre supprimé et la limite. Aucun média,
+historique de lecture, collection ou donnée privée d'extension n'est supprimé.
+

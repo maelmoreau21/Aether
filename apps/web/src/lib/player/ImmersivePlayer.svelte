@@ -11,6 +11,7 @@
   import { PlaybackPresence } from './presence';
   import { session, getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
+  import { playbackPreferences, trackPreferences } from './playback-preferences';
   import { chooseSource, playbackMime, audioLanguage } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
   import { revalidateMediaDescriptor } from '../catalog/api';
@@ -20,6 +21,8 @@
   import WatchPartyOverlay from '../syncplay/WatchPartyOverlay.svelte';
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
+  let skipBackSeconds = $state(10);
+  let skipForwardSeconds = $state(10);
   let syncClient = $state<SyncPartyClient | null>(null);
   let dialog: HTMLDialogElement;
   let surface: HTMLDivElement;
@@ -49,6 +52,9 @@
   let audio = $state('');
   let preferredLanguage = 'fr';
   let preferredAudio: { mediaId: string; trackId: string } | undefined;
+  let manualAudio: { mediaId: string; trackId: string; language?: string } | undefined;
+  let manualSubtitle: SubtitlePreference | undefined;
+  let playDefaultAudio = false;
   let audioOffset = $state(0);
   let subtitleOffset = $state(0);
   let subtitle = $state<string | null>(null);
@@ -207,7 +213,7 @@
       catch { preferenceNotice = 'Préférences indisponibles : réglages locaux à cette séance.'; }
       if (current !== generation) return;
       readPlaybackPreferences();
-      const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))));
+      const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))), playDefaultAudio);
       if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
       if (syncClient) await resume; // Load the progress revision before collective playback saves it.
       if (current !== generation) return;
@@ -260,17 +266,20 @@
     preferredLanguage = 'fr'; subtitlePreference = undefined; preferredAudio = undefined; audioOffset = 0; subtitleOffset = 0;
     try {
       const account = preferences();
-      const track = account.audioTrack;
+      const defaults = playbackPreferences(account);
+      autoplayNext = defaults.autoplayNextEpisode;
+      skipBackSeconds = defaults.skipBackSeconds;
+      skipForwardSeconds = defaults.skipForwardSeconds;
+      const policy = trackPreferences(account);
+      const track = manualAudio ?? policy.audioTrack;
       if (track && typeof track.mediaId === 'string' && typeof track.trackId === 'string') preferredAudio = track;
       const offsets = account.offsets;
       if (offsets && Number.isFinite(offsets.audio) && Math.abs(offsets.audio) <= 30) audioOffset = offsets.audio;
       if (offsets && Number.isFinite(offsets.subtitle) && Math.abs(offsets.subtitle) <= 30) subtitleOffset = offsets.subtitle;
-      const language = audioLanguage(account.audioLanguage ?? 'fr');
+      const language = audioLanguage(manualAudio?.language ?? policy.audioLanguage);
       preferredLanguage = language && language !== 'und' ? language : 'fr';
-      const initialSubtitles = account.subtitles;
-      if (initialSubtitles === 'off') subtitlePreference = { enabled: false };
-      else if (initialSubtitles === 'always') subtitlePreference = { enabled: true, language: 'fr', forced: false };
-      else subtitlePreference = undefined;
+      playDefaultAudio = policy.playDefaultAudioTrack && !manualAudio;
+      subtitlePreference = manualSubtitle ?? policy.subtitlePreference;
       subtitleStyle = account.subtitleStyle;
     } catch { /* Preferences are optional when browser storage is unavailable. */ }
   }
@@ -316,6 +325,7 @@
   export function open(media: Media | Promise<Media>) {
     if (opened) return false;
     generation++; const current = generation;
+    manualAudio = undefined; manualSubtitle = undefined;
     triedMediaIds.clear();
     failoverInProgress = false;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -362,6 +372,7 @@
   export function changeMedia(media: Media, requireOpen = false) {
     if (!opened) { if (!requireOpen) open(media); return; }
     if (!engine || busy) return;
+    manualAudio = undefined; manualSubtitle = undefined;
     triedMediaIds.clear();
     failoverInProgress = false;
     progressTracker?.save(engine.state(), true);
@@ -454,19 +465,26 @@
     const current = generation;
     const accountGeneration = getSessionGeneration();
     void action(async player => { await player.selectAudio(id);
-      if (current !== generation || !opened) return;
+      if (current !== generation || !opened || accountGeneration !== getSessionGeneration()) return;
       audio = id; notice = '';
       const language = audioLanguage(active?.sources.find(source => source.audioTrackId === id)?.language ?? 'und');
       if (language && language !== 'und') preferredLanguage = language;
-      if (accountGeneration !== getSessionGeneration()) return;
-      preferredAudio = { mediaId: active?.id ?? '', trackId: id };
-      savePreferences({ audioTrack: preferredAudio, audioLanguage: preferredLanguage });
+      manualAudio = { mediaId: active?.id ?? '', trackId: id, ...(language && language !== 'und' ? { language } : {}) };
+      preferredAudio = manualAudio;
+      if (preferences().rememberAudioSelections !== false) savePreferences({ audioTrack: manualAudio });
     });
   }
-  function selectSubtitle(id: string | null) { void action(async player => {
-    await player.selectSubtitle(id); subtitle = id;
+  function selectSubtitle(id: string | null) {
+    const current = generation;
+    const accountGeneration = getSessionGeneration();
+    void action(async player => {
+    await player.selectSubtitle(id);
+    if (current !== generation || !opened || accountGeneration !== getSessionGeneration()) return;
+    subtitle = id;
     const track = active?.subtitles.find(track => track.id === id);
     subtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
+    manualSubtitle = subtitlePreference;
+    if (preferences().rememberSubtitleSelections !== false) savePreferences({ subtitlePreference });
   }); }
   function offset(kind: 'audio' | 'subtitle', value: number) {
     if (!Number.isFinite(value) || Math.abs(value) > 30) return;
@@ -497,8 +515,8 @@
     if ([' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'm', 'M', 'f', 'F'].includes(event.key)) {
       event.preventDefault();
       if (event.key === ' ') togglePlayback();
-      else if (event.key === 'ArrowLeft') seek(playback.position - 5);
-      else if (event.key === 'ArrowRight') seek(playback.position + 5);
+      else if (event.key === 'ArrowLeft') seek(Math.max(0, playback.position - skipBackSeconds));
+      else if (event.key === 'ArrowRight') seek(Math.min(playback.duration, playback.position + skipForwardSeconds));
       else if (event.key === 'ArrowUp') volume(Math.min(1, playback.volume + .05));
       else if (event.key === 'ArrowDown') volume(Math.max(0, playback.volume - .05));
       else if (event.key.toLowerCase() === 'm') mute();
@@ -565,7 +583,7 @@
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
       <button class="return" aria-label="Retour à l’accueil" onclick={close}><Icon name="back" size={24} /></button>
       <div class="title"><span>{active?.title ?? 'Votre séance'}</span></div>
-      {#if nextTitle && onNext}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
+      {#if nextTitle && onNext && !syncClient}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} onchange={() => savePreferences({ autoplayNextEpisode: autoplayNext })} /> Enchaîner automatiquement</label></div>{/if}
       {#if $session?.user.role === 'administrator' && active?.episode}<button type="button" onclick={() => editMarker('intro')}>Corriger les marqueurs</button>{/if}
     </div>
     {#if markerEditor && active?.episode}
@@ -613,6 +631,7 @@
       <WatchPartyOverlay client={syncClient} onCloseParty={() => { syncClient?.leave(); syncClient = null; }} />
     {/if}
     {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
+      {skipBackSeconds} {skipForwardSeconds}
       {aspectRatio} onAspectRatio={r => aspectRatio = r} {repeat} onRepeat={r => repeat = r} onStats={() => { statistics = true; wake(); }}
       onPlay={togglePlayback} onVolume={volume} onMute={mute} onSeek={seek} onAudio={selectAudio} onSubtitle={selectSubtitle} onSource={selectSource}
       onSpeed={speed => action(player => player.setSpeed(speed))} onFullscreen={toggleFullscreen} onWake={wake} />{/if}

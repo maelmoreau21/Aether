@@ -237,6 +237,193 @@ async fn installed_marker_extension_queues_only_episode_chapter_work() {
 }
 
 #[tokio::test]
+async fn marker_reanalysis_reuses_completed_fingerprints_and_restarts_detection_once() {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode, header},
+    };
+    use http_body_util::BodyExt;
+    use media_poc::auth::{self, AuthState};
+    use sha2::{Digest, Sha256};
+    use tower::ServiceExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("reanalyze.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "marker-admin",
+            zeroize::Zeroizing::new("synthetic marker password".into()),
+        )
+        .await
+        .unwrap();
+    setup(&store).await;
+    query("UPDATE libraries SET kind='series' WHERE id='library-1'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("UPDATE inventory_works SET kind='episode'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json,kind) VALUES('series','library-1','series','Series','{}','series')").execute(store.pool()).await.unwrap();
+    query("INSERT INTO inventory_seasons(id,series_id,season_number) VALUES('season','series',1)")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    for index in 1..=2 {
+        let asset = format!("asset-{index}");
+        let fingerprint = format!("source-{index}");
+        query("INSERT INTO inventory_episodes(id,season_id,episode_number,work_id) VALUES(?,'season',?,?)")
+            .bind(format!("episode-{index}")).bind(i64::from(index)).bind(format!("work-{index}")).execute(store.pool()).await.unwrap();
+        query("INSERT INTO automation_observations(asset_id,library_id,fingerprint,revision) VALUES(?,?,?,1)")
+            .bind(&asset).bind(format!("library-{index}")).bind(&fingerprint).execute(store.pool()).await.unwrap();
+        let digest =
+            Sha256::digest(serde_json::to_vec(&(&asset, &fingerprint, "chromaprint-v1")).unwrap());
+        let key = format!("fp:{digest:x}");
+        query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,component,status,created_at,updated_at,available_at,finished_at) VALUES(?,?,'system',?,?,'analyze',?,'fingerprint','completed',1,1,1,1)")
+            .bind(format!("fingerprint-{index}")).bind(format!("library-{index}")).bind(key).bind(format!("node-{index}")).bind(&asset).execute(store.pool()).await.unwrap();
+    }
+    let package = media_extension_sdk::Package {
+        manifest: media_extension_sdk::Manifest {
+            api_version: 1,
+            id: "fixture.markers".into(),
+            version: "1.0.0".into(),
+            permissions: vec!["playback.markers".into()],
+            ..Default::default()
+        },
+        publisher_id: "fixture-publisher".into(),
+        wasm: String::new(),
+        sha256: "synthetic-markers".into(),
+        signature: String::new(),
+    };
+    query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture.markers','fixture-publisher',?,1,'generation-1')")
+        .bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
+    query("INSERT INTO extension_grants(extension_id,library_id) VALUES('fixture.markers','library-1')").execute(store.pool()).await.unwrap();
+    automation::drain(&store, 100, 100).await.unwrap();
+    let detection: String = query_scalar("SELECT task_id FROM automation_task_links WHERE extension_id='fixture.markers' AND operation='intro.detect'").fetch_one(store.pool()).await.unwrap();
+    query("UPDATE durable_tasks SET status='completed',finished_at=100 WHERE id=?")
+        .bind(&detection)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    automation::drain(&store, 100, 100).await.unwrap();
+    let status: String = query_scalar("SELECT status FROM durable_tasks WHERE id=?")
+        .bind(&detection)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(status, "completed", "ordinary events remain idempotent");
+    query("INSERT INTO manual_timeline_markers(asset_id,marker_type,enabled,updated_by,updated_at) VALUES('asset-1','intro',0,'automation-admin',1)")
+        .execute(store.pool()).await.unwrap();
+
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = media_poc::timeline_markers::router(auth.clone()).merge(auth::router(auth));
+    let login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/login")
+                .header(header::ORIGIN, "http://127.0.0.1:3000")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"login":"marker-admin","password":"synthetic marker password"})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+    let cookie = login.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let login: serde_json::Value =
+        serde_json::from_slice(&login.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let request = |token: &str| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/admin/seasons/season/analyze-markers")
+            .header(header::ORIGIN, "http://127.0.0.1:3000")
+            .header(header::COOKIE, &cookie)
+            .header("x-csrf-token", token)
+            .body(Body::empty())
+            .unwrap()
+    };
+    assert_eq!(
+        app.clone().oneshot(request("")).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+    // Two explicit clicks share the pending detection and reuse the extraction.
+    for _ in 0..2 {
+        assert_eq!(
+            app.clone().oneshot(request(csrf)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        automation::drain(&store, 101, 100).await.unwrap();
+    }
+    let status: String = query_scalar("SELECT status FROM durable_tasks WHERE id=?")
+        .bind(&detection)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(status, "queued");
+    let detections: i64 = query_scalar(
+        "SELECT COUNT(*) FROM automation_task_links WHERE extension_id='fixture.markers'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(detections, 1, "no duplicate or chapter-only task");
+    let extractions: i64 =
+        query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE component='fingerprint'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(extractions, 2, "completed Node extraction is retained");
+    let manual: i64 = query_scalar("SELECT enabled FROM manual_timeline_markers WHERE asset_id='asset-1' AND marker_type='intro'")
+        .fetch_one(store.pool()).await.unwrap();
+    assert_eq!(manual, 0, "manual disabling survives reanalysis");
+    // A running detection must retain its lease when another request arrives.
+    query("UPDATE durable_tasks SET status='running',lease_until=999 WHERE id=?")
+        .bind(&detection)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(request(csrf)).await.unwrap().status(),
+        StatusCode::OK
+    );
+    automation::drain(&store, 102, 100).await.unwrap();
+    let state: (String, Option<i64>) =
+        query_as("SELECT status,lease_until FROM durable_tasks WHERE id=?")
+            .bind(&detection)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(state, ("running".into(), Some(999)));
+    // Disabled libraries must not enqueue an extraction or emit manual work.
+    query("UPDATE libraries SET enabled=0")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let response = app.oneshot(request(csrf)).await.unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["episodesCount"], 0);
+    assert_eq!(body["tasksQueued"], 0);
+}
+
+#[tokio::test]
 async fn manual_marker_correction_is_authenticated_validated_and_durable() {
     use axum::{
         body::Body,

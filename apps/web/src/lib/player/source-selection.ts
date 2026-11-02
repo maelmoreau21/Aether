@@ -7,7 +7,7 @@ export function audioLanguage(language: string): string {
 
 // An original multi-audio file does not expose a selectable track through HTMLMediaElement.
 // Prefer a concrete track over that ambiguous source, without overriding a manual choice.
-export function chooseSource(media: Media, trackId?: string, language = 'fr', playable: (source: Source) => boolean = () => true): Source | undefined {
+export function chooseSource(media: Media, trackId?: string, language = 'fr', playable: (source: Source) => boolean = () => true, preferDefaultAudio = false): Source | undefined {
   const manual = media.sources.find(source => source.audioTrackId === trackId);
   // Migrate old preferences that saved the browser-selected multi-audio original
   // as though it identified a language. Explicit indexed choices remain authoritative.
@@ -18,6 +18,17 @@ export function chooseSource(media: Media, trackId?: string, language = 'fr', pl
   // establish failure. Prefer a declared playable packaging within that language.
   const candidates = [...media.sources.filter(playable), ...media.sources.filter(source => !playable(source))];
   const concrete = (source: Source) => source.audioTrackId !== 'internal-default' || (source.tracks?.filter(track => track.codec_type === 'audio').length ?? 0) === 1;
+  if (preferDefaultAudio) {
+    const source = candidates.find(source => {
+      if (!concrete(source)) return false;
+      const audios = source.tracks?.filter(track => track.codec_type === 'audio') ?? [];
+      const selectedIndex = /^internal-(\d+)$/.exec(source.audioTrackId)?.[1];
+      const selected = selectedIndex === undefined ? (audios.length === 1 ? audios[0] : undefined)
+        : audios.find(track => track.index === Number(selectedIndex));
+      return selected?.disposition?.default === 1;
+    });
+    if (source) return source;
+  }
   for (const wanted of new Set([audioLanguage(language), 'fr'])) {
     const matches = candidates.filter(source => audioLanguage(source.language) === wanted);
     const source = matches.find(source => concrete(source) && !source.tracks?.some(track => track.disposition?.comment === 1 || track.disposition?.hearing_impaired === 1))

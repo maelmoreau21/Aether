@@ -88,6 +88,7 @@ pub struct CatalogQuery {
     offset: Option<usize>,
     limit: Option<usize>,
     count: Option<bool>,
+    scope: Option<String>,
 }
 
 fn works(available: bool) -> Vec<Work> {
@@ -208,7 +209,8 @@ pub async fn list(
         }
     }
     let limit = query.limit.unwrap_or(24);
-    if !matches!(query.kind.as_deref(), None | Some("film" | "series"))
+    if !matches!(query.scope.as_deref(), None | Some("latest"))
+        || !matches!(query.kind.as_deref(), None | Some("film" | "series"))
         || !matches!(
             query.sort.as_deref(),
             None | Some(
@@ -229,8 +231,39 @@ pub async fn list(
     if let (Some(Extension(store)), Some(Extension(visible))) = (&store, &visible)
         && (!inventory.is_fixture_bench() || visible.0.iter().any(|id| !id.starts_with("fixture-")))
     {
+        let user_id = actor.map(|v| v.0.user.id);
+        let hide_watched = if query.scope.as_deref() == Some("latest") {
+            if let Some(user) = &user_id {
+                let saved: Result<Option<String>, _> = crate::database::query_scalar(
+                    "SELECT preferences_json FROM user_preferences WHERE user_id=?",
+                )
+                .bind(user)
+                .fetch_optional(&store.pool)
+                .await;
+                match saved {
+                    Ok(Some(saved)) => match serde_json::from_str::<serde_json::Value>(&saved) {
+                        Ok(value) => value["hidePlayedInLatest"] == true,
+                        Err(_) => {
+                            return error(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "preferences_unavailable",
+                            );
+                        }
+                    },
+                    Ok(None) => false,
+                    Err(_) => {
+                        return error(StatusCode::INTERNAL_SERVER_ERROR, "preferences_unavailable");
+                    }
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
         let filter = crate::inventory::CatalogueFilter {
-            user_id: actor.map(|v| v.0.user.id),
+            user_id,
+            hide_watched,
             genre: query.genre,
             year: query.year,
             quality: query.quality,

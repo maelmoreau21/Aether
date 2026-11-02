@@ -221,11 +221,27 @@ struct Input {
     expected_revision: i64,
 }
 
+/// Apply the server's resume policy at the persistence boundary for every client.
+/// Position zero remains an explicit restart / mark-unwatched action.
+fn apply_resume_policy(input: &mut Input, settings: &crate::server_settings::Settings) {
+    if input.position == 0.0 || input.watched {
+        return;
+    }
+    let percent = input.position / input.duration * 100.0;
+    if percent >= f64::from(settings.max_resume_pct) {
+        input.watched = true;
+    } else if percent < f64::from(settings.min_resume_pct)
+        || input.duration < f64::from(settings.min_resume_duration_seconds)
+    {
+        input.position = 0.0;
+    }
+}
+
 async fn write(
     State(auth): State<AuthState>,
     Path(work): Path<String>,
     headers: HeaderMap,
-    Json(input): Json<Input>,
+    Json(mut input): Json<Input>,
 ) -> Result<Json<Value>, StatusCode> {
     let user = authorized(&auth, &headers, &work, true).await?;
     let requested_work = work.clone();
@@ -241,6 +257,8 @@ async fn write(
     {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
+    let settings = crate::server_settings::load(&auth.store).await?;
+    apply_resume_policy(&mut input, &settings);
     let now = media_contracts::protocol::unix_now();
     let row = if input.expected_revision == 0 {
         query("INSERT INTO playback_progress(user_id,work_id,position_seconds,duration_seconds,watched,revision,updated_at) VALUES(?,?,?,?,?,1,?) ON CONFLICT(user_id,work_id) DO NOTHING RETURNING *")
@@ -351,6 +369,161 @@ mod activity_tests {
             status,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
+    }
+    #[tokio::test]
+    async fn server_resume_policy_is_persistent_validated_and_applies_to_all_clients() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("resume.sqlite");
+        let store = crate::identity::IdentityStore::open(&path).await.unwrap();
+        let administrator = store
+            .bootstrap(
+                "admin",
+                zeroize::Zeroizing::new("resume fixture secret".into()),
+            )
+            .await
+            .unwrap();
+        crate::libraries::initialize_local(&store).await.unwrap();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','/fixture',1)").execute(&store.pool).await.unwrap();
+        query("INSERT INTO inventory_works(id,library_id,identity_key,title,kind,external_ids_json) VALUES('film','films','film','Synthetic film','film','{}')").execute(&store.pool).await.unwrap();
+        query("INSERT INTO users(id,role) VALUES('reader','user')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO library_permissions(library_id,user_id) VALUES('films','reader')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        for (token, user) in [
+            ("a".repeat(64), administrator),
+            ("b".repeat(64), "reader".into()),
+        ] {
+            query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,unixepoch(),unixepoch(),unixepoch()+3600)")
+                .bind(crate::auth::hash(&token)).bind(user).execute(&store.pool).await.unwrap();
+        }
+        let auth = AuthState::new(store.clone(), "http://localhost".into())
+            .await
+            .unwrap();
+        let app = router(auth.clone())
+            .merge(crate::auth::router(auth.clone()))
+            .merge(crate::server_settings::router(auth));
+        let a = format!("media_session={}", "a".repeat(64));
+        let b = format!("media_session={}", "b".repeat(64));
+        let ac = call(&app, "/api/v1/auth/me", "GET", &a, "", Value::Null)
+            .await
+            .1["csrfToken"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let bc = call(&app, "/api/v1/auth/me", "GET", &b, "", Value::Null)
+            .await
+            .1["csrfToken"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let settings = json!({"serverName":"Resume test","welcomeMessage":"","minResumePct":5,"maxResumePct":95,"minResumeDurationSeconds":300});
+        for (cookie, csrf) in [(b.as_str(), bc.as_str()), (a.as_str(), "")] {
+            assert_eq!(
+                call(
+                    &app,
+                    "/api/v1/admin/settings",
+                    "PUT",
+                    cookie,
+                    csrf,
+                    settings.clone()
+                )
+                .await
+                .0,
+                StatusCode::FORBIDDEN
+            );
+        }
+        assert_eq!(
+            call(
+                &app,
+                "/api/v1/admin/settings",
+                "PUT",
+                &a,
+                &ac,
+                settings.clone()
+            )
+            .await
+            .0,
+            StatusCode::NO_CONTENT
+        );
+        for invalid in [
+            json!({"minResumePct":50}),
+            json!({"maxResumePct":49}),
+            json!({"minResumeDurationSeconds":86401}),
+        ] {
+            let mut bad = settings.clone();
+            for (key, value) in invalid.as_object().unwrap() {
+                bad[key] = value.clone();
+            }
+            assert_eq!(
+                call(&app, "/api/v1/admin/settings", "PUT", &a, &ac, bad)
+                    .await
+                    .0,
+                StatusCode::UNPROCESSABLE_ENTITY
+            );
+        }
+        let reopened = crate::identity::IdentityStore::open(&path).await.unwrap();
+        assert_eq!(
+            crate::server_settings::load(&reopened)
+                .await
+                .unwrap()
+                .max_resume_pct,
+            95
+        );
+        let mut revision = 0;
+        // Minimum percentage is inclusive, and duration exactly at the minimum resumes.
+        // A short item does not become watched merely because resuming is disabled.
+        for (position, duration, watched, saved_position, saved_watched) in [
+            (49.0, 1000.0, false, 0.0, false),
+            (50.0, 1000.0, false, 50.0, false),
+            (100.0, 299.0, false, 0.0, false),
+            (100.0, 300.0, false, 100.0, false),
+            (949.0, 1000.0, false, 949.0, false),
+            (950.0, 1000.0, false, 950.0, true),
+            (285.0, 299.0, false, 285.0, true),
+            (0.0, 1000.0, false, 0.0, false),
+            (1000.0, 1000.0, true, 1000.0, true),
+        ] {
+            let input = json!({"position":position,"duration":duration,"watched":watched,"expectedRevision":revision});
+            let (status, saved) =
+                call(&app, "/api/v1/progress/film", "PUT", &b, &bc, input.clone()).await;
+            assert_eq!(status, StatusCode::OK, "{saved}");
+            revision += 1;
+            assert_eq!(saved["position"], saved_position);
+            assert_eq!(saved["watched"], saved_watched);
+            assert_eq!(saved["revision"], revision);
+            assert_eq!(
+                call(&app, "/api/v1/progress/film", "PUT", &b, &bc, input)
+                    .await
+                    .0,
+                StatusCode::CONFLICT
+            );
+            let loaded = call(&app, "/api/v1/progress/film", "GET", &b, "", Value::Null)
+                .await
+                .1;
+            assert_eq!(loaded["position"], saved_position);
+        }
+        let input =
+            json!({"position":50.0,"duration":1000.0,"watched":false,"expectedRevision":revision});
+        assert_eq!(
+            call(&app, "/api/v1/progress/film", "PUT", &b, "", input.clone())
+                .await
+                .0,
+            StatusCode::FORBIDDEN
+        );
+        query("DELETE FROM library_permissions WHERE user_id='reader'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            call(&app, "/api/v1/progress/film", "PUT", &b, &bc, input)
+                .await
+                .0,
+            StatusCode::FORBIDDEN
+        );
     }
     #[tokio::test]
     async fn activity_is_authenticated_scoped_expires_and_stops() {

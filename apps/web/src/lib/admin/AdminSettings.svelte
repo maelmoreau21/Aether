@@ -121,7 +121,7 @@
     </fieldset>
     <fieldset class="trickplay-fieldset">
       <legend>Reprise de lecture</legend>
-      <p>Valeurs de Jellyfin : 5 %, 90 %, 300 s. Par défaut Aether reprend dès le début (0 / 90 / 0).</p>
+      <p>Les nouvelles progressions sont enregistrées selon ces seuils pour tous les appareils. Avant le seuil de reprise ou sous la durée minimale, la lecture repart du début. Le seuil « vu » est prioritaire. Les progressions existantes sont conservées lors de l’enregistrement des paramètres.</p>
       <div class="trickplay-grid">
         <label>Reprise dès (% de la durée)<input type="number" min="0" max="49" step="1" required bind:value={minResumePct} /></label>
         <label>Considéré comme vu à (%)<input type="number" min="50" max="100" step="1" required bind:value={maxResumePct} /></label>
@@ -144,9 +144,10 @@
       {#if fingerprintNotice}<p class="maintenance-notice">{fingerprintNotice}</p>{/if}
     </fieldset>
     <fieldset class="trickplay-fieldset">
-      <legend>Journal d'activité & Sécurité CORS</legend>
+      <legend>Journal des extensions et sécurité CORS</legend>
+      <p>La tâche « Nettoyer le journal des extensions » supprime jusqu’à 500 événements anciens par exécution, chaque jour par défaut. Son calendrier et son lancement manuel se gèrent dans Tâches. Ce réglage ne modifie pas la durée des sessions ni l’historique de lecture.</p>
       <div class="trickplay-grid">
-        <label>Rétention du journal d'activité (jours)<input type="number" min="1" max="3650" step="1" required bind:value={activityLogRetentionDays} /></label>
+        <label>Conservation du journal des extensions (jours)<input type="number" min="1" max="3650" step="1" required bind:value={activityLogRetentionDays} /></label>
         <label>Origines CORS autorisées (séparées par des virgules)<input bind:value={corsHosts} placeholder="https://app.example.com, http://localhost:3000" /></label>
       </div>
     </fieldset>

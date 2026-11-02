@@ -6,11 +6,14 @@ import type { ArtworkRotationPolicy } from './catalog/artwork-rotation-policy.sv
 
 export type Preferences = {
   theme?: 'light' | 'dark' | 'system'; locale?: 'fr' | 'en'; audioLanguage?: string;
-  subtitles?: 'forced' | 'always' | 'off'; audioTrack?: { mediaId: string; trackId: string };
+  subtitles?: 'forced' | 'always' | 'off'; audioTrack?: { mediaId: string; trackId: string; language?: string };
+  rememberAudioSelections?: boolean; rememberSubtitleSelections?: boolean; playDefaultAudioTrack?: boolean;
+  hidePlayedInLatest?: boolean;
   offsets?: { audio: number; subtitle: number }; subtitlePreference?: SubtitlePreference;
   subtitleStyle?: SubtitleStyle;
   skipIntroEnabled?: boolean; skipCreditsEnabled?: boolean;
   autoSkipIntro?: boolean; autoSkipCredits?: boolean;
+  autoplayNextEpisode?: boolean; skipBackSeconds?: number; skipForwardSeconds?: number;
   artworkRotation?: ArtworkRotationPolicy;
 };
 let current: Preferences = {};
@@ -136,14 +139,14 @@ async function fetchPreferences(): Promise<Preferences | null> {
   return current;
 }
 
-export function savePreferences(patch: Preferences): void {
+export function savePreferences(patch: Preferences): Promise<boolean> {
   const authenticated = get(session);
   const generation = getSessionGeneration();
-  if (!authenticated || owner !== authenticated.user.id) return;
+  if (!authenticated || owner !== authenticated.user.id) return Promise.resolve(false);
   revision++;
   current = { ...current, ...patch }; mirror(current, owner);
   const save = async () => {
-    if (generation !== getSessionGeneration()) return;
+    if (generation !== getSessionGeneration()) return false;
     try {
       const response = await fetch('/api/v1/preferences', {
         method: 'PUT', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000),
@@ -151,10 +154,14 @@ export function savePreferences(patch: Preferences): void {
       });
       if (!response.ok) throw new Error('Vos préférences ne sont pas encore enregistrées sur le serveur. Modifiez à nouveau le réglage pour réessayer.');
       if (generation === getSessionGeneration()) preferenceSyncError.set('');
+      return generation === getSessionGeneration();
     } catch (error) {
       if (generation === getSessionGeneration()) preferenceSyncError.set(error instanceof Error ? error.message : 'Enregistrement des préférences impossible.');
+      return false;
     }
   };
   pendingSaves++;
-  queue = queue.then(save, save).finally(()=>pendingSaves--);
+  const saved = queue.then(save, save);
+  queue = saved.then(() => {}).finally(()=>pendingSaves--);
+  return saved;
 }

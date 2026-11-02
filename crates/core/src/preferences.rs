@@ -18,6 +18,14 @@ struct Preferences {
     #[serde(skip_serializing_if = "Option::is_none")]
     audio_language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    remember_audio_selections: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remember_subtitle_selections: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    play_default_audio_track: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hide_played_in_latest: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     subtitles: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     audio_track: Option<AudioTrack>,
@@ -31,6 +39,12 @@ struct Preferences {
     skip_intro_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     skip_credits_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    autoplay_next_episode: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_back_seconds: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_forward_seconds: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     artwork_rotation: Option<ArtworkRotation>,
 }
@@ -61,6 +75,8 @@ struct ArtworkRotation {
 struct AudioTrack {
     media_id: String,
     track_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -107,25 +123,31 @@ fn hex_color(value: &str) -> bool {
 }
 impl Preferences {
     fn valid(&self) -> bool {
-        self.artwork_rotation.as_ref().is_none_or(|v| {
-            matches!(v.rotation_mode.as_str(), "random" | "sequential")
-                && v.min_hours_between_switches <= 720
-                && (1..=24).contains(&v.pool_size)
-                && language(&v.preferred_language)
-                && language(&v.fallback_language)
-                && v.enabled_libraries.as_ref().is_none_or(|libraries| {
-                    libraries.len() <= 64
-                        && libraries.iter().all(|lib| {
-                            (1..=64).contains(&lib.len())
-                                && lib
-                                    .bytes()
-                                    .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-                        })
-                })
-        }) && self
-            .theme
-            .as_deref()
-            .is_none_or(|v| matches!(v, "light" | "dark" | "system"))
+        self.skip_back_seconds
+            .is_none_or(|v| matches!(v, 5 | 10 | 15 | 30 | 60))
+            && self
+                .skip_forward_seconds
+                .is_none_or(|v| matches!(v, 5 | 10 | 15 | 30 | 60))
+            && self.artwork_rotation.as_ref().is_none_or(|v| {
+                matches!(v.rotation_mode.as_str(), "random" | "sequential")
+                    && v.min_hours_between_switches <= 720
+                    && (1..=24).contains(&v.pool_size)
+                    && language(&v.preferred_language)
+                    && language(&v.fallback_language)
+                    && v.enabled_libraries.as_ref().is_none_or(|libraries| {
+                        libraries.len() <= 64
+                            && libraries.iter().all(|lib| {
+                                (1..=64).contains(&lib.len())
+                                    && lib
+                                        .bytes()
+                                        .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+                            })
+                    })
+            })
+            && self
+                .theme
+                .as_deref()
+                .is_none_or(|v| matches!(v, "light" | "dark" | "system"))
             && self
                 .locale
                 .as_deref()
@@ -136,9 +158,10 @@ impl Preferences {
                 .as_deref()
                 .is_none_or(|v| matches!(v, "forced" | "always" | "off"))
             && self.audio_track.as_ref().is_none_or(|v| {
-                [&v.media_id, &v.track_id]
-                    .into_iter()
-                    .all(|s| !s.is_empty() && s.len() <= 256 && !s.chars().any(char::is_control))
+                v.language.as_deref().is_none_or(language)
+                    && [&v.media_id, &v.track_id].into_iter().all(|s| {
+                        !s.is_empty() && s.len() <= 256 && !s.chars().any(char::is_control)
+                    })
             })
             && self.offsets.as_ref().is_none_or(|v| {
                 [v.audio, v.subtitle]

@@ -1,5 +1,36 @@
 # CI et publication GHCR
 
+## Téléchargement de FFmpeg et échecs réseau — 2 novembre 2026
+
+Le [run 41446141236](https://github.com/maelmoreau21/Aether/actions/runs/41446141236)
+échouait avant les tests Rust/navigateur : curl quittait avec une erreur TLS 35
+ou un délai 28 dans `build-ffmpeg.sh`. La construction Docker échouait sur le
+même téléchargement. Le frontend, Actionlint et l'audit Rust avaient réussi.
+
+Le script partagé conserve FFmpeg 9.0.2 et son SHA-256 épinglé. Il retente
+désormais toutes les erreurs de transport avec des délais bornés puis utilise
+le [miroir MacPorts](https://distfiles.macports.org/ffmpeg/) lorsque
+[le serveur FFmpeg](https://ffmpeg.org/download.html) reste indisponible.
+Seuls HTTPS et ses redirections HTTPS sont acceptés. Une empreinte différente
+arrête immédiatement la construction avant extraction, quel que soit le serveur.
+La même correction s'applique au composite CI et aux images Docker.
+
+`python scripts/test-build-ffmpeg.py` exerce le vrai script en environnement
+POSIX avec transport simulé et véritable vérification SHA-256 : serveur
+principal valide, repli après erreur TLS et fichier partiel, deux serveurs
+injoignables, corruption depuis l'un ou l'autre serveur. Les quatre tests sont
+exécutés par le job de validation des workflows. Aucun test métier ou gate de
+publication n'a été retiré.
+
+Vérifications locales : quatre tests de téléchargement et 14 tests de politique
+de release réussis dans un conteneur Linux, syntaxe Bash et Actionlint 1.7.12
+réussis. Téléchargement réel du miroir : 12 040 788 octets, SHA-256 identique à
+la valeur épinglée. Le repli a également été observé pendant une construction
+réelle du stage Docker `probe-runtime`, après trois échecs TLS du serveur principal.
+Ce stage a été construit complètement avec succès ; `ffmpeg` et `ffprobe`
+annoncent tous deux la version 9.0.2 dans le conteneur.
+Cela ne remplace pas un nouveau run GitHub sur les correctifs publiés.
+
 ## Équilibrage des partitions — 29 octobre 2026
 
 Le run GitHub `40945793905` a passé respectivement 282, 478 et 383 secondes

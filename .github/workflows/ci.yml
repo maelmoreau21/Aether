@@ -35,6 +35,8 @@ jobs:
           python-version: '3.12'
       - name: Validate manual release version policy
         run: python scripts/test-release-policy.py
+      - name: Verify FFmpeg source download fallback and integrity
+        run: python scripts/test-build-ffmpeg.py
 
   # =========================================================================
   # 1. Vérifications et tests Rust (Core & Node)

@@ -1,3 +1,25 @@
+## 2 novembre 2026 — Correction des échecs GitHub Actions FFmpeg
+
+- Diagnostic du run `41446141236` sur `8f33738` : partitions Rust et navigateur
+  bloqués avant les tests par curl 35 (TLS reset) ou 28 (timeout) lors du
+  téléchargement FFmpeg ; même erreur dans le stage Docker `probe-runtime`.
+  Frontend, validation des workflows et audit Rust réussissaient déjà.
+- `build-ffmpeg.sh` retente toutes les erreurs de transport avec délais bornés
+  et utilise le miroir MacPorts en second recours. Version 9.0.2 et SHA-256
+  inchangés, HTTPS obligatoire, refus d'extraire une archive d'empreinte différente.
+  Le même script est utilisé par CI et Docker.
+- Quatre tests POSIX du téléchargement ajoutés au job workflows : succès,
+  repli après TLS/fichier partiel, indisponibilité totale et corruption des deux
+  sources. Quatre tests, 14 tests de politique de release, Bash syntaxe,
+  Actionlint 1.7.12 et contrôle du diff réussis.
+- Archive du miroir réellement téléchargée : 12 040 788 octets, empreinte exacte.
+  Construction locale du stage Docker : trois échecs TLS du serveur principal,
+  puis miroir et vérification réussis. Le stage `probe-runtime` a été construit
+  complètement avec succès ; ses deux binaires annoncent FFmpeg/ffprobe 9.0.2.
+- Correction parallèle dans Aether-Plugins : SDK Git épinglé remplace le chemin
+  vers le dépôt voisin qui faisait échouer Dependabot. Voir sa mémoire projet.
+- Correctifs locaux ; la réussite d'une nouvelle CI GitHub n'est pas revendiquée.
+
 ## 2 novembre 2026 — Identification, plugins officiels et SyncPlay
 
 - Deux dépôts conservés dans le dossier de travail : `Aether` et `Aether-Plugins`.

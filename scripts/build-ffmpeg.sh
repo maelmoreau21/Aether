@@ -9,9 +9,33 @@ case "$prefix" in /*) ;; *) exit 2 ;; esac
 case "$profile" in runtime|fixtures) ;; *) exit 2 ;; esac
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
-curl --fail --location --retry 3 --connect-timeout 20 --max-time 300 \
-  "https://ffmpeg.org/releases/ffmpeg-${version}.tar.xz" -o "$work/source.tar.xz"
-printf '%s  %s\n' "$sha256" "$work/source.tar.xz" | sha256sum --check --status
+download_source() {
+  # TLS resets (curl 35) are not retried by --retry alone. A second host also
+  # avoids making every Rust/browser/Docker job depend on ffmpeg.org uptime.
+  # Both hosts must supply the exact same pinned release archive.
+  for source in \
+    "https://ffmpeg.org/releases/ffmpeg-${version}.tar.xz" \
+    "https://distfiles.macports.org/ffmpeg/ffmpeg-${version}.tar.xz"
+  do
+    printf 'Downloading FFmpeg %s from %s\n' "$version" "$source" >&2
+    if curl --fail --location --proto '=https' --proto-redir '=https' \
+      --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 60 \
+      --connect-timeout 15 --max-time 120 \
+      "$source" -o "$work/source.tar.xz"
+    then
+      if ! printf '%s  %s\n' "$sha256" "$work/source.tar.xz" | sha256sum --check --status
+      then
+        printf 'FFmpeg %s source checksum mismatch; refusing extraction.\n' "$version" >&2
+        return 1
+      fi
+      return 0
+    fi
+    printf 'FFmpeg source unavailable from %s; trying the next source.\n' "$source" >&2
+  done
+  printf 'Unable to download the pinned FFmpeg %s archive.\n' "$version" >&2
+  return 1
+}
+download_source
 tar -xJf "$work/source.tar.xz" -C "$work"
 cd "$work/ffmpeg-$version"
 set -- --prefix="$prefix" --disable-autodetect --disable-network \

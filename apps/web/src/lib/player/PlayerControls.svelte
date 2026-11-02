@@ -518,6 +518,12 @@
 
 
 
+  const timelineChapters = $derived((media.chapters ?? [])
+    .filter(chapter => Number.isFinite(chapter.start) && chapter.start >= 0 && chapter.start < playback.duration)
+    .toSorted((a, b) => a.start - b.start));
+  const activeChapter = $derived(timelineChapters.findLast(chapter => chapter.start <= playback.position));
+  const hoverChapter = $derived(hoverTime === null ? undefined : timelineChapters.findLast(chapter => chapter.start <= hoverTime!));
+
   const previewFrame = $derived.by(() => {
 
 
@@ -1912,6 +1918,13 @@
   {/if}
 
   <div class="progress-line">
+    {#if timelineChapters.length}
+      <div class="chapter-ticks" aria-hidden="true">
+        {#each timelineChapters as chapter, index (`${chapter.start}-${index}`)}
+          <span class="chapter-tick" style:left={`${chapter.start / playback.duration * 100}%`}></span>
+        {/each}
+      </div>
+    {/if}
     {#if playback.duration > 0}
       <div class="timeline-markers-track" aria-hidden="true">
         {#if media.recap}
@@ -1979,6 +1992,7 @@
 
 
 
+        {#if hoverChapter}<span class="preview-chapter">{hoverChapter.title}</span>{/if}
         <span>{clock(hoverTime)}</span>
 
 
@@ -2000,6 +2014,7 @@
 
 
       aria-label="Position"
+      aria-valuetext={`${clock(playback.position)}${activeChapter ? ' · ' + activeChapter.title : ''}`}
 
 
 
@@ -2660,6 +2675,10 @@
 
 
 <style>
+  .chapter-ticks { position:absolute;inset:0;pointer-events:none;z-index:3; }
+  .chapter-tick { position:absolute;top:50%;width:2px;height:10px;transform:translate(-1px,-50%);background:rgba(255,255,255,.85);border-radius:1px; }
+  .preview-chapter { display:block;max-width:220px;white-space:normal;text-align:center;overflow-wrap:anywhere; }
+
 
 
 

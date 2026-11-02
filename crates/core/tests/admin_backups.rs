@@ -432,7 +432,7 @@ async fn backups_list_returns_unavailable_when_directory_refused() {
         .unwrap();
     // Directory placed inside media root is refused by policy
     let app = admin_backups::router_with_configuration(
-        auth,
+        auth.clone(),
         media.clone(),
         Some(media.join("forbidden-backups")),
         std::collections::BTreeMap::new(),
@@ -445,5 +445,45 @@ async fn backups_list_returns_unavailable_when_directory_refused() {
         serde_json::from_slice(&to_bytes(list.into_body(), 4096).await.unwrap()).unwrap();
     assert_eq!(body["available"], false);
     assert!(body["reason"].as_str().is_some());
+    // An unreadable backup listing must not masquerade as an available empty folder.
+    // A regular file at the configured path deterministically exercises read_dir failure
+    // on every OS, including Windows where Unix permission fixtures are ineffective.
+    let invalid_directory = temp.path().join("not-a-directory");
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    drop(options.open(&invalid_directory).unwrap());
+    let app = admin_backups::router_with_configuration(
+        auth,
+        media,
+        Some(invalid_directory),
+        std::collections::BTreeMap::new(),
+    )
+    .await
+    .unwrap();
+    let list = request(&app, "GET", "/api/v1/admin/backups", Some(&cookie), None).await;
+    assert_eq!(list.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(list.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(body["available"], false);
+    let csrf = format!("{:x}", Sha256::digest(format!("csrf:{token}").as_bytes()));
+    let create = request(
+        &app,
+        "POST",
+        "/api/v1/admin/backups",
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(create.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(create.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(body["code"], "backup_directory_unwritable");
+    assert!(body["message"].as_str().unwrap().contains("UID/GID"));
+    assert!(!body.to_string().contains(temp.path().to_str().unwrap()));
     store.close().await;
 }

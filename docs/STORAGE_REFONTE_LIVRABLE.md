@@ -53,9 +53,9 @@
 
 ## 6. Sauvegarde et restauration complètes (P7)
 
-- **Archive unifiée chiffrée** : fichier `.media-backup` contenant :
+- **Archive unifiée non chiffrée** : fichier `.media-backup` contenant :
   - Snapshot de la base de données SQL.
-  - Configuration chiffrée (`config.json`).
+  - Configuration en clair (`config.json`), pouvant contenir des secrets : conserver l'archive dans un stockage privé.
   - Certificats TLS.
   - Tous les assets binaires durables de `/data/assets`, re-hachés et vérifiés par SHA-256 et taille.
 - **Restauration vérifiée** :

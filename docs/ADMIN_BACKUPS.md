@@ -11,7 +11,7 @@ L'archive regroupe configuration et base avec le format versionné de `backup_bu
 ## Contrat HTTP
 
 - `GET /api/v1/admin/backups` : `available`, `reason`, `running`, `archives` (`id`, `size`, `createdAt` en secondes Unix), `schedule`.
-- `POST /api/v1/admin/backups` : 201 après vérification et publication ; une création à la fois, 409 si occupé/dossier refusé ; 501 si configuration incomplète, 500 si échec (sans chemins/secrets).
+- `POST /api/v1/admin/backups` : 201 après vérification et publication ; une création à la fois, 409 si occupé/dossier refusé ; 501 si configuration incomplète. Un échec renvoie `{code,message}` sans chemins/secrets : `backup_directory_unwritable` (403 si permission refusée, sinon 500), `backup_sqlite_snapshot_failed`, `backup_postgres_snapshot_failed`, `backup_assets_unavailable`, `backup_asset_integrity_failed` ou `backup_archive_failed` (500). Le serveur vérifie l'écriture réelle du dossier avant de commencer le snapshot.
 - `GET`/`HEAD /api/v1/admin/backups/{id}/download` : fichier au nom UUID v4, descripteur confiné, Range et mémoire bornée, téléchargement `no-store`.
 - `PUT /api/v1/admin/backups/schedule` : `{ "enabled": true, "intervalMinutes": 1440 }`. Intervalle entier 60..10080 minutes, champs inconnus refusés. 422 hors bornes. Retourne la planification persistée.
 
@@ -24,6 +24,14 @@ Toutes les routes authentifient le rôle `administrator` côté Core ; toutes le
 Migration 0024 dans les deux moteurs : planification désactivée par défaut, intervalle 24 h. Worker avec contrôle toutes les 15 secondes, uniquement quand le Core tourne. Les créations manuelles et planifiées partagent le même sémaphore. L'échéance est revendiquée atomiquement en base puis avancée à maintenant + intervalle : un redémarrage ne provoque pas une rafale de rattrapage. Résultats `never`, `running`, `succeeded`, `failed`, `interrupted`. Un échec attend la prochaine échéance. Au redémarrage, un résultat encore `running` devient `interrupted`. Un Core unique est la cible ; aucun cluster ni coordination multi-Core promis. Le worker ne conserve qu'une référence faible au service au repos et est annulé à la libération du service.
 
 Aucune suppression ni rétention automatique. Maximum 10 000 entrées inspectées et 1 000 archives affichées.
+
+Une erreur de lecture du dossier rend maintenant `available:false` ; elle ne
+simule plus une liste vide disponible. Un volume créé par une ancienne image
+peut appartenir à l'UID 10001 alors que le Compose impose un autre utilisateur.
+Le propriétaire du volume de sauvegardes doit correspondre à l'UID/GID effectif
+du Core, avec permissions 0700. Le Core ne change pas automatiquement le
+propriétaire du volume. Diagnostic réel et correction ciblée du 2 novembre :
+[sauvegarde NAS](BACKUP_NAS_FIX_2026_11_02.md).
 
 ## Récupération et vérifications
 

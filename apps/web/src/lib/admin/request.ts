@@ -10,7 +10,10 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
     headers: { ...(init.body instanceof FormData ? {} : {'content-type':'application/json'}), 'x-csrf-token': current.csrfToken, ...init.headers }
   });
   if (!response.ok) {
-    const detail = await response.json().catch(() => null) as { error?: string; pluginError?: string } | null;
+    const detail = await response.json().catch(() => null) as { error?: string; pluginError?: string; code?: string; message?: string } | null;
+    if (path.startsWith('/api/v1/admin/backups') && detail?.code?.startsWith('backup_') && typeof detail.message === 'string') {
+      throw new Error(detail.message);
+    }
     const messages: Record<string,string> = {
       avatar_collection_full: 'Cette collection ne peut pas contenir plus de 500 images.',
       avatar_migration_required: 'Transférez d’abord les anciennes collections dans Administration → Avatars avant de désinstaller cette extension.',

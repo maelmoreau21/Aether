@@ -36,6 +36,42 @@ struct Archive {
     created_at: u64,
 }
 
+#[derive(Debug)]
+struct BackupFailure {
+    status: StatusCode,
+    code: &'static str,
+    message: &'static str,
+}
+impl BackupFailure {
+    fn new(status: StatusCode, code: &'static str, message: &'static str) -> Self {
+        eprintln!("backup failed: {code}");
+        Self {
+            status,
+            code,
+            message,
+        }
+    }
+}
+impl From<StatusCode> for BackupFailure {
+    fn from(status: StatusCode) -> Self {
+        Self {
+            status,
+            code: "backup_request_failed",
+            message: "Sauvegarde refusée : vérifiez vos droits et le dossier configuré.",
+        }
+    }
+}
+impl IntoResponse for BackupFailure {
+    fn into_response(self) -> Response {
+        (
+            self.status,
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(serde_json::json!({"code":self.code,"message":self.message})),
+        )
+            .into_response()
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Listing {
@@ -276,7 +312,7 @@ async fn list(
                                     "admin_backups: read_dir error in {:?}: {:?}",
                                     directory, err
                                 );
-                                return Ok(Vec::new());
+                                return Err(StatusCode::FORBIDDEN);
                             }
                         };
                         let mut archives = Vec::new();
@@ -361,7 +397,7 @@ async fn list(
         .into_response())
 }
 
-async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
+async fn perform_backup(state: &Backups) -> Result<Archive, BackupFailure> {
     let directory = validate_directory(state).await?;
     let path = directory.clone();
     tokio::task::spawn_blocking(move || {
@@ -388,11 +424,28 @@ async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700));
         }
-        result
+        result?;
+        // A pre-existing private directory can belong to a different deployment UID.
+        // Test real access before starting an expensive SQL snapshot.
+        let probe = path.join(format!(".backup-access-{}.tmp", uuid::Uuid::new_v4()));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&probe)?;
+        drop(file);
+        std::fs::remove_file(probe)
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|error| BackupFailure::new(
+        if error.kind() == std::io::ErrorKind::PermissionDenied { StatusCode::FORBIDDEN } else { StatusCode::INTERNAL_SERVER_ERROR },
+        "backup_directory_unwritable",
+        "Le processus du serveur ne peut pas écrire dans le dossier de sauvegarde. Vérifiez le propriétaire et les permissions du volume de sauvegardes pour l’UID/GID du conteneur.",
+    ))?;
     validate_directory(state).await?;
     let id = uuid::Uuid::new_v4().to_string();
     struct TemporaryDatabase(PathBuf);
@@ -405,15 +458,18 @@ async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
     let engine = if let Some(url) = &state.postgres_url {
         crate::postgres_backup::backup(url.as_str(), &temporary.0, Some(&state.media_root))
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|error| {
+                eprintln!("backup PostgreSQL snapshot failed: {error}");
+                BackupFailure::new(StatusCode::INTERNAL_SERVER_ERROR, "backup_postgres_snapshot_failed", "Le snapshot PostgreSQL a échoué. Vérifiez pg_dump 18 et la connexion du serveur dans les journaux.")
+            })?;
         "postgres"
     } else if let Some(source) = &state.source {
         crate::backup::backup_database(source, &temporary.0, Some(&state.media_root))
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| BackupFailure::new(StatusCode::INTERNAL_SERVER_ERROR, "backup_sqlite_snapshot_failed", "Le snapshot SQLite a échoué. Vérifiez l’accès à la base et l’espace disponible."))?;
         "sqlite"
     } else {
-        return Err(StatusCode::NOT_IMPLEMENTED);
+        return Err(StatusCode::NOT_IMPLEMENTED.into());
     };
     // Assets are listed after the database snapshot: every row present in the snapshot has its
     // file (file-before-row writes, deferred deletion), so a failure here is a real defect.
@@ -425,7 +481,7 @@ async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
         .await
         .map_err(|error| {
             eprintln!("backup: cannot list durable assets: {error}");
-            StatusCode::INTERNAL_SERVER_ERROR
+            BackupFailure::new(StatusCode::INTERNAL_SERVER_ERROR, "backup_assets_unavailable", "L’inventaire des fichiers durables est indisponible. La sauvegarde n’a pas été créée.")
         })?;
     let size = crate::backup_bundle::create_with_assets(
         &temporary.0,
@@ -437,7 +493,12 @@ async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
     .await
     .map_err(|error| {
         eprintln!("backup: archive creation failed: {error}");
-        StatusCode::INTERNAL_SERVER_ERROR
+        let (code, message) = if matches!(error, crate::backup_bundle::BundleError::AssetIntegrity) {
+            ("backup_asset_integrity_failed", "Un fichier durable est absent ou corrompu. Vérifiez le montage du volume des assets ; la sauvegarde incomplète a été refusée.")
+        } else {
+            ("backup_archive_failed", "La création de l’archive a échoué. Vérifiez l’espace disque, les permissions et les fichiers de certificats configurés.")
+        };
+        BackupFailure::new(StatusCode::INTERNAL_SERVER_ERROR, code, message)
     })?;
     Ok(Archive {
         id,
@@ -449,10 +510,10 @@ async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
 async fn create(
     State(state): State<Arc<Backups>>,
     headers: HeaderMap,
-) -> Result<Response, StatusCode> {
+) -> Result<Response, BackupFailure> {
     administrator(&state, &headers, true).await?;
     if state.source.is_none() && state.postgres_url.is_none() {
-        return Err(StatusCode::NOT_IMPLEMENTED);
+        return Err(StatusCode::NOT_IMPLEMENTED.into());
     }
     let permit = state
         .gate
@@ -589,8 +650,11 @@ async fn run_scheduled(
     fence: Option<&crate::task_engine::Job>,
 ) -> Result<(), StatusCode> {
     let result = perform_backup(state).await;
-    if let Err(status) = &result {
-        eprintln!("scheduled backup failed: HTTP {status}");
+    if let Err(error) = &result {
+        eprintln!(
+            "scheduled backup failed: {} HTTP {}",
+            error.code, error.status
+        );
     }
     if let Some(job) = fence {
         let current = crate::task_engine::get(&state.auth.store, &job.id)
@@ -609,7 +673,7 @@ async fn run_scheduled(
     crate::database::query("UPDATE backup_schedule SET last_completed_at=?,last_outcome=? WHERE singleton=1 AND last_outcome='running'")
         .bind(now()).bind(if result.is_ok() {"succeeded"} else {"failed"})
         .execute(state.auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    result.map(|_| ())
+    result.map(|_| ()).map_err(|error| error.status)
 }
 
 fn start_worker(state: &Arc<Backups>) {

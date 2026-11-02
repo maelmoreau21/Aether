@@ -614,45 +614,16 @@ pub(crate) struct ImportImage {
     pub(crate) apply_collection_policy: bool,
 }
 
-pub(crate) async fn import_image_direct(
-    store: &IdentityStore,
-    id: &str,
-    input: ImportImage,
-) -> Result<Json<Value>, Error> {
-    if !matches!(
-        input.kind.as_str(),
-        "poster" | "backdrop" | "logo" | "banner" | "thumb" | "illustration" | "disc" | "landscape"
-    ) {
-        return Err(err(StatusCode::BAD_REQUEST, "invalid_image_kind"));
+static IMAGE_PREVIEWS: Semaphore = Semaphore::const_new(4);
+
+async fn download_provider_image(
+    package: &Package,
+    raw_url: &str,
+) -> Result<(Vec<u8>, String), Error> {
+    if raw_url.len() > 4096 {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_image_url"));
     }
-    if input
-        .language
-        .as_deref()
-        .is_some_and(|v| !super::image_collection::valid_language(v))
-    {
-        return Err(err(StatusCode::BAD_REQUEST, "invalid_language"));
-    }
-    let library: Option<String> = query_scalar("SELECT library_id FROM inventory_works WHERE id=?")
-        .bind(&input.work_id)
-        .fetch_optional(store.pool())
-        .await
-        .map_err(db)?;
-    let _library = library.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
-    let row: Option<(String, String)> =
-        query_as("SELECT package_json,generation FROM extensions WHERE id=? AND enabled=1")
-            .bind(id)
-            .fetch_optional(store.pool())
-            .await
-            .map_err(db)?;
-    let (stored, _) = row.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
-    let package: Package = serde_json::from_str(&stored)
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
-    for permission in ["images", "metadata.write"] {
-        if !package.manifest.permissions.iter().any(|p| p == permission) {
-            return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
-        }
-    }
-    let url = reqwest::Url::parse(&input.url)
+    let url = reqwest::Url::parse(raw_url)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_image_url"))?;
     let host = url
         .host_str()
@@ -718,6 +689,121 @@ pub(crate) async fn import_image_direct(
     .await
     .map_err(|_| err(StatusCode::REQUEST_TIMEOUT, "image_timeout"))??;
 
+    Ok(bytes)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct PreviewImage {
+    work_id: String,
+    url: String,
+}
+
+pub(super) async fn preview_image(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(input): Query<PreviewImage>,
+) -> Result<axum::response::Response, Error> {
+    use axum::response::IntoResponse;
+    admin(&auth, &headers, false).await?;
+    crate::feedback::authorized(&auth, &headers, &input.work_id, false)
+        .await
+        .map_err(|s| err(s, "work_denied"))?;
+    let library: Option<String> = query_scalar("SELECT library_id FROM inventory_works WHERE id=?")
+        .bind(&input.work_id)
+        .fetch_optional(auth.store.pool())
+        .await
+        .map_err(db)?;
+    let library = library.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let row: Option<(String, String)> =
+        query_as("SELECT package_json,generation FROM extensions WHERE id=? AND enabled=1")
+            .bind(&id)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let (stored, generation) =
+        row.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
+    if !permitted(&auth, &headers, &id, &library, &generation).await? {
+        return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
+    }
+    let package: Package = serde_json::from_str(&stored)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
+    if !package.manifest.permissions.iter().any(|p| p == "images") {
+        return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
+    }
+    let _slot = tokio::time::timeout(Duration::from_secs(12), IMAGE_PREVIEWS.acquire())
+        .await
+        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "image_preview_busy"))?
+        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "image_preview_busy"))?;
+    let (bytes, content) = download_provider_image(&package, &input.url).await?;
+    let valid = matches!(
+        (image::guess_format(&bytes).ok(), content.as_str()),
+        (Some(image::ImageFormat::Jpeg), "image/jpeg")
+            | (Some(image::ImageFormat::Png), "image/png")
+            | (Some(image::ImageFormat::WebP), "image/webp")
+    );
+    if !valid {
+        return Err(err(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "invalid_preview_image",
+        ));
+    }
+    // Revalidate live grants after the network operation, before sending pixels.
+    if !permitted(&auth, &headers, &id, &library, &generation).await? {
+        return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
+    }
+    Ok((
+        [
+            (header::CONTENT_TYPE, content),
+            (header::CACHE_CONTROL, "private, no-store".into()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".into()),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+pub(crate) async fn import_image_direct(
+    store: &IdentityStore,
+    id: &str,
+    input: ImportImage,
+) -> Result<Json<Value>, Error> {
+    if !matches!(
+        input.kind.as_str(),
+        "poster" | "backdrop" | "logo" | "banner" | "thumb" | "illustration" | "disc" | "landscape"
+    ) {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_image_kind"));
+    }
+    if input
+        .language
+        .as_deref()
+        .is_some_and(|v| !super::image_collection::valid_language(v))
+    {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_language"));
+    }
+    let library: Option<String> = query_scalar("SELECT library_id FROM inventory_works WHERE id=?")
+        .bind(&input.work_id)
+        .fetch_optional(store.pool())
+        .await
+        .map_err(db)?;
+    let _library = library.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let row: Option<(String, String)> =
+        query_as("SELECT package_json,generation FROM extensions WHERE id=? AND enabled=1")
+            .bind(id)
+            .fetch_optional(store.pool())
+            .await
+            .map_err(db)?;
+    let (stored, _) = row.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
+    let package: Package = serde_json::from_str(&stored)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
+    for permission in ["images", "metadata.write"] {
+        if !package.manifest.permissions.iter().any(|p| p == permission) {
+            return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
+        }
+    }
+    let bytes = download_provider_image(&package, &input.url).await?;
+
     let (_, result) = crate::artwork::upload_internal(
         store,
         input.work_id,
@@ -771,6 +857,82 @@ pub(super) async fn import_image(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn image_previews_reject_untrusted_urls_and_non_admin_accounts() {
+        let mut package = Package {
+            manifest: Manifest {
+                http_hosts: vec!["image.example.org".into(), "127.0.0.1".into()],
+                ..Default::default()
+            },
+            publisher_id: String::new(),
+            wasm: String::new(),
+            sha256: String::new(),
+            signature: String::new(),
+        };
+        for url in [
+            "http://image.example.org/a.png",
+            "https://image.example.org.evil/a.png",
+            "https://user:pass@image.example.org/a.png",
+            "https://image.example.org:8443/a.png",
+            "https://127.0.0.1/a.png",
+        ] {
+            assert_eq!(
+                download_provider_image(&package, url).await.unwrap_err().0,
+                StatusCode::FORBIDDEN
+            );
+        }
+        package.manifest.http_hosts.clear();
+        assert_eq!(
+            download_provider_image(&package, "https://image.example.org/a.png")
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::FORBIDDEN
+        );
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("previews.sqlite"))
+            .await
+            .unwrap();
+        query("INSERT INTO users(id,role) VALUES('reader','user')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let token = "a".repeat(64);
+        query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,'reader',unixepoch(),unixepoch(),unixepoch()+3600)").bind(crate::auth::hash(&token)).execute(store.pool()).await.unwrap();
+        let auth = AuthState::new(store, "http://localhost".into())
+            .await
+            .unwrap();
+        let request = || {
+            Query(PreviewImage {
+                work_id: "work".into(),
+                url: "https://image.example.org/a.png".into(),
+            })
+        };
+        assert_eq!(
+            preview_image(
+                State(auth.clone()),
+                HeaderMap::new(),
+                Path("provider".into()),
+                request()
+            )
+            .await
+            .unwrap_err()
+            .0,
+            StatusCode::UNAUTHORIZED
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("media_session={token}")).unwrap(),
+        );
+        assert_eq!(
+            preview_image(State(auth), headers, Path("provider".into()), request())
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::FORBIDDEN
+        );
+    }
     #[test]
     fn work_context_drives_series_search_and_candidate_details() {
         let context = WorkContext {

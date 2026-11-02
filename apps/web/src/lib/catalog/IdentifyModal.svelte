@@ -1,5 +1,6 @@
 <script lang="ts">
   import { providerErrorText } from './provider-errors';
+  import { providerImagePreview } from './provider-image';
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import { session } from '../../lib/auth/session';
@@ -297,7 +298,7 @@
               <article class="result-card">
                 <div class="result-poster">
                   {#if item.posterUrl}
-                    <img src={item.posterUrl} alt={`Affiche de ${item.title}`} loading="lazy" />
+                    <img src={providerImagePreview(item.provider, work.id, item.posterUrl)} alt={`Affiche de ${item.title}`} loading="lazy" />
                   {:else}
                     <div class="poster-placeholder">
                       <Icon name="image" size={32} />

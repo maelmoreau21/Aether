@@ -1,5 +1,6 @@
 <script lang="ts">
   import { providerErrorText } from './provider-errors';
+  import { providerImagePreview } from './provider-image';
   import { preferences } from '../preferences';
   import Icon from '../ui/Icon.svelte';
   import { onMount } from 'svelte';
@@ -534,7 +535,7 @@
         {#each candidates as candidate(candidate.url)}
           <article class="candidate-card">
             <div class="candidate-preview" class:is-backdrop={candidate.imageType === 'backdrop'}>
-              <img src={candidate.url} alt={`Aperçu ${candidate.imageType}`} loading="lazy" />
+              <img src={providerImagePreview(candidate.provider, workId ?? '', candidate.url)} alt={`Aperçu ${candidate.imageType}`} loading="lazy" />
             </div>
             <div class="candidate-meta">
               <h4>{candidate.providerName || candidate.provider}</h4>

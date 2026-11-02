@@ -282,6 +282,10 @@ pub fn router(auth: AuthState) -> Router {
             axum::routing::post(image_collection::search_candidates),
         )
         .route(
+            "/api/v1/admin/extensions/{id}/image-preview",
+            get(adapters::preview_image),
+        )
+        .route(
             "/api/v1/admin/extensions/identify/search",
             axum::routing::post(identify::search),
         )

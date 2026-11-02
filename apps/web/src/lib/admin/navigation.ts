@@ -11,6 +11,7 @@ export const adminNavigation: { label: string; englishLabel: string; links: Admi
   { label: 'Médiathèque', englishLabel: 'Media library', links: [
     { hash: '#libraries-section', label: 'Bibliothèques', key: 'admin_nav_libraries', icon: 'film' },
     { hash: '#artwork-section', label: 'Images', englishLabel: 'Artwork', icon: 'image' },
+    { hash: '#trickplay-section', label: 'Miniatures Trickplay', englishLabel: 'Trickplay thumbnails', icon: 'image' },
     { hash: '#nodes-section', label: 'Nœuds de stockage', key: 'admin_nav_nodes', icon: 'server' },
     { hash: '#avatars-section', label: 'Avatars', icon: 'image' }
   ] },
@@ -27,6 +28,11 @@ export const adminNavigation: { label: string; englishLabel: string; links: Admi
 ];
 export const adminDestinations = adminNavigation.flatMap(group => group.links);
 export const adminSectionHashes = new Set(adminDestinations.map(link => link.hash));
+export function parseAdminHash(hash: string): { section: string; task: string | null } {
+  const [candidate, query = ''] = hash.split('?', 2);
+  const section = adminSectionHashes.has(candidate) ? candidate : '#overview';
+  return { section, task: section === '#tasks-section' ? new URLSearchParams(query).get('task') || null : null };
+}
 export function adminDestinationLabel(link: AdminDestination, translate: (key: LabelKey) => string, english = false): string {
   return link.key ? translate(link.key) : english ? link.englishLabel ?? link.label : link.label;
 }

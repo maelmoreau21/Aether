@@ -9,7 +9,7 @@
 
   import { session, type AuthUser } from '../../../lib/auth/session';
   import AdminShell from '../../../lib/admin/AdminShell.svelte';
-  import { adminDestinations, adminDestinationLabel, adminSectionHashes } from '../../../lib/admin/navigation';
+  import { adminDestinations, adminDestinationLabel, parseAdminHash } from '../../../lib/admin/navigation';
   import Icon from '../../../lib/ui/Icon.svelte';
   import type { Library, Scan, AdminNode, CoreHealth, EnrollmentToken, RefreshMode } from '../../../lib/admin/types';
   import AdminSettings from '../../../lib/admin/AdminSettings.svelte';
@@ -337,20 +337,19 @@
   let currentHash = $state('#overview');
   const sectionTitle = $derived(adminDestinationLabel(adminDestinations.find(link => link.hash === currentHash) ?? adminDestinations[0], $t, $locale === 'en'));
   function chooseSection(hash: string) { currentHash = hash; selectedTaskId = null; }
-  function selectedSection() {
-    const section = window.location.hash.split('?')[0];
-    return adminSectionHashes.has(section) ? section : '#overview';
+  function syncSection() {
+    const selected = parseAdminHash(window.location.hash);
+    currentHash = selected.section;
+    selectedTaskId = selected.task;
   }
 
   onMount(() => {
     void load();
     if (typeof window !== 'undefined' && window.location.hash) {
-      currentHash = selectedSection();
-      selectedTaskId = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('task');
+      syncSection();
     }
     const hashHandler = () => {
-      currentHash = selectedSection();
-      selectedTaskId = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('task');
+      syncSection();
     };
     window.addEventListener('hashchange', hashHandler);
     const timer = setInterval(() => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { resolve } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
   import AutomationTasks from './AutomationTasks.svelte';
@@ -14,7 +15,7 @@
 
   type Schedule = { libraryId: string; intervalMinutes: number; enabled: number; nextRunAt: number; lastRunAt: number | null; lastOutcome: string };
   type Backup = { available: boolean; reason?: string | null; running: boolean; schedule: { enabled: boolean; intervalMinutes: number; nextDueAt: number; lastStartedAt: number | null; lastCompletedAt: number | null; lastOutcome: string } };
-  type SystemTask = { id: string; name: string; description: string; category: string; intervalMinutes: number; enabled: number; nextDueAt: number; lastStartedAt: number | null; lastCompletedAt: number | null; lastOutcome: string };
+  type SystemTask = { id: string; name: string; description: string; category: string; intervalMinutes: number; enabled: number; nextDueAt: number; lastStartedAt: number | null; lastCompletedAt: number | null; lastOutcome: string; lastErrorKind?: string | null; lastErrorScope?: string | null; lastMessage?: string | null };
   type Task = {
     id: string;
     systemId?: string;
@@ -44,6 +45,9 @@
   let editor = $state<HTMLDialogElement>();
   let frequency = $state(24);
   let unit = $state(60);
+  let triggerEnabled = $state(true);
+  let queueOpen = $state(false);
+  let refreshPromise: Promise<void> | undefined;
 
   const tasks = $derived<Task[]>([
     ...libraries.filter(l => !l.id.startsWith('fixture-')).map(library => {
@@ -106,7 +110,7 @@
     unavailable: 'Bibliothèque indisponible',
     stopped: 'Serveur en arrêt',
     succeeded: 'Réussie',
-    failed: 'Échec'
+    failed: 'Échec', paused: 'Suspendue', cancelled: 'Annulée'
   };
 
   const categories = $derived([...new Set(tasks.map(t => t.category))]);
@@ -118,7 +122,7 @@
     if (minutes % 1440 === 0) return `Toutes les ${minutes / 60} heures`;
     const count = minutes % 60 === 0 ? minutes / 60 : minutes;
     const suffix = minutes % 60 === 0 ? 'heure' : 'minute';
-    return `Toutes les ${count} ${suffix}${count > 1 ? 's' : ''}`;
+    return count === 1 ? `Chaque ${suffix}` : `Toutes les ${count} ${suffix}s`;
   }
 
   function lastRun(task: Task) {
@@ -126,10 +130,18 @@
     if (task.library && scanError) return 'Dernier lancement indisponible';
     if (task.id === 'backup' && backupError) return 'Dernier lancement indisponible';
     if (task.systemId && systemTasksError) return 'Dernier lancement indisponible';
-    return task.plan?.last ? `Dernier lancement planifié : ${date(task.plan.last)}` : 'Aucun lancement planifié enregistré';
+    return task.plan?.last ? `${task.library ? 'Dernier lancement planifié' : 'Dernier lancement'} : ${date(task.plan.last)}` : 'Aucun lancement enregistré';
+  }
+  function executionLabel(task: Task) {
+    if (task.plan && ['queued', 'running', 'paused'].includes(task.plan.outcome)) return outcomes[task.plan.outcome];
+    return task.running ? 'Démarrage…' : task.plan ? outcomes[task.plan.outcome] ?? task.plan.outcome : 'Aucune exécution planifiée';
   }
 
-  async function refresh() {
+  function refresh(): Promise<void> {
+    if (!refreshPromise) refreshPromise = loadSchedules().finally(() => { refreshPromise = undefined; });
+    return refreshPromise;
+  }
+  async function loadSchedules() {
     refreshing = true;
     const [plans, archives, sys] = await Promise.allSettled([
       adminRequest<Schedule[]>('/api/v1/admin/tasks/schedules'),
@@ -161,7 +173,14 @@
     refreshing = false;
   }
 
-  $effect(() => { if (active) void refresh(); });
+  $effect(() => {
+    if (!active) return;
+    untrack(() => void refresh());
+    const update = () => { if (document.visibilityState === 'visible' && !saving && !creatingBackup) void refresh(); };
+    const timer = setInterval(update, 10000);
+    document.addEventListener('visibilitychange', update);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', update); };
+  });
   $effect(() => { if (selectedId !== undefined) { error = ''; notice = ''; editor?.close(); } });
 
   function editTrigger() {
@@ -169,6 +188,7 @@
     const interval = selected.plan?.interval ?? 1440;
     unit = interval % 1440 === 0 ? 1440 : interval % 60 === 0 ? 60 : 1;
     frequency = interval / unit;
+    triggerEnabled = selected.plan?.enabled ?? true;
     error = '';
     editor?.showModal();
   }
@@ -187,25 +207,26 @@
     error = '';
     notice = '';
     try {
+      await refreshPromise;
       if (task.library) {
         await adminRequest(`/api/v1/admin/tasks/schedules/${encodeURIComponent(task.library.id)}`, {
           method: 'PUT',
-          body: JSON.stringify({ intervalMinutes: minutes, enabled: true })
+          body: JSON.stringify({ intervalMinutes: minutes, enabled: triggerEnabled })
         });
       } else if (task.systemId) {
         await adminRequest(`/api/v1/admin/tasks/system/${encodeURIComponent(task.systemId)}/schedule`, {
           method: 'PUT',
-          body: JSON.stringify({ intervalMinutes: minutes, enabled: true })
+          body: JSON.stringify({ intervalMinutes: minutes, enabled: triggerEnabled })
         });
       } else {
         await adminRequest('/api/v1/admin/backups/schedule', {
           method: 'PUT',
-          body: JSON.stringify({ intervalMinutes: minutes, enabled: true })
+          body: JSON.stringify({ intervalMinutes: minutes, enabled: triggerEnabled })
         });
       }
       await refresh();
       editor?.close();
-      notice = 'Déclencheur enregistré.';
+      notice = triggerEnabled ? 'Intervalle activé et enregistré. La prochaine échéance part de cet enregistrement.' : 'Intervalle enregistré et désactivé. Le lancement manuel reste disponible.';
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Enregistrement impossible.';
     } finally {
@@ -220,8 +241,9 @@
     error = '';
     notice = '';
     try {
+      await refreshPromise;
       if (task.library) {
-        await adminRequest(`/api/v1/admin/tasks/schedules/${encodeURIComponent(task.library.id)}`, { method: 'DELETE' });
+        await adminRequest(`/api/v1/admin/tasks/schedules/${encodeURIComponent(task.library.id)}`, { method: 'PUT', body: JSON.stringify({ intervalMinutes: task.plan?.interval ?? 1440, enabled: false }) });
       } else if (task.systemId) {
         await adminRequest(`/api/v1/admin/tasks/system/${encodeURIComponent(task.systemId)}/schedule`, {
           method: 'PUT',
@@ -234,7 +256,7 @@
         });
       }
       await refresh();
-      notice = 'Déclencheur supprimé. Le lancement manuel reste disponible.';
+      notice = 'Intervalle désactivé. Les résultats sont conservés et le lancement manuel reste disponible.';
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Suppression impossible.';
     } finally {
@@ -253,8 +275,9 @@
       error = '';
       notice = '';
       try {
+        await refreshPromise;
         await adminRequest(`/api/v1/admin/tasks/system/${encodeURIComponent(task.systemId)}/run`, { method: 'POST' });
-        notice = `Tâche ${task.name} démarrée.`;
+        notice = `Tâche ${task.name} ajoutée à la file d’exécution.`;
         await refresh();
       } catch (cause) {
         error = cause instanceof Error ? cause.message : 'Démarrage de la tâche impossible.';
@@ -267,6 +290,7 @@
     error = '';
     notice = '';
     try {
+      await refreshPromise;
       await adminRequest('/api/v1/admin/backups', { method: 'POST' });
       notice = 'Sauvegarde créée.';
       await refresh();
@@ -290,9 +314,10 @@
         </button>
       </header>
       <p class="description">{selected.description}</p>
+      <button class="refresh" disabled={refreshing} onclick={() => void refresh()}><Icon name="refresh" size={18} /> Actualiser l’état</button>
       {#if selected.reason}<p class="reason">{selected.reason} {#if !selected.library && !selected.systemId}<a href={resolve('admin/libraries/#backups-section')}>Ouvrir les sauvegardes</a>{/if}</p>{/if}
       <button class="primary" disabled={!loaded || saving || refreshing || !!(selected.library ? scanError : selected.systemId ? systemTasksError : backupError) || (selected.id === 'backup' && !backup?.available)} onclick={editTrigger}>
-        <span aria-hidden="true">+</span> {selected.plan?.enabled ? 'Modifier le déclencheur' : 'Ajouter un déclencheur'}
+        <span aria-hidden="true">+</span> {selected.plan ? 'Configurer l’intervalle' : 'Ajouter un intervalle'}
       </button>
       <div class="trigger-list" aria-label="Déclencheurs">
         <h3>Intervalle</h3>
@@ -302,16 +327,21 @@
               <p>{intervalLabel(selected.plan.interval)}</p>
               <small>Prochaine échéance : {date(selected.plan.next)}</small>
             </div>
-            <button class="remove" disabled={saving} aria-label="Supprimer le déclencheur" title="Supprimer le déclencheur" onclick={() => void removeTrigger()}>−</button>
+            <button class="remove" disabled={saving || refreshing} aria-label="Désactiver l’intervalle" title="Désactiver l’intervalle" onclick={() => void removeTrigger()}>−</button>
           </div>
         {:else}
           <p class="no-trigger">Aucun déclencheur actif. Cette tâche peut être lancée manuellement.</p>
+          {#if selected.plan}<p>Intervalle conservé : {intervalLabel(selected.plan.interval)}.</p>{/if}
         {/if}
       </div>
       <div class="results">
         <h3>Dernier résultat</h3>
         <p>{lastRun(selected)}</p>
-        <p>{selected.running ? 'En cours…' : selected.plan ? outcomes[selected.plan.outcome] ?? selected.plan.outcome : 'Aucune exécution planifiée'}</p>
+        <p>{executionLabel(selected)}</p>
+        {#if selectedSystemTask?.lastMessage}
+          <p class:error={selectedSystemTask.lastOutcome === 'failed'}>{selectedSystemTask.lastMessage}</p>
+          {#if selectedSystemTask.lastErrorKind}<p>Type : {selectedSystemTask.lastErrorKind}{selectedSystemTask.lastErrorScope ? ` · ${selectedSystemTask.lastErrorScope}` : ''}</p>{/if}
+        {/if}
         {#if selected.id === 'backup' && backup?.schedule.lastStartedAt && backup.schedule.lastCompletedAt && backup.schedule.lastCompletedAt >= backup.schedule.lastStartedAt}
           <p>Durée : {backup.schedule.lastCompletedAt - backup.schedule.lastStartedAt} secondes</p>
         {/if}
@@ -338,6 +368,12 @@
           {/if}
         {/if}
       </div>
+    {:else if !loaded}
+      <h2 id="tasks-heading">Chargement de la tâche…</h2>
+      <p role="status">Lecture des planifications du serveur.</p>
+    {:else if selectedId.startsWith('system-') && systemTasksError}
+      <h2 id="tasks-heading">État de la tâche indisponible</h2>
+      <button class="refresh" disabled={refreshing} onclick={() => void refresh()}>Réessayer</button>
     {:else}
       <h2 id="tasks-heading">Tâche introuvable</h2>
       <p>Cette tâche a peut-être été supprimée ou renommée.</p>
@@ -346,8 +382,7 @@
     <header class="list-header">
       <h2 id="tasks-heading">Tâches et indexations</h2>
     </header>
-    <DistributedTasks {active} {libraries} {nodes} />
-    <details class="plans-section"><summary>Planifications et lancement manuel</summary><p class="section-intro">Choisissez une opération pour régler sa fréquence ou la lancer maintenant.</p><button class="refresh" disabled={refreshing} onclick={() => void refresh()}><Icon name="refresh" size={18} /> Actualiser les planifications</button>
+    <details class="plans-section" open><summary>Planifications et lancement manuel</summary><p class="section-intro">Choisissez une opération pour régler son intervalle ou la lancer maintenant. L’état s’actualise toutes les 10 secondes tant que cette page est visible.</p><button class="refresh" disabled={refreshing} onclick={() => void refresh()}><Icon name="refresh" size={18} /> Actualiser les planifications</button>
     {#each categories as category (category)}
       <div class="category">
         <h3>{category}</h3>
@@ -359,7 +394,8 @@
                 <span class="clock"><Icon name="clock" size={26} /></span>
                 <span class="task-copy">
                   <span class="task-title">{task.name}</span>
-                  <span class="task-subtitle">{task.running ? 'En cours…' : task.plan ? outcomes[task.plan.outcome] ?? task.plan.outcome : 'Aucun lancement planifié'}</span>
+                  <span class="task-subtitle">{task.plan?.enabled ? `${intervalLabel(task.plan.interval)} · prochaine échéance ${date(task.plan.next)}` : 'Lancement manuel · aucun intervalle actif'}</span>
+                  <span class="task-subtitle">{executionLabel(task)}</span>
                   <span class="task-subtitle">{lastRun(task)}</span>
                   {#if task.reason}<span class="task-subtitle">{task.reason}</span>{/if}
                 </span>
@@ -375,6 +411,7 @@
       </div>
     {/each}
     </details>
+    <details class="queue-section" bind:open={queueOpen}><summary>File d’exécution et opérations en cours</summary><DistributedTasks active={active && queueOpen} {libraries} {nodes} /></details>
     <details class="automation-section"><summary>Automatisation des métadonnées</summary><AutomationTasks {active} {libraries} /></details>
   {/if}
   {#if scanError}<p class="feedback error" role="alert">{scanError}</p>{/if}
@@ -388,7 +425,8 @@
   <form onsubmit={saveTrigger}>
     <h2 id="trigger-title">Déclencheur périodique</h2>
     <p>{selected?.name}</p>
-    <label>Toutes les<input type="number" min="1" max="10080" step="1" required bind:value={frequency} disabled={saving} /></label>
+    <label class="enabled"><input type="checkbox" bind:checked={triggerEnabled} disabled={saving} /> Activer cet intervalle</label>
+    <label>Toutes les<input type="number" min={Math.max(1, Math.ceil((selected?.library || selected?.systemId ? 5 : 60) / unit))} max={Math.floor(10080 / unit)} step="1" required bind:value={frequency} disabled={saving} /></label>
     <label>Unité
       <select aria-label="Unité" bind:value={unit} disabled={saving}>
         <option value={1}>Minutes</option>
@@ -397,6 +435,7 @@
       </select>
     </label>
     <p>De {selected?.library || selected?.systemId ? '5 minutes' : '1 heure'} à 7 jours. Un déclencheur périodique par tâche.</p>
+    <p>Après enregistrement, la prochaine échéance part de maintenant. Un intervalle de 24 heures ne fixe pas une heure quotidienne.</p>
     {#if error}<p class="feedback error" role="alert">{error}</p>{/if}
     <div class="dialog-actions">
       <button type="button" disabled={saving} onclick={() => editor?.close()}>Annuler</button>
@@ -407,8 +446,8 @@
 
 <style>
   section { min-width: 0; color: var(--text-primary); }
-  .plans-section,.automation-section { margin-top:32px; border-top:1px solid var(--border-subtle); }
-  .plans-section > summary,.automation-section > summary { cursor:pointer; padding:20px 0; min-height:44px; font-size:18px; font-weight:600; }
+  .plans-section,.automation-section,.queue-section { margin-top:32px; border-top:1px solid var(--border-subtle); }
+  .plans-section > summary,.automation-section > summary,.queue-section > summary { cursor:pointer; padding:20px 0; min-height:44px; font-size:18px; font-weight:600; }
   .section-intro { margin:0; color:var(--text-secondary); line-height:1.6; }
   h2 { font-size: clamp(24px, 2.2vw, 32px); font-weight: 400; margin: 0; overflow-wrap: anywhere; }
   .list-header, .detail-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -428,6 +467,7 @@
   .primary:hover:not(:disabled) { background: var(--color-play); box-shadow: var(--shadow-sm); } .primary > span { font-size: 24px; line-height: 1; }
   .back { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; margin-bottom: 24px; color: var(--text-secondary); }
   .description { margin: 24px 0; font-size: 16px; color: var(--text-secondary); line-height: 1.6; }
+  .description + .refresh { margin-bottom:12px; }
   .reason { color: var(--text-secondary); line-height: 1.6; } .reason a { color: var(--accent-primary); text-decoration: underline; }
   .trigger-list { margin: 24px 0 32px; } .trigger-list h3 { margin: 0; padding: 18px 24px; font-size: 16px; border-bottom: 1px solid var(--border-subtle); }
   .trigger-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--border-subtle); }
@@ -442,6 +482,7 @@
   dialog::backdrop { background: rgb(0 0 0 / .65); } dialog form, label { display: grid; gap: 10px; }
   dialog form { gap: 20px; } dialog p { margin: 0; line-height: 1.5; color: var(--text-secondary); }
   input { min-width: 0; width: 100%; padding: 12px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+  .enabled { display:flex; align-items:center; gap:10px; } .enabled input { width:auto; }
   .dialog-actions { display: flex; justify-content: flex-end; gap: 12px; }
   @media (max-width: 640px) {
     .list-header { flex-wrap: wrap; } .task-link { padding: 16px 12px; gap: 12px; } .task-row { padding-right: 8px; }

@@ -31,7 +31,7 @@
   async function load(target: string) {
     loading = true; error = ''; notice = '';
     try {
-      if (target === '#general-section') {
+      if (['#general-section', '#trickplay-section'].includes(target)) {
         const data = await adminRequest<{
           serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean;
           trickplayEnabled?: boolean; trickplayQuality?: number; trickplayWidth?: number;
@@ -58,16 +58,18 @@
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Chargement impossible.'; }
     finally { loading = false; }
   }
-  $effect(() => { if (['#general-section', '#network-section'].includes(section)) void load(section); });
+  $effect(() => { if (['#general-section', '#trickplay-section', '#network-section'].includes(section)) void load(section); });
   async function save(event: SubmitEvent) {
     event.preventDefault(); if (saving) return; saving = true; error = ''; notice = '';
     try {
       await adminRequest('/api/v1/admin/settings', {
         method: 'PUT',
-        body: JSON.stringify({
-          serverName: name, welcomeMessage: welcome, ssoButtonLabel: ssoLabel, blockSsoLocalAccounts,
+        body: JSON.stringify(section === '#trickplay-section' ? {
+          serverName: name, welcomeMessage: welcome,
           trickplayEnabled, trickplayQuality, trickplayWidth, trickplayIntervalSeconds,
-          trickplayAutoGenerate, trickplayMaxCacheMb,
+          trickplayAutoGenerate, trickplayMaxCacheMb
+        } : {
+          serverName: name, welcomeMessage: welcome, ssoButtonLabel: ssoLabel, blockSsoLocalAccounts,
           minResumePct, maxResumePct, minResumeDurationSeconds,
           preferredMetadataLanguage: metadataLanguage, metadataCountryCode: metadataCountry,
           activityLogRetentionDays,
@@ -108,17 +110,7 @@
     <label>Message d’accueil<textarea bind:value={welcome} maxlength="500" rows="3"></textarea></label>
     <label>Texte du bouton de connexion SSO<input bind:value={ssoLabel} required maxlength="80" placeholder="Se connecter avec Authentik" /></label>
     <label class="policy-toggle"><input type="checkbox" bind:checked={blockSsoLocalAccounts} />Empêcher les utilisateurs SSO de créer des identifiants locaux</label>
-    <fieldset class="trickplay-fieldset">
-      <legend>Miniatures Trickplay</legend>
-      <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayEnabled} />Activer le système de miniatures Trickplay</label>
-      <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayAutoGenerate} />Génération automatique pendant l'analyse des bibliothèques</label>
-      <div class="trickplay-grid">
-        <label>Qualité JPEG (1–31)<input type="number" min="1" max="31" step="1" required bind:value={trickplayQuality} /></label>
-        <label>Largeur vignettes (px)<input type="number" min="160" max="1920" step="1" required bind:value={trickplayWidth} /></label>
-        <label>Intervalle (secondes)<input type="number" min="1" max="60" step="1" required bind:value={trickplayIntervalSeconds} /></label>
-        <label>Quota cache (Mo)<input type="number" min="128" max="1048576" step="128" required bind:value={trickplayMaxCacheMb} /></label>
-      </div>
-    </fieldset>
+
     <fieldset class="trickplay-fieldset">
       <legend>Reprise de lecture</legend>
       <p>Les nouvelles progressions sont enregistrées selon ces seuils pour tous les appareils. Avant le seuil de reprise ou sous la durée minimale, la lecture repart du début. Le seuil « vu » est prioritaire. Les progressions existantes sont conservées lors de l’enregistrement des paramètres.</p>
@@ -155,6 +147,25 @@
   </fieldset></form>
   <PlaylistPolicy />
 </section>
+{:else if section === '#trickplay-section'}
+<section id="trickplay-section" aria-labelledby="trickplay-heading">
+  <h2 id="trickplay-heading">Miniatures Trickplay</h2>
+  <p>Réglez les aperçus affichés lorsque vous parcourez la barre de lecture. Les miniatures sont générées sur le Media Node propriétaire du média.</p>
+  <form onsubmit={save}><fieldset disabled={loading || saving}>
+    <fieldset class="trickplay-fieldset">
+      <legend>Miniatures Trickplay</legend>
+      <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayEnabled} />Activer le système de miniatures Trickplay</label>
+      <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayAutoGenerate} />Génération automatique pendant l'analyse des bibliothèques</label>
+      <div class="trickplay-grid">
+        <label>Qualité JPEG (1–31)<input type="number" min="1" max="31" step="1" required bind:value={trickplayQuality} /></label>
+        <label>Largeur vignettes (px)<input type="number" min="160" max="1920" step="1" required bind:value={trickplayWidth} /></label>
+        <label>Intervalle (secondes)<input type="number" min="1" max="60" step="1" required bind:value={trickplayIntervalSeconds} /></label>
+        <label>Quota cache (Mo)<input type="number" min="128" max="1048576" step="128" required bind:value={trickplayMaxCacheMb} /></label>
+      </div>
+    </fieldset>
+    <button type="submit">{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
+  </fieldset></form>
+</section>
 {:else if section === '#network-section'}
 <section id="network-section" aria-labelledby="network-heading"><h2 id="network-heading">Réseau</h2>
   {#if network}<dl><div><dt>Adresse publique</dt><dd>{network.publicUrl}</dd></div><div><dt>Interface Web</dt><dd>{network.webPath}</dd></div><div><dt>API</dt><dd>{network.apiPath}</dd></div><div><dt>Cookies de session sécurisés (HTTPS)</dt><dd>{network.secureCookies ? 'Activés' : 'Désactivés — HTTP local'}</dd></div></dl>{/if}
@@ -162,7 +173,7 @@
   <p>Les adresses des Media Nodes se gèrent dans Nœuds de stockage.</p></details>
 </section>
 {/if}
-{#if ['#general-section','#network-section'].includes(section)}
+{#if ['#general-section','#trickplay-section','#network-section'].includes(section)}
   {#if loading}<p role="status">Chargement…</p>{/if}{#if error}<p role="alert">{error}</p><button disabled={loading} onclick={() => void load(section)}>Réessayer</button>{/if}{#if notice}<p role="status">{notice}</p>{/if}
 {/if}
 <style>

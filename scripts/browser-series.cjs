@@ -195,9 +195,9 @@ fs.mkdirSync(out, {recursive: true});
     report.results.decodedVideoFrames=await page.evaluate(()=>document.querySelector('video').getVideoPlaybackQuality().totalVideoFrames);
     report.results.episode1Playback = true;
     report.results.episodeLaunchMs = Date.now() - launchStarted;
-    const chapters=page.getByRole('combobox',{name:'Chapitres vidéo'});
-    await chapters.waitFor();
-    await chapters.selectOption('1');
+    assert.equal(await page.getByRole('combobox',{name:'Chapitres vidéo'}).count(),0);
+    assert.equal(await page.locator('.chapter-tick').count(),2);
+    await page.getByRole('button',{name:'Chapitre suivant',exact:true}).click();
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>=1);
     report.results.realChapters=true;
 

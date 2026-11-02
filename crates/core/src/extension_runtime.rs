@@ -173,6 +173,15 @@ pub fn execute_host_http(
     state: &mut HostState,
     req: HostHttpRequest,
 ) -> Result<HostHttpResponse, HostHttpError> {
+    #[cfg(test)]
+    if let Some(body) = TEST_HTTP_BODY.with(|v| v.borrow_mut().take()) {
+        return Ok(HostHttpResponse {
+            status: 200,
+            headers: BTreeMap::new(),
+            body,
+        });
+    }
+
     if state.retry_after_seconds.is_some() {
         return Err(HostHttpError {
             code: "provider_rate_limited".into(),
@@ -478,12 +487,10 @@ fn execute_inner(
 
     let mut store = Store::new(&engine, host_state);
     store.limiter(|state| &mut state.limits);
-    let fuel = if invocation.input.operation == "intro.detect" {
-        200_000_000
-    } else {
-        2_000_000
-    };
-    store.set_fuel(fuel).map_err(|_| "runtime_error")?;
+    // JSON byte arrays cross the broker before the guest parses provider data.
+    // Ordinary populated responses exceed two million fuel units. Metadata and
+    // fingerprinting share this finite ceiling; memory and wall-clock caps remain.
+    store.set_fuel(200_000_000).map_err(|_| "runtime_error")?;
 
     let mut linker = Linker::new(&engine);
     let _ = linker.func_wrap(
@@ -644,8 +651,35 @@ pub fn write_frame(
 }
 
 #[cfg(test)]
+thread_local! {static TEST_HTTP_BODY: std::cell::RefCell<Option<Vec<u8>>> = const { std::cell::RefCell::new(None) };}
+
+#[cfg(test)]
 mod storage_frames {
     use super::*;
+    #[test]
+    fn metadata_guest_handles_normal_sized_search_response() {
+        let package: media_extension_sdk::Package =
+            serde_json::from_str(include_str!("../embedded_plugins/tmdb-0.1.1.package.json"))
+                .unwrap();
+        let items: Vec<_>=(1..=20).map(|id|serde_json::json!({"id":id,"title":format!("Synthetic film {id}"),"overview":"Synthetic plot. ".repeat(80),"release_date":"2024-01-01","poster_path":"/synthetic.jpg"})).collect();
+        TEST_HTTP_BODY.with(|v| {
+            *v.borrow_mut() =
+                Some(serde_json::to_vec(&serde_json::json!({"results":items})).unwrap())
+        });
+        let mut invocation = Invocation::new(
+            package.wasm,
+            ExtensionRequest {
+                api_version: 1,
+                operation: "metadata.search".into(),
+                input: serde_json::json!({"title":"Synthetic","mediaType":"movie","config":{"api_key":"synthetic"}}),
+            },
+        );
+        invocation.allowed_hosts = package.manifest.http_hosts;
+        let response =
+            execute(invocation).expect("ordinary metadata must fit the bounded execution budget");
+        assert_eq!(response.result.as_array().unwrap().len(), 20);
+    }
+
     #[test]
     fn provider_cooldown_handles_delta_http_dates_and_bounds() {
         let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);

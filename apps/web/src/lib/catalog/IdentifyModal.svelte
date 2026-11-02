@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { providerErrorText } from './provider-errors';
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import { session } from '../../lib/auth/session';
@@ -90,7 +91,7 @@
       const failures = (data.errors ?? []) as { providerName?: string; provider: string; error: string }[];
       if (results.length === 0 && failures.length > 0) {
         error = failures
-          .map((f) => `${f.providerName ?? f.provider} : ${f.error}`)
+          .map((f) => `${f.providerName ?? f.provider} : ${providerErrorText(f.error)}`)
           .join(' · ');
       }
     } catch (cause) {

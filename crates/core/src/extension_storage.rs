@@ -117,6 +117,45 @@ async fn clean_known(path: &Path) -> io::Result<()> {
     tokio::fs::remove_dir(path).await
 }
 
+/// Preserve the signed previous package before a stateless version switch.
+pub async fn backup_package(store: &IdentityStore, package: &Package) -> io::Result<()> {
+    root(store).await?;
+    let mut path = store.plugins_path().to_path_buf();
+    for component in [".revisions", package.manifest.id.as_str()] {
+        path.push(component);
+        tokio::fs::create_dir_all(&path).await?;
+        if !real_directory(&tokio::fs::symlink_metadata(&path).await?) {
+            return Err(io::Error::other("invalid revision directory"));
+        }
+    }
+    path.push(format!(
+        "{}-{}.package.json",
+        package.manifest.version, package.sha256
+    ));
+    let bytes = serde_json::to_vec(package).map_err(io::Error::other)?;
+    use tokio::io::AsyncWriteExt;
+    match tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .await
+    {
+        Ok(mut file) => {
+            file.write_all(&bytes).await?;
+            file.sync_all().await?;
+            Ok(())
+        }
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            if read(store.plugins_path(), &path, 400_000).await? == bytes {
+                Ok(())
+            } else {
+                Err(io::Error::other("revision package mismatch"))
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
 pub async fn persist(store: &IdentityStore, package: &Package) -> io::Result<()> {
     persist_internal(store, package, false).await
 }

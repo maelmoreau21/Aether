@@ -305,6 +305,11 @@ async fn local_posters_refresh_preserve_media_and_enforce_library_permissions() 
         .save(&poster)
         .unwrap();
     let changed = tokio::fs::read(&poster).await.unwrap();
+    // A sidecar replaced by Jellyfin is usable before any explicit library rescan.
+    let fresh = request(&app, "GET", &image_url, &cookie, None, Value::Null, None).await;
+    assert_eq!(fresh.0, StatusCode::OK);
+    assert_eq!(fresh.2, changed);
+
     assert_eq!(scan(&app, &library, &cookie, csrf).await["probed"], 0);
     let (_, updated, _, _) =
         request(&app, "GET", &detail_url, &cookie, None, Value::Null, None).await;

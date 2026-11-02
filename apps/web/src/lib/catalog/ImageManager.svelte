@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { providerErrorText } from './provider-errors';
   import { preferences } from '../preferences';
   import Icon from '../ui/Icon.svelte';
   import { onMount } from 'svelte';
@@ -274,6 +275,9 @@
       const data = await response.json();
       candidates = data.images ?? [];
       providersList = data.providers ?? [];
+      if (!candidates.length && data.errors?.length) {
+        searchError = data.errors.map((failure: {provider: string; providerName?: string; error?: string; status: number}) => `${failure.providerName ?? failure.provider} : ${failure.error ? providerErrorText(failure.error) : `HTTP ${failure.status}`}`).join(' · ');
+      }
     } catch (cause) {
       searchError = cause instanceof Error ? cause.message : 'Erreur lors de la recherche.';
     } finally {

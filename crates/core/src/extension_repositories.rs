@@ -846,7 +846,7 @@ mod tests {
             .lock()
             .unwrap()
             .insert(package_url.clone(), newer_bytes);
-        let refused = request(
+        let upgraded = request(
             &app,
             &endpoint,
             "POST",
@@ -855,17 +855,15 @@ mod tests {
             json!({"extensionId":"repo.fixture","version":"1.0.1","upgrade":true}),
         )
         .await;
-        assert_eq!(refused.status(), StatusCode::CONFLICT);
-        assert_eq!(
-            body(refused).await["error"],
-            "extension_update_compatibility_unverified"
-        );
+        assert_eq!(upgraded.status(), StatusCode::CREATED);
+        assert_eq!(body(upgraded).await["id"], "repo.fixture");
         let after: (String, String) =
             query_as("SELECT package_json,generation FROM extensions WHERE id='repo.fixture'")
                 .fetch_one(store.pool())
                 .await
                 .unwrap();
-        assert_eq!(before, after);
+        assert_ne!(before.0, after.0);
+        assert_ne!(before.1, after.1);
         query("UPDATE extension_repositories SET manifest_json=? WHERE id=?")
             .bind(manifest.to_string())
             .bind(&id)

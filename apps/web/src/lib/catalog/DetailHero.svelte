@@ -10,11 +10,12 @@
 
   let { work, duration, children }: { work: Work; duration?: number; children: Snippet } = $props();
   const artwork = $derived(selectArtwork(work, $session));
-  const backdrop = $derived(imagePreviewUrl(artwork.backdrop, 1280));
+  const previewBackdrop = $derived(imagePreviewUrl(artwork.backdrop, 1280));
+  const backdrop = $derived([previewBackdrop, artwork.backdrop ?? ''].find(url => url && !failedBackdrops.includes(url)) ?? '');
   const logo = $derived(imagePreviewUrl(artwork.logo, 640));
-  let failedBackdrop = $state('');
+  let failedBackdrops = $state<string[]>([]);
   let failedLogo = $state('');
-  const hasBackdrop = $derived(Boolean(backdrop && backdrop !== failedBackdrop));
+  const hasBackdrop = $derived(Boolean(backdrop));
   const meaningful = (value?: string | null) => Boolean(value?.trim() && !['Média local indexé', 'Média local'].includes(value.trim()));
   const displayTitle = $derived(localizedTitle(work, $locale));
   const displayPlot = $derived(localizedPlot(work, $locale));
@@ -39,7 +40,7 @@
 <section class="detail-hero" class:has-backdrop={hasBackdrop} aria-label={`Présentation de ${displayTitle}`}>
   <div class="detail-backdrop-clip" class:has-backdrop={hasBackdrop}>
     {#if hasBackdrop}
-      <img class="detail-backdrop" src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" onerror={() => failedBackdrop = backdrop} />
+      <img class="detail-backdrop" src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
     {/if}
   </div>
 

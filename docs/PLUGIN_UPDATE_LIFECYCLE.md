@@ -1,14 +1,19 @@
 # Cycle de mise à jour des extensions — contrat à réaliser
 
-État au 27 octobre 2026 : les routes `POST /api/v1/admin/extensions/{id}/upgrade`
-et `POST /api/v1/admin/extensions` avec `upgrade=true` refusent actuellement
-toute mise à jour. Elles vérifient la signature, l'identifiant, l'éditeur, sa
-clé et une version strictement supérieure, puis renvoient
-`extension_update_compatibility_unverified` sans modifier la version installée.
-Le format privé n'est pas déclaré et les anciennes écritures ne sont pas encore
-clôturées atomiquement ; il serait donc dangereux de supposer la compatibilité.
-Le consentement aux droits ajoutés, la validation des paramètres, la bascule
-et le retour arrière restent à réaliser et à éprouver avant leur activation.
+État au 2 novembre 2026 : mise à jour en place disponible pour les fournisseurs
+sans stockage privé. Les deux modules doivent importer uniquement le broker HTTP
+(ou aucun import), demander uniquement des capacités de métadonnées/images et
+ne posséder aucune donnée KV/objet privée. Signature, éditeur, clé, version et
+absence de nouveau droit/domaine sont vérifiés. Les champs facultatifs ajoutés
+sont compatibles ; les changements de types restent refusés.
+
+L'ancien paquet signé est conservé dans `plugins/.revisions/<id>/` avant toute
+mutation. La bascule du paquet et de sa génération est transactionnelle avec
+comparaison de la version chargée ; paramètres, activation et bibliothèques sont
+conservés. Les résultats des anciens workers sont rejetés par leur génération.
+La base reste la source de vérité et le cache disque est resynchronisable.
+Les extensions avec données privées restent refusées : les exigences ci-dessous
+concernent leur future migration et le retour arrière automatisé.
 
 ## Identité et compatibilité
 

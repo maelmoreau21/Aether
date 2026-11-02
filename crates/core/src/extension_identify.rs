@@ -54,7 +54,7 @@ pub(super) async fn search(
     let rows: Vec<(String, String, String)> = query_as(
         "SELECT e.id, e.package_json, e.generation FROM extensions e \
          JOIN extension_publishers p ON p.id = e.publisher_id \
-         WHERE e.enabled = 1 AND p.active = 1 ORDER BY e.id LIMIT 32",
+         WHERE e.enabled = 1 AND p.active = 1 ORDER BY CASE e.id WHEN 'tmdb' THEN 0 WHEN 'imdb' THEN 1 WHEN 'omdb' THEN 2 ELSE 3 END,e.id LIMIT 32",
     )
     .fetch_all(auth.store.pool())
     .await

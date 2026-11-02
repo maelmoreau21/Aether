@@ -1,3 +1,25 @@
+## 2 novembre 2026 — Diagnostic réel NAS et corrections métadonnées/images
+
+- SSH NAS en lecture seule : Core 0.2.0-beta.21, PostgreSQL, quatre plugins 0.1.0.
+  Le volume `aether_data` correspond à `/volume2/@docker/volumes/aether_data/_data` ;
+  aucun réglage, secret, conteneur ou média du NAS modifié.
+- Piège Wasm reproduit avec le module déployé et une vraie réponse TMDb : 2M fuel
+  échoue, 50M renvoie 12 résultats. Plafond fini 200M, erreurs explicites, TMDb
+  prioritaire ; détails TMDb réduits aux crédits/IDs, images dans l'opération dédiée.
+- Affiche réellement changée après scan : lecture locale revalidée via Node,
+  métadonnées rafraîchies, fichier invalide toujours refusé. Bandeau : repli original.
+- Fournisseurs sans données privées : mise à jour transactionnelle et génération
+  remplacée, paramètres/droits conservés, ancien paquet dans `plugins/.revisions`.
+  Les extensions avec stockage privé restent bloquées sans migration.
+- Publication develop : paquets signés, incrément numérique, catalogue develop et
+  releases bêta après CI. Nécessite le secret de signature existant ; aucune
+  publication déclenchée ici. Voir README Aether-Plugins.
+- Vérifications ciblées : affiche remplacée/fichier invalide, vraie exécution du
+  guest avec réponse réaliste et upgrade catalogue passent ; Svelte 0/0,
+  Actionlint et planification des versions passent. Aucun rerun global.
+- Limite : sources locales ; NAS pas encore redéployé. Rapport
+  `docs/NAS_METADATA_FIX_2026_11_02.md`.
+
 ## 2 novembre 2026 — Correction des échecs GitHub Actions FFmpeg
 
 - Diagnostic du run `41446141236` sur `8f33738` : partitions Rust et navigateur

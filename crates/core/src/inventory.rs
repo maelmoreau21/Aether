@@ -4697,7 +4697,7 @@ pub async fn image(
         }
         return crate::nodes::relay_from_remote_node(store, &rec, &pq, request).await;
     }
-    let grant = ReadGrant {
+    let mut grant = ReadGrant {
         target: ReadTarget::Image {
             id: ImageId::from(image_id),
             expected_size: row.get::<i64, _>("size") as u64,
@@ -4714,6 +4714,37 @@ pub async fn image(
         Ok(res) => {
             let (parts, body) = res.into_parts();
             Response::from_parts(parts, Body::new(body))
+        }
+        Err(NodeErrorCode::ImageChangedRescanRequired) => {
+            // Sidecars may be replaced by Jellyfin between scans. Refresh only
+            // this already-authorized image, with Node confinement/decoding limits.
+            let refreshed = async move {
+                let opened = media_node::OpenedFile::open_in_root(
+                    std::path::Path::new(&grant.root_snapshot),
+                    std::path::Path::new(&grant.relative_path),
+                ).await.ok()?;
+                let image = media_node::images::validate_opened(&opened).await.ok()?;
+                query("UPDATE inventory_images SET size=?,modified_ns=?,mime=? WHERE id=? AND root_snapshot=? AND relative_path=? AND available=1")
+                    .bind(image.size_bytes as i64).bind(&image.modified_ns).bind(image.mime)
+                    .bind(image_id).bind(&grant.root_snapshot).bind(&grant.relative_path)
+                    .execute(&store.pool).await.ok()?;
+                grant.target = ReadTarget::Image {
+                    id: ImageId::from(image_id), expected_size: image.size_bytes,
+                    expected_modified_ns: image.modified_ns,
+                };
+                grant.mime = image.mime.to_owned();
+                crate::node::LocalNode.serve_grant(&grant, &request).await.ok()
+            }.await;
+            match refreshed {
+                Some(res) => {
+                    let (parts, body) = res.into_parts();
+                    Response::from_parts(parts, Body::new(body))
+                }
+                None => crate::error(
+                    StatusCode::NOT_FOUND,
+                    NodeErrorCode::ImageChangedRescanRequired.as_str(),
+                ),
+            }
         }
         Err(code @ NodeErrorCode::ImageStreamError) => {
             crate::error(StatusCode::INTERNAL_SERVER_ERROR, code.as_str())

@@ -404,7 +404,7 @@ pub(super) async fn search_candidates(
                     }));
                 }
             }
-            Ok(Err((status, _))) => errors.push(json!({"provider":id,"status":status.as_u16()})),
+            Ok(Err((status, body))) => errors.push(json!({"provider":id,"providerName":package.manifest.name,"status":status.as_u16(),"error":body.0["pluginError"].as_str().or_else(||body.0["error"].as_str()).unwrap_or("provider_error")})),
             Err(_) => errors.push(json!({"provider":id,"status":408})),
         }
     }
@@ -513,7 +513,7 @@ pub(super) async fn collect(
                     }
                 }
             }
-            Ok(Err((status, _))) => errors.push(json!({"provider":id,"status":status.as_u16()})),
+            Ok(Err((status, body))) => errors.push(json!({"provider":id,"providerName":package.manifest.name,"status":status.as_u16(),"error":body.0["pluginError"].as_str().or_else(||body.0["error"].as_str()).unwrap_or("provider_error")})),
             Err(_) => {
                 partial = true;
                 errors.push(json!({"provider":id,"status":408}));

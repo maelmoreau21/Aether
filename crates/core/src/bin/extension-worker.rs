@@ -14,6 +14,12 @@ fn main() {
                 &serde_json::json!({"kind":"finished","response":response}),
             );
         }
-        Err(_) => std::process::exit(1),
+        Err(code) => {
+            let _ = write_frame(
+                &mut std::io::stdout().lock(),
+                &serde_json::json!({"kind":"failed","error":code}),
+            );
+            std::process::exit(1);
+        }
     }
 }

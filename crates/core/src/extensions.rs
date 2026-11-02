@@ -632,7 +632,7 @@ async fn upgrade_with_key(
     package: Package,
     public_key: String,
 ) -> Result<(StatusCode, Json<Value>), Error> {
-    admin(&auth, &headers, true).await?;
+    let actor = admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
     if package.manifest.id != id {
         return Err(err(StatusCode::BAD_REQUEST, "extension_id_mismatch"));
@@ -689,20 +689,97 @@ async fn upgrade_with_key(
             "extension_update_requires_authorization",
         ));
     }
-    if package.manifest.config_schema != installed.manifest.config_schema {
+    let stateless = |p: &Package| -> bool {
+        if p.manifest.permissions.iter().any(|v| {
+            !matches!(
+                v.as_str(),
+                "metadata.read" | "metadata.write" | "images" | "providers"
+            )
+        }) {
+            return false;
+        }
+        let Ok(bytes) = STANDARD.decode(&p.wasm) else {
+            return false;
+        };
+        let engine = wasmi::Engine::default();
+        let Ok(module) = wasmi::Module::new(&engine, &bytes) else {
+            return false;
+        };
+        module
+            .imports()
+            .all(|i| i.module() == "aether" && i.name() == "aether_host_http")
+    };
+    let private_rows: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM extension_data WHERE extension_id=?) + (SELECT COUNT(*) FROM extension_objects WHERE extension_id=?)")
+        .bind(&id).bind(&id).fetch_one(auth.store.pool()).await.map_err(db)?;
+    if !stateless(&installed) || !stateless(&package) || private_rows != 0 {
+        if package.manifest.config_schema != installed.manifest.config_schema {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "extension_settings_compatibility_unverified",
+            ));
+        }
+        return Err(err(
+            StatusCode::CONFLICT,
+            "extension_update_compatibility_unverified",
+        ));
+    }
+    // Optional additive fields and presentation changes preserve saved values.
+    // Incompatible value types or newly required values still require migration.
+    let old = installed
+        .manifest
+        .config_schema
+        .as_deref()
+        .unwrap_or_default();
+    let new = package
+        .manifest
+        .config_schema
+        .as_deref()
+        .unwrap_or_default();
+    let field_kind = |kind: &str| match kind {
+        "boolean" => 0,
+        "number" => 1,
+        _ => 2,
+    };
+    if new
+        .iter()
+        .any(|f| match old.iter().find(|o| o.key == f.key) {
+            Some(o) => {
+                field_kind(&o.field_type) != field_kind(&f.field_type)
+                    || (f.required && !o.required && f.default_value.is_none())
+            }
+            None => f.required && f.default_value.is_none(),
+        })
+    {
         return Err(err(
             StatusCode::CONFLICT,
             "extension_settings_compatibility_unverified",
         ));
     }
-
-    // Existing packages do not declare a private-data format, and in-flight
-    // writes are not yet fenced atomically with the version switch. Do not
-    // mutate the installed package until both guarantees can be established.
-    Err(err(
-        StatusCode::CONFLICT,
-        "extension_update_compatibility_unverified",
-    ))
+    crate::extension_storage::backup_package(&auth.store, &installed)
+        .await
+        .map_err(storage_error)?;
+    let bytes = serde_json::to_string(&package)
+        .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_package"))?;
+    let mut conn = auth.store.pool().acquire().await.map_err(db)?;
+    let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
+    let changed =
+        query("UPDATE extensions SET package_json=?,generation=? WHERE id=? AND package_json=?")
+            .bind(bytes)
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(&id)
+            .bind(existing_package)
+            .execute(&mut *tx)
+            .await
+            .map_err(db)?;
+    if changed.rows_affected() != 1 {
+        return Err(err(StatusCode::CONFLICT, "extension_changed"));
+    }
+    audit(&mut tx, &actor.user.id, &id, "package.upgraded").await?;
+    tx.commit().await.map_err(db)?;
+    if let Err(error) = crate::extension_storage::persist_upgrade(&auth.store, &package).await {
+        eprintln!("Plugin '{id}' cache synchronization pending: {error}");
+    }
+    Ok((StatusCode::CREATED, Json(json!({"id":id}))))
 }
 
 // Validate the same bounded module envelope used by the worker before any
@@ -849,6 +926,15 @@ pub async fn install_internal_with_key(
 }
 
 pub async fn bootstrap_essential_plugins(store: &crate::identity::IdentityStore) {
+    // The seeded official catalogue follows the Core's channel once. An explicit
+    // custom repository or a later administrator override is preserved.
+    if media_contracts::version::current_version_info().channel != "stable" {
+        let _ = query("UPDATE extension_repositories SET url=?,name='Aether Plugins (develop)' WHERE id='community-default' AND name='Aether Plugins' AND url=?")
+            .bind("https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/develop/repository/manifest.json")
+            .bind("https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/main/repository/manifest.json")
+            .execute(store.pool()).await;
+    }
+
     const PUB_KEY: &str = include_str!("../embedded_plugins/publisher-public.txt");
     for (id, bytes) in [
         (
@@ -1464,6 +1550,16 @@ async fn invoke_worker_context(
             let frame: Value = serde_json::from_slice(&bytes)
                 .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
             let kind = frame["kind"].as_str().unwrap_or("");
+            if kind == "failed" {
+                let code = match frame["error"].as_str() {
+                    Some("execution_trapped") => "extension_execution_trapped",
+                    Some("invalid_output_size") => "extension_output_too_large",
+                    Some("invalid_module" | "instantiation_failed") => "extension_module_invalid",
+                    _ => "extension_failed",
+                };
+                eprintln!("Extension '{id}' failed: {code}");
+                return Err(err(StatusCode::UNPROCESSABLE_ENTITY, code));
+            }
             if kind == "provider_retry" {
                 let delay = frame["retryAfterSeconds"]
                     .as_i64()

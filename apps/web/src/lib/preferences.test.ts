@@ -6,6 +6,26 @@ const account = (id: string) => ({ user: { id, login: id, role: 'user' as const 
 afterEach(() => { session.set(null); vi.unstubAllGlobals(); });
 
 describe('account preferences', () => {
+  it('reports a failed server save without claiming successful persistence', async () => {
+    session.set(account('failure'));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json({})).mockResolvedValueOnce(new Response(null, { status: 503 })));
+    await hydratePreferences();
+    expect(await savePreferences({ hidePlayedInLatest: true })).toBe(false);
+  });
+  it('loads and saves playback defaults with the current account CSRF token', async () => {
+    session.set(account('playback'));
+    const fetch = vi.fn().mockResolvedValueOnce(Response.json({ autoplayNextEpisode: true, skipBackSeconds: 5, skipForwardSeconds: 30 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetch);
+    expect(await hydratePreferences()).toEqual({ autoplayNextEpisode: true, skipBackSeconds: 5, skipForwardSeconds: 30 });
+    const saving = savePreferences({ autoplayNextEpisode: false, skipForwardSeconds: 60 });
+    expect(await saving).toBe(true);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    const request = fetch.mock.calls[1][1];
+    expect(JSON.parse(request.body)).toEqual({ autoplayNextEpisode: false, skipForwardSeconds: 60 });
+    expect(request.headers['x-csrf-token']).toBe('csrf-playback');
+    expect(preferences()).toEqual({ autoplayNextEpisode: false, skipBackSeconds: 5, skipForwardSeconds: 60 });
+  });
   it('shares slow startup hydration with playback and reuses loaded settings', async () => {
     session.set(account('a'));
     let respond!: (response: Response) => void;
@@ -76,10 +96,11 @@ describe('account preferences', () => {
     const fetch = vi.fn().mockResolvedValue(Response.json({}));
     vi.stubGlobal('fetch', fetch);
     await hydratePreferences();
-    savePreferences({ theme: 'light' });
+    const saving = savePreferences({ theme: 'light' });
     session.set(account('b'));
     await Promise.resolve(); await Promise.resolve();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(preferences()).toEqual({});
+    expect(await saving).toBe(false);
   });
 });

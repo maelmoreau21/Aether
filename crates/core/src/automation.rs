@@ -516,8 +516,12 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
             .await?;
             if exists > 0 {
                 if matches!(kind.as_str(), "manual" | "metadata.missing") && pending < 100000 {
-                    let restarted=query("UPDATE durable_tasks SET status='queued',failure_count=0,available_at=?,updated_at=?,finished_at=NULL,error='' WHERE status IN ('error','cancelled') AND lease_until IS NULL AND id IN (SELECT task_id FROM automation_task_links WHERE extension_id=? AND fingerprint=?)")
-                    .bind(now).bind(now).bind(&c.id).bind(&fingerprint).execute(&mut *tx).await?.rows_affected();
+                    let reanalyze_markers = kind == "manual"
+                        && marker_plugin
+                        && fingerprint_ready
+                        && event_payload["reanalyzeMarkers"] == true;
+                    let restarted=query("UPDATE durable_tasks SET status='queued',failure_count=0,available_at=?,updated_at=?,finished_at=NULL,error='' WHERE (status IN ('error','cancelled') OR (status='completed' AND ?=1)) AND lease_until IS NULL AND id IN (SELECT task_id FROM automation_task_links WHERE extension_id=? AND fingerprint=?)")
+                    .bind(now).bind(now).bind(i64::from(reanalyze_markers)).bind(&c.id).bind(&fingerprint).execute(&mut *tx).await?.rows_affected();
                     pending += restarted as i64;
                     admitted += restarted;
                 }

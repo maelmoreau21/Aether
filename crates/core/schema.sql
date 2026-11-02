@@ -299,6 +299,7 @@ CREATE TABLE extension_audit (
     action TEXT NOT NULL,
     created_at BIGINT NOT NULL
 );
+CREATE INDEX extension_audit_retention ON extension_audit(created_at,id);
 
 CREATE TABLE "libraries" (
  id TEXT PRIMARY KEY NOT NULL,
@@ -1211,6 +1212,7 @@ INSERT INTO system_task_schedules (id, name, description, category, interval_min
 ('update-extensions', 'Mettre à jour les plugins', 'Vérifie les dépôts distants et actualise les catalogues d''extensions.', 'Extensions', 1440, 1, strftime('%s','now') + 86400),
 ('optimize-database', 'Optimiser la base de données', 'Exécute l''optimisation du moteur de base de données et des journaux de transactions.', 'Maintenance', 1440, 1, strftime('%s','now') + 86400),
 ('clean-sessions', 'Nettoyer les sessions expirées', 'Supprime les sessions obsolètes et les flux d''authentification expirés.', 'Maintenance', 360, 1, strftime('%s','now') + 21600),
+('clean-activity-log', 'Nettoyer le journal des extensions', 'Supprime au plus 500 événements du journal des extensions antérieurs à la rétention configurée.', 'Maintenance', 1440, 1, strftime('%s','now') + 86400),
 ('clean-cache', 'Nettoyer le cache et fichiers temporaires', 'Supprime les fichiers temporaires périmés des dossiers appartenant à Aether (jamais les médias).', 'Maintenance', 1440, 1, strftime('%s','now') + 86400),
 ('clean-playlists', 'Nettoyer les listes et collections', 'Retire des listes de lecture personnelles les éléments dont les médias ont été supprimés.', 'Maintenance', 1440, 1, strftime('%s','now') + 86400);
 
@@ -1626,6 +1628,7 @@ CREATE TABLE extension_audit (
     action text NOT NULL,
     created_at bigint NOT NULL
 );
+CREATE INDEX extension_audit_retention ON extension_audit(created_at,id);
 
 
 
@@ -3926,6 +3929,7 @@ INSERT INTO system_task_schedules (id, name, description, category, interval_min
 ('update-extensions', 'Mettre à jour les plugins', 'Vérifie les dépôts distants et actualise les catalogues d''extensions.', 'Extensions', 1440, 1, (EXTRACT(EPOCH FROM NOW())::BIGINT) + 86400),
 ('optimize-database', 'Optimiser la base de données', 'Exécute l''optimisation du moteur de base de données et des journaux de transactions.', 'Maintenance', 1440, 1, (EXTRACT(EPOCH FROM NOW())::BIGINT) + 86400),
 ('clean-sessions', 'Nettoyer les sessions expirées', 'Supprime les sessions obsolètes et les flux d''authentification expirés.', 'Maintenance', 360, 1, (EXTRACT(EPOCH FROM NOW())::BIGINT) + 21600),
+('clean-activity-log', 'Nettoyer le journal des extensions', 'Supprime au plus 500 événements du journal des extensions antérieurs à la rétention configurée.', 'Maintenance', 1440, 1, (EXTRACT(EPOCH FROM NOW())::BIGINT) + 86400),
 ('clean-cache', 'Nettoyer le cache et fichiers temporaires', 'Supprime les fichiers temporaires périmés des dossiers appartenant à Aether (jamais les médias).', 'Maintenance', 1440, 1, (EXTRACT(EPOCH FROM NOW())::BIGINT) + 86400),
 ('clean-playlists', 'Nettoyer les listes et collections', 'Retire des listes de lecture personnelles les éléments dont les médias ont été supprimés.', 'Maintenance', 1440, 1, (EXTRACT(EPOCH FROM NOW())::BIGINT) + 86400);
 

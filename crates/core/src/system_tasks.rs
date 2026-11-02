@@ -235,6 +235,7 @@ fn default_owned_dirs(media_root: &std::path::Path) -> Vec<OwnedDir> {
 }
 
 pub async fn router(auth: AuthState, media_root: PathBuf) -> Result<Router, sqlx::Error> {
+    ensure_activity_cleanup(&auth.store).await?;
     let state = Arc::new(execution_state(auth, media_root));
 
     Ok(Router::new()
@@ -249,6 +250,20 @@ pub async fn router(auth: AuthState, media_root: PathBuf) -> Result<Router, sqlx
         )
         .layer(DefaultBodyLimit::max(4096))
         .with_state(state))
+}
+
+/// Also install the maintenance schedule on existing databases without replacing user settings.
+async fn ensure_activity_cleanup(
+    store: &crate::identity::IdentityStore,
+) -> Result<(), sqlx::Error> {
+    crate::database::query(
+        "CREATE INDEX IF NOT EXISTS extension_audit_retention ON extension_audit(created_at,id)",
+    )
+    .execute(store.pool())
+    .await?;
+    crate::database::query("INSERT INTO system_task_schedules(id,name,description,category,interval_minutes,enabled,next_due_at) VALUES('clean-activity-log','Nettoyer le journal des extensions','Supprime au plus 500 événements du journal des extensions antérieurs à la rétention configurée.','Maintenance',1440,1,?) ON CONFLICT(id) DO NOTHING")
+        .bind(now().saturating_add(86400)).execute(store.pool()).await?;
+    Ok(())
 }
 
 async fn authorize(
@@ -407,6 +422,7 @@ async fn execute_inner(
         "update-extensions" => task_update_extensions(state).await,
         "optimize-database" => task_optimize_database(state).await,
         "clean-sessions" => task_clean_sessions(state).await,
+        "clean-activity-log" => task_clean_activity_log(state, job).await,
         "clean-cache" => task_clean_cache(state).await,
         "clean-playlists" => task_clean_playlists(state).await,
         _ => Err(TaskFailure::new("config", id, "unknown system task")),
@@ -543,11 +559,8 @@ async fn task_optimize_database(state: &SystemTasksState) -> Result<TaskReport, 
 /// `clean-sessions`: Delete expired and revoked sessions and tokens
 async fn task_clean_sessions(state: &SystemTasksState) -> Result<TaskReport, TaskFailure> {
     let current_time = now();
-    let s_settings = crate::server_settings::load(&state.auth.store)
-        .await
-        .unwrap_or_default();
-    let retention_days = s_settings.activity_log_retention_days as i64;
-    let inactivity_threshold = current_time - (retention_days * 86400);
+    // Session expiry must follow authentication policy, never log retention.
+    let inactivity_threshold = current_time.saturating_sub(crate::auth::IDLE_SECONDS);
     let mut report = TaskReport::default();
     let mut sessions = 0;
     let mut flows = 0;
@@ -572,6 +585,45 @@ async fn task_clean_sessions(state: &SystemTasksState) -> Result<TaskReport, Tas
     }
     report.summary = format!("{sessions} session(s) and {flows} OIDC flow(s) removed");
     Ok(report)
+}
+
+/// One bounded, replayable deletion; current leases fence every persisted change.
+async fn task_clean_activity_log(
+    state: &SystemTasksState,
+    job: Option<&crate::task_engine::Job>,
+) -> Result<TaskReport, TaskFailure> {
+    let settings = crate::server_settings::load(&state.auth.store)
+        .await
+        .map_err(|_| {
+            TaskFailure::new(
+                "config",
+                "activityLogRetentionDays",
+                "server settings could not be loaded; cleanup refused",
+            )
+        })?;
+    if !(1..=3650).contains(&settings.activity_log_retention_days) {
+        return Err(TaskFailure::new(
+            "config",
+            "activityLogRetentionDays",
+            "invalid retention; cleanup refused",
+        ));
+    }
+    let current_time = now();
+    let cutoff =
+        current_time.saturating_sub(i64::from(settings.activity_log_retention_days) * 86400);
+    let task_id = job.map_or("", |j| j.id.as_str());
+    let attempt = job.map_or(0, |j| j.attempt);
+    let done = crate::database::query("DELETE FROM extension_audit WHERE id IN (SELECT id FROM extension_audit WHERE created_at<? ORDER BY created_at,id LIMIT 500) AND created_at<? AND (?='' OR EXISTS(SELECT 1 FROM durable_tasks WHERE id=? AND attempt=? AND status='running' AND lease_until>unixepoch()))")
+        .bind(cutoff).bind(cutoff).bind(task_id).bind(task_id).bind(attempt)
+        .execute(state.auth.store.pool()).await.map_err(|e| TaskFailure::database("extension_audit", e))?;
+    Ok(TaskReport {
+        summary: format!(
+            "{} extension audit event(s) removed; retention {} day(s), maximum 500 per run",
+            done.rows_affected(),
+            settings.activity_log_retention_days
+        ),
+        failures: Vec::new(),
+    })
 }
 
 /// `clean-cache`: orphan poster previews and stale temporary files in Aether-owned directories.
@@ -642,6 +694,7 @@ mod tests {
         let auth = AuthState::new(store, "http://localhost:3000".to_string())
             .await
             .unwrap();
+        ensure_activity_cleanup(&auth.store).await.unwrap();
         SystemTasksState {
             auth,
             media_root: temp.join("media"),
@@ -665,6 +718,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn settings_activity_retention_is_bounded_fenced_and_independent_of_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = state_in(temp.path(), Vec::new()).await;
+        let pool = state.auth.store.pool();
+        let current = now();
+        crate::database::query("UPDATE system_task_schedules SET enabled=0,interval_minutes=60 WHERE id='clean-activity-log'")
+            .execute(pool).await.unwrap();
+        ensure_activity_cleanup(&state.auth.store).await.unwrap();
+        let saved = schedule(&state, "clean-activity-log").await;
+        assert_eq!((saved.enabled, saved.interval_minutes), (0, 60));
+        crate::database::query("INSERT INTO server_settings(singleton,settings_json) VALUES(1,?)")
+            .bind(r#"{"serverName":"test","welcomeMessage":"","activityLogRetentionDays":1}"#)
+            .execute(pool)
+            .await
+            .unwrap();
+        crate::database::query("WITH RECURSIVE sequence(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM sequence WHERE n<501) INSERT INTO extension_audit(id,actor_id,extension_id,action,created_at) SELECT CAST(n AS TEXT),'admin','test','install',? FROM sequence")
+            .bind(current - 10 * 86400).execute(pool).await.unwrap();
+        crate::database::query("INSERT INTO extension_audit(id,actor_id,extension_id,action,created_at) VALUES('recent','admin','test','install',?)")
+            .bind(current - 3600).execute(pool).await.unwrap();
+        crate::database::query("INSERT INTO durable_tasks(id,owner,idempotency_key,node_id,category,target_id,status,attempt,created_at,updated_at,available_at,lease_until) VALUES('audit-cleanup','system','audit-cleanup','local','system','clean-activity-log','running',1,?,?,?,?)")
+            .bind(current).bind(current).bind(current).bind(current - 1).execute(pool).await.unwrap();
+        let job = crate::task_engine::get(&state.auth.store, "audit-cleanup")
+            .await
+            .unwrap()
+            .unwrap();
+        task_clean_activity_log(&state, Some(&job)).await.unwrap();
+        let count = || {
+            crate::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM extension_audit")
+                .fetch_one(pool)
+        };
+        assert_eq!(count().await.unwrap(), 502, "expired lease must not delete");
+        crate::database::query("UPDATE durable_tasks SET lease_until=? WHERE id='audit-cleanup'")
+            .bind(current + 60)
+            .execute(pool)
+            .await
+            .unwrap();
+        task_clean_activity_log(&state, Some(&job)).await.unwrap();
+        assert_eq!(count().await.unwrap(), 2, "one pass removes at most 500");
+        task_clean_activity_log(&state, Some(&job)).await.unwrap();
+        assert_eq!(count().await.unwrap(), 1, "replay retains recent events");
+        crate::database::query("INSERT INTO users(id,role) VALUES('reader','user')")
+            .execute(pool)
+            .await
+            .unwrap();
+        for (id, idle_days) in [("valid", 2), ("idle-expired", 8)] {
+            crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,'reader',?,?,?)")
+                .bind(id).bind(current - 9 * 86400).bind(current - idle_days * 86400).bind(current + 86400).execute(pool).await.unwrap();
+        }
+        task_clean_sessions(&state).await.unwrap();
+        let remaining: String = crate::database::query_scalar("SELECT token_hash FROM sessions")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            remaining, "valid",
+            "one-day log retention must not revoke a two-day idle valid session"
+        );
+        crate::database::query("UPDATE server_settings SET settings_json='invalid'")
+            .execute(pool)
+            .await
+            .unwrap();
+        assert!(
+            task_clean_activity_log(&state, Some(&job)).await.is_err(),
+            "settings errors must fail closed"
+        );
+        assert_eq!(count().await.unwrap(), 1);
+    }
+
+    #[tokio::test]
     async fn test_system_tasks_seeded_and_claimable() {
         let temp = tempfile::tempdir().unwrap();
         let state = state_in(temp.path(), Vec::new()).await;
@@ -673,11 +795,12 @@ mod tests {
                 .fetch_all(&state.auth.store.pool)
                 .await
                 .unwrap();
-        assert_eq!(tasks.len(), 5);
+        assert_eq!(tasks.len(), 6);
         for id in [
             "update-extensions",
             "optimize-database",
             "clean-sessions",
+            "clean-activity-log",
             "clean-cache",
             "clean-playlists",
         ] {
@@ -735,6 +858,7 @@ mod tests {
         for id in [
             "optimize-database",
             "clean-sessions",
+            "clean-activity-log",
             "clean-cache",
             "clean-playlists",
         ] {

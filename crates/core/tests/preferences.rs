@@ -82,6 +82,16 @@ async fn preferences_are_account_owned_csrf_protected_bounded_and_persistent() {
         json!({"offsets":{"audio":31,"subtitle":0}}),
         json!({"subtitlePreference":{"enabled":true,"secret":"x"}}),
         json!({"audioLanguage":"x".repeat(8192)}),
+        json!({"skipBackSeconds":0}),
+        json!({"skipForwardSeconds":600}),
+        json!({"skipBackSeconds":1.5}),
+        json!({"skipForwardSeconds":"30"}),
+        json!({"autoplayNextEpisode":"true"}),
+        json!({"rememberAudioSelections":"yes"}),
+        json!({"rememberSubtitleSelections":1}),
+        json!({"playDefaultAudioTrack":[]}),
+        json!({"hidePlayedInLatest":"false"}),
+        json!({"audioTrack":{"mediaId":"media-1","trackId":"audio-2","language":"../bad"}}),
     ] {
         assert!(
             request(&app, "PUT", cookie, csrf, invalid)
@@ -90,7 +100,7 @@ async fn preferences_are_account_owned_csrf_protected_bounded_and_persistent() {
                 .is_client_error()
         );
     }
-    let wanted = json!({"theme":"dark","locale":"en","audioLanguage":"fr","subtitles":"forced","audioTrack":{"mediaId":"media-1","trackId":"audio-2"},"offsets":{"audio":0.5,"subtitle":-1.0},"subtitlePreference":{"enabled":true,"language":"fr","forced":true}});
+    let wanted = json!({"theme":"dark","locale":"en","audioLanguage":"fr","subtitles":"forced","audioTrack":{"mediaId":"media-1","trackId":"audio-2","language":"en"},"offsets":{"audio":0.5,"subtitle":-1.0},"subtitlePreference":{"enabled":true,"language":"fr","forced":true},"autoplayNextEpisode":true,"skipBackSeconds":5,"skipForwardSeconds":30,"rememberAudioSelections":false,"rememberSubtitleSelections":true,"playDefaultAudioTrack":true,"hidePlayedInLatest":true});
     assert_eq!(
         request(&app, "PUT", cookie, csrf, wanted.clone())
             .await
@@ -106,14 +116,23 @@ async fn preferences_are_account_owned_csrf_protected_bounded_and_persistent() {
         json!({})
     );
     assert_eq!(
-        request(&app, "PUT", cookie, csrf, json!({"theme":"light"}))
-            .await
-            .status(),
+        request(
+            &app,
+            "PUT",
+            cookie,
+            csrf,
+            json!({"theme":"light","autoplayNextEpisode":false})
+        )
+        .await
+        .status(),
         StatusCode::NO_CONTENT
     );
     let saved = body(request(&app, "GET", cookie, "", json!(null)).await).await;
     assert_eq!(saved["theme"], "light");
     assert_eq!(saved["audioLanguage"], "fr");
+    assert_eq!(saved["autoplayNextEpisode"], false);
+    assert_eq!(saved["skipBackSeconds"], 5);
+    assert_eq!(saved["skipForwardSeconds"], 30);
     let rotation = json!({"enabled":true,"enableMovies":true,"enableSeries":false,"rotationMode":"sequential","minHoursBetweenSwitches":24,"poolSize":3,"preferredLanguage":"fr-CA","fallbackLanguage":"en","includeUnknownLanguage":true,"allowAnyLanguageFallback":false});
     for invalid in [
         json!({"poolSize":0}),

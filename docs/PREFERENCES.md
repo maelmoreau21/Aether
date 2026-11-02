@@ -25,6 +25,70 @@ et le Core continuent de vérifier disponibilité et permissions de la ressource
 Les langues/valeurs non prises en charge sont refusées, pas transformées en
 commandes ni en chemins de disque.
 
+## Commandes de lecture (2 novembre 2026)
+
+### Nouveautés de l'accueil
+
+`hidePlayedInLatest` masque les œuvres explicitement marquées vues dans les
+requêtes `GET /api/v1/catalog?scope=latest`. Valeur absente : désactivé. L'accueil
+utilise ce périmètre et le tri `added-desc` ; les pages Films, Séries et Recherche
+restent complètes. Le Core lit la préférence du compte authentifié et applique
+le filtre SQL avant total, sélection des copies regroupées et pagination.
+Les séries ne sont pas calculées automatiquement « vues » à partir de tous leurs
+épisodes dans ce lot ; leur statut explicite reste la référence.
+
+Les pages filtrées ne réutilisent pas le cache Core basé uniquement sur les
+changements d'inventaire. Le cache navigateur invalide seulement les nouveautés
+après changement de progression ou sauvegarde réussie du réglage ; les autres
+pages sont conservées. La limite de page et le mode sans comptage restent actifs.
+
+`autoplayNextEpisode` (booléen, défaut `false`) conserve le choix d’enchaîner
+l’épisode suivant entre les séances et les appareils du compte. Le réglage est
+accessible dans Lecture et dans le lecteur lorsqu’un épisode suivant existe.
+L’enchaînement intervient à la fin du média, reste soumis au parcours autorisé
+de l’épisode suivant, et reste désactivé pour une séance SyncPlay.
+
+`skipBackSeconds` et `skipForwardSeconds` acceptent indépendamment 5, 10, 15,
+30 ou 60 secondes (défaut 10). Les boutons et les flèches gauche/droite du
+lecteur vidéo utilisent ces durées, bornées entre zéro et la durée du média.
+Les anciens comptes gardent les boutons de dix secondes ; les flèches, auparavant
+fixées à cinq secondes, suivent désormais la même préférence. Les données restent
+dans les préférences du compte, sans nouvelle clé globale du navigateur.
+
+Référence fonctionnelle consultée : `jellyfin-web/src/components/playbackSettings/`
+(`EnableNextEpisodeAutoPlay`, durées avant/arrière). Aucun code Jellyfin repris.
+
+## Mémorisation des pistes et accueil (2 novembre 2026)
+
+`rememberAudioSelections` et `rememberSubtitleSelections` sont des booléens,
+actifs par défaut. Désactivés, les anciennes sélections sont ignorées au prochain
+épisode ou à la prochaine ouverture et les nouveaux choix du lecteur ne sont pas
+enregistrés. Les choix manuels restent actifs pendant la séance, y compris après
+un changement de version. Désactiver la mémorisation ne supprime pas les anciennes
+valeurs : les réactiver permet de les retrouver.
+
+Les choix audio enregistrent `audioTrack` avec `mediaId`, `trackId` et une langue
+optionnelle `language`, validée comme `audioLanguage`. Un choix manuel ne change
+plus la langue configurée par le compte. Les anciennes données sans `language`
+restent acceptées. Le choix précis est restauré pour le même média ; ailleurs,
+sa langue est préférée si la mémorisation est active. Les sous-titres mémorisent
+la langue, les drapeaux forced/SDH et l’arrêt explicite dans `subtitlePreference`.
+Ce champ, auparavant sans raccord effectif dans le lecteur immersif, est désormais
+chargé et sauvegardé après sélection réussie.
+
+`playDefaultAudioTrack` est un booléen, inactif par défaut pour conserver la
+préférence française d’Aether. Activé, il choisit une piste concrète dont le
+descripteur déclare `disposition.default=1` avant de chercher la langue configurée.
+Un choix précis mémorisé pour le média ou un choix manuel de la séance reste
+prioritaire. Sans piste par défaut identifiable, la stratégie linguistique
+existante s’applique ; aucune capacité audio du navigateur n’est inventée.
+
+`hidePlayedInLatest`, booléen inactif par défaut, se règle dans Affichage → Accueil.
+L’enregistrement réussi invalide seulement le cache des nouveautés. Le filtrage
+réel côté catalogue est décrit dans le contrat de l’accueil. Ces quatre réglages
+s’inspirent de `UserConfiguration.cs` et `playbackSettings` Jellyfin ; aucune
+source Jellyfin n’a été modifiée ou copiée.
+
 ## Chargement et changements de compte
 
 Le layout vérifie la session, charge les préférences, applique thème/langue,

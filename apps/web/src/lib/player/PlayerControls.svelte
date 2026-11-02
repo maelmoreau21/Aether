@@ -120,6 +120,7 @@
 
 
 
+    skipBackSeconds = 10, skipForwardSeconds = 10,
     onWake
 
 
@@ -132,6 +133,7 @@
 
 
 
+    skipBackSeconds?: number; skipForwardSeconds?: number;
     state: PlaybackState;
 
 
@@ -2153,11 +2155,11 @@
 
 
 
-        aria-label="Reculer de 10 secondes"
+        aria-label={`Reculer de ${skipBackSeconds} secondes`}
 
 
 
-        title="Reculer de 10 secondes"
+        title={`Reculer de ${skipBackSeconds} secondes`}
 
 
 
@@ -2165,7 +2167,7 @@
 
 
 
-        onclick={() => onSeek(Math.max(0, playback.position - 10))}
+        onclick={() => onSeek(Math.max(0, playback.position - skipBackSeconds))}
 
 
 
@@ -2309,11 +2311,11 @@
 
 
 
-        aria-label="Avancer de 10 secondes"
+        aria-label={`Avancer de ${skipForwardSeconds} secondes`}
 
 
 
-        title="Avancer de 10 secondes"
+        title={`Avancer de ${skipForwardSeconds} secondes`}
 
 
 
@@ -2321,7 +2323,7 @@
 
 
 
-        onclick={() => onSeek(Math.min(playback.duration, playback.position + 10))}
+        onclick={() => onSeek(Math.min(playback.duration, playback.position + skipForwardSeconds))}
 
 
 

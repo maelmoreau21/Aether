@@ -14,6 +14,8 @@
   import { fetchServerConfig, type AppServerConfig } from '../config/brand';
   import { defaultArtworkRotationPolicy, setArtworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
   import { accessibleLibraries, loadLibraries } from './libraries';
+  import { playbackPreferences, trackPreferences, SKIP_SECONDS } from '../player/playback-preferences';
+  import { invalidateLatestCatalog } from './page-cache';
 
   let serverConfig = $state<AppServerConfig | null>(null);
 
@@ -40,6 +42,26 @@
   let autoSkipIntro = $state(preferences().autoSkipIntro === true);
   let autoSkipCredits = $state(preferences().autoSkipCredits === true);
   let offsetsEdited = false;
+  let playbackDefaults = $state(playbackPreferences(preferences()));
+  let playbackEdited = false;
+  let rememberAudioSelections = $state(trackPreferences(preferences()).rememberAudioSelections);
+  let rememberSubtitleSelections = $state(trackPreferences(preferences()).rememberSubtitleSelections);
+  let playDefaultAudioTrack = $state(trackPreferences(preferences()).playDefaultAudioTrack);
+  let selectionEdited = false;
+  let hidePlayedInLatest = $state(preferences().hidePlayedInLatest === true);
+  let latestEdited = false;
+  function saveTrackDefaults() {
+    selectionEdited = true;
+    void savePreferences({ rememberAudioSelections, rememberSubtitleSelections, playDefaultAudioTrack });
+  }
+  async function saveLatestPreference() {
+    latestEdited = true;
+    if (await savePreferences({ hidePlayedInLatest })) invalidateLatestCatalog();
+  }
+  function savePlaybackDefaults() {
+    playbackEdited = true;
+    savePreferences({ ...playbackDefaults });
+  }
   let artworkRotation = $state<ArtworkRotationPolicy>({ ...defaultArtworkRotationPolicy, ...preferences().artworkRotation });
   let artworkEdited = false;
 
@@ -67,6 +89,14 @@
     void fetchServerConfig().then(cfg => { if (!disposed) serverConfig = cfg; }).catch(() => {});
     void ensurePreferences().then(saved => {
       if (disposed || !saved) return;
+      if (!playbackEdited) playbackDefaults = playbackPreferences(saved);
+      if (!selectionEdited) {
+        const policy = trackPreferences(saved);
+        rememberAudioSelections = policy.rememberAudioSelections;
+        rememberSubtitleSelections = policy.rememberSubtitleSelections;
+        playDefaultAudioTrack = policy.playDefaultAudioTrack;
+      }
+      if (!latestEdited) hidePlayedInLatest = saved.hidePlayedInLatest === true;
       if (!offsetsEdited) {
         audioOffset = saved.offsets?.audio ?? 0;
         subtitleOffset = saved.offsets?.subtitle ?? 0;
@@ -173,6 +203,10 @@
       </section>
       </div>
             <div hidden={current !== 'display'}>
+        <section class="card" aria-labelledby="home-preferences-heading">
+          <h2 id="home-preferences-heading">Accueil</h2>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={hidePlayedInLatest} onchange={() => void saveLatestPreference()} /> Masquer les contenus vus dans les nouveautés</label>
+        </section>
         <form class="card offsets" onsubmit={saveArtworkRotation}>
           <h2>Rotation des affiches</h2>
           <p class="muted">La rotation utilise les affiches déjà présentes en local. Les images choisies manuellement restent prioritaires.</p>
@@ -246,12 +280,30 @@
       </div>
 
 
+        <section class="offsets" aria-label="Choix des pistes">
+          <h3>Choix des pistes</h3>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={playDefaultAudioTrack} onchange={saveTrackDefaults} /> Privilégier la piste audio par défaut du fichier</label>
+          <p class="muted">Si aucune piste par défaut n’est déclarée et sélectionnable, votre langue préférée reste utilisée.</p>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={rememberAudioSelections} onchange={saveTrackDefaults} /> Mémoriser mes choix audio</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={rememberSubtitleSelections} onchange={saveTrackDefaults} /> Mémoriser mes choix de sous-titres</label>
+          <p class="muted">Vos choix manuels restent prioritaires pendant la séance. Sans mémorisation, les nouvelles séances utilisent vos réglages audio et sous-titres ci-dessus. Aucun ancien choix n’est effacé.</p>
+        </section>
+
+        <section class="offsets" aria-label="Commandes de lecture">
+          <h3>Commandes de lecture</h3>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={playbackDefaults.autoplayNextEpisode} onchange={savePlaybackDefaults} /> Enchaîner automatiquement l’épisode suivant</label>
+          <p class="muted">S’applique aux épisodes disposant d’un suivant. Les séances synchronisées conservent leurs commandes communes.</p>
+          <label>Reculer de<select bind:value={playbackDefaults.skipBackSeconds} onchange={savePlaybackDefaults}>{#each SKIP_SECONDS as seconds (seconds)}<option value={seconds}>{seconds} secondes</option>{/each}</select></label>
+          <label>Avancer de<select bind:value={playbackDefaults.skipForwardSeconds} onchange={savePlaybackDefaults}>{#each SKIP_SECONDS as seconds (seconds)}<option value={seconds}>{seconds} secondes</option>{/each}</select></label>
+          <p class="muted">Les boutons du lecteur et les flèches gauche/droite utilisent ces durées.</p>
+        </section>
+
         <section class="offsets" aria-label="Sauts des génériques">
           <h3>Intros et génériques</h3>
-          <label><input type="checkbox" bind:checked={skipIntroEnabled} onchange={() => savePreferences({ skipIntroEnabled })} /> Proposer « Passer l'intro »</label>
-          <label><input type="checkbox" bind:checked={skipCreditsEnabled} onchange={() => savePreferences({ skipCreditsEnabled })} /> Proposer « Passer le générique »</label>
-          <label><input type="checkbox" bind:checked={autoSkipIntro} onchange={() => savePreferences({ autoSkipIntro })} /> Sauter automatiquement l'introduction</label>
-          <label><input type="checkbox" bind:checked={autoSkipCredits} onchange={() => savePreferences({ autoSkipCredits })} /> Sauter automatiquement le générique de fin</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={skipIntroEnabled} onchange={() => savePreferences({ skipIntroEnabled })} /> Proposer « Passer l'intro »</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={skipCreditsEnabled} onchange={() => savePreferences({ skipCreditsEnabled })} /> Proposer « Passer le générique »</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipIntro} onchange={() => savePreferences({ autoSkipIntro })} /> Sauter automatiquement l'introduction</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipCredits} onchange={() => savePreferences({ autoSkipCredits })} /> Sauter automatiquement le générique de fin</label>
         </section>
 
         <form class="offsets" onsubmit={saveOffsets}>
@@ -451,6 +503,8 @@
   .muted { color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
   .pref-fields, .offsets { display: grid; gap: 24px; margin-top: 24px; }
   label { display: grid; gap: 10px; font-size: 14px; font-weight: 500; }
+  .checkbox-row { display: flex; align-items: flex-start; gap: 10px; }
+  .checkbox-row input { flex: 0 0 auto; width: auto; margin-top: 2px; }
   label > span { display: flex; align-items: center; gap: 8px; }
   select, input:not([type="checkbox"]):not([type="range"]):not([type="color"]) {
     min-width: 0;

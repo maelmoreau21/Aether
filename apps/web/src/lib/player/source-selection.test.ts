@@ -29,6 +29,20 @@ describe('AV1/Opus source selection', () => {
     expect(['fra', 'fre', 'fr-FR', 'FR_fr'].map(audioLanguage)).toEqual(['fr', 'fr', 'fr', 'fr']);
     expect(['eng', 'en-GB'].map(audioLanguage)).toEqual(['en', 'en']);
   });
+  it('uses an explicitly marked default audio only when requested, with manual choices first', () => {
+    const withDefault: Media = { ...media, sources: media.sources.map((source, i) => i === 2
+      ? { ...source, tracks: [{ index: 2, codec_type: 'audio', disposition: { default: 1 } }] }
+      : source) };
+    expect(chooseSource(withDefault, undefined, 'fr')?.audioTrackId).toBe('internal-1');
+    expect(chooseSource(withDefault, undefined, 'fr', () => true, true)?.audioTrackId).toBe('internal-2');
+    expect(chooseSource(withDefault, 'internal-1', 'en', () => true, true)?.audioTrackId).toBe('internal-1');
+    expect(chooseSource(media, undefined, 'fr', () => true, true)?.audioTrackId).toBe('internal-1');
+  });
+  it('does not confuse another audio default flag in a full probe with the selected track', () => {
+    const tracks = [{ index: 1, codec_type: 'audio', disposition: { default: 0 } }, { index: 2, codec_type: 'audio', disposition: { default: 1 } }];
+    const withProbe = { ...media, sources: media.sources.map(source => ({ ...source, tracks })) };
+    expect(chooseSource(withProbe, undefined, 'fr', () => true, true)?.audioTrackId).toBe('internal-2');
+  });
   it('migrates a saved ambiguous original to the preferred indexed language', () => {
     expect(chooseSource(media, 'internal-default', 'fra')?.audioTrackId).toBe('internal-1');
     expect(chooseSource(media, 'internal-default', 'eng')?.audioTrackId).toBe('internal-2');

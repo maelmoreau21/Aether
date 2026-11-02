@@ -1,4 +1,4 @@
-# IntroSkipper — État et architecture au 31 octobre 2026
+# IntroSkipper — Architecture et limites de validation
 
 IntroSkipper est le composant de détection automatique des introductions et génériques de fin pour la plateforme Aether. Il combine l'analyse des chapitres de conteneurs (`.mkv`, `.mp4`), l'extraction acoustique Chromaprint sur les Media Nodes et un algorithme de clustering / consensus multi-épisodes exécuté dans une extension WebAssembly isolée.
 
@@ -6,7 +6,9 @@ IntroSkipper est le composant de détection automatique des introductions et gé
 
 ## 1. Pipeline complet de détection
 
-Le pipeline d'analyse fonctionne de bout en bout sans transcodage vidéo ni réencodage :
+Le code relie les étapes suivantes sans transcodage vidéo. L'extraction acoustique
+décode l'audio via FFmpeg/Chromaprint ; ce diagramme ne constitue pas une preuve
+de détection sur une bibliothèque réelle :
 
 ```
 [Scan bibliothèque]
@@ -14,7 +16,8 @@ Le pipeline d'analyse fonctionne de bout en bout sans transcodage vidéo ni rée
         ▼
 [Détection chapitres] ──(intro OU crédits manquants)──► [Tâche Media Node: Audio Fingerprint]
         │                                                        │
-        │                                             (Head 0-600s + Tail 200-300s)
+        │                                             (Head 300s, max 2500 empreintes)
+        │                                             (Tail 200s, max 1500 empreintes)
         │                                             (Cache local disque invalidé sur mtime/size)
         │                                                        │
         ▼                                                        ▼
@@ -60,7 +63,11 @@ Le pipeline d'analyse fonctionne de bout en bout sans transcodage vidéo ni rée
 
 ## 3. Détection des génériques de fin & scènes post-crédits
 
-- **Extraction acoustique de fin (Tail)** : Le Media Node extrait automatiquement les 200 à 300 dernières secondes via un seek rapide FFmpeg sans décoder tout l'épisode.
+- **Extraction acoustique de fin (Tail)** : pour un épisode long, le Media Node
+  demande les 200 dernières secondes via un seek FFmpeg puis conserve au plus
+  1500 empreintes (~174 s à 8,61328125 Hz). La tête est extraite sur 300 secondes
+  puis limitée à 2500 empreintes (~290 s). Les épisodes courts réutilisent la
+  tête disponible ; aucune recherche ne peut dépasser l'audio effectivement fourni.
 - **Empreintes `tailFingerprintsCompact`** : Transmises en binaire base64 pour respecter le plafond de 65 536 octets de l'entrée Wasm.
 - **Scènes post-crédits** : Si le générique se termine au moins 10 à 12 secondes avant la fin physique du conteneur, le marqueur s'arrête exactement à la fin du générique. L'UI propose de sauter le générique pour atterrir directement sur la scène post-crédits au lieu d'enchaîner brutalement sur l'épisode suivant.
 - **Détection des génériques sans chapitre** : Fonctionne même en l'absence complète de chapitres grâce à la corrélation acoustique sur la queue des épisodes.
@@ -92,13 +99,59 @@ Le pipeline d'analyse fonctionne de bout en bout sans transcodage vidéo ni rée
 
 ## 6. Administration
 
+- **Réglages de détection dans le schéma de l'extension** : début et fin de la
+  fenêtre acoustique d'intro, durées min/max d'intro et de crédits, seuil de
+  similarité et activation des deux moteurs. `search_window_start` et
+  `max_credits_duration` sont maintenant lus par le plugin et exposés dans son
+  schéma. La fenêtre est plafonnée à 600 s, les crédits à 300 s, sans augmenter
+  l'extraction du Node indiquée ci-dessus. Les paramètres numériques non finis,
+  négatifs ou incohérents renvoient `invalid_detection_config` avant comparaison.
+  Les chapitres restent indépendants de la fenêtre acoustique, mais respectent
+  les durées et l'interrupteur de détection. Les nouveaux champs nécessitent un
+  paquet reconstruit et installé ; aucun paquet publié n'a été modifié.
+
 - **Analyse déclenchée à la demande** : Bouton « Analyser intros & génériques » directement sur la page détaillée de chaque saison pour relancer l'analyse en file d'attente d'arrière-plan (`POST /api/v1/admin/seasons/{id}/analyze-markers`).
+- **Relance avec empreintes existantes** : les routes saison et série
+  (`POST /api/v1/admin/works/{id}/analyze-markers`) réutilisent l'extraction
+  terminée correspondant à la version actuelle du fichier. Elles émettent une
+  demande manuelle de détection acoustique, qui remet en file une détection
+  terminée sans créer une nouvelle extraction. Une détection déjà en attente
+  ou en cours conserve son état et sa lease ; les corrections manuelles restent
+  prioritaires. Les bibliothèques désactivées, sources hors racine actuelle et
+  Nodes révoqués sont exclus. `tasksQueued` compte uniquement les extractions
+  ajoutées ou réactivées, pas les demandes de détection réutilisant le cache.
 - **Inspection des marqueurs** : `GET /api/v1/admin/assets/{asset}/markers` exposant la source, le niveau de confiance et l'identifiant d'extension ayant détecté chaque segment.
 - **Isolation des permissions** : Toutes les opérations de modification et d'analyse requièrent strictement le rôle `administrator` et la validation du jeton CSRF.
 
 ---
 
 ## 7. Métriques et validation
+
+Les chiffres ci-dessous sont des résultats historiques annoncés sur des bancs
+synthétiques. Ils ne démontrent pas la précision sur des séries réelles, le coût
+sur NAS, l'exécution sur un Node distant ou l'absence de faux positifs en
+production. Aucun benchmark réel n'a été effectué pour le correctif de relance
+du 2 novembre 2026.
+
+Réglages de détection (2 novembre 2026) :
+`cargo test --locked -p aether-plugin-intro-skipper --test intro_skipper_tests`
+dans le dépôt des extensions : 17 tests réussis. Les cas ajoutés couvrent
+maximum des crédits par chapitre, exclusion d'une intro par début de fenêtre,
+interrupteur des chapitres, valeurs invalides et silence dans la fenêtre. Ils
+utilisent des empreintes synthétiques. Le module Wasm release a ensuite été
+construit localement puis optimisé avec le script Binaryen habituel :
+236 317 → 201 418 octets, sous le plafond de 262 144 octets. Son opération
+`manifest` renvoie bien les deux nouveaux champs dans `configSchema` ; le
+schéma est inclus dans le manifeste, sans fichier JSON chargé dynamiquement.
+Artefact local dans le dépôt des extensions :
+`target/wasm32-unknown-unknown/release/aether_plugin_intro_skipper.wasm`.
+Aucun paquet signé n'a été construit, publié ou installé pour ces changements.
+
+Le test ciblé SQLite HTTP/dispatch
+`marker_reanalysis_reuses_completed_fingerprints_and_restarts_detection_once`
+passe le 2 novembre 2026 : réutilisation des empreintes, réarmement, déduplication,
+lease active, correction manuelle et bibliothèque désactivée. Il n'exécute pas
+FFmpeg ni un module Wasm réel et ne mesure pas la précision acoustique.
 
 - **Module Wasm release** : `229.0 KB` (inférieur au budget strict de 256 Ko).
 - **Consommation CPU Wasm** : < 35 ms par épisode en moyenne.

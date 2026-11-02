@@ -1,3 +1,55 @@
+## 2 novembre 2026 — Suite des réglages Jellyfin, accueil et rétention
+
+- Trois sous-agents réutilisés ; tests mutualisés et ciblés conformément à la
+  demande d'économie. Aucune suite globale ni benchmark de parité Jellyfin.
+- Lecture : mémorisation audio/sous-titres désactivable, piste audio par défaut
+  configurable, choix manuel prioritaire pendant la séance. Choix audio séparé
+  de la langue configurée ; préférences sous-titres réellement enregistrées/lues.
+- Accueil : `hidePlayedInLatest`, filtre Core avant pagination/copies regroupées,
+  tri accueil corrigé en `added-desc`. Statut explicite sur l'œuvre ; calcul d'une
+  série entièrement vue non ajouté. Cache navigateur des nouveautés invalidé
+  seul ; cache Core inventaire évité pour ce filtre dépendant de la progression.
+- Rétention : `activityLogRetentionDays` ne sert plus à supprimer les sessions.
+  Nouvelle tâche durable de purge du journal extensions existant, indexée,
+  500 événements maximum/exécution avec clôture par lease ; calendrier préservé.
+  Schémas SQLite/PostgreSQL alignés, sans validation PostgreSQL réelle.
+- Intro Skipper voisin : début de fenêtre et durée maximale crédits raccordés,
+  validation cohérente, désactivation chapitres respectée et faux positifs de
+  fenêtre silencieuse corrigés. Wasm release optimisé 201418 octets ; manifeste
+  exécuté confirme les nouveaux champs. Paquet signé/installé non mis à jour.
+  Limites d'extraction réelles documentées (~290 s tête, ~174 s queue).
+- Résultats : 26 tests Web pistes/préférences + 9 cache, 17 plugin Intro,
+  test HTTP préférences SQLite et 5 tests Core ciblés réussis. Test accueil
+  initialement en échec sur fixture de groupe invalide, corrigée puis test seul
+  réussi. Check Svelte 0/0, lint/build Web, fmt/diff-check réussis. Aucun essai
+  nouveau sur NAS, navigateur média réel, précision acoustique ou charge.
+- Sources et suites ouvertes : `docs/JELLYFIN_FUNCTIONAL_GAPS.md`. Changements
+  locaux dans Aether et Aether-Plugins ; aucune publication ni déploiement.
+
+## 2 novembre 2026 — Préférences de lecture, reprise serveur et relance Intro Skipper
+
+- Référence fonctionnelle : sources Jellyfin locales consultées en lecture seule,
+  implémentations Aether originales. Trois sous-agents ont traité les domaines.
+- Préférences par compte : enchaînement automatique d'épisode (désactivé par
+  défaut, hors SyncPlay), sauts arrière/avant indépendants 5/10/15/30/60 s pour
+  boutons et flèches ; validation Core, persistance et réglages Lecture raccordés.
+- Seuils serveur de reprise appliqués au PUT progression côté Core ; commandes
+  explicites vu/non-vu conservées, contenu trop court non marqué vu par défaut.
+  Historique non recalculé ; durée toujours déclarée par le client.
+- Intro Skipper : relance saison/série réutilise la tâche d'empreinte terminée,
+  réarme la détection terminée sans dupliquer une tâche active ; corrections
+  manuelles conservées, bibliothèques désactivées et Nodes révoqués exclus.
+- Vérifications ciblées réussies : 10 tests Vitest, test HTTP préférences SQLite,
+  2 tests Core `progress::activity_tests`, test HTTP/dispatch
+  `marker_reanalysis_reuses_completed_fingerprints_and_restarts_detection_once`.
+  Check Svelte 0/0, lint Web, build Web, fmt et diff-check réussis. Chrome avec
+  API simulées 390/1440 : valeurs par défaut, sauvegarde/rechargement, absence de
+  débordement ; capture mobile inspectée. Dernière retouche CSS des cases à cocher
+  après build, sans relance conformément à la demande d'éviter les tests inutiles.
+- Comparaison et prochains lots : `docs/JELLYFIN_FUNCTIONAL_GAPS.md`.
+  Aucune parité complète, validation acoustique réelle, NAS, PostgreSQL ou
+  publication/déploiement revendiqués. Pas de suite globale exécutée.
+
 ## 2 novembre 2026 — Isolation des scénarios navigateur scanner/séries
 
 - La fixture `Scanner Film (2026) [tmdb-123]` déclenchait désormais les vrais

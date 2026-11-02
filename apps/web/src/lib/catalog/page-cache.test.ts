@@ -1,9 +1,29 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cachedCatalog, catalogCacheStats, invalidateCatalog, loadCatalog, preloadCatalog } from './page-cache';
+import { cachedCatalog, catalogCacheStats, invalidateCatalog, invalidateLatestCatalog, loadCatalog, preloadCatalog } from './page-cache';
 import { session } from '../auth/session';
 const page = (id = 'a', libraryId = 'lib') => ({items:[{id,libraryId,title:id}], total:1,offset:0,limit:24,notice:''});
 afterEach(() => { invalidateCatalog(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('session catalogue SWR cache', () => {
+  it('refreshes watched shelves without evicting normal browsing or resurrecting a late shelf', async () => {
+    const latest = '/api/v1/catalog?scope=latest';
+    const normal = '/api/v1/catalog?kind=film';
+    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(Response.json(page())));
+    vi.stubGlobal('fetch', fetcher);
+    await loadCatalog(latest, latest);
+    await loadCatalog(normal, normal);
+    invalidateLatestCatalog();
+    expect(cachedCatalog(latest)).toBeUndefined();
+    expect(cachedCatalog(normal)).toBeDefined();
+    let finish!: (response: Response) => void;
+    fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => finish = resolve));
+    const pending = loadCatalog(latest, latest);
+    const rejected = expect(pending).rejects.toThrow();
+    invalidateLatestCatalog();
+    finish(Response.json(page('stale')));
+    await rejected;
+    expect(cachedCatalog(latest)).toBeUndefined();
+    expect(cachedCatalog(normal)).toBeDefined();
+  });
   it('shares navigation prefetch with the display request including library and sorting', async () => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(Response.json(page())));
     vi.stubGlobal('fetch', fetcher);

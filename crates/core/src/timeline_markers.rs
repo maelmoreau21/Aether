@@ -225,29 +225,33 @@ async fn queue_episodes_fingerprints(
         }
 
         // Emit an event to trigger immediate marker detection if fingerprint is ready
-        let completed: i64 = query_scalar(
-            "SELECT COUNT(*) FROM durable_tasks WHERE idempotency_key=? AND status='completed'",
+        let completed: Option<String> = query_scalar(
+            "SELECT id FROM durable_tasks WHERE owner='system' AND idempotency_key=? AND target_id=? AND component='fingerprint' AND status='completed'",
         )
         .bind(&key)
-        .fetch_one(&mut *tx)
+        .bind(asset_id)
+        .fetch_optional(&mut *tx)
         .await
-        .unwrap_or(0);
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        if completed > 0 {
-            let event_key = format!("fingerprint-ready:{key}");
-            let _ = crate::automation::emit(
+        if let Some(completed) = completed {
+            // An explicit reanalysis must bypass the ordinary once-per-source
+            // event deduplication, while reusing the Node's completed extraction.
+            let event_key = format!("marker-reanalysis:{}", uuid::Uuid::new_v4());
+            crate::automation::emit(
                 &mut tx,
                 &crate::automation::EventInput {
                     key: &event_key,
-                    kind: "fingerprint.ready",
+                    kind: "manual",
                     library_id,
                     asset_id,
                     fingerprint: source_fp,
-                    payload: &json!({"fingerprintKey": key, "stale": false}),
+                    payload: &json!({"fingerprintTaskId": completed, "reanalyzeMarkers": true, "stale": false}),
                 },
                 now,
             )
-            .await;
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         }
     }
 
@@ -277,8 +281,10 @@ async fn analyze_season_markers(
          JOIN inventory_sources s ON s.version_id=v.id \
          JOIN inventory_assets a ON a.source_id=s.id \
          JOIN libraries l ON l.id=a.library_id \
+         JOIN media_nodes n ON n.id=l.node_id \
          JOIN automation_observations obs ON obs.asset_id=a.id \
-         WHERE ep.season_id=? AND a.available=1",
+         WHERE ep.season_id=? AND a.available=1 AND s.root_snapshot=l.root AND n.status!='revoked' \
+         AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))",
     )
     .bind(&season_id)
     .fetch_all(auth.store.pool())
@@ -316,8 +322,10 @@ async fn analyze_work_markers(
          JOIN inventory_sources s ON s.version_id=v.id \
          JOIN inventory_assets a ON a.source_id=s.id \
          JOIN libraries l ON l.id=a.library_id \
+         JOIN media_nodes n ON n.id=l.node_id \
          JOIN automation_observations obs ON obs.asset_id=a.id \
-         WHERE se.series_id=? AND a.available=1",
+         WHERE se.series_id=? AND a.available=1 AND s.root_snapshot=l.root AND n.status!='revoked' \
+         AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))",
     )
     .bind(&work_id)
     .fetch_all(auth.store.pool())

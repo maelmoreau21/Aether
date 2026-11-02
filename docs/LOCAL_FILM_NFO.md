@@ -36,6 +36,12 @@ ou entre versions, sont signalés ; le fournisseur contradictoire est retiré de
 identifiants publics. Aucun rapprochement automatique supplémentaire n'est fait.
 Une contradiction à l'intérieur d'un NFO rend ce NFO invalide.
 
+Compatibilité des identifiants avec Jellyfin : les attributs `TMDB`, `IMDB` et
+`TVDB` de `<id ...>` sont acceptés, y compris sur une balise vide ; les balises
+`imdb_id`, `tvdbid` et `tvdb` sont également reconnues. Un contenu numérique sans
+fournisseur dans `<id>` reste ambigu et n'est pas interprété. Les contradictions
+entre attributs, `uniqueid` et autres balises explicites invalident le NFO.
+
 Migration additive `0005_film_editorial.sql`, sans modification de0004 : snapshot
 des candidats éditoriaux par asset et JSON éditorial/provenance au niveau Work.
 Les chemins des sidecars restent privés. La sélection au niveau Work intervient

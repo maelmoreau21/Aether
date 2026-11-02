@@ -38,6 +38,8 @@ export class SyncPartyClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private lastPingSent = 0;
+  private playbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private countdownInterval: ReturnType<typeof setInterval> | null = null;
   private latestSeq = 0;
   private notificationCounter = 0;
 
@@ -85,6 +87,7 @@ export class SyncPartyClient {
       this.ws.onclose = () => {
         this.connected = false;
         this.stopPingLoop();
+        this.clearPlaybackSchedule();
         if (this.shouldReconnect) {
           const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 10000);
           this.reconnectAttempts += 1;
@@ -135,6 +138,7 @@ export class SyncPartyClient {
         );
         this.clockOffsetMs = offsetMs;
         this.rttMs = roundTripMs;
+        if (this.countdownSeconds !== null) this.applyPlaybackState();
         break;
       }
 
@@ -145,6 +149,7 @@ export class SyncPartyClient {
         this.queue = msg.queue;
         this.poll = msg.poll;
         this.latestSeq = msg.seq;
+        this.applyPlaybackState();
         break;
       }
 
@@ -160,7 +165,7 @@ export class SyncPartyClient {
 
         const actionFr = msg.state === 'playing' ? 'a repris la lecture' : 'a mis en pause';
         this.notify(`${msg.causedByName} ${actionFr}`);
-        this.onPlaybackUpdate?.(msg.state, msg.position, msg.causedByName);
+        this.applyPlaybackState(msg.causedByName);
         break;
       }
 
@@ -168,18 +173,14 @@ export class SyncPartyClient {
         if (msg.seq < this.latestSeq) return;
         this.latestSeq = msg.seq;
 
-        this.countdownSeconds = msg.seconds;
+        if (this.party) {
+          this.party.state = 'playing';
+          this.party.position = msg.position;
+          this.party.positionUpdatedServerMs = msg.targetServerEpochMs;
+        }
         this.notify(`Lancement de la lecture dans ${msg.seconds}s...`);
         this.onCountdown?.(msg.seconds, msg.position);
-
-        const interval = setInterval(() => {
-          if (this.countdownSeconds !== null && this.countdownSeconds > 1) {
-            this.countdownSeconds -= 1;
-          } else {
-            this.countdownSeconds = null;
-            clearInterval(interval);
-          }
-        }, 1000);
+        this.applyPlaybackState(msg.causedByName);
         break;
       }
 
@@ -291,7 +292,9 @@ export class SyncPartyClient {
           this.party.mediaTitle = msg.mediaTitle;
           this.party.state = 'waiting';
           this.party.position = 0;
+          this.party.positionUpdatedServerMs = this.getCurrentServerEpochMs();
         }
+        this.clearPlaybackSchedule();
         this.notify(`Nouveau média lancé par ${msg.causedByName} : ${msg.mediaTitle}`);
         this.onMediaChanged?.(msg.mediaId, msg.mediaTitle);
         break;
@@ -310,6 +313,35 @@ export class SyncPartyClient {
         this.errorMessage = msg.message;
         break;
       }
+    }
+  }
+
+  private clearPlaybackSchedule() {
+    if (this.playbackTimer) clearTimeout(this.playbackTimer);
+    if (this.countdownInterval) clearInterval(this.countdownInterval);
+    this.playbackTimer = null;
+    this.countdownInterval = null;
+    this.countdownSeconds = null;
+  }
+
+  private applyPlaybackState(causedByName = '') {
+    this.clearPlaybackSchedule();
+    if (!this.party) return;
+    const delay = this.party.state === 'playing'
+      ? this.party.positionUpdatedServerMs - this.getCurrentServerEpochMs() : 0;
+    if (delay > 0) {
+      this.onPlaybackUpdate?.('paused', this.party.position, causedByName);
+      this.countdownSeconds = Math.ceil(delay / 1000);
+      this.countdownInterval = setInterval(() => {
+        if (this.party) this.countdownSeconds = Math.max(0,
+          Math.ceil((this.party.positionUpdatedServerMs - this.getCurrentServerEpochMs()) / 1000));
+      }, 100);
+      this.playbackTimer = setTimeout(() => {
+        this.clearPlaybackSchedule();
+        this.onPlaybackUpdate?.('playing', this.getComputedPartyPosition(), causedByName);
+      }, delay);
+    } else {
+      this.onPlaybackUpdate?.(this.party.state, this.getComputedPartyPosition(), causedByName);
     }
   }
 
@@ -455,6 +487,7 @@ export class SyncPartyClient {
   public destroy() {
     this.shouldReconnect = false;
     this.stopPingLoop();
+    this.clearPlaybackSchedule();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

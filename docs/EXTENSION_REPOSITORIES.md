@@ -122,7 +122,7 @@ Session administrateur exigée partout ; CSRF sur chaque mutation. Réponses
 - `POST /api/v1/admin/extensions/repositories/{id}/refresh` : `204` après remplacement du snapshot valide.
 - `DELETE /api/v1/admin/extensions/repositories/{id}` : `204`, sans désinstaller de module.
 - `GET /api/v1/admin/extensions/catalogue` : `{entries:[{repositoryId,repositoryName,manifest,publisherId,publicKey,compatible}]}`.
-- `POST /api/v1/admin/extensions/repositories/{id}/install` : `{extensionId,version}`, `201 {id}` ; mêmes contrôles d’installation que l’import local.
+- `POST /api/v1/admin/extensions/repositories/{id}/install` : `{extensionId,version,upgrade?:boolean}`, `201 {id}` pour une installation. Avec `upgrade:true`, mêmes contrôles que `/extensions/{id}/upgrade` ; la compatibilité actuellement non garantie entraîne un refus sans modifier l'installation. L'interface ne désinstalle plus l'ancienne version pour contourner ce refus.
 
 Principales erreurs : `401/403` identité/CSRF/éditeur non approuvé, `400` URL,
 manifeste, compatibilité ou intégrité invalides, `404` dépôt/version absent,

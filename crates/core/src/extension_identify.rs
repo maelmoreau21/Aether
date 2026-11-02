@@ -12,6 +12,8 @@ pub(super) struct IdentifySearchInput {
     pub(super) year: Option<u16>,
     #[serde(default)]
     pub(super) provider: Option<String>,
+    #[serde(default)]
+    pub(super) external_ids: Option<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(Deserialize)]
@@ -34,23 +36,20 @@ pub(super) async fn search(
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, true).await?;
 
-    let context: Option<(String, String, Option<i64>, String)> =
-        query_as("SELECT library_id, title, year, kind FROM inventory_works WHERE id=?")
+    let context: Option<adapters::WorkContext> =
+        query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
             .bind(&input.work_id)
             .fetch_optional(auth.store.pool())
             .await
             .map_err(db)?;
-    let (library_id, current_title, current_year, kind) =
-        context.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
-
-    let search_title = input
-        .title
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(current_title.as_str());
-
-    let search_year = input.year.or(current_year.map(|y| y as u16));
+    let context = context.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let library_id = context.library_id.clone();
+    let mut requested = json!({"title":input.title,"year":input.year});
+    if let Some(ids) = &input.external_ids {
+        requested["externalIds"] = json!(ids);
+    }
+    let search_input =
+        adapters::metadata_input(&context, &input.work_id, "metadata.search", &requested)?;
 
     let rows: Vec<(String, String, String)> = query_as(
         "SELECT e.id, e.package_json, e.generation FROM extensions e \
@@ -100,21 +99,22 @@ pub(super) async fn search(
             continue;
         }
 
-        let media_type = match kind.as_str() {
-            "series" => "tv_show",
-            _ => "movie",
-        };
-
+        let known_id = known_metadata_id(&search_input, &id).map(str::to_owned);
+        let mut provider_input = search_input.clone();
+        provider_input["language"] = json!(s_settings.preferred_metadata_language);
+        provider_input["country"] = json!(s_settings.metadata_country_code);
+        if let Some(candidate_id) = &known_id {
+            provider_input["id"] = json!(candidate_id);
+        }
         let search_request = Run {
             work_id: input.work_id.clone(),
-            operation: "metadata.search".into(),
-            input: json!({
-                "title": search_title,
-                "year": search_year,
-                "mediaType": media_type,
-                "language": s_settings.preferred_metadata_language,
-                "country": s_settings.metadata_country_code,
-            }),
+            operation: if known_id.is_some() {
+                "metadata.details"
+            } else {
+                "metadata.search"
+            }
+            .into(),
+            input: provider_input,
         };
 
         let provider_deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(12));
@@ -152,7 +152,19 @@ pub(super) async fn search(
         }
 
         if let Ok(Ok(res)) = outcome {
-            let proposal = res.0["proposal"].clone();
+            let mut proposal = res.0["proposal"].clone();
+            if let Some(candidate_id) = &known_id {
+                if proposal["providerId"].as_str() != Some(candidate_id.as_str()) {
+                    errors.push(json!({"provider":id,"providerName":package.manifest.name,"error":"invalid_metadata_origin"}));
+                    continue;
+                }
+                proposal = json!([{
+                    "id":candidate_id,"title":proposal["title"],
+                    "originalTitle":proposal["originalTitle"],"year":proposal["year"],
+                    "overview":proposal["synopsis"],
+                    "posterUrl":proposal["posters"][0]["url"],
+                }]);
+            }
             if let Some(items) = proposal.as_array() {
                 for item in items.iter().take(30) {
                     if let (Some(item_id), Some(item_title)) = (

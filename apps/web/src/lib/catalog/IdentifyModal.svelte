@@ -30,10 +30,16 @@
   let searchYear = $state<number | undefined>(undefined);
   let searchProvider = $state('all');
   let replaceImages = $state(true);
+  let tmdbId = $state('');
+  let imdbId = $state('');
+  let tvdbId = $state('');
 
   $effect(() => {
     searchTitle = work.title || '';
     searchYear = work.year ? Number(work.year) : undefined;
+    tmdbId = work.externalIds?.tmdb ?? '';
+    imdbId = work.externalIds?.imdb ?? '';
+    tvdbId = work.externalIds?.tvdb ?? '';
   });
 
   let results = $state<IdentifyResult[]>([]);
@@ -45,8 +51,13 @@
   let successMsg = $state('');
 
   async function performSearch() {
-    if (!searchTitle.trim()) {
-      error = 'Veuillez saisir un titre à rechercher.';
+    const externalIds = Object.fromEntries(
+      Object.entries({ tmdb: tmdbId, imdb: imdbId, tvdb: tvdbId })
+        .map(([key, value]) => [key, value.trim()])
+        .filter(([, value]) => value)
+    );
+    if (!searchTitle.trim() && Object.keys(externalIds).length === 0) {
+      error = 'Veuillez saisir un titre ou un identifiant à rechercher.';
       return;
     }
     searching = true;
@@ -61,11 +72,12 @@
         },
         body: JSON.stringify({
           workId: work.id,
+          externalIds,
           title: searchTitle.trim(),
           year: searchYear ? Number(searchYear) : undefined,
           provider: searchProvider === 'all' ? null : searchProvider
         }),
-        signal: AbortSignal.timeout(30000)
+        signal: AbortSignal.timeout(45000)
       });
 
       if (!response.ok) {
@@ -164,7 +176,6 @@
             <span>Titre</span>
             <input
               type="text"
-              required
               maxlength="256"
               placeholder="Ex. Inception"
               bind:value={searchTitle}
@@ -214,6 +225,16 @@
           </div>
         </div>
 
+        <details class="identify-ids">
+          <summary>Identifiants des fournisseurs</summary>
+          <p>Les identifiants du NFO sont repris automatiquement. Videz-les pour rechercher uniquement par titre.</p>
+          <div class="input-row">
+            <label class="field-group flex-1"><span>TMDb</span><input aria-label="Identifiant TMDb" type="text" inputmode="numeric" maxlength="32" placeholder="Ex. 27205" bind:value={tmdbId} disabled={searching || applying} /></label>
+            <label class="field-group flex-1"><span>IMDb</span><input aria-label="Identifiant IMDb" type="text" maxlength="32" placeholder="Ex. tt1375666" bind:value={imdbId} disabled={searching || applying} /></label>
+            <label class="field-group flex-1"><span>TVDb</span><input aria-label="Identifiant TVDb" type="text" inputmode="numeric" maxlength="32" bind:value={tvdbId} disabled={searching || applying} /></label>
+          </div>
+        </details>
+
         <div class="options-row">
           <label class="checkbox-label">
             <input
@@ -248,10 +269,10 @@
             <div class="notice-content">
               <h4>Aucun fournisseur de métadonnées actif</h4>
               <p>
-                Contrairement à Jellyfin qui intègre des clés de métadonnées mutualisées, Aether isole strictement ses connecteurs dans des extensions sécurisées (TMDb, OMDb, IMDb).
+                Activez un fournisseur de métadonnées pour rechercher ce média ou utiliser ses identifiants NFO.
               </p>
               <p>
-                Pour identifier ce média et importer ses affiches et résumés, installez et activez le plugin <strong>IMDb (sans clé d'API requise)</strong> ou <strong>TMDb</strong> dans la section Administration.
+                Vérifiez l’activation et l’accès à cette bibliothèque dans les paramètres de <strong>TMDb</strong> ou <strong>IMDb</strong>.
               </p>
               <a href={resolve('admin/libraries/#extensions-section')} class="btn primary-btn notice-link">
                 <Icon name="search" size={15} />
@@ -326,6 +347,9 @@
 </div>
 
 <style>
+  .identify-ids { margin: 16px 0; }
+  .identify-ids summary { cursor: pointer; }
+  .identify-ids p { color: var(--text-secondary); font-size: 13px; margin: 12px 0; }
   .modal-overlay {
     position: fixed;
     inset: 0;

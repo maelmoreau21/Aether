@@ -259,39 +259,11 @@
   async function switchVersion(entry: CatalogueEntry, showNotice = true) {
     const extId = managed?.manifest.id || entry.manifest.id;
     const currentInstalled = installed.find(e => e.manifest.id === extId);
-    const wasEnabled = currentInstalled?.enabled ?? false;
-    const libraryIds = currentInstalled?.libraryIds ?? [];
-    const allLibraries = currentInstalled?.allLibraries ?? (libraryIds.length === 0);
-    const savedSettings = currentInstalled?.settings ?? editingSettings[extId];
-
     const action = async () => {
-      if (currentInstalled) {
-        await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extId)}`, {
-          method: 'DELETE',
-          body: JSON.stringify({ deleteData: false })
-        });
-      }
       await adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(entry.repositoryId)}/install`, {
         method: 'POST',
-        body: JSON.stringify({ extensionId: entry.manifest.id, version: entry.manifest.version })
+        body: JSON.stringify({ extensionId: entry.manifest.id, version: entry.manifest.version, upgrade: !!currentInstalled })
       });
-      if (currentInstalled && wasEnabled) {
-        await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extId)}`, {
-          method: 'PUT',
-          body: JSON.stringify({ enabled: true, libraryIds, allLibraries })
-        });
-      }
-      if (savedSettings && Object.keys(savedSettings).length > 0) {
-        try {
-          await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extId)}/settings`, {
-            method: 'PUT',
-            body: JSON.stringify(savedSettings)
-          });
-          editingSettings[extId] = { ...savedSettings };
-        } catch {
-          // Paramètres existants préservés si schéma compatible
-        }
-      }
       managedId = extId;
     };
 

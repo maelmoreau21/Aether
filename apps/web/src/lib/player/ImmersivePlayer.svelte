@@ -16,6 +16,7 @@
   import { revalidateMediaDescriptor } from '../catalog/api';
   import { bufferedAhead } from './startup-buffer';
   import { SyncPartyClient } from '../syncplay/sync-client.svelte';
+  import { applyPartyPlayback } from '../syncplay/player-sync';
   import WatchPartyOverlay from '../syncplay/WatchPartyOverlay.svelte';
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
@@ -75,15 +76,16 @@
     playback = { ...snapshot, duration: Number.isFinite(snapshot.duration) ? snapshot.duration : 0 };
     paused = snapshot.paused;
     if (!busy) progressTracker?.save(playback);
-    if (syncClient && syncClient.party?.state === 'playing') {
+    if (!busy && !paused && syncClient?.connected && syncClient.party?.state === 'playing'
+      && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs()) {
       const correction = syncClient.evaluateDrift(playback.position);
       if (correction.action === 'rate') {
-        video.playbackRate = correction.playbackRate;
+        engine.setSpeed(correction.playbackRate);
       } else if (correction.action === 'seek') {
         engine.seek(correction.targetPosition);
-        video.playbackRate = 1.0;
+        engine.setSpeed(1.0);
       } else if (video.playbackRate !== 1.0) {
-        video.playbackRate = 1.0;
+        engine.setSpeed(1.0);
       }
     }
   }
@@ -98,7 +100,7 @@
   $effect(() => {
     const pos = playback.position;
     const dur = playback.duration;
-    if (!opened || busy || paused || dur <= 0) return;
+    if (!opened || busy || paused || dur <= 0 || syncClient) return;
     const prefs = preferences();
     if (prefs.autoSkipIntro && active?.intro && !hasAutoSkippedIntro) {
       if (pos >= active.intro.start && pos < active.intro.end - 1.0) {
@@ -207,7 +209,9 @@
       readPlaybackPreferences();
       const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))));
       if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
-      await engine.load(media, source.audioTrackId, restore?.position ?? resume ?? 0);
+      if (syncClient) await resume; // Load the progress revision before collective playback saves it.
+      if (current !== generation) return;
+      await engine.load(media, source.audioTrackId, syncClient ? syncClient.getComputedPartyPosition() : restore?.position ?? resume ?? 0);
       if (current !== generation) return;
       const autoFailoverMsg = failoverNotice || (media.failoverFrom ? 'Basculement automatique sur un nœud disponible.' : '');
       notice = autoFailoverMsg || preferenceNotice;
@@ -242,7 +246,13 @@
       };
       presence?.stop();presence=undefined;
       if(media.workId&&!media.synthetic)presence=new PlaybackPresence(media.workId,()=>engine?.state());
-      if (!restore || !restore.paused) await engine.play();
+      if (syncClient) {
+        await applyPartyPlayback(engine, syncClient.party?.state === 'playing'
+          && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs() ? 'playing' : 'paused',
+          syncClient.getComputedPartyPosition());
+        syncClient.setReady(true);
+        syncClient.setBuffering(false, engine.state().position);
+      } else if (!restore || !restore.paused) await engine.play();
     } catch (e) { if (current === generation) fail(e instanceof Error ? e.message : String(e)); }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
   }
@@ -369,32 +379,39 @@
     }
     syncClient = new SyncPartyClient(partyId, $session?.user.id ?? '');
     setupSyncClientHooks();
-    open(media);
+    if (!opened) open(media);
+    else if (media instanceof Promise) {
+      const client = syncClient;
+      void media.then(item => { if (syncClient === client && opened) changeMedia(item); })
+        .catch(cause => { if (syncClient === client) fail(cause instanceof Error ? cause.message : String(cause)); });
+    } else changeMedia(media);
   }
   function setupSyncClientHooks() {
     if (!syncClient) return;
+    const client = syncClient;
     syncClient.onPlaybackUpdate = (state, position) => {
-      if (state === 'playing') {
-        if (engine && engine.state().paused) {
-          void action(p => p.play());
-        }
-      } else if (state === 'paused') {
-        if (engine && !engine.state().paused) {
-          engine.pause();
-        }
-      }
-      if (Math.abs(playback.position - position) > 1.5) {
-        seek(position);
-      }
-    };
-    syncClient.onCountdown = (_sec, pos) => {
-      seek(pos);
+      // Received commands apply locally even in host_only mode. Never send a
+      // command back through the user-control path (which caused seek loops).
+      if (!engine || busy) return;
+      client.setReady(true);
+      void applyPartyPlayback(engine, state, position).catch(cause => {
+        notice = cause instanceof Error ? cause.message : 'Lecture collective indisponible.';
+      });
     };
     syncClient.onMediaChanged = (newMediaId) => {
-      const found = catalogue.find(m => m.id === newMediaId);
+      const found = catalogue.find(m => m.id === newMediaId || m.workId === newMediaId);
       if (found) changeMedia(found);
+      else void revalidateMediaDescriptor(newMediaId).then(media => {
+        if (syncClient === client && opened) changeMedia(media);
+      }).catch(cause => { notice = cause instanceof Error ? cause.message : 'Média indisponible.'; });
     };
   }
+  function reportBuffering(buffering: boolean) {
+    if (!busy && engine && syncClient?.connected) {
+      syncClient.setBuffering(buffering, engine.state().position);
+    }
+  }
+
   function requestFullscreen() {
     if (!surface.requestFullscreen) { notice = 'Plein écran indisponible. Le mode immersif reste actif.'; return; }
     void surface.requestFullscreen().then(() => {
@@ -429,6 +446,7 @@
     }
     if (syncClient) {
       syncClient.seek(value);
+      return;
     }
     if (!busy) { engine?.seek(value); sync(); wake(); }
   }
@@ -492,7 +510,7 @@
     keyboard(event);
   }
   function cancel(event: Event) { event.preventDefault(); if (menu) controls?.closeMenu(); else close(); }
-  function ended() { sync(); if (engine) progressTracker?.save(engine.state(), true, true); if (autoplayNext && onNext) onNext(); }
+  function ended() { sync(); if (engine) progressTracker?.save(engine.state(), true, true); if (!syncClient && autoplayNext && onNext) onNext(); }
   $effect(() => {
     if (!opened || !statistics) return;
     const update = () => {
@@ -535,6 +553,9 @@
       style:--sub-shadow={activeSubtitleCss.textShadow}
       ontimeupdate={sync}
       ondurationchange={sync}
+      onwaiting={() => reportBuffering(true)}
+      oncanplay={() => reportBuffering(false)}
+      onplaying={() => reportBuffering(false)}
       onplay={sync}
       onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }}
       onended={ended}

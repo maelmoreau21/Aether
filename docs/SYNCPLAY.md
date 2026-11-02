@@ -1,5 +1,35 @@
 # Watch Party (SyncPlay) — Documentation Technique et Architecture
 
+## Corrections vérifiables du 2 novembre 2026
+
+- La création HTTP de séance échouait en `500`, même pour un film : sa requête
+  SQL référençait `inventory_episodes.title`, une colonne inexistante. Le titre
+  d'un épisode est désormais lu dans `inventory_works`, comme le prévoit le schéma.
+- Le protocole JSON utilise `camelCase` pour les types **et les champs** :
+  `clientEpochMs`, `serverEpochMs`, `mediaId`, `queueId`, etc. Les variantes Rust
+  seules ne suffisaient pas à convertir les champs des enums Serde.
+- Les instantanés transmettent la position de base avec son horodatage, afin que
+  le client interpole une seule fois. Une reconnexion réapplique l'état collectif.
+- Les commandes reçues s'appliquent directement au moteur du lecteur, y compris
+  pour un participant sans contrôle. Elles ne repassent pas par les commandes
+  utilisateur, évitant les refus de recalage et les boucles de `seek`.
+- Le chargement du lecteur respecte l'attente/la pause de la séance. Le départ
+  différé utilise `targetServerEpochMs` et peut être annulé par une pause ultérieure.
+- Le lecteur signale le buffering ; une pause causée par ce buffering reprend
+  après récupération des participants connectés. Une pause manuelle reste prioritaire.
+- La correction de vitesse passe par le moteur pour conserver les pistes audio
+  externes synchronisées. Les sauts automatiques personnels et l'épisode suivant
+  personnel sont désactivés pendant une séance collective.
+
+Validation ciblée : `cargo test -p media-poc --lib parties::tests`,
+`cargo test -p media-poc --test syncplay_websocket`,
+`npm --prefix apps/web test -- --run src/lib/syncplay`.
+Le test WebSocket utilise un vrai serveur TCP local, deux comptes authentifiés,
+les routes HTTP de création/adhésion et deux clients WebSocket. Il ne prouve pas
+la lecture vidéo/audio dans deux navigateurs ni le comportement d'un NAS distant.
+Résultats locaux observés : 10 tests Rust du module réussis, 1 test TCP/WebSocket
+réussi, 7 tests Web réussis et `svelte-check` sans erreur ni avertissement.
+
 > **Module :** Watch Party & Synchronisation collective (`parties.rs`, `syncplay/*`)  
 > **Composants concernés :** Core (Rust/Axum/WebSockets), Media Node (flux HTTP Range directs), Frontend (SvelteKit runes, Svelte 5).
 
@@ -15,8 +45,8 @@
 ### 1.2 Horloge et Synchronisation (NTP + Drift Compensation)
 - **Horloge de référence serveur** : le serveur maintient la position temporelle (`position_s`) et l'horodatage serveur de dernière mise à jour (`position_updated_ms`).
 - **Synchronisation d'horloge NTP** :
-  - Le client envoie périodiquement des requêtes `Ping { client_epoch_ms }`.
-  - Le serveur répond avec `Pong { client_epoch_ms, server_epoch_ms }`.
+  - Le client envoie périodiquement `{"type":"ping","clientEpochMs":...}`.
+  - Le serveur répond avec `{"type":"pong","clientEpochMs":...,"serverEpochMs":...}`.
   - Le client calcule le délai d'aller-retour (RTT) : $\text{rtt} = t_3 - t_0$ et le décalage d'horloge (offset) : $\text{offset} = t_1 - t_0 - \frac{\text{rtt}}{2}$.
   - La position cible interpolée est calculée selon l'état :
     - En pause / en attente : $\text{targetPosition} = \text{lastPosition}$

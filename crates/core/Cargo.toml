@@ -42,6 +42,7 @@ wasmi = "=2.0.0"
 [dev-dependencies]
 tempfile = "3"
 wat = "1"
+tokio-tungstenite = "0.29.0"
 
 [[bin]]
 name = "media-extension-worker"

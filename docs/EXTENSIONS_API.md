@@ -105,6 +105,27 @@ dans l’historique sous `{operation,output}` (la proposition simple conserve so
 ancien format titre/résumé). Aucun premier résultat de recherche
 n’est appliqué automatiquement.
 
+`POST /api/v1/admin/extensions/identify/search` accepte
+`{workId,title?,year?,provider?,externalIds?}`. Les identifiants déjà présents dans
+le NFO/catalogue sont utilisés quand `externalIds` est absent. Un objet explicite
+les remplace pour cette recherche seulement ; `{}` force une recherche par titre.
+Les identifiants TMDb/TVDb doivent être numériques, IMDb doit commencer par `tt`
+suivi de chiffres. Un identifiant du fournisseur sélectionné déclenche directement
+`metadata.details`, sans imposer une correspondance avec le titre local, puis
+retourne un candidat dans la liste habituelle. Les erreurs de fournisseur restent
+visibles dans `errors` ; aucune écriture de métadonnées ne précède Appliquer.
+
+L'automatisation utilise également les détails directs pour un identifiant connu
+du fournisseur et vérifie l'identifiant retourné. Sans identifiant, elle recherche
+le titre/année/type et accepte aussi le titre original du candidat.
+Un candidat unique obtenu avec un identifiant d'un autre fournisseur (par exemple
+IMDb vers TMDb) peut contourner la comparaison titre/année seulement si les détails
+confirment exactement l'identifiant source ; une contradiction d'identifiant est
+refusée. Le champ SDK
+`synopsis` alimente `plot` avec les mêmes protections des corrections manuelles que
+les autres champs. Les tests synthétiques ne prouvent pas l'accès à un compte
+TMDb/IMDb réel.
+
 Le bouton Appliquer fusionne les champs proposés avec les corrections existantes.
 Les noms du SDK (`synopsis`, `originalTitle`, `externalIds`, `releaseDate`) sont
 adaptés au catalogue ; les champs nuls et tableaux vides ne suppriment pas les

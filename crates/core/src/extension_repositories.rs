@@ -52,6 +52,8 @@ struct RepositoryInput {
 struct InstallInput {
     extension_id: String,
     version: String,
+    #[serde(default)]
+    upgrade: bool,
 }
 
 pub(super) fn router() -> Router<AuthState> {
@@ -410,7 +412,11 @@ async fn install(
     if current.as_deref() != Some(snapshot.as_str()) {
         return Err(err(StatusCode::CONFLICT, "repository_changed"));
     }
-    super::install_with_key(auth, headers, package, entry.public_key).await
+    if input.upgrade {
+        super::upgrade_with_key(auth, headers, input.extension_id, package, entry.public_key).await
+    } else {
+        super::install_with_key(auth, headers, package, entry.public_key).await
+    }
 }
 
 #[cfg(test)]
@@ -819,6 +825,54 @@ mod tests {
         .await;
         assert_eq!(installed["extensions"][0]["enabled"], false);
         assert_eq!(installed["extensions"][0]["libraryIds"], json!([]));
+        // A catalogue update must use the guarded upgrade, never uninstall first.
+        let before: (String, String) =
+            query_as("SELECT package_json,generation FROM extensions WHERE id='repo.fixture'")
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        let mut newer = package.clone();
+        newer.manifest.version = "1.0.1".into();
+        newer.signature = STANDARD.encode(key.sign(&newer.signing_bytes().unwrap()).as_ref());
+        let newer_bytes = serde_json::to_vec(&newer).unwrap();
+        let newer_manifest = json!({"apiVersion":1,"extensions":[{"manifest":newer.manifest,"publisherId":newer.publisher_id,"publicKey":public,"packageUrl":package_url,"packageSha256":format!("{:x}",Sha256::digest(&newer_bytes))}]});
+        query("UPDATE extension_repositories SET manifest_json=? WHERE id=?")
+            .bind(newer_manifest.to_string())
+            .bind(&id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+        test_documents()
+            .lock()
+            .unwrap()
+            .insert(package_url.clone(), newer_bytes);
+        let refused = request(
+            &app,
+            &endpoint,
+            "POST",
+            &cookie,
+            &csrf,
+            json!({"extensionId":"repo.fixture","version":"1.0.1","upgrade":true}),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            body(refused).await["error"],
+            "extension_update_compatibility_unverified"
+        );
+        let after: (String, String) =
+            query_as("SELECT package_json,generation FROM extensions WHERE id='repo.fixture'")
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(before, after);
+        query("UPDATE extension_repositories SET manifest_json=? WHERE id=?")
+            .bind(manifest.to_string())
+            .bind(&id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+
         assert_eq!(
             request(
                 &app,

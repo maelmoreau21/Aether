@@ -81,6 +81,34 @@ pub(super) fn metadata_input(
         .get("year")
         .and_then(Value::as_i64)
         .or_else(|| editorial["year"].as_i64().or(context.year));
+    if operation == "metadata.search"
+        && let Some(requested) = input.get("externalIds")
+    {
+        let requested: std::collections::BTreeMap<String, String> =
+            serde_json::from_value(requested.clone())
+                .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_external_ids"))?;
+        if requested.len() > 16
+            || requested.iter().any(|(key, value)| {
+                key.is_empty()
+                    || key.len() > 64
+                    || value.len() > 256
+                    || key.chars().any(char::is_control)
+                    || value.chars().any(char::is_control)
+                    || match key.as_str() {
+                        "tmdb" | "tvdb" => {
+                            value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit())
+                        }
+                        "imdb" => !value.strip_prefix("tt").is_some_and(|v| {
+                            !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit())
+                        }),
+                        _ => value.trim().is_empty(),
+                    }
+            })
+        {
+            return Err(err(StatusCode::BAD_REQUEST, "invalid_external_ids"));
+        }
+        ids = requested;
+    }
     let mut value = json!({"apiVersion":1,"workId":work,"libraryId":context.library_id,
         "title":title,"year":year,"mediaType":media_type,"externalIds":ids});
     if let Some(language) = input.get("language").and_then(Value::as_str) {
@@ -768,6 +796,37 @@ mod tests {
         assert_eq!(search["year"], 2020);
         assert_eq!(search["mediaType"], "tv_show");
         assert_eq!(search["externalIds"]["external"], "correct");
+        let override_ids = metadata_input(
+            &context,
+            "work",
+            "metadata.search",
+            &json!({"externalIds":{"tmdb":"27205"}}),
+        )
+        .unwrap();
+        assert_eq!(override_ids["externalIds"], json!({"tmdb":"27205"}));
+        let title_only = metadata_input(
+            &context,
+            "work",
+            "metadata.search",
+            &json!({"externalIds":{}}),
+        )
+        .unwrap();
+        assert_eq!(title_only["externalIds"], json!({}));
+        for invalid in [
+            json!({"imdb":"123"}),
+            json!({"tmdb":"not-a-number"}),
+            json!({"tmdb":42}),
+        ] {
+            assert!(
+                metadata_input(
+                    &context,
+                    "work",
+                    "metadata.search",
+                    &json!({"externalIds":invalid})
+                )
+                .is_err()
+            );
+        }
         assert_eq!(search["libraryId"], "shows");
         assert!(search.get("config").is_none());
         assert!(metadata_input(&context, "work", "metadata.details", &json!({})).is_err());

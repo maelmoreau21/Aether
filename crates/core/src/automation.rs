@@ -764,7 +764,7 @@ pub async fn apply_missing_metadata(
             .unwrap_or(result);
         let mut changed = false;
         for (destination, sources) in [
-            ("plot", &["plot", "summary", "overview"][..]),
+            ("plot", &["plot", "synopsis", "summary", "overview"][..]),
             ("outline", &["outline", "tagline"][..]),
             ("tagline", &["tagline"][..]),
             ("genres", &["genres"][..]),

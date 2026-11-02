@@ -1692,6 +1692,70 @@ async fn rich_operations_and_account_avatars_use_signed_permissions() {
                 assert_eq!(output["proposal"], result);
             }
             if id == "details" {
+                // A fixture that can only return details must identify from its
+                // existing NFO/catalogue ID even when the local title is wrong.
+                media_poc::database::query(
+                    "UPDATE inventory_works SET external_ids_json=? WHERE id='work'",
+                )
+                .bind(json!({"test.details":"candidate"}).to_string())
+                .execute(store.pool())
+                .await
+                .unwrap();
+                let identify = "/api/v1/admin/extensions/identify/search";
+                assert_eq!(
+                    call(
+                        &app,
+                        "POST",
+                        identify,
+                        &cookie,
+                        "",
+                        json!({"workId":"work"})
+                    )
+                    .await
+                    .0,
+                    StatusCode::FORBIDDEN
+                );
+                let (status, identified, _) = call(&app,"POST",identify,&cookie,csrf,
+                    json!({"workId":"work","provider":"test.details","title":"Unrelated release filename"})).await;
+                assert_eq!(status, StatusCode::OK, "{identified}");
+                assert_eq!(identified["results"][0]["id"], "candidate");
+                assert_eq!(identified["results"][0]["overview"], "Full plot");
+                assert_eq!(identified["errors"], json!([]));
+                let unchanged: String = media_poc::database::query_scalar(
+                    "SELECT editorial_json FROM inventory_works WHERE id='work'",
+                )
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+                assert_eq!(
+                    serde_json::from_str::<Value>(&unchanged).unwrap(),
+                    json!({})
+                );
+                let (status, title_only, _) = call(
+                    &app,
+                    "POST",
+                    identify,
+                    &cookie,
+                    csrf,
+                    json!({"workId":"work","provider":"test.details","externalIds":{}}),
+                )
+                .await;
+                assert_eq!(status, StatusCode::OK);
+                assert_eq!(title_only["results"], json!([]));
+                assert_eq!(title_only["errors"][0]["error"], "invalid_output");
+                assert_eq!(
+                    call(
+                        &app,
+                        "POST",
+                        identify,
+                        &cookie,
+                        csrf,
+                        json!({"workId":"work","externalIds":{"imdb":"123"}})
+                    )
+                    .await
+                    .0,
+                    StatusCode::BAD_REQUEST
+                );
                 assert_eq!(
                     call(
                         &app,

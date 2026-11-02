@@ -230,7 +230,11 @@ pub struct PartyStatePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ClientMessage {
     Ping {
         client_epoch_ms: i64,
@@ -311,7 +315,11 @@ pub enum ClientMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 #[allow(clippy::large_enum_variant)]
 pub enum ServerMessage {
     Pong {
@@ -434,10 +442,12 @@ pub struct PartyRoom {
     pub active_controllers: HashSet<String>,
     pub participants: HashMap<String, LiveParticipant>,
     pub online_user_ids: HashSet<String>,
+    connection_counts: HashMap<String, usize>,
     pub messages: VecDeque<ChatMessagePayload>,
     pub queue: Vec<QueueItemPayload>,
     pub current_poll: Option<PollPayload>,
     pub seq: u64,
+    pub paused_for_buffering: bool,
     pub broadcast_tx: broadcast::Sender<ServerMessage>,
 }
 
@@ -470,10 +480,12 @@ impl PartyRoom {
             active_controllers: HashSet::new(),
             participants: HashMap::new(),
             online_user_ids: HashSet::new(),
+            connection_counts: HashMap::new(),
             messages: VecDeque::with_capacity(MAX_STORED_MESSAGES),
             queue: Vec::new(),
             current_poll: None,
             seq: 1,
+            paused_for_buffering: false,
             broadcast_tx,
         };
         (room, rx)
@@ -482,7 +494,7 @@ impl PartyRoom {
     /// Calculate the current live playhead position based on server time.
     pub fn computed_position(&self) -> f64 {
         if self.state == PartyState::Playing {
-            let elapsed = (current_epoch_ms() - self.position_updated_ms) as f64 / 1000.0;
+            let elapsed = (current_epoch_ms() - self.position_updated_ms).max(0) as f64 / 1000.0;
             (self.position_s + elapsed).max(0.0)
         } else {
             self.position_s
@@ -500,6 +512,31 @@ impl PartyRoom {
         }
     }
 
+    fn resume_after_buffering(&mut self, user_id: &str, display_name: &str) -> bool {
+        if self.state != PartyState::Paused
+            || !self.paused_for_buffering
+            || self
+                .participants
+                .values()
+                .any(|p| self.online_user_ids.contains(&p.user_id) && p.is_buffering)
+        {
+            return false;
+        }
+        self.paused_for_buffering = false;
+        self.state = PartyState::Playing;
+        self.position_updated_ms = current_epoch_ms();
+        self.seq += 1;
+        let _ = self.broadcast_tx.send(ServerMessage::PlaybackUpdate {
+            state: "playing".into(),
+            position: self.position_s,
+            server_epoch_ms: self.position_updated_ms,
+            caused_by_user_id: user_id.into(),
+            caused_by_name: display_name.into(),
+            seq: self.seq,
+        });
+        true
+    }
+
     pub fn to_state_payload(&self, host_name: String) -> PartyStatePayload {
         PartyStatePayload {
             id: self.id.clone(),
@@ -510,7 +547,7 @@ impl PartyRoom {
             media_title: self.media_title.clone(),
             control_mode: self.control_mode.as_str().to_string(),
             state: self.state.as_str().to_string(),
-            position: self.computed_position(),
+            position: self.position_s,
             position_updated_server_ms: self.position_updated_ms,
             is_locked: self.is_locked,
             wait_for_buffering: self.wait_for_buffering,
@@ -834,8 +871,8 @@ async fn create_party(
     // Get media title (works for either a movie work ID or an episode ID)
     let media_title: String = query_scalar(
         "SELECT COALESCE( \
-            (SELECT w.title || ' — ' || COALESCE(ep.title, 'Épisode ' || ep.episode_number) \
-             FROM inventory_episodes ep JOIN inventory_works w ON w.id = ep.work_id WHERE ep.id = ?), \
+            (SELECT w.title FROM inventory_episodes ep \
+             JOIN inventory_works w ON w.id = ep.work_id WHERE ep.id = ?), \
             (SELECT title FROM inventory_works WHERE id = ?) \
          )",
     )
@@ -1806,6 +1843,11 @@ async fn ws_handler(
     // Check media access
     {
         let room = room_arc.read().await;
+        // Joining is a separate authenticated REST action with invitation and
+        // lock checks. A socket must not bypass it or restore a kicked member.
+        if room.state == PartyState::Ended || !room.participants.contains_key(&actor.user.id) {
+            return Err(StatusCode::FORBIDDEN);
+        }
         if !can_user_access_media(
             &auth.store,
             &actor.user.id,
@@ -1839,6 +1881,7 @@ async fn handle_socket(
     let mut rx = {
         let mut room = room_arc.write().await;
         room.online_user_ids.insert(user_id.clone());
+        *room.connection_counts.entry(user_id.clone()).or_default() += 1;
 
         // Ensure user is in participants map
         if !room.participants.contains_key(&user_id) {
@@ -1891,13 +1934,14 @@ async fn handle_socket(
     // Broadcast member online status
     {
         let room = room_arc.read().await;
-        if let Some(p) = room.participants.get(&user_id) {
-            let _ = room.broadcast_tx.send(ServerMessage::MemberStatus {
-                user_id: user_id.clone(),
-                is_ready: p.is_ready,
-                is_buffering: p.is_buffering,
-                position: p.last_position,
-            });
+        if let Some(member) = room
+            .members_payload()
+            .into_iter()
+            .find(|p| p.user_id == user_id)
+        {
+            let _ = room
+                .broadcast_tx
+                .send(ServerMessage::MemberJoined { member });
         }
     }
 
@@ -1915,7 +1959,17 @@ async fn handle_socket(
     // Task listening to broadcast channel and sending to client
     let out_tx_clone = out_tx.clone();
     let bcast_task = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
+        loop {
+            let msg = match rx.recv().await {
+                Ok(msg) => msg,
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    // Trigger a reconnect and fresh snapshot instead of leaving
+                    // a connected client permanently missing playback events.
+                    let _ = out_tx_clone.send(Message::Close(None)).await;
+                    break;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            };
             if let Ok(json_str) = serde_json::to_string(&msg) {
                 if out_tx_clone
                     .send(Message::Text(json_str.into()))
@@ -1959,16 +2013,34 @@ async fn handle_socket(
     // Client disconnected: update online status
     {
         let mut room = room_arc.write().await;
-        room.online_user_ids.remove(&user_id);
+        let remaining = room
+            .connection_counts
+            .get_mut(&user_id)
+            .map(|count| {
+                *count = count.saturating_sub(1);
+                *count
+            })
+            .unwrap_or(0);
+        if remaining == 0 {
+            room.connection_counts.remove(&user_id);
+            room.online_user_ids.remove(&user_id);
+            if room.resume_after_buffering(&user_id, &display_name) {
+                let _ = query("UPDATE watch_parties SET state = 'playing', current_position_ms = ?, position_updated_at_ms = ? WHERE id = ?")
+                    .bind((room.position_s * 1000.0) as i64).bind(room.position_updated_ms).bind(&room.id)
+                    .execute(&hub.store.pool).await;
+            }
+        }
         if let Some(p) = room.participants.get_mut(&user_id) {
             p.last_seen_ms = current_epoch_ms();
         }
 
-        let _ = room.broadcast_tx.send(ServerMessage::MemberLeft {
-            user_id: user_id.clone(),
-            display_name: display_name.clone(),
-            reason: Some("Déconnecté".to_string()),
-        });
+        if remaining == 0 {
+            let _ = room.broadcast_tx.send(ServerMessage::MemberLeft {
+                user_id: user_id.clone(),
+                display_name: display_name.clone(),
+                reason: Some("Déconnecté".to_string()),
+            });
+        }
     }
 
     bcast_task.abort();
@@ -2037,6 +2109,7 @@ async fn handle_client_event(
 
             // Auto-pause if wait_for_buffering is enabled and someone starts buffering
             if buffering && room.wait_for_buffering && room.state == PartyState::Playing {
+                room.paused_for_buffering = true;
                 room.state = PartyState::Paused;
                 room.position_s = position;
                 room.position_updated_ms = current_epoch_ms();
@@ -2051,6 +2124,14 @@ async fn handle_client_event(
                     caused_by_name: format!("{display_name} (chargement)"),
                     seq,
                 });
+            }
+
+            // Resume only a pause caused by buffering, after every connected
+            // participant has recovered. A manual pause cancels this intent.
+            if !buffering && room.resume_after_buffering(user_id, display_name) {
+                let _ = query("UPDATE watch_parties SET state = 'playing', current_position_ms = ?, position_updated_at_ms = ? WHERE id = ?")
+                    .bind((room.position_s * 1000.0) as i64).bind(room.position_updated_ms).bind(&room.id)
+                    .execute(&hub.store.pool).await;
             }
 
             if auto_paused {
@@ -2073,7 +2154,8 @@ async fn handle_client_event(
                 return;
             }
 
-            let countdown_s = countdown.unwrap_or(0);
+            room.paused_for_buffering = false;
+            let countdown_s = countdown.unwrap_or(0).min(30);
             room.seq += 1;
             let seq = room.seq;
             let now_ms = current_epoch_ms();
@@ -2107,7 +2189,7 @@ async fn handle_client_event(
 
             let _ = query("UPDATE watch_parties SET state = 'playing', current_position_ms = ?, position_updated_at_ms = ? WHERE id = ?")
                 .bind((position * 1000.0) as i64)
-                .bind(now_ms)
+                .bind(room.position_updated_ms)
                 .bind(&room.id)
                 .execute(&hub.store.pool)
                 .await;
@@ -2120,6 +2202,7 @@ async fn handle_client_event(
                 return;
             }
 
+            room.paused_for_buffering = false;
             room.state = PartyState::Paused;
             room.position_s = position;
             room.position_updated_ms = current_epoch_ms();
@@ -2281,6 +2364,7 @@ async fn handle_client_event(
                 room.media_id = media_id.clone();
                 room.media_title = m_title.clone();
                 room.state = PartyState::Waiting;
+                room.paused_for_buffering = false;
                 room.position_s = 0.0;
                 room.position_updated_ms = current_epoch_ms();
                 room.seq += 1;
@@ -2421,6 +2505,7 @@ async fn handle_client_event(
                 room.media_id = media_id.clone();
                 room.media_title = media_title.clone();
                 room.state = PartyState::Waiting;
+                room.paused_for_buffering = false;
                 room.position_s = 0.0;
                 room.position_updated_ms = current_epoch_ms();
                 room.seq += 1;
@@ -2760,6 +2845,195 @@ pub async fn clean_expired_parties(store: &IdentityStore) -> Result<u64, sqlx::E
 mod tests {
     use super::*;
     use sqlx::Row;
+
+    #[test]
+    fn websocket_contract_uses_browser_camel_case_fields() {
+        for raw in [
+            json!({"type":"ping", "clientEpochMs":123}),
+            json!({"type":"changeMedia", "mediaId":"movie"}),
+            json!({"type":"moveQueueItem", "queueId":"q", "newIndex":2}),
+            json!({"type":"votePoll", "pollId":"p", "optionIndex":1}),
+            json!({"type":"grantControl", "userId":"u"}),
+            json!({"type":"setSettings", "controlMode":"shared", "isLocked":true, "waitForBuffering":false}),
+        ] {
+            let event: ClientMessage = serde_json::from_value(raw.clone()).unwrap();
+            let encoded = serde_json::to_value(event).unwrap();
+            for (key, value) in raw.as_object().unwrap() {
+                assert_eq!(&encoded[key], value, "field {key}");
+            }
+        }
+        let pong = serde_json::to_value(ServerMessage::Pong {
+            client_epoch_ms: 123,
+            server_epoch_ms: 456,
+        })
+        .unwrap();
+        assert_eq!(
+            pong,
+            json!({"type":"pong", "clientEpochMs":123, "serverEpochMs":456})
+        );
+    }
+
+    #[test]
+    fn reconnect_snapshot_interpolates_once_and_countdown_keeps_base_position() {
+        let (mut room, _) = PartyRoom::new(
+            "p".into(),
+            "Room".into(),
+            "h".into(),
+            "m".into(),
+            "Movie".into(),
+            ControlMode::HostOnly,
+            true,
+            current_epoch_s(),
+        );
+        room.state = PartyState::Playing;
+        room.position_s = 50.0;
+        room.position_updated_ms = current_epoch_ms() - 10_000;
+        assert_eq!(room.to_state_payload("Host".into()).position, 50.0);
+        assert!((room.computed_position() - 60.0).abs() < 0.5);
+        room.position_updated_ms = current_epoch_ms() + 3000;
+        assert_eq!(room.computed_position(), 50.0);
+    }
+
+    #[tokio::test]
+    async fn two_clients_receive_authoritative_controls_and_buffering_recovery() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("controls.sqlite"))
+            .await
+            .unwrap();
+        let hub = WatchPartyHub::new(store);
+        let (mut room, mut host_rx) = PartyRoom::new(
+            "p".into(),
+            "Room".into(),
+            "host".into(),
+            "m".into(),
+            "Movie".into(),
+            ControlMode::HostOnly,
+            true,
+            current_epoch_s(),
+        );
+        for id in ["host", "follower"] {
+            room.online_user_ids.insert(id.into());
+            room.participants.insert(
+                id.into(),
+                LiveParticipant {
+                    user_id: id.into(),
+                    display_name: id.into(),
+                    role: "participant".into(),
+                    is_ready: true,
+                    is_buffering: false,
+                    last_position: 0.0,
+                    last_seen_ms: current_epoch_ms(),
+                    joined_at: current_epoch_s(),
+                },
+            );
+        }
+        let mut follower_rx = room.broadcast_tx.subscribe();
+        let room = Arc::new(RwLock::new(room));
+        let (out, mut errors) = tokio::sync::mpsc::channel(16);
+        for (raw, expected) in [
+            (json!({"type":"play","position":12}), "playing"),
+            (json!({"type":"seek","position":45}), "playing"),
+            (json!({"type":"pause","position":45}), "paused"),
+        ] {
+            handle_client_event(
+                serde_json::from_value(raw).unwrap(),
+                &room,
+                "host",
+                "Host",
+                &out,
+                &hub,
+            )
+            .await;
+            let a = serde_json::to_value(host_rx.recv().await.unwrap()).unwrap();
+            let b = serde_json::to_value(follower_rx.recv().await.unwrap()).unwrap();
+            assert_eq!(a, b);
+            assert_eq!(a["state"], expected);
+            assert!(a["serverEpochMs"].is_i64());
+        }
+        handle_client_event(
+            ClientMessage::Seek { position: 99.0 },
+            &room,
+            "follower",
+            "Follower",
+            &out,
+            &hub,
+        )
+        .await;
+        assert!(errors.recv().await.is_some());
+        assert_eq!(room.read().await.position_s, 45.0);
+        handle_client_event(
+            ClientMessage::Play {
+                position: 45.0,
+                countdown: None,
+            },
+            &room,
+            "host",
+            "Host",
+            &out,
+            &hub,
+        )
+        .await;
+        handle_client_event(
+            ClientMessage::SetBuffering {
+                buffering: true,
+                position: 46.0,
+            },
+            &room,
+            "follower",
+            "Follower",
+            &out,
+            &hub,
+        )
+        .await;
+        assert_eq!(room.read().await.state, PartyState::Paused);
+        handle_client_event(
+            ClientMessage::SetBuffering {
+                buffering: false,
+                position: 46.0,
+            },
+            &room,
+            "follower",
+            "Follower",
+            &out,
+            &hub,
+        )
+        .await;
+        assert_eq!(room.read().await.state, PartyState::Playing);
+        handle_client_event(
+            ClientMessage::SetBuffering {
+                buffering: true,
+                position: 47.0,
+            },
+            &room,
+            "follower",
+            "Follower",
+            &out,
+            &hub,
+        )
+        .await;
+        handle_client_event(
+            ClientMessage::Pause { position: 47.0 },
+            &room,
+            "host",
+            "Host",
+            &out,
+            &hub,
+        )
+        .await;
+        handle_client_event(
+            ClientMessage::SetBuffering {
+                buffering: false,
+                position: 47.0,
+            },
+            &room,
+            "follower",
+            "Follower",
+            &out,
+            &hub,
+        )
+        .await;
+        assert_eq!(room.read().await.state, PartyState::Paused);
+    }
 
     #[test]
     fn test_control_mode_and_state_roundtrip() {

@@ -1,3 +1,47 @@
+## 2 novembre 2026 — Identification, plugins officiels et SyncPlay
+
+- Deux dépôts conservés dans le dossier de travail : `Aether` et `Aether-Plugins`.
+  L'ancien worktree de publication Poster Rotator a été archivé hors de ce
+  dossier, sans suppression, dans `Documents/Aether-archives/`, puis réparé avec
+  `git worktree repair`. Poster Rotator et avatars restent natifs.
+- Comparaison des sources locales Jellyfin : NFO, priorité des IDs TMDb,
+  commandes programmées et attente de buffering SyncPlay.
+- Les IDs NFO du fournisseur donnent accès aux détails sans imposer le titre
+  local ; le résumé SDK `synopsis` est enregistré sans écraser le manuel.
+  Identifier expose TMDb/IMDb/TVDb, autorise l'ID seul et `{externalIds:{}}`
+  pour une recherche textuelle explicite. Des contrôles de correspondance des
+  IDs protègent également le passage entre fournisseurs.
+- TMDb/IMDb 0.1.1 signés embarqués ; le démarrage ne réactive plus une extension
+  désactivée ni n'étend ses bibliothèques. Sept fournisseurs officiels ont leurs
+  sources/paquets locaux 0.1.1 et des paramètres effectivement utilisés ; voir
+  le rapport du dépôt voisin. Aucun catalogue public ni release publiés.
+- Le changement de version UI ne désinstalle plus avant d'installer : il appelle
+  l'upgrade contrôlé depuis le catalogue. Cette route reste volontairement
+  bloquée tant que la compatibilité et les anciennes écritures ne sont pas
+  garanties ; les installations existantes ne sont pas automatiquement migrées.
+- SyncPlay : champs JSON camelCase, application locale des commandes reçues,
+  position de reconnexion, compte à rebours, préparation du lecteur et reprise
+  de buffering corrigés. Le test HTTP réel a aussi révélé une référence SQL à
+  une colonne d'épisode inexistante empêchant la création des séances.
+- Preuves acquises : NFO 7 tests ; extensions Core 26 tests réussis, un test
+  navigateur ignoré explicitement ; identification HTTP avec vrai worker Wasm
+  signé ; persistance du synopsis et protection manuel ; 7 tests frontend
+  SyncPlay ; Svelte check 0/0 et ESLint ; 51 tests natifs fournisseurs,
+  exécution des sept guests Wasm avec broker simulé et signatures vérifiées.
+  Chrome 156 desktop/mobile valide le formulaire Identifier et le refus de
+  mise à jour sans désinstallation. Requête réelle TMDb : HTTP 200, film 27205,
+  titre français, résumé et affiche présents.
+- SyncPlay : dix tests unitaires Rust réussis ; un scénario TCP/HTTP avec deux comptes et deux vrais WebSockets
+  réussit après correction SQL (18,71 s d'exécution) : création, adhésion, ping,
+  play/pause/seek, refus du contrôle participant, compte à rebours, reconnexion,
+  buffering/reprise et déconnexion pendant buffering. Ce test ne décode pas
+  deux vidéos dans deux navigateurs. Clippy Core/Node bibliothèques avec
+  `-D warnings`, formatage Rust et `git diff --check` réussis.
+- Rapport et limites : `docs/REPAIR_METADATA_SYNCPLAY_2026_11_02.md`.
+  Aucune preuve NAS, deux lecteurs physiques ou endurance. Les modifications
+  de dépendances Web/Rust apparues en parallèle ont été préservées et ne sont pas
+  attribuées à cette intervention.
+
 ## 1er novembre 2026 — Correction CI : formatage Rust & alignement test missing_only_sweep
 
 - **Correction du formatage Rust (`cargo fmt`)** :

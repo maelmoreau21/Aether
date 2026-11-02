@@ -849,41 +849,43 @@ pub async fn install_internal_with_key(
 }
 
 pub async fn bootstrap_essential_plugins(store: &crate::identity::IdentityStore) {
-    let tmdb_row: Option<(i64, i64)> =
-        query_as("SELECT enabled, all_libraries FROM extensions WHERE id='tmdb'")
-            .fetch_optional(store.pool())
-            .await
-            .unwrap_or(None);
-    if let Some((enabled, all_libs)) = tmdb_row {
-        if enabled == 0 || all_libs == 0 {
-            let _ = query("UPDATE extensions SET enabled=1, all_libraries=1 WHERE id='tmdb'")
-                .execute(store.pool())
-                .await;
+    const PUB_KEY: &str = include_str!("../embedded_plugins/publisher-public.txt");
+    for (id, bytes) in [
+        (
+            "tmdb",
+            include_str!("../embedded_plugins/tmdb-0.1.1.package.json"),
+        ),
+        (
+            "imdb",
+            include_str!("../embedded_plugins/imdb-0.1.1.package.json"),
+        ),
+    ] {
+        let exists: bool =
+            match query_scalar::<sqlx::Any, i64>("SELECT COUNT(*) FROM extensions WHERE id=?")
+                .bind(id)
+                .fetch_one(store.pool())
+                .await
+            {
+                Ok(count) => count > 0_i64,
+                Err(error) => {
+                    eprintln!("Could not check bundled extension {id}: {error}");
+                    continue;
+                }
+            };
+        // Bootstrap defaults only. A restart must preserve the administrator's
+        // activation and library grants, including an intentionally empty scope.
+        if exists {
+            continue;
         }
-    } else {
-        const TMDB_PKG: &str = include_str!("../embedded_plugins/tmdb-0.1.0.package.json");
-        const PUB_KEY: &str = include_str!("../embedded_plugins/publisher-public.txt");
-        if let Ok(pkg) = serde_json::from_str::<Package>(TMDB_PKG) {
-            let _ = install_internal_with_key(store, pkg, PUB_KEY.trim()).await;
-        }
-    }
-
-    let imdb_row: Option<(i64, i64)> =
-        query_as("SELECT enabled, all_libraries FROM extensions WHERE id='imdb'")
-            .fetch_optional(store.pool())
-            .await
-            .unwrap_or(None);
-    if let Some((enabled, all_libs)) = imdb_row {
-        if enabled == 0 || all_libs == 0 {
-            let _ = query("UPDATE extensions SET enabled=1, all_libraries=1 WHERE id='imdb'")
-                .execute(store.pool())
-                .await;
-        }
-    } else {
-        const IMDB_PKG: &str = include_str!("../embedded_plugins/imdb-0.1.0.package.json");
-        const PUB_KEY: &str = include_str!("../embedded_plugins/publisher-public.txt");
-        if let Ok(pkg) = serde_json::from_str::<Package>(IMDB_PKG) {
-            let _ = install_internal_with_key(store, pkg, PUB_KEY.trim()).await;
+        let package = match serde_json::from_str::<Package>(bytes) {
+            Ok(package) => package,
+            Err(error) => {
+                eprintln!("Invalid bundled extension package {id}: {error}");
+                continue;
+            }
+        };
+        if let Err(error) = install_internal_with_key(store, package, PUB_KEY.trim()).await {
+            eprintln!("Could not install bundled extension {id}: {error}");
         }
     }
 }
@@ -1717,7 +1719,7 @@ pub(crate) async fn run_automated(
         settings["countryCode"] = json!(country_code);
     }
     let mut marker_sources = Vec::new();
-    let payload = if let Some((title, artist, album, duration)) = &music_track {
+    let mut payload = if let Some((title, artist, album, duration)) = &music_track {
         if operation == "lyrics.get" {
             lyrics_request_input(title, artist, album, *duration)
         } else if operation == "metadata.search" {
@@ -1896,13 +1898,26 @@ pub(crate) async fn run_automated(
         }
         value
     };
+    // An authoritative NFO/manual provider ID resolves details directly. Local
+    // titles may be translated or a release filename and must not veto the ID.
+    let known_id = (music_track.is_none() && operation == "metadata.search")
+        .then(|| known_metadata_id(&payload, extension_id).map(str::to_owned))
+        .flatten();
+    if let Some(id) = &known_id {
+        payload["id"] = json!(id);
+    }
+    let resolved_operation = if known_id.is_some() {
+        "metadata.details"
+    } else {
+        operation
+    };
     let invocation = crate::extension_runtime::Invocation {
         wasm: crate::extension_storage::wasm(&auth.store, &package)
             .await
             .map_err(storage_error)?,
         input: ExtensionRequest {
             api_version: 1,
-            operation: operation.into(),
+            operation: resolved_operation.into(),
             input: metadata_input_with_settings(payload.clone(), settings),
         },
         allowed_hosts: package.manifest.http_hosts.clone(),
@@ -1957,6 +1972,14 @@ pub(crate) async fn run_automated(
         Some(job),
     )
     .await?;
+    if let Some(id) = &known_id
+        && result["providerId"].as_str() != Some(id.as_str())
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_metadata_origin",
+        ));
+    }
     if operation == "lyrics.get" && !lyrics_result_matches_input(&payload, &result) {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -2005,12 +2028,16 @@ pub(crate) async fn run_automated(
             });
         }
     }
-    // Only an unambiguous title/type/year match may reach automatic details.
+    // A cross-provider ID lookup may return a translated title or correct a
+    // local year. Resolve its sole candidate, then verify the source ID in details.
     if music_track.is_none()
         && operation == "metadata.search"
         && let Some(items) = result.as_array()
         && let Some(candidate) = trusted_metadata_candidate(items, &invocation.input.input)
+            .or_else(|| external_id_candidate(items, &invocation.input.input))
     {
+        let source_input = invocation.input.input.clone();
+        let identified_by_title = trusted_metadata_candidate(items, &source_input).is_some();
         let mut details = invocation;
         details.input.operation = "metadata.details".into();
         details.input.input["id"] = candidate["id"].clone();
@@ -2028,10 +2055,14 @@ pub(crate) async fn run_automated(
             .as_str()
             .is_some_and(|id| id == candidate["id"].as_str().unwrap_or(""));
         let title_matches = enriched["title"].as_str().is_none_or(|title| {
-            normalize_title(title) == normalize_title(candidate["title"].as_str().unwrap_or(""))
+            matchable_title(title) == matchable_title(candidate["title"].as_str().unwrap_or(""))
         });
         let year_matches = invocation_year_matches(&enriched, candidate);
-        if id_matches && title_matches && year_matches {
+        let identity_matches = metadata_external_ids_match(&enriched, &source_input);
+        if id_matches
+            && !metadata_external_ids_conflict(&enriched, &source_input)
+            && (identity_matches || (identified_by_title && title_matches && year_matches))
+        {
             let _ = crate::automation::put_cached_provider_response(
                 &mut tx,
                 extension_id,
@@ -2134,6 +2165,54 @@ fn invocation_year_matches(details: &Value, candidate: &Value) -> bool {
     })
 }
 
+fn known_metadata_id<'a>(input: &'a Value, provider: &str) -> Option<&'a str> {
+    input["externalIds"][provider]
+        .as_str()
+        .filter(|id| !id.trim().is_empty() && id.len() <= 256 && !id.chars().any(char::is_control))
+}
+
+fn external_id_candidate<'a>(items: &'a [Value], input: &Value) -> Option<&'a Value> {
+    if !input["externalIds"]
+        .as_object()
+        .is_some_and(|ids| !ids.is_empty())
+        || items.len() != 1
+    {
+        return None;
+    }
+    let candidate = &items[0];
+    (candidate["mediaType"] == input["mediaType"]
+        && candidate["id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty() && id.len() <= 256))
+    .then_some(candidate)
+}
+
+fn metadata_external_ids_match(details: &Value, input: &Value) -> bool {
+    let Some(expected) = input["externalIds"].as_object() else {
+        return false;
+    };
+    let mut confirmed = false;
+    for (provider, id) in expected {
+        if let Some(actual) = details["externalIds"].get(provider) {
+            if actual != id {
+                return false;
+            }
+            confirmed = true;
+        }
+    }
+    confirmed
+}
+
+fn metadata_external_ids_conflict(details: &Value, input: &Value) -> bool {
+    input["externalIds"].as_object().is_some_and(|expected| {
+        expected.iter().any(|(provider, id)| {
+            details["externalIds"]
+                .get(provider)
+                .is_some_and(|actual| actual != id)
+        })
+    })
+}
+
 fn trusted_metadata_candidate<'a>(items: &'a [Value], input: &Value) -> Option<&'a Value> {
     let raw_title = input["title"].as_str()?;
     let title = normalize_title(raw_title);
@@ -2148,7 +2227,8 @@ fn trusted_metadata_candidate<'a>(items: &'a [Value], input: &Value) -> Option<&
 
     if let Some(expected) = year
         && let Some(candidate) = items.iter().find(|item| {
-            item["title"].as_str().is_some_and(title_matches)
+            (item["title"].as_str().is_some_and(title_matches)
+                || item["originalTitle"].as_str().is_some_and(title_matches))
                 && item["mediaType"].as_str() == Some(media_type)
                 && item["year"].as_i64() == Some(expected)
         })
@@ -2156,7 +2236,8 @@ fn trusted_metadata_candidate<'a>(items: &'a [Value], input: &Value) -> Option<&
         return Some(candidate);
     }
     items.iter().find(|item| {
-        item["title"].as_str().is_some_and(title_matches)
+        (item["title"].as_str().is_some_and(title_matches)
+            || item["originalTitle"].as_str().is_some_and(title_matches))
             && item["mediaType"].as_str() == Some(media_type)
             && year.is_none_or(|expected| item["year"].as_i64().is_none_or(|y| y == expected))
     })
@@ -2369,6 +2450,42 @@ mod configuration_tests {
         }
     }
     #[test]
+    fn known_metadata_identity_is_provider_scoped_and_translated_titles_match_originals() {
+        let input = json!({"title":"Wrong release name","externalIds":{"tmdb":"27205"}});
+        assert_eq!(known_metadata_id(&input, "tmdb"), Some("27205"));
+        assert_eq!(known_metadata_id(&input, "imdb"), None);
+        assert_eq!(
+            known_metadata_id(&json!({"externalIds":{"tmdb":" "}}), "tmdb"),
+            None
+        );
+        let input = json!({"title":"The Movie","mediaType":"movie","year":2024});
+        let candidate = json!({"id":"42","title":"Le Film","originalTitle":"The Movie","mediaType":"movie","year":2024});
+        assert!(trusted_metadata_candidate(std::slice::from_ref(&candidate), &input).is_some());
+        let input = json!({"title":"Wrong filename","year":1999,"mediaType":"movie","externalIds":{"imdb":"tt123"}});
+        assert!(trusted_metadata_candidate(std::slice::from_ref(&candidate), &input).is_none());
+        assert!(external_id_candidate(std::slice::from_ref(&candidate), &input).is_some());
+        assert!(external_id_candidate(&[candidate.clone(), candidate.clone()], &input).is_none());
+        assert!(
+            external_id_candidate(&[json!({"id":"42","mediaType":"tv_show"})], &input).is_none()
+        );
+        assert!(metadata_external_ids_match(
+            &json!({"externalIds":{"tmdb":"42","imdb":"tt123"}}),
+            &input
+        ));
+        assert!(!metadata_external_ids_match(
+            &json!({"externalIds":{"tmdb":"42"}}),
+            &input
+        ));
+        assert!(!metadata_external_ids_match(
+            &json!({"externalIds":{"imdb":"tt999"}}),
+            &input
+        ));
+        assert!(metadata_external_ids_conflict(
+            &json!({"externalIds":{"imdb":"tt999"}}),
+            &input
+        ));
+    }
+    #[test]
     fn historical_empty_endpoint_keeps_provider_default_and_credentials() {
         let value = metadata_input_with_settings(
             json!({"title":"Fixture"}),
@@ -2438,5 +2555,21 @@ mod configuration_tests {
         .await
         .unwrap();
         assert_eq!(imdb_row, Some((1, 1)));
+
+        query("UPDATE extensions SET enabled=0, all_libraries=0 WHERE id='tmdb'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        query("UPDATE extensions SET enabled=1, all_libraries=0 WHERE id='imdb'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        bootstrap_essential_plugins(&store).await;
+        let choices: Vec<(String, i64, i64)> =
+            query_as("SELECT id, enabled, all_libraries FROM extensions ORDER BY id")
+                .fetch_all(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(choices, vec![("imdb".into(), 1, 0), ("tmdb".into(), 0, 0)]);
     }
 }

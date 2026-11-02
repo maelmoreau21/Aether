@@ -1795,6 +1795,39 @@ async fn image_automation_preserves_manual_and_deduplicates() {
     assert_eq!(prov.1, 100);
 }
 
+#[tokio::test]
+async fn structured_provider_synopsis_is_persisted_and_manual_plot_is_preserved() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("provider-synopsis.sqlite"))
+        .await
+        .unwrap();
+    setup(&store).await;
+    query("UPDATE inventory_works SET manual_json=? WHERE id='work-2'")
+        .bind(json!({"plot":"Local NFO/manual plot"}).to_string())
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let mut tx = store.pool().begin().await.unwrap();
+    for asset in ["asset-1", "asset-2"] {
+        automation::apply_missing_metadata(&mut tx, asset, "fixture.metadata", "fingerprint-1",
+            &json!({"provider":"fixture.metadata","providerId":"27205","synopsis":"Localized provider synopsis","externalIds":{"tmdb":"27205"}}), 100).await.unwrap();
+    }
+    tx.commit().await.unwrap();
+    let metadata: String =
+        query_scalar("SELECT editorial_json FROM inventory_works WHERE id='work-1'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&metadata).unwrap()["plot"],
+        "Localized provider synopsis"
+    );
+    let provenance: String = query_scalar("SELECT value_json FROM automatic_metadata_provenance WHERE work_id='work-1' AND field_name='plot'").fetch_one(store.pool()).await.unwrap();
+    assert_eq!(provenance, json!("Localized provider synopsis").to_string());
+    let count: i64 = query_scalar("SELECT COUNT(*) FROM automatic_metadata_provenance WHERE work_id='work-2' AND field_name='plot'").fetch_one(store.pool()).await.unwrap();
+    assert_eq!(count, 0);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn extreme_scale_100k_and_naive_vs_optimized_comparison() {
     let temp = tempfile::tempdir().unwrap();

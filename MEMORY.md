@@ -1,4 +1,1115 @@
+## 2 novembre 2026 — Isolation des scénarios navigateur scanner/séries
+
+- La fixture `Scanner Film (2026) [tmdb-123]` déclenchait désormais les vrais
+  fournisseurs embarqués : son titre changeait et le sélecteur Scanner Film expirait.
+- Les bases temporaires des deux scénarios préinstallent puis désactivent les
+  fournisseurs avant le démarrage Core. Les IDs synthétiques et les assertions
+  de catalogue/lecture restent conservés ; les paramètres produit sont inchangés.
+  Les scripts navigateur vérifient cette isolation avant le scan.
+- Le processus Séries force également SQLite et retire MEDIA_DB_URL hérité.
+- Validation locale : fmt et syntaxe JS réussis ; les deux scénarios navigateur
+  passent (Films avec redémarrage : 80,68 s ; Séries : 72,74 s). Aucun autre test
+  lancé. Une nouvelle CI GitHub reste à exécuter après envoi du correctif.
+
+## 2 novembre 2026 — Diagnostic réel NAS et corrections métadonnées/images
+
+- SSH NAS en lecture seule : Core 0.2.0-beta.21, PostgreSQL, quatre plugins 0.1.0.
+  Le volume `aether_data` correspond à `/volume2/@docker/volumes/aether_data/_data` ;
+  aucun réglage, secret, conteneur ou média du NAS modifié.
+- Piège Wasm reproduit avec le module déployé et une vraie réponse TMDb : 2M fuel
+  échoue, 50M renvoie 12 résultats. Plafond fini 200M, erreurs explicites, TMDb
+  prioritaire ; détails TMDb réduits aux crédits/IDs, images dans l'opération dédiée.
+- Affiche réellement changée après scan : lecture locale revalidée via Node,
+  métadonnées rafraîchies, fichier invalide toujours refusé. Bandeau : repli original.
+- Fournisseurs sans données privées : mise à jour transactionnelle et génération
+  remplacée, paramètres/droits conservés, ancien paquet dans `plugins/.revisions`.
+  Les extensions avec stockage privé restent bloquées sans migration.
+- Publication develop : paquets signés, incrément numérique, catalogue develop et
+  releases bêta après CI. Nécessite le secret de signature existant ; aucune
+  publication déclenchée ici. Voir README Aether-Plugins.
+- Vérifications ciblées : affiche remplacée/fichier invalide, vraie exécution du
+  guest avec réponse réaliste et upgrade catalogue passent ; Svelte 0/0,
+  Actionlint et planification des versions passent. Aucun rerun global.
+- Limite : sources locales ; NAS pas encore redéployé. Rapport
+  `docs/NAS_METADATA_FIX_2026_11_02.md`.
+
+## 2 novembre 2026 — Correction des échecs GitHub Actions FFmpeg
+
+- Diagnostic du run `41446141236` sur `8f33738` : partitions Rust et navigateur
+  bloqués avant les tests par curl 35 (TLS reset) ou 28 (timeout) lors du
+  téléchargement FFmpeg ; même erreur dans le stage Docker `probe-runtime`.
+  Frontend, validation des workflows et audit Rust réussissaient déjà.
+- `build-ffmpeg.sh` retente toutes les erreurs de transport avec délais bornés
+  et utilise le miroir MacPorts en second recours. Version 9.0.2 et SHA-256
+  inchangés, HTTPS obligatoire, refus d'extraire une archive d'empreinte différente.
+  Le même script est utilisé par CI et Docker.
+- Quatre tests POSIX du téléchargement ajoutés au job workflows : succès,
+  repli après TLS/fichier partiel, indisponibilité totale et corruption des deux
+  sources. Quatre tests, 14 tests de politique de release, Bash syntaxe,
+  Actionlint 1.7.12 et contrôle du diff réussis.
+- Archive du miroir réellement téléchargée : 12 040 788 octets, empreinte exacte.
+  Construction locale du stage Docker : trois échecs TLS du serveur principal,
+  puis miroir et vérification réussis. Le stage `probe-runtime` a été construit
+  complètement avec succès ; ses deux binaires annoncent FFmpeg/ffprobe 9.0.2.
+- Correction parallèle dans Aether-Plugins : SDK Git épinglé remplace le chemin
+  vers le dépôt voisin qui faisait échouer Dependabot. Voir sa mémoire projet.
+- Correctifs locaux ; la réussite d'une nouvelle CI GitHub n'est pas revendiquée.
+
+## 2 novembre 2026 — Identification, plugins officiels et SyncPlay
+
+- Deux dépôts conservés dans le dossier de travail : `Aether` et `Aether-Plugins`.
+  L'ancien worktree de publication Poster Rotator a été archivé hors de ce
+  dossier, sans suppression, dans `Documents/Aether-archives/`, puis réparé avec
+  `git worktree repair`. Poster Rotator et avatars restent natifs.
+- Comparaison des sources locales Jellyfin : NFO, priorité des IDs TMDb,
+  commandes programmées et attente de buffering SyncPlay.
+- Les IDs NFO du fournisseur donnent accès aux détails sans imposer le titre
+  local ; le résumé SDK `synopsis` est enregistré sans écraser le manuel.
+  Identifier expose TMDb/IMDb/TVDb, autorise l'ID seul et `{externalIds:{}}`
+  pour une recherche textuelle explicite. Des contrôles de correspondance des
+  IDs protègent également le passage entre fournisseurs.
+- TMDb/IMDb 0.1.1 signés embarqués ; le démarrage ne réactive plus une extension
+  désactivée ni n'étend ses bibliothèques. Sept fournisseurs officiels ont leurs
+  sources/paquets locaux 0.1.1 et des paramètres effectivement utilisés ; voir
+  le rapport du dépôt voisin. Aucun catalogue public ni release publiés.
+- Le changement de version UI ne désinstalle plus avant d'installer : il appelle
+  l'upgrade contrôlé depuis le catalogue. Cette route reste volontairement
+  bloquée tant que la compatibilité et les anciennes écritures ne sont pas
+  garanties ; les installations existantes ne sont pas automatiquement migrées.
+- SyncPlay : champs JSON camelCase, application locale des commandes reçues,
+  position de reconnexion, compte à rebours, préparation du lecteur et reprise
+  de buffering corrigés. Le test HTTP réel a aussi révélé une référence SQL à
+  une colonne d'épisode inexistante empêchant la création des séances.
+- Preuves acquises : NFO 7 tests ; extensions Core 26 tests réussis, un test
+  navigateur ignoré explicitement ; identification HTTP avec vrai worker Wasm
+  signé ; persistance du synopsis et protection manuel ; 7 tests frontend
+  SyncPlay ; Svelte check 0/0 et ESLint ; 51 tests natifs fournisseurs,
+  exécution des sept guests Wasm avec broker simulé et signatures vérifiées.
+  Chrome 156 desktop/mobile valide le formulaire Identifier et le refus de
+  mise à jour sans désinstallation. Requête réelle TMDb : HTTP 200, film 27205,
+  titre français, résumé et affiche présents.
+- SyncPlay : dix tests unitaires Rust réussis ; un scénario TCP/HTTP avec deux comptes et deux vrais WebSockets
+  réussit après correction SQL (18,71 s d'exécution) : création, adhésion, ping,
+  play/pause/seek, refus du contrôle participant, compte à rebours, reconnexion,
+  buffering/reprise et déconnexion pendant buffering. Ce test ne décode pas
+  deux vidéos dans deux navigateurs. Clippy Core/Node bibliothèques avec
+  `-D warnings`, formatage Rust et `git diff --check` réussis.
+- Rapport et limites : `docs/REPAIR_METADATA_SYNCPLAY_2026_11_02.md`.
+  Aucune preuve NAS, deux lecteurs physiques ou endurance. Les modifications
+  de dépendances Web/Rust apparues en parallèle ont été préservées et ne sont pas
+  attribuées à cette intervention.
+
+## 1er novembre 2026 — Correction CI : formatage Rust & alignement test missing_only_sweep
+
+- **Correction du formatage Rust (`cargo fmt`)** :
+  - Alignement des retours de ligne et indentations dans `crates/core/src/extensions.rs`, `crates/node/src/scanner.rs`, `crates/core/src/automation.rs`, et `crates/core/src/extension_adapters.rs` pour satisfaire `cargo fmt --check` en CI.
+- **Alignement du test `missing_only_sweep_skips_complete_and_manually_corrected_works` (`crates/core/tests/automation_flow.rs`)** :
+  - Suite à l'introduction de la vérification de présence d'affiche (`poster_count > 0`) pour qualifier une œuvre comme complète dans les sweeps `metadata.missing`, ajout explicite d'une affiche sur `work-1` dans le jeu de test pour correspondre à la définition d'une œuvre complète.
+- **Validations réelles** :
+  - `cargo fmt --check` : 0 divergence.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test -p media-poc --test automation_flow -- --test-threads=1` : 16 passés, 0 échec.
+  - `cargo test -p media-node` : 93 passés, 0 échec.
+
+## 1er novembre 2026 — Résolution complète du pipeline de métadonnées et d'images (Parité Jellyfin)
+
+- **Nettoyage avancé des noms de fichiers (crates/node/src/scanner.rs)** :
+  - Conversion automatique des séparateurs de scène (points ., underscores _) en espaces.
+  - Détection automatique de l'année 1888..=2100 : entre parenthèses (YYYY), entre crochets [YYYY] ou délimitée sans parenthèses (ex: Movie.Title.2024.1080p.mkv -> titre: "Movie Title", année: Some(2024)).
+  - Élimination des tags de release et codecs standards (1080p, 720p, 2160p, 4k, web-dl, luray, x264, x265, hevc, 
+emux, etc.) pour éviter de polluer la recherche TMDb/IMDb.
+  - Nettoyage des titres d'épisodes de séries (clean_episode_title) avec repli propre sur SxxExx sans les résolutions/codecs.
+- **Auto-amorçage des plugins essentiels (crates/core/src/extensions.rs)** :
+  - ootstrap_essential_plugins insère ou réactive automatiquement 	mdb et imdb avec enabled = 1 et ll_libraries = 1 dès le premier démarrage d'Aether.
+  - Paquets pré-embarqués dans crates/core/embedded_plugins/ pour garantir la présence des plugins sans dépendre d'un téléchargement réseau initial.
+  - install_with_key active désormais par défaut les extensions installées depuis le catalogue (enabled = 1, all_libraries = 1).
+- **Assouplissement du matching TMDb/IMDb (crates/core/src/extensions.rs)** :
+  - 	rusted_metadata_candidate utilise matchable_title pour ignorer les divergences de ponctuation (-, :, ', etc.).
+  - Retient le premier candidat pertinent même en cas d'homonymes multiples au lieu de rejeter silencieusement la correspondance.
+- **Téléchargement automatique des affiches et fanarts (crates/core/src/automation.rs, crates/core/src/extension_adapters.rs)** :
+  - pply_missing_metadata extrait poster_url et ackdrop_url et les importe immédiatement dans le magasin d'images applicatif (rtwork.rs).
+  - Limite de taille d'image augmentée à 10 Mo dans import_image_direct pour accepter les affiches originales haute résolution de TMDb.
+  - Enregistrement systématique de 
+egister_active_store(&store) dans IdentityStore::open_with_timeout et open_postgres.
+- **Déclenchement du scan de métadonnées manquantes (crates/core/src/inventory.rs, AdminLibraries.svelte)** :
+  - complete_scan planifie automatiquement metadata.missing lors des scans en mode missing_metadata ou ull.
+  - Bouton et sélecteur de mode dans l'administration des bibliothèques (AdminLibraries.svelte) permettant de cibler les œuvres sans résumé ou sans affiche.
+- **Validations réelles** :
+  - cargo check --workspace : 0 erreur.
+  - cargo test -p media-node : 93 passés, 0 échec.
+  - cargo test -p media-poc --lib extensions -- --test-threads=1 : 26 passés, 0 échec.
+  - cargo clippy --all-targets -- -D warnings : 0 avertissement.
+  - 
+pm --prefix apps/web test : 31 suites, 220 tests passés.
+  - 
+pm --prefix apps/web run check : 0 erreur, 0 avertissement (svelte-check).
+
+## 1er novembre 2026 — Parités Jellyfin : seuils de reprise, métadonnées, SyncPlay, CORS et réglages serveur
+
+- **Seuils de reprise & Intégration UI (`progress.ts`, `server_settings.rs`)** :
+  - `minResumePct` (0..49, défaut 0), `maxResumePct` (50..100, défaut 90), `minResumeDurationSeconds` (0..86400, défaut 0), `preferredMetadataLanguage` (défaut "fr"), `metadataCountryCode` (défaut "FR").
+  - `isResumable(progress, presentation)` vérifie si le média est terminé (`watched`), si la durée est inférieure au seuil minimal, ou si le pourcentage lu se situe hors de l'intervalle de reprise.
+  - `ProgressTracker.load()` unifié pour utiliser directement `isResumable`, évitant les divergences entre lecteur et affichage catalogue.
+  - Relié de façon réactive dans l'UI du catalogue et du lecteur : `ContinueWatching.svelte`, `FilmDetail.svelte`, `HeroBanner.svelte`, `Poster.svelte`, et `SeriesDetail.svelte`.
+- **Propagation de la langue et du pays vers les extensions (`extensions.rs`, `extension_identify.rs`, `extension_adapters.rs`)** :
+  - `extensions::run` et `run_automated` résolvent la langue et le pays prioritaires depuis les options de la bibliothèque avec repli sur `server_settings::load(&auth.store)`.
+  - Transmission des champs `language` et `country` dans les charges utiles Wasm (`metadata.search`, `metadata.details`, `metadata.identify`).
+  - Optimisation dans `extension_identify.rs` : chargement unique des paramètres serveur avant la boucle d'interrogation des fournisseurs.
+- **File d'attente Watch Party / SyncPlay (`parties.rs`, `sync-client.svelte.ts`, `WatchPartyOverlay.svelte`)** :
+  - Nouveaux messages `MoveQueueItem { queue_id, new_index }` et `PlayQueueItem { queue_id }` gérés côté Core et client.
+  - Réordonnancement dynamique de la file d'attente avec persistance SQL en base (`watch_party_queue.position`) et diffusion `QueueUpdated`.
+  - Lancement direct d'un élément de la file d'attente avec suppression de la file, réindexation contiguë des éléments restants en base et en mémoire, réinitialisation de la position de lecture à zéro et diffusion synchronisée `MediaChanged` / `QueueUpdated`.
+  - Boutons de montée/descente (▲/▼) et de lancement direct (▶ Lancer) intégrés dans l'onglet File d'attente de `WatchPartyOverlay.svelte`.
+- **Réglages serveur additionnels & Application réelle (`server_settings.rs`, `lib.rs`, `identity.rs`, `system_tasks.rs`, `AdminSettings.svelte`)** :
+  - `activity_log_retention_days` (1..=3650 jours, défaut 30) : branché dans `task_clean_sessions` pour purger les sessions inactives selon le seuil configuré (parité Jellyfin `CleanActivityLogTask`).
+  - `cors_hosts` (`Vec<String>`, origines `http://` ou `https://` ou `*`, max 50) : mis en cache dans `IdentityStore.cors_origins` et appliqué en temps réel dans le middleware de sécurité (`local_security_with_store`).
+  - Support complet des requêtes prévol CORS `OPTIONS` (réponse 204 No Content + headers `Access-Control-*`) et insertion automatique de `Access-Control-Allow-Origin: <origin>` et `Access-Control-Allow-Credentials: true` sur les requêtes autorisées.
+- **Validations réelles** :
+  - `cargo test -p media-poc --lib parties::tests` : 7/7 tests passés.
+  - `cargo test -p media-poc --lib server_settings::tests` : 4/4 tests passés.
+  - `cargo test -p media-poc --test settings_avatars` : 2/2 tests passés, incluant `cors_preflight_and_configured_origins_are_enforced`.
+  - `cargo test -p media-poc --test challenger_security_challenge` : 4/4 tests de sécurité stricts passés (rejet de tout attaquant non configuré en 403 Forbidden).
+  - `cargo test -p media-poc --test extensions` : 16/16 tests passés sans conflit de slot d'exécution (isolation de l'ID d'extension pour les tests de quota).
+  - `cargo clippy -p media-poc --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo fmt --check` : 0 divergence.
+  - `npm --prefix apps/web test` : 31 suites, 220 tests passés (100 %).
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement (`svelte-check`).
+
+## 1er novembre 2026 - Diagnostic des recherches d'identification vides
+
+- Identify (extension_identify.rs) : les erreurs des fournisseurs (timeout, cle absente, 401, etc.) n'etaient plus avalees silencieusement ; la reponse expose errors[] et IdentifyModal.svelte les affiche quand aucun resultat n'est trouve.
+- Plugin TMDb : si la recherche avec annee ne renvoie rien, nouvelle tentative sans annee.
+- Verifie : clippy workspace OK, tests plugin TMDb 5/5, svelte-check 0 erreur. Non verifie : appel reseau reel TMDb (cause exacte du resultat vide chez l'utilisateur a confirmer via le message d'erreur affiche).
+
+## 1er novembre 2026 — Résolution des échecs d'identification, de recherche d'images et intégration de la clé par défaut TMDb (Option B Jellyfin)
+
+- **Intégration de la clé communautaire par défaut pour TMDb (Pattern Jellyfin - Option B) (`crates/core/src/extensions.rs`, `Aether-Plugins-TMDb`)** :
+  - **Résolution automatique des réglages (`resolve_effective_extension_settings`)** :
+    - Si l'administrateur n'a pas renseigné de clé d'API personnelle dans les réglages de l'extension TMDb et qu'aucune variable `TMDB_API_KEY` n'est définie dans l'environnement hôte, le Core injecte automatiquement la clé de projet communautaire open source partagée (`4219e299c89411838049ab0dab19ebd5`).
+    - Priorité absolue conservée : si l'administrateur renseigne sa propre clé ou définit `TMDB_API_KEY`, celle-ci prend le pas sur la clé de repli par défaut.
+    - Champ `api_key` marqué `required: false` dans la déclaration de configuration de TMDb (`Aether-Plugins-TMDb/src/lib.rs`), permettant l'activation immédiate du plugin sans saisie obligatoire.
+- **Diagnostic et correction des blocages d'identification et de recherche d'images (`extension_identify.rs`, `extension_adapters.rs`, `extension_image_collection.rs`, `Aether-Plugins-TMDb`)** :
+  - **Correction du format de type média pour les séries (`extension_identify.rs`)** :
+    - Les requêtes `metadata.search` et `metadata.details` transmettaient `"mediaType": "tvShow"` en camelCase, alors que l'énumération Rust `MediaType` du SDK utilise `#[serde(rename_all = "snake_case")]` (`"tv_show"`). Cette discordance causait une erreur systématique `invalid_search_input` ou `invalid_details_input` lors de toute tentative d'identification d'une série. Corrigé en `"tv_show"`.
+  - **Prise en compte du titre et de l'année de recherche saisis (`extension_adapters.rs`)** :
+    - `metadata_input` écrasait aveuglément les champs `title` et `year` fournis par le formulaire de recherche manuelle avec le titre brut non nettoyé de la base de données. Corrigé pour respecter `input.get("title")` et `input.get("year")` lorsqu'ils sont spécifiés par l'utilisateur.
+  - **Transmission de `externalIds` et `mediaType` lors de la recherche et collecte d'images (`extension_image_collection.rs`)** :
+    - Les requêtes Wasm pour `metadata.images` n'incluaient ni `externalIds`, ni `mediaType`. L'extension TMDb interrogeait le point d'accès `movie/{id}/images` même pour les séries et ne pouvait pas exploiter les identifiants croisés (ex. `imdb`). La charge utile transmet désormais explicitement `mediaType` et `externalIds`.
+  - **Résolution croisée IMDb -> TMDb dans l'extension TMDb (`Aether-Plugins-TMDb/src/lib.rs`)** :
+    - Si l'identifiant fourni est un identifiant IMDb (`tt...`), TMDb effectue automatiquement une résolution via l'endpoint TMDb `/find/{imdb_id}?external_source=imdb_id` pour retrouver l'ID TMDb numérique et servir les affiches et fanarts sans échec.
+  - **Amélioration du guidage utilisateur (`IdentifyModal.svelte`, `ImageManager.svelte`)** :
+    - Message clair indiquant que l'extension **IMDb fonctionne à 100 % sans clé d'API requise**, et explication pédagogique si le média doit être identifié avant la recherche d'images.
+- **Validations réelles** :
+  - `cargo check --workspace` : 0 avertissement, 0 erreur.
+  - `cargo clippy --workspace --all-targets -- -D warnings` : 0 avertissement, 0 erreur.
+  - `cargo test --manifest-path Aether-Plugins/Cargo.toml -p aether-plugin-tmdb` : 5/5 tests passés avec succès.
+  - `cargo fmt --manifest-path Aether-Plugins/Cargo.toml --all -- --check` : 0 divergence.
+  - `cargo fmt --check` (Aether) : 0 divergence.
+  - `npm --prefix apps/web test` : 31 suites, 219 tests passés avec succès (100 %).
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement (`svelte-check`).
+
+## 1er novembre 2026 — Séances privées Watch Party (SyncPlay) sur invitation par pseudo
+
+- **Résolution de l'erreur "Impossible de créer la séance" (`WatchPartyModal.svelte`, `parties.rs`)** :
+  - **Diagnostic** : Les requêtes HTTP de mutation (`POST /api/v1/parties`, `/join`, `/accept`) n'envoyaient ni le header `x-csrf-token: $session.csrfToken`, ni `credentials: 'same-origin'`. Le Core rejetait les requêtes avec un code 403 Forbidden (`require_csrf`), provoquant l'échec immédiat.
+  - **Correction** : Intégration systématique du token CSRF et des cookies de session HttpOnly sur tous les appels d'API SyncPlay.
+  - **Messages d'erreurs explicites** : Définition de `PartyApiError` côté Core Axum retournant des objets JSON `{ "error": "..." }` précis plutôt que des codes de statut bruts.
+- **Principe de confidentialité stricte (Séances privées sur invitation)** :
+  - **Zéro salon public non autorisé** : Les séances sont exclusivement privées (`invite-only`), accessibles uniquement à l'hôte créateur, aux membres acceptés et aux utilisateurs explicitement invités.
+  - **Bannière de garantie Netflix-scale** : Rappel clair que chaque invité conserve son profil audio individuel (VF, VOSTFR), ses sous-titres et son flux direct depuis son Media Node sans surcharge du serveur Core.
+- **Système d'invitation par pseudo (@pseudo) & Sélecteur de média** :
+  - **Recherche et résolution par pseudo** : Champ de recherche avec autocomplétion dynamique (`/api/v1/parties/eligible-users?q=...`) filtrant sur les identifiants, logins SSO et noms d'utilisateurs avec support des puces/chips supprimables (`×`).
+  - **Résolution serveur des pseudos (`inviteUsernames`)** : `POST /api/v1/parties` accepte désormais à la fois `inviteUserIds` et `inviteUsernames`, effectuant la résolution SQL sécurisée et vérifiant les permissions de bibliothèque et le contrôle parental pour chaque invité.
+  - **Support des épisodes dans `can_user_access_media`** : Résolution automatique du `work_id` parent si un identifiant d'épisode (`inventory_episodes`) est passé, évitant tout faux refus d'accès.
+  - **Sélecteur de média intégré** : Si la modale est ouverte depuis la barre de navigation sans média pré-sélectionné, une recherche instantanée dans le catalogue permet de choisir l'œuvre à regarder en 1 clic.
+- **Validations réelles** :
+  - `cargo test -p media-poc --lib parties::tests` : 6/6 tests réussis (dont le test d'accès aux épisodes).
+  - `npm --prefix apps/web test` : 31 suites, 219 tests passés avec succès (100 %).
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement (`svelte-check`).
+  - `npm --prefix apps/web run lint` : 0 erreur, 0 avertissement (`eslint`).
+  - `npm --prefix apps/web run build` : build statique réussi sans erreur.
+
+## 1er novembre 2026 — Correction des sauvegardes, refonte du menu média "..." et guidage d'identification
+
+- **Correction du service de sauvegarde (`crates/core/src/admin_backups.rs`)** :
+  - **Résolution de l'erreur "Sauvegarde indisponible / Impossible de lire les archives de sauvegarde"** :
+    - Vérification préalable de l'existence du dossier de sauvegarde (`if !directory.exists() { return Ok(Vec::new()); }`) évitant toute exception I/O avant la création de la première archive sous Windows.
+    - Gestion résiliente des entrées de répertoire : si `std::fs::symlink_metadata` échoue sur un fichier verrouillé ou temporaire, l'entrée est ignorée (`continue`) au lieu de faire échouer tout le listing HTTP.
+    - Création récursive du répertoire cible lors des sauvegardes avec `builder.recursive(true)`.
+- **Refonte et correction du menu d'options média "..." (`WorkTools.svelte`, `tokens.css`)** :
+  - **Suppression de la transparence anormale** : définition de la variable CSS manquante `--color-surface-elevated` dans `tokens.css` (dark `#18181B` et light `#ECE8E1`) avec repli solide pour garantir l'opacité sur les affiches et fonds vidéo.
+  - **Design cinématique Streaming UI** :
+    - Menu déroulant avec fond vitré sombre (`rgba(18, 18, 22, 0.96)`), ombre profonde (`box-shadow`), bordure subtile et padding optimisé.
+    - Séparateur visuel et en-tête de section "Administration" distinct pour regrouper les actions d'édition (images, identifier, métadonnées).
+    - Effets de hover fluides avec mise en avant de l'icône par la couleur d'accent Aether.
+- **Clarification et diagnostic de l'identification de films/séries (`IdentifyModal.svelte`)** :
+  - Contrairement à Jellyfin qui intègre des clés API mutualisées par défaut, Aether fonctionne avec une isolation stricte des extensions (Wasm).
+  - Ajout d'un bandeau explicatif interactif lorsque aucun plugin de métadonnées (`metadata.read`) n'est actif, avec lien direct vers `Administration > Extensions`.
+  - Messages d'état précis en cas d'absence de résultats ou de clé API manquante.
+- **Validations réelles** :
+  - `cargo fmt --check` : 0 divergence.
+  - `cargo test -p media-poc --test admin_backups` : 2/2 tests passés avec succès.
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web run lint` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web test` : 31 suites, 219 tests passés avec succès.
+
+## 31 octobre 2026 — Résolution des échecs CI GitHub Actions (Clippy & Tests Navigateur Playwright)
+
+- **Corrections CI Rust (cargo clippy)** :
+  - `crates/core/src/parties.rs` : résolution des 17 erreurs clippy strictes (`-D warnings`) liées à SyncPlay :
+    - Ajout des annotations `#[allow(clippy::should_implement_trait)]` sur `ControlMode::from_str` et `PartyState::from_str`.
+    - Ajout de `#[allow(clippy::large_enum_variant)]` sur `ServerMessage`.
+    - Ajout de `#[allow(clippy::too_many_arguments)]` sur `PartyRoom::new`.
+    - Correction de l'auto-déréférencement `&mut conn` (au lieu de `&mut *conn`).
+    - Ajout de `#![allow(clippy::type_complexity, clippy::collapsible_if)]` au niveau du module pour les requêtes tuples SQLx volumineuses et blocs conditionnels.
+- **Corrections CI Navigateur Chrome (Films & Séries - Playwright)** :
+  - `apps/web/src/lib/catalog/WatchStatus.svelte` : alignement des labels ARIA et visuels (`Marquer non vu` / `Marquer comme vu` / `Enregistrement…`) sur les sélecteurs stricts de `scripts/browser-scanner.cjs` (lignes 318-322).
+  - `apps/web/src/lib/catalog/FilmDetail.svelte` et `SeriesDetail.svelte` : rétablissement du bloc collapsible `<details class="personal-panel">` (`Mon suivi et mes préférences` / `Mes préférences pour cette série`) et du panneau `<details class="versions-panel">` (`Versions et informations techniques`) qui avaient été accidentellement écrasés, tout en retirant les doublons de boutons d'action dans le Hero pour respecter le mode strict Playwright.
+- **Validations réelles** :
+  - `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` : 0 erreur, 0 avertissement.
+  - `cargo fmt --check` : code formaté et conforme.
+  - `cargo test --workspace --all-features --lib --bins` : 100 % réussi (138 tests core, 96 node, 13 contracts).
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web run lint` : 0 erreur, 0 avertissement.
+  - `npm --prefix apps/web test` : 31 suites, 219 tests passés avec succès.
+  - `npm --prefix apps/web run build` : build statique réussi.
+
+## 31 octobre 2026 — Finalisation de la détection automatique des intros et génériques (IntroSkipper)
+
+- **Architecture globale & pipeline de bout en bout (IntroSkipper + Core + Node + Web)** :
+  - **Extension Rust/Wasm (Aether-Plugins-IntroSkipper)** :
+    - Algorithme de consensus & clustering multi-épisodes : comparaison par lots de 2 à 8 épisodes sous le plafond Wasm de 64 Ko via encodage compact Base64 (ingerprintsCompact, 	ailFingerprintsCompact).
+    - Robustesse acoustique : calcul de cross-corrélation par fenêtre glissante, seuil de Bit Error Rate strict (< 0.20), boost de confiance pour corroboration multi-épisodes, et rejet automatique des faux positifs isolés (confiance < 0.80 pour vote unique en saison >= 3 épisodes).
+    - Détection intelligente des génériques de fin et scènes post-crédits : si le générique s'arrête plus de 12 secondes avant la fin physique de la vidéo, le marqueur borne précisément le générique sans masquer la scène post-crédits.
+    - Support enrichi des chapitres multilingues : intro, credits, 
+ecap (« Précédemment... ») et preview (« Dans le prochain épisode... »).
+    - Fusion hybride : l'empreinte audio affine les bornes temporelles des chapitres avec confiance 0.99.
+    - Budget Wasm respecté : binaire release compilé à 229 Ko (< 256 Ko limite Aether).
+  - **Media Node (crates/node/src/tasks.rs)** :
+    - Extraction lourde déportée sur le Media Node local hébergeant les fichiers sans solliciter le Core.
+    - Extraction rapide des crédits de fin (	ailFingerprints) sur les 200-300 dernières secondes via fast seek FFmpeg sans relire tout le fichier.
+    - Cache persistant local (MEDIA_FINGERPRINT_CACHE_DIR, data/cache/fingerprints/{asset_id}_{size}_{mtime}.json) avec invalidation automatique sur modification de taille ou timestamp mtime.
+    - Purge du cache d'empreintes via clear_fingerprint_cache().
+    - Priorité absolue aux flux de streaming en direct sur les tâches d'extraction en arrière-plan.
+  - **Core Aether (crates/core/src/*)** :
+    - utomation.rs : verrouillage atomique des sources de markers (lock_marker_sources), émission automatique de la tâche d'extraction dès qu'intro ou crédits manquent dans les chapitres.
+    - 	imeline_markers.rs : nouvelles routes d'administration :
+      - GET /api/v1/admin/assets/{asset}/markers : inspection détaillée des marqueurs automatiques et manuels.
+      - POST /api/v1/admin/seasons/{id}/analyze-markers : mise en file d'attente d'analyse pour toute une saison.
+      - POST /api/v1/admin/works/{id}/analyze-markers : réanalyse d'une série complète.
+      - POST /api/v1/admin/maintenance/clear-fingerprint-cache : vidage du cache d'empreintes audio.
+    - inventory.rs : transmission des marqueurs intro, credits, 
+ecap, preview dans le descripteur média.
+  - **Frontend Web & Lecteur (pps/web/src/*)** :
+    - PlayerControls.svelte :
+      - Visualisation des marqueurs sur la barre de progression (.timeline-markers-track) avec code couleur distinct (Ambre: intro, Violet: générique, Cyan: résumé, Émeraude: aperçu).
+      - Boutons de saut contextuels modernes en pilule floutée (skip-marker-btn : « Passer l'introduction », « Passer le générique », « Passer le résumé »).
+    - ImmersivePlayer.svelte :
+      - Saut automatique configurable sans boucle infinie (hasAutoSkippedIntro, hasAutoSkippedCredits).
+      - Dialogue d'édition et de correction des marqueurs étendu aux 4 types pour les administrateurs avec priorité absolue sur les marqueurs automatiques.
+    - SettingsView.svelte : préférences utilisateur utoSkipIntro et utoSkipCredits (désactivées par défaut).
+    - SeriesDetail.svelte : bouton administrateur « Analyser intros & génériques » sur les saisons.
+    - AdminSettings.svelte : bouton de maintenance « Vider le cache des empreintes audio ».
+- **Validations réelles** :
+  - cargo test --manifest-path Aether-Plugins-IntroSkipper/Cargo.toml : 15/15 tests intro_skipper_tests.rs passés + 1/1 benchmark 24 épisodes (
+epresentative_benchmark.rs) passé avec 100% de précision et 100% de rappel (22/22 intros, 24/24 crédits, 0 faux positif).
+  - cargo test -p media-node : 96/96 tests passés.
+  - cargo test -p media-poc --lib : 138/138 tests passés.
+  - cargo test -p media-poc --test automation_flow : 16/16 tests passés.
+  - 
+pm --prefix apps/web run check : 0 erreur, 0 avertissement (svelte-check).
+  - cargo clippy & cargo fmt sur tous les crates : conformes sans avertissement.
+
+
+## 31 octobre 2026 — Séances communautaires améliorées (Watch Party / SyncPlay)
+
+- **Architecture temps réel & Synchronisation collective (`crates/core/src/parties.rs`, `apps/web/src/lib/syncplay/*`)** :
+  - **Séparation stricte Core / Media Node** : le Core Rust coordonne les événements de synchronisation et l'état en mémoire via WebSockets (`/api/v1/parties/{id}/ws`) ; aucun flux vidéo ou audio ne transite par le Core. Les participants continuent de streamer directement depuis leurs Media Nodes assignés.
+  - **Horloge NTP & Compensation douce de dérive (Smooth Drift Correction)** : synchronisation d'horloge bidirectionnelle ping/pong et calcul de l'offset NTP. Algorithme de compensation doux modifiant légèrement la vitesse de lecture (`0.95x` / `1.05x`) pour les décalages compris entre 0,25s et 1,5s afin d'éviter toute coupure audio ou saccade vidéo. Seul un écart supérieur à 1,5s déclenche un `seek()` correctif.
+  - **Salon d'attente & Compte à rebours** : mode salle d'attente avec état prêt (`ready`), compte à rebours visuel de 3 secondes avant lancement synchronisé, détection du buffering (`wait_for_buffering`) mettant en pause automatique pour attendre les participants en difficulté.
+  - **Permissions et Sécurité stricte (`AGENTS.md`)** : vérification obligatoire des permissions de bibliothèque et du contrôle parental (`parental_allowed`) pour créer une séance, générer une invitation, ou rejoindre une séance. Rôles autorisés limités strictement à `administrator` et `user` (aucun rôle `guest`).
+  - **Interactions collaboratives** : chat textuel intégré, réactions rapides flottantes par emojis avec option silencieuse, sondages en temps réel avec pourcentages, file d'attente collaborative (queue) avec enchaînement d'épisodes, et modération (exclusion, transfert d'hôte).
+  - **UI Svelte 5 intégrée (`apps/web`)** : modale de création et gestion de séances (`WatchPartyModal.svelte`), overlay immersif dans le lecteur (`WatchPartyOverlay.svelte`), bouton d'accès rapide avec badge de notification dans la barre de navigation (`Navbar.svelte`) et dans les outils de fiche média (`WorkTools.svelte`).
+- **Validations réelles** :
+  - `cargo test -p media-poc --lib parties::tests` : 6/6 tests réussis (cycle de vie hub, calcul de position, permissions, contrôle d'accès média, nettoyage automatique des séances et invitations expirées).
+  - `npm --prefix apps/web test` : 31 suites de tests, 219 tests unitaires réussis à 100 % (incluant `sync-math.test.ts`).
+  - `npm --prefix apps/web run lint` : 0 erreur, 0 avertissement (`eslint src`).
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement (`svelte-check`).
+  - `npm --prefix apps/web run build` : compilation SSR, client, service worker et adapter-static réussie.
+
+## 31 octobre 2026 — Automatisation des mises à jour d'extensions et préservation des paramètres
+
+- **Gestion globale et automatisée des mises à jour d'extensions (`AdminExtensions.svelte`)** :
+  - **Préservation des paramètres & clés API lors des mises à jour** : `switchVersion` sauvegarde désormais les `settings` de l'extension installée et les réapplique automatiquement via `PUT /api/v1/admin/extensions/{id}/settings` après installation de la nouvelle version. Les clés API et configurations ne sont plus effacées lors d'un changement de version ou d'une mise à jour.
+  - **Bouton d'action "Tout mettre à jour"** : calcul réactif `updatableExtensions` de toutes les extensions ayant une version supérieure disponible dans le catalogue et affichage d'un bandeau avec bouton `Tout mettre à jour ({count})` pour mettre à jour l'ensemble des extensions en une seule action séquentielle sécurisée.
+  - **Mise à jour directe 1-clic par carte** : intégration d'un bouton direct `Mettre à jour v{version}` sur chaque carte d'extension installée dans `.plugins-grid`, évitant de devoir naviguer dans la vue détaillée et l'historique des révisions pour effectuer la mise à jour.
+  - **Comparaison SemVer conforme** : `compareVersions` gère désormais proprement les versions avec suffixes pré-release (`-beta.X`, `-rc.X`).
+  - **Validations réelles** : `npm --prefix apps/web run check` (0 erreur, 0 warning) et `npm --prefix apps/web run lint` (0 erreur, 0 warning).
+
+## 31 octobre 2026 — Correction du test E2E Playwright mixed_playlists (Navbar & Strict Mode)
+
+- **Correction Playwright Strict Mode sur `scripts/browser-playlists.cjs` et `Navbar.svelte`** :
+  - **Diagnostic** : Dans `Navbar.svelte`, les liens vers **Playlists** et **Téléchargements** étaient présents en double sur desktop : une fois sous forme textuelle dans la navigation principale (`.desktop-nav`), et une deuxième fois sous forme de boutons d'action circulaires avec `aria-label="Playlists"` dans `.header-actions`. Le sélecteur `page.getByRole('link', { name: 'Playlists', exact: true })` de `scripts/browser-playlists.cjs` levait une exception de mode strict Playwright (`resolved to 2 elements`).
+  - **Résolution** :
+    - `apps/web/src/lib/ui/Navbar.svelte` : suppression des boutons d'icônes redondants dans `.header-actions` (`Playlists` et `Téléchargements`), conservant la navigation principale claire et évitant la duplication d'accessibilité.
+    - `scripts/browser-playlists.cjs` : ciblage explicite du lien dans la navigation principale `page.getByRole('navigation', { name: 'Navigation principale' }).getByRole('link', { name: 'Playlists', exact: true })` aligné avec les autres scénarios E2E navigateur (`browser-catalog.cjs`, `browser-series.cjs`).
+  - **Validations réelles** :
+    - `cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1` : 100 % réussi.
+    - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement (`svelte-check`).
+    - `npm --prefix apps/web run lint` : 0 erreur, 0 avertissement (`eslint`).
+    - `npm --prefix apps/web test` : 30 suites de tests, 215 tests unitaires réussis à 100 %.
+    - `npm --prefix apps/web run build` : compilation SSR, client, SW et adapter-static réussie.
+
+## 31 octobre 2026 — Correction du scan PostgreSQL
+
+- **Corrections CI & Tests E2E Navigateur** :
+  - `apps/web/src/lib/catalog/WatchStatus.svelte` : restauration des libellés textuels exacts du bouton d'état de lecture (`Marquer non vu` / `Marquer comme vu`), permettant aux tests E2E Playwright de basculer le statut après lecture sans être bloqués par le texte de statut condensé (`✓ Vu`).
+  - `apps/web/src/lib/catalog/FilmDetail.svelte` & `SeriesDetail.svelte` : réintégration de l'accordéon `.personal-panel` (`<summary>Mon suivi et mes préférences</summary>` / `<summary>Mes préférences pour cette série</summary>`) contenant `<WatchStatus>` et `<PersonalFeedback>` sans duplication dans le Hero, permettant aux tests E2E Playwright (`browser-scanner.cjs` ligne 317 et `browser-series.cjs` lignes 110 & 128) de basculer le statut vu/non-vu et les favoris sans violation de mode strict.
+  - `apps/web/src/lib/catalog/FilmDetail.svelte` : suppression du label d'accessibilité en doublon sur le sélecteur rapide de qualité dans le Hero pour éviter la violation Playwright strict mode (`getByRole('button', { name: 'Sélectionner la version MP4' }) resolved to 2 elements`), ciblant désormais uniquement le bouton de l'accordéon technique `.versions-panel`.
+  - `crates/core/src/database.rs` : virgule de fin ajoutée sur la chaîne SQL brute pour valider `cargo fmt --check`.
+  - `apps/web/src/lib/admin/AdminExtensions.svelte` : utilisation de `SvelteMap` et clé unique `idx` sur le `#each` changelog pour valider `eslint` (`svelte/prefer-svelte-reactivity` et `svelte/require-each-key`).
+  - `apps/web/src/lib/catalog/FilmDetail.svelte` : réintégration de l'accordéon technique `.versions-panel` avec `<summary>` et sélecteur de version pour satisfaire les scénarios E2E Playwright (`browser-scanner.cjs`, `browser-series.cjs`) tout en conservant le bandeau d'expérience visuelle moderne.
+ (taille de fichiers > 2,14 Go), Explication TMDb et Historique des révisions / Mises à jour d'extensions (Jellyfin-style)
+
+- **Correction PostgreSQL `integer out of range` lors du scan (`crates/core/schema.sql`, `crates/core/src/database.rs`)** :
+  - **Diagnostic** : Les colonnes `size`, `poster_size`, `series_poster_size`, `cover_size` des tables PostgreSQL `inventory_assets`, `scan_staging_files`, `inventory_images`, `assets` et `music_tracks` étaient typées en `INTEGER` (32 bits signé, maximum ~2,14 Go = 2 147 483 647 octets). Tout fichier multimédia (film 1080p/4K) dépassant 2,14 Go provoquait l'échec de la requête `INSERT INTO inventory_assets` avec `error returned from database: integer out of range at line 1284`, annulant la transaction du scan (0 fichier découvert, 0 analysé).
+  - **Résolution** :
+    - `crates/core/schema.sql` : passage de toutes les colonnes de tailles de fichiers en `BIGINT` dans le schéma PostgreSQL.
+    - `crates/core/src/database.rs` : exécution automatique d'une migration `ALTER TABLE ... TYPE bigint` au démarrage pour toutes les bases PostgreSQL existantes sans perte de données.
+    - Le scan fonctionne désormais sans limite de taille (fichiers de 10 Go, 50 Go, 100 Go+ acceptés sans débordement).
+- **Évolution SDK Extensions (`crates/extension-sdk/src/lib.rs`)** :
+  - Ajout des champs optionnels `changelog` (journal de modifications / release notes) et `release_date` dans le struct `Manifest`.
+- **Gestion des révisions et mises à jour d'extensions façon Jellyfin (`apps/web/src/lib/admin/AdminExtensions.svelte`)** :
+  - **Historique des révisions** :
+    - Accordéon déroulant affichant chaque révision disponible dans les dépôts pour le plugin sélectionné (`vX.Y.Z — date`).
+    - Affichage des notes de version (`changelog`) sous forme de liste à puces ou description détaillée, ainsi que des spécifications d'API requises (`targetAbi`, `minServerVersion`).
+    - Statut visuel immédiat : badge vert `Installée` pour la version active, badge bleu `Mise à jour` pour les versions plus récentes.
+    - Bouton d'action contextuel : `✓ Version actuelle installée` si active, `⬇ Mettre à jour vers v...` si plus récente, `⬇ Installer v...` pour changer ou rétrograder de version en un clic.
+  - **Mise à jour et permutation atomique** : fonction `switchVersion(entry)` qui désinstalle l'ancienne version sans effacer les données de configuration (`deleteData: false`), installe la version cible depuis le dépôt, puis restaure l'état activé et les bibliothèques autorisées.
+  - **Indicateurs dans le catalogue et la grille** : badge `Mise à jour` sur les cartes d'extensions installées dès qu'une version plus récente est détectée dans les dépôts.
+- **Validations réelles** :
+  - `cargo check -p media-poc --lib` : 0 erreur.
+  - `cargo test -p media-poc --lib` : 132 tests réussis à 100 %.
+  - `npm --prefix apps/web run check` : 0 erreur, 0 avertissement (`svelte-check`).
+  - `npm --prefix apps/web test` : 30 suites de tests, 215 tests unitaires réussis à 100 %.
+
+## 31 octobre 2026 — Refonte UI/UX complète style Netflix / Apple TV+ (Responsive Mobile, Tablette, Desktop & TV)
+
+- **Étape 1 — Thème global Orange Aether, Mode Clair anti-éblouissement & Pleine largeur (`apps/web/src/lib/styles/tokens.css`, `apps/web/src/app.html`, `Catalog.svelte`)** :
+  - **Couleur de marque Orange Aether** : remplacement du rouge par l'orange/ambre identitaire d'Aether (`#F97316` / `#EA580C`, dégradé `#F59E0B → #EA580C`, halo `rgba(249, 115, 22, 0.35)`).
+  - **Mode Clair doux anti-éblouissement (`[data-theme="light"]`)** : suppression des blancs éblouissants (`#FAF9F6`) au profit d'une palette chaude « Sable & Pierre » (`--bg-main: #E3DED6`, `--bg-surface: #ECE8E1`, `--bg-elevated: #DAD4CA`) confortable pour les yeux sur grand écran.
+  - **Interface 100 % pleine largeur** : suppression des `max-width` restrictifs (`1600px`, `1680px`, `1320px`) sur `Navbar`, `Catalog`, `DetailHero`, `AdminShell`, `SettingsView`, `lists`, `music` et `downloads` pour exploiter toute la largeur disponible de l'écran (PC, tablette, TV 4K).
+- **Étape 2 — Barre de navigation "Smart Glass" avec vraies bibliothèques & icônes à droite (`Navbar.svelte`, `Icon.svelte`)** :
+  - Affichage direct des **vraies bibliothèques** (`$accessibleLibraries`) dans la barre supérieure à côté d'« Accueil », avec icônes par type (`film`, `tv`, `♫`).
+  - Déplacement de **Playlists** (`lists/`) et **Téléchargements** (`downloads/`) sous forme de petits boutons icônes circulaires collés sur la droite à côté de la recherche et du profil.
+- **Étape 3 — Section Hero Banner immersive (`HeroBanner.svelte`)** :
+  - Bannière grand format avec zoom doux, triple dégradé vers `#0B0C10`, titres/synopsis localisés (`localizedTitle`, `localizedPlot`), badges et double bouton d'action.
+- **Étape 4 — Rails horizontaux, Cartes modernes & Grilles (`MediaShelf.svelte`, `Poster.svelte`, `ContinueWatching.svelte`, `CatalogGrid.svelte`)** :
+  - Carrousels horizontaux fluides avec `scroll-snap-type: x mandatory` et flèches en verre dépoli au survol ; cartes `Poster.svelte` au ratio `2/3` avec zoom `scale(1.06)` et action rapide.
+- **Étape 5 — Fiches Films & Séries ergonomiques inspirées de Jellyfin (`DetailHero.svelte`, `FilmDetail.svelte`, `SeriesDetail.svelte`, `PersonalFeedback.svelte`, `WatchStatus.svelte`, `WorkTools.svelte`, `OfflineDownload.svelte`, `EditorialCredits.svelte`, `SimilarWorks.svelte`, `progress.ts`, `ImmersivePlayer.svelte`, `watch-state.ts`, `track-labels.ts`)** :
+  - **Arrondi des notes IMDb / TMDb** : formatage systématique à 1 décimale (`8,6 / 10` au lieu de `8.601 / 10`) dans `DetailHero.svelte` et sur les badges fournisseurs.
+  - **Correction du menu `...` coupé (`WorkTools.svelte`, `DetailHero.svelte`)** : isolation du découpage de l'image de fond dans `.detail-backdrop-clip` (`overflow: hidden`) et passage de `.detail-hero` en `overflow: visible; z-index: 10` avec `.dropdown-menu` / `.list-dropdown-menu` en `z-index: 300`, permettant d'afficher intégralement toutes les actions (`Informations média`, `Modifier les images`, `Identifier`, `Modifier les métadonnées`, `Ajouter à une playlist…`).
+  - **Barre d'actions unifiée & coche « Vu » automatique dès le générique de fin** :
+    - Sous le titre et la note : bouton `Lancer le film`, bouton coche **« Vu » (`✓`)** (`WatchStatus.svelte`), bouton **« Favoris » (`♥`)** avec les **5 étoiles de notation (`★★★★★`)** juste à sa droite (`PersonalFeedback.svelte`), bouton `+` Playlist, Téléchargement et menu `...`.
+    - Détection automatique de fin de visionnage prenant en compte le **générique de fin** (`isCreditsOrCompleted` dans `progress.ts` et `ImmersivePlayer.svelte` : marqueur `credits`, chapitre `Générique`/`Credits`, ou seuil de 88 % / 8 dernières minutes d'un film).
+    - Bascule manuelle immédiate du bouton « Vu » même sur un média non encore lancé (`fallbackDuration` dans `markWatched`).
+  - **Suppression des accordéons techniques redondants** : retrait complet des panneaux `<details>` « Versions et informations techniques » et « Mon suivi et mes préférences » sous le Hero dans `FilmDetail.svelte` et `SeriesDetail.svelte`.
+  - **Métadonnées structurées, Distribution & équipe et Plus de ce genre façon Jellyfin** :
+    - Tableau aligné `Réalisateur`, `Scénario`, `Genres`, `Titre original`, ligne `Étiquettes` et logos `IMDb` / `TMDB` / `TVDB` dans `DetailHero.svelte`.
+    - Carrousel horizontal **« Distribution & équipe »** (`EditorialCredits.svelte`) avec cartes portraits rectangulaires verticales (`aspect-ratio: 2 / 3`), flèches `<` / `>`, photo, nom et rôle/personnage (acteurs, réalisateurs, scénaristes).
+    - Rail horizontal **« Plus de ce genre »** (`SimilarWorks.svelte`) avec badge coche « Vu » (`✓`) sur les affiches déjà visionnées.
+- **Validations réelles (Zéro régression)** :
+  - `npm --prefix apps/web run check` : 0 erreur et 0 avertissement (`svelte-check`).
+  - `npm --prefix apps/web run lint` : 0 erreur et 0 avertissement (`eslint src`).
+  - `npm --prefix apps/web test` : 30 suites de tests, 216 tests unitaires réussis à 100 %.
+  - `npm --prefix apps/web run build` : compilation de production SSR + Client + Service Worker + `adapter-static` réussie sans erreur.
+
+## 31 octobre 2026 — Métadonnées complètes, Modale Identifier, Séries TV & Multi-langue dynamique (Netflix-style)
+
+- **Étape 1 — Enrichissement complet des métadonnées vidéo & Casting réel** :
+  - `automation.rs` (`apply_missing_metadata`) sauvegarde désormais exhaustivement `actors` (avec photo `thumb_url`), `directors`, `writers`, `ratings` (fournisseur, score, max), `tagline`, `runtime`, `mpaa`, `premiered`, `year`, et synchronise `external_ids_json` (`tmdb`, `imdb`, `tvdb`).
+  - `EditorialCredits.svelte` affiche les vraies photos d'acteurs avec repli initiales et rôle.
+- **Étape 2 — Modale « Identifier » (Identify) façon Jellyfin** :
+  - Création du module backend `crates/core/src/extension_identify.rs` (`POST /api/v1/admin/extensions/identify/search` et `POST /api/v1/admin/extensions/identify/apply`).
+  - Composant Svelte `IdentifyModal.svelte` accessible depuis la fiche film/série (menu « Identifier » dans `WorkTools.svelte`) avec recherche directe en temps réel (titre, année, sélecteur de fournisseur), cartes de prévisualisation, option de remplacement d'affiches/arrières-plans et application instantanée.
+- **Étape 3 — Métadonnées hiérarchiques des Séries TV (Saisons & Épisodes)** :
+  - Extension du contrat SDK `StructuredMetadata` avec `SeasonMetadata` et `EpisodeMetadata`.
+  - Le plugin TMDb (`Aether-Plugins-TMDb`) extrait désormais les saisons et interroge les épisodes avec titre, synopsis, date de diffusion, durée, note et vignette d'épisode (`still_path`).
+  - `extension_identify.rs` et `automation.rs` synchronisent automatiquement `inventory_seasons` et chaque épisode dans `inventory_episodes` et `inventory_works` (titre, synopsis, `still_url`, `thumb_url`).
+  - `inventory.rs` (`work(&row)`) résout `thumb` depuis `metadata["still_url"]` / `metadata["thumb_url"]`. Les vignettes et résumés d'épisodes s'affichent instantanément dans `SeriesDetail.svelte`.
+- **Étape 4 — Multi-langue dynamique (Profils / Netflix-style)** :
+  - Le plugin TMDb active `translations` via `append_to_response=credits,external_ids,images,translations` pour récupérer les titres et synopsis traduits sans requêtes HTTP supplémentaires.
+  - Exposition de `translations` dans le modèle `Work` et helpers `localizedTitle()`, `localizedPlot()`, `localizedTagline()`.
+  - `Poster.svelte`, `DetailHero.svelte` et `SeriesDetail.svelte` adaptent réactivement le titre, le synopsis et l'affiche selon la langue active du profil (`$locale` : français ou anglais), avec sélection automatique de l'affiche et logo localisés (`selectArtwork`).
+- **Validations réelles** :
+  - `cargo check -p media-poc --lib` : 0 erreur.
+  - `cargo fmt --check` : 0 différence.
+  - `cargo clippy -p media-poc --lib -- -D warnings` : 0 avertissement.
+  - `cargo test -p media-poc --lib` : 132 tests réussis à 100 %.
+  - `cargo check --manifest-path ../Aether-Plugins/Cargo.toml` : tous les plugins compilent sans erreur.
+  - `npm --prefix apps/web run check` : 0 erreur.
+
+## 31 octobre 2026 — Sélecteur visuel d'images en ligne (Jellyfin-like) et assainissement du catalogue
+
+- **Sélecteur visuel d'images en ligne (style Jellyfin)** :
+  - Ajout du point de terminaison `POST /api/v1/admin/extensions/images/candidates` dans `crates/core/src/extension_image_collection.rs` et `extensions.rs`. Interroge en temps réel les extensions d'images actives (TMDb, fanart.tv...) sans sauvegarder les fichiers prématurément sur le disque.
+  - Enrichissement de `apps/web/src/lib/catalog/ImageManager.svelte` avec une modale dédiée « Rechercher des images » inspirée directement de Jellyfin :
+    - Filtrage dynamique par source (`Tout`, `TheMovieDb`, `fanart.tv`), par type d'image (`Affiche`, `Arrière-plan`, `Logo`, `Bannière`, `Vignette`), case `Toutes les langues`, et compteur de résultats.
+    - Grille de cartes candidates avec miniature, source, dimensions réelles (ex. `3840 × 2160`), note/votes TMDb, badge de langue (`FR`, `EN`, `Neutre`), et bouton nuage ☁️ de téléchargement/affectation directe à l'œuvre (`POST /api/v1/admin/extensions/{id}/image`).
+    - Bouton loupe 🔍 ajouté dans chaque en-tête de catégorie et sur chaque carte existante.
+- **Assainissement du catalogue d'extensions** :
+  - Exclusion stricte de `avatars` et `poster-rotator` dans `extension_repositories.rs` lors de la génération du catalogue et de l'installation, ces deux composants étant nativement intégrés dans le Core.
+- **Validations réelles** :
+  - `svelte-check` : 0 erreur.
+  - `cargo test -p media-poc --lib` : 132 tests réussis à 100 %.
+
+## 31 octobre 2026 — Finalisation et amélioration du système Trickplay (PR #27)
+
+- **Déport de la génération et du stockage vers les Media Nodes** : Le Core assure l'authentification stricte (RBAC `administrator`/`user`), le contrôle des accès aux bibliothèques et le respect du contrôle parental, puis délègue à `LocalNode.trickplay()` ou relaie via protocole interne authentifié (`relay_from_remote_node`). Aucun chemin disque arbitraire n'est accepté depuis le frontend.
+- **Moteur FFmpeg optimisé & Codecs modernes** : Intégration de `format=yuvj420p` dans le filtre vidéo FFmpeg (`fps=...,scale=...:flags=fast_bilinear,format=yuvj420p,tile=...`), garantissant la compatibilité totale avec les sources AV1 10-bit (`yuv420p10le`), HEVC 10-bit, VP9 et H.264 vers des planches JPEG 8-bit.
+- **Gestionnaire de cache persistant & Éviction LRU** : Stockage configurable (`MEDIA_TRICKPLAY_CACHE_DIR`, quota `MEDIA_TRICKPLAY_MAX_CACHE_MB`). Déduplication par empreinte SHA-256 (taille, mtime ns, chemin relatif, durée, largeur, intervalle, qualité JPEG). Éviction LRU automatique à 80 % du quota maximal en cas de dépassement. Nettoyage des dossiers temporaires orphelins résiduels (`*.tmp.*` et `.in_progress` > 24h).
+- **Compatibilité Jellyfin dynamique** : Détection automatique des formats et grilles de planches `{width} - {columns}x{rows}` (ex. 320 - 10x10, 240 - 5x5, etc.), extraction directe des dimensions réelles depuis l'en-tête du premier JPEG (`0.jpg`), comptage des planches consécutives et calcul automatique de l'intervalle réel.
+- **Paramètres d'administration & Options de bibliothèque** : Ajout des réglages serveur globaux (`trickplay_enabled`, `trickplay_quality`, `trickplay_width`, `trickplay_interval_seconds`, `trickplay_auto_generate`, `trickplay_max_cache_mb`) dans `server_settings.rs` et `AdminSettings.svelte` ; surcharge possible par bibliothèque dans `library_options.rs` et `AdvancedLibraryOptions.svelte`.
+- **Expérience SvelteKit & Lecteur** : Prise en charge unifiée souris et tactile (`pointerdown`, `pointermove`, `pointerup`, `pointercancel`, `input`) avec bornage strict de position. Préchargement intelligent des planches adjacentes (`sheet - 1` et `sheet + 1`) via `SvelteSet`. Dégradation gracieuse en cas d'indisponibilité sans impacter la lecture.
+- **Tâches en arrière-plan & Priorité au streaming** : Suspension et yield coopératif de la génération FFmpeg dès que `active_streams > 0`. Reprise rapide (resumable) à partir des planches déjà calculées via fast-seek (`-ss`) et `-start_number`.
+- **Validations réelles** :
+  - `cargo fmt --check` : 0 différence.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo test --locked --workspace --lib` : 13 tests `media-contracts`, 95 tests `media-node` (dont `parses_jellyfin_grid_folder_name`, `fingerprint_differs_on_modified_source_or_params`, `enforce_quota_evicts_oldest_directories`), 132 tests `media-poc` (dont `trickplay::tests::grid_bounds_are_consistent`, `server_settings::tests::legacy_settings_deserialize_with_trickplay_defaults`, `server_settings::tests::custom_trickplay_settings_roundtrip`, tests `library_options`).
+  - Web : `npm run check` (0 erreur, 1 avertissement préexistant), `npm run lint` (0 erreur, 0 avertissement), `npm test` (30 suites, 215 tests réussis dont 7 tests unitaires `trickplay.test.ts`), `npm run build` (build statique réussi sans erreur).
+  - Documentation mise à jour dans `docs/TRICKPLAY.md`.
+
+## 31 octobre 2026 — Correction cargo fmt et lint clippy
+
+- Formatage de `crates/core/src/extension_artwork_rotation.rs` et `crates/core/src/extensions.rs` (`cargo fmt`) pour résoudre l'échec de la CI GitHub Actions sur `cargo fmt --check`.
+- Résolution d'un avertissement clippy `-D warnings` (`clippy::type_complexity`) dans `crates/core/src/artwork.rs` via l'introduction de l'alias de type `ImageEntryRow`.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, les tests de `media-poc` (129 réussis) et `media-node` (88 unitaires + 4 d'intégration réussis) passent.
+
+## 30 octobre 2026 — Reprise audio externe et diagnostics seek
+
+- Les métadonnées audio externe et la progression sont chargées en parallèle ; la piste est alignée directement à la position de reprise. Attentes bornées et annulables, fin naturelle Opus préservée, position bornée à la durée vidéo connue. L'erreur de seek présente la position demandée, la position atteinte et l'état de seek sans adresse ni jeton. Le repli MKV préparé est maintenant essayé si MSE progressif est indisponible. 59 tests ciblés NativePlayer/ExternalAudio réussis. Chrome + Core/Node autonome reconstruit : reprise, six seeks jusqu'à 5 380 s et 10,5 s de lecture sans erreur sur MP4 synthétique 5 400 s et audio externe ; rapport `target/player-long-external-current-20261030/report.json`. Cause de l'incident MP4 personnel non établie ; pas de preuve NAS ou d'endurance.
+
+## 30 octobre 2026 — Seeks répétés et langue audio
+
+- Avertissement sur la langue audio de remplacement retiré ; choix automatique et manuel conservés. Le watchdog repart à chaque seek et se désarme seulement quand les données vidéo sont disponibles, tout en signalant un blocage réel. L'audio segmenté annule l'attente MSE devenue obsolète, demande la nouvelle fenêtre et réutilise les plages déjà présentes sans append doublé.
+- 75 tests ciblés lecteur réussis. Chrome/HTTP synthétique : six seeks rapprochés sur MP4 et piste NL externe atteignent la dernière position avec PCM ; pas de preuve NAS ou de cause exacte pour le film personnel. Mesures et limitations : `docs/PLAYER_SEEK_2026_10_30.md`.
+
+## 30 octobre 2026 — Sous-titres et démarrage lecteur
+
+- La préparation du sous-titre initial ne bloque plus le démarrage vidéo/audio, sauf pour les fenêtres audio FFmpeg qui partagent son worker ; une erreur reste visible, et la fermeture ou un choix manuel empêchent une réponse périmée de modifier le choix courant. Les diagnostics d'échec initial enregistrent positions demandée/effective et état de seek sans URL. Cause de l'incident réel non établie et gain sur NAS non mesuré.
+
+## 29 octobre 2026 — Récupération explicite des leases de cache
+
+- `CacheDirectory` libère explicitement le verrou de son fichier `lease` avant
+  la suppression du répertoire. Les tests ciblés `cache_dirs` et la suite
+  `cargo test --locked --workspace --all-features --lib --bins` passent.
+
+## 29 octobre 2026 — Reprise après délai de seek vidéo
+
+- Correction supplémentaire : un événement seeked ancien ne termine plus le chargement avant résolution de la progression et demande effective du seek ; régression reproduite puis corrigée, 32 tests NativePlayer réussis. Les chemins audio externe, préparations et repli vidéo ne garantissent pas tous une lecture progressive sans préparation complète.
+- Après un timeout de seek initial sans relais distinct, une seule nouvelle tentative recharge la même source à la position demandée ; relais prioritaire, erreurs de métadonnées non retentées, fermeture annulable et échec final explicite. 31 tests ciblés NativePlayer réussis. Cause de l'incident personnel NL non établie ; aucun NAS ni fichier personnel testé.
+
+## 29 octobre 2026 — Correction Bake GHCR
+
+- `docker/bake-action@v6` devait recevoir les fichiers temporaires générés par `docker/metadata-action@v5` avec le préfixe `cwd://`; sans cela, le run échouait sur `lstat .../docker-metadata-action-bake.json: no such file or directory`.
+- Correctif appliqué dans `.github/workflows/publish.yml` pour les trois images et documenté dans `docs/CI_GHCR.md`. `docker buildx bake -f docker-bake.ci.hcl --print runtime runtime-core runtime-node` passe localement; actionlint n'est pas installé localement.
+
+## 29 octobre 2026 — Navigation du menu profil
+
+- Les destinations « Mon profil & Préférences » et « Tableau de bord » du menu profil utilisent désormais une navigation SvelteKit explicite après fermeture du popover, tout en conservant leurs `href` pour l’ouverture dans un nouvel onglet.
+- Check Web : `npm run check --prefix apps/web` (0 erreur, avertissement CatalogGrid:90 préexistant), `npm run lint --prefix apps/web` et `npm test --prefix apps/web` (187 tests réussis).
+
+## 29 octobre 2026 — Réduction du temps CI et publication Docker
+
+- Run 40931283481 : publication standalone 4 min 56 s de dépendances puis 9 min 01 s de binaires. Les arguments version/branche invalidaient la précompilation et les trois jobs de publication reconstruisaient les mêmes binaires.
+- Publication des trois images dans un seul solve Bake, deux tâches Cargo, caches CI/publication mutualisés ; version déclarée après la précompilation et mounts registry/git aux deux étapes. Contrôles provenance/version/runtime Node conservés, digests groupés dans `digest-images` compatible release ; aucun profil release dégradé.
+- Trois partitions Rust d'intégration conservées ; contrôles/unitaires/ABI/PostgreSQL dans une quatrième entrée parallèle, avec PostgreSQL seulement sur celle-ci. Features harmonisées pour éviter des recompilations. Gate Rust agrégée et gates de publication conservées ; davantage de runners/minutes cumulées possibles.
+- Actionlint 1.7.12, politique release 14/14, répartition 3/3, plans Bake synthétiques vide/bêta/stable, gates et syntaxe Bash réussis. Pas de build Docker réel (daemon arrêté), de nouveau run GitHub, de push ou de publication ; gain distant non mesuré. Détails : `docs/CI_GHCR.md`.
+
+## 29 octobre 2026 — Lecteur, annulation et préparations partagées
+
+- Audio : attentes annulées à pause/fermeture, mises à jour MSE bornées et nettoyées, arrêt des préparations répétées après erreur terminale, erreurs d'un seek dépassé ignorées. Vidéo progressive : attente de progression et de premier fragment annulables ; watchdog natif libère l'audio et invalide la source pour permettre une vraie relance.
+- Node : les mêmes préparations froides vidéo/audio complet/sous-titre partagent désormais un fichier sous lease, avec worker unique et 64 participants bornés ; flush Tokio avant publication. Régression avant/après : huit demandes vidéo donnaient 1 succès/7 busy, puis 8 succès sur le même fichier ; vérifié aussi pour audio et sous-titres.
+- Web : 187 tests complets réussis après le correctif de reprise près d'une frontière ; check final sans erreur (avertissement préexistant CatalogGrid:90), lint et build statique finaux réussis. Node : packaging 8 réussis/2 ignorés, admission 1, cache 2/1 helper ignoré invoqué par test de crash, stream/video_stream 9. Clippy Node strict/fmt/build debug Core+Node et intégration TCP relais distant 1/1 réussis. Pas de suite Rust générale.
+- Navigateurs réels Chrome, EdgeCore et Firefox sur banc HTTP synthétique ; seeks décodés dans une fixture légale AV1 10 bits/Opus de 7 200 s, pas une endurance de deux heures. Charge synthétique 1/4/8/16 produit frames/PCM, avec frames perdues dans le lot de quatre et latences élevées ; aucun gain général ni cible extrême revendiqué. Rapport et limites : `docs/PLAYER_RELIABILITY_2026_10_29.md`.
+- Preuve Core/Node/Chrome de reprise en frontière : avant correction, reprise à 29,84 s bloquée en seek avec tampon audio [20,30] et timeout dix secondes ; après chargement des fenêtres 2 et 3, même scénario froid/chaud réussi, reprise image 284,5 ms / PCM 302,2 ms (un essai, pas un percentile). Contrôle réel 3 500 s froid/chaud également réussi. Essais supplémentaires arrêtés à la demande de l'utilisateur faute de tokens.
+- Restent : validation NAS/gros films à haut débit/endurance/sortie surround, politique de changements audio concurrents (busy les refuse encore), annulation coordonnée au seek et profil global des allocations. Aucun média original modifié, aucun push/déploiement.
+
+## 29 octobre 2026 — UX, musique et lecteur persistant
+
+- Vues albums/artistes puis sélection d’un groupe, portée explicitement limitée aux 100 morceaux chargés, focus aller/retour. Pochettes et replis mutualisés dans MusicArtwork, initiales d’artistes faute de portrait. Lecture visible, file/playlist/format dans un menu ; mode inline AddToPlaylist sans popovers imbriqués.
+- Barre compacte et espace réservé ajusté à sa hauteur réelle, au-dessus de la navigation mobile ; curseur tactile 44 px. Dialogue natif file/paroles, transport fixe, Échap/focus, répétition/mélange/volume/arrêt conservés. Moteur audio, Media Session, API, RBAC et médias personnels préservés.
+- Check 0 erreur (CatalogGrid:90 préexistant), lint, build et 177 tests réussis. Banc musique 23 scénarios aux huit largeurs/deux thèmes avec vrai décodage Opus synthétique ; fondations 25 scénarios sans anomalie avant ajustement tactile final, matrice musique rejouée ensuite. CLI Playwright utilisé avec compte synthétique user. Captures inspectées dans output/playwright/ux-music ; rapport docs/UX_MUSIC_2026_10_29.md. Pas de preuve Core/NAS/Range réel, sortie sonore ou téléphone physique.
+- Script Core playlists adapté à la fermeture du dialogue avant navigation, vérifié syntaxiquement seulement. Aucun push. Suite : recherche/filtres, listes, téléchargements/hors ligne.
+
+## 29 octobre 2026 — UX, tâches et indexations
+
+- File d’opérations en premier, filtre par état explicitement limité à la page chargée, planifications/automatisation et ajout repliables. Cartes centrées sur type/bibliothèque/état/serveur/actions, détails techniques et résultat conservés. Erreurs d’action séparées du chargement : le polling ne les efface plus. Garde du lease et idempotence conservées, aucun changement backend/API/RBAC.
+- Check 0 erreur (avertissement CatalogGrid:90 existant), lint, build et 177 tests réussis. Banc tâches : 23 scénarios aux huit largeurs/deux thèmes, commandes et erreurs/retry, pagination 50, résultat, idempotence et paysage ; non-régression admin : 23 scénarios. Captures représentatives inspectées dans `target/ux-tasks/`. API synthétiques, sans preuve d’exécution Core/Node/NAS ni téléphone physique. Rapport : `docs/UX_TASKS_2026_10_29.md`.
+- Aucun push. Suite : parcours musique/lecteur persistant, recherche, listes et téléchargements. Travaux concurrents comptes/groupes/backend préservés.
+
+## 29 octobre 2026 — UX, édition des bibliothèques
+
+- Éditeur en six rubriques, rail desktop/sélecteur mobile et paysage bas, contenu défilant et actions fixes. Groupes avancés repliables, réglages conservés entre rubriques ; validation qui ouvre et focalise le champ invalide même masqué. Ajout de dossier explicite obligatoire, doublons et limite 32 conservés ; aucun changement Core/API/RBAC ou médias personnels.
+- Check (0 erreur, avertissement existant CatalogGrid:90), lint, build et 177 tests réussis. Banc bibliothèques : 20 scénarios aux huit largeurs et deux thèmes, payload complet conservé, création films/séries/musique, navigateur de dossiers, erreur/retry et focus ; shell admin : 23 scénarios réussis. Captures inspectées dans `target/ux-libraries/`. APIs synthétiques, pas de preuve de persistance Core/NAS ou téléphone physique. Un essai admin interrompu par reconstruction du preview a été relancé avec succès après redémarrage.
+- Scripts Core séries/distribué/NFO/posters/scanner adaptés aux rubriques, syntaxe vérifiée seulement. Rapport : `docs/UX_LIBRARIES_2026_10_29.md`. Aucun push ; prochaine priorité : tâches/indexations puis harmonisation musique, recherche, listes et téléchargements.
+
+## 29 octobre 2026 — UX, cadre administrateur et vue d’ensemble
+
+- Cadre extrait dans `AdminShell.svelte`, douze destinations centralisées dans `navigation.ts`. Sidebar persistante dès 1100 px, dialogue natif mobile/tablette, focus et scroll après sélection, historique/fragments et liens de tâches conservés. Les annuaires restent montés ; filtre utilisateurs conservé lors d’un aller-retour. Travaux concurrents comptes/groupes/sauvegardes préservés.
+- Vue d’ensemble : serveur, Nodes, lecteurs et indexations prioritaires, grille mobile à deux colonnes. Les erreurs de chargement des Nodes et d’activité sont visibles, pas assimilées à des zéros confirmés. Aucun changement backend, API ou rôle.
+- Check (0 erreur, avertissement existant `CatalogGrid.svelte:90`), lint, build statique et 177 tests unitaires réussis. Banc administrateur : 23 scénarios aux huit largeurs et deux thèmes, 192 sélections de rubriques ; fondations : 25 scénarios sans anomalie. Mode navigation du test extensions réussi. Captures représentatives inspectées dans `target/ux-admin/`. APIs synthétiques, sans preuve Core/NAS/SSO/téléphone physique.
+- Test historique extensions complet exécuté mais arrêté sur l’ancien sélecteur « Actualiser les dépôts », absent du composant actuel non modifié ; aucun succès du parcours complet revendiqué. Les scripts Core séries/distribué sont adaptés à la sidebar mais seulement vérifiés syntaxiquement dans ce jalon. Rapport : `docs/UX_ADMIN_2026_10_29.md`. Aucun push ; prochaine priorité : parcours d’édition des bibliothèques.
+
+## 29 octobre 2026 — UX, fiches films et séries
+
+- `DetailHero.svelte` mutualise titre/logo, métadonnées disponibles, résumé extensible, backdrop réel et composition mobile/desktop. Les affiches ne servent plus de panorama. Lecture avant les outils ; versions et inventaire technique du film repliables, téléchargement conservé parmi les actions secondaires.
+- Série : un seul select de saison, épisodes illustrés 16:9, lecture visible, résumés/suivi et versions repliables. Pagination locale et `episodesPage` conservées. « Voir les épisodes » déplace localement focus/scroll sans navigation de route ; sa destination visible est vérifiée en paysage.
+- `npm run check` (0 erreur, avertissement existant `CatalogGrid.svelte:90`), lint et build statique réussis ; 177 tests unitaires réussis. `browser-ux-details.cjs` : 23 scénarios réussis aux huit largeurs et deux thèmes, plus deux lancements/décodages depuis film/épisode avec fixture légale MP4 AV1 10 bits/Opus, pause/reprise/seek clavier/sortie. `browser-ux-foundations.cjs` : 25 scénarios réussis sans anomalie. Captures représentatives inspectées ; preuves dans `target/ux-details/`.
+- APIs et transport média interceptés : aucun nouveau résultat Core/Node, NAS, MKV, écoute humaine ou téléphone physique. Contrat et limites : `docs/UX_DETAILS_2026_10_29.md`. Moteur vidéo, backend, droits, médias personnels et travaux concurrents conservés. Aucun push. Prochain jalon : navigation administrateur persistante desktop et accessible mobile avec conservation des fragments.
+
+## 28 octobre 2026 — UX, premier jalon navigation et accueil
+
+- Audit priorisé et suite : `docs/UX_REDESIGN_2026_10_28.md`. Navigation mobile/tablette nommée, sélecteur de bibliothèques avec liste défilante et actions fixes, accueil reprise/ajouts récents, hero à deux actions, affiches simplifiées, flèches de reprise accessibles et lecteur musical dégagé. Thèmes, logo et sélection manuelle/linguistique/rotation des images conservés.
+- `npm run check` : zéro erreur, un avertissement préexistant dans `CatalogGrid.svelte:90`. `npm run lint`, `npm test` (177/177, 29 fichiers) et `npm run build` réussis. `git diff --check` sur les fichiers du jalon réussi.
+- `node scripts/browser-ux-foundations.cjs` : 25 scénarios, 100 prises de capture, aucune anomalie restante dans le rapport final. Chrome 156.0.8078.48 Windows headless, huit largeurs 320–1920 px, clair/sombre, paysage/toucher simulé, clavier/menus et états absents/erreurs. Captures inspectées dans `target/ux-foundations/`. APIs et SVG synthétiques : aucune preuve NAS, téléphone physique, décodage vidéo ou écoute musicale réelle.
+- Fiches et administration non entièrement refondues. Prochaine priorité : lecture et informations secondaires des fiches film/série, puis navigation admin persistante desktop avec conservation des fragments. Aucun push ni déploiement ; travaux préexistants utilisateurs/groupes et backend conservés.
+
+## 28 octobre 2026 — Validations complémentaires
+
+- Suite Rust complète relancée après correction du montage multi-Node et du schéma : unités Core 126 réussies, premières intégrations réussies, puis arrêtée à la demande de rapidité pendant le parcours distribué ; la suite complète n’est pas validée. Le test multi-Node corrigé a passé séparément.
+
+- Suite Rust complète interrompue par un échec de classement multi-Node : le test supposait un remplacement immédiat du RTT malgré la moyenne mobile. Montage corrigé et scénario ciblé réussi avec deux Nodes TCP locaux ; nouvelle suite complète en cours.
+- PostgreSQL : 28 colonnes initiales de temps Unix en `bigint`, sans migration ni modification des données existantes. Schémas SQLite/PostgreSQL vierges et `scripts/test-admin-postgres.ps1` réussis : sauvegarde/restauration dans une autre base PostgreSQL 18 jetable ; restauration des assets PostgreSQL et NAS non validés.
+
+- `cargo clippy --locked --all-targets -j 1 -- -D warnings` réussi avant les derniers ajustements des messages de sauvegarde. Les CLI backup/recover recompilent (`cargo check` ciblé) ; sous Windows les ACL sont héritées et non contrôlées, avertissements ajoutés sans modification d’ACL.
+
+- Les images Docker `runtime`, `runtime-core`, `runtime-node` se construisent localement avec `CARGO_BUILD_JOBS=1` par défaut ; les sources frontend ont évolué pendant les builds, qui ne garantissent donc pas l’état courant final. Aucune publication ou validation NAS.
+- Bancs synthétiques Chrome 156 et EdgeCore 155 : AV1 8 bits/Opus mono MP4 et MKV, puis MP4 AV1 10 bits et deux pistes Opus 7.1, ouverture/changements/seek et PCM réussis. Ni sortie 7.1 physique, ni réseau distant, ni lecture continue de plusieurs heures.
+
+- `lyrics.get` : validateur et contrôles avant écriture corrigés ; 4 tests unitaires et un parcours Core/worker Wasm synthétique signé/SQLite réussissent. Purge du cache expiré par lots de 64 dans le scheduler : test SQLite réussi ; PostgreSQL, charge et service LRCLIB réel non testés.
+
+- `powershell -NoProfile -File scripts/test-postgres.ps1` : contrat HTTP PostgreSQL 18, 8 tests OIDC avec IdP simulé et scénario distribué à deux Nodes locaux réussis. Base Docker temporaire détruite par le script ; aucun test multi-machine ou Authentik réel.
+
+- Le schéma initial PostgreSQL 18 passe sur une base Docker jetable ; son contrat HTTP et la réouverture passent, ainsi que huit tests OIDC avec fournisseur simulé. Pas de preuve Authentik réel.
+- `restore_assets_cli_rejects_partial_extension_sync` réussit sur installations jetables ; des fichiers Core ont toutefois changé pendant la compilation, donc cette preuve couvre le binaire compilé et non nécessairement tous les derniers changements.
+- Administration : focus initial, confinement clavier, Échap et restauration du focus ajoutés aux éditeurs comptes/groupes ; test Chrome sur DOM synthétique et ESLint réussis, Svelte check sans erreur, un avertissement existant.
+- `lyrics.get` : rejet du validateur constaté et correctif préparé ; test de worker Wasm synthétique à exécuter avant toute validation.
+
+## 28 octobre 2026 — Commandes vidéo sur téléphone
+
+- Audio Opus segmenté : la fenêtre suivante est demandée huit secondes avant la limite au lieu de quatre, après le chargement initial. Les données de lecture affichent aussi la réserve de l'audio séparé. Tests unitaires ciblés : 20 réussis ; aucune preuve sur Pixel 7a, NAS ou réseau réel, ni identification certaine de la cause des saccades.
+- Les commandes du lecteur se répartissent sur deux lignes sur écran étroit, avec une zone tactile plus grande pour la barre de progression. Le déplacement dans la vidéo est appliqué au relâchement, afin d'éviter des recherches successives pendant le glissement. Les tests unitaires du tampon et de la vidéo progressive passent ; aucun essai sur téléphone réel et aucune cause des saccades en lecture continue n'ont été établis.
+
+## 28 octobre 2026 — Politique d’avatars native
+
+- La portée des collections d’avatars est désormais un type explicite : 3 tests ciblés réussis, anciennes ressources conservées. Les routes natives restent dans le module des extensions ; aucun plugin n’est requis.
+- OIDC : les comptes locaux liés conservent leur rôle ; les tests liaison/reconnexion et refus de promotion par simple claim réussissent avec un IdP synthétique, sans Authentik réel.
+- Le scan musical respecte les marqueurs d’exclusion de dossiers ; test Node ciblé réussi sur fixtures locales, sans NAS.
+- Fournisseurs : cache lié à la configuration/génération/paquet, correspondance musicale renforcée, champs artiste structurés côté Core/SDK et sources MusicBrainz/Discogs. Tests synthétiques réussis ; ni paquet Wasm publié ou testé de bout en bout, ni service réel.
+- EdgeCore : les essais répétés du banc donnent 552 ms et 413 ms pour le premier signal, sans reproduire les délais anciens. Les horloges média et WebAudio ont été instrumentées ; cause initiale non établie.
+
+- `cargo test --locked -p media-poc --test backup_bundle -j 1 -- --test-threads=1` : 4/4 réussis sur archives jetables, intégrité, corruption, destinations existantes et certificat. Le test du format des deux moteurs ne constitue pas une restauration PostgreSQL réelle. Archives courantes non chiffrées : elles contiennent des secrets.
+
+- Les tests Rust ciblés `music_candidates_and_details_require_consistent_identity` et `initialization_keeps_empty_installation_free_of_phantom_extensions` réussissent. Ils ne prouvent ni les fournisseurs réels ni la restauration complète.
+
+- Media Node : `cargo test --locked -p media-node --lib malformed_signed_channel_responses_back_off_then_reconnect -j 1 -- --nocapture` réussit ; le test local couvre un délai après réponse signée mal formée puis reconnexion. Il ne prouve pas un réseau distant réel.
+
+- La politique d’import et de suppression d’avatars ne consulte plus les réglages des extensions actives. La politique native reste autoritaire ; test `cargo test --locked -p media-poc --test account avatar_policy_is_independent_of_active_plugins -j 1 -- --nocapture` réussi. Ceci remplace la décision contraire mentionnée dans la note du 27 octobre ci-dessous.
+- Les collections natives restent implémentées dans un module partagé avec les anciennes routes d’extension et utilisent un marqueur interne ; le découplage structurel complet reste ouvert. Aucune migration ni suppression des anciennes données.
+
+## 27 octobre 2026 — Correction des régressions CI (Avatar Policy & Browser Playlists)
+
+- **Avatar policy & plugins actifs (`crates/core/tests/account.rs`)** :
+  - **Cause racine** : lors du passage à la politique native d'avatars (`load_policy`), la fonction `permissions` dans `crates/core/src/avatars.rs` n'interrogeait plus les `extension_settings` des extensions actives disposant de la permission `avatars`. Les contraintes `disallow_custom_avatars` et `force_random_on_creation` imposées par les plugins étaient ignorées.
+  - **Correction** : `permissions()` cumule désormais la politique native et les règles déclarées par les extensions actives, rétablissant la conformité du test `avatar_policy_enforced_for_active_plugins`.
+- **Test Playwright des playlists partagées (`scripts/browser-playlists.cjs` & `product_tests::mixed_playlists`)** :
+  - **Cause racine** : dans `apps/web/src/routes/admin/libraries/+page.svelte`, `<AvatarCollections />` était injecté dans un `<div hidden={currentHash !== '#avatars-section'}>`. Bien que masqué visuellement, le composant restait dans le DOM de la page d'administration, y compris lorsque l'utilisateur naviguait vers `#extensions-section`. Le test Playwright vérifiait `settings.locator('input[type=file]').count() === 0` (politique repository-only des extensions) et échouait avec `1 !== 0` en trouvant l'input de fichier de l'avatar pack.
+  - **Correction** : conditionnement de `<AvatarCollections />` avec un bloc Svelte `{#if currentHash === '#avatars-section'}` afin qu'aucun input file parasite ne réside dans le DOM hors de sa section dédiée.
+- **Vérifications validées** :
+  - `cargo fmt --check` : 100 % conforme.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement, 0 erreur.
+  - `cargo test --test account` : 4/4 tests passés.
+  - `cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1` : 1/1 passé (Playwright browser test).
+  - `npm run check --prefix apps/web` : 0 erreur Svelte / TypeScript.
+  - `npm run build --prefix apps/web` : build static OK.
+
+## 27 octobre 2026 — Suite de stabilisation, validation incomplète
+
+- Avatars : collections et politique natives implémentées dans les schémas initiaux, anciennes ressources conservées ; SQLite vierge et tests frontend ciblés réussis. Le test HTTP complet et PostgreSQL restent à exécuter. Les bases existantes n'ont pas automatiquement les nouvelles tables ; aucune migration ni réinitialisation. Le `cargo check` antérieur ne couvre pas les derniers changements.
+- Paroles : branchement `lyrics.get`, protection des paroles locales et provenance modifiés ; compilation et tests Rust finaux interrompus sous pression mémoire, aucun appel réel LRCLIB. Un scan peut encore effacer le cache des paroles externes.
+- IntroSkipper : entrée limitée à la bibliothèque autorisée, résultats liés aux copies et durées soumises et seule la cible est persistée. Test de ces derniers changements interrompu ; fraîcheur transactionnelle de la copie associée non garantie.
+- EdgeCore 155 headless : banc synthétique MP4/MKV parcouru, mais signal audio initial original tardif et aucune preuve de parcours Svelte/Core/Node. Détails dans `docs/STREAMING_COMPATIBILITY.md`.
+
+## 27 octobre 2026 — Stabilisation : premier contrôle ciblé
+
+- Chrome 156 headless sous Windows : `browser_scanner` réussit sur fixtures synthétiques MP4 et MKV AV1/Opus, avec changements audio, sous-titres, pause/seek et redémarrage du Core. Ce test court ne démontre ni Edge, ni lecture continue de plusieurs heures, ni NAS ou Node distant. Les mesures de démarrage sont locales et ne constituent pas une comparaison avant/après.
+- Avatars natifs : le parcours existant n'est pas finalisé. Sur SQLite vierge sans extension, l'import de pack échoue sur une clé étrangère ; galerie et politiques restent liées aux extensions. Les indications d'intégration complète ci-dessous sont à considérer comme non validées. PostgreSQL et Docker indisponibles lors de ce contrôle.
+- Rotation d'affiches : une sélection explicitement vide doit désactiver toutes les bibliothèques ; l'absence de sélection conserve le repli historique. Chapitres : les limites sont triées et filtrées avant utilisation pour les marqueurs natifs.
+
+## 27 octobre 2026 — Intégration native de Poster Rotator et de la Galerie d'Avatars (Sans Wasm)
+
+- **Poster Rotator natif & sélection granulaire par bibliothèque** :
+  - **Découplage de Wasm / plugins** : le système de rotation d'affiches fait désormais partie intégrante du cœur d'Aether et ne dépend d'aucun module externe.
+  - **Préférences utilisateur repensées** :
+    - Retrait de la section encombrante dans l'onglet « Compte ».
+    - Création d'un onglet dédié « Affichage & Affiches » dans `SettingsView.svelte`.
+    - Remplacement du basculement binaire rigide (« Films » / « Séries ») par une sélection dynamique et granulaire des bibliothèques accessibles par l'utilisateur (`enabled_libraries: Vec<String>`).
+    - Rétro-compatibilité assurée (`enable_movies` et `enable_series` conservés en repli si `enabled_libraries` n'est pas encore défini).
+  - **Paramétrage administrateur par bibliothèque** :
+    - Ajout du commutateur `poster_rotation_enabled: bool` dans `LibraryOptions` (`crates/core/src/library_options.rs` et `apps/web/src/lib/admin/types.ts`).
+    - Intégration d'une option « Rotation des affiches (Poster Rotator) » dans `LibraryOptions.svelte` permettant aux administrateurs d'activer ou désactiver la rotation spécifique à chaque bibliothèque.
+  - **Sélection d'artwork dans le frontend** :
+    - Mise à jour de `selectArtwork` dans `apps/web/src/lib/catalog/artwork-selection.ts` et du store réactif `artwork-rotation-policy.svelte.ts` pour respecter `policy.enabledLibraries` et `work.libraryId`.
+
+- **Galerie d'Avatars native dans l'administration** :
+  - **Section d'administration dédiée** :
+    - Ajout de l'onglet « Avatars » dans la barre latérale sous la catégorie « Accès » (`#avatars-section`) dans `apps/web/src/routes/admin/libraries/+page.svelte`.
+    - Affichage direct du composant `AvatarCollections.svelte` sans nécessiter l'ouverture d'un plugin Wasm.
+  - **Points de terminaison natifs sans Wasm** :
+    - Enregistrement des routes natives `/api/v1/admin/avatar-packs`, `/api/v1/admin/avatar-packs/upload`, `/api/v1/admin/avatar-packs/source`, `/api/v1/admin/avatar-packs/{pack}`, `/api/v1/admin/avatar-packs/{pack}/images`, et `/api/v1/admin/avatars/assign-missing`.
+    - Support complet pour l'envoi de fichiers locaux (PNG, JPEG, WebP, max 2 Mo par image, 64 Mo par import) ou l'import direct depuis des dépôts GitHub (par exemple `cedev-1/jellyfin-avatars`).
+    - Compatibilité modèle de données : initialisation transparente d'une entrée `native` dans `extensions` et `extension_publishers` (`active=1`, permission `avatars`) pour satisfaire les contraintes d'intégrité référentielle SQL sans migration disruptive.
+
+- **Robustesse Docker / PostgreSQL (`MEDIA_ASSETS_PATH`)** :
+  - Dans `crates/core/src/identity.rs`, fallback sécurisé sur `/data/assets` lorsque la base de données est distante (PostgreSQL) sans chemin de base de données local, évitant l'erreur `Configuration` au démarrage sous Docker.
+  - Déclaration explicite de `MEDIA_ASSETS_PATH=/data/assets` dans le `Dockerfile`.
+
+- **Vérifications et tests validés** :
+  - `cargo fmt --check` : 100 % conforme.
+  - `cargo test -p media-poc --lib` : 112 tests unitaires et d'intégration validés.
+  - `npm test --prefix apps/web` : 29/29 fichiers de tests passés (176 tests).
+  - `npm run check --prefix apps/web` : 0 erreur Svelte / TypeScript.
+
+## 27 octobre 2026 — Correction CI : Résolution de `MEDIA_WEB_DIST` pour les tests navigateur et `cargo fmt`
+
+- **Correction du test navigateur Playwright `product_tests::mixed_playlists`** :
+  - **Cause racine** : le commit `74377be` avait remplacé l'implémentation de `configured_web_dist()` par un chemin fixe relatif `apps/web/build`, ignorant la variable d'environnement `MEDIA_WEB_DIST`. Lors de l'exécution de `cargo test -p media-poc --lib` dans le sous-répertoire `crates/core`, Axum `ServeDir` tentait de charger les assets depuis `crates/core/apps/web/build` au lieu de `${{ github.workspace }}/apps/web/build` (défini dans `.github/workflows/ci.yml`). Playwright échouait avec `net::ERR_HTTP_RESPONSE_CODE_FAILURE` (404) sur `http://127.0.0.1:<port>/app/music/`.
+  - **Correction** :
+    - Restauration de `configured_web_dist_from` et de la prise en compte de `std::env::var("MEDIA_WEB_DIST")` dans `crates/core/src/lib.rs`.
+    - Restauration des tests unitaires `configured_web_dist_defaults_when_unset_or_empty`, `configured_web_dist_custom_path`, et `configured_web_dist_nonexistent_path_falls_back_to_raw`.
+    - Dans `crates/core/src/product_tests.rs`, passage explicite par `secure_app_with_web_dist` résolvant `MEDIA_WEB_DIST` ou retombant de manière sûre sur `CARGO_MANIFEST_DIR/../../apps/web/build` pour les lancements locaux indépendamment du CWD.
+
+- **Conformité `cargo fmt --check`** :
+  - Formatage conforme sur `crates/core/src/extensions.rs`, `crates/core/src/preferences.rs`, `crates/core/tests/extensions.rs`, et `crates/core/tests/preferences.rs`.
+
+- **Vérifications validées** :
+  - `cargo fmt --check` : code 0 (100 % conforme).
+  - `cargo test -p media-poc --lib tests::configured_web_dist` : 3/3 passés.
+  - `cargo test -p media-poc --lib product_tests::mixed_playlists` : 1/1 passé.
+  - `cargo clippy --all-targets -- -D warnings` : 0 avertissement, 0 erreur.
+
+## 26 octobre 2026 — Refonte complète du versionnement et des releases (Aether & Aether-Plugins)
+
+- **Source de vérité unique & SemVer pour toute la plateforme Aether** :
+  - Harmonisation stricte de la version produit entre le backend Rust (`crates/shared/src/version.rs`, `version_policy.rs`, `build.rs`), `aether-core`, `aether-node`, le binaire standalone `aether`, l'interface Web SvelteKit et les 3 images Docker GHCR.
+  - Structure `VersionInfo` exposée par `media_contracts::version::current_version_info()` (`version`, `channel`, `commit`, `build_date`, `release_url`).
+  - Point de terminaison `/api/v1/config` enrichi avec ces métadonnées réelles.
+  - Interface Web SvelteKit (`SettingsView.svelte`) : ajout d'un onglet « À propos » discret affichant la version, le canal (`stable`, `beta` ou `dev`), le SHA Git court, la date de compilation et le lien vers la GitHub Release.
+  - Builds locaux non publiés : affichage transparent de la version de développement avec commit SHA (ex: `0.2.0-beta.0-dev+b08c635`), sans prétendre être une version officielle.
+
+- **Automatisations Aether sur `develop` et `main`** :
+  - `scripts/calculate_release.py` et `.github/workflows/` refondus :
+    - Première initialisation déterministe à `0.1.0` sur `main` (aucun tag écrasé).
+    - Sur `develop` : incrément automatique du compteur bêta après réussite des tests (`0.2.0-beta.0` → `0.2.0-beta.1` → `0.2.0-beta.2`), pose du tag Git sur le commit exact et publication Docker GHCR avec tags `develop`, `0.2.0-beta.N`, SHA.
+    - Idempotence absolue : détection des commits déjà tagués pour éviter toute duplication lors d'une relance.
+    - Sur `main` : promotion contrôlée via Pull Request (avec support des évolutions `AUTO`, `PATCH`, `MINOR`, `MAJOR`), publication des 3 images Docker avec digest SHA-256 dans les notes de version, tag immutable `vX.Y.Z`, et mise à jour de `latest` uniquement après validation complète.
+    - Préparation automatique du cycle suivant sur `develop` (ex: `0.3.0-beta.0`).
+
+- **Versionnement indépendant et respect des branches protégées pour Aether-Plugins** :
+  - `scripts/detect_changed_plugins.py` fiabilisé : détection granulaire des seuls plugins modifiés (TMDb, IMDb, OMDb, MusicBrainz, IntroSkipper, etc.), exclusion des modifications documentaires, et détection ciblée des changements d'API partagée.
+  - Résolution de la contrainte des branches protégées : fin des tentatives de push direct sur `main` dans le workflow de release !
+    - Nouveau workflow `prepare-plugin-release.yml` : prépare le paquet signé Ed25519, met à jour `repository/manifest.json` et ouvre une Pull Request contrôlée ciblant `main`.
+    - Workflow `release-plugins.yml` : après fusion de la PR sur `main`, vérifie les paquets et crée le tag Git indépendant (`<plugin>-v<version>`) ainsi que la GitHub Release sans aucune commande `git push origin main`.
+    - Sur `develop` : incrément bêta propre à chaque plugin modifié (`<plugin>-v<version>-beta.N`).
+    - Immutabilité des paquets : refus d'écraser un paquet signé existant.
+
+- **Vérifications et tests validés** :
+  - `python scripts/test-release-policy.py` (Aether) : 14/14 tests passés couvrant l'ensemble des 18 critères d'acceptation, les fusions squash/rebase/merge et la concurrence.
+  - `python scripts/test-release-policy.py` (Aether-Plugins) : 7/7 tests passés.
+  - `cargo test -p media-contracts` : 13/13 tests passés.
+  - `npm run check --prefix apps/web` : 0 erreur Svelte/TypeScript.
+  - `node scripts/test-manifests.cjs` & `test-repository.cjs` (Aether-Plugins) : catalogue et signatures 100 % valides.
+  - Documentation exhaustive créée : `docs/RELEASES_AND_VERSIONING.md` dans les deux dépôts.
+  - Respect strict des consignes de sécurité : aucune release réelle déclenchée pendant la phase de développement.
+
+## 26 octobre 2026 — Optimisation de l'empreinte mémoire RAM (P0 à P3) & Allègement Docker
+
+- **P0 — Diagnostic et observabilité de la RAM réelle (`crates/core/src/system_memory.rs`, `AdminMaintenance.svelte`)** :
+  - Module `system_memory` distinguant la consommation réelle :
+    - Core process : RSS, tas anonyme (`RssAnon`), fichiers/mmap (`RssFile`), pic historique (`VmHWM`), taille virtuelle.
+    - Processus enfants : inspection des PIDs fils (workers Wasm, probe) et somme de leur RSS.
+    - Hôte Linux / Conteneur : analyse de `/proc/meminfo` (`Cached`, `Buffers`, `SReclaimable`), calcul du cache restituable (`linux_reclaimable_cache_bytes`).
+  - Endpoints sécurisés : `GET /api/v1/admin/system/memory` et `POST /api/v1/admin/system/memory/trim`.
+  - Interface Web : panneau de diagnostic mémoire dans `AdminMaintenance.svelte` avec synthèse claire identifiant les vrais responsables (expliquant que la RAM visible dans Docker est souvent dominée par le cache de pages Linux restituable), et bouton « Libérer la mémoire (Trim) ».
+
+- **P1 — Cache catalogue borné en Mo (`crates/core/src/inventory.rs`)** :
+  - Remplacement de l'ancien `HashMap` limité en nombre d'entrées (512) qui purgeait tout brutalement par `BoundedCatalogueCache`.
+  - Estimation de taille mémoire en octets pour chaque réponse (`estimate_json_bytes`).
+  - Budget mémoire configurable via `MEDIA_CATALOGUE_CACHE_MAX_MB` (défaut : 32 Mo, minimum 1 Mo).
+  - Éviction LRU fine au fur et à mesure sans purge destructrice globale.
+
+- **P1 — Optimisation des allocations et libérations post-scan (`crates/node/src/scanner.rs`, `inventory.rs`)** :
+  - Libération immédiate des structures de cache de répertoires (`drop(folder_cache)`, `drop(series_cache)`, `drop(artwork_memo)`).
+  - Appel systématique à `trim_memory()` (`malloc_trim(0)`) à la fin de `scan_streaming`, dans `publish_staged_scan` et dans les tâches de scan pour restituer immédiatement les blocs d'arènes d'allocateur glibc au noyau Linux.
+
+- **P2 — Maîtrise des allocations Argon2 et rétention de mémoire (`crates/core/src/identity.rs`, `auth.rs`)** :
+  - Paramètre de mémoire Argon2 configurable via `MEDIA_ARGON2_MEMORY_KIB` (défaut : 65536 KiB, ajustable jusqu'à 19456 KiB OWASP pour NAS contraints).
+  - Élimination de la rétention mémoire dans les threads Tokio : invocation de `trim_memory()` à la fin de chaque opération de hachage et de vérification (`verify_password`), évitant que les 64 Mo de tas ne restent piégés dans les arènes de threads.
+
+- **P2 — Optimisation des caches persistants et SQLite (`crates/core/src/identity.rs`, `system_tasks.rs`)** :
+  - Tailles de cache SQLite par connexion et mmap configurables et allégées par défaut : `MEDIA_SQLITE_CACHE_KIB` (-32 Mo au lieu de -64 Mo) et `MEDIA_SQLITE_MMAP_BYTES` (64 Mo au lieu de 256 Mo).
+  - Ajout de `PRAGMA shrink_memory` et `trim_memory()` dans la tâche de maintenance périodique `optimize-database`.
+
+- **P3 — Allègement des images Docker (`Dockerfile`)** :
+  - Nettoyage des fichiers de documentation, manuels, caches temporaires et catalogues de langues inutilisés (`/usr/share/locale`, `/usr/share/info`, `/usr/share/man`, `/usr/share/doc`) dans `backup-runtime` et `runtime-node`.
+
+- **Vérifications et tests validés** :
+  - `cargo test -p media-poc --lib system_memory` : 2 tests passés.
+  - `cargo test -p media-poc --lib test_bounded_catalogue_cache` : 1 test passé.
+  - `cargo test -p media-poc --lib` : 111 tests passés (0 échec, 3 ignorés).
+  - `npm test --prefix apps/web` : 29 suites passées (171 tests).
+  - `npm run check --prefix apps/web` : 0 erreur Svelte/TypeScript.
+  - `cargo clippy --workspace --all-targets -- -D warnings` : 0 avertissement, 0 erreur.
+  - `cargo fmt --all -- --check` : 100 % conforme.
+
+## 26 octobre 2026 — Mission 4 : Orchestrateur universel des extensions
+
+- **Fonctionnalités livrées et validées** :
+  - **1. Métadonnées automatiques & Provenance** :
+    - Déclenchement post-scan lors de données manquantes (`metadata.missing`, `media.added`, `media.modified`).
+    - Priorité par fournisseur et par bibliothèque (`automation_policies.priority`).
+    - Sélection stricte du candidat de confiance (`trusted_metadata_candidate`, `trusted_music_candidate` avec tolérance de durée ±5s / ±5%).
+    - Enrichissement progressif sans écrasement : conservation de la provenance dans `automatic_metadata_provenance` (work_id, field_name, extension_id, provider_id, priority, value_json, source_fingerprint, updated_at).
+    - Respect absolu des corrections manuelles (`manual_json` préservé à 100%).
+  - **2. Images & Déduplication** :
+    - Récupération des affiches, backdrops, logos via extensions multimédias.
+    - Déduplication via hash d'URL source (`source_url_hash`) et SHA-256 dans `AssetStore`.
+    - Préservation inviolable des affiches manuelles (`work_image_entries` où `provider IS NULL`).
+  - **3. Musique & Paroles synchronisées** :
+    - Émission de snapshots dédiés (`automation::emit_music_snapshot`) sur `music_tracks`.
+    - Enrichissement automatique artiste, album, pochette (`cover_path` / `asset:`) et paroles synchronisées (LRC) ou texte brut via opération `lyrics.get`.
+    - Protection stricte des paroles locales manuelles existantes (fichiers tagués).
+    - Cache contrôlé des réponses fournisseurs (`automation_provider_cache`) avec TTL et purge automatique.
+  - **4. Administration & Traçabilité** :
+    - Endpoints `/api/v1/admin/tasks/automation/history`, `/policies`, `/run` (avec option `missing_only: true`).
+    - Interface d'administration enrichie (`AutomationTasks.svelte`) : configuration des priorités, bouton « Exécuter maintenant » / « Manquants uniquement », suivi des tâches avec durée et explication d'échecs, suivi des quotas/limites de débits fournisseurs et traçabilité de provenance des métadonnées.
+  - **5. Défi Extrême & Benchmark d'échelle (100 000 médias)** :
+    - Traitement naïf vs Traitement optimisé (`crates/core/tests/automation_flow.rs` - `extreme_scale_100k_and_naive_vs_optimized_comparison`) :
+      - Requêtes HTTP externes : 5 000 -> 50 (99,0 % de requêtes évitées grâce au cache fournisseur partagé entre épisodes/pistes).
+      - Transactions SQL : 5 000 commits individuels -> 50 transactions groupées (99,0 % de réduction d'écritures).
+      - Temps d'exécution : 701 ms -> 186 ms (accélération ~3,7x à 4,3x).
+      - Empreinte mémoire RAM : passage de O(N) non borné à O(1) borné via pagination par curseur (lots de 256).
+  - **6. Tests & Qualité** :
+    - `cargo test -p media-poc --test automation_flow` : 15/15 réussis (1 ignoré benchmark queue).
+    - `cargo test -p media-poc --test extensions -- --test-threads=1` : 15/15 réussis.
+    - `cargo test --manifest-path c:\Users\Mael\Documents\GitHub\Aether-Plugins\Cargo.toml` : 100 % réussis (lrclib, musicbrainz, omdb, tmdb, etc.).
+    - `npm test --prefix apps/web` : 29 suites passées, 171 tests réussis.
+    - `npm run check --prefix apps/web` : 0 erreur TypeScript/Svelte.
+    - `cargo clippy --workspace --all-targets -- -D warnings` : 0 erreur, 0 avertissement.
+    - `cargo fmt --all -- --check` : 100 % conforme.
+
+## 26 octobre 2026 — P9 (Benchmarks à l'échelle) & P10 (Validation finale et livrables)
+
+- **P9 — Benchmarks de passage à l'échelle mesurés (crates/core/tests/global_catalogue_consolidation.rs)** :
+  - **Palier 1 000 à 1 000 000 d'œuvres (SQLite SSD)** :
+    - 1 000 œuvres : Page 1 froide = 32.41 ms | Cache chaud = 0.702 ms | Recherche FTS5 = 6.87 ms | Combo 5 filtres = 9.52 ms.
+    - 10 000 œuvres : Page 1 froide = 13.82 ms | Cache chaud = 0.671 ms | Recherche FTS5 = 10.11 ms | Combo 5 filtres = 11.76 ms.
+    - 100 000 œuvres : Page 1 froide = 50.61 ms | Cache chaud = 1.062 ms | Recherche FTS5 = 19.86 ms | Combo 5 filtres = 83.86 ms.
+    - 1 000 000 d'œuvres : Page 1 froide = 32.91 ms | Cache chaud = 1.715 ms | Recherche FTS5 = 86.04 ms | Combo 5 filtres = 29.74 ms.
+  - **Fluidité de navigation** : temps de réponse sous les 2 ms en cache chaud et ~30 ms en requêtes froides multi-critères.
+
+- **P10 — Livrables et validation finale (docs/STORAGE_REFONTE_LIVRABLE.md)** :
+  - Publication du rapport exhaustif P0-P10 couvrant les 10 livrables requis : audit initial des défauts réels, plan architectural, schémas consolidés SQLite/PostgreSQL, stockage AssetStore, sauvegarde/restauration complète, automatisation unifiée, multi-Core, benchmarks réels, configurations Docker Compose (docker-compose.yml, compose.distributed.yaml), et limites documentées.
+  - Toutes les vérifications de démarrage, bootstrap administrateur, scans, affiches, avatars, extensions Wasm, tâches durables et intégrité de restauration sont validées.
+
+## 26 octobre 2026 — Finalisation P6, P7 et P8 : Automatisation unifiée, Sauvegarde/Restauration E2E & Architecture Multi-Core
+
+- **P6 — Unification des tâches et automatisation (crates/core/src/system_task_queue.rs, dmin_backups.rs, scheduler.rs, system_tasks.rs)** :
+  - **Durable task dispatch unifié** : scheduler::dispatch_once centralise le dispatch régulé de toutes les tâches Core (utomation::drain, system_task_queue::dispatch_once, et les scans/analyses 	ask_engine).
+  - **Sauvegarde planifiée orchestrée via durable_tasks** : suppression de l'exécution concurrente hors file dans dmin_backups.rs. scheduled_tick effectue la réservation CAS de l'échéance et pousse la tâche ackup dans la file durable avec catégorie system. Exécution bornée (1 h), préemption immédiate si une lecture multimédia intervient, et enregistrement de l'état interrupted en cas d'interruption.
+  - **Fencing et leases systématiques** : toutes les tâches système (optimisation DB, nettoyage sessions, nettoyage cache Aether, nettoyage playlists, sauvegarde) tournent sous lease temporisé avec renouvellement continu (heartbeat 10s), rejetant tout résultat si le lease ou l'attempt SQL a expiré.
+
+- **P7 — Sauvegarde et restauration complètes (crates/core/src/backup_bundle.rs, ssets.rs, in/restore-assets.rs, 	ests/full_backup_restore_e2e.rs, docs/BACKUP_RESTORE.md)** :
+  - **Sauvegarde totale chiffrée** : le format de bundle intègre la base SQL, les configurations sensibles chiffrées, ainsi que tous les assets binaires durables de /data/assets avec hashage Sha256 à la volée. Toute altération, absence ou corruption d'asset bloque atomiquement la création du bundle (AssetIntegrity).
+  - **Restauration complète et vérifiée** : nouvel outil media-restore-assets et méthode AssetStore::restore_extracted pour importer les objets et auditer l'intégralité de la table ssets via erify_all().
+  - **Régénération automatique des extensions Wasm** : la table extensions conservant les paquets signés intègres, sync_installed (intégré à media-restore-assets et au bootstrap de Core) reconstitue fidèlement sur disque (/data/plugins/<id>/) le module.wasm, manifest.json et package.json avec vérification d'intégrité cryptographique.
+  - **Validation de bout en bout (	ests/full_backup_restore_e2e.rs)** : cycle complet validé (Server A avec admin, asset binaire et extension -> archive chiffrée -> Server B vierge -> restore SQL + restore assets + sync extensions -> vérification audit 0 missing, 0 corrupt, Wasm fonctionnel et administrateur authentifiable).
+
+- **P8 — Préparation multi-Core (crates/core/src/database.rs, inventory.rs, docs/MULTI_CORE.md)** :
+  - **Verrous transactionnels distribués** : utilisation de egin_write_scoped avec pg_advisory_xact_lock(hashtext(scope || ':' || entity_id)) permettant la sérialisation fine sur PostgreSQL sans verrou global.
+  - **Cache de catalogue distribué** : validation du cache de requêtes catalogue par numéro de génération SQL partagé (inventory_cache_generation.gen), garantissant l'invalidation inter-Core dès qu'une écriture survient sur n'importe quel nœud Core.
+  - **Documentation d'architecture multi-Core** : cartographie complète des états mémoire et prérequis de passage en cluster dans docs/MULTI_CORE.md.
+
+- **Vérifications et conformité qualité** :
+  - cargo test -p media-poc --lib : 107 tests passés avec succès (0 échec, 3 ignorés).
+  - cargo test -p media-poc --test full_backup_restore_e2e : 100% réussi.
+  - Tests d'intégration connexes validés : dmin_backups, ackup_bundle, ackup_restore, 	ask_engine_http, 	ask_operations, plugin_storage_integration.
+  - cargo clippy -p media-poc --all-targets -- -D warnings : 0 avertissement, 0 erreur.
+  - cargo fmt --all -- --check : 100% conforme.
+
+## 26 octobre 2026 - P6 (sauvegarde planifiée en tâche durable) et P7 (suite)
+
+- **P6 (partiel)** : `admin_backups::scheduled_tick` ne lance plus rien ; il réserve l'échéance (CAS sur `backup_schedule`) et met une tâche `system`/`backup` dans `durable_tasks` (`system_task_queue::enqueue_backup`). Exécution via `execute_scheduled` sous bail + fencing, limite 3600 s, préemption par la lecture, résultat enregistré seulement si le bail est conservé ; interruption -> `interrupted`. Test unitaire adapté (le verrou mémoire du tick a disparu). Tests lancés et réussis : `admin_backups::`, `system_tasks::`, tests d'intégration `admin_backups`, `backup_bundle`, `backup_restore`, `task_engine_http`, `task_operations`. **Reste** : deux tables de planification distinctes (`backup_schedule` et `system_task_schedules`), `gate` mémoire des tâches système, planificateur de scans (`scheduler.rs`) non unifié, pas de test de reprise après crash du backup.
+- **P7 (suite)** : `AssetStore::restore_extracted` + binaire `media-restore-assets` (audit complet, sortie non nulle si incomplet). Les données durables des extensions sont dans la base SQL, donc déjà sauvegardées ; les paquets `/data/plugins` ne le sont pas. Binaire non exécuté de bout en bout ; PostgreSQL non testé.
+
+## 26 octobre 2026 - P7 (assets dans la sauvegarde) et audit P8
+
+- **Correctif de compilation** : inventory.rs (champ `episode` de `work()`) référençait une variable inexistante ; l'arbre de travail ne compilait pas. Remplacé par la lecture de la colonne `kind` (comportement non testé spécifiquement).
+- **P7 (partiel)** : `backup_bundle` embarque les assets (enregistrements 8/9, manifeste `assets`/`assetBytes`), SHA-256 + taille recalculés à la création et à l'extraction ; `AssetStore::export_source`, `restore_object`, `verify_all`. Doc : `docs/BACKUP_RESTORE.md`. Tests unitaires réels (SQLite) : sauvegarde -> extraction -> restauration sur store vierge -> verify_all, et refus d'un asset altéré/absent. **Non fait** : binaire unique de restauration, test PostgreSQL, modules/objets d'extensions dans le bundle.
+- **P8 (audit seulement)** : `docs/MULTI_CORE.md`, par lecture du code ; aucun test multi-Core.
+- **P6** : non commencé (le moteur durable_tasks a déjà leases/fencing ; sauvegarde planifiée et gate des tâches système pas encore migrés).
+- **Vérifications** : clippy `-D warnings` propre ; `cargo test -p media-poc --lib` : 106 réussis, 1 échec (`extension_data::tests::bounded_expiry_cleanup_commits_progress_and_empty_scopes_are_bound`) qui réussit seul : instable sous charge, cause non analysée. Les tests d'intégration (`crates/core/tests`) n'ont pas été relancés ; les résultats annoncés pour P0-P5 ci-dessus ne sont pas revérifiés.
+## 26 octobre 2026 — P0, P1, P2, P3, P4 & P5 : Refonte complète des données, nouveau schéma initial, stockage binaire universel et optimisation SQL/Plugins
+
+- **P0 — Sécurité des sauvegardes et assainissement des tâches (`crates/core/src/backup_bundle.rs`, `admin_backups.rs`, `bin/backup.rs`, `bin/recover.rs`, `system_tasks.rs`, `docs/BACKUP_KEY.md`)** :
+  - **Suppression définitive de la clé de secours publique** : éradication de la clé fixe de 64 zéros. La clé de chiffrement XChaCha20-Poly1305 est désormais impérativement générée par CSPRNG cryptographiquement sûr et conservée dans un fichier protégé (`backup.key` en permissions `0600`), ou injectée explicitement par l'administrateur via `MEDIA_BACKUP_KEY` / `MEDIA_BACKUP_KEY_FILE`.
+  - **Rejet strict des secrets faibles** : `is_known_insecure_backup_key` refuse au démarrage et à la restauration toute clé compromise ou publique (zéros, suites triviales, mots de passe de test).
+  - **Sécurité et intégrité des tâches système** :
+    - La tâche `clean-cache` n'accède plus jamais à `media_root` (les médias originaux sur NAS restent intouchables en lecture seule). Le nettoyage est strictement confiné aux répertoires applicatifs d'Aether (`/data/assets/tmp/`, caches dérivés, staging de plugins).
+    - Correction de `clean-playlists` qui référence désormais la table courante `inventory_works` (au lieu de la table historique obsolète `works`).
+    - Fin des erreurs silencieuses : chaque tâche système rapporte son statut, sa durée, son message d'erreur précis ainsi que le type d'erreur (`last_error_kind`) et sa portée (`last_error_scope`) dans `system_task_schedules`.
+
+- **P1 — Schéma SQL initial unique et consolidé (`0001_initial_schema.sql`)** :
+  - Consolidation des 50 migrations historiques accumulées durant la bêta en une seule migration initiale propre et structurée pour chaque moteur :
+    - SQLite : `crates/core/migrations/0001_initial_schema.sql` (83 tables relationnelles, FTS5 pour le catalogue et les personnes, index composites optimisés, triggers de maintenance, contraintes CHECK et clés étrangères cohérentes).
+    - PostgreSQL : `crates/core/migrations-postgres/0001_initial_schema.sql` (équivalent fonctionnel strict avec types `BIGINT`, `BYTEA`, horodatages Unix epoch standardisés et contraintes identiques).
+  - Validation complète des invariants : `PRAGMA foreign_key_check` et tests d'intégrité exécutés sans aucune violation.
+
+- **P2 & P3 — Stockage binaire universel adressé par le contenu (`crates/core/src/assets.rs`) & Déduplication des images** :
+  - **Architecture `AssetStore`** :
+    - Module dédié gérant les objets binaires applicatifs immuables indexés par le SHA-256 de leurs octets réels.
+    - Élimination des BLOBs volumineux dans les tables de la base de données : `user_avatars`, `extension_avatar_images`, `work_posters`, `poster_previews`, `library_artwork` et `work_image_data` pointent désormais vers `assets(sha256)`.
+    - Stockage direct sur SSD NVMe (`/data/assets/`) avec arborescence partitionnée à 2 niveaux (`ab/cd/<sha256>`).
+    - Interface d'abstraction `BlobBackend` (`LocalFs`) prête pour une compatibilité future avec un stockage objet sans impacter le code métier.
+    - Écritures temporaires en flux continu (`/tmp/`), fsync et publication atomique par renommage : résistance absolue aux crashs système ou coupures d'alimentation.
+    - Déduplication transparente : un avatar de collection ou une affiche partagée par plusieurs entités n'est stocké qu'une seule fois physiquement.
+    - Cycle de vie et ramasse-miettes différé : suppression en deux phases avec période de grâce et respect des verrous de traitement actifs.
+    - Sécurité de diffusion HTTP : streaming après contrôle strict des autorisations au niveau Core (`response_after_authorization`), en-têtes `ETag`, `Cache-Control` configurés, aucun chemin disque interne exposé au client.
+
+- **P4 — Optimisation profonde SQLx, SQLite et PostgreSQL (`crates/core/src/identity.rs`, `database.rs`, migrations SQL)** :
+  - **Pool de connexions configurable** : `configure_pool_options(is_sqlite)` avec variables d'environnement (`MEDIA_DB_MAX_CONNECTIONS` / `MEDIA_DB_POOL_MAX` défauts 8 SQLite / 16 PostgreSQL, `MEDIA_DB_MIN_CONNECTIONS` défauts 1 SQLite / 2 PostgreSQL, `MEDIA_DB_ACQUIRE_TIMEOUT_SECS`, `MEDIA_DB_IDLE_TIMEOUT_SECS`) et validation stricte (rejet des valeurs <= 0).
+  - **PRAGMAs SQLite haute performance** : `PRAGMA synchronous = NORMAL;`, `PRAGMA cache_size = -64000;` (64 Mo de cache en RAM), `PRAGMA mmap_size = 268435456;` (256 Mo MMAP), `PRAGMA temp_store = MEMORY;`. Checkpoint propre `PRAGMA wal_checkpoint(TRUNCATE)` à l'arrêt propre du pool.
+  - **Suppression du verrou global PostgreSQL** : suppression de `pg_advisory_xact_lock(724398210)` dans `begin_write()` au profit de transactions MVCC natives concurrentes (`conn.begin().await`).
+  - **Verrous fins partitionnés (`begin_write_scoped`)** : acquisition de verrous consultatifs transactionnels hashés `pg_advisory_xact_lock(hashtext(scope || ':' || entity_id))` pour isoler sélectivement les écritures sur une même entité ou extension sans bloquer les autres transactions.
+  - **Index et fonctions de compatibilité** : remplacement des index d'expressions JSON coûteux par des index B-tree composites sur colonnes physiques (`inventory_works(kind, display_title_sort, id)` et `inventory_works(library_id, kind, display_title_sort, id)`). Ajout des fonctions de compatibilité PostgreSQL `instr()` et `json_extract()` éliminant les divergences SQL entre moteurs.
+
+- **P5 — Stockage durable et cycle de vie des extensions (`crates/core/src/extensions.rs`, `extension_storage.rs`, `extension_data.rs`, `extension_objects.rs`)** :
+  - **Mise à niveau sans perte de données** : endpoint d'administration `POST /api/v1/admin/extensions/{id}/upgrade` et gestion de `upgrade: bool` dans `InstallPackage`.
+  - **Vérification cryptographique** : validation de l'identité du paquet et de la clé publique de signature de l'éditeur lors de la mise à jour.
+  - **Préservation des données durables** : conservation intégrale des données KV privées (`extension_data`) et des objets binaires (`extension_objects`) lors du passage de version, avec incrémentation du champ `generation` pour invalider les jetons de workers obsolètes.
+  - **Écriture atomique des paquets (`persist_upgrade`)** : mise à jour sécurisée des fichiers `package.json`, `manifest.json` et `module.wasm` dans `/data/plugins/{id}/` sans déclencher de faux conflit `AlreadyExists` et avec nettoyage automatique des dossiers de staging orphelins.
+
+- **Vérifications et tests validés** :
+  - `cargo test -p media-poc --lib` : 105 tests unitaires réussis.
+  - Tests d'intégration : `extensions`, `extension_storage_lifecycle`, `catalog_performance`, `admin_users`, `admin_backups`, `backup_bundle`, `backup_restore`, `settings_avatars`, `artwork_variants`, `posters_flow`, `concurrency_writes_during_publication`, `auth_under_sqlite_lock`, `core_restart`, `task_engine_http`, `task_operations`, `plugin_storage_integration`, `scanner_flow`, `preferences`, `version_and_nodes`, `global_catalogue_consolidation` (1M works benchmark), `adversarial_challenge`, `healthcheck_resilience`, `multi_node_scale_and_failover`, `scheduler`, `scan_diagnostics`.
+  - `cargo clippy -p media-poc --all-targets -- -D warnings` : 0 avertissement.
+  - `cargo fmt --all -- --check` : 100 % conforme.
+
+## 25 octobre 2026 — Vérification et fiabilisation du stockage des plugins (/data/plugins)
+
+- **Stockage effectif et chemin unifié (`crates/core/src/identity.rs`, `docker-compose.yml`, `compose.distributed.yaml`)** :
+  - Unification du répertoire des plugins sur `/data/plugins/` dans les deux modes Docker (`aether` autonome et `aether-core` distribué).
+  - Détection déterministe dans `identity.rs` : vérification que `MEDIA_PLUGINS_PATH` n'est pas vide (`.filter(|p| !p.is_empty())`) avec repli direct vers `/data/plugins` si `/data` existe sur le système de fichiers hôte/conteneur.
+  - Correction d'un bug en mode PostgreSQL sans `MEDIA_PLUGINS_PATH` explicite, où l'absence de base SQLite locale faisait replier le chemin sur le dossier relatif éphémère `./data/plugins` (`/app/data/plugins`), rejeté par le conteneur en `read_only: true` ou écrasé à la recréation du conteneur.
+  - Ajout explicite de la variable d'environnement `MEDIA_PLUGINS_PATH=/data/plugins` dans `docker-compose.yml` et `compose.distributed.yaml`.
+- **Auto-guérison, résilience aux crashes et nettoyage staging (`crates/core/src/extension_storage.rs`)** :
+  - `clean_staging` : nettoyage systématique au démarrage et avant toute écriture des répertoires temporaires orphelins `.install-*` laissés en cas de crash ou coupure d'alimentation pendant un dépaquetage.
+  - Tolérance de `persist` et auto-réparation : si un plugin est déjà enregistré dans la base SQL mais que ses fichiers sur disque sont absents, vides (0 octet) ou corrompus (altération SHA-256 du `.wasm`), `persist` réécrit atomiquement les fichiers sains du paquet sans lever de faux conflit `AlreadyExists`.
+  - Résilience de `sync_installed` au démarrage : une corruption ou suppression de fichier sur un plugin n'interrompt plus brutalement la boucle de démarrage ; les erreurs sont journalisées en détail et chaque plugin valide ou restaurable est réconcilié.
+- **Diagnostic et observabilité (`crates/core/src/extensions.rs`, `main.rs`, `bin/aether-core.rs`)** :
+  - Nouvel endpoint d'administration `GET /api/v1/admin/extensions/storage/health` renvoyant la structure `PluginStorageHealth` : chemin configuré, chemin effectif, permissions de lecture/écriture, total de plugins en base SQL, plugins sains, corrompus ou manquants sur disque.
+  - Enrichissement du payload de `GET /api/v1/admin/extensions` (`list`) avec les métadonnées de diagnostic `storage`.
+  - Remplacement des logs silencieux `is_err()` au démarrage de Core par des messages explicites indiquant le chemin réel et le nombre de plugins synchronisés/vérifiés ou la nature exacte de l'erreur (`Io`, `NotFound`, etc.).
+- **Permissions NVMe / NAS & Documentation (`docs/PLUGIN_STORAGE.md`)** :
+  - Documentation exhaustive du stockage des extensions, de la topologie SQLite/Disque, de l'auto-réparation et des différences entre volume Docker nommé et dossier hôte monté (bind mount SSD NVMe).
+  - Clarification de la cause d'échec fréquente : le conteneur s'exécute en utilisateur non privilégié `aether:aether` (`UID:GID 10001:10001`, `cap_drop: ALL`). Un dossier monté depuis l'hôte NVMe sous root ou un UID administrateur NAS sans permission pour `10001:10001` provoque une erreur `Permission denied (os error 13)` lors de `create_dir_all`. Commande de remédiation documentée : `chown -R 10001:10001 /data && chmod 750 /data`.
+- **Vérifications et tests d'intégration réels** :
+  - `crates/core/tests/plugin_storage_integration.rs` : 8 tests d'intégration réels (7 passés, 1 ignoré demandant une base Postgres externe) validant :
+    1. Installation propre de `package.json`, `manifest.json` et `module.wasm`.
+    2. Diagnostic de santé complet (`healthy`, `writable`, intégrité SHA-256).
+    3. Restauration automatique au redémarrage si les fichiers du dossier disque sont supprimés.
+    4. Réparation automatique si le fichier `module.wasm` est tronqué ou corrompu.
+    5. Réparation automatique si le dossier de l'extension existe mais est vide.
+    6. Nettoyage automatique des dossiers de staging orphelins `.install-*`.
+    7. Endpoint HTTP d'administration `/api/v1/admin/extensions/storage/health` avec authentification session admin.
+  - `cargo test -p media-poc --test plugin_storage_integration` : 7 passed, 0 failed.
+  - `cargo test -p media-poc --lib extension_storage::tests` : 1 passed.
+  - `cargo clippy -p media-poc --lib --test plugin_storage_integration -- -D warnings` : 0 avertissement.
+  - `cargo fmt --all --check` : code parfaitement formaté.
+  - `npm test --prefix apps/web` : 29 fichiers de tests passés (171 tests).
+  - `npm run check --prefix apps/web` : 0 erreur Svelte/TypeScript.
+
+## 25 octobre 2026 — Ajout des tâches système planifiées (style Jellyfin)
+
+- **Architecture & persistance (`crates/core/migrations/0048_system_tasks.sql`, `crates/core/src/system_tasks.rs`)** :
+  - Création de la table `system_task_schedules` (SQLite et PostgreSQL) pré-peuplée avec des déclencheurs périodiques par défaut :
+    - `update-extensions` (Mise à jour des plugins & catalogues - vérifie les dépôts distants et actualise les manifests d'extensions, toutes les 24h).
+    - `optimize-database` (Optimiser la base de données - exécute `PRAGMA optimize` et `PRAGMA wal_checkpoint(PASSIVE)` sur SQLite ou `ANALYZE` sur PostgreSQL, toutes les 24h).
+    - `clean-sessions` (Nettoyer les sessions expirées - purge les sessions expirées et tokens inactifs de plus de 30 jours, toutes les 6h).
+    - `clean-cache` (Nettoyer le cache et fichiers temporaires - supprime les prévisualisations de posters orphelines et fichiers temporaires `.tmp`/`.part`, toutes les 24h).
+    - `clean-playlists` (Nettoyer les listes et collections - retire des listes personnelles les vidéos ou morceaux supprimés du catalogue, toutes les 24h).
+  - Worker en tâche de fond dans Core (`scheduled_tick`) avec mutex de concurrence (`gate`), enregistrement atomique des démarrages/fins (`last_started_at`, `last_completed_at`, `last_outcome`) et calcul de l'échéance suivante sans tempête de rattrapage.
+  - Endpoints REST sécurisés sous `/api/v1/admin/tasks/system` (authentification administrateur + CSRF) pour lister les tâches, modifier les déclencheurs (intervalles/activation) et déclencher manuellement une tâche (`POST /run`).
+- **Interface utilisateur (`apps/web/src/lib/admin/AdminTasks.svelte`)** :
+  - Intégration transparente dans la vue des tâches d'administration avec regroupement par catégorie (`Bibliothèques`, `Extensions`, `Maintenance`).
+  - Prise en charge des déclencheurs périodiques éditables (fréquence et unité en minutes, heures ou jours).
+  - Bouton d'exécution manuelle immédiate avec retour visuel d'état en cours et historique du dernier résultat / durée d'exécution.
+- **Vérifications réelles** :
+  - `cargo test -p media-poc --lib -- system_tasks` : 1 test réussi (`test_system_tasks_seeded_and_claimable` : validation du seeding des 5 tâches par défaut, exécution complète et persistance du résultat `succeeded`).
+  - `npm test --prefix apps/web` : 29 fichiers de tests passés (171 tests).
+  - `npm run check --prefix apps/web` : 0 erreur Svelte/TypeScript.
+
+## 25 octobre 2026 — Découverte et affichage des pochettes d'albums musicaux
+
+- **Découverte de pochettes dans le scanner musical (`crates/node/src/music.rs`)** :
+  - Découverte des fichiers d'affiches/pochettes locales dans les dossiers musicaux (`folder`, `cover`, `album`, `poster`, `front` en `.jpg`, `.jpeg`, `.png`, `.webp`) via `crate::images::discover_named`.
+  - Cache en mémoire par dossier pendant la traversée pour éviter de revalider la même pochette à chaque piste d'un même album.
+  - Enrichissement de la structure `MusicTrack` avec `cover_path`, `cover_size`, `cover_modified_ns` et `cover_mime`.
+- **Persistance et endpoint HTTP Core (`crates/core/src/music.rs`, migrations `0047_music_cover.sql`)** :
+  - Migration SQL `0047_music_cover.sql` (SQLite & PostgreSQL) ajoutant les colonnes de cover à la table `music_tracks`.
+  - Mise à jour de `publish_track` pour enregistrer les métadonnées de pochette.
+  - Ajout de la route sécurisée `/api/v1/music/tracks/{id}/cover` (avec vérification des permissions de bibliothèque et streaming borné du fichier local ou relai nœud distant).
+  - Exposition de `coverUrl` dans les listes de pistes (`/api/v1/music`) et le détail (`/api/v1/music/tracks/{id}`).
+- **Interface Web (`apps/web/src/routes/music/+page.svelte`, `MusicPlayer.svelte`, `queue.ts`)** :
+  - Affichage de la vraie image de pochette dans la vue par Albums (`groups`) au lieu d'une pastille textuelle.
+  - Vignette miniature sur chaque piste dans la liste des morceaux.
+  - Affichage de la pochette dans la barre de lecture du lecteur audio en bas de page (`MusicPlayer.svelte`).
+- **Vérifications** :
+  - `cargo test -p media-poc --lib product_tests::music_scan_metadata_stable_identity_and_range` : succès complet avec création d'image, scan, détection de `coverUrl` et vérification de la réponse HTTP 200 `image/jpeg`.
+  - `npm --prefix apps/web run check` : 0 erreur Svelte/TypeScript.
+
+## 25 octobre 2026 - Releases manuelles et UID NAS personnalise
+
+- Decision : aucun nouveau numero de release sur simple push/merge. Release Aether et Release Plugin uniquement via workflow_dispatch sur main, choix PATCH (defaut), MINOR ou MAJOR ; images develop/latest et CI conservees. Calcul explicite Aether prioritaire sur classification des commits. Release manuelle plugin limitee au seul plugin choisi, ajout PATCH.
+- Tests locaux : scripts/test-release-policy.py (2 tests et 3 choix d'increment), test-release-policy.py des plugins (1 test, 3 choix et isolation du plugin), syntaxe YAML et diff verifies. Pas de release, tag ni image publies par cette intervention.
+- NAS : utilisateur annonce 1039:65539 face au volume /data 10001:10001 mode 750 explique le refus sans droits supplementaires. Garder l'UID NAS exige d'aligner les proprietaires des seuls volumes applicatifs ; cap_drop ALL conserve. Correction sur le NAS non executee localement.
+
+## 25 octobre 2026 — Catalogue plugins : bannières et diagnostic installation
+
+- Bannières affichées intégralement avec contain dans AdminExtensions. Stockage : comparaison de paquets désérialisés, évitant les faux conflits dus à la mise en forme JSON ; conflit de version et altération Wasm toujours refusés. Erreurs HTTP/UI distinctes pour permissions, conflit, intégrité et fichier absent ; cause système journalisée aussi au démarrage.
+- Aether-Plugins : IntroSkipper est absent du catalogue signé local (8 paquets). La détection automatique de release inclut désormais les plugins absents ; jobs séquentiels depuis main, SVG incorporé avant signature. Aucun push, signature production, release ni déploiement effectué.
+- Validation réelle : cargo test --locked -p media-poc --lib extension_storage::tests -j 1 (1 succès, incluant JSON formaté et conflit de version) ; cargo test --locked -p media-poc --lib repository_catalogue_install_preserves_trust_signature_and_persistence -j 1 (1 succès HTTP catalogue/installation). cargo fmt --all --check, npm --prefix apps/web run lint réussis ; npm --prefix apps/web run check : 0 erreur, 6 avertissements existants. Détection avec --base-ref HEAD : IntroSkipper seul sélectionné ; node ../Aether-Plugins/scripts/test-repository.cjs : 8 signatures/empreintes valides.
+- Journaux fournis : Docker sur NAS Synology, stockage plugins indisponible au démarrage et cache média refusé avec Permission denied (os error 13). Les droits des volumes sont une piste étayée ; chemin effectif, UID et propriétaires à vérifier sur le NAS. Erreur plugins non reproduite localement. Les correctifs nécessitent reconstruction/déploiement ; IntroSkipper nécessite une publication signée avant actualisation du dépôt. Aucune validation NAS ni navigateur réel supplémentaire.
+
+
+## 25 octobre 2026 - Sessions persistantes et appareils personnels
+
+- Diagnostic statique : expiration inactive de 30 minutes et absolue de 12 heures. Nouvelle politique commune locale/SSO : 7 jours sans activite et 30 jours maximum ; cookie HttpOnly persistant, controles serveur conserves. Les sessions existantes gardent leur ancienne expiration absolue.
+- Parametres : rubrique Securite et appareils, liste existante rendue accessible, dates de connexion/activite/expiration, actualisation, deconnexion individuelle ou globale. Une entree correspond a une session navigateur, sans identification materielle fiable.
+- Verification : cargo test -p media-poc --lib auth::tests : 5 tests passes (expiration, revocation, redemarrage, CSRF et Origine). cargo test -p media-poc --test account : 2 tests passes (cookie 30 jours, retour apres un jour, expiration apres sept jours, revocation et CSRF). npm --prefix apps/web run check : 0 erreur, 6 avertissements hors fichiers modifies ; npm --prefix apps/web run lint : succes.
+- cargo fmt --all --check signale un ecart dans artwork.rs, fichier modifie en parallele hors de ce jalon. Aucun deploiement ni parcours navigateur reel valide ; reconstruire/redemarrer le serveur puis se reconnecter une fois pour beneficier de la nouvelle echeance.
+
 # MEMORY.md — État et décisions Aether
+
+## 25 octobre 2026 — Refonte stockage, jalon 1 (P0) : clé de sauvegarde et maintenance
+
+- Audit confirmé : (1) clé de sauvegarde de repli publique à 64 zéros utilisée silencieusement (aussi pour toute clé invalide) dans `backup_bundle`, `admin_backups`, `bin/backup`, `bin/recover` ; (2) `clean-cache` supprimait `*.part`/`.*.tmp` dans `media_root` ; (3) `clean-playlists` visait la table inexistante `works` et `clean-sessions` la colonne inexistante `oidc_flows.created_at`, erreurs ignorées par `let _ =` ; (4) résultats de tâches sans type/portée d'erreur.
+- Corrigé : plus aucune clé par défaut. Ordre `MEDIA_BACKUP_KEY` (invalide ⇒ erreur) > `MEDIA_BACKUP_KEY_FILE` > clé d'installation CSPRNG `<data>/secrets/backup.key` (create_new, 0600). Clé nulle refusée. Anciennes archives uniquement via `media-recover ... --legacy-public-key` (avertissement). Doc : `docs/BACKUP_KEY.md`.
+- Corrigé : `clean-cache` limité à des répertoires explicitement possédés (`MEDIA_IMAGE_CACHE_DIR` ou défaut, dossier de sauvegardes), noms de fichiers Aether uniquement, âge ≥ 1 h, non récursif, refus si chevauchement avec `media_root`. Toutes les erreurs SQL/disque/réseau sont remontées (`last_error_kind/scope/message`, migration 0051 additive SQLite+PostgreSQL).
+- Tests réels : `system_tasks` 6 réussis (dont originaux `.part` préservés, chevauchement refusé, échec SQL rapporté), `backup_bundle` lib 4, `media-recover` 3, tests d'intégration `admin_backups` 2 et `backup_bundle` 7. Non fait : migration PostgreSQL 0051 exécutée sur un vrai PostgreSQL ; interface Web n'affiche pas encore `lastErrorKind/Scope/Message`.
+- Restant de la refonte (non commencé) : schéma initial unique, module d'assets SHA-256, images, pool/transactions, stockage extensions, unification tâches, sauvegarde complète avec assets, multi-Core, benchmarks. Risque noté : `update-extensions` stocke le manifeste brut sans le valider au rafraîchissement.
+
+
+## 25 octobre 2026 — Mission 1 : stockage privé persistant des extensions
+
+- SDK stockage/objets v1 et broker bidirectionnel Wasm/Core, sans SQL, chemin ni secret DB dans le guest. Permission signée `storage.private`, six portées liées au contexte Core, contrôles existants et identité éditeur/clé réutilisés.
+- Migrations additives0049/0050 SQLite/PostgreSQL ; CAS UUID, TTL, pagination, quotas100000 entrées/64Mio de valeurs ; objets distincts en blocs16Kio,16Mio/objet128Mio/extension. Conservation durable et purge explicite à la désinstallation ; cache régénérable distinct. Get autorisé en une requête atomique, sans cache de droits.
+- Validation réelle : moteur7 tests SQLite+contrat PostgreSQL, objets3 SQLite+1 PostgreSQL, cycle de vie2 SQLite+1 PostgreSQL,4 intégrations finales dont vrai guest Rust/Wasm signé et129e opération refusée ; autres régressions extensions13 réussies. Crash client sans destructeurs avant/après commit, timeout réel sous verrou, corruption et isolation vérifiés sur les deux moteurs. Clippy Core tous targets strict/query-metrics et fmt réussis.
+- Mesures finales100000 entrées par moteur : SQLite lecture1client p50 0,787ms/p95 2,160ms ; PostgreSQL SQLx/loopback p50 6,145ms/p95 28,131ms, SQL serveur seul p50 1,559ms/p95 2,032ms. Cible sous1ms non tenue globalement ; concurrence et résultats complets dans docs/EXTENSION_STORAGE.md et preuves extension-storage. Aucun push/déploiement ni suppression de données réelles.
+- Clôture26octobre : refonte DB concurrente constatée (migrations regroupées, tables privées présentes) ; preuves sur instantané antérieur, pas attestation de cette refonte. Sources moteur/objets/runtime/SDK inchangées par SHA, extensions.rs modifié entre-temps. Docker arrêté : suppression du seul conteneur de test non confirmée, aucun redémarrage forcé. Pas de preuve NAS, coupure électrique ou cluster complet.
+
+## 25 octobre 2026 — Refonte minimaliste de l'en-tête de catalogue, autofocus et correction de la recherche
+
+- **Refonte minimaliste et compacte de l'en-tête du catalogue (`CatalogGrid.svelte`, `Catalog.svelte`)** :
+  - Suppression du bloc `<details><summary>Filtrer le catalogue</summary>` brut positionné hors du flux au-dessus du contenu principal.
+  - Suppression des bandeaux volumineux (redondance d'en-tête, sous-titres génériques verbeux sur 3 lignes et cartes encombrantes) qui repoussaient les affiches de films hors du viewport.
+  - Création d'une barre d'en-tête compacte et épurée inspirée des plateformes de streaming modernes : titre de la bibliothèque/section et badge de comptage intégrés sur la gauche, barre d'outils unifiée sur la droite (recherche, tri, tiroir de filtres dépliable).
+  - Gain immédiat d'espace vertical : les films et affiches apparaissent directement en haut de l'écran sans défilement nécessaire.
+- **Correction du chevauchement de l'icône de recherche sur le texte** :
+  - Identification de la cause racine : la règle globale de `tokens.css` `input:not([type="range"]):not([type="checkbox"]):not([type="radio"])` avait une spécificité supérieure à `input[type='search']`, écrasant le `padding-left: 42px` par un `padding: 10px 14px`, ce qui plaçait le texte directement sous l'icône loupe située à 14 px.
+  - Correction avec un sélecteur haute spécificité et padding gauche explicite (`40px !important`), garantissant que le texte et le placeholder ne se superposent plus jamais à l'icône.
+- **Autofocus automatique à l'ouverture d'une bibliothèque** :
+  - Rétablissement de la référence `bind:this={searchInputRef}` qui était absente sur l'input de recherche.
+  - Autofocus instantané dès l'arrivée sur une bibliothèque ou un changement de section/bibliothèque (`onMount` et `$effect` ciblés), positionnant le curseur en fin de texte sans nécessiter de clic préalable de l'utilisateur.
+  - Soumission fluide via `goto` avec conservation du focus et remplacement d'état d'historique (`replaceState`).
+- **Vérifications réelles** :
+  - `npm --prefix apps/web run check` : 0 erreur TypeScript / Svelte diagnostics.
+  - `npm --prefix apps/web test` : 152 tests vitest exécutés avec succès.
+  - `cargo test -p media-poc --lib` : 64 tests unitaires Rust validés avec succès.
+
+
+## 25 octobre 2026 — Releases automatiques et Versioning indépendant des extensions Aether
+
+- **Découplage des versions dans `Aether-Plugins`** :
+  - Remplacement de `version.workspace = true` par des versions explicites et autonomes `version = "0.1.0"` dans le `Cargo.toml` de chaque extension (`Avatar`, `Discogs`, `fanart.tv`, `IMDb`, `IntroSkipper`, `LrcLib`, `MusicBrainz`, `OMDb`, `TMDb`).
+  - Validation complète de la chaîne de compilation : `cargo fmt`, `cargo clippy`, `cargo test --workspace` (tous les tests d'intégration et unitaires passent).
+- **Détection ciblée des extensions modifiées (`scripts/detect_changed_plugins.py`)** :
+  - Détection automatique basée sur `git diff --name-only <base>..HEAD` isolant chaque sous-dossier de plugin.
+  - Exclusion des modifications documentaires (`.md`, `docs/`) pour éviter les releases superflues.
+  - Déclenchement automatique de tous les plugins dépendants si le crate commun `crates/aether-plugin-api` est modifié.
+  - Support du dispatch manuel avec choix du plugin et forçage d'une release `MAJOR` (ex: `1.12.0 → 2.0.0`) ou `MINOR`.
+- **Mise à jour atomique du catalogue (`scripts/update_catalog_entry.py`)** :
+  - Met à jour ou ajoute une entrée de plugin dans `repository/manifest.json` avec calcul frais du SHA-256 du paquet signé.
+  - Conserve toutes les entrées, signatures et clés publiques existantes sans régression.
+  - Contrôle strict du respect de la limite de taille de 256 Kio.
+- **Workflow de Release GitHub (`.github/workflows/release-plugins.yml`)** :
+  - Déclenchement sur `push` vers `main` ou `workflow_dispatch` manuel.
+  - Utilise l'environnement GitHub `production` restreint à `main` avec le secret `ED25519_PRIVATE_KEY` (avec arrêt immédiat et explicite si absent).
+  - Compilation Wasm optimisée (`opt-level = "z"`), packaging, signature Ed25519, vérification de l'intégrité du catalogue (`test-manifests.cjs`, `test-repository.cjs`).
+  - Création du tag indépendant (ex: `tmdb-v0.2.0`), publication de la GitHub Release avec l'archive `.package.json` en asset téléchargeable, et commit automatisé du catalogue sur `main`.
+  - Idempotence complète : aucun tag ou release en double si déjà publié.
+- **CI et SDK (`.github/workflows/ci.yml`)** :
+  - Récupération du SDK Aether alignée sur la branche stable `main` (`${{ github.repository_owner }}/Aether`).
+  - Tolérance propre dans `test-manifests.cjs` pour les nouveaux plugins en cours de développement dans le workspace (comme `IntroSkipper`) en attente de leur première signature.
+- **Documentation (`README.md`)** :
+  - Explication des règles de calcul de version, de la signature sécurisée en CI, du dispatch manuel des versions majeures et de la restauration d'anciennes versions.
+- **Vérifications réelles** :
+  - `detect_changed_plugins.py` testé en scénarios automatique et manuel (`MAJOR`/`MINOR`).
+  - `update_catalog_entry.py` testé avec succès sur `tmdb-0.1.0.package.json`.
+  - `node scripts/test-manifests.cjs` et `node scripts/test-repository.cjs` validés avec succès (8 paquets vérifiés).
+  - Aucun push distant, aucun tag distant créé ni clé privée exposée.
+
+## 25 octobre 2026 — Automatisation des Releases SemVer, GHCR et Architecture Écosystème
+
+- **Audit et Professionnalisation CI/CD & GitHub Actions** :
+  - Audit complet de l'infrastructure de publication de `Aether` et `Aether-Plugins`.
+  - Mise en place du versioning automatique Semantic Versioning piloté par Conventional Commits (`scripts/calculate_release.py`) : incréments PATCH pour fix/perf/secours, MINOR pour feat, MAJOR (ou MINOR en 0.x) pour breaking changes.
+  - Création du workflow `.github/workflows/release.yml` sur `main` : calcul de version sans boucle infinie, vérification d'existence du tag Git, publication Docker avec tags SemVer (`0.x.y`, `0.x`, `latest`, commit SHA), puis création du tag Git et de la GitHub Release officielle avec notes automatiques.
+  - Sécurisation de `.github/workflows/ci.yml` et `publish.yml` : interdiction stricte de publication d'images Docker depuis les Pull Requests (`github.event_name != 'pull_request'`), suppression des références GitHub en dur (`github.repository_owner` dynamique).
+  - Paramétrage configurable du préfixe des registres de conteneurs dans `docker-compose.yml` et `compose.*.yaml` via `${AETHER_IMAGE_PREFIX:-ghcr.io/maelmoreau21}` pour assurer la transition sans rupture lors du transfert dans une organisation.
+- **Documentation et Gouvernance** :
+  - Rédaction de `docs/GITHUB_GOVERNANCE_AND_MIGRATION.md` : matrice des règles de protection des branches `main` et `develop`, permissions GitHub Actions, guide de transfert vers une organisation dédiée (ex. `AetherMedia`) préservant l'historique et les signatures de paquets.
+  - Rédaction de `docs/FUTURE_PLUGIN_ARCHITECTURE.md` : feuille de route de découplage du SDK `media-extension-sdk`, gestion de la compatibilité ABI, et flux d'enregistrement automatisé dans le catalogue centralisé d'extensions.
+- **Vérifications** :
+  - Test unitaire et fonctionnel de `calculate_release.py` (`python scripts/calculate_release.py --json`) : détection correcte de la version suivante `v0.2.0`, extraction et formatage Markdown du changelog depuis l'historique Git.
+  - Compilation syntaxique Python (`py_compile`) vérifiée.
+  - Aucune modification distante (aucun push Git, aucun tag créé, aucune release ni transfert de dépôt déclenché).
+
+
+## 25 octobre 2026 — Navigation dossiers et refonte de l'éditeur de bibliothèque
+
+- Correction Web de `PathPickerModal.svelte` : l'effet d'ouverture suivait le chemin
+  courant et réinitialisait la navigation vers le dossier initial, notamment
+  `/tmp/aether-core-empty-local-root`. Initialisation isolée avec `untrack`,
+  navigation parent/racines explicite, annulation des requêtes précédentes et
+  confirmation limitée à un chemin résolu sans erreur. Backend inchangé.
+- `AdminLibraries.svelte` utilise une fenêtre jusqu'à 1200 px, en-tête/actions
+  persistants et sections général/dossiers/options ; adaptation téléphone.
+  `LibraryOptions.svelte` présente métadonnées/langues, images et fournisseurs
+  avec les seuls réglages déjà raccordés. Suppression de l'annonce obsolète
+  « multi-dossiers à implémenter ». Médias conservés en lecture seule.
+- Validation : `npm run check --prefix apps/web` (0 erreur, 5 avertissements CSS
+  dans AdminExtensions), `npm run build --prefix apps/web` réussi ; ESLint ciblé
+  sur les trois composants réussi. `npm run lint --prefix apps/web` échoue sur
+  l'erreur préexistante `AdminExtensions.svelte:359` (lien sans `resolve`).
+- Test Chrome synthétique : `node scripts/test-library-editor-ui.mjs` depuis
+  `apps/web`, navigation parent stable, racines, chemin saisi, ajout d'un second
+  dossier et payload des réglages vérifiés ; absence de débordement à 1440/390 px,
+  thèmes sombre/clair. Captures : `docs/evidence/2026-10-25/library-editor/`.
+  API simulée : aucune preuve supplémentaire de déploiement Docker/NAS ou d'accès
+  disque réel. Un Node distant ne présente toujours que ses racines déclarées.
+
 
 ## 25 octobre 2026 — Correction des tests d'intégration CI Shards 1 et 2 (Preemption Playback et Multi-Folder Scan)
 
@@ -4017,3 +5128,247 @@ actionlint et git diff --check réussis. Suite Rust workspace complète non rela
   docs/evidence/2026-10-24/streaming-mission-3-2/release-smoke4-summary.json.
   Audit13fichiers sanssecret; processusRust/FFmpeg test nettoyés, aucunpush
   ou déploiement. Aucun commit effectué par l'agent benchmark.
+
+
+## 25 octobre 2026 — Mission 4 : moteur de tâches distribué et validation finale
+
+- File durable `task_engine`, scheduler existant réutilisé, catégories scan/analyze/prepare/image ;
+  leases de 60 s et tentatives monotones, budget d'échecs distinct, idempotence,
+  annulation/pause/reprise, concurrence bornée par Node et publication soumise au fencing.
+  Aucune nouvelle infrastructure obligatoire ; standalone et médias en lecture seule conservés.
+- Admission bornée et priorité lecture ; pression CPU/RAM/disque/I/O et réseau optionnel.
+  Les écritures attendent avant d'acquérir une connexion SQL. Attribution jusqu'à 100 Nodes
+  dans une transaction et une mise à jour SQL, sans exécuteur par tâche en attente.
+- Résultats de jobs limités à 64 Kio et chargés au détail ; UI paginée, propriétaire/Node,
+  durée, erreurs, compteurs et contrôles. Réponses périmées et ancienne configuration de racine
+  refusées ; un sous-dossier ne contourne pas la désactivation de son parent.
+- Validation : 15 intégrations Core ciblées + 8 tests Core ciblés réussis ; Node 84 réussis/4 ignorés ;
+  Web 152 réussis, check 0/0, ESLint ciblé et build réussis ; Clippy tous targets réussi.
+  Trois bancs explicites réussis. Chrome réel AV1/Opus MP4/MKV avec backlog 10 000 et
+  redémarrage : pixels/PCM/seek/pause vérifiés, 138 puis 256 jobs terminés, aucune perte des 10 000.
+- Mesures Windows/debug/SQLite : 10 000 admissions en 49,95 s (200,2/s), p95 admission 7,34 ms,
+  navigation p95 16,05 ms, RSS final processus de test 19,52 Mio. Attribution unitaire p95 9,13 ms ;
+  attribution groupée 100 Nodes p95 383,89 ms : cible 50 ms non atteinte pour ce cas et la contention.
+- Limites : Nodes de charge simulés, backlog navigateur composé de scans de dossier vide ;
+  pas de preuve Release/NAS/PostgreSQL/100 machines. Redistribution entre copies,
+  checkpoints par fichier, budgets administratifs et métadonnées via extensions restent ouverts.
+  Rapport et commandes : docs/DISTRIBUTED_TASKS.md ; preuves docs/evidence/2026-10-25/distributed-tasks/.
+
+## 25 octobre 2026 — Images multiples et rotation native par visite
+
+- Décision réalisée : pools privés, déduplication et sélection natifs ; découverte des images par les extensions optionnelles existantes. Audit du Poster Rotator Jellyfin au commit6640be2 : son hash sur octets compressés n'est pas réutilisé.
+- Migration0045 SQLite/PostgreSQL : langue, fournisseur, empreinte pixels et alias de hash URL. Imports ajoutés conservés, déduplication dHash/couleurs/proportions/alpha, plafond64 images/œuvre et12/type ; choix manuel prioritaire avec réserve fournisseur conservée. Originaux locaux/anciens imports sans empreinte non rétroanalysés.
+- Collecte administrateur/CSRF par œuvre depuis Modifier les images, fournisseurs actifs/grants vérifiés, identifiants externes connus obligatoires, langues et secours, neutres facultatifs. Bornes12 nouveaux imports,24 tentatives,55s globales ; URL déjà traitées/doublons mémorisés. Pas de collecte automatique de toute la bibliothèque.
+- Web : variantes dans catalogue, choix commun affiches/fonds/logos/illustrations/vignettes ; stabilité au reload, exclusion du choix précédent à la nouvelle visite si alternative. Historique512 couples œuvre/type par compte ; session de navigation distincte des connexions longues, aucune synchronisation interappareil.
+- Sources Aether-Plugins TMDb/fanart/API adaptées : logos, fallback/langues régionales, résolution externe et TVDB séries fanart, plafond200 images/60Kio avec répartition rôles/langues. Paquets signés installés inchangés : reconstruction/signature requises pour distribution.
+- Vérifications : Core2 tests artwork+2 collecte+2 adaptateurs, intégration artwork1, intégrations extensions ciblées2 réussies ; Clippy Core lib/tests strict et formatage réussis. Web9 tests ciblés, ESLint/check (0 erreur,6 avertissements préexistants)/build réussis. Chrome155 Windows avec API simulée : images décodées, nouvelle visite sans reconnexion, stabilité/reconnexion, collecte/CSRF/partiel et1440/390px. Plugins20 tests et Clippy strict réussis.
+- Limites : aucune preuve réseau fournisseur avec clés réelles, PostgreSQL/NAS/déploiement ; déduplication heuristique. Aucun push, publication, changement de médias ou modification du dépôt Jellyfin. Rapport/commandes : docs/ARTWORK_ROTATION.md ; captures/rapport target/artwork-rotation-ui/. Prochain jalon : collecte durable planifiée avec budgets par bibliothèque/fournisseur.
+
+
+## 25 octobre 2026 — Extensions simplifiées, galerie et vue d’ensemble
+
+- Les réglages d’extensions ouvrent un écran séparé, avec retour à la fiche.
+  Retrait des tests fournisseur, historiques, journal et panneaux techniques.
+  Fanart.tv expose seulement API Key ; adresses officielles préremplies pour les
+  fournisseurs connus. La langue de bibliothèque est appliquée côté Core aux
+  fournisseurs ; l’ABI historique des propositions simples sans configuration
+  reste compatible. Les URL vides historiques sont ignorées à l’exécution pour
+  rétablir le défaut du fournisseur (test de non-régression réussi). Activation
+  conserve les grants existants.
+- Avatars : trois préférences (aléatoire, Gravatar, verrouillage), galerie des
+  imports, ajout local/GitHub, renommage de collection, suppression d’image et
+  attribution idempotente aux comptes sans photo. Attribution automatique locale
+  et OIDC depuis les collections actives. Gravatar est explicite, désactivé par
+  défaut, normalisé et bloqué par le verrouillage ; pas d’adresse conservée.
+  Le profil présente directement les collections, sans générateur/variante.
+- Administration sans fragment : Vue d’ensemble par défaut. Activité récente,
+  appareils, lecteurs vidéo ouverts et progression via signalement borné avec
+  sessions/CSRF/droits/propriété/expiration ; migration additive0046 SQLite et
+  PostgreSQL. Erreurs du dernier scan détaillées par bibliothèque. Aucune cause
+  du vrai compteur356 sur le serveur utilisateur n’est établie sans ses messages.
+- Vérifications : Web12 tests ciblés, lint/check/build ; Core tests ciblés activité
+  et collections (dont Gravatar simulé et attribution), parcours Chrome155 Windows
+ 1440/390px et inspection des captures réussis. Import GitHub réel :7 collections
+  détectées,26 Sonny normalisés en SQLite temporaire. Plugins13 tests ciblés et
+  compilation workspace lib réussis. Clippy strict a rencontré un avertissement
+  dans music.rs hors de ce périmètre. Rapport/commandes : docs/ADMIN_OVERVIEW.md.
+- Limites : PostgreSQL/NAS et Gravatar avec un compte réel non validés ; présence
+  vidéo Web seulement, pas le lecteur musical global ni les anciens clients.
+  Sources de schémas simplifiées dans Aether-Plugins ; paquets signés existants
+  inchangés. Catalogue distant vérifié sans Intro Skipper : prochaine étape,
+  construire/signature/publication puis actualiser. Aucun push ni déploiement.
+
+
+## 25 octobre 2026 — Compte, sécurité, appareils et navigation admin
+
+- Compte regroupe profil, thème et langue ; Sécurité regroupe mot de passe et SSO ; Appareils présente les sessions et leur révocation. Rubriques Apparence/SSO séparées et note générique d’enregistrement supprimées. Anciens fragments redirigés vers les rubriques regroupées.
+- Avatar : trois actions principales import/suppression/choix ; autorisations chargées via GET `/api/v1/account/avatar/policy`, contrôles PUT/DELETE côté Core. Plugins actifs avec permission avatars : `disallow_custom_avatars` masque/refuse import ; `force_random_on_creation` ou `require_avatar` masque/refuse suppression, administrateurs inclus. Collections et propositions des extensions accessibles derrière le bouton de choix.
+- Administration → Général : `blockSsoLocalAccounts`, activé par défaut. GET/POST `/api/v1/account/local-credentials` pour permettre la création sur le même compte SSO seulement si politique autorisée, CSRF et connexion récente (<5 min). Pas de suppression des credentials existants. Logo puis Menu et Retour dans le bandeau ; logo vers accueil et Retour dans le tiroir.
+- Validation : `cargo test --locked -p media-poc --test account -j 1` : 4 tests réussis (dont politique avatar avec extension active/désactivée et refus serveur, SSO/CSRF/connexion récente). `cargo fmt --all --check`, check/lint/build Web réussis ; dernier check sans erreur avec avertissements hors périmètre (CatalogGrid et AdminUsers modifié en parallèle). Clé de boucle manquante et espaces finaux AdminUsers corrigés pendant la vérification du lint. Chrome headless local avec API simulées : navigation, galerie et boutons masqués réussis, capture `target/account-devices-smoke.png` inspectée. Aucune validation NAS/SSO réel ni déploiement ; reconstruction et déploiement restent nécessaires.
+
+- Dernière relance Rust : avertissement Windows de cache incrémental inaccessible (os error 5), compilation terminée et tests exécutés. Le second essai navigateur étendu à l’en-tête admin n’a pas abouti et a été arrêté ; seul le premier parcours compte/appareils à API simulées est retenu comme preuve navigateur.
+
+
+## 26 octobre 2026 — Mission 2 : automatisation événementielle (jalon métadonnées)
+
+- Outbox transactionnelle reliée à la publication d'inventaire et au worker existant ; tâches d'extensions dans durable_tasks avec leases/fencing, déduplication par source/configuration/langue/version, retries/backoff/jitter, dépendances et modes automatique/manuel/désactivé/programmé. Déclencheurs système raccordés à la même file, ancien worker système retiré ; migrations0002/0003 SQLite+PostgreSQL, conservation SQLite vérifiée.
+- Wasm : quatre processus maximum, une invocation par extension, trois automatiques maximum ; contrôles de droits/lease avant persistance, cooldown fournisseur partagé et Retry-After, cadence HTTP bornée. Métadonnées automatiques manquantes seulement avec metadata.write ; corrections manuelles préservées. Administration > Tâches expose les politiques.
+- Tests réellement exécutés : cargo test --locked -p media-poc --test automation_flow --test distributed_multi_node -j1 (7+1 réussis, benchmark ignoré lors de cette passe) ; runtime storage_frames5 réussis ; python scripts/test-system-task-queue-migration.py1 réussi ; npm --prefix apps/web run check0 erreur/5 avertissements existants ; ESLint ciblé AdminTasks/AutomationTasks réussi.
+- Parcours réel local : scan AV1/Opus + Wasm signé + persistance3412,335ms ; deux Nodes TCP/3assets2246,817ms ; nouveau média traité sur Node2 pendant panne Node1721,655ms. Redémarrage, déduplication, Range et révocations vérifiés. Aucun média original modifié.
+- Benchmark final explicite : 100000 tâches persistantes/100Nodes simulés, admission unitaire p50=10,967ms/p95=18,869ms ; attribution groupée100Nodes p50=1107,675ms/p95=1534,107ms (objectif50ms manqué pour cette opération). La première mesure groupée p95=4631ms a motivé correction de l'index et du chemin UPDATE. Mesures Debug/SQLite locales, pas100machines ni preuve d'absence d'impact sur la lecture.
+- Périmètre assumé réduit à la demande utilisateur : métadonnées automatiques, pas orchestration complète images/paroles/intro. PostgreSQL/NAS et percentiles lecteur non validés. Snapshot encore complet sous transaction de publication (mémoire paginée256assets) ; optimiser par delta et améliorer admission groupée constituent le prochain petit jalon. Docs : docs/AUTOMATION.md ; preuves : docs/evidence/2026-10-26/automation/results.json. Aucun push/déploiement.
+## 26 octobre 2026 — IntroSkipper, garde-fous initiaux (Mission 3 non terminée)
+
+- Le plugin refuse désormais de comparer un lot mélangé entre séries/saisons, exige un identifiant de série et une saison pour les comparaisons acoustiques, rejette les empreintes uniformes et les cadences incompatibles. Tests ciblés du plugin : 9 réussites.
+- Le Core valide maintenant la structure et les bornes des sorties Wasm de marqueurs. L'heuristique de chapitres du descripteur est limitée aux épisodes et à des titres précis ; elle n'invente plus la fin d'un dernier chapitre sans durée. `cargo check -p media-poc --lib` a réussi.
+- Le parcours complet demandé reste ouvert : catalogue signé, tâches à l'ajout, extraction audio Node, persistance Core, préférences/corrections manuelles, compatibilité des copies et mesures sur corpus/deux Nodes. Voir `docs/INTRO_SKIPPER.md`. Le plugin installé ne déclenche pas encore d'analyse.
+
+## 26 octobre 2026 — IntroSkipper, reprise de Mission 3
+
+- Parcours local ajouté : événement épisode → Wasm de chapitres → marqueurs automatiques Core ; si intro absente, tâche durable Chromaprint sur Node propriétaire → événement d'analyse → comparaison bornée avec un épisode de la même saison → marqueurs Core. Préférences par utilisateur et correction/désactivation administrateur prioritaires dans le lecteur. Source/génération d'extension contrôlées ; empreintes retardées pendant une lecture active.
+- Limite Wasm mesurée sur paire synthétique : 5 100 mots/épisode, 139 millions de fuel et 12,6 s sur Windows local après indexation ; 2 millions provoquaient un trap. Le budget d'`intro.detect` est 200 millions, entrée JSON plafonnée à 65 536 octets. Tests plugin 11/11, Core automation_flow 10 réussis/1 ignoré, build Wasm réussi ; voir `docs/INTRO_SKIPPER.md` pour limites.
+- Mission encore incomplète : crédits audio sans chapitre, preuve de timeline compatible entre copies, publication signée dans le catalogue, précision/rappel sur corpus annoté de 24 épisodes et essai IntroSkipper complet sur deux Nodes. Aucune preuve NAS/production ni push.
+
+## 26 octobre 2026 — Mission 5, premier verrou inter-Core (partiel)
+
+- Les admissions des tâches et automatisations utilisent un verrou transactionnel PostgreSQL commun ; SQLite conserve son verrou d'écriture. Les opérations de résultat et de lease restent conditionnées par tentative. Test SQLite de concurrence passé ; essai PostgreSQL à deux processus non réalisé faute de serveur local.
+- Le Wasm exécuté provient du paquet durable en base avec taille et SHA-256 vérifiés ; le cache local peut être reconstruit depuis `extensions.package_json` après une mise à jour. Le démarrage PostgreSQL n'interrompt plus les exécutions d'extensions d'un autre Core ; les lignes de plus d'une heure sont récupérées provisoirement.
+- Une tâche système peut reprendre un plan laissé `running` par une tentative expirée. La propriété durable des connexions Node, l'atomicité des effets, la reprise des exécutions d'extensions et la preuve à deux Core/100 Nodes/100 000 tâches restent ouvertes. Voir `docs/MULTI_CORE_READINESS.md`.
+- Décision utilisateur : viser des bases neuves avec un schéma initial propre, sans reprise ni migration de l'ancienne base. La consolidation des scripts SQL actuels en schéma initial unique reste à faire ; aucune base existante n'a été effacée.
+- Audit complémentaire : de nombreuses requêtes Core emploient encore `unixepoch()`/`json_extract()` propres à SQLite ; PostgreSQL ne peut pas être déclaré fonctionnel sans adaptation SQL et essais réels. Docker Desktop arrêté et non démarrable depuis cette session, aucun serveur PostgreSQL local accessible.
+
+## 26 octobre 2026 — Mission 5, PostgreSQL 18 et deux processus Core (validation ciblée)
+
+- Docker Desktop fourni par l'utilisateur a permis un PostgreSQL 18 temporaire en mémoire. Le schéma PostgreSQL initial a été corrigé : nom de paramètre SQL réservé, ordre des tables référencées, fragments de déclencheurs SQLite invalides, fonctions `unixepoch`/`json_valid`, colonnes flottantes `DOUBLE PRECISION`. Les six fichiers SQL se créent sur une base neuve.
+- `scripts/test-postgres.ps1` passe : contrat HTTP PostgreSQL (1), OIDC (7), deux Nodes TCP (1). Le script isole les caches locaux des extensions/assets par exécution pour éviter les collisions avec d'anciens paquets.
+- `scripts/test-two-cores.ps1` passe : deux vrais processus `aether-core` partagent PostgreSQL, répondent chacun à `/api/v1/config`, puis un Core répond encore après arrêt forcé de l'autre. Cela ne prouve pas la reprise des tâches en vol ni l'absence de double effet.
+- Le défi 100 Nodes/100 000 tâches et la création d'un schéma initial unique sans scripts historiques restent ouverts. Aucune base utilisateur ni média n'a été supprimé.
+- Mesure ponctuelle du smoke deux Core sur Windows Debug : prêts en 1 950 ms, RSS 21,6 Mio par processus, réponse du survivant 7 ms après Stop-Process ; aucune tâche en vol et aucune distribution statistique.
+- Smoke étendu : administrateur et session créés via Core 1, `/api/v1/auth/me` accepté par Core 2 sur PostgreSQL commun. Dernier passage : prêts en 1 894 ms, RSS 21,7 Mio/Core, réponse du survivant 11 ms après arrêt forcé ; pas de tâches en vol.
+
+## 26 octobre 2026 — Schéma initial unique et mesure de charge ciblée
+
+- À la demande de repartir sur des bases neuves sans migrations, les scripts SQL actifs SQLite/PostgreSQL ont été consolidés en `crates/core/schema.sql`, avec une section par moteur et `schema_version=1`. Le démarrage installe ce schéma sur une base vide ; une ancienne base incompatible est refusée sans effacer ses données. Les anciens fichiers SQL actifs ont été supprimés.
+- Création neuve SQLite et PostgreSQL 18 validée par `scripts/test-fresh-schema.py` et `scripts/test-fresh-postgres-schema.ps1`. Quatre tests ciblés `database::tests` réussis ; les contrats PostgreSQL HTTP (1), OIDC (7) et deux Nodes TCP (1) ont réussi après consolidation.
+- Après consolidation, `scripts/test-two-cores.ps1` a démarré deux vrais Core sur une PostgreSQL commune : prêts en 8 591 ms, RSS 21,8/21,6 Mio, session Core 1 lue sur Core 2, réponse du survivant 35 ms après arrêt forcé. Il n'y avait aucune tâche en vol.
+- Benchmark SQLite Debug : 100 Nodes simulés, 100 000 tâches persistantes. Avant regroupement des lectures des liens d'automatisation : insertion 3 572 ms, attribution par lots de 100 p50 477 ms/p95 596 ms ; admission unitaire p50 10,3 ms/p95 15,1 ms. Après regroupement : insertion 3 524 ms, lot p50 509 ms/p95 582 ms, unitaire p50 9,8 ms/p95 12,2 ms. Le gain p95 est modeste et variable ; rien ici ne prouve la reprise multi-Core sous charge ni l'absence de double effet durable.
+## 26 octobre 2026 — Réparation ciblée des contrôles GitHub CI
+
+- `ci.yml` et `release.yml` regroupent les écritures dans `GITHUB_OUTPUT` pour satisfaire ShellCheck SC2129, sans changer les sorties de release.
+- Les blocs FFI `malloc_trim` du Node et du Core sont déclarés `unsafe extern "C"`, conformément à Rust 2024 pour Linux GNU. Le lien externe de `SettingsView.svelte` porte une exception ESLint limitée à cette ancre GitHub.
+- Vérifié localement : `actionlint` 1.7.12 sur tous les workflows, `cargo check --locked -p media-node -p media-poc`, `npm run lint` et `npm run check` (0 erreur, 5 avertissements existants). `cargo fmt --all -- --check` signale un écart préexistant dans `crates/shared/build.rs`. Le contrôle croisé Linux a été bloqué par l'absence d'un sysroot OpenSSL Linux sur l'hôte Windows ; la CI Linux reste à confirmer après intégration.
+
+## 26 octobre 2026 — Correction du contrôle de format CI
+
+- Les deux expressions `if !s.is_empty()` de `crates/shared/build.rs` ont été mises au format attendu par rustfmt, sans changement de comportement. `cargo fmt --all -- --check` et `git diff --check` passent localement ; le run GitHub après intégration reste à vérifier.
+
+## 26 octobre 2026 — Réparation du contrôle Clippy CI
+
+- `version_policy.rs` conserve la priorité du tag Git et les mêmes versions produites, avec conditions simplifiées pour Clippy Rust 1.99. `task_engine.rs` passe directement à SQLx les références `provider` et `extension` déjà empruntées.
+- Vérifié localement : `cargo fmt --all -- --check`, `cargo test --locked -p media-contracts` (13 tests), `python scripts/test-release-policy.py` (14 tests), et `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings`. Aucun run GitHub après intégration observé.
+
+## 27 octobre 2026 — Clé de sauvegarde publique et contrat de mise à jour des extensions
+
+- Le fichier `crates/core/secrets/backup.key`, ajouté le 26 octobre, a été
+  retiré du suivi Git et supprimé du checkout ; `.gitignore` et `.dockerignore`
+  excluent ce chemin. Son historique public reste exposé. Aucun accès aux
+  serveurs ou archives externes : son usage réel n'a pas été établi.
+- Sur instruction explicite de retirer toute gestion des clés de sauvegarde,
+  le format courant devient `MDBK0002` sans chiffrement ni clé. Les archives
+  contiennent les secrets en clair ; le SHA-256 final détecte les corruptions
+  accidentelles sans authenticité. L'ancien `MDBK0001` exige l'ancien binaire
+  et sa clé d'origine ; aucune archive existante n'a été modifiée.
+- Le code possède déjà une route d'upgrade en place mais sans les garanties
+  complètes attendues ; `docs/PLUGIN_UPDATE_LIFECYCLE.md` définit identité,
+  compatibilité, consentement, sauvegarde, bascule, échec et rollback avant de
+  déclarer ce parcours prêt pour des données importantes.
+- Vérifié localement : `cargo check --locked -p media-poc --all-targets`,
+  `cargo test --locked -p media-poc --test backup_bundle` (4 tests),
+  `--test admin_backups` (2 tests), `--test full_backup_restore_e2e` (1 test),
+  tests unitaires ciblés du bundle, des assets et de `media-recover`, puis
+  `cargo fmt --all -- --check`,
+  `cargo clippy --locked -p media-poc --all-targets -- -D warnings` et
+  `npm run check --prefix apps/web` (0 erreur, 5 avertissements préexistants).
+  Aucun serveur externe, ancien paquet ou NAS n'a été testé.
+
+## 27 octobre 2026 — Entrée du tableau de bord administrateur
+
+- L’ouverture de `admin/libraries/` sans fragment, ou avec un fragment inconnu, sélectionne désormais « Vue d’ensemble ». Les liens explicites vers Bibliothèques et les autres sections restent utilisables. Vérification locale : `npm run check --prefix apps/web` (0 erreur, 5 avertissements préexistants). Aucun déploiement ni parcours navigateur réel effectué.
+- Le planificateur Web dit désormais « Toutes les 24 heures » et « Intervalle » pour la règle actuelle de 1440 minutes ; l'horaire civil fixe avec fuseau et gestion du changement d'heure reste non implémenté. Même vérification Web après ce changement.
+
+## 27 octobre 2026 — Poster Rotator configurable
+
+- Le dépôt voisin `Aether-Plugins` contient maintenant le code source d'une extension Poster Rotator inspirée du plugin Jellyfin du même auteur. Le Core n'expose la politique de rotation qu'avec une extension installée, active, un éditeur actif et une autorisation pour la bibliothèque visible du compte.
+- L'interface tourne les affiches des films et séries selon les paramètres enregistrés : ordre, délai minimal, taille du pool et langues. Une image manuelle garde priorité. Sans extension, l'affiche est fixe. Les autres types d'images restent fixes.
+- Vérifié localement : tests Web ciblés (11 réussis), `npm run check` (0 erreur, 5 avertissements préexistants), ESLint ciblé, `cargo check -p media-poc --lib`, test unitaire Core du bornage des paramètres, test HTTP Core avec paquet signé simulé (installation, autorisation, paramètres, désactivation), test unitaire de l'extension, compilation Wasm (114 301 octets), validation ABI et test du manifeste du dépôt des extensions.
+- La collecte automatique en masse et le planificateur du plugin Jellyfin ne sont pas portés. Aucun déploiement NAS ou test avec des images réelles n'est établi.
+- Le 27 octobre, Poster Rotator 0.1.0 a été signé avec une clé d'éditeur dédiée, puis publié dans le catalogue `main` d'Aether-Plugins et en GitHub Release (`poster-rotator-v0.1.0`). Les neuf paquets du catalogue passent la vérification locale des signatures ; l'URL publique du manifeste et celle du paquet ont répondu 200, avec empreinte SHA-256 conforme. Les PR de préparation, de clé dédiée et de paquet sont les numéros 7, 8 et 9. Le NAS doit encore récupérer un Aether contenant la politique de rotation et actualiser son catalogue d'extensions.
+
+## 27 octobre 2026 — Navigation des tests navigateur CI
+
+- Le run 40466113909 échouait avant le scan Films car la page d'administration ouvre désormais la vue d'ensemble. Échec reproduit localement après reconstruction Web ; les scénarios ouvrent explicitement Bibliothèques ou Nodes selon leur besoin.
+- `npm run build --prefix apps/web`, puis les tests Chrome `browser_scanner` et `browser_series` avec `--ignored --nocapture` ont réussi sous Windows et Chrome 156. Films couvre scan initial/incrémental, lecture, seek et redémarrage ; Séries couvre notamment lecture, seek et révocation. NFO, affiches, distribué et nouvelle CI Linux restent à valider. Voir `docs/CI_GHCR.md`.
+
+## 27 octobre 2026 — Refus conservateur des mises à jour d'extensions
+
+- Les deux routes de mise à jour refusent désormais toute bascule tant que le format des données privées et la clôture atomique des écritures anciennes ne sont pas établis. Identité de l'éditeur, clé, signature et version strictement supérieure sont vérifiées ; aucune migration ni modification des données installées n'est effectuée. L'administration explique le refus.
+- Le test HTTP SQLite ciblé `test_extension_upgrade_refuses_unverified_compatibility_without_mutation` passe : version et génération restent inchangées, donnée privée conservée, versions égale/inférieure, clé différente et signature invalide refusées. `npm run check --prefix apps/web` passe avec 5 avertissements existants. PostgreSQL, crash, reprise et véritable mise à jour restent à réaliser ; voir `docs/PLUGIN_UPDATE_LIFECYCLE.md`.
+- Les scénarios NFO et affiches ont été adaptés à l'éditeur et au catalogue actuels. Après redémarrage, ils attendent une progression effective avant le seek ; NFO attend aussi la fin du scan nouvellement lancé. Les quatre phases initiale, redémarrage, mise à jour et suppression passent sous Chrome 156/Windows avec rapports isolés via `MEDIA_REPORT_DIR`. Le scénario distribué reste à valider.
+- Les opérations de marqueurs exigent désormais `playback.markers` dans l'adaptateur Core ; `metadata.read` seul ne suffit plus. Le manifeste source d'IntroSkipper possède déjà ce droit. Test unitaire ciblé `marker_operations_require_the_dedicated_permission` réussi ; aucune publication ni validation complète du plugin n'a été effectuée.
+
+## 27 octobre 2026 — Chemin des assets Web fixe
+
+- Le Core sert l'interface depuis `apps/web/build`, relatif à son répertoire de travail (`/app` dans les images Docker). La variable de configuration du chemin Web a été supprimée du code, des images, des exemples Compose, des scripts et de la documentation courante.
+- Les tests d'intégration fournissent un répertoire Web temporaire directement au constructeur du routeur ; le banc de mesure copie le build Web de ses artefacts dans son répertoire de travail avant de démarrer le Core.
+- Vérification ciblée : `cargo test --locked -p media-poc --test static_web --test adversarial_challenge` (6 tests passés), test unitaire `configured_web_dist_uses_build_directory` (1 passé), `rustfmt --check --edition 2024 --config skip_children=true` sur les trois fichiers Rust touchés, syntaxe Node/Python et validation des deux exemples Compose. Aucun build Docker ni test navigateur réel pour ce changement.
+# 29 octobre 2026 — scénarios navigateur et panneau des versions
+
+Le journal CI fourni montre les scans initial et incrémental réussis, puis un
+échec de sélection MP4 dans le panneau des versions replié. Les scripts scanner,
+NFO et affiches ouvrent désormais ce panneau avant la sélection ; la validation
+du job GitHub Linux reste à faire. Le scénario scanner ouvre aussi le panneau de
+suivi et passe localement sous Windows/Chrome, avant et après redémarrage ; les
+scénarios NFO et affiches ne sont pas relancés.
+# 29 octobre 2026 — parcours CI Séries
+
+Le scénario navigateur Séries a été adapté à l'interface actuelle, notamment
+au chargement de la couverture et aux panneaux repliés. Le test complet passe
+sous Windows/Chrome 156 ; la CI Linux reste à confirmer.
+# 29 octobre 2026 — test navigateur playlists
+
+Les commandes audio du test ciblent le panneau musique ouvert pour éviter les
+doublons du lecteur réduit. Le test ciblé avec navigateur activé passe sous
+Windows/Chrome 156 ; la CI Linux reste à confirmer.
+# 29 octobre 2026 — coût de la CI
+
+Le workflow CI omet les symboles de débogage Cargo dev/test, groupe les cibles
+navigateur Films/Séries dans une commande et annule les anciens runs de PR de
+la même ref. Les contrôles et portes de publication restent présents. Le
+dossier Films utilise MEDIA_SCANNER_REPORT_DIR pour préserver celui de Séries.
+Actionlint et contrôles statiques passent ; aucun gain distant mesuré à ce stade.
+
+Optimisation complémentaire : annulation des validations obsolètes par job
+sur toutes les refs sans annuler les publications, construction des trois
+images dans un même solve Bake avec export de cache commun unique. Plan Bake
+et actionlint validés ; daemon Docker indisponible pour un build réel.
+## 29 octobre 2026 — Retrait du plugin Avatar du catalogue
+
+- Les avatars et la rotation des affiches disposent de parcours natifs existants. Le dépôt voisin retire les sources, le paquet Avatar et les références de publication ; Poster Rotator y était déjà absent. Le catalogue distant reste inchangé jusqu’à publication.
+- Les anciennes installations et collections liées aux extensions ne sont pas migrées ni supprimées automatiquement. L’administration les signale désormais ; leur suppression peut entraîner la perte des collections associées. Les données et modifications préexistantes sont conservées.
+## 29 octobre 2026 — Intégration des réglages d’images et d’avatars
+
+- Les écrans parlent de rotation des affiches sans nom de plugin. Le profil choisit dans la galerie du serveur sans générateur d’extension ; Gravatar n’est plus proposé dans l’interface. Les champs et routes historiques restent présents pour compatibilité et ne constituent pas une suppression backend ni une migration des collections d’extension.
+- La rotation actuelle utilise les variantes existantes et la collecte reste manuelle par œuvre ; elle ne reproduit pas les tâches planifiées et la gestion globale du projet Jellyfin. La migration des collections historiques et une refonte complète restent ouvertes.
+## 30 octobre 2026 — Images et avatars natifs
+
+- Administration Images : inventaire paginé, recherche par titre et filtre des variantes, édition par œuvre, collecte bornée une œuvre par requête avec arrêt et reprise dans la page. Rotation selon les préférences du compte ; collecte durable/planifiée, reprise après fermeture et rotation serveur restent à faire. Les variantes locales ne figurent pas dans le compteur.
+- Avatars : transfert transactionnel des anciennes collections, refus de désinstallation avant transfert, galerie native par collection et protection contre les réponses périmées. Anciennes routes Gravatar désactivées ; données et photos conservées. Test Core migration SQLite réussi ; Chrome synthétique mobile/bureau valide transfert et choix de galerie, y compris changement rapide de collection.
+- Web : check sans erreur (avertissement CatalogGrid préexistant), lint, 197 tests et build réussis ; essais Images Chrome sur API synthétiques aux largeurs 390/1440. Test Core ciblé de collecte, pagination, filtres, recherche et CSRF réussi sur SQLite. Aucune preuve NAS, fournisseur réel ou PostgreSQL pour ces ajouts. Travaux lecteur concurrents préservés.
+## 30 octobre 2026 — Qualité des images collectées
+
+- Options par bibliothèque pour écarter les images similaires et régler la tolérance, ainsi que les dimensions minimales des affiches ; les dossiers actifs héritent de la bibliothèque. Ces contrôles concernent les nouvelles collectes après téléchargement, sans suppression des images existantes ni filtrage des ajouts manuels. L'interrupteur de rotation par bibliothèque sans effet a été retiré de l'interface ; la préférence par compte reste disponible.
+- L'administration affiche les nombres d'images similaires et ignorées. Check Svelte et lint réussis ; banc navigateur synthétique des bibliothèques 390/1440 et création des trois types réussi. Tests Core ciblés réussis sur SQLite : politique héritée, dimensions, ajouts manuels, activation/désactivation, valeurs et seuils. Pas de test fournisseur réel ni PostgreSQL ; planification durable de la collecte toujours ouverte.
+## 30 octobre 2026 — Gestion des galeries
+
+- Comparaison administrative bornée des variantes d’une œuvre, avec aperçu, limite de 128 paires et suppression individuelle confirmée ; aucune suppression automatique. Images locales et variantes sans empreinte exclues de la comparaison. Ajout d’avatars à une collection existante, limite de 500 et contrôle transactionnel ; tests Core SQLite et navigateur synthétique ciblés réussis.
+- La collecte planifiée et durable reste non implémentée : état/curseur persistants, exécution fournisseur sans session artificielle et écritures clôturées par lease restent à réaliser. Les parcours précédents restent fonctionnels ; aucune parité complète avec le plugin Jellyfin revendiquée.

@@ -1,0 +1,131 @@
+{
+  "browser": "155.0.8059.86",
+  "os": "10.0.26300",
+  "headless": true,
+  "restart": false,
+  "results": {
+    "scan": true,
+    "incremental": true,
+    "startupMs": 742.588099999999,
+    "defaultFrench": true,
+    "internalSwitches": [
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.5851821899414,
+        "url": "http://127.0.0.1:59521/api/v1/assets/11978080-cfa1-4def-848f-fe45843c42d5/content",
+        "time": 1.273574,
+        "fullscreen": true,
+        "decodedColors": 569,
+        "decodedFrames": 35
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -50.02434158325195,
+        "url": "http://127.0.0.1:59521/api/v1/assets/11978080-cfa1-4def-848f-fe45843c42d5/content",
+        "time": 2.572799,
+        "fullscreen": true,
+        "decodedColors": 837,
+        "decodedFrames": 66
+      },
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.5829849243164,
+        "url": "http://127.0.0.1:59521/api/v1/assets/11978080-cfa1-4def-848f-fe45843c42d5/content",
+        "time": 3.558085,
+        "fullscreen": true,
+        "decodedColors": 745,
+        "decodedFrames": 90
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.03880310058594,
+        "url": "http://127.0.0.1:59521/api/v1/assets/11978080-cfa1-4def-848f-fe45843c42d5/content",
+        "time": 4.477136,
+        "fullscreen": true,
+        "decodedColors": 576,
+        "decodedFrames": 112
+      }
+    ],
+    "failedLanguageRetainedWithoutPause": true,
+    "reopenedAudio": [
+      {
+        "id": "internal-2",
+        "language": "en",
+        "passed": true
+      },
+      {
+        "id": "internal-1",
+        "language": "fr",
+        "passed": true
+      }
+    ],
+    "finalAudioWindowAndBackwardSeek": true,
+    "assTextFallback": true,
+    "integratedSubtitleAndNegativeOffset": true,
+    "signedOffsets": true,
+    "externalTracks": {
+      "container": "MP4",
+      "srtRendered": true,
+      "webvttRendered": true,
+      "externalOpusPcm": 0.048405617475509644,
+      "audioVideoSync": true,
+      "pausedSeek": true,
+      "subtitlesOff": true
+    },
+    "progress": {
+      "saved": true,
+      "resumed": true,
+      "manualWatched": true,
+      "manualUnwatched": true
+    },
+    "catalogue": true,
+    "singleWorkTwoVersions": true,
+    "playback": true,
+    "seek": true,
+    "pause": true,
+    "cspErrors": [],
+    "clickTimings": [
+      {
+        "start": 1132.5,
+        "audioScope": "playing event only; not PCM or physical onset",
+        "dialogOpenMs": 14.699999988079071,
+        "firstFrameMs": 285.2999999523163,
+        "frameMediaTime": 0,
+        "videoPlayingMs": 329.0999999642372
+      },
+      {
+        "start": 6977.199999988079,
+        "audioScope": "playing event only; not PCM or physical onset",
+        "dialogOpenMs": 8.300000011920929,
+        "firstFrameMs": 223.69999998807907,
+        "frameMediaTime": 1,
+        "videoPlayingMs": 242.30000001192093
+      },
+      {
+        "start": 8147.599999964237,
+        "audioScope": "playing event only; not PCM or physical onset",
+        "dialogOpenMs": 8.199999988079071,
+        "firstFrameMs": 166.69999998807907,
+        "frameMediaTime": 1,
+        "videoPlayingMs": 196.19999998807907
+      },
+      {
+        "start": 13327.799999952316,
+        "audioScope": "playing event only; not PCM or physical onset",
+        "dialogOpenMs": 5.5,
+        "videoPlayingMs": 69.70000004768372,
+        "firstFrameMs": 91.60000002384186,
+        "frameMediaTime": 0
+      }
+    ]
+  },
+  "captionLayout": {
+    "line": 70,
+    "snapToLines": false
+  },
+  "passed": true
+}

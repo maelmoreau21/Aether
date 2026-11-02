@@ -1,3 +1,25 @@
+## Correctifs du 25 octobre 2026
+
+Les bannières du catalogue et des extensions installées sont affichées en entier
+(`object-fit: contain`), sans découper les logos des visuels panoramiques.
+
+Le stockage compare les paquets JSON après désérialisation : une différence
+indolore de mise en forme ou de champs optionnels omis ne bloque plus une
+réinstallation identique. Un paquet différent et un module altéré restent refusés.
+Les réponses distinguent `plugin_storage_permission_denied`,
+`plugin_storage_conflict`, `plugin_storage_integrity_failed` et
+`plugin_storage_missing`. Les erreurs non classées conservent
+`plugin_storage_failed`. Le Core journalise la cause système ; le navigateur
+ne reçoit aucun chemin interne. Aucune réparation destructive automatique.
+
+IntroSkipper existe dans Aether-Plugins mais le catalogue signé local contient
+encore huit paquets sans IntroSkipper. La détection de release inclut désormais
+les plugins absents du catalogue sur les exécutions automatiques. Les publications
+sont séquentielles et récupèrent main pour éviter les conflits entre leurs commits
+de catalogue. Les SVG locaux sont incorporés avant signature. La signature avec
+la clé de production et la publication restent nécessaires avant actualisation
+du catalogue sur un serveur ; aucun paquet signé fictif n'est ajouté.
+
 # Dépôts et catalogue d’extensions
 
 > Mise à jour du 23 octobre : aucune approbation d’éditeur ou de dépôt n’est requise.
@@ -61,9 +83,10 @@ ne télécharge aucun manifeste. Une erreur d’actualisation conserve le dernie
 catalogue valide. **Retirer le dépôt** conserve les extensions installées ;
 révoquer l’éditeur ou désactiver l’extension restent des actions distinctes.
 Une installation utilise le snapshot sélectionné ; un changement de catalogue
-pendant son téléchargement est signalé. Les mises à jour en place et le rollback
-ne sont pas fournis : une version déjà installée se gère dans Installées, avec
-désinstallation/réinstallation et de nouveaux consentements si nécessaire.
+pendant son téléchargement est signalé. Une route d'upgrade existe côté Core,
+mais le cycle complet depuis le catalogue et le rollback ne sont pas garantis.
+Voir [Cycle de mise à jour](PLUGIN_UPDATE_LIFECYCLE.md) ; une
+désinstallation/réinstallation exige une sauvegarde préalable des données.
 
 ## Format du manifeste
 
@@ -99,7 +122,7 @@ Session administrateur exigée partout ; CSRF sur chaque mutation. Réponses
 - `POST /api/v1/admin/extensions/repositories/{id}/refresh` : `204` après remplacement du snapshot valide.
 - `DELETE /api/v1/admin/extensions/repositories/{id}` : `204`, sans désinstaller de module.
 - `GET /api/v1/admin/extensions/catalogue` : `{entries:[{repositoryId,repositoryName,manifest,publisherId,publicKey,compatible}]}`.
-- `POST /api/v1/admin/extensions/repositories/{id}/install` : `{extensionId,version}`, `201 {id}` ; mêmes contrôles d’installation que l’import local.
+- `POST /api/v1/admin/extensions/repositories/{id}/install` : `{extensionId,version,upgrade?:boolean}`, `201 {id}` pour une installation. Avec `upgrade:true`, mêmes contrôles que `/extensions/{id}/upgrade` ; la compatibilité actuellement non garantie entraîne un refus sans modifier l'installation. L'interface ne désinstalle plus l'ancienne version pour contourner ce refus.
 
 Principales erreurs : `401/403` identité/CSRF/éditeur non approuvé, `400` URL,
 manifeste, compatibilité ou intégrité invalides, `404` dépôt/version absent,

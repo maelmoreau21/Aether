@@ -10,7 +10,7 @@ const translations = {
     films: 'Films',
     series: 'Séries',
     search: 'Recherche',
-    admin_dashboard: 'Tableau de bord (Admin)',
+    admin_dashboard: 'Tableau de bord',
     profile_settings: 'Mon profil & Préférences',
     logout: 'Se déconnecter',
     login: 'Connexion',

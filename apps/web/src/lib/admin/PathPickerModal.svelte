@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import Icon from '../ui/Icon.svelte';
 
   export interface DirectoryEntry {
@@ -32,23 +33,30 @@
   let directories = $state<DirectoryEntry[]>([]);
   let loading = $state(false);
   let error = $state('');
+  let resolvedPath = $state('');
+  let requestController: AbortController | undefined;
 
   $effect(() => {
     if (open) {
-      currentPath = initialPath || '';
       dialog?.showModal();
-      void browse(currentPath);
+      // Opening initializes the picker once. Reading currentPath here would
+      // restart this effect on every navigation and reset it to initialPath.
+      untrack(() => { void browse(initialPath || ''); });
     } else {
+      requestController?.abort();
       dialog?.close();
     }
   });
 
   async function browse(targetPath: string) {
+    requestController?.abort();
+    const controller = new AbortController();
+    requestController = controller;
     loading = true;
     error = '';
     try {
       const url = `/api/v1/admin/filesystem/browse?nodeId=${encodeURIComponent(nodeId)}&path=${encodeURIComponent(targetPath)}`;
-      const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+      const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         error = data?.error ?? 'Dossier introuvable ou inaccessible.';
@@ -56,12 +64,13 @@
       }
       const data: BrowseResult = await res.json();
       currentPath = data.path;
+      resolvedPath = data.path;
       parent = data.parent;
       directories = data.directories;
     } catch {
-      error = 'Impossible de contacter le serveur.';
+      if (!controller.signal.aborted) error = 'Impossible de contacter le serveur.';
     } finally {
-      loading = false;
+      if (requestController === controller) loading = false;
     }
   }
 
@@ -78,6 +87,7 @@
   }
 
   function handleConfirm() {
+    if (loading || error || currentPath !== resolvedPath) return;
     const selected = currentPath.trim();
     if (selected) {
       onselect(selected);
@@ -95,6 +105,7 @@
   </div>
 
   <div class="picker-body">
+    <p class="server-hint">Parcourez les dossiers du serveur sélectionné. Dans Docker, seuls les dossiers montés dans le conteneur peuvent être ajoutés.</p>
     <label for="picker-path-input">Dossier</label>
     <div class="input-wrapper">
       <input
@@ -117,6 +128,11 @@
       </button>
     </div>
 
+    <div class="navigation-actions">
+      <button type="button" onclick={() => browse('')} disabled={loading}>Racines / lecteurs</button>
+      <button type="button" onclick={() => browse(parent ?? '')} disabled={loading || parent === null}>Dossier parent</button>
+    </div>
+
     {#if error}
       <p class="error-msg" role="alert">{error}</p>
     {/if}
@@ -124,7 +140,7 @@
     <div class="dirs-container" class:is-loading={loading}>
       {#if parent !== null}
         <button type="button" class="dir-item parent-item" onclick={() => browse(parent ?? '')}>
-          <span class="dir-name">...</span>
+          <span class="dir-name">.. — Dossier parent</span>
           <span class="dir-arrow"><Icon name="arrow" size={18} /></span>
         </button>
       {/if}
@@ -137,13 +153,13 @@
       {/each}
 
       {#if directories.length === 0 && !loading && !error}
-        <div class="empty-hint">Ce dossier ne contient aucun sous-dossier.</div>
+        <div class="empty-hint">Ce dossier ne contient aucun sous-dossier. Vous pouvez le sélectionner ou revenir au dossier parent.</div>
       {/if}
     </div>
 
     <div class="picker-footer">
-      <button type="button" class="ok-btn" onclick={handleConfirm}>
-        OK
+      <button type="button" class="ok-btn" onclick={handleConfirm} disabled={loading || !!error || !resolvedPath || currentPath !== resolvedPath}>
+        {loading ? 'Chargement…' : 'Sélectionner ce dossier'}
       </button>
     </div>
   </div>
@@ -151,12 +167,12 @@
 
 <style>
   dialog.path-picker-dialog {
-    width: min(720px, calc(100vw - 32px));
+    width: min(1000px, calc(100vw - 32px));
     max-height: calc(100dvh - 48px);
     padding: 0;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
-    background: #1c1c1e;
+    background: var(--bg-surface);
     color: var(--text-primary);
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
   }
@@ -172,7 +188,7 @@
     gap: 16px;
     padding: 16px 20px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    background: #161618;
+    background: var(--bg-elevated);
   }
 
   .back-btn {
@@ -197,7 +213,7 @@
     font-size: 20px;
     font-weight: 500;
     margin: 0;
-    color: #fff;
+    color: var(--text-primary);
   }
 
   .picker-body {
@@ -206,6 +222,11 @@
     padding: 24px;
     gap: 16px;
   }
+
+  .server-hint { margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
+  .navigation-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .navigation-actions button { padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
 
   label {
     display: block;
@@ -217,7 +238,7 @@
   .input-wrapper {
     display: flex;
     align-items: center;
-    background: #262628;
+    background: var(--bg-elevated);
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: var(--radius-md);
     overflow: hidden;
@@ -235,7 +256,7 @@
     padding: 0 14px;
     background: transparent;
     border: none;
-    color: #fff;
+    color: var(--text-primary);
     font: inherit;
     font-size: 14px;
   }
@@ -275,7 +296,7 @@
     overflow-y: auto;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: var(--radius-md);
-    background: #202022;
+    background: var(--bg-elevated);
   }
 
   .dirs-container.is-loading {

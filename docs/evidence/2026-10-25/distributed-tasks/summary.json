@@ -1,0 +1,94 @@
+{
+  "profile": "test, unoptimized + debuginfo",
+  "simulatedNodes": 100,
+  "measurements": [
+    {
+      "benchmark": "SIMULATED_QUEUE_HTTP_CONTENTION",
+      "completedJobs": 1000,
+      "completedJobsPerSecond": 65.36363134608634,
+      "fixtureJobs": 10000,
+      "fixtureSeedMs": 2969.6940999999997,
+      "httpEnqueues": 100,
+      "measurements": [
+        {
+          "maxMs": 1797.3856,
+          "operation": "claim_under_contention",
+          "p50Ms": 623.6348,
+          "p95Ms": 1639.6855,
+          "samples": 1000
+        },
+        {
+          "maxMs": 1827.7589,
+          "operation": "authenticated_http_enqueue",
+          "p50Ms": 8.112,
+          "p95Ms": 791.6653,
+          "samples": 100
+        },
+        {
+          "maxMs": 98.30239999999999,
+          "operation": "authenticated_admin_page_50",
+          "p50Ms": 9.2715,
+          "p95Ms": 17.2677,
+          "samples": 100
+        },
+        {
+          "maxMs": 0.7255,
+          "operation": "synthetic_health_no_database",
+          "p50Ms": 0.11739999999999999,
+          "p95Ms": 0.3851,
+          "samples": 100
+        }
+      ],
+      "processCpuMs": 10375.0,
+      "rssAfterBytes": 18767872,
+      "rssBeforeBytes": 18935808,
+      "simulatedNodes": 100,
+      "statementCalls": 8106,
+      "wallMs": 15299.027600000001
+    },
+    {
+      "actualDurableAdmissions": 10000,
+      "admissionDurationMs": 49945.3214,
+      "admissionsPerSecond": 200.2189538417907,
+      "benchmark": "REAL_10000_ADMISSIONS_WITH_ADMIN_HTTP",
+      "measurements": [
+        {
+          "maxMs": 132.1217,
+          "operation": "real_enqueue",
+          "p50Ms": 4.4475,
+          "p95Ms": 7.3406,
+          "samples": 10000
+        },
+        {
+          "maxMs": 2.7958000000000003,
+          "operation": "authenticated_admin_empty_baseline",
+          "p50Ms": 2.0477,
+          "p95Ms": 2.7958000000000003,
+          "samples": 20
+        },
+        {
+          "maxMs": 56.4741,
+          "operation": "authenticated_admin_during_all_admissions",
+          "p50Ms": 10.9445,
+          "p95Ms": 16.0484,
+          "samples": 1752
+        }
+      ],
+      "nodeLibrarySetupMs": 41.5536,
+      "processCpuMs": 55453.125,
+      "rssAfterBytes": 20467712,
+      "rssBeforeBytes": 16891904,
+      "simulatedNodes": 100,
+      "statementCalls": 73510
+    }
+  ],
+  "queueSummaryLines": [
+    "test ten_thousand_jobs_on_one_hundred_simulated_nodes ... SIMULATED_QUEUE nodes=100 jobs=10000 fixture_seed_ms=1661.98 total_ms=95895.77 throughput_jobs_s=104.28 claim_p50_ms=5.833 claim_p95_ms=9.132 claim_p99_ms=21.576 claim_max_ms=201.964",
+    "PRODUCTION_BATCH_ADMISSION nodes=100 jobs=10000 transactions=100 batch_p50_ms=213.992 batch_p95_ms=383.889 batch_max_ms=818.061; each timing covers admission of all 100 Nodes, fixture requeue excluded"
+  ],
+  "limitations": [
+    "No Release or physical NAS benchmark",
+    "statementCalls counts instrumented statement construction and transaction boundaries, not physical database I/O",
+    "100-node batch attribution remains above 50 ms in this debug run"
+  ]
+}

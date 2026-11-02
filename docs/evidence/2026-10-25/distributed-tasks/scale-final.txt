@@ -1,0 +1,23 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.27s
+     Running tests\distributed_tasks.rs (target\debug\deps\distributed_tasks-7f22560b10ee9a29.exe)
+
+running 1 test
+test ten_thousand_jobs_on_one_hundred_simulated_nodes ... SIMULATED_QUEUE nodes=100 jobs=10000 fixture_seed_ms=1661.98 total_ms=95895.77 throughput_jobs_s=104.28 claim_p50_ms=5.833 claim_p95_ms=9.132 claim_p99_ms=21.576 claim_max_ms=201.964
+PRODUCTION_BATCH_ADMISSION nodes=100 jobs=10000 transactions=100 batch_p50_ms=213.992 batch_p95_ms=383.889 batch_max_ms=818.061; each timing covers admission of all 100 Nodes, fixture requeue excluded
+Fixture insertion uses one transaction; execution performs 10,000 real claim transactions plus 10,000 finish statements. CPU/RSS, HTTP latency and video playback are not measured by this queue-only test.
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 154.77s
+
+     Running tests\distributed_tasks_scale.rs (target\debug\deps\distributed_tasks_scale-ea59f12e427d6514.exe)
+
+running 2 tests
+test backlog_and_one_hundred_claimers_preserve_admin_http_responsiveness ... {"benchmark":"SIMULATED_QUEUE_HTTP_CONTENTION","completedJobs":1000,"completedJobsPerSecond":65.36363134608634,"fixtureJobs":10000,"fixtureSeedMs":2969.6940999999997,"httpEnqueues":100,"measurements":[{"maxMs":1797.3856,"operation":"claim_under_contention","p50Ms":623.6348,"p95Ms":1639.6855,"samples":1000},{"maxMs":1827.7589,"operation":"authenticated_http_enqueue","p50Ms":8.112,"p95Ms":791.6653,"samples":100},{"maxMs":98.30239999999999,"operation":"authenticated_admin_page_50","p50Ms":9.2715,"p95Ms":17.2677,"samples":100},{"maxMs":0.7255,"operation":"synthetic_health_no_database","p50Ms":0.11739999999999999,"p95Ms":0.3851,"samples":100}],"processCpuMs":10375.0,"rssAfterBytes":18767872,"rssBeforeBytes":18935808,"simulatedNodes":100,"statementCalls":8106,"wallMs":15299.027600000001}
+In-process Axum requests, SQLite, 100 simulated node identities; no sockets, scan work, media, browser, NAS or video stability measured. Optional query-metrics counts shared-wrapper statement calls and engine transaction boundaries, not SQLite page I/O; 1000 actual claim transactions, 1000 finishes and 100 authenticated HTTP enqueues were executed; seed cost is reported separately.
+ok
+test ten_thousand_real_admissions_keep_authenticated_navigation_served ... {"actualDurableAdmissions":10000,"admissionDurationMs":49945.3214,"admissionsPerSecond":200.2189538417907,"benchmark":"REAL_10000_ADMISSIONS_WITH_ADMIN_HTTP","measurements":[{"maxMs":132.1217,"operation":"real_enqueue","p50Ms":4.4475,"p95Ms":7.3406,"samples":10000},{"maxMs":2.7958000000000003,"operation":"authenticated_admin_empty_baseline","p50Ms":2.0477,"p95Ms":2.7958000000000003,"samples":20},{"maxMs":56.4741,"operation":"authenticated_admin_during_all_admissions","p50Ms":10.9445,"p95Ms":16.0484,"samples":1752}],"nodeLibrarySetupMs":41.5536,"processCpuMs":55453.125,"rssAfterBytes":20467712,"rssBeforeBytes":16891904,"simulatedNodes":100,"statementCalls":73510}
+All 10,000 jobs use engine::enqueue including per-job validation, idempotency, pending-capacity check and durable commit; no direct task seeding. HTTP navigation runs throughout admission in the same Tokio runtime. Optional query-metrics counts shared-wrapper statement calls and engine transaction boundaries; arbitrary raw SQLx and SQLite page I/O are excluded. No sockets, real scans, physical nodes or media decoding measured.
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 91.15s
+

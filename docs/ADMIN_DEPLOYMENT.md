@@ -3,7 +3,7 @@
 Les images Core et autonome incluent `media-backup`, `media-restore` et
 `media-recover`. Le Core conserve les sessions, utilisateurs, groupes, droits,
 clés API et plans de scans dans sa base applicative. Les sauvegardes complètes
-ajoutent la configuration serveur capturée à l'archive chiffrée ; elles ne
+ajoutent la configuration serveur capturée à l'archive non chiffrée ; elles ne
 contiennent pas les médias ni l'infrastructure externe.
 
 ## Deux modes conservés
@@ -17,7 +17,7 @@ Les identités UID/GID `10001:10001`, les ports locaux par défaut,
 `no-new-privileges` et la suppression des capacités Linux sont conservés.
 Les clients PostgreSQL ne sont pas ajoutés à l'image Node.
 
-## Répertoire et clé de sauvegarde
+## Répertoire privé de sauvegarde
 
 `MEDIA_BACKUP_DIR=/backups` désigne le volume d'archives. L'image crée ce dossier
 avec le propriétaire `10001:10001` et le mode `0700`. Un montage existant masque
@@ -34,16 +34,11 @@ d'un mode Unix ne prouve pas qu'aucune ACL supplémentaire ne donne accès.
 Ne pas changer les droits des dossiers médias pour résoudre un problème de
 sauvegarde.
 
-Les nouvelles configurations Compose passent `MEDIA_BACKUP_KEY` depuis
-l'environnement opérateur sans secret de repli. Fournir une clé aléatoire de
-32 octets encodée en 64 caractères hexadécimaux dans un gestionnaire de secrets
-ou une configuration de service protégée. Conserver une copie de récupération
-séparée du volume d'archives. Sans cette clé, le contenu chiffré ne peut pas être
-récupéré. Une valeur vide ne constitue pas une clé de démonstration et doit
-laisser les opérations chiffrées indisponibles.
+Les archives sont non chiffrées et contiennent des secrets applicatifs en clair.
+Réserver `/backups` à l'opérateur, protéger aussi toutes ses copies et ne pas
+servir ce dossier par le proxy Web. Le digest du paquet détecte la corruption
+accidentelle, pas une modification hostile. Voir [BACKUP_BUNDLE.md](BACKUP_BUNDLE.md).
 
-Ne pas envoyer la clé avec les archives, la placer dans Git ou l'afficher dans
-les journaux. Le répertoire `/backups` ne doit pas être servi par le proxy Web.
 Pour les installations autonomes antérieures utilisant un volume anonyme créé
 par le `VOLUME` de l'image, inventorier et conserver ce volume avant de passer au
 nouveau volume nommé ; aucune migration automatique des anciennes archives

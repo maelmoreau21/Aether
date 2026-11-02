@@ -1,5 +1,7 @@
 <script lang="ts">
   import ImageManager from './ImageManager.svelte';
+  import IdentifyModal from './IdentifyModal.svelte';
+  import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
   import { session } from '../auth/session';
   import type { Work } from './api';
   import type { Media } from '../player/types';
@@ -21,10 +23,13 @@
   } = $props();
 
   let imagesOpen = $state(false);
+  let imagesChanged = $state(false);
   let metadataOpen = $state(false);
+  let identifyOpen = $state(false);
   let infoOpen = $state(false);
   let listOpen = $state(false);
   let menuOpen = $state(false);
+  let watchPartyOpen = $state(false);
 
   let lists = $state<{ id: string; name: string; owned?: boolean }[]>([]);
   let listName = $state('');
@@ -176,13 +181,40 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
+{#if watchPartyOpen}
+  <WatchPartyModal
+    mediaId={work.id}
+    mediaTitle={work.title}
+    onClose={() => (watchPartyOpen = false)}
+    onJoinParty={(partyId) => {
+      watchPartyOpen = false;
+      window.dispatchEvent(new CustomEvent('start-watch-party', { detail: { partyId, workId: work.id } }));
+    }}
+  />
+{/if}
+
 {#if imagesOpen}
   <ImageManager
     title={work.title}
     workId={work.id}
-    onclose={() => (imagesOpen = false)}
-    onchanged={async () => {
+    onclose={() => {
+      imagesOpen = false;
+      if (imagesChanged) {
+        imagesChanged = false;
+        window.dispatchEvent(new CustomEvent('media-artwork-updated', { detail: { id: work.id } }));
+      }
+    }}
+    onchanged={async () => { imagesChanged = true; }}
+  />
+{/if}
+
+{#if identifyOpen && isAdmin}
+  <IdentifyModal
+    {work}
+    onclose={() => (identifyOpen = false)}
+    onsaved={() => {
       window.dispatchEvent(new CustomEvent('media-artwork-updated', { detail: { id: work.id } }));
+      window.location.reload();
     }}
   />
 {/if}
@@ -280,6 +312,19 @@
           role="menuitem"
           onclick={() => {
             menuOpen = false;
+            watchPartyOpen = true;
+          }}
+        >
+          <Icon name="users" size={16} />
+          <span>Séance Watch Party</span>
+        </button>
+
+        <button
+          type="button"
+          class="menu-item"
+          role="menuitem"
+          onclick={() => {
+            menuOpen = false;
             infoOpen = true;
           }}
         >
@@ -287,7 +332,24 @@
           <span>Informations média</span>
         </button>
 
+        <button
+          type="button"
+          class="menu-item"
+          role="menuitem"
+          onclick={() => {
+            menuOpen = false;
+            listOpen = true;
+            void loadLists();
+          }}
+        >
+          <Icon name="sparkles" size={16} />
+          <span>Ajouter à une playlist…</span>
+        </button>
+
         {#if isAdmin}
+          <div class="menu-divider" role="separator"></div>
+          <div class="menu-section-header">Administration</div>
+
           <button
             type="button"
             class="menu-item"
@@ -307,6 +369,19 @@
             role="menuitem"
             onclick={() => {
               menuOpen = false;
+              identifyOpen = true;
+            }}
+          >
+            <Icon name="search" size={16} />
+            <span>Identifier</span>
+          </button>
+
+          <button
+            type="button"
+            class="menu-item"
+            role="menuitem"
+            onclick={() => {
+              menuOpen = false;
               metadataOpen = true;
               void loadCandidates();
             }}
@@ -315,20 +390,6 @@
             <span>Modifier les métadonnées</span>
           </button>
         {/if}
-
-        <button
-          type="button"
-          class="menu-item"
-          role="menuitem"
-          onclick={() => {
-            menuOpen = false;
-            listOpen = true;
-            void loadLists();
-          }}
-        >
-          <Icon name="sparkles" size={16} />
-          <span>Ajouter à une playlist…</span>
-        </button>
       </div>
     {/if}
   </div>
@@ -691,7 +752,7 @@
     align-items: center;
     gap: 10px;
     position: relative;
-    margin-block: 8px;
+    z-index: 40;
     vertical-align: middle;
   }
 
@@ -711,16 +772,17 @@
 
   .list-dropdown-menu {
     position: absolute;
-    top: calc(100% + 8px);
+    top: calc(100% + 10px);
     left: 0;
     min-width: 280px;
-    background: rgba(24, 24, 27, 0.95);
-    backdrop-filter: blur(16px);
+    background: var(--color-surface-elevated);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     border: 1px solid var(--color-line-strong);
     border-radius: var(--radius-md);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-lg);
     padding: 14px;
-    z-index: 100;
+    z-index: 300;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -764,9 +826,11 @@
     width: 44px;
     height: 44px;
     box-sizing: border-box;
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface);
+    border: 1px solid var(--color-line-strong);
+    border-radius: 50%;
+    background: var(--color-glass-raised);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     color: var(--color-text-bright);
     cursor: pointer;
     transition: all var(--transition-fast);
@@ -775,7 +839,7 @@
   .tool-btn:hover {
     color: var(--color-accent);
     border-color: var(--color-accent);
-    background: var(--color-surface-hover);
+    background: var(--color-raised-hover);
     transform: translateY(-1px);
   }
 
@@ -797,7 +861,7 @@
   .backdrop-dismiss {
     position: fixed;
     inset: 0;
-    z-index: 99;
+    z-index: 290;
     background: transparent;
     border: none;
     cursor: default;
@@ -805,25 +869,50 @@
 
   .dropdown-menu {
     position: absolute;
-    top: calc(100% + 8px);
+    top: calc(100% + 10px);
     left: 0;
-    min-width: 230px;
-    background: rgba(24, 24, 27, 0.95);
-    backdrop-filter: blur(16px);
+    min-width: 250px;
+    background: #18181c;
+    background: var(--color-surface-elevated, #18181c);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border: 1px solid var(--color-line-strong);
     border-radius: var(--radius-md);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.05);
     padding: 6px;
-    z-index: 100;
+    z-index: 300;
     display: flex;
     flex-direction: column;
     gap: 2px;
   }
 
+  @media (max-width: 720px) {
+    .dropdown-menu,
+    .list-dropdown-menu {
+      left: auto;
+      right: 0;
+    }
+  }
+
+  .menu-divider {
+    height: 1px;
+    background: var(--color-line);
+    margin: 6px 4px;
+  }
+
+  .menu-section-header {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-muted);
+    padding: 6px 12px 2px;
+  }
+
   .menu-item {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     width: 100%;
     padding: 10px 14px;
     border: none;
@@ -834,13 +923,24 @@
     font-weight: 500;
     text-align: left;
     cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
+    transition: all var(--transition-fast);
+  }
+
+  .menu-item :global(svg) {
+    color: var(--color-muted);
+    transition: color var(--transition-fast), transform var(--transition-fast);
+    flex-shrink: 0;
   }
 
   .menu-item:hover, .menu-item:focus-visible {
     background: var(--color-surface-hover);
-    color: var(--color-accent);
+    color: var(--color-text-bright);
     outline: none;
+  }
+
+  .menu-item:hover :global(svg), .menu-item:focus-visible :global(svg) {
+    color: var(--color-accent);
+    transform: scale(1.1);
   }
 
   /* Modals */
@@ -869,10 +969,12 @@
     max-width: 580px;
     max-height: 90vh;
     overflow-y: auto;
-    background: #18181b;
+    background: var(--color-glass-raised);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border: 1px solid var(--color-line-strong);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
     display: flex;
     flex-direction: column;
   }

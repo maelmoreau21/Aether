@@ -20,10 +20,8 @@ RUN npm run build
 # ==============================================================================
 FROM rust:slim-bookworm AS rust-builder
 
-ARG GIT_BRANCH=develop
-ARG MEDIA_VERSION=""
-ENV GIT_BRANCH=${GIT_BRANCH}
-ENV MEDIA_VERSION=${MEDIA_VERSION}
+# Keep release builds usable on memory-constrained hosts; operators can override.
+ARG CARGO_BUILD_JOBS=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
@@ -72,8 +70,16 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Copy actual workspace crates (shared contracts, node, and core with migrations)
 COPY crates/ ./crates/
 
+# Version changes must not invalidate the dependency compilation layer above.
+ARG GIT_BRANCH=develop
+ARG MEDIA_VERSION=""
+ENV GIT_BRANCH=${GIT_BRANCH}
+ENV MEDIA_VERSION=${MEDIA_VERSION}
+
 # Clean dummy binary/deps artifacts, recompile actual release binaries, and strip symbols
-RUN touch crates/shared/src/lib.rs \
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    touch crates/shared/src/lib.rs \
           crates/shared/build.rs \
           crates/node/src/lib.rs \
           crates/node/src/bin/aether-node.rs \
@@ -152,7 +158,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && pg_dump --version \
     && pg_restore --version \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc /usr/share/locale /usr/share/info
 
 # ==============================================================================
 # Stage 3: Distributed Core Runtime (`aether-core`)
@@ -183,8 +189,8 @@ ENV MEDIA_MODE=distributed \
     MEDIA_BIND_ADDR=0.0.0.0 \
     MEDIA_DB_PATH=/data/core.sqlite3 \
     MEDIA_PLUGINS_PATH=/data/plugins \
+    MEDIA_ASSETS_PATH=/data/assets \
     MEDIA_BACKUP_DIR=/backups \
-    MEDIA_WEB_DIST=/app/apps/web/build \
     MEDIA_PUBLIC_URL=http://127.0.0.1:3000
 
 WORKDIR /app
@@ -211,7 +217,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         tini \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc /usr/share/locale /usr/share/info
 
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffprobe /usr/local/bin/ffprobe
@@ -289,8 +295,8 @@ ENV MEDIA_PORT=3000 \
     MEDIA_BIND_ADDR=0.0.0.0 \
     MEDIA_DB_PATH=/data/core.sqlite3 \
     MEDIA_PLUGINS_PATH=/data/plugins \
+    MEDIA_ASSETS_PATH=/data/assets \
     MEDIA_BACKUP_DIR=/backups \
-    MEDIA_WEB_DIST=/app/apps/web/build \
     MEDIA_PUBLIC_URL=http://127.0.0.1:3000
 
 WORKDIR /app

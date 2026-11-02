@@ -4,10 +4,14 @@ pub mod admin_backups;
 pub mod admin_users;
 pub mod api_keys;
 pub mod auth;
+pub mod automation;
+pub mod automation_execution;
+pub mod automation_http;
 pub mod avatars;
 pub mod backup;
 pub mod backup_bundle;
 pub mod database;
+pub mod extension_data_lifecycle;
 pub mod extension_files;
 pub mod extension_runtime;
 pub mod extensions;
@@ -16,8 +20,12 @@ pub mod oidc;
 pub mod postgres_backup;
 pub mod scheduler;
 pub mod server_settings;
+pub mod system_memory;
+pub mod system_task_queue;
+pub mod system_tasks;
 use media_contracts::brand;
 pub mod artwork;
+pub mod assets;
 mod catalog;
 pub mod consolidation;
 mod demo;
@@ -31,6 +39,7 @@ pub mod media;
 pub mod music;
 pub mod node;
 pub mod nodes;
+pub mod parties;
 pub mod permissions;
 pub mod playlists;
 pub mod preferences;
@@ -39,6 +48,7 @@ pub mod product;
 mod product_tests;
 pub mod progress;
 pub mod scans;
+pub mod trickplay;
 pub mod user_media_policy;
 
 use axum::{
@@ -126,6 +136,35 @@ pub async fn secure_app_with_jobs(
     auth: auth::AuthState,
     jobs: Arc<scans::ScanJobs>,
 ) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
+    secure_app_with_jobs_and_web_dist(inventory, _port, auth, jobs, configured_web_dist()).await
+}
+
+/// Build the authenticated router with an explicit static asset directory.
+/// Used by integration tests to supply disposable web fixtures.
+#[doc(hidden)]
+pub async fn secure_app_with_web_dist(
+    inventory: node::Inventory,
+    port: u16,
+    auth: auth::AuthState,
+    web_dist: std::path::PathBuf,
+) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
+    secure_app_with_jobs_and_web_dist(
+        inventory,
+        port,
+        auth,
+        Arc::new(scans::ScanJobs::default()),
+        web_dist,
+    )
+    .await
+}
+
+async fn secure_app_with_jobs_and_web_dist(
+    inventory: node::Inventory,
+    _port: u16,
+    auth: auth::AuthState,
+    jobs: Arc<scans::ScanJobs>,
+    web_dist: std::path::PathBuf,
+) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
     let mode = if inventory.is_fixture_bench() {
         "localhost-fixtures"
     } else {
@@ -157,6 +196,11 @@ pub async fn secure_app_with_jobs(
             get(indexed_subtitle).head(indexed_subtitle),
         )
         .route("/api/v1/media/{id}", get(indexed_descriptor))
+        .route("/api/v1/assets/{id}/trickplay", get(indexed_trickplay))
+        .route(
+            "/api/v1/assets/{id}/trickplay/{index}",
+            get(indexed_trickplay_tile).head(indexed_trickplay_tile),
+        )
         .route(
             "/api/v1/assets/{id}/image",
             get(indexed_image).head(indexed_image),
@@ -175,7 +219,7 @@ pub async fn secure_app_with_jobs(
             permissions::require_media,
         ));
     let protected = local_security_with_store(
-        public_routes(mode)
+        public_routes(mode, web_dist)
             .merge(media)
             .merge(scans::router(auth.clone(), root.clone(), jobs).await?)
             .merge(libraries::router(auth.clone(), root.clone()))
@@ -185,6 +229,7 @@ pub async fn secure_app_with_jobs(
             .merge(preferences::router(auth.clone()))
             .merge(account::router(auth.clone()))
             .merge(music::router(auth.clone()))
+            .merge(parties::router(auth.clone()))
             .merge(playlists::router(auth.clone()))
             .merge(product::router(auth.clone()))
             .merge(artwork::router(auth.clone()))
@@ -194,8 +239,12 @@ pub async fn secure_app_with_jobs(
             .merge(admin_users::router(auth.clone()))
             .merge(admin_backups::router(auth.clone(), root.clone()).await?)
             .merge(scheduler::router(auth.clone()).await?)
+            .merge(system_tasks::router(auth.clone(), root.clone()).await?)
+            .merge(system_memory::router(auth.clone()))
             .merge(groups::router(auth.clone()))
             .merge(api_keys::router(auth.clone()))
+            .merge(automation_http::router(auth.clone()))
+            .merge(timeline_markers::router(auth.clone()))
             .merge(extensions::router(auth.clone()))
             .merge(auth::router(auth))
             .merge(oidc),
@@ -274,6 +323,22 @@ async fn indexed_image(
     inventory::image(&store, &id, request).await
 }
 
+async fn indexed_trickplay(
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    request: Request,
+) -> Response {
+    trickplay::manifest(&store, &id, request).await
+}
+
+async fn indexed_trickplay_tile(
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path((id, index)): axum::extract::Path<(String, usize)>,
+    request: Request,
+) -> Response {
+    trickplay::tile(&store, &id, index, request).await
+}
+
 async fn indexed_descriptor(
     axum::Extension(identity): axum::Extension<auth::Authenticated>,
     axum::Extension(visible): axum::Extension<permissions::VisibleLibraries>,
@@ -300,7 +365,7 @@ async fn indexed_descriptor(
 #[cfg(feature = "fixture-bench")]
 pub fn app(inventory: node::Inventory, port: u16) -> Router {
     health_routes("localhost-fixtures").merge(local_security(
-        public_routes("localhost-fixtures").merge(media_routes(inventory)),
+        public_routes("localhost-fixtures", configured_web_dist()).merge(media_routes(inventory)),
         format!("http://127.0.0.1:{port}"),
     ))
 }
@@ -358,20 +423,24 @@ fn health_routes(mode: &'static str) -> Router {
         ))
 }
 
-fn public_routes(mode: &'static str) -> Router {
+fn public_routes(mode: &'static str, web_dist: std::path::PathBuf) -> Router {
     let mut router = Router::new()
         .nest_service(
             "/app",
-            tower_http::services::ServeDir::new(configured_web_dist())
-                .append_index_html_on_directories(true),
+            tower_http::services::ServeDir::new(web_dist).append_index_html_on_directories(true),
         )
         .route(
             "/api/v1/config",
             get(move || async move {
+                let v = media_contracts::version::current_version_info();
                 Json(serde_json::json!({
                     "name": brand::DEFAULT_NAME,
                     "mode": mode,
-                    "version": media_contracts::version::current_version()
+                    "version": v.version,
+                    "channel": v.channel,
+                    "commit": v.commit,
+                    "build_date": v.build_date,
+                    "release_url": v.release_url,
                 }))
             }),
         );
@@ -398,7 +467,7 @@ fn local_security(router: Router, origin: String) -> Router {
     local_security_with_store(router, origin, None, Vec::new())
 }
 
-fn local_security_with_store(
+pub fn local_security_with_store(
     router: Router,
     origin: String,
     store: Option<identity::IdentityStore>,
@@ -450,11 +519,29 @@ fn local_security_with_store(
                     && is_web_route
                     && req.headers().get("sec-fetch-mode").is_some_and(|v| v == "navigate");
 
+                if let Some(s) = &store {
+                    crate::server_settings::ensure_cors_origins_warm(s).await;
+                }
                 // 3. Check Origin header against primary and trusted external origins
-                let origin_header = req.headers().get(header::ORIGIN).and_then(|h| h.to_str().ok());
-                let is_primary_origin = origin_header == Some(origin.as_str());
+                let origin_header = req
+                    .headers()
+                    .get(header::ORIGIN)
+                    .and_then(|h| h.to_str().ok())
+                    .map(|s| s.to_owned());
+                let is_primary_origin = origin_header.as_deref() == Some(origin.as_str());
+                let is_cors_allowed = store.as_ref().is_some_and(|s| {
+                    if let Ok(hosts) = s.cors_origins.read() {
+                        origin_header
+                            .as_deref()
+                            .is_some_and(|cand| hosts.iter().any(|h| h == "*" || h == cand))
+                    } else {
+                        false
+                    }
+                });
                 let is_trusted_external = origin_header
-                    .is_some_and(|cand| allowed_origins.iter().any(|ao| ao.as_str() == cand));
+                    .as_deref()
+                    .is_some_and(|cand| allowed_origins.iter().any(|ao| ao.as_str() == cand))
+                    || is_cors_allowed;
                 let origin_matches = origin_header.is_none() || is_primary_origin || is_trusted_external;
 
                 let is_cross_site = req.headers().get("sec-fetch-site").is_some_and(|h| h == "cross-site");
@@ -470,7 +557,49 @@ fn local_security_with_store(
                 if !allowed {
                     return StatusCode::FORBIDDEN.into_response();
                 }
+
+                if method == axum::http::Method::OPTIONS && origin_matches && origin_header.is_some() {
+                    let mut res = StatusCode::NO_CONTENT.into_response();
+                    let headers = res.headers_mut();
+                    if let Some(oh) = &origin_header
+                        && let Ok(val) = HeaderValue::from_str(oh)
+                    {
+                        headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
+                    }
+                    headers.insert(
+                        header::ACCESS_CONTROL_ALLOW_METHODS,
+                        HeaderValue::from_static("GET, POST, PUT, DELETE, PATCH, OPTIONS"),
+                    );
+                    headers.insert(
+                        header::ACCESS_CONTROL_ALLOW_HEADERS,
+                        HeaderValue::from_static("content-type, authorization, x-csrf-token, range, x-playback-session-id"),
+                    );
+                    headers.insert(
+                        header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+                        HeaderValue::from_static("true"),
+                    );
+                    headers.insert(
+                        header::ACCESS_CONTROL_MAX_AGE,
+                        HeaderValue::from_static("86400"),
+                    );
+                    return res;
+                }
+
                 let mut res = next.run(req).await;
+                if let Some(oh) = &origin_header
+                    && (is_primary_origin || is_trusted_external)
+                    && let Ok(val) = HeaderValue::from_str(oh)
+                {
+                    res.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
+                    res.headers_mut().insert(
+                        header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+                        HeaderValue::from_static("true"),
+                    );
+                    res.headers_mut().insert(
+                        header::ACCESS_CONTROL_EXPOSE_HEADERS,
+                        HeaderValue::from_static("content-range, content-length, etag"),
+                    );
+                }
                 let mut extra_origins = String::new();
                 for ao in &allowed_origins {
                     let origin_str = format!(" {ao}");
@@ -479,6 +608,16 @@ fn local_security_with_store(
                     }
                 }
                 if let Some(store) = &store {
+                    if let Ok(hosts) = store.cors_origins.read() {
+                        for host in hosts.iter() {
+                            if host != "*" {
+                                let origin_str = format!(" {host}");
+                                if !extra_origins.contains(&origin_str) {
+                                    extra_origins.push_str(&origin_str);
+                                }
+                            }
+                        }
+                    }
                     let _ = nodes::ensure_node_registry_warm(store).await;
                     for origin_url in store.node_registry.connected_public_origins() {
                         let origin_str = format!(" {origin_url}");
@@ -488,7 +627,7 @@ fn local_security_with_store(
                     }
                 }
                 let csp = format!(
-                    "default-src 'none'; script-src 'self'; worker-src 'self'; manifest-src 'self'; img-src 'self'{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; frame-ancestors 'none'"
+                    "default-src 'none'; script-src 'self'; worker-src 'self'; manifest-src 'self'; img-src 'self' data:{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; frame-ancestors 'none'"
                 );
                 if let Ok(val) = HeaderValue::from_str(&csp) {
                     res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, val);
@@ -550,3 +689,7 @@ pub mod extension_storage;
 
 pub mod task_engine;
 mod task_execution;
+pub mod timeline_markers;
+
+pub mod extension_data;
+pub mod extension_objects;

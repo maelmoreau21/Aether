@@ -1,4 +1,4 @@
-//! Administrator-only encrypted SQLite/PostgreSQL backups. Archive names and source paths are server owned.
+//! Administrator-only SQLite/PostgreSQL backups. Archives are unencrypted and contain secrets.
 use crate::{auth::AuthState, identity::Role};
 use axum::{
     Json, Router,
@@ -17,8 +17,6 @@ use std::{
 };
 use tokio::sync::Semaphore;
 
-pub use crate::backup_bundle::DEFAULT_BACKUP_KEY;
-
 struct Backups {
     auth: AuthState,
     source: Option<PathBuf>,
@@ -27,7 +25,6 @@ struct Backups {
     media_root: PathBuf,
     gate: Arc<Semaphore>,
     worker: Mutex<Option<tokio::task::AbortHandle>>,
-    key: Option<Arc<zeroize::Zeroizing<String>>>,
     configuration: BTreeMap<String, String>,
 }
 
@@ -54,7 +51,11 @@ pub async fn router(
     auth: AuthState,
     media_root: PathBuf,
 ) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
-    let key = std::env::var("MEDIA_BACKUP_KEY").ok();
+    let (directory, configuration) = environment_inputs();
+    router_with_configuration(auth, media_root, directory, configuration).await
+}
+
+fn environment_inputs() -> (Option<PathBuf>, BTreeMap<String, String>) {
     let directory = std::env::var_os("MEDIA_BACKUP_DIR").map(PathBuf::from);
     let configuration = std::env::vars()
         .filter(|(name, _)| {
@@ -62,7 +63,7 @@ pub async fn router(
                 && !matches!(name.as_str(), "MEDIA_BACKUP_KEY" | "MEDIA_BACKUP_KEY_FILE")
         })
         .collect();
-    router_with_configuration(auth, media_root, directory, key, configuration).await
+    (directory, configuration)
 }
 
 /// Explicit operator/test configuration; never exposed as an HTTP payload.
@@ -70,15 +71,21 @@ pub async fn router_with_configuration(
     auth: AuthState,
     media_root: PathBuf,
     directory: Option<PathBuf>,
-    key: Option<String>,
-    mut configuration: BTreeMap<String, String>,
+    configuration: BTreeMap<String, String>,
 ) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
+    let state = build_state(auth, media_root, directory, configuration).await?;
+    Ok(router_with_state(state))
+}
+
+/// Resolve engine, directory and configuration from the open database.
+async fn build_state(
+    auth: AuthState,
+    media_root: PathBuf,
+    directory: Option<PathBuf>,
+    mut configuration: BTreeMap<String, String>,
+) -> Result<Backups, Box<dyn std::error::Error + Send + Sync>> {
     configuration.remove("MEDIA_BACKUP_KEY");
     configuration.remove("MEDIA_BACKUP_KEY_FILE");
-    let key = key
-        .filter(|key| key.len() == 64 && key.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .unwrap_or_else(|| DEFAULT_BACKUP_KEY.to_string());
-    let key = Some(Arc::new(zeroize::Zeroizing::new(key)));
     let mut connection = auth.store.pool().acquire().await?;
     let source = if connection.backend_name() == "SQLite" {
         let rows = crate::database::query("PRAGMA database_list")
@@ -136,7 +143,7 @@ pub async fn router_with_configuration(
         );
     }
     configuration.insert("MEDIA_PUBLIC_URL".into(), auth.origin().into());
-    Ok(router_with_state(Backups {
+    Ok(Backups {
         auth,
         source,
         postgres_url,
@@ -144,9 +151,8 @@ pub async fn router_with_configuration(
         media_root,
         gate: Arc::new(Semaphore::new(1)),
         worker: Mutex::new(None),
-        key,
         configuration,
-    }))
+    })
 }
 
 fn router_with_state(state: Backups) -> Router {
@@ -257,12 +263,21 @@ async fn list(
             Ok(directory) => {
                 let listing_result =
                     tokio::task::spawn_blocking(move || -> Result<Vec<Archive>, StatusCode> {
+                        if !directory.exists() {
+                            return Ok(Vec::new());
+                        }
                         let entries = match std::fs::read_dir(&directory) {
                             Ok(entries) => entries,
                             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                                 return Ok(Vec::new());
                             }
-                            Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+                            Err(err) => {
+                                eprintln!(
+                                    "admin_backups: read_dir error in {:?}: {:?}",
+                                    directory, err
+                                );
+                                return Ok(Vec::new());
+                            }
                         };
                         let mut archives = Vec::new();
                         for entry in entries.take(10_000).flatten() {
@@ -280,8 +295,9 @@ async fn list(
                                 &directory,
                                 DiskPath::new(&name),
                             ) {
-                                let metadata = std::fs::symlink_metadata(entry.path())
-                                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                                let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
+                                    continue;
+                                };
                                 let created_at = metadata
                                     .modified()
                                     .ok()
@@ -304,11 +320,22 @@ async fn list(
                     .await;
                 match listing_result {
                     Ok(Ok(archives)) => (true, None, archives),
-                    _ => (
-                        false,
-                        Some("Impossible de lire les archives de sauvegarde."),
-                        Vec::new(),
-                    ),
+                    Ok(Err(err_code)) => {
+                        eprintln!("admin_backups: listing archives returned {:?}", err_code);
+                        (
+                            false,
+                            Some("Impossible de lire les archives de sauvegarde."),
+                            Vec::new(),
+                        )
+                    }
+                    Err(join_err) => {
+                        eprintln!("admin_backups: join error on listing: {:?}", join_err);
+                        (
+                            false,
+                            Some("Impossible de lire les archives de sauvegarde."),
+                            Vec::new(),
+                        )
+                    }
                 }
             }
             Err(_) => (
@@ -335,12 +362,6 @@ async fn list(
 }
 
 async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
-    let fallback_key = DEFAULT_BACKUP_KEY.to_string();
-    let key = state
-        .key
-        .as_ref()
-        .map(|k| k.as_str())
-        .unwrap_or(&fallback_key);
     let directory = validate_directory(state).await?;
     let path = directory.clone();
     tokio::task::spawn_blocking(move || {
@@ -352,7 +373,9 @@ async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
             builder
         };
         #[cfg(not(unix))]
-        let builder = std::fs::DirBuilder::new();
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(not(unix))]
+        builder.recursive(true);
         let result = match builder.create(&path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => {
@@ -392,15 +415,30 @@ async fn perform_backup(state: &Backups) -> Result<Archive, StatusCode> {
     } else {
         return Err(StatusCode::NOT_IMPLEMENTED);
     };
-    let size = crate::backup_bundle::create(
+    // Assets are listed after the database snapshot: every row present in the snapshot has its
+    // file (file-before-row writes, deferred deletion), so a failure here is a real defect.
+    let assets = state
+        .auth
+        .store
+        .assets()
+        .export_source()
+        .await
+        .map_err(|error| {
+            eprintln!("backup: cannot list durable assets: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    let size = crate::backup_bundle::create_with_assets(
         &temporary.0,
         state.configuration.clone(),
         &directory.join(format!("{id}.media-backup")),
-        key,
         engine,
+        Some(assets),
     )
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|error| {
+        eprintln!("backup: archive creation failed: {error}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     Ok(Archive {
         id,
         size,
@@ -497,6 +535,9 @@ async fn update_schedule(
         .into_response())
 }
 
+/// The schedule only *triggers* work: the due run is claimed here (compare-and-set on
+/// `next_due_at`, safe against several ticks) and handed to the durable task queue, whose lease,
+/// fencing token and playback preemption then govern the execution. No backup runs in this loop.
 async fn scheduled_tick(state: &Backups) -> Result<(), StatusCode> {
     if state.source.is_none() && state.postgres_url.is_none() {
         return Ok(());
@@ -506,22 +547,69 @@ async fn scheduled_tick(state: &Backups) -> Result<(), StatusCode> {
     if !schedule.enabled || schedule.next_due_at > started {
         return Ok(());
     }
-    let Ok(permit) = state.gate.clone().try_acquire_owned() else {
-        return Ok(());
-    };
-    // Atomic claim across router instances; advance from now to avoid missed-run storms.
+    // Atomic claim; advance from now to avoid missed-run storms. `running` means queued or running.
     let claimed = crate::database::query("UPDATE backup_schedule SET next_due_at=?,last_started_at=?,last_completed_at=NULL,last_outcome='running' WHERE singleton=1 AND enabled=1 AND next_due_at=? AND next_due_at<=?")
         .bind(started + schedule.interval_minutes * 60).bind(started).bind(schedule.next_due_at).bind(started)
         .execute(state.auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if claimed.rows_affected() == 0 {
         return Ok(());
     }
-    let result = perform_backup(state).await;
-    crate::database::query("UPDATE backup_schedule SET last_completed_at=?,last_outcome=? WHERE singleton=1 AND last_started_at=?")
-        .bind(now()).bind(if result.is_ok() {"succeeded"} else {"failed"}).bind(started)
-        .execute(state.auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    drop(permit);
+    if let Err(error) =
+        crate::system_task_queue::enqueue_backup(&state.auth.store, schedule.next_due_at, started)
+            .await
+    {
+        eprintln!("scheduled backup could not be queued: {error}");
+        crate::database::query("UPDATE backup_schedule SET last_completed_at=?,last_outcome='failed' WHERE singleton=1 AND last_started_at=?")
+            .bind(now()).bind(started)
+            .execute(state.auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
     Ok(())
+}
+
+/// Execute a queued scheduled backup under its durable-task lease. The outcome is recorded only
+/// while this attempt still owns the lease, so a superseded worker never overwrites the result.
+pub(crate) async fn execute_scheduled(
+    auth: AuthState,
+    media_root: PathBuf,
+    job: &crate::task_engine::Job,
+) -> Result<(), StatusCode> {
+    let (directory, configuration) = environment_inputs();
+    let state = build_state(auth, media_root, directory, configuration)
+        .await
+        .map_err(|error| {
+            eprintln!("scheduled backup: configuration unavailable: {error}");
+            StatusCode::SERVICE_UNAVAILABLE
+        })?;
+    run_scheduled(&state, Some(job)).await
+}
+
+async fn run_scheduled(
+    state: &Backups,
+    fence: Option<&crate::task_engine::Job>,
+) -> Result<(), StatusCode> {
+    let result = perform_backup(state).await;
+    if let Err(status) = &result {
+        eprintln!("scheduled backup failed: HTTP {status}");
+    }
+    if let Some(job) = fence {
+        let current = crate::task_engine::get(&state.auth.store, &job.id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let owns = current.is_some_and(|c| {
+            c.status == "running"
+                && c.attempt == job.attempt
+                && c.lease_until.is_some_and(|u| u > now())
+        });
+        if !owns {
+            eprintln!("scheduled backup: lease lost, result not recorded");
+            return Err(StatusCode::CONFLICT);
+        }
+    }
+    crate::database::query("UPDATE backup_schedule SET last_completed_at=?,last_outcome=? WHERE singleton=1 AND last_outcome='running'")
+        .bind(now()).bind(if result.is_ok() {"succeeded"} else {"failed"})
+        .execute(state.auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    result.map(|_| ())
 }
 
 fn start_worker(state: &Arc<Backups>) {
@@ -617,16 +705,19 @@ mod tests {
             media_root: media,
             gate: Arc::new(Semaphore::new(1)),
             worker: Mutex::new(None),
-            key: Some(Arc::new(zeroize::Zeroizing::new("11".repeat(32)))),
             configuration: BTreeMap::new(),
         };
         assert!(!load_schedule(&state).await.unwrap().enabled);
         crate::database::query("UPDATE backup_schedule SET enabled=1,interval_minutes=60,next_due_at=0 WHERE singleton=1").execute(store.pool()).await.unwrap();
-        let permit = state.gate.clone().try_acquire_owned().unwrap();
+        // The tick no longer depends on the in-memory gate: exclusion is the durable task's lease.
         scheduled_tick(&state).await.unwrap();
-        assert_eq!(load_schedule(&state).await.unwrap().next_due_at, 0);
-        drop(permit);
-        scheduled_tick(&state).await.unwrap();
+        // The tick only queues a durable task; nothing ran yet.
+        let queued: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE category='system' AND target_id='backup' AND status='queued'")
+            .fetch_one(store.pool()).await.unwrap();
+        assert_eq!(queued, 1);
+        assert_eq!(load_schedule(&state).await.unwrap().last_outcome, "running");
+        assert!(!temp.path().join("backups").exists());
+        run_scheduled(&state, None).await.unwrap();
         let schedule = load_schedule(&state).await.unwrap();
         assert_eq!(schedule.last_outcome, "succeeded");
         assert!(schedule.next_due_at > now());
@@ -644,6 +735,7 @@ mod tests {
             .await
             .unwrap();
         scheduled_tick(&state).await.unwrap();
+        assert!(run_scheduled(&state, None).await.is_err());
         let schedule = load_schedule(&state).await.unwrap();
         assert_eq!(schedule.last_outcome, "failed");
         assert!(schedule.last_completed_at.is_some());

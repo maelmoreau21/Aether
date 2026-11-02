@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-26",
+  "environment": "Windows local debug Rust, SQLite, same-machine TCP Nodes",
+  "commands": [
+    {
+      "command": "cargo test -p media-poc --test automation_flow --test distributed_multi_node -- --nocapture",
+      "exitCode": 0,
+      "automationFlow": { "passed": 7, "failed": 0, "ignored": 1, "elapsedSeconds": 15.68 },
+      "distributedMultiNode": { "passed": 1, "failed": 0, "elapsedSeconds": 43.45 }
+    },
+    {
+      "command": "cargo test -p media-poc --test automation_flow hundred_thousand_persistent_tasks_admission -- --ignored --nocapture",
+      "exitCode": 0,
+      "passed": 1,
+      "failed": 0,
+      "elapsedSeconds": 28.09
+    }
+  ],
+  "functionalEvidence": {
+    "standalonePhysicalAv1OpusScanSignedWasmAndPersistentResultMs": 3412.335,
+    "twoRealTcpNodesThreeAssetsAutomaticWasmCompletionMs": 2246.817,
+    "healthyNodeDiscoveryAndEnrichmentWhilePeerListenerStoppedMs": 721.655,
+    "contracts": [
+      "Inventory mutation and outbox event roll back atomically",
+      "1000 duplicate deliveries create one durable effect",
+      "Configuration revision invalidates the computation fingerprint",
+      "Manual, disabled and scheduled policy modes and library grants",
+      "Source and configuration changes reject delayed results",
+      "Leases survive database reopen and fence previous attempts",
+      "Extension revocation prevents stale publication",
+      "Manual catalogue corrections remain unchanged",
+      "metadata.write permits filling a missing synopsis",
+      "Dependency cycles are rejected and prerequisite cancellation propagates",
+      "HTTP administrator, CSRF, validation and manual idempotency checks",
+      "System manual triggers share the durable queue and survive database reopen",
+      "Real TCP scans on two Nodes invoke signed Wasm workers automatically",
+      "A healthy Node continues discovery and enrichment while its peer is stopped",
+      "Node restart and unchanged rescans preserve results without duplicate tasks",
+      "Existing real TCP Range, preparation, permissions and concurrent backlog checks"
+    ]
+  },
+  "scale": {
+    "persistentTasks": 100000,
+    "simulatedNodes": 100,
+    "databaseReopenedBeforeMeasurement": true,
+    "seedMs": 3778.110,
+    "batchSamples": 20,
+    "batchSize": 100,
+    "batchAdmissionP50Ms": 1107.675,
+    "batchAdmissionP95Ms": 1534.107,
+    "enqueueSamples": 100,
+    "enqueueP50Ms": 10.967,
+    "enqueueP95Ms": 18.869,
+    "enqueueP95Under50Ms": true,
+    "batchAdmissionP95Under50Ms": false
+  },
+  "baselineBeforeQueuePlanChanges": {
+    "persistentTasks": 100000,
+    "simulatedNodes": 100,
+    "batchAdmissionP50Ms": 3617.172,
+    "batchAdmissionP95Ms": 4631.177,
+    "enqueueP50Ms": 15.837,
+    "enqueueP95Ms": 69.865,
+    "note": "Earlier local run included overlapping compilation activity; timings are observational and not a controlled causal comparison."
+  },
+  "limits": [
+    "100 Nodes are database simulations, not 100 physical machines",
+    "Scale timings measure durable admission, without media, Wasm or HTTP execution",
+    "Real two-Node evidence uses independent TCP services on one Windows host",
+    "Database reopen proves durable state; it is not a power-loss or kill-process Core test",
+    "Node failure test stops and rebinds an HTTP listener using persisted Node state",
+    "No browser decoding or physical audible playback latency measurement",
+    "No NAS, PostgreSQL or production deployment validation in these commands",
+    "Batch admission p95 remains above 50 ms"
+  ]
+}

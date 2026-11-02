@@ -1,3 +1,31 @@
+> Mission 4 : scénarios réels standalone/Core + deux Nodes, interruption/reprise, idempotence, contrôles et bancs explicites 10 000 tâches / 100 Nodes simulés : [méthode et résultats du moteur distribué](DISTRIBUTED_TASKS.md). Les essais HTTP Range restent distincts du décodage navigateur et des machines physiques.
+
+## Fiabilité lecteur — 29 octobre 2026
+
+Régressions ajoutées : fermeture pendant attente de progression vidéo,
+supersession avant premier fragment, source rechargeable après watchdog,
+annulation audio avant disponibilité, fin d'attente MSE bornée/nettoyée,
+arrêt des préparations périodiques après erreur terminale, rejet d'erreurs
+MSE devenues obsolètes après seek. Le test Rust
+`packaging::tests::identical_cold_full_components_share_one_published_file`
+demande huit fois simultanément chaque composant vidéo/audio/sous-titre et
+vérifie un seul fichier publié, les leases et la restitution des permis.
+La reprise à 29,844173 s dans une chronologie de deux heures vérifie aussi
+que le chargement initial demande les fenêtres 2 et 3, afin de ne pas attendre
+indéfiniment la fin du seek dans les dernières fractions d'une fenêtre.
+
+Le banc `browser-streaming-performance.cjs` peut figer tous les modules d'une
+révision via `MEDIA_PERFORMANCE_PLAYER_REF`, choisir les positions par
+`MEDIA_PERFORMANCE_SEEK_TARGETS` et exercer 1/4/8/16 sessions avec
+`MEDIA_PERFORMANCE_SESSIONS`. Les sources sont figées avant lancement et leurs
+empreintes figurent dans le rapport. Il conserve son serveur HTTP synthétique :
+ses résultats ne remplacent pas le banc Core/Node Rust. Les petits échantillons
+de latence restent exploratoires ; décoder des extraits d'un conteneur de deux
+heures ne prouve pas une endurance de deux heures.
+
+Résultats réellement exécutés, commandes et limites :
+[rapport du 29 octobre](PLAYER_RELIABILITY_2026_10_29.md).
+
 ## Flux progressifs et Node Rust — 24 octobre 2026
 
 Méthode et preuves : [STREAMING_SYSTEM_BENCHMARK.md](STREAMING_SYSTEM_BENCHMARK.md).
@@ -91,11 +119,11 @@ de sélection sont inclus dans `npm test --prefix apps/web`.
 
 ## Administration complète — 19 octobre 2026
 
-Vérifications ciblées : `cargo test --locked -p media-poc --test admin_users --test admin_access --test admin_backups --test backup_bundle --test scheduler --test preferences`. Comptes, rôle/session/CSRF, protection du dernier administrateur, groupes/droits vivants, clés expirables et révocables, scans planifiés, archivage chiffré et restauration réelle SQLite. Les tests du paquet couvrent altération, troncature, permutation, clé incorrecte, base vide, destinations existantes et certificats.
+Vérifications ciblées : `cargo test --locked -p media-poc --test admin_backups --test backup_bundle --test full_backup_restore_e2e`. Le format courant non chiffré couvre sauvegarde/restauration SQLite, corruption, troncature, ancien format refusé et destination existante. Les tests des autres domaines sont distincts ; le checksum ne prouve pas l'authenticité contre un tiers ayant accès au fichier.
 
-PostgreSQL réel : `pwsh -NoProfile -File scripts/test-admin-postgres.ps1` — base18 jetable, vrais pg_dump/pg_restore, paquet chiffré, extraction, restauration dans une base vide, comparaison de toutes les tables et des paramètres. Les clients du conteneur sont invoqués via un pont de test, sans identifiants dans les arguments.
+PostgreSQL réel : `pwsh -NoProfile -File scripts/test-admin-postgres.ps1` — base18 jetable, vrais pg_dump/pg_restore, paquet non chiffré, extraction, restauration dans une base vide, comparaison de toutes les tables et des paramètres. Les clients du conteneur sont invoqués via un pont de test, sans identifiants dans les arguments. Ce parcours doit être relancé après le changement de format.
 
-Navigateur : build Web puis `cargo test --locked -p media-poc --test browser_admin -- --ignored --nocapture`, avec MEDIA_BACKUP_KEY de test unique dans l'environnement du processus. Vrai Core/SQLite jetable, création compte/groupe, planification/scan, création/révocation clé, sauvegarde/téléchargement et planification, largeur mobile et erreurs JS. Ce scénario ne cible aucun média personnel. `test-admin-ui.mjs` reste un contrôle séparé avec API simulée.
+Navigateur : build Web puis `cargo test --locked -p media-poc --test browser_admin -- --ignored --nocapture`. Vrai Core/SQLite jetable, création compte/groupe, planification/scan, création/révocation de clé API, sauvegarde/téléchargement et planification, largeur mobile et erreurs JS. Ce scénario ne cible aucun média personnel. `test-admin-ui.mjs` reste un contrôle séparé avec API simulée.
 
 Les images applicatives complètes, le NAS et la charge ne sont pas validés par ces essais. La cible Docker `backup-runtime` seule a été construite ; pg_dump/pg_restore18.6 exécutés avec succès.
 

@@ -12,7 +12,14 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
   if (!response.ok) {
     const detail = await response.json().catch(() => null) as { error?: string; pluginError?: string } | null;
     const messages: Record<string,string> = {
-      plugin_storage_failed: 'Le dossier data/plugins est indisponible ou un fichier installé est altéré. Vérifiez les droits du volume.',
+      avatar_collection_full: 'Cette collection ne peut pas contenir plus de 500 images.',
+      avatar_migration_required: 'Transférez d’abord les anciennes collections dans Administration → Avatars avant de désinstaller cette extension.',
+      avatar_migration_id_conflict: 'Le transfert est impossible : des identifiants de collection ou d’image sont déjà utilisés. Aucune collection n’a été modifiée.',
+      plugin_storage_failed: 'Le serveur ne peut pas enregistrer cette extension. Consultez les journaux du serveur pour connaître la cause exacte.',
+      plugin_storage_permission_denied: 'Le serveur ne peut pas accéder au stockage des extensions. Vérifiez les droits du dossier configuré par MEDIA_PLUGINS_PATH.',
+      plugin_storage_conflict: 'Une autre version du paquet existe déjà sur disque. Désinstallez cette extension avant de la réinstaller. Si elle est absente des Installées, consultez les journaux du serveur.',
+      plugin_storage_integrity_failed: 'Un fichier du paquet installé est altéré ou invalide. Désinstallez puis réinstallez cette extension.',
+      plugin_storage_missing: 'Un fichier de l’extension manque sur le serveur. Désinstallez puis réinstallez cette extension.',
       invalid_avatar_upload: 'Choisissez un nom et des images PNG, JPEG ou WebP pour cette collection.',
       github_avatar_repository_required: 'Collez le lien racine d’un dépôt GitHub public, sans /tree/ ni paramètre.',
       avatar_import_busy: 'Une collection est déjà en cours d’import.',
@@ -52,6 +59,9 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
       unknown_catalogue_version: 'Cette version de l’extension n’existe pas dans le catalogue.',
       repository_changed: 'Le catalogue a changé. Veuillez réactualiser les dépôts.',
       extension_exists: 'Cette extension est déjà installée.',
+      extension_version_not_newer: 'La version proposée doit être supérieure à la version installée.',
+      publisher_key_mismatch: 'La clé de signature ne correspond pas à celle de l’extension installée.',
+      extension_update_compatibility_unverified: 'La mise à jour est refusée : la compatibilité des données et l’arrêt des anciennes écritures ne peuvent pas encore être garantis. La version installée est conservée.',
       extension_limit: 'La limite de 32 extensions installées est atteinte.',
       extension_unavailable: 'Cette extension n’est pas disponible.'
     };

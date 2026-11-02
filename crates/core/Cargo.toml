@@ -12,7 +12,7 @@ image = { version = "=0.25.10", default-features = false, features = ["jpeg", "p
 media-contracts = { path = "../shared" }
 media-extension-sdk = { path = "../extension-sdk" }
 media-node = { path = "../node" }
-axum = { version = "0.8.9", features = ["multipart"] }
+axum = { version = "0.8.9", features = ["multipart", "ws"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -29,6 +29,7 @@ uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10.9"
 bytes = "1"
 http-body-util = "0.1"
+httpdate = "1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 url = "2"
@@ -41,6 +42,7 @@ wasmi = "=2.0.0"
 [dev-dependencies]
 tempfile = "3"
 wat = "1"
+tokio-tungstenite = "0.29.0"
 
 [[bin]]
 name = "media-extension-worker"
@@ -68,6 +70,7 @@ path = "src/bin/restore.rs"
 
 [features]
 fixture-bench = []
+query-metrics = []
 
 [[test]]
 name = "p0"
@@ -77,6 +80,9 @@ required-features = ["fixture-bench"]
 name = "catalog"
 required-features = ["fixture-bench"]
 
+[[bin]]
+name = "media-restore-assets"
+path = "src/bin/restore-assets.rs"
 [[bin]]
 name = "media-recover"
 path = "src/bin/recover.rs"

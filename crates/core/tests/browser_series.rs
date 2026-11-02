@@ -7,6 +7,8 @@ async fn start(root: &Path, db: &Path, library: &Path, port: u16) -> tokio::proc
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_media-poc"))
         .current_dir(root)
         .env("MEDIA_DB_PATH", db)
+        .env("MEDIA_DB_ENGINE", "sqlite")
+        .env_remove("MEDIA_DB_URL")
         .env("MEDIA_LIBRARY_ROOT", library)
         .env("MEDIA_PORT", port.to_string())
         .env_remove("MEDIA_PUBLIC_URL")
@@ -138,6 +140,14 @@ async fn browser_series_flow_and_playback() {
     std::fs::write(film_root.join(".ignore"), "").unwrap();
     let db = temp.path().join("series.sqlite3");
     let store = IdentityStore::open(&db).await.unwrap();
+    // These synthetic fixtures exercise local scanning/playback, not providers.
+    // Keep their deliberately synthetic external IDs without resolving real films.
+    media_poc::extensions::bootstrap_essential_plugins(&store).await;
+    media_poc::database::query("UPDATE extensions SET enabled=0")
+        .execute(store.pool())
+        .await
+        .unwrap();
+
     store
         .bootstrap(
             "series-admin",

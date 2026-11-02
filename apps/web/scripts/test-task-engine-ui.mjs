@@ -15,7 +15,7 @@ try {
   const submissions = []; let detailReads = 0;
   let theme = 'dark';
   const library = { id: 'films', name: 'Archives des films', kind: 'films', nodeId: 'local', root: '/read-only', enabled: true, userIds: [] };
-  let jobs = [{ id: 'synthetic-job', libraryId: 'films', owner: 'synthetic-admin', nodeId: 'local', status: 'running', category: 'scan', priority: 100, attempt: 1, maxAttempts: 3, progress: 0, processedItems: 12, createdAt: 1792860000, updatedAt: 1792860001, startedAt: 1792860000, finishedAt: null, leaseUntil: 1792860300, error: '' }];
+  let jobs = [{ id: 'synthetic-job', libraryId: 'films', owner: 'synthetic-admin', nodeId: 'local', status: 'running', category: 'scan', priority: 100, attempt: 7, failureCount: 0, maxAttempts: 3, progress: 0, processedItems: 12, createdAt: 1792860000, updatedAt: 1792860001, startedAt: 1792860000, finishedAt: null, leaseUntil: 1792860300, error: '' }];
   await page.route('**/api/v1/**', async route => {
     const request = route.request(); const path = new URL(request.url()).pathname; const method = request.method();
     let body;
@@ -58,6 +58,8 @@ try {
   const queue = page.getByRole('region', { name: 'File de tâches distribuées' });
   await queue.getByText('12 éléments traités · Total encore inconnu', { exact: true }).waitFor();
   assert.equal(await queue.locator('progress').count(), 0, 'unknown scan total must not produce a percentage');
+  assert.equal(await queue.getByText('7 / 3', { exact: true }).count(), 0, 'preemptions must not be displayed as failed retries');
+  await queue.getByText('0 / 3', { exact: true }).waitFor();
   await queue.getByRole('button', { name: 'Suspendre', exact: true }).click();
   await queue.getByRole('button', { name: 'Reprendre', exact: true }).waitFor();
   await queue.getByRole('button', { name: 'Reprendre', exact: true }).click();

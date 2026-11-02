@@ -1,8 +1,7 @@
 //! Offline recovery staging. Never connects to a database or applies configuration.
 use std::{ffi::OsString, path::PathBuf};
-use zeroize::Zeroizing;
 
-const USAGE: &str = "usage: media-recover ARCHIVE NEW_OUTPUT_DIR\nOptionally set MEDIA_BACKUP_KEY to a custom 64-character hexadecimal key (default key used if omitted). The output directory must not exist; its parent must exist. This extracts sensitive recovery files only; stop Core and use media-restore separately.";
+const USAGE: &str = "usage: media-recover ARCHIVE NEW_OUTPUT_DIR\nOnly version 2 archives are supported. The output directory must not exist; its parent must exist. Archives are unencrypted and contain sensitive data. Stop Core and use media-restore separately.";
 
 fn paths(mut args: impl Iterator<Item = OsString>) -> Result<(PathBuf, PathBuf), &'static str> {
     let source = args.next().ok_or(USAGE)?;
@@ -11,13 +10,6 @@ fn paths(mut args: impl Iterator<Item = OsString>) -> Result<(PathBuf, PathBuf),
         return Err(USAGE);
     }
     Ok((source.into(), target.into()))
-}
-
-fn validate_key(key: &str) -> Result<(), &'static str> {
-    if key.len() != 64 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("MEDIA_BACKUP_KEY must contain exactly 64 hexadecimal characters");
-    }
-    Ok(())
 }
 
 fn next_steps(engine: &str) -> Result<&'static str, &'static str> {
@@ -49,16 +41,25 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (source, target) = paths(std::env::args_os().skip(1))?;
-    let key = Zeroizing::new(
-        std::env::var("MEDIA_BACKUP_KEY")
-            .unwrap_or_else(|_| media_poc::backup_bundle::DEFAULT_BACKUP_KEY.to_string()),
+    #[cfg(windows)]
+    eprintln!(
+        "Windows: recovered files inherit the destination folder's ACL. Verify access to the folder and any copies; Aether does not validate or restrict these ACLs."
     );
-    validate_key(&key)?;
-    let summary = media_poc::backup_bundle::extract(&source, &target, &key).await?;
+    let summary = media_poc::backup_bundle::extract(&source, &target).await?;
     println!(
         "Recovery files extracted. Keep the output directory private: config.json contains sensitive settings."
     );
     println!("{}", next_steps(&summary.engine)?);
+    if summary.assets > 0 {
+        println!(
+            "{} durable assets were verified (size and SHA-256) and extracted to assets/<sha256> with assets.json. They are not yet in the live store: after restoring the database, import them with AssetStore::restore_object and require AssetStore::verify_all to report no missing or corrupt object before declaring the restore successful.",
+            summary.assets
+        );
+    } else {
+        println!(
+            "This archive contains no durable assets (database-only or pre-asset format). Avatars, posters and other stored images referenced by the database will be missing."
+        );
+    }
     println!(
         "If internal-ca.pem is present, remount it at the original path or set MEDIA_INTERNAL_CA_FILE to its restored path before starting Core. If postgres-ca.pem, postgres-cert.pem or postgres-key.pem are present, restore their original paths or update the TLS file path parameters in MEDIA_DB_URL. Other external file secrets must be restored separately."
     );
@@ -85,21 +86,13 @@ mod tests {
                 [
                     OsString::from("a"),
                     OsString::from("b"),
-                    OsString::from("--replace")
+                    OsString::from("--replace"),
+                    OsString::from("x")
                 ]
                 .into_iter()
             )
             .is_err()
         );
-    }
-
-    #[test]
-    fn key_validation_never_embeds_secret_in_error() {
-        assert!(validate_key(&"aB19".repeat(16)).is_ok());
-        assert!(validate_key(&"z".repeat(64)).is_err());
-        assert!(validate_key(&"a".repeat(63)).is_err());
-        let secret = "synthetic secret which must not appear";
-        assert!(!validate_key(secret).unwrap_err().contains(secret));
     }
 
     #[test]

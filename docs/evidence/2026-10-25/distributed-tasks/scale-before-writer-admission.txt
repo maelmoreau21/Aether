@@ -1,0 +1,13 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.69s
+     Running tests\distributed_tasks_scale.rs (target\debug\deps\distributed_tasks_scale-9002698126d069fa.exe)
+
+running 2 tests
+test backlog_and_one_hundred_claimers_preserve_admin_http_responsiveness ... {"benchmark":"SIMULATED_QUEUE_HTTP_CONTENTION","completedJobs":1000,"completedJobsPerSecond":92.51445300103425,"fixtureJobs":10000,"fixtureSeedMs":1934.5704,"httpEnqueues":100,"measurements":[{"maxMs":4489.7487,"operation":"claim_under_contention","p50Ms":490.4579,"p95Ms":665.1068,"samples":1000},{"maxMs":1735.7138,"operation":"authenticated_http_enqueue","p50Ms":5.9604,"p95Ms":1355.4877000000001,"samples":100},{"maxMs":1186.299,"operation":"authenticated_admin_page_50","p50Ms":9.547,"p95Ms":959.4287,"samples":100},{"maxMs":0.5897,"operation":"synthetic_health_no_database","p50Ms":0.1356,"p95Ms":0.231,"samples":100}],"processCpuMs":8921.875,"rssAfterBytes":19886080,"rssBeforeBytes":18206720,"simulatedNodes":100,"wallMs":10809.121899999998}
+In-process Axum requests, SQLite, 100 simulated node identities; no sockets, scan work, media, browser, NAS or video stability measured. SQL access counts are not instrumented; 1000 actual claim transactions, 1000 finishes and 100 authenticated HTTP enqueues were executed; seed cost is reported separately.
+ok
+test ten_thousand_real_admissions_keep_authenticated_navigation_served ... {"actualDurableAdmissions":10000,"admissionDurationMs":48770.4833,"admissionsPerSecond":205.0420525564076,"benchmark":"REAL_10000_ADMISSIONS_WITH_ADMIN_HTTP","measurements":[{"maxMs":249.14710000000002,"operation":"real_enqueue","p50Ms":4.252800000000001,"p95Ms":6.297,"samples":10000},{"maxMs":2.0084999999999997,"operation":"authenticated_admin_empty_baseline","p50Ms":1.2312,"p95Ms":2.0084999999999997,"samples":20},{"maxMs":61.8103,"operation":"authenticated_admin_during_all_admissions","p50Ms":10.0984,"p95Ms":12.594899999999999,"samples":1802}],"nodeLibrarySetupMs":30.303,"processCpuMs":55781.25,"rssAfterBytes":21176320,"rssBeforeBytes":18059264,"simulatedNodes":100}
+All 10,000 jobs use engine::enqueue including per-job validation, idempotency, pending-capacity check and durable commit; no direct task seeding. HTTP navigation runs throughout admission in the same Tokio runtime. SQL statement counts are not instrumented. No sockets, real scans, physical nodes or media decoding measured.
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 83.40s
+

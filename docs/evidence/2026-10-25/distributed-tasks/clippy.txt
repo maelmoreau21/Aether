@@ -1,0 +1,23 @@
+   Compiling media-poc v0.1.0 (C:\Users\Mael\Documents\GitHub\Aether\crates\core)
+error: this `if` statement can be collapsed
+   --> crates\core\src\extension_storage.rs:159:5
+    |
+159 | /     if let Ok(metadata) = tokio::fs::symlink_metadata(store.plugins_path()).await {
+160 | |         if !real_directory(&metadata) {
+161 | |             return Err(io::Error::other("plugin root must be a real directory"));
+162 | |         }
+163 | |     }
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#collapsible_if
+    = note: `-D clippy::collapsible-if` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::collapsible_if)]`
+help: collapse nested if block
+    |
+159 ~     if let Ok(metadata) = tokio::fs::symlink_metadata(store.plugins_path()).await
+160 ~         && !real_directory(&metadata) {
+161 |             return Err(io::Error::other("plugin root must be a real directory"));
+162 ~         }
+    |
+
+error: could not compile `media-poc` (lib) due to 1 previous error

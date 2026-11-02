@@ -1,37 +1,30 @@
 //! Generic host adapters: no provider names, credentials or host inference.
 use super::*;
-use media_extension_sdk::{MediaImage, SearchResultItem, StructuredMetadata};
+use crate::identity::IdentityStore;
+use media_extension_sdk::{Lyrics, MediaImage, SearchResultItem, StructuredMetadata};
 
 #[derive(sqlx::FromRow)]
 pub(super) struct WorkContext {
     pub library_id: String,
     title: String,
     year: Option<i64>,
-    kind: String,
+    pub(super) kind: String,
     external_ids_json: String,
     editorial_json: String,
     manual_json: Option<String>,
 }
 pub(super) fn authorize_operation(manifest: &Manifest, operation: &str) -> Result<(), Error> {
     let permission = match operation {
-        "metadata.propose" | "metadata.search" | "metadata.details" => "metadata.read",
+        "metadata.propose" | "metadata.search" | "metadata.details" | "lyrics.get" => {
+            "metadata.read"
+        }
         "metadata.images" => "images",
         "avatars.list" | "avatars.generate" => "avatars",
         "intro.detect"
         | "markers.detect"
         | "intro.match_fingerprints"
         | "intro.parse_chapters"
-        | "markers.get" => {
-            if manifest
-                .permissions
-                .iter()
-                .any(|p| p == "playback.markers" || p == "metadata.read")
-            {
-                return Ok(());
-            } else {
-                return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
-            }
-        }
+        | "markers.get" => "playback.markers",
         _ => return Err(err(StatusCode::BAD_REQUEST, "unsupported_operation")),
     };
     if !manifest.permissions.iter().any(|p| p == permission) {
@@ -78,14 +71,63 @@ pub(super) fn metadata_input(
             "title":editorial["title"].as_str().unwrap_or(&context.title)}),
         );
     }
+    let title = input
+        .get("title")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| editorial["title"].as_str().unwrap_or(&context.title));
+    let year = input
+        .get("year")
+        .and_then(Value::as_i64)
+        .or_else(|| editorial["year"].as_i64().or(context.year));
+    if operation == "metadata.search"
+        && let Some(requested) = input.get("externalIds")
+    {
+        let requested: std::collections::BTreeMap<String, String> =
+            serde_json::from_value(requested.clone())
+                .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_external_ids"))?;
+        if requested.len() > 16
+            || requested.iter().any(|(key, value)| {
+                key.is_empty()
+                    || key.len() > 64
+                    || value.len() > 256
+                    || key.chars().any(char::is_control)
+                    || value.chars().any(char::is_control)
+                    || match key.as_str() {
+                        "tmdb" | "tvdb" => {
+                            value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit())
+                        }
+                        "imdb" => !value.strip_prefix("tt").is_some_and(|v| {
+                            !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit())
+                        }),
+                        _ => value.trim().is_empty(),
+                    }
+            })
+        {
+            return Err(err(StatusCode::BAD_REQUEST, "invalid_external_ids"));
+        }
+        ids = requested;
+    }
     let mut value = json!({"apiVersion":1,"workId":work,"libraryId":context.library_id,
-        "title":editorial["title"].as_str().unwrap_or(&context.title),
-        "year":editorial["year"].as_i64().or(context.year),"mediaType":media_type,"externalIds":ids});
+        "title":title,"year":year,"mediaType":media_type,"externalIds":ids});
+    if let Some(language) = input.get("language").and_then(Value::as_str) {
+        if !super::image_collection::valid_language(language) {
+            return Err(err(StatusCode::BAD_REQUEST, "invalid_language"));
+        }
+        value["language"] = json!(language);
+    }
+    if let Some(country) = input.get("country").and_then(Value::as_str) {
+        value["country"] = json!(country);
+    }
     if operation == "metadata.details" || operation == "metadata.images" {
         let id = input
             .get("id")
             .and_then(Value::as_str)
-            .filter(|s| !s.is_empty() && s.len() <= 256)
+            .filter(|s| {
+                s.len() <= 256
+                    && (!s.is_empty() || (operation == "metadata.images" && !ids.is_empty()))
+            })
             .ok_or_else(|| err(StatusCode::BAD_REQUEST, "candidate_required"))?;
         value["id"] = json!(id);
     }
@@ -122,9 +164,14 @@ pub(super) fn validate_result(operation: &str, result: Value) -> Result<Value, E
             let items: Vec<SearchResultItem> =
                 serde_json::from_value(result.clone()).map_err(|_| invalid())?;
             if items.len() > 100
-                || items
-                    .iter()
-                    .any(|v| v.id.is_empty() || v.id.len() > 256 || v.title.len() > 512)
+                || items.iter().any(|v| {
+                    v.id.is_empty()
+                        || v.id.len() > 256
+                        || v.title.len() > 512
+                        || v.artist.as_ref().is_some_and(|artist| {
+                            artist.len() > 512 || artist.chars().any(char::is_control)
+                        })
+                })
             {
                 return Err(invalid());
             }
@@ -132,6 +179,36 @@ pub(super) fn validate_result(operation: &str, result: Value) -> Result<Value, E
         "metadata.details" => {
             let _: StructuredMetadata =
                 serde_json::from_value(result.clone()).map_err(|_| invalid())?;
+        }
+        "lyrics.get" => {
+            let lyrics: Lyrics = serde_json::from_value(result.clone()).map_err(|_| invalid())?;
+            if lyrics.track_name.trim().is_empty()
+                || lyrics.track_name.len() > 512
+                || lyrics.artist_name.trim().is_empty()
+                || lyrics.artist_name.len() > 512
+                || lyrics
+                    .album_name
+                    .as_ref()
+                    .is_some_and(|value| value.len() > 512)
+                || lyrics
+                    .plain
+                    .as_ref()
+                    .is_some_and(|value| value.len() > 32768)
+                || lyrics
+                    .synced
+                    .as_ref()
+                    .is_some_and(|value| value.len() > 32768)
+                || lyrics.synced_lines.len() > 4096
+                || lyrics
+                    .synced_lines
+                    .iter()
+                    .any(|line| line.text.len() > 32768)
+                || lyrics
+                    .duration_secs
+                    .is_some_and(|d| !d.is_finite() || d <= 0.0)
+            {
+                return Err(invalid());
+            }
         }
         "metadata.images" => {
             let images: Vec<MediaImage> =
@@ -149,16 +226,211 @@ pub(super) fn validate_result(operation: &str, result: Value) -> Result<Value, E
             let svg = result["svg"].as_str().ok_or_else(invalid)?;
             crate::avatars::validate_svg(svg).map_err(|_| invalid())?;
         }
-        "intro.detect"
-        | "markers.detect"
-        | "intro.match_fingerprints"
-        | "intro.parse_chapters"
-        | "markers.get" => {
-            // Validated timeline markers
+        "intro.detect" | "markers.detect" => {
+            let episodes = result.as_array().ok_or_else(invalid)?;
+            if episodes.len() > 32
+                || episodes.iter().any(|episode| {
+                    episode["episodeId"]
+                        .as_str()
+                        .is_none_or(|id| id.is_empty() || id.len() > 128)
+                        || episode["markers"].as_array().is_none_or(|markers| {
+                            markers.len() > 8 || markers.iter().any(|m| !valid_timeline_marker(m))
+                        })
+                })
+            {
+                return Err(invalid());
+            }
+        }
+        "intro.parse_chapters" | "markers.get" => {
+            let markers = result.as_array().ok_or_else(invalid)?;
+            if markers.len() > 8 || markers.iter().any(|m| !valid_timeline_marker(m)) {
+                return Err(invalid());
+            }
+        }
+        "intro.match_fingerprints" => {
+            if !result.is_null()
+                && (result["offsetA"]
+                    .as_f64()
+                    .is_none_or(|n| !n.is_finite() || n < 0.0)
+                    || result["offsetB"]
+                        .as_f64()
+                        .is_none_or(|n| !n.is_finite() || n < 0.0)
+                    || result["duration"]
+                        .as_f64()
+                        .is_none_or(|n| !n.is_finite() || n <= 0.0)
+                    || result["score"]
+                        .as_f64()
+                        .is_none_or(|n| !n.is_finite() || !(0.0..=1.0).contains(&n)))
+            {
+                return Err(invalid());
+            }
         }
         _ => return Err(invalid()),
     }
     Ok(result)
+}
+// The guest may only report on the exact copies it received. Bind boundaries
+// to the input duration too, including responses from the provider cache.
+pub(super) fn marker_result_matches_input(input: &Value, result: &Value) -> bool {
+    let Some(inputs) = input["episodes"].as_array() else {
+        return false;
+    };
+    let Some(outputs) = result.as_array() else {
+        return false;
+    };
+    if inputs.len() < 2 || inputs.len() > 32 || outputs.len() > inputs.len() {
+        return false;
+    }
+    let mut seen = std::collections::HashSet::new();
+    outputs.iter().all(|output| {
+        let Some(id) = output["episodeId"].as_str() else {
+            return false;
+        };
+        let Some(source) = inputs.iter().find(|entry| entry["id"].as_str() == Some(id)) else {
+            return false;
+        };
+        let Some(duration) = source["duration"]
+            .as_f64()
+            .filter(|d| d.is_finite() && *d > 0.0)
+        else {
+            return false;
+        };
+        seen.insert(id)
+            && output["markers"].as_array().is_some_and(|markers| {
+                markers.len() <= 8
+                    && markers.iter().all(|marker| {
+                        valid_timeline_marker(marker)
+                            && marker["end"].as_f64().is_some_and(|end| end <= duration)
+                    })
+            })
+    })
+}
+
+fn valid_timeline_marker(marker: &Value) -> bool {
+    let (Some(start), Some(end), Some(confidence)) = (
+        marker["start"].as_f64(),
+        marker["end"].as_f64(),
+        marker["confidence"].as_f64(),
+    ) else {
+        return false;
+    };
+    start.is_finite()
+        && end.is_finite()
+        && confidence.is_finite()
+        && start >= 0.0
+        && end > start
+        && end - start <= 600.0
+        && (0.0..=1.0).contains(&confidence)
+        && marker["id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty() && id.len() <= 128)
+        && matches!(
+            marker["markerType"].as_str(),
+            Some("intro" | "credits" | "recap" | "preview")
+        )
+        && matches!(
+            marker["method"].as_str(),
+            Some("fingerprint" | "chapter" | "silence" | "manual")
+        )
+}
+#[cfg(test)]
+mod marker_tests {
+    use super::*;
+
+    #[test]
+    fn detection_results_are_bound_to_submitted_copies_and_durations() {
+        let input = json!({"episodes":[{"id":"a","duration":120.0},{"id":"b","duration":90.0}]});
+        let marker = json!({"id":"m","start":10.0,"end":40.0,"confidence":0.95,"markerType":"intro","method":"fingerprint"});
+        let valid = json!([{"episodeId":"a","markers":[marker.clone()]},{"episodeId":"b","markers":[marker.clone()]}]);
+        assert!(marker_result_matches_input(&input, &valid));
+        let mut unknown = valid.clone();
+        unknown[1]["episodeId"] = json!("other");
+        assert!(!marker_result_matches_input(&input, &unknown));
+        let mut duplicate = valid.clone();
+        duplicate[1]["episodeId"] = json!("a");
+        assert!(!marker_result_matches_input(&input, &duplicate));
+        let mut past_end = valid.clone();
+        past_end[1]["markers"][0]["end"] = json!(91.0);
+        assert!(!marker_result_matches_input(&input, &past_end));
+        let mut bad_confidence = valid;
+        bad_confidence[0]["markers"][0]["confidence"] = json!(1.1);
+        assert!(!marker_result_matches_input(&input, &bad_confidence));
+    }
+
+    #[test]
+    fn lyrics_result_is_typed_and_bounded() {
+        let result = json!({"id":42,"trackName":"Song","artistName":"Artist","instrumental":false,"plain":"Words"});
+        assert!(validate_result("lyrics.get", result.clone()).is_ok());
+        assert!(validate_result("lyrics.get", json!({"lyrics":"untyped"})).is_err());
+        let mut bad = result.clone();
+        bad["synced"] = json!("x".repeat(32769));
+        assert!(validate_result("lyrics.get", bad).is_err());
+        let mut bad = result;
+        bad["trackName"] = json!("");
+        assert!(validate_result("lyrics.get", bad).is_err());
+    }
+
+    #[test]
+    fn lyrics_operation_requires_metadata_permission() {
+        let mut manifest = Manifest::default();
+        assert_eq!(
+            authorize_operation(&manifest, "lyrics.get").unwrap_err().0,
+            StatusCode::FORBIDDEN
+        );
+        manifest.permissions.push("metadata.read".into());
+        assert!(authorize_operation(&manifest, "lyrics.get").is_ok());
+    }
+
+    #[test]
+    fn marker_operations_require_the_dedicated_permission() {
+        let mut manifest = Manifest {
+            permissions: vec!["metadata.read".into()],
+            ..Default::default()
+        };
+        for operation in [
+            "intro.detect",
+            "markers.detect",
+            "intro.match_fingerprints",
+            "intro.parse_chapters",
+            "markers.get",
+        ] {
+            assert_eq!(
+                authorize_operation(&manifest, operation).unwrap_err().0,
+                StatusCode::FORBIDDEN
+            );
+        }
+        manifest.permissions.push("playback.markers".into());
+        for operation in [
+            "intro.detect",
+            "markers.detect",
+            "intro.match_fingerprints",
+            "intro.parse_chapters",
+            "markers.get",
+        ] {
+            assert!(authorize_operation(&manifest, operation).is_ok());
+        }
+        manifest.permissions.clear();
+        assert!(authorize_operation(&manifest, "intro.detect").is_err());
+    }
+
+    #[test]
+    fn rejects_unbounded_or_invalid_wasm_markers() {
+        let valid = json!({"id":"m1","start":10.0,"end":40.0,"confidence":0.98,"markerType":"intro","method":"chapter"});
+        assert!(validate_result("intro.parse_chapters", json!([valid.clone()])).is_ok());
+        let mut invalid = valid;
+        invalid["end"] = json!(1000.0);
+        assert!(validate_result("intro.parse_chapters", json!([invalid])).is_err());
+        assert!(
+            validate_result("intro.detect", json!([{"episodeId":"ep","markers":"bad"}])).is_err()
+        );
+        assert!(
+            validate_result(
+                "intro.match_fingerprints",
+                json!({"offsetA":0,"offsetB":0,"duration":-1,"score":1})
+            )
+            .is_err()
+        );
+    }
 }
 fn public_image_url(value: &str) -> bool {
     reqwest::Url::parse(value).is_ok_and(|url| {
@@ -273,9 +545,11 @@ pub(super) async fn avatar_operation(
     {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_input"));
     }
-    let _slot = EXECUTIONS
-        .try_acquire()
-        .map_err(|_| err(StatusCode::CONFLICT, "extension_busy"))?;
+    let _slot = crate::extension_runtime::try_acquire_execution(
+        &id,
+        crate::extension_runtime::ExecutionClass::Interactive,
+    )
+    .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
     let row: Option<(String, String)> =
         query_as("SELECT package_json,generation FROM extensions WHERE id=?")
             .bind(&id)
@@ -294,7 +568,7 @@ pub(super) async fn avatar_operation(
     let invocation = crate::extension_runtime::Invocation::new(
         crate::extension_storage::wasm(&auth.store, &package)
             .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "plugin_storage_failed"))?,
+            .map_err(super::storage_error)?,
         ExtensionRequest {
             api_version: 1,
             operation: input.operation,
@@ -310,49 +584,67 @@ pub(super) async fn avatar_operation(
         if !permitted(&auth, &headers, &id, "", &generation).await? {
             return Err(err(StatusCode::FORBIDDEN, "extension_revoked"));
         }
-        query("INSERT INTO user_avatars(user_id,image_data) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET image_data=excluded.image_data")
-            .bind(&actor.user.id).bind(svg.as_bytes()).execute(auth.store.pool()).await.map_err(db)?;
+        let meta = auth
+            .store
+            .assets
+            .put_bytes(svg.as_bytes(), "image/svg+xml")
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?;
+        query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET sha256=excluded.sha256")
+            .bind(&actor.user.id)
+            .bind(&meta.sha256)
+            .execute(auth.store.pool())
+            .await
+            .map_err(db)?;
     }
     Ok(Json(json!({"result":result,"applied":input.apply})))
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct ImportImage {
-    work_id: String,
-    url: String,
-    kind: String,
+pub(crate) struct ImportImage {
+    pub(crate) work_id: String,
+    pub(crate) url: String,
+    pub(crate) kind: String,
+    #[serde(default)]
+    pub(crate) language: Option<String>,
+    #[serde(default)]
+    pub(crate) append: bool,
+    #[serde(skip)]
+    pub(crate) apply_collection_policy: bool,
 }
-pub(super) async fn import_image(
-    State(auth): State<AuthState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-    Json(input): Json<ImportImage>,
+
+pub(crate) async fn import_image_direct(
+    store: &IdentityStore,
+    id: &str,
+    input: ImportImage,
 ) -> Result<Json<Value>, Error> {
-    admin(&auth, &headers, true).await?;
     if !matches!(
         input.kind.as_str(),
-        "poster" | "backdrop" | "logo" | "banner" | "thumb" | "illustration" | "disc"
+        "poster" | "backdrop" | "logo" | "banner" | "thumb" | "illustration" | "disc" | "landscape"
     ) {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_image_kind"));
     }
+    if input
+        .language
+        .as_deref()
+        .is_some_and(|v| !super::image_collection::valid_language(v))
+    {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_language"));
+    }
     let library: Option<String> = query_scalar("SELECT library_id FROM inventory_works WHERE id=?")
         .bind(&input.work_id)
-        .fetch_optional(auth.store.pool())
+        .fetch_optional(store.pool())
         .await
         .map_err(db)?;
-    let library = library.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let _library = library.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
     let row: Option<(String, String)> =
-        query_as("SELECT package_json,generation FROM extensions WHERE id=?")
-            .bind(&id)
-            .fetch_optional(auth.store.pool())
+        query_as("SELECT package_json,generation FROM extensions WHERE id=? AND enabled=1")
+            .bind(id)
+            .fetch_optional(store.pool())
             .await
             .map_err(db)?;
-    let (stored, generation) =
-        row.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
-    if !permitted(&auth, &headers, &id, &library, &generation).await? {
-        return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
-    }
+    let (stored, _) = row.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
     let package: Package = serde_json::from_str(&stored)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
     for permission in ["images", "metadata.write"] {
@@ -360,9 +652,6 @@ pub(super) async fn import_image(
             return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
         }
     }
-    let _slot = EXECUTIONS
-        .try_acquire()
-        .map_err(|_| err(StatusCode::CONFLICT, "extension_busy"))?;
     let url = reqwest::Url::parse(&input.url)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_image_url"))?;
     let host = url
@@ -419,7 +708,7 @@ pub(super) async fn import_image(
             .await
             .map_err(|_| err(StatusCode::BAD_GATEWAY, "image_download_failed"))?
         {
-            if bytes.len() + chunk.len() > 2 * 1024 * 1024 {
+            if bytes.len() + chunk.len() > 10 * 1024 * 1024 {
                 return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "image_too_large"));
             }
             bytes.extend_from_slice(&chunk);
@@ -428,26 +717,55 @@ pub(super) async fn import_image(
     })
     .await
     .map_err(|_| err(StatusCode::REQUEST_TIMEOUT, "image_timeout"))??;
-    let _lock = MUTATIONS.lock().await;
-    if !permitted(&auth, &headers, &id, &library, &generation).await? {
-        return Err(err(StatusCode::FORBIDDEN, "extension_revoked"));
-    }
-    let mut headers = headers;
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_str(&bytes.1)
-            .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_image_type"))?,
-    );
-    let (_, result) = crate::artwork::upload(
-        State(auth),
-        Path((input.work_id, input.kind)),
-        Query(Default::default()),
-        headers,
+
+    let (_, result) = crate::artwork::upload_internal(
+        store,
+        input.work_id,
+        input.kind,
+        crate::artwork::ImageQuery {
+            append: input.append,
+            language: input.language,
+            provider: Some(id.to_string()),
+            source_url_hash: Some(format!("{:x}", Sha256::digest(input.url.as_bytes()))),
+            apply_collection_policy: input.apply_collection_policy,
+            ..Default::default()
+        },
+        bytes.1,
         bytes.0.into(),
     )
     .await
     .map_err(|s| err(s, "image_import_failed"))?;
     Ok(result)
+}
+
+pub(super) async fn import_image(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<ImportImage>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, true).await?;
+    let library: Option<String> = query_scalar("SELECT library_id FROM inventory_works WHERE id=?")
+        .bind(&input.work_id)
+        .fetch_optional(auth.store.pool())
+        .await
+        .map_err(db)?;
+    let library = library.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let generation: Option<String> = query_scalar("SELECT generation FROM extensions WHERE id=?")
+        .bind(&id)
+        .fetch_optional(auth.store.pool())
+        .await
+        .map_err(db)?;
+    let generation = generation.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
+    if !permitted(&auth, &headers, &id, &library, &generation).await? {
+        return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
+    }
+    let _slot = crate::extension_runtime::try_acquire_execution(
+        &id,
+        crate::extension_runtime::ExecutionClass::Interactive,
+    )
+    .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
+    import_image_direct(&auth.store, &id, input).await
 }
 
 #[cfg(test)]
@@ -478,6 +796,37 @@ mod tests {
         assert_eq!(search["year"], 2020);
         assert_eq!(search["mediaType"], "tv_show");
         assert_eq!(search["externalIds"]["external"], "correct");
+        let override_ids = metadata_input(
+            &context,
+            "work",
+            "metadata.search",
+            &json!({"externalIds":{"tmdb":"27205"}}),
+        )
+        .unwrap();
+        assert_eq!(override_ids["externalIds"], json!({"tmdb":"27205"}));
+        let title_only = metadata_input(
+            &context,
+            "work",
+            "metadata.search",
+            &json!({"externalIds":{}}),
+        )
+        .unwrap();
+        assert_eq!(title_only["externalIds"], json!({}));
+        for invalid in [
+            json!({"imdb":"123"}),
+            json!({"tmdb":"not-a-number"}),
+            json!({"tmdb":42}),
+        ] {
+            assert!(
+                metadata_input(
+                    &context,
+                    "work",
+                    "metadata.search",
+                    &json!({"externalIds":invalid})
+                )
+                .is_err()
+            );
+        }
         assert_eq!(search["libraryId"], "shows");
         assert!(search.get("config").is_none());
         assert!(metadata_input(&context, "work", "metadata.details", &json!({})).is_err());

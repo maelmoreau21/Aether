@@ -41,7 +41,7 @@ pub(crate) async fn recheck_administrator(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     actor: &Authenticated,
 ) -> Result<(), StatusCode> {
-    let count: i64 = query_scalar("SELECT count(*) FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.user_id=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-1800 AND u.disabled_at IS NULL AND u.role='administrator'").bind(&actor.token_hash).bind(&actor.user.id).fetch_one(&mut **tx).await.map_err(database)?;
+    let count: i64 = query_scalar("SELECT count(*) FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.user_id=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-604800 AND u.disabled_at IS NULL AND u.role='administrator'").bind(&actor.token_hash).bind(&actor.user.id).fetch_one(&mut **tx).await.map_err(database)?;
     if count != 1 {
         return Err(StatusCode::FORBIDDEN);
     }

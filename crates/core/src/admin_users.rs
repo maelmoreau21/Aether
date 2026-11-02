@@ -8,8 +8,8 @@ use argon2::{Algorithm, Argon2, Params, Version, password_hash::PasswordHasher};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, State},
-    http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::Response,
     routing::{get, put},
 };
 use serde::{Deserialize, Serialize};
@@ -138,26 +138,23 @@ async fn avatar(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     administrator(&auth, &headers, false).await?;
-    let bytes: Option<Vec<u8>> =
-        query_scalar("SELECT image_data FROM user_avatars WHERE user_id=?")
-            .bind(id)
-            .fetch_optional(&auth.store.pool)
-            .await
-            .map_err(db)?;
-    let bytes = bytes.ok_or_else(|| error(StatusCode::NOT_FOUND, "avatar_not_found"))?;
-    Ok((
-        [
-            (header::CONTENT_TYPE, crate::avatars::content_type(&bytes)),
-            (
-                header::CONTENT_SECURITY_POLICY,
-                "default-src 'none'; sandbox",
-            ),
-            (header::CACHE_CONTROL, "private, no-store"),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-        ],
-        bytes,
-    )
-        .into_response())
+    let sha256: Option<String> = query_scalar("SELECT sha256 FROM user_avatars WHERE user_id=?")
+        .bind(id)
+        .fetch_optional(&auth.store.pool)
+        .await
+        .map_err(db)?;
+    let sha256 = sha256.ok_or_else(|| error(StatusCode::NOT_FOUND, "avatar_not_found"))?;
+    let mut resp = auth
+        .store
+        .assets
+        .response_after_authorization(&sha256, &headers)
+        .await
+        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "storage_error"))?;
+    resp.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    );
+    Ok(resp)
 }
 async fn create(
     State(auth): State<AuthState>,
@@ -224,13 +221,19 @@ async fn create(
         }
     }
     tx.commit().await.map_err(db)?;
+    if crate::extensions::collections::assign_new_user(&auth, &id)
+        .await
+        .is_err()
+    {
+        eprintln!("Automatic avatar assignment failed");
+    }
     Ok((StatusCode::CREATED, Json(serde_json::json!({"id":id}))))
 }
 async fn recheck_actor(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     actor: &Authenticated,
 ) -> Result<(), ApiError> {
-    let valid:i64=query_scalar("SELECT COUNT(*) FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.id=? AND u.role='administrator' AND u.disabled_at IS NULL AND s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-1800").bind(&actor.user.id).bind(&actor.token_hash).fetch_one(&mut **tx).await.map_err(db)?;
+    let valid:i64=query_scalar("SELECT COUNT(*) FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.id=? AND u.role='administrator' AND u.disabled_at IS NULL AND s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-604800").bind(&actor.user.id).bind(&actor.token_hash).fetch_one(&mut **tx).await.map_err(db)?;
     if valid != 1 {
         return Err(error(StatusCode::FORBIDDEN, "administrator_required"));
     }

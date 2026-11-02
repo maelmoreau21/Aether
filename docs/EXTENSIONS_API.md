@@ -1,5 +1,13 @@
 # Extensions API v1 — premier parcours local
 
+> Stockage privé du 25 octobre : [contrat KV/objets v1](EXTENSION_STORAGE.md).
+> `storage.private` est une capacité signée reconnue ; imports hôtes versionnés,
+> SQLite/PostgreSQL et conservation explicite remplacent les exclusions de
+> stockage privé des descriptions historiques ci-dessous.
+
+> Images multiples et collecte bornée du25octobre : [contrat actuel](ARTWORK_ROTATION.md).
+> Fournisseurs optionnels conservés ; stockage/déduplication et rotation par session natifs.
+
 > Mise à jour du 23 octobre : aucune approbation d’éditeur ou de dépôt n’est requise.
 > Les signatures restent vérifiées avec la clé du catalogue. Configuration dédiée,
 > Toutes les bibliothèques et import d’avatars : [contrat actuel](PLUGIN_SETTINGS_AND_COLLECTIONS.md).
@@ -57,8 +65,10 @@ de clés sont conservées pour compatibilité des outils existants.
 
 Le paquet est conservé en base applicative, hors médias; installation atomique
 par insertion et unicité. Installation et activation restent séparées.
-Une mise à jour en place est refusée : désinstaller puis installer et réaccorder
-les droits. Pas de dépendances, migrations privées ni rollback annoncés.
+Une route de mise à jour en place existe désormais, mais son parcours complet
+de compatibilité, consentement, sauvegarde et rollback n'est pas garanti.
+Voir [Cycle de mise à jour](PLUGIN_UPDATE_LIFECYCLE.md) avant tout usage réel.
+La désinstallation/réinstallation n'est pas un substitut de sauvegarde.
 La conservation des résultats à la désinstallation est un choix explicite.
 
 ## ABI Rust/Wasm
@@ -95,6 +105,27 @@ dans l’historique sous `{operation,output}` (la proposition simple conserve so
 ancien format titre/résumé). Aucun premier résultat de recherche
 n’est appliqué automatiquement.
 
+`POST /api/v1/admin/extensions/identify/search` accepte
+`{workId,title?,year?,provider?,externalIds?}`. Les identifiants déjà présents dans
+le NFO/catalogue sont utilisés quand `externalIds` est absent. Un objet explicite
+les remplace pour cette recherche seulement ; `{}` force une recherche par titre.
+Les identifiants TMDb/TVDb doivent être numériques, IMDb doit commencer par `tt`
+suivi de chiffres. Un identifiant du fournisseur sélectionné déclenche directement
+`metadata.details`, sans imposer une correspondance avec le titre local, puis
+retourne un candidat dans la liste habituelle. Les erreurs de fournisseur restent
+visibles dans `errors` ; aucune écriture de métadonnées ne précède Appliquer.
+
+L'automatisation utilise également les détails directs pour un identifiant connu
+du fournisseur et vérifie l'identifiant retourné. Sans identifiant, elle recherche
+le titre/année/type et accepte aussi le titre original du candidat.
+Un candidat unique obtenu avec un identifiant d'un autre fournisseur (par exemple
+IMDb vers TMDb) peut contourner la comparaison titre/année seulement si les détails
+confirment exactement l'identifiant source ; une contradiction d'identifiant est
+refusée. Le champ SDK
+`synopsis` alimente `plot` avec les mêmes protections des corrections manuelles que
+les autres champs. Les tests synthétiques ne prouvent pas l'accès à un compte
+TMDb/IMDb réel.
+
 Le bouton Appliquer fusionne les champs proposés avec les corrections existantes.
 Les noms du SDK (`synopsis`, `originalTitle`, `externalIds`, `releaseDate`) sont
 adaptés au catalogue ; les champs nuls et tableaux vides ne suppriment pas les
@@ -126,6 +157,12 @@ jamais incorporés au paquet signé. Le serveur stocke cette configuration dans
 la base applicative, accessible à l’administrateur ; cela ne constitue pas un
 coffre de secrets chiffrés autonome.
 
+Les champs de configuration de fournisseur affichés proviennent du manifeste
+signé ; l'interface ne choisit plus d'adresse selon l'identifiant du plugin.
+Une adresse `base_url` vide est omise avant l'appel : le fournisseur peut
+alors utiliser sa propre valeur par défaut. Les préférences de langue du
+catalogue restent fournies par le contexte de bibliothèque.
+
 ## Exécution et révocation
 
 Wasmi 2.0.0 dans un worker temporaire distinct du Core; aucun chargement natif
@@ -136,9 +173,22 @@ empreintes audio; ces opérations Node demandent leur propre contrat contrôlé.
 
 Limites fixes du premier runtime : module 256 Kio, entrée/sortie 64 Kio,
 une mémoire linéaire de 16 Mio, une table de 4096 éléments, 2 millions d'unités
-de fuel, délai maximal de 65 secondes et une invocation simultanée par Core.
+de fuel et délai maximal de 65 secondes. L'admission commune limite le Core à
+quatre opérations simultanées et une par extension. Les tâches automatiques
+occupent au plus trois places, conservant une place pour les opérations
+interactives. Les appels Web saturés répondent `409 extension_busy` sans file
+d'attente en mémoire ; les tâches automatiques conservent leur reprise dans la
+file durable. Chaque invocation utilise un processus jetable distinct, arrêté
+au dépassement du délai ou à l'annulation. Cette borne protège les ressources ;
+elle ne garantit pas l'absence de contention avec la lecture sur une machine saturée.
 Le broker autorise au plus 10 requêtes HTTP de 6 secondes et 256 Kio par réponse,
 avec lecture bornée, hôte signé, DNS public épinglé et redirections refusées.
+Les départs HTTP d'une invocation sont espacés d'au moins une seconde dans son
+processus worker. Une réponse `429` ou `503` interrompt ses prochains appels et
+émet un signal hôte de reprise au Core, indépendamment du résultat du guest.
+`Retry-After` accepte les secondes ou une date HTTP, avec repli de 30 secondes
+et borne de 1 seconde à 24 heures. La file durable conserve l'échéance de reprise ;
+aucune attente fournisseur prolongée n'occupe un worker Wasm.
 Le délai Web de ces opérations est de 70 secondes. Les erreurs fournisseurs
 conservent leur code borné dans `pluginError` ; les messages bruts potentiellement
 porteurs de secrets sont exclus des réponses et de l’historique.
@@ -224,3 +274,45 @@ fournisseur réel reste à vérifier avec ses clés et conditions. Leur absence
 est signalée dans l'administration; le fonctionnement du serveur n'en dépend pas.
 
 Interface actuelle : installation par Catalogue/Dépôts. L'import manuel signé passe par les fichiers du serveur, sans envoi dans l'interface : [procédure](PLAYLISTS_AND_MUSIC.md#extensions). Les descriptions historiques d'envoi JSON concernent le contrat API.
+
+
+### Paroles (`lyrics.get`)
+
+L'opération générique `lyrics.get` exige `metadata.read` et reçoit `track`,
+`artist`, `album` et `durationSecs` entier ou nul, conformément à
+`LyricsRequest` du SDK. Elle peut retourner `plain` et `synced` ; le Core
+privilégie le texte synchronisé non vide et borne les paroles enregistrées à
+32 Kio. La provenance est conservée et une modification locale ultérieure
+reste prioritaire. Les recherches restent soumises aux politiques et tâches
+d'automatisation ; la lecture des paroles ne déclenche pas elle-même de recherche.
+Les tâches `lyrics.get` ne sont pas admises pour une piste ayant déjà des
+paroles. Le cache de résultat d'automatisation est distinct des paroles de la
+piste. Un scan conserve un texte externe si sa provenance et les propriétés de
+la piste correspondent encore ; les paroles locales présentes restent
+prioritaires. Aucun appel LRCLIB réel n'est prouvé par ce contrat.
+
+### Correspondance musicale automatique
+
+Une recherche musicale automatique doit renvoyer un unique candidat avec un
+identifiant non vide, le type musical, le titre et le nom d'artiste correspondant exactement
+après normalisation des espaces et de la casse. Une durée fournie des deux côtés
+est contrôlée. Les détails obtenus doivent conserver l'identifiant du candidat
+et ne pas contredire son titre. Les anciens résultats enregistrés sous les règles
+de correspondance précédentes ne sont pas réutilisés. Une réponse ambiguë ou
+incomplète ne provoque aucune adoption automatique. Le champ optionnel structuré `artist` des résultats musicaux porte le crédit
+artiste exact. Les sources MusicBrainz et Discogs ont été adaptées pour le fournir ;
+les paquets précédemment publiés ne sont pas modifiés. Le Core recherche l'album
+avec son artiste lorsque les deux sont connus, sans assimiler titre de piste et
+titre de sortie. Les résultats incomplets ne sont pas associés automatiquement.
+
+Le cache automatique des fournisseurs dépend aussi des réglages effectifs, de
+la génération et de l'empreinte du paquet. Les réglages ne sont pas enregistrés
+en clair dans sa clé : une signature HMAC avec une clé aléatoire en mémoire les
+isole. Cette clé change au redémarrage, ce qui invalide alors le cache de ce
+processus. Le scheduler examine au plus 64 entrées par minute, par clé primaire,
+pour supprimer les entrées expirées sans balayage complet dans les requêtes HTTP.
+
+La réponse `lyrics.get` doit respecter le type `Lyrics` du SDK ; le Core borne
+les textes et vérifie le titre, l’artiste et la durée lorsqu’elle est disponible
+avant application, y compris pour les réponses en cache. Un fournisseur qui ne
+peut pas confirmer l’identité renvoie une erreur sans interrompre la lecture.

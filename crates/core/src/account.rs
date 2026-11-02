@@ -42,6 +42,10 @@ async fn actor(
 pub fn router(auth: AuthState) -> Router {
     Router::new()
         .route("/api/v1/account/password", put(password))
+        .route(
+            "/api/v1/account/local-credentials",
+            get(local_policy).post(create_local),
+        )
         .route("/api/v1/account/sessions", get(sessions).delete(revoke_all))
         .route(
             "/api/v1/account/sessions/{id}",
@@ -50,12 +54,72 @@ pub fn router(auth: AuthState) -> Router {
         .layer(DefaultBodyLimit::max(4096))
         .with_state(auth)
 }
+async fn local_policy(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, Error> {
+    let actor = actor(&auth, &headers, false).await?;
+    let exists: i64 = query_scalar("SELECT COUNT(*) FROM local_credentials WHERE user_id=?")
+        .bind(&actor.user.id)
+        .fetch_one(&auth.store.pool)
+        .await
+        .map_err(db)?;
+    let blocked = crate::server_settings::load(&auth.store)
+        .await
+        .map_err(|s| failure(s, "settings_unavailable"))?
+        .block_sso_local_accounts;
+    Ok(Json(json!({"canCreate":exists==0 && !blocked})))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LocalCredentials {
+    login: String,
+    password: String,
+}
+async fn create_local(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Json(input): Json<LocalCredentials>,
+) -> Result<StatusCode, Error> {
+    let actor = actor(&auth, &headers, true).await?;
+    if crate::server_settings::load(&auth.store)
+        .await
+        .map_err(|s| failure(s, "settings_unavailable"))?
+        .block_sso_local_accounts
+    {
+        return Err(failure(StatusCode::FORBIDDEN, "sso_local_accounts_blocked"));
+    }
+    if !(3..=64).contains(&input.login.len())
+        || !input
+            .login
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c))
+    {
+        return Err(failure(StatusCode::BAD_REQUEST, "invalid_login"));
+    }
+    let recent: i64 = query_scalar(
+        "SELECT COUNT(*) FROM sessions WHERE token_hash=? AND created_at>unixepoch()-300",
+    )
+    .bind(&actor.token_hash)
+    .fetch_one(&auth.store.pool)
+    .await
+    .map_err(db)?;
+    if recent == 0 {
+        return Err(failure(StatusCode::FORBIDDEN, "recent_login_required"));
+    }
+    let hash = crate::admin_users::hash_password(&auth, input.password).await?;
+    let result=query("INSERT INTO local_credentials(user_id,login,password_hash) SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM oidc_identities WHERE user_id=?) AND NOT EXISTS(SELECT 1 FROM local_credentials WHERE user_id=?)").bind(&actor.user.id).bind(input.login).bind(hash).bind(&actor.user.id).bind(&actor.user.id).execute(&auth.store.pool).await.map_err(|_|failure(StatusCode::CONFLICT,"local_credentials_conflict"))?;
+    if result.rows_affected() != 1 {
+        return Err(failure(StatusCode::CONFLICT, "local_credentials_conflict"));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
 fn public_id(token_hash: &str) -> String {
     hash(&format!("device:{token_hash}"))
 }
 async fn sessions(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<Value>, Error> {
     let actor = actor(&auth, &headers, false).await?;
-    let rows: Vec<(String,String,i64,i64,i64)> = query_as("SELECT token_hash,device_label,created_at,last_seen_at,expires_at FROM sessions WHERE user_id=? AND expires_at>unixepoch() AND last_seen_at>unixepoch()-1800 ORDER BY last_seen_at DESC LIMIT 200")
+    let rows: Vec<(String,String,i64,i64,i64)> = query_as("SELECT token_hash,device_label,created_at,last_seen_at,expires_at FROM sessions WHERE user_id=? AND expires_at>unixepoch() AND last_seen_at>unixepoch()-604800 ORDER BY last_seen_at DESC LIMIT 200")
         .bind(&actor.user.id).fetch_all(&auth.store.pool).await.map_err(db)?;
     Ok(Json(
         json!({"sessions":rows.into_iter().map(|(key,device,created,last,expires)|json!({"id":public_id(&key),"device":device,"createdAt":created,"lastSeenAt":last,"expiresAt":expires,"current":key==actor.token_hash})).collect::<Vec<_>>()}),
@@ -147,7 +211,7 @@ async fn password(
     let replacement = crate::admin_users::hash_password(&auth, input.new_password).await?;
     let mut conn = auth.store.pool.acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
-    let changed = query("UPDATE local_credentials SET password_hash=?,updated_at=unixepoch() WHERE user_id=? AND password_hash=? AND EXISTS(SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.user_id=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-1800 AND u.disabled_at IS NULL)")
+    let changed = query("UPDATE local_credentials SET password_hash=?,updated_at=unixepoch() WHERE user_id=? AND password_hash=? AND EXISTS(SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.user_id=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-604800 AND u.disabled_at IS NULL)")
         .bind(replacement).bind(&actor.user.id).bind(encoded).bind(&actor.token_hash).bind(&actor.user.id).execute(&mut *tx).await.map_err(db)?;
     if changed.rows_affected() != 1 {
         return Err(failure(StatusCode::CONFLICT, "credentials_changed"));

@@ -32,12 +32,16 @@ export interface Source {
 export interface Subtitle { id: string; language: string; label: string; url: string; forced?: boolean; sdh?: boolean; sourceFormat?: string }
 export interface Media {
   chapters?: { start: number; title: string }[];
+  trickplay?: { intervalMs: number; width: number; height: number; columns: number; rows: number; sheetCount: number; thumbnailCount: number; urlPrefix: string } | null;
   intro?: { start: number; end: number };
   credits?: { start: number; end: number };
+  recap?: { start: number; end: number };
+  preview?: { start: number; end: number };
   id: string;
   workId?: string;
   title: string;
   synthetic?: boolean;
+  episode?: boolean;
   nodeId?: string;
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';
   connectionMode?: string;

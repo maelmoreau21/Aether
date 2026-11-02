@@ -1,5 +1,5 @@
 import {get,writable} from 'svelte/store';
-export interface MusicTrack {id:string;title:string;artist:string;album:string;albumArtist?:string;mime:string;codec:string;duration:number|null}
+export interface MusicTrack {id:string;title:string;artist:string;album:string;albumArtist?:string;mime:string;codec:string;duration:number|null;coverUrl?:string|null}
 export const musicQueue=writable<{tracks:MusicTrack[];index:number;playing:boolean;repeat:'off'|'all'|'one'}>({tracks:[],index:0,playing:false,repeat:'off'});
 export function playMusic(tracks:MusicTrack[],index=0){if(!tracks.length)return;const start=Math.max(0,Math.min(index,tracks.length-1));const first=Math.max(0,start-100);musicQueue.set({tracks:tracks.slice(first,first+500),index:start-first,playing:true,repeat:get(musicQueue).repeat});}
 export function enqueueMusic(track:MusicTrack){musicQueue.update(q=>q.tracks.length>=500?q:{...q,tracks:[...q.tracks,track]});}

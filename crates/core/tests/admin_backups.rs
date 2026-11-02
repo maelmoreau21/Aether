@@ -95,7 +95,6 @@ async fn backups_authorization_csrf_consistency_download_and_unknown_ids() {
         auth,
         media,
         None,
-        Some(key.clone()),
         std::collections::BTreeMap::from([
             (
                 "MEDIA_TEST_SECRET".into(),
@@ -156,19 +155,19 @@ async fn backups_authorization_csrf_consistency_download_and_unknown_ids() {
     );
     let bytes = to_bytes(download.into_body(), 20_000_000).await.unwrap();
     assert!(
-        !bytes
+        bytes
             .windows(28)
             .any(|window| window == b"synthetic-node-secret-marker")
     );
     assert!(
-        !bytes
+        bytes
             .windows(25)
             .any(|window| window == b"secret-test-config-marker")
     );
     let package = temp.path().join("download.media-backup");
     std::fs::write(&package, &bytes).unwrap();
     let extracted = temp.path().join("extracted");
-    let summary = media_poc::backup_bundle::extract(&package, &extracted, &key)
+    let summary = media_poc::backup_bundle::extract(&package, &extracted)
         .await
         .unwrap();
     assert_eq!(summary.engine, "sqlite");
@@ -436,7 +435,6 @@ async fn backups_list_returns_unavailable_when_directory_refused() {
         auth,
         media.clone(),
         Some(media.join("forbidden-backups")),
-        None,
         std::collections::BTreeMap::new(),
     )
     .await

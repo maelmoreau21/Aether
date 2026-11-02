@@ -1,5 +1,5 @@
 {
-  "browser": "155.0.8059.86",
+  "browser": "156.0.8078.48",
   "os": "10.0.26300",
   "headless": true,
   "results": {
@@ -9,12 +9,12 @@
     "localArtwork": true,
     "catalogueChanges": {
       "privateFeedbackPersisted": true,
-      "seasonShortcuts": true,
+      "seasonSelection": true,
       "responsiveThemes": true
     },
-    "decodedVideoFrames": 8,
+    "decodedVideoFrames": 7,
     "episode1Playback": true,
-    "episodeLaunchMs": 831,
+    "episodeLaunchMs": 948,
     "realChapters": true,
     "seekAndPause": true,
     "simplePlaybackControls": {

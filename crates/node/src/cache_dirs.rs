@@ -133,7 +133,9 @@ fn safe_directory(path: &Path) -> io::Result<()> {
 }
 impl Drop for CacheDirectory {
     fn drop(&mut self) {
-        drop(self.lease.take());
+        if let Some(lease) = self.lease.take() {
+            let _ = lease.unlock();
+        }
         drop(self.directory.take());
     }
 }

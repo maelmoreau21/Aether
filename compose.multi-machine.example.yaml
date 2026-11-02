@@ -12,7 +12,7 @@
 # ------------------------------------------------------------------------------
 services:
   aether-core:
-    image: ghcr.io/maelmoreau21/aether-core:${AETHER_TAG:-latest}
+    image: ${AETHER_IMAGE_PREFIX:-ghcr.io/maelmoreau21}/aether-core:${AETHER_TAG:-latest}
     container_name: aether-core
     restart: unless-stopped
     stop_signal: SIGINT
@@ -35,8 +35,6 @@ services:
       - MEDIA_DB_PATH=/data/core.sqlite3
       - MEDIA_BACKUP_DIR=/backups
       # Protect this key separately from the archive volume.
-      - MEDIA_BACKUP_KEY=${MEDIA_BACKUP_KEY:-}
-      - MEDIA_WEB_DIST=/app/apps/web/build
     volumes:
       - /volume1/docker/aether-core/data:/data
       - /volume1/docker/aether-core/backups:/backups
@@ -52,7 +50,7 @@ services:
 # Copy the service below into Machine B's `docker-compose.yml`
 # ------------------------------------------------------------------------------
   aether-node-films:
-    image: ghcr.io/maelmoreau21/aether-node:${AETHER_TAG:-latest}
+    image: ${AETHER_IMAGE_PREFIX:-ghcr.io/maelmoreau21}/aether-node:${AETHER_TAG:-latest}
     container_name: aether-node-films
     restart: unless-stopped
     stop_signal: SIGINT
@@ -89,7 +87,7 @@ services:
 # Copy the service below into Machine C's `docker-compose.yml`
 # ------------------------------------------------------------------------------
   aether-node-series:
-    image: ghcr.io/maelmoreau21/aether-node:${AETHER_TAG:-latest}
+    image: ${AETHER_IMAGE_PREFIX:-ghcr.io/maelmoreau21}/aether-node:${AETHER_TAG:-latest}
     container_name: aether-node-series
     restart: unless-stopped
     stop_signal: SIGINT

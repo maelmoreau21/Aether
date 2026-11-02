@@ -2,6 +2,9 @@
 > groupes sans promotion de rôle, clés catalogue seulement et permissions vivantes,
 > sauvegardes chiffrées avec clé externe et extraction hors ligne sans écrasement.
 > Contrats : ADMIN_USERS.md, ADMIN_ACCESS.md, ADMIN_BACKUPS.md, BACKUP_BUNDLE.md.
+> État du 27 octobre : les nouvelles archives `MDBK0002` sont non chiffrées,
+> contiennent des secrets en clair et exigent un stockage privé. La mention
+> historique du 19 octobre ci-dessus ne décrit plus le format courant.
 > Les préférences sont persistées par session utilisateur, sans ID de compte fourni par le client.
 
 > Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités

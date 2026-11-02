@@ -1,12 +1,15 @@
 # Requires Docker, Rust and the generated legal media fixtures used by the tests.
 # Runs only a disposable PostgreSQL 18 instance; never targets an existing database.
 [CmdletBinding()]
-param()
+param([switch]$OnlyDistributed)
 
 $ErrorActionPreference = 'Stop'
 $containerId = $null
 $previousPassword = [Environment]::GetEnvironmentVariable('POSTGRES_PASSWORD', 'Process')
 $previousTestUrl = [Environment]::GetEnvironmentVariable('MEDIA_TEST_POSTGRES_URL', 'Process')
+$previousPluginsPath = [Environment]::GetEnvironmentVariable('MEDIA_PLUGINS_PATH', 'Process')
+$previousAssetsPath = [Environment]::GetEnvironmentVariable('MEDIA_ASSETS_PATH', 'Process')
+$testStorage = $null
 $pushedLocation = $false
 
 function Invoke-CheckedCargo {
@@ -59,16 +62,24 @@ try {
     }
     $testPort = $Matches[1]
     $env:MEDIA_TEST_POSTGRES_URL = "postgresql://postgres:${testPassword}@127.0.0.1:${testPort}/media_test?sslmode=disable"
+    $testStorage = Join-Path ([System.IO.Path]::GetTempPath()) ('media-pg18-storage-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $testStorage | Out-Null
+    $env:MEDIA_PLUGINS_PATH = Join-Path $testStorage 'plugins'
+    $env:MEDIA_ASSETS_PATH = Join-Path $testStorage 'assets'
     Write-Host 'PostgreSQL 18 is ready on a temporary loopback port. Running serial contract tests.'
 
-    Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--test', 'postgres', '--', '--ignored', '--test-threads=1')
-    Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--lib', 'oidc::tests', '--', '--test-threads=1')
+    if (-not $OnlyDistributed) {
+        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--test', 'postgres', '--', '--ignored', '--test-threads=1')
+        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--lib', 'oidc::tests', '--', '--test-threads=1')
+    }
     Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--test', 'distributed_multi_node', '--', '--test-threads=1')
-    Write-Host 'PostgreSQL contract, OIDC and distributed Node tests passed.'
+    Write-Host 'Requested PostgreSQL tests passed.'
 }
 finally {
     [Environment]::SetEnvironmentVariable('POSTGRES_PASSWORD', $previousPassword, 'Process')
     [Environment]::SetEnvironmentVariable('MEDIA_TEST_POSTGRES_URL', $previousTestUrl, 'Process')
+    [Environment]::SetEnvironmentVariable('MEDIA_PLUGINS_PATH', $previousPluginsPath, 'Process')
+    [Environment]::SetEnvironmentVariable('MEDIA_ASSETS_PATH', $previousAssetsPath, 'Process')
     $testPassword = $null
     if ($containerId -and $containerId -match '^[a-f0-9]{64}$') {
         # Never enumerate or remove other containers: only our returned exact ID.
@@ -79,5 +90,13 @@ finally {
     }
     if ($pushedLocation) {
         Pop-Location
+    }
+    if ($testStorage) {
+        $resolved = [System.IO.Path]::GetFullPath($testStorage)
+        $parent = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+        if ($resolved.StartsWith($parent, [StringComparison]::OrdinalIgnoreCase) -and
+            [System.IO.Path]::GetFileName($resolved) -match '^media-pg18-storage-[a-f0-9]{32}$') {
+            Remove-Item -LiteralPath $resolved -Recurse -Force
+        }
     }
 }

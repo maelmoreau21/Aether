@@ -1,5 +1,6 @@
 import { get } from 'svelte/store';
 import { session, getSessionGeneration, onSessionGenerationChange } from '../auth/session';
+import { serverPresentation } from '../config/presentation';
 import type { PlaybackState } from './types';
 
 export interface Progress { workId: string; position: number; duration: number; watched: boolean; revision: number; title?: string; kind?: string; seriesId?: string }
@@ -49,6 +50,35 @@ export async function writeProgress(progress: Progress, keepalive = false): Prom
   return saved;
 }
 
+export function isResumable(progress: Progress, cfg?: { minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number }): boolean {
+  if (progress.watched || progress.position <= 0) return false;
+  const minPct = cfg?.minResumePct ?? 0;
+  const maxPct = cfg?.maxResumePct ?? 90;
+  const minDuration = cfg?.minResumeDurationSeconds ?? 0;
+  if (progress.duration > 0) {
+    if (progress.duration < minDuration) return false;
+    const ratio = (progress.position / progress.duration) * 100;
+    if (ratio < minPct || ratio >= maxPct) return false;
+  }
+  return true;
+}
+
+export function isCreditsOrCompleted(position: number, duration: number, creditsStart?: number, maxResumePct = 90): boolean {
+  if (!Number.isFinite(duration) || duration <= 0 || position <= 0) return false;
+  if (creditsStart !== undefined && Number.isFinite(creditsStart) && creditsStart > 0 && creditsStart < duration && position >= creditsStart) {
+    return true;
+  }
+  const ratio = position / duration;
+  const heuristics = maxResumePct <= 90;
+  if (heuristics && duration >= 3600 && (ratio >= 0.88 || (ratio >= 0.85 && duration - position <= 480))) {
+    return true;
+  }
+  if (heuristics && duration >= 1200 && ratio >= 0.88) {
+    return true;
+  }
+  return ratio >= maxResumePct / 100;
+}
+
 export class ProgressTracker {
   private revision = 0;
   private generation = getSessionGeneration();
@@ -56,13 +86,21 @@ export class ProgressTracker {
   private lastSave = Date.now();
   private failed = false;
   private watched = false;
-  constructor(private work: string, private onError: (message: string) => void) {}
+  private creditsStart?: number;
+  constructor(private work: string, private onError: (message: string) => void, creditsStart?: number) {
+    this.creditsStart = creditsStart;
+  }
+  setCreditsStart(creditsStart?: number) {
+    this.creditsStart = creditsStart;
+  }
   async load(): Promise<number> {
     try {
       const progress = await readProgress(this.work);
       if (this.generation !== getSessionGeneration()) { this.failed = true; return 0; }
       this.revision = progress.revision; this.watched = progress.watched;
-      return progress.watched ? 0 : progress.position;
+      const cfg = get(serverPresentation);
+      if (!isResumable(progress, cfg)) return 0;
+      return progress.position;
     } catch (error) { this.fail(error instanceof DOMException && error.name==='TimeoutError' ? new Error('Reprise indisponible après 2,5 secondes. Lecture depuis le début ; progression conservée sur le serveur.') : error); return 0; }
   }
   private fail(error: unknown) { this.failed = true; this.onError(error instanceof Error ? error.message : 'Progression indisponible.'); }
@@ -72,10 +110,11 @@ export class ProgressTracker {
     this.lastSave = Date.now();
     const position = Math.max(0, Math.min(state.position, state.duration));
     const duration = state.duration;
+    const watched = this.watched || ended || isCreditsOrCompleted(position, duration, this.creditsStart, get(serverPresentation).maxResumePct);
     this.queue = this.queue.then(async () => {
       if (this.failed || this.generation !== getSessionGeneration()) return;
       try {
-        const progress = await writeProgress({ workId: this.work, position, duration, watched: this.watched || ended || position / duration >= .95, revision: this.revision }, force);
+        const progress = await writeProgress({ workId: this.work, position, duration, watched, revision: this.revision }, force);
         this.revision = progress.revision; this.watched = progress.watched;
       } catch (error) { this.fail(error); }
     });

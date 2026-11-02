@@ -1,5 +1,167 @@
 # CI et publication GHCR
 
+## Téléchargement de FFmpeg et échecs réseau — 2 novembre 2026
+
+Le [run 41446141236](https://github.com/maelmoreau21/Aether/actions/runs/41446141236)
+échouait avant les tests Rust/navigateur : curl quittait avec une erreur TLS 35
+ou un délai 28 dans `build-ffmpeg.sh`. La construction Docker échouait sur le
+même téléchargement. Le frontend, Actionlint et l'audit Rust avaient réussi.
+
+Le script partagé conserve FFmpeg 9.0.2 et son SHA-256 épinglé. Il retente
+désormais toutes les erreurs de transport avec des délais bornés puis utilise
+le [miroir MacPorts](https://distfiles.macports.org/ffmpeg/) lorsque
+[le serveur FFmpeg](https://ffmpeg.org/download.html) reste indisponible.
+Seuls HTTPS et ses redirections HTTPS sont acceptés. Une empreinte différente
+arrête immédiatement la construction avant extraction, quel que soit le serveur.
+La même correction s'applique au composite CI et aux images Docker.
+
+`python scripts/test-build-ffmpeg.py` exerce le vrai script en environnement
+POSIX avec transport simulé et véritable vérification SHA-256 : serveur
+principal valide, repli après erreur TLS et fichier partiel, deux serveurs
+injoignables, corruption depuis l'un ou l'autre serveur. Les quatre tests sont
+exécutés par le job de validation des workflows. Aucun test métier ou gate de
+publication n'a été retiré.
+
+Vérifications locales : quatre tests de téléchargement et 14 tests de politique
+de release réussis dans un conteneur Linux, syntaxe Bash et Actionlint 1.7.12
+réussis. Téléchargement réel du miroir : 12 040 788 octets, SHA-256 identique à
+la valeur épinglée. Le repli a également été observé pendant une construction
+réelle du stage Docker `probe-runtime`, après trois échecs TLS du serveur principal.
+Ce stage a été construit complètement avec succès ; `ffmpeg` et `ffprobe`
+annoncent tous deux la version 9.0.2 dans le conteneur.
+Cela ne remplace pas un nouveau run GitHub sur les correctifs publiés.
+
+## Équilibrage des partitions — 29 octobre 2026
+
+Le run GitHub `40945793905` a passé respectivement 282, 478 et 383 secondes
+dans les commandes d'intégration Rust, après installation et cache. Les mêmes
+tests sont désormais répartis par durée observée, les plus longs en premier,
+au lieu d'une alternance alphabétique. La liste des cibles reste découverte
+par `cargo metadata` ; aucune cible connue ou nouvelle n'est exclue. Les noms
+présents dans plusieurs crates restent ensemble, les durées inconnues valent
+une seconde et les égalités sont résolues de façon déterministe.
+
+Sur les 57 cibles actuelles et avec les durées du run cité, la simulation
+donne des charges de 340/340/340 secondes contre 245/439/336 secondes pour
+l'ancien découpage. Ce calcul exclut compilation, cache, démarrage du runner
+et variabilité des tests : ce n'est ni une mesure du nouveau workflow ni une
+promesse de 99 secondes gagnées. Les poids devront être révisés si les durées
+ou les cibles changent. Aucun contrôle, profil, ni ordre des gates de publication
+n'a été supprimé. Les mêmes suites continuent de s'exécuter séquentiellement
+dans chaque partition.
+
+Vérification locale : `python scripts/test-ci-integration-shard.py` (4 tests)
+et `python scripts/ci-integration-shard.py --index N --count 3 --list` pour
+N = 0, 1, 2 ; couverture et ordre déterministe vérifiés. Pas de nouveau run
+GitHub ni de publication réalisés pour cette modification.
+
+## Publication mutualisée et partition Rust allégée — 29 octobre 2026
+
+Diagnostic du [run 40931283481](https://github.com/maelmoreau21/Aether/actions/runs/40931283481) :
+la publication standalone recompile les dépendances en 4 min 56 s puis les
+binaires en 9 min 01 s, bien qu'un job Images ait déjà construit les runtimes.
+`MEDIA_VERSION` était déclaré avant la précompilation : chaque nouvelle version
+invalidait cette couche. Les trois publications utilisaient aussi trois runners
+compilant chacun les mêmes neuf binaires, avec une seule tâche Cargo.
+
+La publication réutilise maintenant le plan Bake partagé par la validation,
+avec deux tâches Cargo, trois jeux de métadonnées/tags et un seul export de cache
+`publish-images`. Elle importe aussi le cache `ci-images`. Les arguments de
+version/branche sont déclarés après la précompilation des dépendances ; les deux
+commandes Cargo montent les caches registry/git. La compilation finale reste
+nécessaire lorsque la version embarquée ou les sources changent. Les profils
+release et la limite locale par défaut d'une tâche Cargo restent conservés.
+
+Les trois images sont toujours vérifiées : téléchargement par digest après
+push, labels source/révision, commande version, FFmpeg/ffprobe 9.0.2 et taille
+Node inférieure à 200 Mo. Le mode sans push utilise désormais le tag SHA réellement
+chargé. Les trois fichiers digest sont regroupés dans `digest-images`, compatible
+avec le téléchargement `digest-*` de la release. La publication reste sérialisée,
+interdite aux PR et conditionnée aux mêmes contrôles sur develop.
+
+Rust conserve ses trois partitions d'intégration ; une quatrième entrée `checks`
+exécute en parallèle format, Clippy, unitaires, ABI et contrats PostgreSQL/OIDC/
+multi-Node. PostgreSQL ne démarre que pour cette entrée. Le contrôle agrégé
+`Rust (Format, Clippy, Tests)` exige toujours la réussite de toute la matrice.
+Les commandes supplémentaires utilisent les mêmes features que les unitaires,
+pour éviter les recompilations dues à l'alternance des features. Aucun test
+obligatoire n'est retiré. Le quatrième runner peut augmenter les minutes cumulées
+et le gain dépend du nombre de runners disponibles.
+
+Validation locale : actionlint 1.7.12 sur les trois workflows, 14 tests de politique
+de release, 3 tests de couverture des partitions, plans `docker buildx bake --print`
+avec métadonnées synthétiques (version vide, bêta et stable), vérification des
+gates de publication et syntaxe Bash réussis ; `git diff --check` réussi.
+Daemon Docker indisponible : aucune construction/exécution de conteneur ni
+publication réelle dans ce jalon. Une première reconstruction de cache est
+attendue ; aucun gain de temps après modification n'est encore mesuré sur GitHub.
+
+## Réduction des compilations et des runs obsolètes — 29 octobre 2026
+
+Les profils Cargo dev/test omettent les symboles de débogage dans ce workflow
+(`CARGO_PROFILE_DEV_DEBUG=0`, `CARGO_PROFILE_TEST_DEBUG=0`). Les assertions et
+contrôles de débordement restent actifs. L'objectif est de réduire le temps
+de liaison, le disque et les transferts de cache ; un premier run peut devoir
+reconstruire les artefacts avec ce réglage.
+
+Films et Séries sont exécutés par une seule commande Cargo ciblant leurs deux
+tests pour mutualiser la compilation. `MEDIA_SCANNER_REPORT_DIR` réserve le
+dossier Films, sans changer le dossier Séries ni les validations de rapports.
+Les nouveaux commits annulent les jobs de validation obsolètes de la même ref,
+y compris sur les branches ; les jobs de publication ne sont pas interrompus.
+Les trois images Docker utilisent désormais un seul job Buildx Bake pour
+partager les étapes Rust/Web/FFmpeg, avec deux tâches Cargo de compilation
+et un seul export de cache des étapes communes. Les anciens caches restent
+lisibles. Les trois images sont chargées et le contrôle du runtime Node reste
+obligatoire. Le plan Bake a été validé avec `docker buildx bake --print` ;
+une construction réelle n'a pas été exécutée (daemon Docker indisponible).
+Aucun contrôle obligatoire
+n'est retiré. Actionlint 1.7.12, parsing YAML, vérification des dossiers et
+`git diff --check` passent localement ; le gain réel et l'exécution Linux sont
+à mesurer au prochain run GitHub.
+
+## Parcours playlists — 29 octobre 2026
+
+Le lecteur réduit et le panneau ouvert possèdent tous deux des commandes de
+navigation audio. Le test cible maintenant les commandes du panneau. Le test
+`product_tests::mixed_playlists` passe sous Windows avec
+`MEDIA_TEST_PLAYLIST_BROWSER=1` et Chrome 156 ; la CI Linux reste à confirmer.
+
+## Parcours Séries — 29 octobre 2026
+
+Le test attendait une classe `loaded` supprimée de la couverture. Il vérifie
+maintenant le chargement réel de l'image et suit les panneaux, sélecteurs et
+menus actuels. Le scénario complet passe localement sous Windows avec Chrome
+156.0.8078.48, y compris lecture, permissions et changement de compte. La
+relance du job GitHub Linux reste nécessaire.
+
+## Sélection des versions dans les parcours navigateur — 29 octobre 2026
+
+Le journal GitHub montre que les deux scans Films aboutissent, puis que le
+sélecteur de version expire : il se trouve désormais dans le panneau replié
+« Versions et informations techniques ». Les scénarios scanner, NFO et
+affiches ouvrent ce panneau avant de sélectionner une version. Une relance du
+job Linux reste nécessaire pour confirmer l'ensemble du parcours en CI. Le
+scénario scanner ouvre aussi le panneau de suivi avant les contrôles vu/non vu.
+Après reconstruction Web, `cargo test --locked -p media-poc --test
+browser_scanner -- --ignored --nocapture` réussit sous Windows avec Chrome
+156.0.8078.48, en MP4 puis en MKV après redémarrage. NFO et affiches ne sont
+pas relancés ici.
+
+## Parcours administrateur navigateur — 27 octobre 2026
+
+Le run CI 40466113909 échouait avant le scan Films : l'administration ouvre
+la vue d'ensemble par défaut et le test cherchait le bouton d'ajout dans la
+section Bibliothèques masquée. Les scénarios Films, Séries, NFO et affiches
+ouvrent désormais explicitement cette section ; le scénario distribué ouvre
+la section Nodes. Les assertions et délais de lecture restent inchangés.
+Après reconstruction du frontend, les parcours Films et Séries passent avec
+Chrome 156.0.8078.48 sous Windows, sur fixtures synthétiques et SQLite
+temporaire. Les scénarios NFO et affiches passent aussi sur les quatre phases
+initiale, redémarrage, mise à jour et suppression. Ils attendent une vraie
+progression avant le seek et l'achèvement du scan demandé. Le scénario distribué
+et la CI Linux après correction ne sont pas encore validés ici.
+
 ## Réduction de l'attente CI — 22 octobre 2026
 
 Le run `39827517263` a pris 22 min 25 s. Les logs montrent 13 min 27 s
@@ -193,6 +355,11 @@ Le heredoc shell commence avec des lignes non indentées au niveau YAML ; elles
 terminent le bloc `run: |`. Le parseur essaie donc de lire les tags d'images
 comme des clés YAML. L'appel réutilisable propage cette erreur dans la CI.
 Les tags sont maintenant produits par `docker/metadata-action`.
+Avec `docker/bake-action@v6`, les fichiers Bake générés par
+`docker/metadata-action` doivent être passés avec le préfixe `cwd://` :
+ils sont créés dans le répertoire temporaire du runner et ne font pas partie
+du contexte Git. Sans ce préfixe, Bake échoue avec
+`lstat .../docker-metadata-action-bake.json: no such file or directory`.
 Le lancement manuel historique pouvait également étiqueter le SHA courant comme
 une autre branche sans passer les tests : ce paramètre a été supprimé.
 

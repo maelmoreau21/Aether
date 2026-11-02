@@ -874,6 +874,28 @@ async fn webm_uses_original_video_and_authorizes_explicit_external_audio() {
     assert_eq!(external["language"], "fr");
     assert_eq!(external["audioOffsetSeconds"], 0.25);
     assert_eq!(external["tracks"][0]["channels"], 6);
+    assert_eq!(
+        external["videoStreamUrl"],
+        format!("/api/v1/assets/{asset}/prepared/video-stream-0-")
+    );
+    assert!(external["durationSeconds"].as_f64().unwrap() > 0.0);
+    assert!(
+        external["videoMime"]
+            .as_str()
+            .unwrap()
+            .starts_with("video/mp4; codecs=\"av01.")
+    );
+    let progressive = format!("{}0", external["videoStreamUrl"].as_str().unwrap());
+    assert_eq!(
+        request(&app, "GET", &progressive, "", None, Value::Null, None)
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (status, _, bytes, _) =
+        request(&app, "GET", &progressive, &cookie, None, Value::Null, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(&bytes[4..8], b"ftyp");
     assert!(!media.to_string().contains("voice.opus"));
     for url in [
         external["externalAudioUrl"].as_str().unwrap().to_owned(),

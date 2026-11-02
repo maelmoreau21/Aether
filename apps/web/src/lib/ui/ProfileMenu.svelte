@@ -42,6 +42,13 @@
       panel.hidePopover();
     }
   }
+
+  function navigate(event: MouseEvent, destination: 'settings/' | 'admin/libraries/#overview') {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    panel.hidePopover();
+    void goto(resolve(destination));
+  }
 </script>
 
 <div class="profile-access">
@@ -79,14 +86,14 @@
     </div>
 
     <nav aria-label="Menu profil">
-      <a class="profile-entry" href={resolve('settings/')} onclick={() => panel.hidePopover()}>
+      <a class="profile-entry" href={resolve('settings/')} onclick={(event) => navigate(event, 'settings/')}>
         <Icon name="profile" size={17} />
         <span>{$t('profile_settings')}</span>
         <Icon name="chevron" size={13} />
       </a>
 
       {#if $session?.user.role === 'administrator'}
-        <a class="profile-entry" href={resolve('admin/libraries/')} onclick={() => panel.hidePopover()}>
+        <a class="profile-entry" href={resolve('admin/libraries/#overview')} onclick={(event) => navigate(event, 'admin/libraries/#overview')}>
           <Icon name="settings" size={17} />
           <span>{$t('admin_dashboard')}</span>
           <Icon name="chevron" size={13} />
@@ -199,14 +206,18 @@
     position: fixed;
     inset: 76px var(--page-gutter) auto auto;
     margin: 0;
-    width: 270px;
+    width: 280px;
     max-width: calc(100vw - 32px);
-    padding: 10px;
-    border: 1px solid var(--color-line);
-    border-radius: 14px;
+    max-height: calc(100dvh - 96px);
+    overflow-y: auto;
+    padding: 12px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-lg);
     color: var(--color-text);
-    background: var(--color-raised);
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+    background: var(--color-glass-raised);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: var(--shadow-lg);
   }
   .profile-popover:popover-open {
     animation: reveal 0.14s ease-out;

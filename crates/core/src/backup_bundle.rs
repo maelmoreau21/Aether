@@ -1,9 +1,6 @@
-//! Versioned, chunk-authenticated encrypted backup bundles. No archive-provided paths.
-use ring::{
-    aead, hkdf,
-    rand::{SecureRandom, SystemRandom},
-};
+//! Versioned backup bundles with a corruption checksum. No archive-provided paths.
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs::{self, File, OpenOptions},
@@ -11,17 +8,13 @@ use std::{
     path::{Path, PathBuf},
 };
 use zeroize::Zeroizing;
-const MAGIC: &[u8; 8] = b"MDBK0001";
+const MAGIC: &[u8; 8] = b"MDBK0002";
 const CHUNK: usize = 65536;
-pub const DEFAULT_BACKUP_KEY: &str =
-    "0000000000000000000000000000000000000000000000000000000000000000";
 #[derive(Debug, thiserror::Error)]
 pub enum BundleError {
     #[error("backup I/O failed")]
     Io(#[from] std::io::Error),
-    #[error("backup key must be exactly 64 hexadecimal characters")]
-    InvalidKey,
-    #[error("backup authentication or format validation failed")]
+    #[error("backup checksum or format validation failed")]
     InvalidBundle,
     #[error("backup target already exists")]
     TargetExists,
@@ -29,6 +22,8 @@ pub enum BundleError {
     InvalidConfig,
     #[error("backup worker failed")]
     Worker,
+    #[error("an asset is missing or does not match its recorded SHA-256 or size")]
+    AssetIntegrity,
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -37,12 +32,36 @@ struct Manifest {
     config: BTreeMap<String, String>,
     #[serde(default)]
     attachments: BTreeMap<String, u64>,
+    /// Number of content-addressed assets carried by the archive (0 for database-only archives).
+    #[serde(default)]
+    assets: u64,
+    #[serde(default)]
+    asset_bytes: u64,
+}
+/// One durable binary object to embed. `(sha256, size, mime)` come from the SQL `assets` table.
+pub struct AssetSource {
+    pub items: Vec<(String, u64, String)>,
+    pub open: AssetOpener,
+}
+/// Opens one stored object by digest (blocking).
+pub type AssetOpener = Box<dyn Fn(&str) -> std::io::Result<File> + Send + 'static>;
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssetHeader {
+    sha256: String,
+    size: u64,
+    mime: String,
+}
+fn hex_digest(digest: impl AsRef<[u8]>) -> String {
+    digest.as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
 #[derive(Debug, Serialize)]
 pub struct BundleSummary {
     pub engine: String,
     pub database_file: String,
     pub bytes: u64,
+    /// Verified assets written to `<output>/assets/<sha256>` (listed in `assets.json`).
+    pub assets: u64,
 }
 struct Cleanup(PathBuf, bool);
 impl Drop for Cleanup {
@@ -56,74 +75,23 @@ impl Drop for Cleanup {
         }
     }
 }
-fn decode_key(value: &str) -> Result<Zeroizing<[u8; 32]>, BundleError> {
-    let value = if value.is_empty() {
-        DEFAULT_BACKUP_KEY
-    } else {
-        value
-    };
-    if value.len() != 64 {
-        return Err(BundleError::InvalidKey);
-    }
-    let mut key = Zeroizing::new([0; 32]);
-    for (i, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-        let text = std::str::from_utf8(pair).map_err(|_| BundleError::InvalidKey)?;
-        key[i] = u8::from_str_radix(text, 16).map_err(|_| BundleError::InvalidKey)?;
-    }
-    Ok(key)
-}
-struct KeyLength;
-impl hkdf::KeyType for KeyLength {
-    fn len(&self) -> usize {
-        32
-    }
-}
-fn cipher(root: &[u8], salt: &[u8]) -> Result<aead::LessSafeKey, BundleError> {
-    let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, salt);
-    let prk = salt.extract(root);
-    let info = [b"media-backup-v1".as_slice()];
-    let okm = prk
-        .expand(&info, KeyLength)
-        .map_err(|_| BundleError::InvalidBundle)?;
-    let mut sub = Zeroizing::new([0; 32]);
-    okm.fill(sub.as_mut())
-        .map_err(|_| BundleError::InvalidBundle)?;
-    Ok(aead::LessSafeKey::new(
-        aead::UnboundKey::new(&aead::AES_256_GCM, sub.as_ref())
-            .map_err(|_| BundleError::InvalidBundle)?,
-    ))
-}
-fn nonce(counter: u64) -> aead::Nonce {
-    let mut bytes = [0; 12];
-    bytes[4..].copy_from_slice(&counter.to_be_bytes());
-    aead::Nonce::assume_unique_for_key(bytes)
-}
-fn aad(header: &[u8], counter: u64, kind: u8, len: u32) -> Vec<u8> {
-    let mut bytes = header.to_vec();
-    bytes.extend_from_slice(&counter.to_be_bytes());
-    bytes.push(kind);
-    bytes.extend_from_slice(&len.to_be_bytes());
-    bytes
-}
 fn record(
     out: &mut File,
-    key: &aead::LessSafeKey,
-    header: &[u8],
-    counter: u64,
+    checksum: &mut Sha256,
     kind: u8,
     plain: &[u8],
 ) -> Result<(), BundleError> {
+    if plain.len() > CHUNK {
+        return Err(BundleError::InvalidBundle);
+    }
     let len = u32::try_from(plain.len()).map_err(|_| BundleError::InvalidBundle)?;
-    let mut data = Zeroizing::new(plain.to_vec());
-    key.seal_in_place_append_tag(
-        nonce(counter),
-        aead::Aad::from(aad(header, counter, kind, len)),
-        &mut *data,
-    )
-    .map_err(|_| BundleError::InvalidBundle)?;
-    out.write_all(&[kind])?;
-    out.write_all(&len.to_be_bytes())?;
-    out.write_all(&data)?;
+    let mut frame = [0u8; 5];
+    frame[0] = kind;
+    frame[1..].copy_from_slice(&len.to_be_bytes());
+    out.write_all(&frame)?;
+    out.write_all(plain)?;
+    checksum.update(frame);
+    checksum.update(plain);
     Ok(())
 }
 fn private_file(path: &Path) -> Result<File, BundleError> {
@@ -185,20 +153,30 @@ fn fresh_temp(target: &Path) -> Result<PathBuf, BundleError> {
     }
     Ok(parent.join(format!(".media-backup-{}", uuid::Uuid::new_v4())))
 }
-/// Encrypt an already-consistent database snapshot, never the active database file.
+/// Package an already-consistent database snapshot, never the active database file.
 pub async fn create(
     database_archive: &Path,
     config: BTreeMap<String, String>,
     target: &Path,
-    key_hex: &str,
     engine: &str,
+) -> Result<u64, BundleError> {
+    create_with_assets(database_archive, config, target, engine, None).await
+}
+/// Like [`create`], additionally embedding every asset of `assets`. Each object is re-hashed while
+/// it is read: a missing, truncated or altered object aborts the backup instead of producing an
+/// archive that claims to be complete.
+pub async fn create_with_assets(
+    database_archive: &Path,
+    config: BTreeMap<String, String>,
+    target: &Path,
+    engine: &str,
+    assets: Option<AssetSource>,
 ) -> Result<u64, BundleError> {
     let database_archive = database_archive.to_owned();
     let target = target.to_owned();
-    let key = decode_key(key_hex)?;
     let engine = engine.to_owned();
     tokio::task::spawn_blocking(move || {
-        create_sync(&database_archive, config, &target, &key[..], &engine)
+        create_sync(&database_archive, config, &target, &engine, assets)
     })
     .await
     .map_err(|_| BundleError::Worker)?
@@ -216,8 +194,8 @@ fn create_sync(
     database: &Path,
     mut config: BTreeMap<String, String>,
     target: &Path,
-    root: &[u8],
     engine: &str,
+    assets: Option<AssetSource>,
 ) -> Result<u64, BundleError> {
     if !matches!(engine, "sqlite" | "postgres") {
         return Err(BundleError::InvalidConfig);
@@ -278,6 +256,10 @@ fn create_sync(
             engine: engine.into(),
             config,
             attachments,
+            assets: assets.as_ref().map_or(0, |a| a.items.len() as u64),
+            asset_bytes: assets
+                .as_ref()
+                .map_or(0, |a| a.items.iter().map(|i| i.1).sum()),
         })
         .map_err(|_| BundleError::InvalidConfig)?,
     );
@@ -287,17 +269,12 @@ fn create_sync(
     let temp = fresh_temp(target)?;
     let mut guard = Cleanup(temp.clone(), true);
     let mut output = private_file(&temp)?;
-    let mut header = [0; 40];
-    header[..8].copy_from_slice(MAGIC);
-    SystemRandom::new()
-        .fill(&mut header[8..])
-        .map_err(|_| BundleError::InvalidBundle)?;
-    let key = cipher(root, &header[8..])?;
-    output.write_all(&header)?;
-    record(&mut output, &key, &header, 0, 1, &manifest)?;
+    output.write_all(MAGIC)?;
+    let mut checksum = Sha256::new();
+    checksum.update(MAGIC);
+    record(&mut output, &mut checksum, 1, &manifest)?;
     let mut source = File::open(database)?;
     let mut buffer = Zeroizing::new(vec![0; CHUNK]);
-    let mut counter = 1u64;
     for (name, (file, expected)) in &mut files {
         let mut copied = 0u64;
         loop {
@@ -311,16 +288,45 @@ fn create_sync(
             }
             record(
                 &mut output,
-                &key,
-                &header,
-                counter,
+                &mut checksum,
                 attachment_kind(name).ok_or(BundleError::InvalidConfig)?,
                 &buffer[..n],
             )?;
-            counter = counter.checked_add(1).ok_or(BundleError::InvalidBundle)?;
         }
         if copied != *expected {
             return Err(BundleError::InvalidConfig);
+        }
+    }
+    if let Some(assets) = assets {
+        for (sha256, size, mime) in &assets.items {
+            if !crate::assets::is_sha256_hex(sha256) || *size == 0 {
+                return Err(BundleError::AssetIntegrity);
+            }
+            let header_json = serde_json::to_vec(&AssetHeader {
+                sha256: sha256.clone(),
+                size: *size,
+                mime: mime.clone(),
+            })
+            .map_err(|_| BundleError::InvalidConfig)?;
+            record(&mut output, &mut checksum, 8, &header_json)?;
+            let mut file = (assets.open)(sha256).map_err(|_| BundleError::AssetIntegrity)?;
+            let mut hasher = <sha2::Sha256 as sha2::Digest>::new();
+            let mut copied = 0u64;
+            loop {
+                let n = file.read(&mut buffer)?;
+                if n == 0 {
+                    break;
+                }
+                copied += n as u64;
+                if copied > *size {
+                    return Err(BundleError::AssetIntegrity);
+                }
+                sha2::Digest::update(&mut hasher, &buffer[..n]);
+                record(&mut output, &mut checksum, 9, &buffer[..n])?;
+            }
+            if copied != *size || hex_digest(sha2::Digest::finalize(hasher)) != *sha256 {
+                return Err(BundleError::AssetIntegrity);
+            }
         }
     }
     let mut database_bytes = 0u64;
@@ -332,13 +338,13 @@ fn create_sync(
         database_bytes = database_bytes
             .checked_add(n as u64)
             .ok_or(BundleError::InvalidBundle)?;
-        record(&mut output, &key, &header, counter, 2, &buffer[..n])?;
-        counter = counter.checked_add(1).ok_or(BundleError::InvalidBundle)?;
+        record(&mut output, &mut checksum, 2, &buffer[..n])?;
     }
     if database_bytes == 0 {
         return Err(BundleError::InvalidBundle);
     }
-    record(&mut output, &key, &header, counter, 3, &[])?;
+    record(&mut output, &mut checksum, 3, &[])?;
+    output.write_all(&checksum.finalize())?;
     output.sync_all()?;
     let bytes = output.metadata()?.len();
     drop(output);
@@ -354,37 +360,37 @@ fn create_sync(
     guard.1 = false;
     Ok(bytes)
 }
-/// Authenticate all records in a private sibling staging directory, then publish atomically.
-pub async fn extract(
-    source: &Path,
-    target_dir: &Path,
-    key_hex: &str,
-) -> Result<BundleSummary, BundleError> {
+/// Verify the checksum and record structure in a private staging directory, then publish.
+pub async fn extract(source: &Path, target_dir: &Path) -> Result<BundleSummary, BundleError> {
     let source = source.to_owned();
     let target = target_dir.to_owned();
-    let key = decode_key(key_hex)?;
-    tokio::task::spawn_blocking(move || extract_sync(&source, &target, &key[..]))
+    tokio::task::spawn_blocking(move || extract_sync(&source, &target))
         .await
         .map_err(|_| BundleError::Worker)?
 }
-fn extract_sync(source: &Path, target: &Path, root: &[u8]) -> Result<BundleSummary, BundleError> {
+fn extract_sync(source: &Path, target: &Path) -> Result<BundleSummary, BundleError> {
     let temp = fresh_temp(target)?;
     private_dir(&temp)?;
     let mut guard = Cleanup(temp.clone(), true);
     let mut input = File::open(source)?;
-    let mut header = [0; 40];
+    let mut header = [0; 8];
     input
         .read_exact(&mut header)
         .map_err(|_| BundleError::InvalidBundle)?;
-    if &header[..8] != MAGIC {
+    if &header != MAGIC {
         return Err(BundleError::InvalidBundle);
     }
-    let key = cipher(root, &header[8..])?;
-    let mut counter = 0u64;
+    let mut checksum = Sha256::new();
+    checksum.update(header);
+    let mut first = true;
     let mut database: Option<File> = None;
     let mut result: Option<BundleSummary> = None;
     let mut attachments = BTreeMap::<u8, (File, u64, u64)>::new();
     let mut database_started = false;
+    let mut expected_assets = (0u64, 0u64);
+    let mut current_asset: Option<CurrentAsset> = None;
+    let mut asset_index: Vec<AssetHeader> = Vec::new();
+    let mut asset_total = 0u64;
     loop {
         let mut frame = [0; 5];
         input
@@ -397,24 +403,20 @@ fn extract_sync(source: &Path, target: &Path, root: &[u8]) -> Result<BundleSumma
                 .map_err(|_| BundleError::InvalidBundle)?,
         ) as usize;
         if len > CHUNK
-            || !matches!(kind, 1..=7)
-            || (counter == 0) != (kind == 1)
-            || (matches!(kind, 2 | 4..=7) && len == 0)
+            || !matches!(kind, 1..=9)
+            || first != (kind == 1)
+            || (matches!(kind, 2 | 4..=9) && len == 0)
             || (kind == 3 && len != 0)
         {
             return Err(BundleError::InvalidBundle);
         }
-        let mut data = Zeroizing::new(vec![0; len + aead::AES_256_GCM.tag_len()]);
+        let mut data = Zeroizing::new(vec![0; len]);
         input
             .read_exact(&mut data)
             .map_err(|_| BundleError::InvalidBundle)?;
-        let plain = key
-            .open_in_place(
-                nonce(counter),
-                aead::Aad::from(aad(&header, counter, kind, len as u32)),
-                &mut data,
-            )
-            .map_err(|_| BundleError::InvalidBundle)?;
+        checksum.update(frame);
+        checksum.update(&*data);
+        let plain = &data[..];
         match kind {
             1 => {
                 let manifest: Manifest =
@@ -445,9 +447,45 @@ fn extract_sync(source: &Path, target: &Path, root: &[u8]) -> Result<BundleSumma
                     engine: manifest.engine,
                     database_file: file.into(),
                     bytes: 0,
+                    assets: 0,
                 });
+                expected_assets = (manifest.assets, manifest.asset_bytes);
+                if manifest.assets > 0 {
+                    private_dir(&temp.join("assets"))?;
+                }
+            }
+            8 => {
+                if database_started || result.is_none() {
+                    return Err(BundleError::InvalidBundle);
+                }
+                finish_asset(&mut current_asset, &mut asset_index, &mut asset_total)?;
+                let h: AssetHeader =
+                    serde_json::from_slice(plain).map_err(|_| BundleError::InvalidBundle)?;
+                if !crate::assets::is_sha256_hex(&h.sha256)
+                    || h.size == 0
+                    || h.mime.len() > 100
+                    || asset_index.iter().any(|a| a.sha256 == h.sha256)
+                {
+                    return Err(BundleError::InvalidBundle);
+                }
+                let file = private_file(&temp.join("assets").join(&h.sha256))?;
+                current_asset = Some((h, file, <sha2::Sha256 as sha2::Digest>::new(), 0));
+            }
+            9 => {
+                if database_started {
+                    return Err(BundleError::InvalidBundle);
+                }
+                let (h, file, hasher, copied) =
+                    current_asset.as_mut().ok_or(BundleError::InvalidBundle)?;
+                *copied += len as u64;
+                if *copied > h.size {
+                    return Err(BundleError::InvalidBundle);
+                }
+                sha2::Digest::update(hasher, plain);
+                file.write_all(plain)?;
             }
             2 => {
+                finish_asset(&mut current_asset, &mut asset_index, &mut asset_total)?;
                 database_started = true;
                 database
                     .as_mut()
@@ -475,6 +513,10 @@ fn extract_sync(source: &Path, target: &Path, root: &[u8]) -> Result<BundleSumma
                 file.write_all(plain)?;
             }
             3 => {
+                finish_asset(&mut current_asset, &mut asset_index, &mut asset_total)?;
+                if expected_assets != (asset_index.len() as u64, asset_total) {
+                    return Err(BundleError::InvalidBundle);
+                }
                 if attachments
                     .values()
                     .any(|(_, expected, copied)| expected != copied)
@@ -482,6 +524,13 @@ fn extract_sync(source: &Path, target: &Path, root: &[u8]) -> Result<BundleSumma
                     return Err(BundleError::InvalidBundle);
                 }
                 if result.as_ref().is_none_or(|summary| summary.bytes == 0) {
+                    return Err(BundleError::InvalidBundle);
+                }
+                let mut expected = [0; 32];
+                input
+                    .read_exact(&mut expected)
+                    .map_err(|_| BundleError::InvalidBundle)?;
+                if checksum.finalize().as_slice() != expected {
                     return Err(BundleError::InvalidBundle);
                 }
                 let mut trailing = [0; 1];
@@ -492,7 +541,7 @@ fn extract_sync(source: &Path, target: &Path, root: &[u8]) -> Result<BundleSumma
             }
             _ => return Err(BundleError::InvalidBundle),
         }
-        counter = counter.checked_add(1).ok_or(BundleError::InvalidBundle)?;
+        first = false;
     }
     database
         .as_mut()
@@ -502,11 +551,39 @@ fn extract_sync(source: &Path, target: &Path, root: &[u8]) -> Result<BundleSumma
     for (_, (file, _, _)) in attachments {
         file.sync_all()?;
     }
+    if !asset_index.is_empty() {
+        let mut list = private_file(&temp.join("assets.json"))?;
+        serde_json::to_writer(&mut list, &asset_index).map_err(|_| BundleError::InvalidBundle)?;
+        list.sync_all()?;
+        sync_directory(&temp.join("assets"))?;
+    }
+    if let Some(summary) = result.as_mut() {
+        summary.assets = asset_index.len() as u64;
+    }
     sync_directory(&temp)?;
     publish_dir(&temp, target)?;
     sync_directory(target.parent().ok_or(BundleError::InvalidConfig)?)?;
     guard.1 = false;
     result.ok_or(BundleError::InvalidBundle)
+}
+type CurrentAsset = (AssetHeader, File, sha2::Sha256, u64);
+/// Close the asset being extracted: size and SHA-256 must both match what the header promised.
+fn finish_asset(
+    current: &mut Option<CurrentAsset>,
+    index: &mut Vec<AssetHeader>,
+    total: &mut u64,
+) -> Result<(), BundleError> {
+    if let Some((header, file, hasher, copied)) = current.take() {
+        if copied != header.size || hex_digest(sha2::Digest::finalize(hasher)) != header.sha256 {
+            return Err(BundleError::InvalidBundle);
+        }
+        file.sync_all()?;
+        *total = total
+            .checked_add(copied)
+            .ok_or(BundleError::InvalidBundle)?;
+        index.push(header);
+    }
+    Ok(())
 }
 fn sync_directory(path: &Path) -> Result<(), BundleError> {
     #[cfg(unix)]
@@ -576,38 +653,31 @@ fn publish_dir(source: &Path, target: &Path) -> Result<(), BundleError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn authenticated_empty_database_and_key_file_manifest_are_rejected() {
-        let directory = tempfile::tempdir().unwrap();
-        for (index, config) in [
-            BTreeMap::new(),
-            BTreeMap::from([(
-                "MEDIA_BACKUP_KEY_FILE".to_owned(),
-                "secret-location".to_owned(),
-            )]),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let archive = directory.path().join(format!("empty-{index}"));
-            let mut file = private_file(&archive).unwrap();
-            let mut header = [0; 40];
-            header[..8].copy_from_slice(MAGIC);
-            header[8..].fill(index as u8 + 1);
-            let key = cipher(&[7; 32], &header[8..]).unwrap();
-            file.write_all(&header).unwrap();
-            let manifest = serde_json::to_vec(&Manifest {
-                engine: "sqlite".into(),
-                config,
-                attachments: BTreeMap::new(),
-            })
+
+    #[tokio::test]
+    async fn keyless_bundle_round_trip_and_rejects_legacy_magic() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("db");
+        fs::write(&db, b"sqlite-bytes").unwrap();
+        let archive = dir.path().join("new.media-backup");
+        create(&db, BTreeMap::new(), &archive, "sqlite")
+            .await
             .unwrap();
-            record(&mut file, &key, &header, 0, 1, &manifest).unwrap();
-            record(&mut file, &key, &header, 1, 3, &[]).unwrap();
-            drop(file);
-            let output = directory.path().join(format!("output-{index}"));
-            assert!(extract_sync(&archive, &output, &[7; 32]).is_err());
-            assert!(!output.exists());
-        }
+        let output = dir.path().join("output");
+        let summary = extract(&archive, &output).await.unwrap();
+        assert_eq!(summary.bytes, 12);
+        assert_eq!(
+            fs::read(output.join("database.sqlite3")).unwrap(),
+            b"sqlite-bytes"
+        );
+        let mut old = fs::read(&archive).unwrap();
+        old[..8].copy_from_slice(b"MDBK0001");
+        let old_path = dir.path().join("old.media-backup");
+        fs::write(&old_path, old).unwrap();
+        assert!(
+            extract(&old_path, &dir.path().join("old-output"))
+                .await
+                .is_err()
+        );
     }
 }

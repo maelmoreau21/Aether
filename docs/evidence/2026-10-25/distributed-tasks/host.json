@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-25",
+  "platform": {
+    "Caption": "Microsoft Windows 11 Famille",
+    "Version": "10.0.26300",
+    "OSArchitecture": "64 bits"
+  },
+  "cpu": {
+    "Name": "Intel(R) Core(TM) Ultra 7 256V",
+    "NumberOfLogicalProcessors": 8
+  },
+  "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "profile": "test / unoptimized + debuginfo",
+  "database": "SQLite WAL",
+  "notes": "Local Windows test processes; simulated Node identities; no NAS or physical multi-machine benchmark."
+}

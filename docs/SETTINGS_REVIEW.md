@@ -32,3 +32,11 @@ Prochains petits lots proposés, à valider après retour sur l’interface :
 Les prochains lots restent des manques de produit, pas des fonctionnalités livrées.
 Contrats actuels, quatre modes d’actualisation et préparation des fournisseurs : [SETTINGS_AND_REFRESH.md](SETTINGS_AND_REFRESH.md).
 Les résultats des contrôles réellement exécutés sont consignés dans MEMORY.md.
+
+## Navigation du compte — 25 octobre 2026
+
+Compte réunit le profil, l’image, le thème et la langue. Sécurité réunit le mot de passe et le SSO. Appareils possède sa page de sessions ; Lecture conserve les préférences du lecteur. Les anciens liens `#appearance` et `#sso` arrivent respectivement sur Compte et Sécurité. Le texte générique d’enregistrement est supprimé.
+
+GET `/api/v1/account/avatar/policy` authentifié retourne `{uploadAllowed,removeAllowed}` sans cache. Les extensions actives d’un éditeur actif avec permission `avatars` interdisent l’import via `disallow_custom_avatars` et la suppression via `force_random_on_creation` ou `require_avatar`. Ces restrictions sont aussi appliquées à PUT/DELETE avatar, y compris pour les administrateurs. Les boutons concernés sont masqués. Le bouton de sélection apparaît pour les collections disponibles ou les extensions actives et présente les propositions derrière ce bouton.
+
+L’en-tête administratif présente le logo puis Menu et Retour. Le tiroir contient aussi un lien logo vers l’accueil et Retour.

@@ -75,6 +75,8 @@ fn test_structured_metadata_roundtrip() {
             is_primary: true,
         }],
         images: vec![],
+        seasons: vec![],
+        translations: BTreeMap::new(),
     };
 
     let json = serde_json::to_string(&meta).unwrap();
@@ -98,6 +100,7 @@ fn test_search_and_query_roundtrip() {
     let item = SearchResultItem {
         id: "27205".into(),
         title: "Inception".into(),
+        artist: None,
         original_title: Some("Inception".into()),
         year: Some(2010),
         media_type: MediaType::Movie,
@@ -108,6 +111,16 @@ fn test_search_and_query_roundtrip() {
     let item_json = serde_json::to_string(&item).unwrap();
     let item_d: SearchResultItem = serde_json::from_str(&item_json).unwrap();
     assert_eq!(item, item_d);
+    let music: SearchResultItem = serde_json::from_value(
+        serde_json::json!({"id":"album","title":"Album","mediaType":"music","artist":"Artist"}),
+    )
+    .unwrap();
+    assert_eq!(music.artist.as_deref(), Some("Artist"));
+    let legacy: SearchResultItem = serde_json::from_value(
+        serde_json::json!({"id":"album","title":"Album","mediaType":"music"}),
+    )
+    .unwrap();
+    assert_eq!(legacy.artist, None);
 }
 
 #[test]

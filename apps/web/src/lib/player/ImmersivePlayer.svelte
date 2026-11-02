@@ -6,27 +6,44 @@
   import PlayerControls, { type Menu } from './PlayerControls.svelte';
   import type { Media, Player, PlayerFactory, PlaybackState } from './types';
   import { preferredSubtitle, type SubtitlePreference } from './subtitle-preference';
+  import { subtitleStyleToCss, type SubtitleStyle } from './subtitle-style';
   import { ProgressTracker } from './progress';
-  import { getSessionGeneration } from '../auth/session';
+  import { PlaybackPresence } from './presence';
+  import { session, getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
-  import { chooseSource, playbackMime, audioLanguage, audioSelectionNotice } from './source-selection';
+  import { chooseSource, playbackMime, audioLanguage } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
   import { revalidateMediaDescriptor } from '../catalog/api';
+  import { bufferedAhead } from './startup-buffer';
+  import { SyncPartyClient } from '../syncplay/sync-client.svelte';
+  import { applyPartyPlayback } from '../syncplay/player-sync';
+  import WatchPartyOverlay from '../syncplay/WatchPartyOverlay.svelte';
   let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
   let autoplayNext = $state(false);
+  let syncClient = $state<SyncPartyClient | null>(null);
   let dialog: HTMLDialogElement;
   let surface: HTMLDivElement;
   let video: HTMLVideoElement;
   let controls = $state<PlayerControls>();
   let engine: Player | undefined;
   let progressTracker: ProgressTracker | undefined;
+  let presence: PlaybackPresence | undefined;
   let opened = $state(false);
   let active = $state<Media | undefined>();
   let busy = $state(false);
   let error = $state('');
   let notice = $state('');
   let statistics = $state(false);
-  let metrics = $state({ width: 0, height: 0, frames: 0, dropped: 0, buffered: 0, ready: 0, network: 0 });
+  let markerEditor = $state(false);
+  let markerKind = $state<'intro' | 'credits' | 'recap' | 'preview'>('intro');
+  let hasAutoSkippedIntro = false;
+  let hasAutoSkippedCredits = false;
+  let markerEnabled = $state(true);
+  let markerStart = $state(0);
+  let markerEnd = $state(0);
+  let markerSaving = $state(false);
+  let markerError = $state('');
+  let metrics = $state({ width: 0, height: 0, frames: 0, dropped: 0, buffered: 0, audioBuffered: null as number | null, ready: 0, network: 0 });
   const selectedSource = $derived(active?.sources.find(source => source.audioTrackId === audio));
   let loadStage = $state('Chargement de votre séance…');
   let audio = $state('');
@@ -36,6 +53,8 @@
   let subtitleOffset = $state(0);
   let subtitle = $state<string | null>(null);
   let subtitlePreference: SubtitlePreference | undefined;
+  let subtitleStyle = $state<SubtitleStyle | undefined>();
+  const activeSubtitleCss = $derived(subtitleStyleToCss(subtitleStyle));
   let menu = $state<Menu>(null);
   let fullscreen = $state(false);
   let visible = $state(true);
@@ -57,6 +76,18 @@
     playback = { ...snapshot, duration: Number.isFinite(snapshot.duration) ? snapshot.duration : 0 };
     paused = snapshot.paused;
     if (!busy) progressTracker?.save(playback);
+    if (!busy && !paused && syncClient?.connected && syncClient.party?.state === 'playing'
+      && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs()) {
+      const correction = syncClient.evaluateDrift(playback.position);
+      if (correction.action === 'rate') {
+        engine.setSpeed(correction.playbackRate);
+      } else if (correction.action === 'seek') {
+        engine.seek(correction.targetPosition);
+        engine.setSpeed(1.0);
+      } else if (video.playbackRate !== 1.0) {
+        engine.setSpeed(1.0);
+      }
+    }
   }
   function armIdle() {
     clearTimeout(idle);
@@ -66,6 +97,28 @@
   function wake() { visible = true; armIdle(); }
   $effect(() => { armIdle(); return () => clearTimeout(idle); });
   $effect(() => { if (opened && !visible) surface?.focus(); });
+  $effect(() => {
+    const pos = playback.position;
+    const dur = playback.duration;
+    if (!opened || busy || paused || dur <= 0 || syncClient) return;
+    const prefs = preferences();
+    if (prefs.autoSkipIntro && active?.intro && !hasAutoSkippedIntro) {
+      if (pos >= active.intro.start && pos < active.intro.end - 1.0) {
+        hasAutoSkippedIntro = true;
+        engine?.seek(active.intro.end);
+        notice = "Introduction sautée automatiquement";
+      }
+    }
+    if (prefs.autoSkipCredits && active?.credits && !hasAutoSkippedCredits) {
+      if (pos >= active.credits.start && pos < active.credits.end - 1.0) {
+        hasAutoSkippedCredits = true;
+        if (active.credits.end < dur - 10) {
+          engine?.seek(active.credits.end);
+          notice = "Générique sauté automatiquement";
+        }
+      }
+    }
+  });
   async function tryAutomaticFailover(): Promise<boolean> {
     if (!opened || !engine || !active || failoverInProgress) return false;
     const current = generation;
@@ -137,6 +190,16 @@
     if (media.failoverFrom) triedMediaIds.add(media.failoverFrom);
     busy = true; error = ''; notice = ''; wake();
     try {
+      // Progress and account preferences are independent reads. Start both
+      // before choosing a track so a cold preferences request does not delay
+      // the saved position request; track selection still waits for preferences.
+      const creditsChapter = media.chapters?.find(ch => /cr[eé]dits?|g[eé]n[eé]rique|outro|ending/i.test(ch.title) && ch.start > 0);
+      const detectedCreditsStart = media.credits?.start ?? creditsChapter?.start;
+      const tracker = !restore && media.workId && !media.synthetic
+        ? new ProgressTracker(media.workId, message => { if (current === generation) notice = message; }, detectedCreditsStart) : undefined;
+      if (tracker) progressTracker = tracker;
+      else progressTracker?.setCreditsStart(detectedCreditsStart);
+      const resume = tracker?.load();
       // Preferences are optional: an outage must not prevent authorized playback.
       // preferences() is cleared by session generation changes.
       let preferenceNotice = '';
@@ -146,22 +209,50 @@
       readPlaybackPreferences();
       const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))));
       if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
-      const tracker = !restore && media.workId && !media.synthetic
-        ? new ProgressTracker(media.workId, message => { if (current === generation) notice = message; }) : undefined;
-      if (tracker) progressTracker = tracker;
-      const resume = tracker?.load();
-      await engine.load(media, source.audioTrackId, restore?.position ?? resume ?? 0);
+      if (syncClient) await resume; // Load the progress revision before collective playback saves it.
+      if (current !== generation) return;
+      await engine.load(media, source.audioTrackId, syncClient ? syncClient.getComputedPartyPosition() : restore?.position ?? resume ?? 0);
       if (current !== generation) return;
       const autoFailoverMsg = failoverNotice || (media.failoverFrom ? 'Basculement automatique sur un nœud disponible.' : '');
-      notice = autoFailoverMsg || preferenceNotice || audioSelectionNotice(media, source, preferredLanguage);
+      notice = autoFailoverMsg || preferenceNotice;
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
-      await engine.selectSubtitle(usableSubtitle); subtitle = usableSubtitle;
+      // Embedded subtitle extraction can take substantially longer than the
+      // first video/audio data. Start it now but do not hold playback for it.
+      const subtitleLoading = engine.selectSubtitle(usableSubtitle);
+      subtitle = usableSubtitle;
+      void subtitleLoading.catch(error => {
+        if (current === generation && subtitle === usableSubtitle) {
+          subtitle = null;
+          notice = error instanceof Error ? error.message : 'Sous-titres indisponibles.';
+        }
+      });
+      // Legacy audio windows share the Node's single FFmpeg worker with
+      // subtitle extraction. Keep their existing ordering so an extraction
+      // cannot starve the next audio window during playback.
+      if (source.audioSegmentUrl && source.audioSegmentMode !== 'absolute') await subtitleLoading;
       if (restore) { engine.setVolume(restore.volume); engine.setSpeed(restore.speed); }
       if (current !== generation) return;
-      active = media;
-      if (!restore || !restore.paused) await engine.play();
+      hasAutoSkippedIntro = false;
+      hasAutoSkippedCredits = false;
+      const skipPreferences = preferences();
+      active = {
+        ...media,
+        intro: skipPreferences.skipIntroEnabled === false ? undefined : media.intro,
+        credits: skipPreferences.skipCreditsEnabled === false ? undefined : media.credits,
+        recap: media.recap,
+        preview: media.preview
+      };
+      presence?.stop();presence=undefined;
+      if(media.workId&&!media.synthetic)presence=new PlaybackPresence(media.workId,()=>engine?.state());
+      if (syncClient) {
+        await applyPartyPlayback(engine, syncClient.party?.state === 'playing'
+          && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs() ? 'playing' : 'paused',
+          syncClient.getComputedPartyPosition());
+        syncClient.setReady(true);
+        syncClient.setBuffering(false, engine.state().position);
+      } else if (!restore || !restore.paused) await engine.play();
     } catch (e) { if (current === generation) fail(e instanceof Error ? e.message : String(e)); }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
   }
@@ -180,7 +271,47 @@
       if (initialSubtitles === 'off') subtitlePreference = { enabled: false };
       else if (initialSubtitles === 'always') subtitlePreference = { enabled: true, language: 'fr', forced: false };
       else subtitlePreference = undefined;
+      subtitleStyle = account.subtitleStyle;
     } catch { /* Preferences are optional when browser storage is unavailable. */ }
+  }
+  function editMarker(kind: 'intro' | 'credits' | 'recap' | 'preview') {
+    markerKind = kind;
+    const value = active?.[kind];
+    markerEnabled = Boolean(value);
+    markerStart = value?.start ?? Math.floor(playback.position);
+    markerEnd = value?.end ?? Math.min(playback.duration, markerStart + 60);
+    markerError = '';
+    markerEditor = true;
+    wake();
+  }
+  async function saveMarker(remove = false) {
+    const account = $session;
+    if (!account || !active || markerSaving) return;
+    const assetId = active.id;
+    markerSaving = true; markerError = '';
+    try {
+      const response = await fetch(`/api/v1/admin/assets/${encodeURIComponent(assetId)}/markers/${markerKind}`, {
+        method: remove ? 'DELETE' : 'PUT', credentials: 'same-origin',
+        headers: { 'x-csrf-token': account.csrfToken, 'content-type': 'application/json' },
+        body: remove ? undefined : JSON.stringify(markerEnabled ? { enabled: true, start: markerStart, end: markerEnd } : { enabled: false })
+      });
+      if (!response.ok) throw new Error(`Correction refusée (${response.status}).`);
+      if (active?.id !== assetId) return;
+      if (remove) {
+        const fresh = await revalidateMediaDescriptor(assetId);
+        if (fresh && active?.id === assetId) active = {
+          ...fresh,
+          intro: preferences().skipIntroEnabled === false ? undefined : fresh.intro,
+          credits: preferences().skipCreditsEnabled === false ? undefined : fresh.credits,
+          recap: fresh.recap,
+          preview: fresh.preview
+        };
+      } else {
+        active = { ...active, [markerKind]: markerEnabled ? { start: markerStart, end: markerEnd } : undefined };
+      }
+      markerEditor = false;
+    } catch (error) { markerError = error instanceof Error ? error.message : 'Correction indisponible.'; }
+    finally { markerSaving = false; }
   }
   export function open(media: Media | Promise<Media>) {
     if (opened) return false;
@@ -205,9 +336,14 @@
   }
   export function close() {
     if (!opened) return;
+    if (syncClient) {
+      syncClient.leave();
+      syncClient = null;
+    }
     if (engine) progressTracker?.save(engine.state(), true);
     progressTracker = undefined;
-    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null;
+    presence?.stop();presence=undefined;
+    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null; markerEditor = false;
     const returnTarget = opener;
     const restoreNavigation = () => {
       if (opened || generation !== closedGeneration) return;
@@ -230,11 +366,52 @@
     failoverInProgress = false;
     progressTracker?.save(engine.state(), true);
     progressTracker = undefined;
+    presence?.stop();presence=undefined;
     active = media;
     // Keep the dialog, focus context and fullscreen through episode transitions.
     void prepare(media);
   }
   export function reportError(message: string) { fail(message); }
+  export function joinParty(partyId: string, media: Media | Promise<Media>) {
+    if (syncClient) {
+      syncClient.leave();
+      syncClient = null;
+    }
+    syncClient = new SyncPartyClient(partyId, $session?.user.id ?? '');
+    setupSyncClientHooks();
+    if (!opened) open(media);
+    else if (media instanceof Promise) {
+      const client = syncClient;
+      void media.then(item => { if (syncClient === client && opened) changeMedia(item); })
+        .catch(cause => { if (syncClient === client) fail(cause instanceof Error ? cause.message : String(cause)); });
+    } else changeMedia(media);
+  }
+  function setupSyncClientHooks() {
+    if (!syncClient) return;
+    const client = syncClient;
+    syncClient.onPlaybackUpdate = (state, position) => {
+      // Received commands apply locally even in host_only mode. Never send a
+      // command back through the user-control path (which caused seek loops).
+      if (!engine || busy) return;
+      client.setReady(true);
+      void applyPartyPlayback(engine, state, position).catch(cause => {
+        notice = cause instanceof Error ? cause.message : 'Lecture collective indisponible.';
+      });
+    };
+    syncClient.onMediaChanged = (newMediaId) => {
+      const found = catalogue.find(m => m.id === newMediaId || m.workId === newMediaId);
+      if (found) changeMedia(found);
+      else void revalidateMediaDescriptor(newMediaId).then(media => {
+        if (syncClient === client && opened) changeMedia(media);
+      }).catch(cause => { notice = cause instanceof Error ? cause.message : 'Média indisponible.'; });
+    };
+  }
+  function reportBuffering(buffering: boolean) {
+    if (!busy && engine && syncClient?.connected) {
+      syncClient.setBuffering(buffering, engine.state().position);
+    }
+  }
+
   function requestFullscreen() {
     if (!surface.requestFullscreen) { notice = 'Plein écran indisponible. Le mode immersif reste actif.'; return; }
     void surface.requestFullscreen().then(() => {
@@ -246,10 +423,33 @@
     else requestFullscreen();
     wake();
   }
-  function togglePlayback() { void action(async player => { if (player.state().paused) await player.play(); else player.pause(); }); }
+  function togglePlayback() {
+    if (syncClient && !syncClient.canControl) {
+      notice = 'Contrôles réservés à l’organisateur';
+      wake();
+      return;
+    }
+    if (syncClient) {
+      if (paused) syncClient.play(playback.position);
+      else syncClient.pause(playback.position);
+      return;
+    }
+    void action(async player => { if (player.state().paused) await player.play(); else player.pause(); });
+  }
   function volume(value: number) { engine?.setVolume(value); if (value > 0) previousVolume = value; sync(); wake(); }
   function mute() { volume(playback.volume === 0 ? previousVolume || 1 : 0); }
-  function seek(value: number) { if (!busy) { engine?.seek(value); sync(); wake(); } }
+  function seek(value: number) {
+    if (syncClient && !syncClient.canControl) {
+      notice = 'Contrôles réservés à l’organisateur';
+      wake();
+      return;
+    }
+    if (syncClient) {
+      syncClient.seek(value);
+      return;
+    }
+    if (!busy) { engine?.seek(value); sync(); wake(); }
+  }
   function selectAudio(id: string) {
     const current = generation;
     const accountGeneration = getSessionGeneration();
@@ -310,7 +510,7 @@
     keyboard(event);
   }
   function cancel(event: Event) { event.preventDefault(); if (menu) controls?.closeMenu(); else close(); }
-  function ended() { sync(); if (engine) progressTracker?.save(engine.state(), true, true); if (autoplayNext && onNext) onNext(); }
+  function ended() { sync(); if (engine) progressTracker?.save(engine.state(), true, true); if (!syncClient && autoplayNext && onNext) onNext(); }
   $effect(() => {
     if (!opened || !statistics) return;
     const update = () => {
@@ -319,7 +519,8 @@
       for (let i = 0; i < video.buffered.length; i++) {
         if (video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)) buffered = video.buffered.end(i) - video.currentTime;
       }
-      metrics = { width: video.videoWidth, height: video.videoHeight, frames: quality?.totalVideoFrames ?? 0, dropped: quality?.droppedVideoFrames ?? 0, buffered, ready: video.readyState, network: video.networkState };
+      const separateAudio = surface.querySelector<HTMLAudioElement>('audio[data-active-audio="true"]');
+      metrics = { width: video.videoWidth, height: video.videoHeight, frames: quality?.totalVideoFrames ?? 0, dropped: quality?.droppedVideoFrames ?? 0, buffered, audioBuffered: separateAudio ? bufferedAhead(separateAudio) : null, ready: video.readyState, network: video.networkState };
     };
     update();
     const timer = setInterval(update, 1000);
@@ -339,14 +540,49 @@
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = true; wake(); }} onkeydown={keyboard}
     onpointermove={event => { if (event.pointerType !== 'touch') wake(); }} onpointerdown={() => { keyboardPinned = false; surface?.focus(); }}>
-    <video bind:this={video} playsinline preload="auto" loop={repeat} style:object-fit={aspectRatio} ontimeupdate={sync} ondurationchange={sync} onplay={sync} onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }} onended={ended}><track kind="captions" /></video>
+    <video
+      bind:this={video}
+      playsinline
+      preload="auto"
+      loop={repeat}
+      style:object-fit={aspectRatio}
+      style:--sub-color={activeSubtitleCss.color}
+      style:--sub-size={activeSubtitleCss.fontSize}
+      style:--sub-font={activeSubtitleCss.fontFamily}
+      style:--sub-bg={activeSubtitleCss.backgroundColor}
+      style:--sub-shadow={activeSubtitleCss.textShadow}
+      ontimeupdate={sync}
+      ondurationchange={sync}
+      onwaiting={() => reportBuffering(true)}
+      oncanplay={() => reportBuffering(false)}
+      onplaying={() => reportBuffering(false)}
+      onplay={sync}
+      onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }}
+      onended={ended}
+    ><track kind="captions" /></video>
     {#if active?.chapters?.length && visible}<label class="chapters">Chapitres<select aria-label="Chapitres vidéo" disabled={busy} onchange={event => seek(Number(event.currentTarget.value))}><option value="" disabled selected>Choisir un chapitre</option>{#each active.chapters as chapter,i (`${chapter.start}-${i}`)}<option value={chapter.start}>{i+1}. {chapter.title}</option>{/each}</select></label>{/if}
     <button class="video-interaction" tabindex="-1" aria-label="Afficher ou masquer les commandes" onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
       <button class="return" aria-label="Retour à l’accueil" onclick={close}><Icon name="back" size={24} /></button>
       <div class="title"><span>{active?.title ?? 'Votre séance'}</span></div>
       {#if nextTitle && onNext}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} /> Enchaîner automatiquement</label></div>{/if}
+      {#if $session?.user.role === 'administrator' && active?.episode}<button type="button" onclick={() => editMarker('intro')}>Corriger les marqueurs</button>{/if}
     </div>
+    {#if markerEditor && active?.episode}
+      <section class="marker-editor" aria-label="Correction des marqueurs">
+        <h2>Marqueur manuel</h2>
+        <label>Type<select bind:value={markerKind} onchange={() => editMarker(markerKind)}><option value="intro">Introduction</option><option value="credits">Générique de fin</option><option value="recap">Résumé</option><option value="preview">Aperçu</option></select></label>
+        <label><input type="checkbox" bind:checked={markerEnabled} /> Activer ce marqueur</label>
+        {#if markerEnabled}
+          <label>Début (secondes)<input type="number" min="0" step="0.1" bind:value={markerStart} /></label>
+          <label>Fin (secondes)<input type="number" min="0" max={playback.duration} step="0.1" bind:value={markerEnd} /></label>
+        {/if}
+        {#if markerError}<p role="alert">{markerError}</p>{/if}
+        <button type="button" disabled={markerSaving} onclick={() => void saveMarker()}>Enregistrer</button>
+        <button type="button" disabled={markerSaving} onclick={() => void saveMarker(true)}>Revenir à la détection</button>
+        <button type="button" onclick={() => markerEditor = false}>Fermer</button>
+      </section>
+    {/if}
     {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" /><span>Chargement de la vidéo…</span><button onclick={close}>Annuler</button></div>{/if}
     {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, { ...playback, paused: false }); }}>Réessayer</button></div>{/if}
     {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label="Données de lecture">
@@ -357,6 +593,7 @@
         <dt>Vidéo décodée</dt><dd>{metrics.width} × {metrics.height}</dd>
         <dt>Images / perdues</dt><dd>{metrics.frames} / {metrics.dropped}</dd>
         <dt>Vidéo en mémoire tampon</dt><dd>{metrics.buffered.toFixed(1)} s</dd>
+        <dt>Audio séparé en mémoire tampon</dt><dd>{metrics.audioBuffered === null ? 'Non utilisé' : `${metrics.audioBuffered.toFixed(1)} s`}</dd>
         <dt>Position / durée</dt><dd>{playback.position.toFixed(1)} / {playback.duration.toFixed(1)} s</dd>
         <dt>Vitesse</dt><dd>{playback.speed}×</dd>
         <dt>readyState / networkState</dt><dd>{metrics.ready} / {metrics.network}</dd>
@@ -372,6 +609,9 @@
       <p>Les pistes déclarées ne prouvent pas la sortie audio physique. Débit réseau non mesuré.</p>
     </section>{/if}
     <p class="fullscreen-notice" role="status">{notice}</p>
+    {#if syncClient}
+      <WatchPartyOverlay client={syncClient} onCloseParty={() => { syncClient?.leave(); syncClient = null; }} />
+    {/if}
     {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
       {aspectRatio} onAspectRatio={r => aspectRatio = r} {repeat} onRepeat={r => repeat = r} onStats={() => { statistics = true; wake(); }}
       onPlay={togglePlayback} onVolume={volume} onMute={mute} onSeek={seek} onAudio={selectAudio} onSubtitle={selectSubtitle} onSource={selectSource}
@@ -380,6 +620,8 @@
 </dialog>
 
 <style>
+  .marker-editor { position:absolute;z-index:10;top:90px;right:24px;display:grid;gap:10px;width:min(340px,calc(100% - 48px));padding:16px;background:#171923;color:white;border:1px solid #ffffff50;border-radius:10px; }
+  .marker-editor label { display:grid;gap:4px; }
   .stream-statistics button { color:#eee; background:#ffffff15; border:1px solid #ffffff30; border-radius:8px; padding:10px 14px; cursor:pointer; }
   .stream-statistics { position:absolute; z-index:7; top:90px; right:24px; width:min(460px,calc(100% - 48px)); max-height:calc(100dvh - 230px); overflow:auto; padding:20px; box-sizing:border-box; background:rgba(16,17,25,.96); color:#eee; border:1px solid #ffffff25; border-radius:12px; font-size:12px; overflow-wrap:anywhere; }
   .stream-statistics header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
@@ -387,7 +629,14 @@
   .stream-statistics dd { margin:0; } .stream-statistics dt, .stream-statistics p { color:#bbb8ca; }
 
   .chapters { position:absolute;top:90px;right:24px;z-index:4;display:grid;gap:6px;max-width:70%; } .chapters select { padding:10px;max-width:100%;color:var(--color-text);background:var(--color-surface);border:1px solid var(--color-line);border-radius:6px; }
-  video::cue { color:#fff; background:rgba(0,0,0,.8); text-shadow:0 1px 2px #000; font-size:clamp(18px,2vw,30px); }
+  video::cue {
+    color: var(--sub-color, #ffffff);
+    background: var(--sub-bg, transparent);
+    text-shadow: var(--sub-shadow, 0 2px 4px rgba(0, 0, 0, 0.9));
+    font-size: var(--sub-size, clamp(18px, 2.2vw, 30px));
+    font-family: var(--sub-font, system-ui, -apple-system, sans-serif);
+    line-height: 1.35;
+  }
   .next-episode { margin-left:auto; max-width:50%; font-size:12px; } .next-episode label { display:flex; align-items:center; gap:8px; }
   .title { min-width:0; flex:1; } .title>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   :global(body.immersive-open) { overflow: hidden; }

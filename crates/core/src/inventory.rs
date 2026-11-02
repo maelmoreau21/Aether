@@ -350,7 +350,9 @@ pub async fn ingest(
         }
     }
     refresh_editorial(&mut tx, library_id).await?;
-    tx.commit().await
+    tx.commit().await?;
+    crate::system_memory::trim_memory();
+    Ok(())
 }
 
 pub async fn clean_staging(store: &IdentityStore, scan_id: &str) -> Result<(), sqlx::Error> {
@@ -387,6 +389,7 @@ pub async fn stage_batch(
         == 0
     {
         tx.commit().await?;
+        crate::system_memory::trim_memory();
         return Ok(());
     }
     let encoded: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
@@ -574,7 +577,9 @@ pub async fn stage_batch(
         query("UPDATE durable_tasks SET processed_items=processed_items+? WHERE id=? AND attempt=? AND status='running'")
             .bind(batch.files.len() as i64).bind(job).bind(attempt).execute(&mut *tx).await?;
     }
-    tx.commit().await
+    tx.commit().await?;
+    crate::system_memory::trim_memory();
+    Ok(())
 }
 
 pub async fn publish_staged_scan(
@@ -1745,6 +1750,26 @@ pub async fn publish_staged_scan(
     query("INSERT INTO inventory_audio(asset_id,audios_json) SELECT a.id,f.audios_json FROM scan_staging_files f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE SET audios_json=excluded.audios_json")
         .bind(scan_id).execute(&mut *tx).await?;
 
+    crate::automation::emit_snapshot(
+        &mut tx,
+        library_id,
+        scan_id,
+        media_contracts::protocol::unix_now(),
+    )
+    .await?;
+
+    if matches!(refresh_mode.as_str(), "missing_metadata" | "full") {
+        let _ = crate::automation::schedule_library(
+            &mut tx,
+            library_id,
+            "metadata.missing",
+            &uuid::Uuid::new_v4().to_string(),
+            None,
+            media_contracts::protocol::unix_now(),
+        )
+        .await;
+    }
+
     query("DELETE FROM scan_staging_files WHERE scan_id=?")
         .bind(scan_id)
         .execute(&mut *tx)
@@ -1755,7 +1780,9 @@ pub async fn publish_staged_scan(
         .execute(&mut *tx)
         .await?;
 
-    tx.commit().await
+    tx.commit().await?;
+    crate::system_memory::trim_memory();
+    Ok(())
 }
 
 pub async fn refresh_editorial_for_works(
@@ -1881,6 +1908,8 @@ pub async fn refresh_editorial_for_works(
         }
     }
 
+    crate::automation::reapply_results(tx, &work_ids.iter().cloned().collect::<Vec<_>>()).await?;
+
     let mut parent_series = std::collections::BTreeSet::new();
     for wid in work_ids {
         crate::consolidation::consolidate_work_tx(tx, wid).await?;
@@ -1990,6 +2019,7 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
         "metadataProvenance": metadata["provenance"].as_str().unwrap_or("local"),
         "metadataWarnings": metadata["warnings"].as_array().cloned().unwrap_or_default(),
         "synthetic": false,
+        "episode": row.try_get::<String,_>("kind").is_ok_and(|kind| kind == "episode"),
         "posterUrl": row.try_get::<Option<String>,_>("poster_url").ok().flatten()
             .or_else(|| metadata["poster_url"].as_str().or_else(|| metadata["posterUrl"].as_str()).map(str::to_owned)),
         "artwork": {
@@ -1998,7 +2028,9 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
             "logo": row.try_get::<Option<String>,_>("logo_url").ok().flatten()
                 .or_else(|| metadata["logo_url"].as_str().or_else(|| metadata["logoUrl"].as_str()).map(str::to_owned)),
             "thumb": row.try_get::<Option<String>,_>("thumb_url").ok().flatten()
+                .or_else(|| metadata["thumb_url"].as_str().or_else(|| metadata["thumbUrl"].as_str()).or_else(|| metadata["still_url"].as_str()).or_else(|| metadata["stillUrl"].as_str()).map(str::to_owned))
         },
+        "translations": metadata.get("translations").cloned().unwrap_or_else(|| json!({})),
         "nodeId": node_id.unwrap_or_else(|| "local".to_string()),
         "nodeStatus": node_status.unwrap_or_else(|| "connected".to_string()),
         "available": node_available
@@ -2315,15 +2347,135 @@ pub async fn catalogue_filtered(
     .await
 }
 
-static CATALOGUE_CACHE: std::sync::OnceLock<
-    std::sync::Mutex<std::collections::HashMap<String, (String, Value)>>,
-> = std::sync::OnceLock::new();
+pub struct BoundedCatalogueCache {
+    max_bytes: usize,
+    current_bytes: usize,
+    entries: std::collections::HashMap<String, CatalogueCacheEntry>,
+    access_seq: u64,
+}
+
+struct CatalogueCacheEntry {
+    gen_fp: String,
+    value: Value,
+    size_bytes: usize,
+    last_accessed: u64,
+}
+
+impl BoundedCatalogueCache {
+    pub fn new(max_bytes: usize) -> Self {
+        Self {
+            max_bytes: max_bytes.max(1024 * 1024),
+            current_bytes: 0,
+            entries: std::collections::HashMap::new(),
+            access_seq: 0,
+        }
+    }
+
+    pub fn from_env() -> Self {
+        let max_mb = std::env::var("MEDIA_CATALOGUE_CACHE_MAX_MB")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(32)
+            .clamp(1, 1024);
+        Self::new(max_mb * 1024 * 1024)
+    }
+
+    pub fn get(&mut self, key: &str, current_fp: i64) -> Option<Value> {
+        let fp_str = current_fp.to_string();
+        if let Some(entry) = self.entries.get_mut(key) {
+            if entry.gen_fp == fp_str {
+                self.access_seq += 1;
+                entry.last_accessed = self.access_seq;
+                return Some(entry.value.clone());
+            } else if let Some(removed) = self.entries.remove(key) {
+                self.current_bytes = self.current_bytes.saturating_sub(removed.size_bytes);
+            }
+        }
+        None
+    }
+
+    pub fn insert(&mut self, key: String, current_fp: i64, value: Value) {
+        let entry_size = key.len() + 64 + estimate_json_bytes(&value);
+        if entry_size > self.max_bytes {
+            return;
+        }
+
+        while self.current_bytes.saturating_add(entry_size) > self.max_bytes
+            && !self.entries.is_empty()
+        {
+            if let Some((oldest_key, _)) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, e)| e.last_accessed)
+                .map(|(k, e)| (k.clone(), e.size_bytes))
+            {
+                if let Some(removed) = self.entries.remove(&oldest_key) {
+                    self.current_bytes = self.current_bytes.saturating_sub(removed.size_bytes);
+                }
+            } else {
+                break;
+            }
+        }
+
+        self.access_seq += 1;
+        let entry = CatalogueCacheEntry {
+            gen_fp: current_fp.to_string(),
+            value,
+            size_bytes: entry_size,
+            last_accessed: self.access_seq,
+        };
+
+        if let Some(old) = self.entries.insert(key, entry) {
+            self.current_bytes = self.current_bytes.saturating_sub(old.size_bytes);
+        }
+        self.current_bytes = self.current_bytes.saturating_add(entry_size);
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.current_bytes = 0;
+    }
+
+    pub fn stats(&self) -> (usize, usize, usize) {
+        (self.current_bytes, self.max_bytes, self.entries.len())
+    }
+}
+
+pub fn estimate_json_bytes(val: &Value) -> usize {
+    match val {
+        Value::Null | Value::Bool(_) | Value::Number(_) => 16,
+        Value::String(s) => 24 + s.capacity().max(s.len()),
+        Value::Array(arr) => {
+            24 + arr.capacity() * std::mem::size_of::<Value>()
+                + arr.iter().map(estimate_json_bytes).sum::<usize>()
+        }
+        Value::Object(map) => {
+            48 + map
+                .iter()
+                .map(|(k, v)| 24 + k.capacity().max(k.len()) + estimate_json_bytes(v))
+                .sum::<usize>()
+        }
+    }
+}
+
+static CATALOGUE_CACHE: std::sync::OnceLock<std::sync::Mutex<BoundedCatalogueCache>> =
+    std::sync::OnceLock::new();
 
 pub fn invalidate_catalogue_cache() {
     if let Some(lock) = CATALOGUE_CACHE.get()
         && let Ok(mut guard) = lock.lock()
     {
         guard.clear();
+    }
+}
+
+pub fn catalogue_cache_stats() -> (usize, usize, usize) {
+    if let Some(lock) = CATALOGUE_CACHE.get()
+        && let Ok(guard) = lock.lock()
+    {
+        guard.stats()
+    } else {
+        (0, 0, 0)
     }
 }
 
@@ -2384,11 +2536,10 @@ pub async fn catalogue_page(
 
     if state_fp > 0
         && let Some(lock) = CATALOGUE_CACHE.get()
-        && let Ok(guard) = lock.lock()
-        && let Some((cached_fp, cached_val)) = guard.get(&cache_key)
-        && *cached_fp == state_fp.to_string()
+        && let Ok(mut guard) = lock.lock()
+        && let Some(cached_val) = guard.get(&cache_key, state_fp)
     {
-        return Ok(cached_val.clone());
+        return Ok(cached_val);
     }
 
     // 1. Pre-filter visible libraries to enabled libraries on non-revoked nodes matching target_kind.
@@ -2707,13 +2858,10 @@ pub async fn catalogue_page(
     });
 
     if state_fp > 0 {
-        let lock =
-            CATALOGUE_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+        let lock = CATALOGUE_CACHE
+            .get_or_init(|| std::sync::Mutex::new(BoundedCatalogueCache::from_env()));
         if let Ok(mut guard) = lock.lock() {
-            if guard.len() > 512 {
-                guard.clear();
-            }
-            guard.insert(cache_key, (state_fp.to_string(), response.clone()));
+            guard.insert(cache_key, state_fp, response.clone());
         }
     }
 
@@ -3304,6 +3452,17 @@ async fn populate_episode_page(
     Ok(())
 }
 
+// Folder scopes inherit the live configuration of their logical library.
+async fn playback_library_options(
+    store: &IdentityStore,
+    library_id: &str,
+) -> Result<crate::library_options::LibraryOptions, sqlx::Error> {
+    let encoded: String = query_scalar("SELECT COALESCE(parent.options_json,l.options_json) FROM libraries l LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 LEFT JOIN libraries parent ON parent.id=f.parent_id WHERE l.id=?")
+        .bind(library_id).fetch_one(&store.pool).await?;
+    serde_json::from_str(&encoded)
+        .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))
+}
+
 pub async fn descriptor(
     store: &IdentityStore,
     asset_id: &str,
@@ -3493,6 +3652,7 @@ pub async fn descriptor_for_user(
     let probe = decode(row.get("probe_json"))?;
     let library_id: String = row.get("library_id");
     let node_id: String = row.get("node_id");
+    let library_options = playback_library_options(store, &library_id).await?;
     let node_rec = crate::nodes::load_node(store, &node_id).await?;
     let direct_info = if node_status == "connected" {
         node_rec.as_ref().and_then(|n| {
@@ -3633,6 +3793,8 @@ pub async fn descriptor_for_user(
         }
         for track in probe.streams.iter().filter(|t| {
             t.codec_type.as_deref() == Some("subtitle")
+                && library_options.embedded_subtitle_allowed(t.codec_name.as_deref())
+                // Even allow_all only offers formats that preparation supports.
                 && matches!(
                     t.codec_name.as_deref(),
                     Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text")
@@ -3672,60 +3834,169 @@ pub async fn descriptor_for_user(
         ));
         source["audioOffsetSeconds"] = json!(track.offset_seconds);
         source["tracks"] = json!(track.probe.streams);
+        // External audio shares the original video. Expose the same bounded
+        // AV1 packet-copy fallback as an internal audio selection, so a failed
+        // browser seek/decode does not strand the external track on the
+        // original container. Only advertise it with a real codec config and
+        // finite duration; the player still tests browser MSE support.
+        if let (Some(video), Some(duration)) = (video_source, duration)
+            && let Some(mime) = av1_video_mime(video)
+            && matches!(
+                row.get::<String, _>("mime").as_str(),
+                "video/mp4" | "video/webm" | "video/x-matroska"
+            )
+        {
+            source["durationSeconds"] = json!(duration);
+            source["videoMime"] = json!(mime);
+            source["videoStreamUrl"] = json!(format!(
+                "/api/v1/assets/{asset_id}/prepared/video-stream-{}-",
+                video.index
+            ));
+            if source_obj["mime"] == "video/x-matroska" {
+                source["preparedVideoUrl"] =
+                    json!(format!("/api/v1/assets/{asset_id}/prepared/video"));
+            }
+        }
         sources.push(source);
     }
-    let chapter_list: Vec<(f64, String)> = probe
-        .chapters
-        .iter()
-        .filter_map(|chapter| {
-            let start = chapter["start_time"].as_str()?.parse::<f64>().ok()?;
-            if !start.is_finite() || start < 0. {
-                return None;
-            }
-            Some((
-                start,
-                chapter["tags"]["title"]
-                    .as_str()
-                    .unwrap_or("Chapitre")
-                    .to_string(),
-            ))
-        })
-        .take(1000)
-        .collect();
-
     let total_dur = probe
         .format
         .get("duration")
         .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<f64>().ok());
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|duration| duration.is_finite() && *duration > 0.0);
+    let chapter_list = valid_chapters(&probe.chapters, total_dur);
     let mut intro_segment: Option<serde_json::Value> = None;
     let mut credits_segment: Option<serde_json::Value> = None;
+    let mut recap_segment: Option<serde_json::Value> = None;
+    let mut preview_segment: Option<serde_json::Value> = None;
 
     for (i, (start, title)) in chapter_list.iter().enumerate() {
-        let clean = title.to_lowercase();
+        if initial_work_kind != "episode" {
+            break;
+        }
+        let clean = title
+            .to_lowercase()
+            .replace(['é', 'è', 'ê', 'ë'], "e")
+            .replace(['à', 'â'], "a");
         let next_start = if i + 1 < chapter_list.len() {
             chapter_list[i + 1].0
         } else {
-            total_dur.unwrap_or(*start + 90.0)
+            total_dur.unwrap_or(*start)
         };
         let dur = next_start - start;
-        if (clean.contains("intro")
-            || clean.contains("opening")
-            || clean.contains("generique debut")
-            || clean.starts_with("op"))
-            && (15.0..=150.0).contains(&dur)
+        if matches!(
+            clean.trim(),
+            "intro"
+                | "introduction"
+                | "opening"
+                | "opening credits"
+                | "op"
+                | "generique debut"
+                | "generique d'ouverture"
+        ) && (15.0..=150.0).contains(&dur)
             && intro_segment.is_none()
         {
             intro_segment = Some(json!({ "start": start, "end": next_start }));
-        } else if (clean.contains("credits")
-            || clean.contains("ending")
-            || clean.contains("generique fin")
-            || clean.contains("generique de fin")
-            || clean.starts_with("ed"))
-            && (10.0..=300.0).contains(&dur)
+        } else if matches!(
+            clean.trim(),
+            "credits"
+                | "end credits"
+                | "ending"
+                | "ending credits"
+                | "ed"
+                | "generique fin"
+                | "generique de fin"
+        ) && (10.0..=300.0).contains(&dur)
             && credits_segment.is_none()
         {
             credits_segment = Some(json!({ "start": start, "end": next_start }));
+        }
+    }
+
+    // A completed marker task is reusable only for this physical asset and
+    // the exact inventory revision that produced it. Other copies need their
+    // own timeline validation before sharing any marker.
+    let stored_markers: Vec<(String,f64,f64,f64)> = query_as(
+        "SELECT m.marker_type,m.start_seconds,m.end_seconds,m.confidence FROM automatic_timeline_markers m \
+         JOIN automation_observations obs ON obs.asset_id=m.asset_id AND obs.fingerprint=m.source_fingerprint \
+         JOIN extensions ext ON ext.id=m.extension_id AND ext.enabled=1 AND ext.generation=m.generation \
+         JOIN extension_publishers publisher ON publisher.id=ext.publisher_id AND publisher.active=1 \
+         WHERE m.asset_id=? AND \
+         (ext.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants grant_row WHERE grant_row.extension_id=ext.id AND (grant_row.library_id=? OR EXISTS(SELECT 1 FROM library_folders folder WHERE folder.library_id=? AND folder.parent_id=grant_row.library_id AND folder.active=1)))) \
+         ORDER BY m.confidence DESC LIMIT 8",
+    )
+    .bind(asset_id)
+    .bind(&library_id)
+    .bind(&library_id)
+    .fetch_all(&store.pool)
+    .await?;
+    if !stored_markers.is_empty() {
+        let mut seen_kinds = std::collections::HashSet::new();
+        for (kind, start, end, confidence) in stored_markers {
+            if !seen_kinds.insert(kind.clone()) {
+                continue;
+            }
+            match kind.as_str() {
+                "intro" => intro_segment = None,
+                "credits" => credits_segment = None,
+                "recap" => recap_segment = None,
+                "preview" => preview_segment = None,
+                _ => continue,
+            }
+            if !start.is_finite()
+                || !end.is_finite()
+                || !confidence.is_finite()
+                || start < 0.0
+                || end <= start
+                || confidence < 0.9
+                || end > total_dur.unwrap_or(0.0)
+            {
+                continue;
+            }
+            match kind.as_str() {
+                "intro" if intro_segment.is_none() => {
+                    intro_segment = Some(json!({"start":start,"end":end}))
+                }
+                "credits" if credits_segment.is_none() => {
+                    credits_segment = Some(json!({"start":start,"end":end}))
+                }
+                "recap" if recap_segment.is_none() => {
+                    recap_segment = Some(json!({"start":start,"end":end}))
+                }
+                "preview" if preview_segment.is_none() => {
+                    preview_segment = Some(json!({"start":start,"end":end}))
+                }
+                _ => {}
+            }
+        }
+    }
+    let manual: Vec<(String, Option<f64>, Option<f64>, i64)> = query_as(
+        "SELECT marker_type,start_seconds,end_seconds,enabled FROM manual_timeline_markers WHERE asset_id=?",
+    ).bind(asset_id).fetch_all(&store.pool).await?;
+    for (kind, start, end, enabled) in manual {
+        let value = if enabled == 1 {
+            match (start, end) {
+                (Some(start), Some(end))
+                    if start.is_finite()
+                        && end.is_finite()
+                        && start >= 0.0
+                        && end > start
+                        && end <= total_dur.unwrap_or(0.0) =>
+                {
+                    Some(json!({"start":start,"end":end}))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        match kind.as_str() {
+            "intro" => intro_segment = value,
+            "credits" => credits_segment = value,
+            "recap" => recap_segment = value,
+            "preview" => preview_segment = value,
+            _ => {}
         }
     }
 
@@ -3744,7 +4015,9 @@ pub async fn descriptor_for_user(
         "subtitles": subtitles,
         "chapters": chapter_list.iter().map(|(start, title)| json!({"start": start, "title": title})).collect::<Vec<_>>(),
         "intro": intro_segment,
-        "credits": credits_segment
+        "credits": credits_segment,
+        "recap": recap_segment,
+        "preview": preview_segment
     });
     if let Some(orig) = failover_from {
         desc["requestedId"] = json!(orig.clone());
@@ -3822,7 +4095,7 @@ pub async fn prepared(
 ) -> axum::response::Response {
     use axum::{body::Body, http::StatusCode, response::Response};
     use media_node::packaging::Component;
-    let row = query("SELECT a.relative_path,a.size,a.modified_ns,a.probe_json,l.root,l.node_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND n.status != 'revoked'")
+    let row = query("SELECT a.relative_path,a.size,a.modified_ns,a.probe_json,a.library_id,l.root,l.node_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND n.status != 'revoked'")
         .bind(asset_id).fetch_optional(&store.pool).await;
     let row = match row {
         Ok(Some(row)) => row,
@@ -3839,6 +4112,35 @@ pub async fn prepared(
         Ok(probe) => probe,
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
     };
+    if let Some(index) = component
+        .strip_prefix("subtitle-")
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        let options = match playback_library_options(
+            store,
+            row.get::<String, _>("library_id").as_str(),
+        )
+        .await
+        {
+            Ok(options) => options,
+            Err(_) => {
+                return crate::error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "library_options_unavailable",
+                );
+            }
+        };
+        if probe.streams.iter().any(|track| {
+            track.index == index
+                && track.codec_type.as_deref() == Some("subtitle")
+                && !options.embedded_subtitle_allowed(track.codec_name.as_deref())
+        }) {
+            return crate::error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "embedded_subtitle_disabled",
+            );
+        }
+    }
     let stream_position = media_node::video_stream::position(component);
     let selected = if let Some((index, position)) = stream_position {
         let duration = probe
@@ -4395,7 +4697,7 @@ pub async fn image(
         }
         return crate::nodes::relay_from_remote_node(store, &rec, &pq, request).await;
     }
-    let grant = ReadGrant {
+    let mut grant = ReadGrant {
         target: ReadTarget::Image {
             id: ImageId::from(image_id),
             expected_size: row.get::<i64, _>("size") as u64,
@@ -4412,6 +4714,37 @@ pub async fn image(
         Ok(res) => {
             let (parts, body) = res.into_parts();
             Response::from_parts(parts, Body::new(body))
+        }
+        Err(NodeErrorCode::ImageChangedRescanRequired) => {
+            // Sidecars may be replaced by Jellyfin between scans. Refresh only
+            // this already-authorized image, with Node confinement/decoding limits.
+            let refreshed = async move {
+                let opened = media_node::OpenedFile::open_in_root(
+                    std::path::Path::new(&grant.root_snapshot),
+                    std::path::Path::new(&grant.relative_path),
+                ).await.ok()?;
+                let image = media_node::images::validate_opened(&opened).await.ok()?;
+                query("UPDATE inventory_images SET size=?,modified_ns=?,mime=? WHERE id=? AND root_snapshot=? AND relative_path=? AND available=1")
+                    .bind(image.size_bytes as i64).bind(&image.modified_ns).bind(image.mime)
+                    .bind(image_id).bind(&grant.root_snapshot).bind(&grant.relative_path)
+                    .execute(&store.pool).await.ok()?;
+                grant.target = ReadTarget::Image {
+                    id: ImageId::from(image_id), expected_size: image.size_bytes,
+                    expected_modified_ns: image.modified_ns,
+                };
+                grant.mime = image.mime.to_owned();
+                crate::node::LocalNode.serve_grant(&grant, &request).await.ok()
+            }.await;
+            match refreshed {
+                Some(res) => {
+                    let (parts, body) = res.into_parts();
+                    Response::from_parts(parts, Body::new(body))
+                }
+                None => crate::error(
+                    StatusCode::NOT_FOUND,
+                    NodeErrorCode::ImageChangedRescanRequired.as_str(),
+                ),
+            }
         }
         Err(code @ NodeErrorCode::ImageStreamError) => {
             crate::error(StatusCode::INTERNAL_SERVER_ERROR, code.as_str())
@@ -4479,8 +4812,50 @@ pub async fn backfill_title_sort_unicode(
     Ok(())
 }
 
+// Probe output is external data: chapter ordering and timestamps cannot be
+// assumed valid, especially when their boundaries drive skip controls.
+fn valid_chapters(chapters: &[Value], duration: Option<f64>) -> Vec<(f64, String)> {
+    let mut valid: Vec<_> = chapters
+        .iter()
+        .take(1000)
+        .filter_map(|chapter| {
+            let start = chapter["start_time"].as_str()?.parse::<f64>().ok()?;
+            if !start.is_finite()
+                || start < 0.0
+                || duration.is_some_and(|duration| start >= duration)
+            {
+                return None;
+            }
+            Some((
+                start,
+                chapter["tags"]["title"]
+                    .as_str()
+                    .unwrap_or("Chapitre")
+                    .to_string(),
+            ))
+        })
+        .collect();
+    valid.sort_by(|left, right| left.0.total_cmp(&right.0));
+    valid
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chapter_boundaries_are_sorted_and_confined_to_the_media() {
+        let chapters = serde_json::json!([
+            {"start_time":"60", "tags":{"title":"Episode"}},
+            {"start_time":"10", "tags":{"title":"Intro"}},
+            {"start_time":"1200", "tags":{"title":"Invalid end"}},
+            {"start_time":"NaN"},
+            {"start_time":"-1"}
+        ]);
+        assert_eq!(
+            super::valid_chapters(chapters.as_array().unwrap(), Some(1200.0)),
+            vec![(10.0, "Intro".into()), (60.0, "Episode".into())]
+        );
+    }
+
     #[test]
     fn packet_stream_descriptors_use_validated_track_ids_and_real_av1_configuration() {
         let probe: super::Probe = serde_json::from_value(serde_json::json!({
@@ -4513,35 +4888,126 @@ mod tests {
     use super::*;
     use crate::node::scanner::ScannedFile;
     #[tokio::test]
-    async fn editorial_migration_preserves_existing_0004_works() {
+    async fn embedded_subtitle_preferences_apply_locally_and_before_remote_relay() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("subtitle-options.sqlite"))
+            .await
+            .unwrap();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','Films','films','local','/movies',1)")
+            .execute(&store.pool).await.unwrap();
+        let file = ScannedFile {
+            relative_path: "film.mp4".into(), size: 42, modified_ns: "1".into(),
+            title: "Film".into(), identity_key: "film".into(), mime: "video/mp4".into(),
+            probe: serde_json::from_value(json!({"streams":[
+                {"index":0,"codec_type":"video","codec_name":"av1"},
+                {"index":1,"codec_type":"subtitle","codec_name":"subrip","tags":{"language":"fr"}}
+            ],"format":{}})).unwrap(),
+            subtitles: vec![serde_json::from_value(json!({"language":"en","label":"External","forced":false,"sdh":false,"source_format":"webvtt","webvtt":"WEBVTT\n\n"})).unwrap()],
+            ..Default::default()
+        };
+        ingest(
+            &store,
+            "lib",
+            Path::new("/movies"),
+            &ScanReport {
+                files: vec![file],
+                complete: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let asset: String = query_scalar("SELECT id FROM inventory_assets")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        // The legacy ingest fixture helper predates sidecars; publish their
+        // snapshot explicitly as the staged scanner publication does.
+        query("INSERT INTO inventory_subtitles(asset_id,subtitles_json) VALUES(?,?)")
+            .bind(&asset)
+            .bind(json!([{"language":"en","label":"External","forced":false,"sdh":false,"source_format":"webvtt","webvtt":"WEBVTT\n\n"}]).to_string())
+            .execute(&store.pool).await.unwrap();
+        query("INSERT INTO media_nodes(id,name,kind) VALUES('remote','Remote','remote')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let preparations = media_node::packaging::Preparations::default();
+        for node in ["local", "remote"] {
+            query("UPDATE libraries SET node_id=? WHERE id='lib'")
+                .bind(node)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            for (policy, expected) in [("allow_all", 2), ("allow_text", 2), ("block_all", 1)] {
+                query("UPDATE libraries SET options_json=? WHERE id='lib'")
+                    .bind(json!({"embeddedSubtitlePolicy":policy}).to_string())
+                    .execute(&store.pool)
+                    .await
+                    .unwrap();
+                let descriptor = descriptor(&store, &asset, "synthetic-session")
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let subtitles = descriptor["subtitles"].as_array().unwrap();
+                assert_eq!(subtitles.len(), expected, "node {node}, policy {policy}");
+                assert!(
+                    subtitles
+                        .iter()
+                        .any(|subtitle| subtitle["label"] == "External")
+                );
+            }
+            let request = axum::extract::Request::builder()
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let response = prepared(&store, &preparations, &asset, "subtitle-1", request).await;
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY
+            );
+            let body = axum::body::to_bytes(response.into_body(), 1024)
+                .await
+                .unwrap();
+            assert!(String::from_utf8_lossy(&body).contains("embedded_subtitle_disabled"));
+        }
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES('folder','Folder','films','local','/child',0,'{}')")
+            .execute(&store.pool).await.unwrap();
+        query("INSERT INTO library_folders(library_id,parent_id) VALUES('folder','lib')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let inherited = playback_library_options(&store, "folder").await.unwrap();
+        assert!(!inherited.embedded_subtitle_allowed(Some("subrip")));
+        query("UPDATE library_folders SET active=0 WHERE library_id='folder'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let detached = playback_library_options(&store, "folder").await.unwrap();
+        assert!(detached.embedded_subtitle_allowed(Some("subrip")));
+    }
+
+    #[tokio::test]
+    async fn fresh_schema_preserves_editorial_fields() {
         sqlx::any::install_default_drivers();
         let pool = sqlx::any::AnyPoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        query("CREATE TABLE libraries(id TEXT PRIMARY KEY)")
+        let mut conn = pool.acquire().await.unwrap();
+        crate::database::initialize_fresh_schema(&mut conn)
+            .await
+            .unwrap();
+        drop(conn);
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','Films','films','local','/test',1)")
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::raw_sql(include_str!("../migrations/0004_inventory.sql"))
-            .execute(&pool)
-            .await
-            .unwrap();
-        query("INSERT INTO libraries VALUES('lib')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        query("INSERT INTO inventory_works VALUES('stable','lib','folder:Film','Film',2026,'{}')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::raw_sql(include_str!("../migrations/0005_film_editorial.sql"))
+        query("INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort,kind) VALUES('stable','lib','folder:Film','Film',2026,'{}','film','film')")
             .execute(&pool)
             .await
             .unwrap();
         let preserved: (String, String, i64, String) =
-            query_as("SELECT id,title,year,editorial_json FROM inventory_works")
+            query_as("SELECT id,title,year,editorial_json FROM inventory_works WHERE id='stable'")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
@@ -4549,27 +5015,17 @@ mod tests {
             preserved,
             ("stable".into(), "Film".into(), 2026, "{}".into())
         );
-        sqlx::raw_sql(include_str!("../migrations/0006_local_posters.sql"))
-            .execute(&pool)
-            .await
-            .unwrap();
-        let after: (String, String, i64, String) =
-            query_as("SELECT id,title,year,editorial_json FROM inventory_works")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(preserved, after);
-        sqlx::raw_sql(include_str!("../migrations/0007_catalogue_indexes.sql"))
-            .execute(&pool)
-            .await
-            .unwrap();
-        let after_0007: (String, String, i64, String, String) =
-            query_as("SELECT id,title,year,editorial_json,title_sort FROM inventory_works")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        backfill_title_sort_unicode(&mut conn).await.unwrap();
+        drop(conn);
+        let after_unicode: (String, String, i64, String, String) = query_as(
+            "SELECT id,title,year,editorial_json,title_sort FROM inventory_works WHERE id='stable'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
-            after_0007,
+            after_unicode,
             (
                 "stable".into(),
                 "Film".into(),
@@ -4578,35 +5034,7 @@ mod tests {
                 "film".into()
             )
         );
-        sqlx::raw_sql(include_str!(
-            "../migrations/0008_catalogue_unicode_sort.sql"
-        ))
-        .execute(&pool)
-        .await
-        .unwrap();
-        let mut conn = pool.acquire().await.unwrap();
-        backfill_title_sort_unicode(&mut conn).await.unwrap();
-        drop(conn);
-        let after_0008: (String, String, i64, String, String) =
-            query_as("SELECT id,title,year,editorial_json,title_sort FROM inventory_works")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(after_0008, after_0007);
-        sqlx::raw_sql(include_str!("../migrations/0016_catalogue_added_at.sql"))
-            .execute(&pool)
-            .await
-            .unwrap();
-        let historical: Option<i64> =
-            query_scalar("SELECT added_at FROM inventory_works WHERE id='stable'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(
-            historical, None,
-            "migration must not invent historical dates"
-        );
-        query("INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort) VALUES('new','lib','new','New',2026,'{}','new')").execute(&pool).await.unwrap();
+        query("INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort,kind) VALUES('new','lib','new','New',2026,'{}','new','film')").execute(&pool).await.unwrap();
         let added: i64 = query_scalar("SELECT added_at FROM inventory_works WHERE id='new'")
             .fetch_one(&pool)
             .await
@@ -4857,5 +5285,35 @@ mod tests {
                 .unwrap()["total"],
             0
         );
+    }
+
+    #[test]
+    fn test_bounded_catalogue_cache_budget_and_lru_eviction() {
+        let mut cache = BoundedCatalogueCache::new(2000);
+
+        let val1 = serde_json::json!({"items": ["movie1", "movie2"], "total": 2});
+        let val2 = serde_json::json!({"items": ["movie3", "movie4"], "total": 2});
+
+        cache.insert("key1".into(), 1, val1.clone());
+        let (bytes1, max_b, count1) = cache.stats();
+        assert_eq!(count1, 1);
+        assert!(bytes1 > 0);
+        assert!(bytes1 <= max_b);
+
+        cache.insert("key2".into(), 1, val2.clone());
+        let (bytes2, _, count2) = cache.stats();
+        assert_eq!(count2, 2);
+        assert!(bytes2 > bytes1);
+
+        // Access key1 to update its recency
+        assert!(cache.get("key1", 1).is_some());
+
+        // Stale generation removes entry
+        assert!(cache.get("key2", 2).is_none());
+        assert_eq!(cache.stats().2, 1);
+
+        cache.clear();
+        assert_eq!(cache.stats().0, 0);
+        assert_eq!(cache.stats().2, 0);
     }
 }

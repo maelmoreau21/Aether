@@ -25,6 +25,36 @@ struct Preferences {
     offsets: Option<Offsets>,
     #[serde(skip_serializing_if = "Option::is_none")]
     subtitle_preference: Option<SubtitlePreference>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subtitle_style: Option<SubtitleStyle>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_intro_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_credits_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    artwork_rotation: Option<ArtworkRotation>,
+}
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ArtworkRotation {
+    enabled: bool,
+    #[serde(default = "default_true")]
+    enable_movies: bool,
+    #[serde(default = "default_true")]
+    enable_series: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    enabled_libraries: Option<Vec<String>>,
+    rotation_mode: String,
+    min_hours_between_switches: u32,
+    pool_size: u32,
+    preferred_language: String,
+    fallback_language: String,
+    include_unknown_language: bool,
+    allow_any_language_fallback: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -38,6 +68,23 @@ struct Offsets {
     audio: f64,
     subtitle: f64,
 }
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SubtitleStyle {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    font_size: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    font_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    background_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    background_opacity: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text_shadow: Option<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SubtitlePreference {
@@ -55,9 +102,28 @@ fn language(value: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
+fn hex_color(value: &str) -> bool {
+    value.len() == 7 && value.starts_with('#') && value[1..].bytes().all(|b| b.is_ascii_hexdigit())
+}
 impl Preferences {
     fn valid(&self) -> bool {
-        self.theme
+        self.artwork_rotation.as_ref().is_none_or(|v| {
+            matches!(v.rotation_mode.as_str(), "random" | "sequential")
+                && v.min_hours_between_switches <= 720
+                && (1..=24).contains(&v.pool_size)
+                && language(&v.preferred_language)
+                && language(&v.fallback_language)
+                && v.enabled_libraries.as_ref().is_none_or(|libraries| {
+                    libraries.len() <= 64
+                        && libraries.iter().all(|lib| {
+                            (1..=64).contains(&lib.len())
+                                && lib
+                                    .bytes()
+                                    .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+                        })
+                })
+        }) && self
+            .theme
             .as_deref()
             .is_none_or(|v| matches!(v, "light" | "dark" | "system"))
             && self
@@ -83,6 +149,21 @@ impl Preferences {
                 .subtitle_preference
                 .as_ref()
                 .is_none_or(|v| v.language.as_deref().is_none_or(language))
+            && self.subtitle_style.as_ref().is_none_or(|s| {
+                s.font_size
+                    .as_deref()
+                    .is_none_or(|v| matches!(v, "small" | "medium" | "large"))
+                    && s.font_family
+                        .as_deref()
+                        .is_none_or(|v| matches!(v, "sans-serif" | "serif" | "monospace"))
+                    && s.text_color.as_deref().is_none_or(hex_color)
+                    && s.background_color.as_deref().is_none_or(hex_color)
+                    && s.background_opacity
+                        .is_none_or(|v| v.is_finite() && (0.0..=100.0).contains(&v))
+                    && s.text_shadow
+                        .as_deref()
+                        .is_none_or(|v| matches!(v, "none" | "outline" | "drop-shadow"))
+            })
     }
 }
 pub fn router(auth: AuthState) -> Router {

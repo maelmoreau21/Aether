@@ -1,5 +1,108 @@
 # P3/P4 — préparation des pistes (18 octobre 2026)
 
+## Reprise d'une piste audio externe — 30 octobre 2026
+
+Le chargement des métadonnées audio commence en parallèle de la récupération de
+la progression, puis la piste est positionnée directement sur la reprise au
+lieu de valider d'abord la position zéro. Les attentes sont bornées et annulées
+à la fermeture. La courte fin naturelle d'une piste Opus reste acceptée ; si
+la durée vidéo n'est pas encore connue, sa vérification est différée.
+Un délai de seek vidéo affiche les positions demandée et atteinte ainsi que
+l'état de seek, sans URL ou jeton. Ces indications ne suffisent pas toujours
+à identifier la cause d'un incident sur un fichier personnel.
+
+Validation locale : Core/Node autonome Rust reconstruit, Chrome et fichier MP4
+AV1/Opus synthétique de 5 400 s avec audio externe ; reprise et six seeks
+éloignés réussis, puis 10,5 s de lecture sans erreur. La réouverture observée
+à 356 ms et la série de seeks stabilisée à 782 ms sont deux observations
+isolées, pas des percentiles. Rapport brut :
+`target/player-long-external-current-20261030/report.json`. Le premier essai
+avec un Core précompilé plus ancien s'était arrêté à la création de bibliothèque,
+avant la lecture. Aucun NAS, film personnel ou endurance de 90 minutes testé.
+
+## Seeks répétés — 30 octobre 2026
+
+Le watchdog vidéo repart de zéro à chaque nouveau seek et se désarme quand le
+navigateur a terminé le seek et dispose de données. Une attente réellement
+bloquée reste signalée. Une fenêtre audio MSE demandée après un seek n'attend
+plus la fin d'une opération devenue obsolète pour commencer son téléchargement ;
+le nouvel append attend toujours la fin de l'opération MSE. Les plages déjà
+présentes sont réutilisées. Tests et limites : [mesures locales](PLAYER_SEEK_2026_10_30.md).
+
+## Sous-titres au démarrage — 30 octobre 2026
+
+La préparation du sous-titre initial démarre en parallèle : la lecture vidéo et
+audio peut commencer avant la fin d'une extraction intégrée. Exception : les
+fenêtres audio préparées par FFmpeg partagent son worker avec les sous-titres ;
+leur ordre initial reste conservé pour éviter d'affamer l'audio. Le sous-titre
+apparaît lorsqu'il est prêt ; en mode parallèle, un échec est signalé sans
+arrêter la lecture. Une
+sélection manuelle ultérieure et la fermeture invalident les résultats périmés.
+Ce changement ne prouve pas que les sous-titres expliquent un incident donné,
+ni que le démarrage est instantané sur un NAS ou un navigateur particulier.
+En cas d'échec initial, la console indique désormais la position demandée, la
+position effective et l'état de seek, sans inclure l'URL ou les jetons média.
+
+## Reprise après délai vidéo — 29 octobre 2026
+
+Les requêtes de progression et de préférences démarrent en parallèle ; le choix
+de piste attend toujours les préférences et le seek attend la progression.
+Le délai de connexion directe (2,5 s pour les métadonnées lorsqu'un relais est
+disponible) ne s'applique plus au seek : la position et le seek disposent chacun
+de leur propre délai borné. Une progression expirée est distinguée d'un seek
+expiré ; seul ce dernier peut être retenté sur la même source sans relais.
+
+Le lecteur ignore aussi les événements `seeked` antérieurs à la résolution de
+la progression et au seek effectivement demandé : ils ne peuvent plus valider
+prématurément la reprise. Un test reproduit la course avec progression retardée.
+
+Lorsqu'un seek initial expire et qu'aucun relais distinct ni repli utilisable
+ne sont proposés, le lecteur recharge une seule fois la même source à la
+position demandée. Lorsque le repli progressif est disponible, ou qu'une vidéo
+préparée existe, il est essayé après l'échec sans refaire le seek sur la même URL. Les
+erreurs de métadonnées ne déclenchent pas cette nouvelle tentative ; un relais
+disponible reste prioritaire. Chaque attente est bornée à dix secondes et la
+fermeture l'annule. Ce comportement ne démontre pas la cause d'un incident
+réseau ou d'un fichier particulier ; une seconde expiration reste explicite.
+
+## Annulation et préparations partagées — 29 octobre 2026
+
+Les demandes froides d'un même composant vidéo, audio complet ou sous-titre
+partagent désormais le verrou par clé déjà utilisé pour les fenêtres audio.
+Les requêtes attendantes ne lancent pas de FFmpeg supplémentaire ; après
+publication elles ouvrent le même résultat sous lease. La concurrence reste
+bornée à 64 participants et un worker FFmpeg. Une demande différente peut
+toujours recevoir `preparation_busy` : il ne s'agit pas d'une file globale
+illimitée. L'attente d'un composant complet expire après la limite de préparation
+configurée plus cinq secondes. L'annulation du demandeur libère ses gardes ;
+un autre demandeur intéressé peut reprendre. Les écritures Tokio sont vidées
+avant publication du fichier et les erreurs de cette dernière écriture remontent.
+
+Côté lecteur, pause/fermeture annulent les attentes de disponibilité audio ;
+une reprise dans la dernière demi-seconde d'une fenêtre charge également la
+suivante pour permettre au décodeur de terminer son seek, sans attendre la fin
+du chargement initial. Ailleurs, le démarrage garde la seule fenêtre courante.
+La préparation reste limitée à deux fenêtres, sans copie intégrale du média.
+Une mise à jour MSE Opus sans événement de fin expire après dix secondes et se
+nettoie à fermeture. Une erreur terminale de fenêtre active arrête les demandes
+périodiques plutôt que de relancer la même préparation toutes les 250 ms.
+Une préparation vidéo progressive supersédée rejette son attente de premier
+fragment ; sa fermeture rejette aussi une attente de progression sauvegardée.
+Le watchdog vidéo invalide la source et libère l'audio avant de signaler son
+erreur, pour qu'une nouvelle sélection de la même piste recharge réellement.
+
+Au seek, l'attente de disponibilité audio suit la nouvelle position avec son
+timeout initial ; les époques empêchent un ancien démarrage de relancer l'audio.
+L'annulation explicite de cette attente au seek reste à coordonner avec la
+reprise dans NativePlayer. Les erreurs MSE d'une ancienne époque sont ignorées,
+alors que celles de la position courante restent fatales. La maintenance du
+cache conserve des opérations disque synchrones ; son impact sur stockage lent
+reste à mesurer avant modification du protocole de récupération.
+
+Les correctifs ne changent ni les codecs, ni les canaux, ni les autorisations.
+Mesures, scénarios exécutés et limites :
+[rapport du 29 octobre](PLAYER_RELIABILITY_2026_10_29.md).
+
 ## Démarrage progressif et reprise — 23 octobre 2026
 
 La progression sauvegardée se charge en parallèle des métadonnées vidéo. Le

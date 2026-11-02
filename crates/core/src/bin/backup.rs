@@ -25,6 +25,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    #[cfg(windows)]
+    eprintln!(
+        "Windows: backup files inherit the destination folder's ACL. Verify access to the folder and any copies; Aether does not validate or restrict these ACLs."
+    );
+
     let media_root = std::env::var_os("MEDIA_LIBRARY_ROOT")
         .or_else(|| std::env::var_os("MEDIA_FIXTURE_DIR"))
         .map(PathBuf::from)
@@ -95,13 +100,6 @@ async fn full_backup(
     target: &std::path::Path,
     media_root: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let key = zeroize::Zeroizing::new(
-        std::env::var("MEDIA_BACKUP_KEY")
-            .unwrap_or_else(|_| media_poc::backup_bundle::DEFAULT_BACKUP_KEY.to_string()),
-    );
-    if key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err("invalid MEDIA_BACKUP_KEY".into());
-    }
     media_poc::backup::check_path_safety(target, "full backup")?;
     media_poc::backup::check_not_in_media_root(target, Some(media_root), "full backup")?;
     if target.exists() {
@@ -132,7 +130,8 @@ async fn full_backup(
     let snapshot = cleanup.0.join("database.snapshot");
     let mut config: std::collections::BTreeMap<String, String> = std::env::vars()
         .filter(|(name, _)| {
-            (name.starts_with("MEDIA_") || name.starts_with("OIDC_")) && name != "MEDIA_BACKUP_KEY"
+            (name.starts_with("MEDIA_") || name.starts_with("OIDC_"))
+                && !matches!(name.as_str(), "MEDIA_BACKUP_KEY" | "MEDIA_BACKUP_KEY_FILE")
         })
         .collect();
     let engine = std::env::var("MEDIA_DB_ENGINE").unwrap_or_else(|_| "sqlite".into());
@@ -151,7 +150,7 @@ async fn full_backup(
         _ => return Err("MEDIA_DB_ENGINE must be sqlite or postgres".into()),
     }
     config.insert("MEDIA_DB_ENGINE".into(), engine.clone());
-    media_poc::backup_bundle::create(&snapshot, config, target, &key, &engine).await?;
+    media_poc::backup_bundle::create(&snapshot, config, target, &engine).await?;
     Ok(())
 }
 

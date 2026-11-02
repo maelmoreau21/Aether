@@ -14,28 +14,49 @@ on:
 permissions:
   contents: read
 
+# Preserve debug assertions and overflow checks; omit only debug symbols.
+# This reduces test linking time, disk use and Cargo cache transfers.
+env:
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+
 jobs:
   workflows:
+    concurrency:
+      group: ci-workflows-${{ github.ref }}
+      cancel-in-progress: true
     name: Validation des workflows
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: docker://rhysd/actionlint:1.7.12
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate manual release version policy
+        run: python scripts/test-release-policy.py
+      - name: Verify FFmpeg source download fallback and integrity
+        run: python scripts/test-build-ffmpeg.py
 
   # =========================================================================
   # 1. Vérifications et tests Rust (Core & Node)
   # =========================================================================
   rust-tests:
-    name: Rust (partition ${{ matrix.shard }})
+    concurrency:
+      group: ci-rust-${{ github.ref }}-${{ matrix.shard }}
+      cancel-in-progress: true
+    name: Rust (${{ matrix.shard == 'checks' && 'contrôles et contrats' || format('partition {0}', matrix.shard) }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2]
+        # Keep the three integration partitions; run the former partition-0
+        # prerequisites/contracts in parallel instead of serializing them.
+        shard: [0, 1, 2, checks]
     services:
       postgres:
-        image: postgres:18-alpine
+        image: ${{ matrix.shard == 'checks' && 'postgres:18-alpine' || '' }}
         env:
           POSTGRES_DB: media_test
           POSTGRES_USER: media_test
@@ -66,7 +87,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: rust
-          save-if: ${{ matrix.shard == 0 }}
+          save-if: ${{ matrix.shard == 'checks' }}
 
       - name: Cache des fixtures synthétiques
         id: cache-fixtures
@@ -110,52 +131,53 @@ jobs:
         run: python3 scripts/validate-prepared-fixtures.py
 
       - name: Valider les métriques de comparaison des lecteurs
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: node scripts/player-comparison-stats.test.cjs
 
       - name: Valider les statistiques de marge de sécurité
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: node scripts/safe-margin-stats.test.cjs
 
       - name: Valider la récupération audio bornée
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: node --test scripts/audio-seek-policy.test.cjs
 
       - name: Vérifier le formatage (cargo fmt)
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: cargo fmt --check
 
       - name: Analyse statique stricte (cargo clippy)
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
 
       - name: Exécuter les tests unitaires (cargo test --lib --bins)
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: cargo test --locked --workspace --all-features --lib --bins
 
       - name: Vérifier l'ABI du SDK avec un module Rust de test
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: |
           cargo build --locked -p media-extension-sdk-fixture --target wasm32-unknown-unknown --release
-          cargo test --locked -p media-poc --test extensions real_rust_sdk_module_executes -- --ignored
+          cargo test --locked --all-features -p media-poc --test extensions real_rust_sdk_module_executes -- --ignored
 
       - name: Exécuter les tests d'intégration (cargo test --test '*')
+        if: matrix.shard != 'checks'
         # Disques/CPU séparés entre partitions. Aucun test retiré ; les tests
         # restent séquentiels au sein de chaque runner, y compris les benchmarks.
         run: python3 scripts/ci-integration-shard.py --index ${{ matrix.shard }} --count 3
 
       - name: Vérifier la couverture des partitions de tests
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         run: python3 scripts/test-ci-integration-shard.py
 
       - name: Contrats PostgreSQL 18 (HTTP, OIDC, deux Nodes)
-        if: matrix.shard == 0
+        if: matrix.shard == 'checks'
         env:
           MEDIA_TEST_POSTGRES_URL: postgres://media_test:ci-only-disposable-password@127.0.0.1:5432/media_test?sslmode=disable
         run: |
-          cargo test --locked -p media-poc --test postgres -- --ignored --test-threads=1
-          cargo test --locked -p media-poc --lib oidc::tests -- --test-threads=1
-          cargo test --locked -p media-poc --test distributed_multi_node -- --test-threads=1
+          cargo test --locked --all-features -p media-poc --test postgres -- --ignored --test-threads=1
+          cargo test --locked --all-features -p media-poc --lib oidc::tests -- --test-threads=1
+          cargo test --locked --all-features -p media-poc --test distributed_multi_node -- --test-threads=1
 
   # Keep the existing required-check name and gate publication on all partitions.
   rust:
@@ -174,6 +196,9 @@ jobs:
   # 2. Audit de sécurité des dépendances Rust
   # =========================================================================
   security-audit:
+    concurrency:
+      group: ci-audit-${{ github.ref }}
+      cancel-in-progress: true
     name: Audit de sécurité (cargo audit)
     runs-on: ubuntu-latest
     steps:
@@ -190,6 +215,9 @@ jobs:
   # Ce job s'exécutera automatiquement dès que apps/web sera initialisé.
   # =========================================================================
   frontend:
+    concurrency:
+      group: ci-frontend-${{ github.ref }}
+      cancel-in-progress: true
     name: Frontend SvelteKit
     runs-on: ubuntu-latest
     defaults:
@@ -228,6 +256,9 @@ jobs:
   # 4. Parcours navigateur réels (Films & Séries sous Chrome headless)
   # =========================================================================
   browser:
+    concurrency:
+      group: ci-browser-${{ github.ref }}
+      cancel-in-progress: true
     name: Navigateur Chrome (Films & Séries)
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -298,15 +329,12 @@ jobs:
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
         run: python3 scripts/prepare-p1.py
 
-      - name: Exécuter le parcours navigateur Films (scan, incrémental, lecture, seek, redémarrage Core)
+      - name: Exécuter les parcours Films et Séries (scan, lecture, redémarrage, permissions et sessions)
         env:
           # Keep generation aligned with report validation and artifact upload,
           # independently of the script's local default under target/.
-          MEDIA_REPORT_DIR: docs/evidence/2026-10-16/scanner
-        run: cargo test --locked --test browser_scanner -- --ignored --nocapture
-
-      - name: Exécuter le parcours navigateur Séries (scan, saisons, lecture, 403, transition cookies HttpOnly)
-        run: cargo test --locked --test browser_series -- --ignored --nocapture
+          MEDIA_SCANNER_REPORT_DIR: docs/evidence/2026-10-16/scanner
+        run: cargo test --locked -p media-poc --test browser_scanner --test browser_series -- --ignored --nocapture
 
       - name: Vérifier playlists, partage connecté, musique persistante et paroles
         env:
@@ -378,29 +406,22 @@ jobs:
             docs/evidence/2026-10-22/playlists/ci/
 
   images:
-    name: Image Docker (${{ matrix.target }})
+    concurrency:
+      group: ci-images-${{ github.ref }}
+      cancel-in-progress: true
+    name: Images Docker (compilation partagée)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [runtime, runtime-core, runtime-node]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: docker/bake-action@v6
         with:
-          context: .
-          target: ${{ matrix.target }}
-          platforms: linux/amd64
-          build-args: |
-            GIT_BRANCH=${{ github.ref_name }}
+          files: docker-bake.ci.hcl
           load: true
           push: false
-          tags: media-ci:${{ matrix.target }}
-          cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+        env:
+          GIT_BRANCH: ${{ github.ref_name }}
       - name: Vérifier le runtime Node optimisé avant publication
-        if: matrix.target == 'runtime-node'
         run: |
           set -euo pipefail
           docker run --rm --entrypoint sh media-ci:runtime-node -ec '
@@ -412,14 +433,74 @@ jobs:
 
   # =========================================================================
   # 5. Publication des images Docker sur GHCR
-  # Push ou lancement manuel de CI (main/develop), après tous les contrôles.
+  # Push ou lancement manuel de CI (develop), après tous les contrôles.
   # Les pull requests non fiables ne publient jamais d'image.
   # =========================================================================
-  publish:
-    name: Publication Docker GHCR
+  calculate-beta:
+    name: Calcul du numéro bêta
     needs: [workflows, rust, security-audit, frontend, browser, images]
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.base_ref == 'develop' || github.base_ref == 'main')
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/develop' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    outputs:
+      has_release: ${{ steps.calc.outputs.has_release }}
+      version: ${{ steps.calc.outputs.version }}
+      next_tag: ${{ steps.calc.outputs.next_tag }}
+      series: ${{ steps.calc.outputs.series }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: calc
+        run: |
+          set -euo pipefail
+          python scripts/calculate_release.py --json --channel develop > beta_info.json
+          cat beta_info.json
+          HAS_REL=$(jq -r '.has_release' beta_info.json)
+          {
+            echo "has_release=$HAS_REL"
+            if [ "$HAS_REL" = "true" ]; then
+              echo "version=$(jq -r '.version' beta_info.json)"
+              echo "next_tag=$(jq -r '.next_tag' beta_info.json)"
+              echo "series=$(jq -r '.series' beta_info.json)"
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+  tag-beta:
+    name: Création du tag bêta Git
+    needs: [calculate-beta]
+    if: needs.calculate-beta.outputs.has_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Poser le tag bêta
+        env:
+          TAG: ${{ needs.calculate-beta.outputs.next_tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            git tag -a "$TAG" -m "Development beta $TAG"
+            git push origin "$TAG"
+          fi
+
+  publish:
+    name: Publication Docker GHCR (develop)
+    needs: [calculate-beta, tag-beta]
+    if: needs.calculate-beta.outputs.has_release == 'true'
     permissions:
       contents: read
       packages: write
     uses: ./.github/workflows/publish.yml
+    with:
+      version: ${{ needs.calculate-beta.outputs.version }}
+      series: ${{ needs.calculate-beta.outputs.series }}
+      is_release: false
+      push: true

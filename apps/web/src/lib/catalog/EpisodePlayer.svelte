@@ -114,45 +114,29 @@
     }catch(cause){launchError=cause instanceof Error?cause.message:'Lecture indisponible.';}
   }
 </script>
-
 <div class="episode-actions">
-  {#if versionIds.length > 1}
-  <label>Version
-    <select
-      aria-label={`Version de ${episode.title}`}
-      bind:value={selected}
-      onfocus={prefetchVersions}
-      onpointerenter={prefetchVersions}
-    >
-      <option value="auto">Meilleure version disponible</option>
-      {#each versionIds as id, index (id)}
-        <option value={id}>{getLabel(id, index)}</option>
-      {/each}
-    </select>
-  </label>
-  {/if}
-  <button
-    onpointerenter={() => { if (!episode.synthetic) preloadProgress(episode.id); prefetchVersions(); }}
-    onfocus={() => { if (!episode.synthetic) preloadProgress(episode.id); prefetchVersions(); }}
-    disabled={!versionIds.length || isLaunching || episode.available === false}
-    onclick={handlePlay}
-    aria-label={`Lire ${episode.title}`}
-  >
-    {episode.available === false ? 'Node indisponible' : isLaunching ? 'Chargement…' : '▶ Lecture'}
+  <button class="episode-play" onpointerenter={() => { if (!episode.synthetic) preloadProgress(episode.id); prefetchVersions(); }} onfocus={() => { if (!episode.synthetic) preloadProgress(episode.id); prefetchVersions(); }} disabled={!versionIds.length || isLaunching || episode.available === false} onclick={handlePlay} aria-label={`Lire ${episode.title}`}>
+    {episode.available === false ? 'Temporairement indisponible' : isLaunching ? 'Chargement…' : 'Lire l’épisode'}
   </button>
-  {#if episode.available === false}
-    <span>Média temporairement indisponible (Media Node hors ligne).</span>
-  {:else if !versionIds.length}
-    <span>Aucune version disponible.</span>
-  {/if}
+  {#if episode.available === false}<span>Le serveur qui héberge cet épisode est hors ligne.</span>{:else if !versionIds.length}<span>Aucune version disponible.</span>{/if}
 </div>
 {#if launchError}<p role="alert">{launchError}</p>{/if}
-{#if !episode.synthetic && versionIds.length}<OfflineDownload options={downloadOptions} url={`/api/v1/assets/${selected==='auto'?versionIds[0]:selected}/content`} title={episode.title} mime={(media.find(item=>item.id===(selected==='auto'?versionIds[0]:selected)))?.sources.find(source=>!source.prepare)?.mime??'application/octet-stream'} />{/if}
+{#if versionIds.length > 1 || (!episode.synthetic && versionIds.length)}
+  <details class="episode-versions"><summary>{versionIds.length > 1 ? 'Versions et téléchargement' : 'Téléchargement'}</summary>
+    {#if versionIds.length > 1}
+      <label>Version<select aria-label={`Version de ${episode.title}`} bind:value={selected} onfocus={prefetchVersions} onpointerenter={prefetchVersions}><option value="auto">Meilleure version disponible</option>{#each versionIds as id, index (id)}<option value={id}>{getLabel(id, index)}</option>{/each}</select></label>
+    {/if}
+    {#if !episode.synthetic && versionIds.length}<OfflineDownload options={downloadOptions} url={`/api/v1/assets/${selected === 'auto' ? versionIds[0] : selected}/content`} title={episode.title} mime={media.find(item => item.id === (selected === 'auto' ? versionIds[0] : selected))?.sources.find(source => !source.prepare)?.mime ?? 'application/octet-stream'} />{/if}
+  </details>
+{/if}
 
 <style>
-  .episode-actions { display:flex; align-items:end; gap:14px; flex-wrap:wrap; }
-  label { display:grid; gap:6px; font-size:11px; color:var(--color-muted); }
-  button { background:var(--color-text); color:var(--color-canvas); border:0; padding:13px 20px; border-radius:6px; min-height:46px; font-size:12px; cursor:pointer; }
-  button:disabled { opacity:0.6; cursor:not-allowed; }
-  span { font-size:12px; color:var(--color-muted); }
+  .episode-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; max-width:100%; }
+  .episode-play { min-height:44px; max-width:100%; padding:11px 20px; border:0; border-radius:var(--radius-sm); background:var(--color-play); color:var(--color-on-play); font-size:14px; font-weight:600; }
+  .episode-actions span { font-size:12px; color:var(--color-muted); }
+  .episode-versions { max-width:100%; width:100%; font-size:13px; }
+  summary { min-height:44px; padding-block:10px; color:var(--color-muted); cursor:pointer; }
+  label { display:grid; gap:8px; color:var(--color-muted); font-size:12px; }
+  select { max-width:100%; min-height:44px; font-size:16px; }
+  [role='alert'] { color:var(--color-danger); font-size:13px; line-height:1.6; }
 </style>

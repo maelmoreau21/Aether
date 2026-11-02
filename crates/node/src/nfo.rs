@@ -150,7 +150,8 @@ fn apply(
         }
         "uniqueid" if !provider.is_empty() => insert_id(metadata, provider, text)?,
         "tmdbid" | "tmdb" => insert_id(metadata, "tmdb", text)?,
-        "imdbid" | "imdb" => insert_id(metadata, "imdb", text)?,
+        "imdbid" | "imdb" | "imdb_id" => insert_id(metadata, "imdb", text)?,
+        "tvdbid" | "tvdb" => insert_id(metadata, "tvdb", text)?,
         "id" if text.starts_with("tt") => insert_id(metadata, "imdb", text)?,
         _ => (),
     }
@@ -207,6 +208,16 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
                         .map_err(|_| "invalid XML attribute entity")?;
                     if value.len() > MAX_FIELD {
                         return Err("XML attribute too large".into());
+                    }
+                    // Jellyfin/Kodi legacy movie NFOs may carry IDs on <id>,
+                    // including an empty element. Never interpret its numeric text as IMDb.
+                    if name == "id" && stack.len() == 1 {
+                        let key = attribute.key.as_ref().to_ascii_lowercase();
+                        if matches!(key.as_str(), "tmdb" | "imdb" | "tvdb")
+                            && !value.trim().is_empty()
+                        {
+                            insert_id(&mut metadata, &key, value.trim())?;
+                        }
                     }
                     if name == "rating" && attribute.key.as_ref() == "max" {
                         rating_max = value
@@ -466,6 +477,26 @@ async fn read_and_parse_nfo(root: &Path, relative: &Path, priority: u8) -> NfoOu
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parses_jellyfin_legacy_id_attributes_and_provider_aliases() {
+        let m =
+            parse(br#"<movie><id TMDB="27205" IMDB="tt1375666" TVDB="100" /></movie>"#).unwrap();
+        assert_eq!(m.external_ids["tmdb"], "27205");
+        assert_eq!(m.external_ids["imdb"], "tt1375666");
+        assert_eq!(m.external_ids["tvdb"], "100");
+        let m =
+            parse(br#"<movie><imdb_id>tt1375666</imdb_id><tvdbid>100</tvdbid></movie>"#).unwrap();
+        assert_eq!(m.external_ids["imdb"], "tt1375666");
+        assert_eq!(m.external_ids["tvdb"], "100");
+        assert!(parse(br#"<movie><id TMDB="27205"/><tmdbid>1</tmdbid></movie>"#).is_err());
+        assert!(parse(br#"<movie><id IMDB="123"/></movie>"#).is_err());
+        assert!(
+            parse(br#"<movie><id>27205</id></movie>"#)
+                .unwrap()
+                .external_ids
+                .is_empty()
+        );
+    }
     use super::*;
     #[test]
     fn preserves_credits_and_provider_scales() {

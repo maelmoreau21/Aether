@@ -1,3 +1,5 @@
+> Moteur de tâches à Core unique (25 octobre 2026) : file SQLite/PostgreSQL persistante, décisions Core, exécution confinée dans les Media Nodes appairés et dans le Node standalone, leases/tentatives et priorité à la lecture. Les travaux distribués n’exigent pas plusieurs Core ni un broker externe. Contrat réel et limites : [DISTRIBUTED_TASKS.md](docs/DISTRIBUTED_TASKS.md).
+
 > PostgreSQL 18 optionnel en cours de validation : moteur explicite, migrations indépendantes et premier contrat HTTP commun réussi sur SQLite et PostgreSQL. Voir [PostgreSQL](docs/POSTGRESQL.md) et MEMORY.md ; P2 reste ouvert.
 
 > CI/GHCR (18 octobre 2026) : validation YAML réparée localement, publication
@@ -16,6 +18,12 @@
 > Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
 
 # ARCHITECTURE.md — Architecture cible Aether
+
+Stockage privé des extensions (25 octobre 2026) : connexions SQLx exclusivement
+dans le Core, broker borné via les pipes du worker Wasm, données KV et objets
+binaires par blocs dans des tables distinctes de la base existante. Les scopes
+s'appuient sur les grants et le compte courant, sans SQL ni chemin guest.
+Contrat, quotas et limites multi-Core : [EXTENSION_STORAGE.md](docs/EXTENSION_STORAGE.md).
 
 Jalon J1 (`docs/ARCHITECTURE_ROADMAP.md`, 16 octobre 2026) : découpage effectif du
 workspace Rust en trois crates (`crates/core`, `crates/node`, `crates/shared`),

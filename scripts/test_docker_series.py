@@ -65,7 +65,6 @@ def run_container():
         "-e", "MEDIA_BIND_ADDR=0.0.0.0",
         "-e", "MEDIA_DB_PATH=/data/core.sqlite3",
         "-e", "MEDIA_LIBRARY_ROOT=/media",
-        "-e", "MEDIA_WEB_DIST=/app/apps/web/build",
         "-e", f"MEDIA_PUBLIC_URL=http://127.0.0.1:{PORT}",
         "-v", data_mount,
         "-v", media_mount,

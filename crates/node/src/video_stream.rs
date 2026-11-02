@@ -95,7 +95,7 @@ impl VideoStreams {
                 "-protocol_whitelist",
                 "fd,pipe",
                 "-format_whitelist",
-                "matroska,webm,mov,mp4",
+                "matroska,webm,mov,mp4,obu",
                 "-max_alloc",
                 "67108864",
                 "-ss",

@@ -7,7 +7,9 @@ import { chooseSource } from './source-selection';
 import { AudioSelectionRetainedError } from './errors';
 import { unsupportedAudio } from './compatibility';
 
-// One finite source replacement. No retries, silent fallback or player-specific API in the UI.
+class VideoSeekTimeoutError extends Error {}
+
+// Bounded source replacement; failures and recovery remain visible to the UI.
 export class NativePlayer implements Player {
   private media?: Media;
   private source?: Source;
@@ -32,17 +34,25 @@ export class NativePlayer implements Player {
     if (this.video.paused || this.busy || this.stallTimer) return;
     this.stallTimer = setTimeout(() => {
       this.stallTimer = undefined;
-      this.video.pause();
+      this.pause();
       this.progressiveVideo?.destroy();this.progressiveVideo=undefined;
+      this.externalAudio?.destroy();this.externalAudio=undefined;
+      this.source=undefined;
       this.onError('Lecture bloquée pendant 10 secondes. Rechargez explicitement la source.');
     }, 10000);
   };
+  // A newer seek supersedes the previous wait. Its timeout must measure the
+  // new position, not accumulated time spent on obsolete requests.
+  private seeking = () => { this.clearStall(); this.stalled(); };
+  private seeked = () => { if (!this.video.seeking && this.video.readyState >= 3) this.clearStall(); };
   constructor(private video: HTMLVideoElement, private onError: (message: string) => void) {
     video.addEventListener('error', this.mediaError);
     video.addEventListener('waiting', this.stalled);
     video.addEventListener('stalled', this.stalled);
     video.addEventListener('playing', this.clearStall);
     video.addEventListener('pause', this.clearStall);
+    video.addEventListener('seeking', this.seeking);
+    video.addEventListener('seeked', this.seeked);
   }
   private mediaError = () => {
     if(this.busy)return;
@@ -118,6 +128,7 @@ export class NativePlayer implements Player {
     let resumeReplacement = false;
     let replacementPauseRevision: number | undefined;
     const segmented = Boolean(source.audioSegmentUrl && SegmentedAudio.supported());
+    const canTryProgressive = Boolean(source.videoStreamUrl && source.videoMime && Number.isFinite(source.durationSeconds) && source.durationSeconds! > 0 && ProgressiveVideo.supported(source.videoMime));
     const audioUrl = segmented ? source.audioSegmentUrl! : source.externalAudioUrl;
     const createAudio = () => segmented
       ? new SegmentedAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError, {mode: source.audioSegmentMode, trackId: source.audioTrackId})
@@ -201,6 +212,7 @@ export class NativePlayer implements Player {
     const loadCandidate = (candidateUrl: string, timeoutMs=10000) =>
       new Promise<void>((resolve, reject) => {
         let settled = false;
+        let timer: ReturnType<typeof setTimeout>;
         const finish = (error?: Error) => {
           if (settled) return;
           settled = true;
@@ -210,15 +222,21 @@ export class NativePlayer implements Player {
           this.video.removeEventListener('error', failed);
           this.cancel = undefined;
           if (error) {
-            console.info('[media playback]',{stage:metadataReceived ? 'seek-failed' : 'metadata-failed',networkState:this.video.networkState,readyState:this.video.readyState,mediaError:this.video.error?.code ?? null});
+            console.info('[media playback]',{stage:metadataReceived ? (awaitingSeek ? 'seek-failed' : 'progress-failed') : 'metadata-failed',networkState:this.video.networkState,readyState:this.video.readyState,mediaError:this.video.error?.code ?? null,requestedPosition:awaitingSeek ? seekTarget : null,actualPosition:this.video.currentTime,seeking:this.video.seeking});
             reject(error);
           }
           else resolve();
         };
-        const seeked = () => finish();
+        let awaitingSeek = false;
+        let seekTarget = 0;
+        const seeked = () => { if (awaitingSeek && !this.video.seeking && Math.abs(this.video.currentTime - seekTarget) <= .25) finish(); };
         let metadataReceived = false;
         const metadata = () => {
+          if (metadataReceived) return;
           metadataReceived = true;
+          // The direct-node connection deadline must not consume the separate
+          // saved-progress and media-seek budgets on slow storage or networks.
+          armTimeout(10000);
           this.video.volume = volume;
           this.video.playbackRate = speed;
           // Resolve saved progress alongside metadata, before audio windows load.
@@ -227,7 +245,7 @@ export class NativePlayer implements Player {
           void Promise.resolve(position).then(position => {
             if (settled || this.destroyed) return;
             const target = Number.isFinite(position) ? Math.max(0, Math.min(position, Math.max(0, this.video.duration - 0.05))) : 0;
-            if (target > 0 && Math.abs(this.video.currentTime - target) > .001) this.video.currentTime = target;
+            if (target > 0 && Math.abs(this.video.currentTime - target) > .001) { seekTarget = target; awaitingSeek = true; armTimeout(10000); this.video.currentTime = target; }
             else finish();
           }, error => finish(error instanceof Error ? error : new Error(String(error))));
         };
@@ -237,13 +255,18 @@ export class NativePlayer implements Player {
               `Source ${source.language.toUpperCase()} illisible : réseau, conteneur ou codec non pris en charge.`
             )
           );
-        const timer = setTimeout(
-          () =>
-            finish(
-              new Error(`Délai ${metadataReceived ? 'de seek' : 'de lecture des métadonnées'} expiré après ${timeoutMs / 1000} s (networkState=${this.video.networkState}, readyState=${this.video.readyState}, MediaError=${this.video.error?.code ?? 'aucune'}). ${metadataReceived ? 'Position demandée non atteinte.' : 'Index du conteneur ou données vidéo non reçus/lisibles.'} Cause codec, conteneur ou transport non déterminée ; consulter les diagnostics HTTP du navigateur et du Media Node.`)
-            ),
-          timeoutMs
-        );
+        const armTimeout = (milliseconds: number) => {
+          clearTimeout(timer);
+          const stage = !metadataReceived ? 'de lecture des métadonnées' : awaitingSeek ? 'de seek' : 'de chargement de la position';
+          timer = setTimeout(() => {
+            const actual = Number.isFinite(this.video.currentTime) ? this.video.currentTime.toFixed(2) : 'indisponible';
+            const detail = awaitingSeek
+              ? `Position demandée ${seekTarget.toFixed(2)} s, atteinte ${actual} s (seeking=${this.video.seeking}).`
+              : metadataReceived ? 'Position de reprise indisponible.' : 'Index du conteneur ou données vidéo non reçus/lisibles.';
+            finish(new (awaitingSeek ? VideoSeekTimeoutError : Error)(`Délai ${stage} expiré après ${milliseconds / 1000} s (networkState=${this.video.networkState}, readyState=${this.video.readyState}, MediaError=${this.video.error?.code ?? 'aucune'}). ${detail} Cause non déterminée ; consulter les diagnostics HTTP du navigateur et du Media Node.`));
+          }, milliseconds);
+        };
+        armTimeout(timeoutMs);
         this.cancel = () => finish(new Error('Lecteur fermé.'));
         this.video.addEventListener('loadedmetadata', metadata);
         this.video.addEventListener('seeked', seeked);
@@ -274,7 +297,7 @@ export class NativePlayer implements Player {
         void audioLoading.catch(() => {});
       } else if (source.externalAudioUrl && !segmented) {
         this.externalAudio = createAudio();
-        audioLoading = this.externalAudio.load(audioUrl!, false);
+        audioLoading = this.externalAudio.load(audioUrl!, false, undefined, position);
         void audioLoading.catch(() => {});
       }
       try {
@@ -285,13 +308,16 @@ export class NativePlayer implements Player {
           if (fallbackUrl && !this.destroyed) {
             this.status('Chargement de la vidéo…');
             await loadVideo(fallbackUrl,7500);
+          } else if (primaryErr instanceof VideoSeekTimeoutError && !canTryProgressive && !source.preparedVideoUrl && !this.destroyed) {
+            this.status('Reprise du chargement vidéo après interruption…');
+            await loadVideo(primaryUrl, 10000);
           } else {
             throw primaryErr;
           }
         }
       } catch (originalError) {
         if (this.destroyed) throw originalError;
-        if(source.videoStreamUrl && source.videoMime && Number.isFinite(source.durationSeconds) && source.durationSeconds!>0 && ProgressiveVideo.supported(source.videoMime)) {
+        if(canTryProgressive && source.videoStreamUrl && source.videoMime) {
           this.status('Vidéo originale non lisible. Lecture progressive sans réencodage…');
           const progressive=new ProgressiveVideo(this.video,source.videoStreamUrl,source.durationSeconds!,source.videoMime,message=>{
             this.pause();this.externalAudio?.destroy();this.externalAudio=undefined;this.progressiveVideo?.destroy();this.progressiveVideo=undefined;this.source=undefined;this.onError(message);
@@ -310,8 +336,10 @@ export class NativePlayer implements Player {
             }
           }
         } else {
-          if(source.videoStreamUrl)throw new Error(`La lecture vidéo progressive n’est pas disponible pour ce navigateur ou ce descripteur (${source.videoMime??'codec MSE absent'}). Aucun remux intégral automatique.`);
-          if(!source.preparedVideoUrl)throw originalError;
+          if(!source.preparedVideoUrl) {
+            if(source.videoStreamUrl)throw new Error(`La lecture vidéo progressive n’est pas disponible pour ce navigateur ou ce descripteur (${source.videoMime??'codec MSE absent'}). Aucun remux intégral automatique.`);
+            throw originalError;
+          }
           this.status('Vidéo originale non lisible sur ce navigateur. Préparation sans réencodage…');
           await this.prepareUrl(source.preparedVideoUrl);
           await loadCandidate(source.preparedVideoUrl);
@@ -365,7 +393,7 @@ export class NativePlayer implements Player {
       for (const cue of Array.from(track.track.cues ?? [])) {
         this.cueTimes.set(cue, [cue.startTime, cue.endTime]);
         this.shiftCue(cue);
-        if (typeof VTTCue !== 'undefined' && cue instanceof VTTCue) { cue.snapToLines = false; cue.line = 70; }
+        if (typeof VTTCue !== 'undefined' && cue instanceof VTTCue) { cue.snapToLines = false; cue.line = 90; }
       }
     }, { once: true });
     track.addEventListener('error', () => this.onError('Échec du chargement des sous-titres WebVTT.'), { once: true });
@@ -436,6 +464,8 @@ export class NativePlayer implements Player {
     this.video.removeEventListener('stalled', this.stalled);
     this.video.removeEventListener('playing', this.clearStall);
     this.video.removeEventListener('pause', this.clearStall);
+    this.video.removeEventListener('seeking', this.seeking);
+    this.video.removeEventListener('seeked', this.seeked);
     this.video.pause(); this.video.removeAttribute('src'); this.video.load();
   }
 }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { resolve } from '$app/paths';
   import type { Library, AdminNode, Scan, RefreshMode, LibraryOptions } from './types';
   import LibraryOptionsForm from './LibraryOptions.svelte';
@@ -23,13 +24,55 @@
   let imageTarget = $state<Library | null>(null);
   let target = $state<Library | null>(null), mode = $state<RefreshMode>('incremental'), refreshing = $state(false);
   let showPathPicker = $state(false);
+  const editorSections = [
+    { id: 'general', label: 'Général' },
+    { id: 'sources', label: 'Sources et dossiers' },
+    { id: 'metadata', label: 'Métadonnées et images' },
+    { id: 'indexing', label: 'Indexation' },
+    { id: 'access', label: 'Accès' },
+    { id: 'advanced', label: 'Avancé' }
+  ] as const;
+  type EditorSection = typeof editorSections[number]['id'];
+  let activeSection = $state<EditorSection>('general');
+  let formError = $state('');
+  let editorContent: HTMLDivElement;
+  function chooseEditorSection(section: EditorSection) {
+    activeSection = section;
+    if (editorContent) editorContent.scrollTop = 0;
+  }
+  function tabKeydown(event: KeyboardEvent, index: number) {
+    const step = ['ArrowDown', 'ArrowRight'].includes(event.key) ? 1 : ['ArrowUp', 'ArrowLeft'].includes(event.key) ? -1 : 0;
+    if (!step && event.key !== 'Home' && event.key !== 'End') return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? editorSections.length - 1 : (index + step + editorSections.length) % editorSections.length;
+    chooseEditorSection(editorSections[next].id);
+    editor?.querySelector<HTMLButtonElement>(`#library-tab-${editorSections[next].id}`)?.focus();
+  }
   const activeNodes = $derived(nodes.filter(n => n.status !== 'revoked'));
   function closeMenu(event: MouseEvent) { const details = (event.currentTarget as HTMLElement).closest('details'); details?.removeAttribute('open'); details?.querySelector('summary')?.focus(); }
-  function manage(library?: Library) { if (library) onedit(library); else onreset(); editor?.showModal(); }
+  function manage(library?: Library) { if (library) onedit(library); else onreset(); activeSection = 'general'; formError = ''; editor?.showModal(); }
   function refreshLibrary(library: Library | null) { target = library; mode = 'incremental'; refresher?.showModal(); }
   async function submit(event: SubmitEvent) {
-    if (folders.length === 0 && root.trim()) {
-      folders = [{ nodeId, root: root.trim() }];
+    event.preventDefault();
+    if (saving) return;
+    formError = '';
+    const form = event.currentTarget as HTMLFormElement;
+    const invalid = form.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input:invalid, select:invalid, textarea:invalid');
+    if (invalid) {
+      const panel = invalid.closest<HTMLElement>('[data-editor-panel]');
+      chooseEditorSection((panel?.dataset.editorPanel ?? 'general') as EditorSection);
+      for (let parent = invalid.parentElement; parent && parent !== editor; parent = parent.parentElement) {
+        if (parent instanceof HTMLDetailsElement) parent.open = true;
+      }
+      await tick();
+      invalid.focus(); invalid.reportValidity();
+      return;
+    }
+    if (!folders.length) {
+      formError = 'Ajoutez au moins un dossier dans Sources et dossiers.';
+      chooseEditorSection('sources');
+      await tick(); editor?.querySelector<HTMLInputElement>('#library-root')?.focus();
+      return;
     }
     if (await onsave(event)) editor?.close();
   }
@@ -63,6 +106,7 @@
           <button onclick={(event) => { closeMenu(event); manage(library); }}>Renommer</button>
           <button disabled={!library.enabled || pending.includes(library.id) || ['queued','running'].includes(scans[library.id]?.status)} onclick={(event) => { closeMenu(event); void onscan(library); }}>Scanner la bibliothèque</button>
           <button onclick={(event) => { closeMenu(event); imageTarget = library; }}>Modifier les images</button>
+          <button disabled={!library.enabled || pending.includes(library.id) || ['queued','running'].includes(scans[library.id]?.status)} onclick={(event) => { closeMenu(event); target = library; mode = 'missing_metadata'; refresher?.showModal(); }}>Rechercher les métadonnées manquantes</button>
           <button disabled={!library.enabled || pending.includes(library.id) || ['queued','running'].includes(scans[library.id]?.status)} onclick={(event) => { closeMenu(event); refreshLibrary(library); }}>Actualiser la bibliothèque</button>
           <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(library.id)}`)}>Planifier l’actualisation</a>
         </div></details>
@@ -73,61 +117,46 @@
     </article>{:else}<p>Ajoutez votre première bibliothèque de films ou de séries.</p>{/each}
   </div>
 </section>
-<dialog bind:this={editor} aria-labelledby="library-form" oncancel={(event) => { if (saving) event.preventDefault(); }}>
-  <h2 id="library-form">{editing ? 'Modifier la bibliothèque' : 'Ajouter une bibliothèque'}</h2>
-  <form onsubmit={submit}><fieldset disabled={saving}>
-    <label for="library-name">Nom de la bibliothèque</label><input id="library-name" bind:value={name} required maxlength="100" autocomplete="off" />
-    <label for="library-kind">Type de contenu</label><select id="library-kind" bind:value={kind}><option value="films">Films</option><option value="series">Séries</option><option value="music">Musique</option></select>
-    <section class="folders" aria-labelledby="folders-heading">
-      <h3 id="folders-heading">Dossiers de la bibliothèque</h3>
-      <p>Regroupez vos dossiers de plusieurs serveurs, par exemple dans Films_UHD. Les accès et les réglages s’appliquent à toute la bibliothèque.</p>
-      <ul>{#each folders as folder, index (`${folder.nodeId}:${folder.root}`)}
-        <li><div><strong>{nodes.find(node => node.id === folder.nodeId)?.name ?? folder.nodeId}</strong><span>{folder.root}</span></div><button type="button" aria-label={`Retirer ${folder.root}`} onclick={() => folders = folders.filter((_, i) => i !== index)}>Retirer</button></li>
-      {:else}<li class="empty-folders">Aucun dossier ajouté. Choisissez un serveur et un dossier ci-dessous.</li>{/each}</ul>
-    <label for="library-node">Serveur du dossier</label><select id="library-node" bind:value={nodeId} onchange={onnodechange}><option value="local">Node local</option>{#each activeNodes.filter(n => n.id !== 'local') as node (node.id)}<option value={node.id}>{node.name}</option>{/each}</select>
-    <label for="library-root">Dossier</label>
-    <div class="folder-input-row">
-      <input
-        id="library-root"
-        type="text"
-        bind:value={root}
-        placeholder="ex: /media/films ou C:\Films"
-        autocomplete="off"
-        spellcheck="false"
-      />
-      <button
-        type="button"
-        class="browse-btn"
-        onclick={() => showPathPicker = true}
-        title="Parcourir les dossiers"
-      >
-        <Icon name="search" size={16} /> Parcourir…
-      </button>
+<dialog class="library-editor" bind:this={editor} aria-labelledby="library-form" oncancel={event => { if (saving) event.preventDefault(); }}>
+  <header class="editor-header"><div><p class="eyebrow">{editing ? name : 'Nouvelle bibliothèque'}</p><h2 id="library-form">{editing ? 'Modifier la bibliothèque' : 'Ajouter une bibliothèque'}</h2></div><button type="button" disabled={saving} aria-label="Fermer les réglages de la bibliothèque" onclick={() => editor?.close()}><Icon name="close" size={20} /></button></header>
+  <form onsubmit={submit} novalidate><fieldset disabled={saving}>
+    <div class="editor-workspace">
+      <div class="editor-navigation">
+        <div class="editor-tabs" role="tablist" aria-label="Réglages de la bibliothèque" aria-orientation="vertical">
+          {#each editorSections as section, index (section.id)}<button type="button" id={`library-tab-${section.id}`} role="tab" aria-selected={activeSection === section.id} aria-controls={`library-panel-${section.id}`} tabindex={activeSection === section.id ? 0 : -1} onclick={() => chooseEditorSection(section.id)} onkeydown={event => tabKeydown(event, index)}>{section.label}</button>{/each}
+        </div>
+        <label class="editor-select">Rubrique<select aria-label="Rubrique des réglages" value={activeSection} onchange={event => chooseEditorSection(event.currentTarget.value as EditorSection)}>{#each editorSections as section (section.id)}<option value={section.id}>{section.label}</option>{/each}</select></label>
+      </div>
+      <div class="editor-content" bind:this={editorContent}>
+        <div id="library-panel-general" role="tabpanel" aria-labelledby="library-tab-general" data-editor-panel="general" hidden={activeSection !== 'general'} tabindex="0">
+          <h3>Général</h3><p class="panel-description">Donnez un nom à la bibliothèque et choisissez le type de médias.</p>
+          <div class="identity-fields"><div><label for="library-name">Nom de la bibliothèque</label><input id="library-name" bind:value={name} required maxlength="100" autocomplete="off" /></div><div><label for="library-kind">Type de contenu</label><select id="library-kind" bind:value={kind}><option value="films">Films</option><option value="series">Séries</option><option value="music">Musique</option></select></div></div>
+          <label class="check"><input type="checkbox" bind:checked={enabled} /> Bibliothèque active</label><p class="field-hint">Une bibliothèque désactivée est masquée du catalogue et ne peut pas être lue.</p>
+          <div class="source-summary"><strong>{folders.length} {folders.length > 1 ? 'dossiers configurés' : 'dossier configuré'}</strong><p>{folders.length ? 'Les médias restent en lecture seule.' : 'Ajoutez un dossier pour pouvoir enregistrer cette bibliothèque.'}</p><button type="button" onclick={() => chooseEditorSection('sources')}>{folders.length ? 'Consulter les dossiers' : 'Configurer les dossiers'}</button></div>
+        </div>
+        <div id="library-panel-sources" role="tabpanel" aria-labelledby="library-tab-sources" data-editor-panel="sources" hidden={activeSection !== 'sources'} tabindex="0">
+          <div class="section-heading"><h3>Sources et dossiers</h3><span>{folders.length} / 32</span></div><p class="panel-description">Choisissez les dossiers sur les serveurs qui les hébergent. Aucun fichier d’origine n’est modifié.</p>
+          <ul class="folders">{#each folders as folder (`${folder.nodeId}:${folder.root}`)}<li><div><strong>{nodes.find(node => node.id === folder.nodeId)?.name ?? folder.nodeId}</strong><span>{folder.root}</span></div><button type="button" aria-label={`Retirer ${folder.root}`} onclick={() => folders = folders.filter(item => item !== folder)}>Retirer</button></li>{:else}<li class="empty-folders">Aucun dossier ajouté.</li>{/each}</ul>
+          <label for="library-node">Serveur du dossier</label><select id="library-node" bind:value={nodeId} onchange={onnodechange}><option value="local">Node local</option>{#each activeNodes.filter(node => node.id !== 'local') as node (node.id)}<option value={node.id}>{node.name}</option>{/each}</select>
+          <label for="library-root">Dossier</label><div class="folder-input-row"><input id="library-root" type="text" bind:value={root} placeholder="ex: /media/films ou C:\Films" autocomplete="off" spellcheck="false" /><button type="button" class="browse-btn" onclick={() => showPathPicker = true}><Icon name="search" size={16} />Parcourir…</button></div>
+          <button type="button" class="add-folder-btn" disabled={folders.length >= 32 || !root.trim() || folders.some(folder => folder.nodeId === nodeId && folder.root === root.trim())} onclick={() => { if (root.trim()) { folders = [...folders, { nodeId, root: root.trim() }]; root = ''; formError = ''; } }}><span aria-hidden="true">+</span> Ajouter ce dossier</button>
+        </div>
+        <div id="library-panel-metadata" role="tabpanel" aria-labelledby="library-tab-metadata" data-editor-panel="metadata" hidden={activeSection !== 'metadata'} tabindex="0"><LibraryOptionsForm bind:options {kind} section="metadata" /></div>
+        <div id="library-panel-indexing" role="tabpanel" aria-labelledby="library-tab-indexing" data-editor-panel="indexing" hidden={activeSection !== 'indexing'} tabindex="0">
+          <h3>Indexation</h3><p class="panel-description">Choisissez les fichiers à ignorer et les règles d’import.</p>
+          <label for="library-excluded">Dossiers ou motifs à exclure</label><input id="library-excluded" bind:value={excludedPatterns} placeholder="ex: bonus, trailers, #recycle" autocomplete="off" /><p class="field-hint">Séparez les motifs par des virgules. Les dossiers système (#recycle, @eaDir, dossiers cachés), .nomedia et .ignore sont déjà exclus automatiquement.</p>
+          <LibraryOptionsForm bind:options {kind} section="indexing" />
+        </div>
+        <div id="library-panel-access" role="tabpanel" aria-labelledby="library-tab-access" data-editor-panel="access" hidden={activeSection !== 'access'} tabindex="0"><h3>Accès à la bibliothèque</h3><p>Les autorisations se gèrent dans les rubriques <strong>Utilisateurs</strong> et <strong>Groupes</strong> de l’administration.</p><p>Ce formulaire configure les sources et l’import. Ajouter un dossier n’accorde aucun droit supplémentaire à un compte.</p><p>Les médias et les fichiers utilisés par Jellyfin restent en lecture seule.</p></div>
+        <div id="library-panel-advanced" role="tabpanel" aria-labelledby="library-tab-advanced" data-editor-panel="advanced" hidden={activeSection !== 'advanced'} tabindex="0"><h3>Options avancées</h3><p class="panel-description">Les indications de chaque groupe distinguent les réglages disponibles des préférences préparées pour de futurs moteurs.</p><LibraryOptionsForm bind:options {kind} section="advanced" /></div>
+      </div>
     </div>
-
-    <button
-      type="button"
-      class="add-folder-btn"
-      disabled={folders.length >= 32 || !root.trim() || folders.some(folder => folder.nodeId === nodeId && folder.root === root.trim())}
-      onclick={() => {
-        if (root.trim()) {
-          folders = [...folders, { nodeId, root: root.trim() }];
-          root = '';
-        }
-      }}
-    >
-      <span aria-hidden="true">+</span> Ajouter ce dossier
-    </button>
-    </section>
-    <label for="library-excluded">Dossiers ou motifs à exclure (séparés par des virgules)</label>
-    <input id="library-excluded" bind:value={excludedPatterns} placeholder="ex: bonus, trailers, #recycle" autocomplete="off" />
-    <p class="field-hint">Les dossiers système (#recycle, @eaDir, dossiers cachés) et les dossiers contenant un fichier .nomedia ou .ignore sont exclus automatiquement.</p>
-    <label class="check"><input type="checkbox" bind:checked={enabled} /> Bibliothèque active</label>
-    <LibraryOptionsForm bind:options {kind} />
-    <p>Les accès se règlent dans Utilisateurs et Groupes. Les médias restent en lecture seule.</p>
-    <div class="actions"><button type="button" onclick={() => editor?.close()}>Annuler</button><button class="primary" type="submit" disabled={folders.length === 0}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div>
+    <footer class="editor-actions">
+      {#if formError || error}<p class="editor-error" role="alert">{formError || error}</p>{/if}
+      <p class="save-hint">{folders.length ? 'Les réglages locaux s’appliquent au prochain scan ; les réglages des fournisseurs aux prochaines collectes.' : 'Ajoutez un dossier dans Sources et dossiers.'}</p>
+      <div class="footer-buttons"><button type="button" onclick={() => editor?.close()}>Annuler</button><button class="primary" type="submit" disabled={!folders.length}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div>
+    </footer>
   </fieldset></form>
-  {#if error}<p role="alert">{error}</p>{/if}
 </dialog>
 <dialog bind:this={refresher} aria-labelledby="refresh-heading" oncancel={(event) => { if (refreshing) event.preventDefault(); }}>
   <form onsubmit={refresh}>
@@ -138,8 +167,8 @@
       <option value="missing_metadata">Compléter les descriptions manquantes</option>
       <option value="full">Tout réanalyser (plus lent)</option>
     </select>
-    <p>{mode === 'new_only' ? 'Les métadonnées des médias déjà connus sont conservées. Les fichiers modifiés et les pistes restent vérifiés.' : mode === 'missing_metadata' ? 'Les métadonnées locales déjà validées sont conservées. Les médias sans métadonnées sont complétés depuis les fichiers NFO disponibles.' : mode === 'full' ? 'Tous les fichiers sont réanalysés. Les métadonnées locales sont relues, y compris celles des médias connus.' : 'Les analyses techniques inchangées sont réutilisées. Les fichiers et leurs pistes externes sont vérifiés.'}</p>
-    <p>La recherche de métadonnées auprès de fournisseurs en ligne n’est pas encore disponible.</p>
+    <p>{mode === 'new_only' ? 'Les métadonnées des médias déjà connus sont conservées. Les fichiers modifiés et les pistes restent vérifiés.' : mode === 'missing_metadata' ? 'Les métadonnées locales déjà validées sont conservées. Les médias sans métadonnées ou sans affiches sont complétés depuis les fournisseurs en ligne configurés et les fichiers NFO.' : mode === 'full' ? 'Tous les fichiers sont réanalysés. Les métadonnées locales sont relues, y compris celles des médias connus.' : 'Les analyses techniques inchangées sont réutilisées. Les fichiers et leurs pistes externes sont vérifiés.'}</p>
+
     {#if error}<p role="alert">{error}</p>{/if}
     <div class="actions"><button type="button" disabled={refreshing} onclick={() => refresher?.close()}>Annuler</button><button class="primary" type="submit" disabled={refreshing}>{refreshing ? 'Lancement…' : 'Actualiser'}</button></div>
   </form>
@@ -155,13 +184,37 @@
   />
 {/if}
 <style>
+  dialog.library-editor { width:min(1040px,calc(100vw - 48px)); height:min(800px,calc(100dvh - 48px)); max-width:none; max-height:calc(100dvh - 48px); padding:0; overflow:hidden; }
+  dialog.library-editor[open] { display:flex; flex-direction:column; }
+  .editor-header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:20px 24px; background:var(--color-surface); border-bottom:1px solid var(--color-line); flex:none; }
+  .editor-header h2 { margin:4px 0 0; font-size:24px; font-weight:650; }
+  .editor-header button { width:44px; height:44px; padding:0; flex:none; }
+  .eyebrow { margin:0; font-size:12px; color:var(--color-muted); max-width:70ch; overflow-wrap:anywhere; }
+  .library-editor form,.library-editor fieldset { display:flex; flex-direction:column; flex:1; min-height:0; }
+  .editor-workspace { display:grid; grid-template-columns:190px minmax(0,1fr); flex:1; min-height:0; }
+  .editor-navigation { background:var(--color-surface); border-right:1px solid var(--color-line); padding:20px 12px; overflow-y:auto; }
+  .editor-tabs { display:grid; gap:4px; }
+  .editor-tabs button { justify-content:start; border:0; background:transparent; text-align:left; font-size:13px; line-height:1.5; padding:12px; }
+  .editor-tabs button[aria-selected=true] { background:var(--color-accent-soft); color:var(--color-accent); font-weight:600; }
+  .editor-select { display:none; }
+  .editor-content { min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:24px; }
+  .editor-content h3 { font-size:20px; font-weight:600; letter-spacing:-.02em; }
+  .panel-description { margin:8px 0 20px; }
+  .identity-fields { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr); gap:20px; }
+  .source-summary { border-top:1px solid var(--color-line); padding-top:20px; margin-top:24px; }
+  .source-summary p { margin:8px 0 16px; }
+  .section-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .section-heading span { color:var(--color-muted); font-size:13px; }
+  .folders { list-style:none; padding:0; margin:20px 0; display:grid; gap:8px; }
+  .folders li { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--color-line); }
+  .folders li div { min-width:0; display:grid; gap:5px; }
+  .folders li span { overflow-wrap:anywhere; font-size:13px; color:var(--color-muted); }
+  .folders li button { flex:none; padding:8px 12px; }
   .folder-count { margin:0; padding:0 18px 18px; font-size:12px; }
-  .folders { margin:24px 0; padding:20px; border:1px solid var(--border-subtle); border-radius:12px; background:var(--bg-elevated); }
-  .folders h3 { margin:0 0 8px; } .folders p { font-size:13px; line-height:1.6; color:var(--text-secondary); }
-  .folders ul { list-style:none; padding:0; display:grid; gap:10px; }
-  .folders li { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px; background:var(--bg-surface); border-radius:var(--radius-md); }
-  .folders li div { min-width:0; display:grid; gap:5px; } .folders li span { overflow-wrap:anywhere; font-size:13px; color:var(--text-secondary); }
-  .folders li button { flex-shrink:0; white-space:nowrap; padding:8px 12px; }
+  .editor-actions { flex:none; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px 20px; padding:16px 24px; background:var(--color-surface); border-top:1px solid var(--color-line); }
+  .save-hint { flex:1; min-width:160px; margin:0; font-size:12px; }
+  .footer-buttons { display:flex; gap:12px; margin-left:auto; }
+  .editor-error { flex-basis:100%; margin:0; font-size:13px; }
   h2 { font-size: 28px; font-weight: 400; margin: 0 0 28px; overflow-wrap: anywhere; }
   .toolbar { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 32px; }
   button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 10px 18px; font: inherit; font-size: 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); color: var(--text-primary); }
@@ -202,5 +255,38 @@
   .folder-input-row input { flex: 1; min-width: 0; }
   .browse-btn { flex-shrink: 0; white-space: nowrap; height: 44px; }
   .add-folder-btn { margin-top: 10px; width: 100%; }
-  @media(max-width: 600px) { .library-grid { grid-template-columns: minmax(0, 1fr); } dialog { padding: 20px; } }
+  @media(max-width:800px), (max-height:520px) and (max-width:1100px) {
+    .editor-workspace { grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); }
+    .editor-navigation { padding:12px 20px; border-right:0; border-bottom:1px solid var(--color-line); overflow:visible; }
+    .editor-tabs { display:none; }
+    .editor-select { display:flex; align-items:center; gap:12px; margin:0; font-size:12px; }
+    .editor-select select { flex:1; width:auto; min-width:0; min-height:44px; padding:8px 12px; font-size:16px; }
+  }
+  @media(max-width:600px) {
+    .library-grid { grid-template-columns:minmax(0,1fr); }
+    dialog { padding:20px; }
+    dialog.library-editor { width:100vw; height:100dvh; max-height:100dvh; margin:0; border:0; border-radius:0; }
+    .editor-header { padding:16px; }
+    .editor-header h2 { font-size:21px; }
+    .editor-navigation { padding:10px 16px; }
+    .editor-content { padding:20px 16px; }
+    .identity-fields { grid-template-columns:minmax(0,1fr); gap:0; }
+    .folder-input-row { flex-wrap:wrap; }
+    .folder-input-row input { flex-basis:100%; }
+    .browse-btn { width:100%; }
+    .editor-actions { padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px)); gap:8px; }
+    .save-hint { flex-basis:100%; }
+    .footer-buttons { width:100%; }
+    .footer-buttons button { flex:1; }
+    .library-editor input:not([type=checkbox]),.library-editor select { font-size:16px; }
+  }
+  @media(max-height:520px) and (max-width:1100px) {
+    dialog.library-editor { height:100dvh; max-height:100dvh; width:100vw; margin:0; border:0; border-radius:0; }
+    .editor-header { padding:8px 16px; }
+    .editor-header h2 { margin:0; font-size:20px; }
+    .eyebrow,.save-hint { display:none; }
+    .editor-navigation { padding:8px 16px; }
+    .editor-actions { padding:8px 16px calc(8px + env(safe-area-inset-bottom,0px)); }
+    .editor-content { padding:16px; }
+  }
 </style>

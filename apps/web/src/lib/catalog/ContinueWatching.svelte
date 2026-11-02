@@ -3,16 +3,30 @@
   import { resolve } from '$app/paths';
   import { session } from '../auth/session';
   import { history, loadHistory } from './watch-state';
+  import { isResumable } from '../player/progress';
+  import { serverPresentation } from '../config/presentation';
   import Icon from '../ui/Icon.svelte';
   import type { Work } from './api';
+  import { selectArtwork } from './artwork-selection';
   import { imagePreviewUrl } from './image-url';
   let { works = [] }: { works?: Work[] } = $props();
-  function thumbnail(id: string, seriesId?: string) { const work=works.find(work=>work.id===(seriesId || id)); return imagePreviewUrl(work?.artwork?.backdrop || work?.posterUrl,640); }
+  function thumbnail(id: string, seriesId?: string) { const work=works.find(work=>work.id===(seriesId || id)); const artwork=selectArtwork(work, $session); return imagePreviewUrl(artwork.thumb || artwork.landscape || artwork.backdrop,640); }
+  let failedImages = $state<string[]>([]);
 
   let error = $state('');
   let track = $state<HTMLDivElement>();
   let canScrollLeft = $state(false);
   let canScrollRight = $state(false);
+
+  $effect(() => {
+    if (!track) return;
+    const resize = new ResizeObserver(updateScrollState);
+    resize.observe(track);
+    const content = new MutationObserver(updateScrollState);
+    content.observe(track, { childList: true });
+    updateScrollState();
+    return () => { resize.disconnect(); content.disconnect(); };
+  });
 
   onMount(() => {
     void loadHistory().catch(e => (error = e.message));
@@ -22,7 +36,7 @@
     if ($session) void loadHistory().catch(e => (error = e.message));
   });
 
-  const continuing = $derived($history.filter(item => !item.watched && item.position > 0));
+  const continuing = $derived($history.filter(item => isResumable(item, $serverPresentation)));
 
   function updateScrollState() {
     if (!track) return;
@@ -35,12 +49,12 @@
     const distance = track.clientWidth * 0.75;
     track.scrollBy({
       left: direction === 'left' ? -distance : distance,
-      behavior: 'smooth'
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
     });
   }
 </script>
 
-{#if error || $history.length}
+{#if error || continuing.length}
 <section class="continue-shelf" aria-label="Continuer à regarder">
   <div class="shelf-header">
     <div class="title-group">
@@ -51,14 +65,13 @@
     </div>
 
     {#if continuing.length > 2}
-      <div class="carousel-nav" aria-hidden="true">
+      <div class="carousel-nav">
         <button
           type="button"
           class="nav-arrow"
           disabled={!canScrollLeft}
           onclick={() => scroll('left')}
           aria-label="Faire défiler vers la gauche"
-          tabindex="-1"
         >
           <Icon name="chevron-left" size={18} />
         </button>
@@ -68,7 +81,6 @@
           disabled={!canScrollRight}
           onclick={() => scroll('right')}
           aria-label="Faire défiler vers la droite"
-          tabindex="-1"
         >
           <Icon name="chevron-right" size={18} />
         </button>
@@ -107,13 +119,14 @@
       onscroll={updateScrollState}
     >
       {#each continuing as item (item.workId)}
+        {@const image = thumbnail(item.workId,item.seriesId)}
         <a
           class="continue-card"
           href={resolve(`${item.kind === 'episode' ? 'series/' : 'films/'}?work=${encodeURIComponent(item.seriesId ?? item.workId)}`)}
           aria-label={`Reprendre la lecture de ${item.title}`}
         >
           <div class="card-thumb">
-            {#if thumbnail(item.workId,item.seriesId)}<img class="resume-image" src={thumbnail(item.workId,item.seriesId)} alt="" loading="lazy" />{/if}
+            {#if image && !failedImages.includes(image)}<img class="resume-image" src={image} alt="" width="640" height="360" loading="lazy" decoding="async" onerror={() => failedImages = [...failedImages, image]} />{/if}
             <div class="thumb-bg" aria-hidden="true">
               <span class="thumb-letter">{(item.title ?? 'M').charAt(0)}</span>
             </div>
@@ -149,29 +162,6 @@
       {/each}
     </div>
   {/if}
-
-  {#if $history.length}
-    <details class="history-details">
-      <summary>
-        <span class="summary-content">
-          <Icon name="clock" size={16} />
-          <span>Historique récent ({$history.length} séance{$history.length > 1 ? 's' : ''})</span>
-        </span>
-      </summary>
-      <ul class="history-list">
-        {#each $history.slice(0, 20) as item (item.workId)}
-          <li class="history-item">
-            <a href={resolve(`${item.kind === 'episode' ? 'series/' : 'films/'}?work=${encodeURIComponent(item.seriesId ?? item.workId)}`)}>
-              <span class="history-title">{item.title}</span>
-            </a>
-            <span class="history-status" class:watched={item.watched}>
-              {item.watched ? '✓ Vu' : '⏱ En cours'}
-            </span>
-          </li>
-        {/each}
-      </ul>
-    </details>
-  {/if}
 </section>
 {/if}
 
@@ -180,7 +170,7 @@
   .card-thumb { position:relative; }
   .thumb-overlay,.card-progress-track { z-index:2; }
   .continue-shelf {
-    margin: 36px 0;
+    margin: 0;
   }
 
   .shelf-header {
@@ -306,9 +296,11 @@
     gap: 18px;
     overflow-x: auto;
     scroll-behavior: smooth;
-    padding: 6px 4px 14px;
+    padding: 12px 8px 18px;
+    margin: -6px -8px;
     scrollbar-width: none;
     -ms-overflow-style: none;
+    scroll-snap-type: x mandatory;
   }
 
   .continue-list::-webkit-scrollbar {
@@ -316,7 +308,8 @@
   }
 
   .continue-card {
-    flex: 0 0 clamp(240px, 24vw, 300px);
+    flex: 0 0 clamp(250px, 24vw, 310px);
+    scroll-snap-align: start;
     display: flex;
     flex-direction: column;
     text-decoration: none;
@@ -325,14 +318,20 @@
     background: var(--color-surface);
     border: 1px solid var(--color-line);
     overflow: hidden;
-    transition: transform var(--transition-normal), border-color var(--transition-normal), box-shadow var(--transition-normal);
+    transition:
+      transform 250ms cubic-bezier(0.25, 0.8, 0.25, 1),
+      border-color 250ms cubic-bezier(0.25, 0.8, 0.25, 1),
+      box-shadow 250ms cubic-bezier(0.25, 0.8, 0.25, 1);
     box-shadow: var(--shadow-card);
   }
 
-  .continue-card:hover {
-    transform: translateY(-4px);
-    border-color: var(--color-accent-soft);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.65), 0 0 16px var(--color-accent-soft);
+  @media (hover: hover) and (pointer: fine) {
+    .continue-card:hover {
+      transform: scale(1.045);
+      border-color: var(--color-line-strong);
+      box-shadow: var(--shadow-card-hover);
+      z-index: 4;
+    }
   }
 
   .card-thumb {
@@ -460,74 +459,4 @@
     color: var(--color-subtle);
   }
 
-  /* History details accordion */
-  .history-details {
-    margin-top: 22px;
-    border-radius: var(--radius-sm);
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--color-line);
-    overflow: hidden;
-  }
-
-  summary {
-    padding: 12px 18px;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--color-muted);
-    transition: color var(--transition-fast), background var(--transition-fast);
-  }
-
-  summary:hover {
-    color: var(--color-text-bright);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .summary-content {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .history-list {
-    list-style: none;
-    margin: 0;
-    padding: 8px 18px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .history-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    font-size: 13px;
-    padding: 6px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  }
-
-  .history-item:last-child {
-    border-bottom: none;
-  }
-
-  .history-item a {
-    color: var(--color-text);
-    transition: color var(--transition-fast);
-  }
-
-  .history-item a:hover {
-    color: var(--color-accent);
-  }
-
-  .history-status {
-    font-size: 11px;
-    color: var(--color-muted);
-  }
-
-  .history-status.watched {
-    color: var(--color-success);
-    font-weight: 600;
-  }
 </style>

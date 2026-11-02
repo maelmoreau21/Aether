@@ -1,0 +1,8 @@
+{
+  "browserFlowPassed": true,
+  "completed": 138,
+  "completedBeforeRestart": 0,
+  "fixtureBacklog": 10000,
+  "restart": false,
+  "scope": "real browser image and PCM assertions from browser-scanner.cjs; backlog consists of empty-library scans, not 10000 media probes"
+}

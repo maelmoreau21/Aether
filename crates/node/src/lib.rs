@@ -24,7 +24,19 @@ pub mod stream;
 pub mod subtitles;
 pub mod tasks;
 pub mod transport;
+pub mod trickplay;
 pub mod video_stream;
+
+#[inline]
+pub fn trim_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        unsafe extern "C" {
+            fn malloc_trim(pad: usize) -> i32;
+        }
+        let _ = malloc_trim(0);
+    }
+}
 
 pub use files::{OpenedFile, confined_file, validate_library_root};
 pub use inventory::{
@@ -100,6 +112,11 @@ impl LocalNode {
             on_batch,
         )
         .await
+    }
+
+    /// Access the node's trickplay manager.
+    pub fn trickplay(&self) -> std::sync::Arc<crate::trickplay::TrickplayManager> {
+        crate::trickplay::global_manager()
     }
 
     /// Open a confined media file handle relative to `root`.

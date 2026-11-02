@@ -24,6 +24,17 @@ const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr',
 function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
+  it('starts external audio metadata immediately and supplies the saved resume position', async () => {
+    const {video,player}=setup();video.auto=false;
+    const load=vi.spyOn(ExternalAudio.prototype,'load');
+    const position=Promise.resolve(6);
+    const loading=player.load({...media,sources:[{...media.sources[0],externalAudioUrl:'/external.opus'}]},'fr',position);
+    expect(load).toHaveBeenCalledWith('/external.opus',false,undefined,position);
+    expect(video.loads).toBe(1);
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    video.dispatchEvent(new Event('seeked'));await loading;
+    player.destroy();load.mockRestore();
+  });
   it('preloads the saved audio window in parallel with video metadata when the descriptor supplies duration', async()=>{
     const {video,player}=setup();video.auto=false;
     vi.stubGlobal('MediaSource',class {});
@@ -137,6 +148,19 @@ describe('native source replacement', () => {
     expect(fetcher).toHaveBeenCalledWith('/prepared/video',expect.objectContaining({method:'HEAD'}));
     expect(error).not.toHaveBeenCalled();player.destroy();
   });
+  it('uses the prepared video fallback when progressive MSE is unavailable', async () => {
+    const {video,player}=setup();video.auto=false;video.readyState=1;
+    vi.stubGlobal('MediaSource',undefined);
+    const fetcher=vi.fn().mockResolvedValue({ok:true});vi.stubGlobal('fetch',fetcher);
+    const source={...media.sources[0],url:'/original.mkv',prepareVideo:false,preparedVideoUrl:'/prepared/video',videoStreamUrl:'/progressive-',videoMime:'video/mp4; codecs="av01.0.08M.10"',durationSeconds:12};
+    const loading=player.load({...media,sources:[source]});
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();await Promise.resolve();
+    video.dispatchEvent(new Event('error'));
+    await vi.waitFor(()=>expect(video.src).toBe('/prepared/video'));
+    video.dispatchEvent(new Event('loadedmetadata'));await loading;
+    expect(fetcher).toHaveBeenCalledWith('/prepared/video',expect.objectContaining({method:'HEAD'}));
+    player.destroy();
+  });
   it('cancels a startup reserve on pause without starting playback after late data', async () => {
     const {video,player}=setup();await player.load(media);
     video.buffered={length:1,start:()=>0,end:()=>.01};
@@ -170,7 +194,7 @@ describe('native source replacement', () => {
     const load=vi.spyOn(ExternalAudio.prototype,'load').mockImplementationOnce(()=>new Promise<void>(resolve=>{ready=resolve;}));
     const activate=vi.spyOn(ExternalAudio.prototype,'activate');
     const loading=player.load({...media,sources:[{...media.sources[0],externalAudioUrl:'/audio'}]});
-    expect(load).toHaveBeenCalledWith('/audio',false);
+    expect(load).toHaveBeenCalledWith('/audio',false,undefined,0);
     expect(video.loads).toBe(1);expect(activate).not.toHaveBeenCalled();
     video.dispatchEvent(new Event('loadedmetadata'));
     await Promise.resolve();expect(activate).not.toHaveBeenCalled();
@@ -201,10 +225,50 @@ describe('native source replacement', () => {
     const metadata=expect(player.load(media)).rejects.toThrow('métadonnées');
     await vi.advanceTimersByTimeAsync(10000);await metadata;
     video.auto=true;await player.load(media);video.auto=false;video.currentTime=5;
-    const seek=expect(player.selectAudio('en')).rejects.toThrow('de seek');
+    const seek=expect(player.selectAudio('en')).rejects.toThrow('Position demandée 5.00 s, atteinte 4.00 s (seeking=true)');
     video.currentTime=0; // A new browser resource resets its timeline before metadata.
     video.dispatchEvent(new Event('loadedmetadata'));
+    await vi.advanceTimersByTimeAsync(10000);
+    video.currentTime=0;
+    video.dispatchEvent(new Event('loadedmetadata'));
+    await Promise.resolve();video.currentTime=4;video.seeking=true;
     await vi.advanceTimersByTimeAsync(10000);await seek;player.destroy();
+  });
+  it('retries a timed-out initial video seek once at the saved position', async () => {
+    vi.useFakeTimers();const {video,player}=setup();video.auto=false;
+    const loading=player.load(media, 'fr', 5);
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(video.loads).toBe(2);video.currentTime=0;
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    expect(video.currentTime).toBe(5);video.dispatchEvent(new Event('seeked'));
+    await loading;player.destroy();
+  });
+  it('starts an available prepared fallback immediately after a seek timeout', async () => {
+    vi.useFakeTimers();const {video,player}=setup();video.auto=false;
+    const fetcher=vi.fn().mockResolvedValue({ok:true});vi.stubGlobal('fetch',fetcher);
+    const loading=player.load({...media,sources:[{...media.sources[0],prepareVideo:false,preparedVideoUrl:'/prepared/video'}]},'fr',5);
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(fetcher).toHaveBeenCalledWith('/prepared/video',expect.objectContaining({method:'HEAD'}));
+    expect(video.src).toBe('/prepared/video');expect(video.loads).toBe(2);
+    video.currentTime=0;video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    video.dispatchEvent(new Event('seeked'));await loading;player.destroy();
+  });
+  it('ignores an obsolete seeked event before saved progress resolves', async () => {
+    const {video,player}=setup();video.auto=false;
+    let resolvePosition!:(position:number)=>void;
+    let completed=false;
+    const loading=player.load(media,'fr',new Promise<number>(resolve=>{resolvePosition=resolve;})).then(()=>{completed=true;});
+    video.dispatchEvent(new Event('loadedmetadata'));
+    video.dispatchEvent(new Event('seeked'));await Promise.resolve();await Promise.resolve();
+    expect(completed).toBe(false);
+    resolvePosition(5);await vi.waitFor(()=>expect(video.currentTime).toBe(5));
+    video.seeking=true;video.dispatchEvent(new Event('seeked'));
+    await Promise.resolve();expect(completed).toBe(false);video.seeking=false;
+    video.currentTime=2;video.dispatchEvent(new Event('seeked'));
+    await Promise.resolve();expect(completed).toBe(false);video.currentTime=5;
+    video.dispatchEvent(new Event('seeked'));await loading;player.destroy();
   });
   it('reads indexed MP4 video directly and prepares only audio on the legacy fallback',async()=>{
     const fetcher=vi.fn().mockResolvedValue({ok:true});vi.stubGlobal('fetch',fetcher);
@@ -271,6 +335,42 @@ describe('native source replacement', () => {
     expect(video.paused).toBe(true); expect(error).toHaveBeenCalledTimes(1); expect(video.loads).toBe(1);
     await vi.advanceTimersByTimeAsync(60000); expect(error).toHaveBeenCalledTimes(1);
   });
+  it('gives the latest seek its own stall deadline', async () => {
+    vi.useFakeTimers();const {video,player,error}=setup();
+    await player.load(media);await player.play();
+    video.dispatchEvent(new Event('waiting'));
+    await vi.advanceTimersByTimeAsync(9000);
+    video.seeking=true;video.dispatchEvent(new Event('seeking'));
+    await vi.advanceTimersByTimeAsync(9000);expect(error).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);expect(error).toHaveBeenCalledOnce();player.destroy();
+  });
+  it('clears the seek deadline when the latest position has playable data', async () => {
+    vi.useFakeTimers();const {video,player,error}=setup();
+    await player.load(media);await player.play();
+    video.seeking=true;video.dispatchEvent(new Event('seeking'));
+    video.seeking=false;video.readyState=3;video.dispatchEvent(new Event('seeked'));
+    await vi.advanceTimersByTimeAsync(11000);expect(error).not.toHaveBeenCalled();player.destroy();
+  });
+  it('keeps the seek deadline when seeked has no playable data and disarms it on manual pause', async () => {
+    vi.useFakeTimers();const {video,player,error}=setup();
+    await player.load(media);await player.play();
+    video.seeking=true;video.dispatchEvent(new Event('seeking'));
+    video.seeking=false;video.readyState=1;video.dispatchEvent(new Event('seeked'));
+    await vi.advanceTimersByTimeAsync(9000);expect(error).not.toHaveBeenCalled();
+    player.pause();video.dispatchEvent(new Event('pause'));
+    await vi.advanceTimersByTimeAsync(2000);expect(error).not.toHaveBeenCalled();player.destroy();
+  });
+  it('invalidates stalled audio so an explicit reload of the same track performs a real recovery', async () => {
+    vi.useFakeTimers(); const { video, player, error } = setup();
+    const prepared={...media,sources:media.sources.map(s=>({...s,url:'/same-video',externalAudioUrl:`/audio-${s.language}`}))};
+    await player.load(prepared);await player.play();
+    const destroy=vi.spyOn(ExternalAudio.prototype,'destroy');
+    video.dispatchEvent(new Event('stalled'));await vi.advanceTimersByTimeAsync(10000);
+    expect(error).toHaveBeenCalledOnce();expect(destroy).toHaveBeenCalledOnce();
+    await expect(player.play()).rejects.toThrow('indisponible');
+    await player.selectAudio('fr');expect(video.loads).toBe(2);
+    destroy.mockRestore();player.destroy();
+  });
   it('cancels pending work on teardown', async () => {
     const { video, player } = setup(); video.auto = false;
     const result = expect(player.load(media)).rejects.toThrow('fermé'); player.destroy(); await result;
@@ -283,6 +383,22 @@ describe('native source replacement', () => {
     await vi.advanceTimersByTimeAsync(1);expect(video.src).toBe('/relay');
     video.dispatchEvent(new Event('loadedmetadata'));await loading;
     expect(error).not.toHaveBeenCalled();expect(video.loads).toBe(2);
+  });
+  it('gives a connected Node a separate seek budget after metadata', async()=>{
+    vi.useFakeTimers();const {video,player}=setup();video.auto=false;
+    const direct={...media,sources:[{...media.sources[0],directUrl:'https://node.invalid/content',relayUrl:'/relay'}]};
+    const loading=player.load(direct,'fr',5);
+    await vi.advanceTimersByTimeAsync(2000);
+    video.dispatchEvent(new Event('loadedmetadata'));await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(video.src).toBe('https://node.invalid/content');expect(video.loads).toBe(1);
+    video.dispatchEvent(new Event('seeked'));await loading;player.destroy();
+  });
+  it('reports a stalled progress lookup without retrying it as a video seek', async()=>{
+    vi.useFakeTimers();const {video,player}=setup();video.auto=false;
+    const loading=expect(player.load(media,'fr',new Promise<number>(()=>{}))).rejects.toThrow('chargement de la position');
+    video.dispatchEvent(new Event('loadedmetadata'));await vi.advanceTimersByTimeAsync(10000);
+    await loading;expect(video.loads).toBe(1);player.destroy();
   });
   it('serializes preparation to respect the single Node worker',async()=>{
     const replies:((value:Response)=>void)[]=[];

@@ -54,15 +54,11 @@ async fn upgrade_keeps_existing_libraries_rights_inventory_and_progress() {
         .execute(&pool)
         .await
         .unwrap();
-    let mut previous = sqlx::migrate!("./migrations");
-    previous.migrations = std::borrow::Cow::Owned(
-        previous
-            .iter()
-            .filter(|migration| migration.version <= 31)
-            .cloned()
-            .collect(),
-    );
-    previous.run(&pool).await.unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    crate::database::initialize_fresh_schema(&mut conn)
+        .await
+        .unwrap();
+    drop(conn);
     query("INSERT INTO users(id,role) VALUES('kept-user','administrator')")
         .execute(&pool)
         .await
@@ -575,6 +571,50 @@ async fn music_scan_metadata_stable_identity_and_range() {
             .unwrap(),
         id
     );
+    // A scan of an unchanged track preserves provider lyrics, but an actual
+    // local sidecar replaces them and removing it does not revive stale data.
+    query("INSERT INTO extension_publishers(id,public_key) VALUES('scan-publisher','fixture')")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    query("INSERT INTO extensions(id,publisher_id,package_json,generation) VALUES('scan-provider','scan-publisher','{}','fixture')").execute(&store.pool).await.unwrap();
+    std::fs::remove_file(root.join("track.lrc")).unwrap();
+    query("UPDATE music_tracks SET lyrics='External lyrics' WHERE id=?")
+        .bind(&id)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    query("INSERT INTO automatic_metadata_provenance(work_id,field_name,extension_id,provider_id,priority,value_json,source_fingerprint,updated_at) VALUES(?,'lyrics','scan-provider','42',100,?,'scan',1)")
+        .bind(&id).bind(json!("External lyrics").to_string()).execute(&store.pool).await.unwrap();
+    crate::music::scan(&store, "music", &root, &cancel)
+        .await
+        .unwrap();
+    let lyrics: String = query_scalar("SELECT lyrics FROM music_tracks WHERE id=?")
+        .bind(&id)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(lyrics, "External lyrics");
+    std::fs::write(root.join("track.lrc"), "Local lyrics").unwrap();
+    crate::music::scan(&store, "music", &root, &cancel)
+        .await
+        .unwrap();
+    let lyrics: String = query_scalar("SELECT lyrics FROM music_tracks WHERE id=?")
+        .bind(&id)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(lyrics, "Local lyrics");
+    std::fs::remove_file(root.join("track.lrc")).unwrap();
+    crate::music::scan(&store, "music", &root, &cancel)
+        .await
+        .unwrap();
+    let lyrics: String = query_scalar("SELECT lyrics FROM music_tracks WHERE id=?")
+        .bind(&id)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    assert!(lyrics.is_empty());
     query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,unixepoch(),unixepoch(),unixepoch()+3600)").bind(auth::hash(&"d".repeat(64))).bind(user).execute(&store.pool).await.unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
     let app = crate::music::router(auth);
@@ -606,6 +646,40 @@ async fn music_scan_metadata_stable_identity_and_range() {
             .len(),
         16
     );
+    let mut jpg = vec![];
+    image::DynamicImage::new_rgb8(2, 3)
+        .write_to(
+            &mut std::io::Cursor::new(&mut jpg),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
+    std::fs::write(root.join("folder.jpg"), &jpg).unwrap();
+    crate::music::scan(&store, "music", &root, &cancel)
+        .await
+        .unwrap();
+    let listed_cover =
+        value(request(&app, "/api/v1/music?q=Une", "GET", &cookie, "", Value::Null).await).await;
+    assert_eq!(
+        listed_cover["items"][0]["coverUrl"],
+        format!("/api/v1/music/tracks/{id}/cover")
+    );
+    let cover_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/music/tracks/{id}/cover"))
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cover_res.status(), StatusCode::OK);
+    assert_eq!(
+        cover_res.headers().get("content-type").unwrap(),
+        "image/jpeg"
+    );
+
     std::fs::remove_file(root.join("track.opus")).unwrap();
     crate::music::scan(&store, "music", &root, &cancel)
         .await
@@ -1350,6 +1424,45 @@ async fn mixed_playlists_share_only_with_authenticated_accounts_and_keep_library
         .await["text"],
         "[00:00]Hello"
     );
+    query("INSERT INTO extension_publishers(id,public_key) VALUES('lyrics-provider','fixture')")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    query("INSERT INTO extensions(id,publisher_id,package_json,generation) VALUES('lyrics-fixture','lyrics-provider','{}','fixture')").execute(&store.pool).await.unwrap();
+    query("INSERT INTO automatic_metadata_provenance(work_id,field_name,extension_id,provider_id,priority,value_json,source_fingerprint,updated_at) VALUES('song','lyrics','lyrics-fixture','42',100,?,'fixture',1)").bind(json!("provider lyrics").to_string()).execute(&store.pool).await.unwrap();
+    let local = value(
+        request(
+            &app,
+            "/api/v1/music/tracks/song/lyrics",
+            "GET",
+            &peer_cookie,
+            "",
+            Value::Null,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(local["source"], "library");
+    assert!(local["provenance"].is_null());
+    query("UPDATE music_tracks SET lyrics='provider lyrics' WHERE id='song'")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    let external = value(
+        request(
+            &app,
+            "/api/v1/music/tracks/song/lyrics",
+            "GET",
+            &peer_cookie,
+            "",
+            Value::Null,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(external["source"], "extension");
+    assert_eq!(external["provenance"]["extensionId"], "lyrics-fixture");
+    assert_eq!(external["provenance"]["providerId"], "42");
     let reorder = format!("/api/v1/playlists/{id}/order");
     assert_eq!(
         request(
@@ -1460,19 +1573,23 @@ async fn mixed_playlists_share_only_with_authenticated_accounts_and_keep_library
         let port = listener.local_addr().unwrap().port();
         let origin = format!("http://127.0.0.1:{port}");
         let auth = AuthState::new(store.clone(), origin.clone()).await.unwrap();
-        let app = crate::secure_app(
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let web_dist = std::env::var("MEDIA_WEB_DIST")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| root.join("apps/web/build"));
+        let app = crate::secure_app_with_web_dist(
             crate::node::Inventory::local(temp.path().to_owned())
                 .await
                 .unwrap(),
             port,
             auth,
+            web_dist,
         )
         .await
         .unwrap();
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let result = tokio::process::Command::new("node")
             .arg("scripts/browser-playlists.cjs")
             .current_dir(root)

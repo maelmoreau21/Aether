@@ -1,5 +1,10 @@
 # Navigation, images et réactivité — 21 octobre 2026
 
+> Complément du25octobre : [images multiples et rotation](ARTWORK_ROTATION.md).
+> La liste expose désormais toutes les variantes ; les ajouts multiples et les
+> imports fournisseurs conservent les pools. Les bornes historiques16 images et
+> l'absence de collecte en ligne ci-dessous sont remplacées par ce contrat.
+
 La navigation affiche les bibliothèques actives autorisées par le Core, avec leur nom réel. Accueil, listes et téléchargements restent accessibles. Le filtre de bibliothèque est appliqué avant la pagination, y compris à la musique et aux représentants des groupes.
 
 ## Contrat

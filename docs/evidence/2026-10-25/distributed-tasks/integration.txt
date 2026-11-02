@@ -1,0 +1,75 @@
+   Compiling media-poc v0.1.0 (C:\Users\Mael\Documents\GitHub\Aether\crates\core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 46s
+     Running tests\browser_scanner.rs (target\debug\deps\browser_scanner-f7f850305e003846.exe)
+
+running 1 test
+test browser_scanner_persists_and_plays_after_core_restart ... ignored, requires built Web assets, generated synthetic fixtures and Chrome/Playwright
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\distributed_multi_node.rs (target\debug\deps\distributed_multi_node-cb1459573b085c50.exe)
+
+running 1 test
+test distributed_core_and_two_remote_nodes_end_to_end ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.29s
+
+     Running tests\distributed_tasks.rs (target\debug\deps\distributed_tasks-b1204da7d0254864.exe)
+
+running 6 tests
+test batch_claims_deduplicate_nodes_and_preserve_live_capacity ... ok
+test concurrent_claims_never_overbook_or_run_same_library ... ok
+test controls_hold_capacity_until_stop_ack_and_retries_are_bounded ... ok
+test leases_fence_old_workers_and_survive_reopen ... ok
+test repeated_playback_preemption_and_pause_preserve_failure_budget ... ok
+test ten_thousand_jobs_on_one_hundred_simulated_nodes ... ignored, explicit 10,000-job / 100 simulated-node queue benchmark; no media or network
+
+test result: ok. 5 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.27s
+
+     Running tests\distributed_tasks_scale.rs (target\debug\deps\distributed_tasks_scale-9002698126d069fa.exe)
+
+running 2 tests
+test backlog_and_one_hundred_claimers_preserve_admin_http_responsiveness ... ignored, explicit 10k-job backlog, 100 simulated nodes and concurrent in-process admin HTTP benchmark
+test ten_thousand_real_admissions_keep_authenticated_navigation_served ... ignored, explicit 10,000 real durable admissions with authenticated HTTP navigation throughout
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\node_enrollment_and_relay.rs (target\debug\deps\node_enrollment_and_relay-4f6207ed7b2e9726.exe)
+
+running 1 test
+test test_node_enrollment_outbound_channel_and_streaming_relay ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.04s
+
+     Running tests\scanner_flow.rs (target\debug\deps\scanner_flow-1d02dfc1b8a7f3e2.exe)
+
+running 3 tests
+test grouped_folders_scan_filter_stream_and_remove ... ok
+test real_films_scan_persists_reuses_probes_and_enforces_live_library_permissions ... ok
+test webm_uses_original_video_and_authorizes_explicit_external_audio ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 41.74s
+
+     Running tests\scheduler.rs (target\debug\deps\scheduler-8ca397c4d38d8a84.exe)
+
+running 3 tests
+test metadata_refresh_is_durable_bounded_and_reuses_the_scan_runner ... ok
+test schedule_reconciliation_tracks_all_durable_scopes_and_pending_retries ... ok
+test schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.06s
+
+     Running tests\task_engine_http.rs (target\debug\deps\task_engine_http-2c3d943a58570e11.exe)
+
+running 1 test
+test jobs_require_live_admin_csrf_validate_input_and_deduplicate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.91s
+
+     Running tests\task_operations.rs (target\debug\deps\task_operations-189b9a03d77a4c8a.exe)
+
+running 1 test
+test standalone_scans_then_executes_real_analysis_preparation_and_image_jobs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.91s
+

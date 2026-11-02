@@ -1,4 +1,10 @@
+> Le moteur persistant décrit dans [DISTRIBUTED_TASKS.md](DISTRIBUTED_TASKS.md) remplace le dispatch globalement sériel historique : leases par Node, reprises bornées, priorités, états persistants et suivi collectif des dossiers. Les routes des plans ci-dessous sont conservées.
+
 # Scans planifiés — 19 octobre 2026
+
+## Libellé des déclencheurs — 27 octobre 2026
+
+L'interface nomme les déclencheurs actuels « intervalles » et affiche « Toutes les 24 heures » pour 1440 minutes. Le moteur part de l'heure d'enregistrement ou du dernier lancement ; il ne garantit pas « chaque jour à 7 h ». Un horaire civil fixe requiert une règle persistée avec fuseau horaire et un calcul explicite des changements d'heure pour les scans, sauvegardes et tâches système.
 
 Le Core possède un plan persistant par bibliothèque Films/Séries, locale ou distante.
 L’administrateur active le plan et choisit un intervalle de 5 à 10 080 minutes dans
@@ -32,7 +38,8 @@ Les bibliothèques désactivées et Nodes révoqués ne sont pas exécutés.
 La prochaine échéance est enregistrée par compare-and-set avant le dispatch.
 Un redémarrage ne produit pas de rafale de rattrapage : une échéance dépassée
 entraîne un seul scan, puis un nouvel intervalle à partir du lancement effectif.
-Un arrêt pendant le dispatch produit `interrupted` au redémarrage. Un échec est
+Une tentative durable expirée peut reprendre un plan resté `running` après
+arrêt brutal, sous contrôle du lease courant. Un arrêt pendant le dispatch produit `interrupted` au redémarrage. Un échec est
 conservé et réessayé seulement à la prochaine échéance. Modifier/enregistrer un
 plan recalcule sa prochaine échéance. Le bouton Actualiser relit les résultats.
 

@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+pub mod storage;
 
 pub const API_VERSION: u32 = 1;
 pub const MAX_MODULE: usize = 262_144;
@@ -95,6 +96,10 @@ pub struct Manifest {
     pub checksum: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub banner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changelog: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_date: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_schema: Option<Vec<ConfigField>>,
 }
@@ -250,6 +255,56 @@ pub struct StructuredMetadata {
     pub backdrops: Vec<MediaImage>,
     #[serde(default)]
     pub images: Vec<MediaImage>,
+    #[serde(default)]
+    pub seasons: Vec<SeasonMetadata>,
+    #[serde(default)]
+    pub translations: BTreeMap<String, TranslationItem>,
+}
+
+/// Localized translation for title, overview and tagline
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationItem {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tagline: Option<String>,
+}
+
+/// Metadata for an episode within a season
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EpisodeMetadata {
+    pub episode_number: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub air_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_minutes: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub still_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rating: Option<f64>,
+}
+
+/// Metadata for a TV season
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeasonMetadata {
+    pub season_number: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster_url: Option<String>,
+    #[serde(default)]
+    pub episodes: Vec<EpisodeMetadata>,
 }
 
 /// Search query payload sent to the extension
@@ -277,6 +332,9 @@ fn default_media_type() -> MediaType {
 pub struct SearchResultItem {
     pub id: String,
     pub title: String,
+    /// Exact credited artist for music search; absent for non-music or unknown results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -608,3 +666,5 @@ macro_rules! extension {
 }
 #[doc(hidden)]
 pub use serde_json;
+
+pub mod objects;

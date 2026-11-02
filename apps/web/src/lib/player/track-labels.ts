@@ -44,6 +44,35 @@ export function colorProfileLabel(pix_fmt?: string): string | null {
   return '8 bits standard';
 }
 
+export function audioChannelBadge(track?: CodecTrack): string | null {
+  if (!track) return null;
+  const layout = track.channel_layout?.toLowerCase().trim() ?? '';
+  if (layout.startsWith('7.2')) return '7.2';
+  if (layout.startsWith('7.1')) return '7.1';
+  if (layout.startsWith('6.1')) return '6.1';
+  if (layout.startsWith('5.2')) return '5.2';
+  if (layout.startsWith('5.1')) return '5.1';
+  if (layout.startsWith('5.0')) return '5.0';
+  if (layout.startsWith('4.1')) return '4.1';
+  if (layout.startsWith('4.0') || layout === 'quad') return '4.0';
+  if (layout.startsWith('3.1')) return '3.1';
+  if (layout.startsWith('3.0')) return '3.0';
+  if (layout.startsWith('2.1')) return '2.1';
+  if (layout === 'stereo' || layout.startsWith('2.0')) return '2.0';
+  if (layout === 'mono' || layout.startsWith('1.0')) return '1.0';
+  switch (track.channels) {
+    case 1: return '1.0';
+    case 2: return '2.0';
+    case 3: return '2.1';
+    case 4: return '4.0';
+    case 5: return '5.0';
+    case 6: return '5.1';
+    case 7: return '6.1';
+    case 8: return '7.1';
+    default: return track.channels ? `${track.channels}.0` : (track.channel_layout || null);
+  }
+}
+
 /** Inventory, not a claim that every track is playable by this browser. */
 export function inspectedAudioTracks(media?: Media): (CodecTrack & { language:string })[] {
   const unique = new Map<string, CodecTrack & {language:string}>();

@@ -1,3 +1,5 @@
+> Moteur de tâches (25 octobre 2026) : API administrateur persistante `GET/POST /api/v1/admin/tasks/jobs`, détail `GET /api/v1/admin/tasks/jobs/{id}` et contrôles `POST /api/v1/admin/tasks/jobs/{id}/{pause|resume|cancel}`. Session administrateur et CSRF pour les mutations ; catégories scan/analyze/prepare/image et cibles inventoriées. Contrat, limites et validation : [tâches distribuées](DISTRIBUTED_TASKS.md).
+
 > Bibliothèques avec plusieurs dossiers/nœuds : [contrat du 22 octobre](LIBRARY_FOLDERS.md).
 > Navigation par bibliothèque et images multiples : [contrat du 21 octobre](RESPONSIVENESS_AND_ARTWORK.md).
 
@@ -380,6 +382,11 @@ propositions de métadonnées et historique. Le catalogue distant a été ajout�
 21 octobre : [EXTENSION_REPOSITORIES.md](EXTENSION_REPOSITORIES.md). Trickplay et
 Intro Skipper restent absents. Preuves et limites du contrat local initial :
 [evidence/2026-10-20/extensions/README.md](evidence/2026-10-20/extensions/README.md).
+
+La rotation native des affiches utilise `artworkRotation` dans les préférences
+du compte (`GET/PUT /api/v1/preferences`) ; la modification exige la session et
+le CSRF. Les bornes et le comportement sont décrits dans
+[ARTWORK_ROTATION.md](ARTWORK_ROTATION.md).
 # Fonctions produit du 20 octobre 2026
 
 Contrats comptes/sessions, musique, restrictions parentales, filtres, métadonnées,
@@ -428,3 +435,82 @@ Les comptes et offsets concernent donc les épisodes admissibles, sans sauter de
 éléments autorisés après un épisode interdit. Le compte exact par saison nécessite
 encore une requête agrégée ; seule l'hydratation des détails est bornée à la page.
 Sans `episodeLimit`, le contrat historique complet est conservé.
+
+## Réglages avancés de bibliothèque — 25 octobre 2026
+
+Les routes administrateur `GET /api/v1/admin/libraries`,
+`POST /api/v1/admin/libraries` et `PUT /api/v1/admin/libraries/{id}` utilisent
+l'objet `options` décrit dans [LIBRARY_OPTIONS.md](LIBRARY_OPTIONS.md).
+Session administrateur requise ; Origin et CSRF pour POST/PUT. Les préférences
+avancées utilisent le même stockage JSON SQLite/PostgreSQL, sans nouvelle table.
+
+| Champs `options` | Valeur par défaut / limites |
+| --- | --- |
+| `preferEmbeddedTitles` | `false` |
+| `embeddedSubtitlePolicy` | `allow_all` ; choix `allow_all`, `allow_text`, `block_all` |
+| `metadataProviders`, `imageProviders`, `similarItemsProviders`, `segmentProviders`, `subtitleProviders` | `[]` ; listes ordonnées de `{id, enabled}`, maximum 32 entrées chacune |
+| `onlineRefreshIntervalDays` | `0` ; valeurs 0, 30, 60, 90 |
+| `realtimeMonitoring`, `automaticCollections`, `introDetectionEnabled` | `false` |
+| `saveNfoToMedia`, `saveImagesToMedia`, `saveSubtitlesToMedia` | `false` |
+| `trickplayEnabled`, `trickplayDuringScan`, `trickplaySaveToMedia` | `false` |
+| `trickplayIntervalSeconds` | `10` ; entier de 1 à 60 |
+| `trickplayWidth` | `320` ; entier de 160 à 1920 |
+| `chapterImagesEnabled`, `chapterImagesDuringScan`, `chapterImagesSaveToMedia` | `false` |
+| `subtitleLanguages` | `["fr"]` ; maximum 16 codes de langue distincts |
+| `subtitleOnlyMissing`, `subtitleRequireHash` | `true` |
+| `subtitleDownloadEnabled`, `subtitleMatchAudio` | `false` |
+
+Les identifiants de fournisseurs sont uniques dans chaque liste, de 1 à 100
+caractères ASCII alphanumériques ou `._-`. Leur position est conservée comme
+priorité ; un identifiant enregistré ne prouve pas que l'extension est installée
+ou exécutable. Les codes de langue suivent la même validation structurelle que
+`preferredMetadataLanguage` : 2 à 35 caractères, premier sous-tag alphabétique
+de 2 à 8 caractères, sous-tags alphanumériques de 1 à 8 caractères séparés par `-`.
+
+Champs inconnus et valeurs invalides sont rejetés ; les valeurs manquantes dans
+un objet `options` reçoivent leurs valeurs par défaut. Un PUT omettant entièrement
+`options` conserve l'objet existant. Les paramètres réservés sont sauvegardés
+mais ne lancent aucun moteur de surveillance, collection, enrichissement Internet,
+extraction trickplay/chapitres ou téléchargement de sous-titres. Les préférences
+de sauvegarde dans les médias ne constituent pas une autorisation d'écriture :
+les médias restent en lecture seule.
+
+`preferEmbeddedTitles` agit au scan sur le titre du fichier, en repli lorsque
+le NFO activé ne fournit pas de titre ; il ne change pas l'identité du média.
+Le tag `title` du conteneur est limité à 512 caractères sans caractères de contrôle.
+
+`embeddedSubtitlePolicy` filtre les sous-titres intégrés proposés par le lecteur
+et contrôle leur préparation Core. `allow_text` reconnaît `subrip`, `webvtt`,
+`ass`, `ssa`, `mov_text` ; `block_all` refuse une préparation intégrée avec
+`422 embedded_subtitle_disabled`, avant le traitement local ou le relais distant.
+Les pistes externes sont conservées. Le fichier original Direct Play contient
+toujours ses pistes internes : cette préférence n'en retire pas les octets.
+
+### Sessions personnelles (25 octobre 2026)
+
+`GET /api/v1/account/sessions` retourne `{sessions:[{id,device,createdAt,lastSeenAt,expiresAt,current}]}` pour le compte courant uniquement. `DELETE /api/v1/account/sessions/{id}` révoque une session du compte (`404` si absente ou appartenant à un autre compte) ; `DELETE /api/v1/account/sessions` les révoque toutes. Mutations : Origin/CSRF requis (`403`), session valide requise (`401`), succès `204`. Dates Unix en secondes, identifiants publics distincts des secrets. Connexion locale/SSO : cookie persistant 30 jours, inactivité maximale 7 jours. Les sessions antérieures conservent leur expiration absolue. Voir [sessions](LOCAL_SESSIONS.md).
+
+
+### Paroles musicales
+
+`GET /api/v1/music/tracks/{id}/lyrics` exige une session et les droits sur la
+bibliothèque. `text` contient les paroles locales ou celles déjà enregistrées
+par une extension ; `source` vaut `library`, `extension` ou `unavailable`.
+Pour une valeur d'extension encore identique à sa provenance, `provenance`
+contient `extensionId` et `providerId` ; sinon il vaut `null`. Les paroles locales
+priment sur une provenance périmée. Cette route ne lance pas de recherche réseau.
+> Galerie d'avatars : `GET /api/v1/admin/avatars/migrate-legacy` compte les
+> collections historiques et leurs images ; `POST` à la même adresse les
+> transfère atomiquement, avec session administrateur et CSRF. Réponse
+> `{packs,images}` ; conflit d'identifiants : 409, sans transfert. La
+> désinstallation de l'ancienne extension est bloquée tant qu'elle possède des
+> collections. Voir [collections d'avatars](PLUGIN_SETTINGS_AND_COLLECTIONS.md).
+> Collecte d’images : les options de bibliothèque `artworkDeduplicate`,
+> `artworkSimilarity`, `artworkMinPosterWidth` et `artworkMinPosterHeight`
+> définissent la détection et les dimensions minimales. Valeurs, portée,
+> héritage et limites : [Images et rotation](ARTWORK_ROTATION.md).
+
+L'envoi multipart `POST /api/v1/admin/avatar-packs/upload` accepte soit `name`
+pour créer une collection, soit `packId` pour ajouter à une collection native
+existante, avec les champs `images`. Les deux champs sont exclusifs ; une
+collection est limitée à 500 images. Session administrateur et CSRF requis.

@@ -1,0 +1,7 @@
+{
+  "test": "sqlite_storage_benchmark",
+  "sampledPeakRssBytes": 38506496,
+  "sampledCpuMs": 152546.875,
+  "sampleIntervalMs": 100,
+  "includes": "whole benchmark process incl seeding, runtime and assertions; excludes compilation and PostgreSQL server"
+}

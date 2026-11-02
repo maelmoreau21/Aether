@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import { loadArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
   import { serverPresentation } from '../config/presentation';
   import { ensurePreferences, savePreferences } from '../preferences';
   import { page } from '$app/state';
@@ -11,7 +12,6 @@
   import type { Media, PlayerFactory } from '../player/types';
   import { accessibleLibraries } from './libraries';
   import Navbar from '../ui/Navbar.svelte';
-  import CatalogFilters from './CatalogFilters.svelte';
   import { bestVersion } from '../player/version-choice';
   import CatalogHome from './CatalogHome.svelte';
   import CatalogGrid from './CatalogGrid.svelte';
@@ -220,6 +220,32 @@
       : resolve(`films/?work=${encodeURIComponent(work.id)}`);
   }
 
+  async function launchWatchParty(partyId: string, targetMediaId?: string) {
+    const current = playableMedia.find(item => item.id === selected) ?? playableMedia[0];
+    const targetId = targetMediaId || current?.id || (allowedIds.includes(selected) ? selected : allowedIds[0]);
+    if (!targetId) return;
+    const controller = new AbortController();
+    episodeLaunchController = controller;
+    launching = true;
+    mediaError = '';
+
+    try {
+      const descriptor = revalidateMediaDescriptor(targetId, controller.signal);
+      void descriptor.catch(() => {});
+      await loadPlayer();
+      await tick();
+      immersive?.joinParty(partyId, descriptor);
+      const item = await descriptor;
+      media = [...media.filter(m => m.id !== item.id), item];
+      selected = item.id;
+    } catch (err) {
+      mediaError = err instanceof Error ? err.message : 'Impossible de rejoindre la séance.';
+      immersive?.close();
+    } finally {
+      launching = false;
+    }
+  }
+
   async function openPlayer(): Promise<void> {
     const current = playableMedia.find(item => item.id === selected) ?? playableMedia[0];
     const targetId = current?.id ?? (allowedIds.includes(selected) ? selected : allowedIds[0]);
@@ -291,6 +317,7 @@
 
   onMount(() => {
     const controller = new AbortController();
+    void loadArtworkRotationPolicy(controller.signal);
     fetchBrandName(controller.signal)
       .then(brandName => {
         name = brandName;
@@ -315,7 +342,12 @@
       if(detail?.id===id)void request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}?episodeLimit=24`,controller.signal).then(work=>{if(!controller.signal.aborted&&detail?.id===id)detail=work;}).catch(()=>{});
     };
     window.addEventListener('media-artwork-updated',artworkChanged);
-    return () => {controller.abort();window.removeEventListener('media-artwork-updated',artworkChanged);};
+    const onStartParty = (e: Event) => {
+      const d = (e as CustomEvent<{ partyId: string; mediaId?: string; workId?: string }>).detail;
+      void launchWatchParty(d.partyId, d.mediaId || d.workId);
+    };
+    window.addEventListener('start-watch-party', onStartParty);
+    return () => {controller.abort();window.removeEventListener('media-artwork-updated',artworkChanged);window.removeEventListener('start-watch-party', onStartParty);};
   });
 
   function savePreference(key: string, value: string) {
@@ -481,7 +513,6 @@
 <a class="skip-link" href="#main-content">Aller au contenu</a>
 
 <Navbar {section} {name} />
-{#if !workId && section !== 'settings' && section !== 'home'}<CatalogFilters />{/if}
 
 <main id="main-content" tabindex="-1">
   {#if launching}<p role="status">Connexion à la source… <button onclick={()=>{episodeLaunchController?.abort();episodeLaunchController=null;launching=false;}}>Annuler</button></p>{/if}
@@ -542,6 +573,7 @@
         {allowedIds}
         bind:selected
         {mediaError}
+        similarCandidates={films}
         onPlay={openPlayer}
       />
       {:catch}<p role="alert">Chargement du film impossible. Rechargez la page pour réessayer.</p>{/await}
@@ -554,6 +586,7 @@
         bind:season
         {media}
         {mediaError}
+        similarCandidates={series}
         {immersive}
         {launchingEpisodeId}
         onLaunchEpisode={launchEpisode}
@@ -567,8 +600,6 @@
     <CatalogHome
       {films}
       {series}
-      {totalFilms}
-      {totalSeries}
       featured={films[0] ?? series[0] ?? null}
       onPlay={handleDirectPlay}
       {detailUrl}
@@ -625,8 +656,9 @@
   }
 
   main {
-    max-width: 1600px;
-    margin: 0 auto;
+    width: 100%;
+    max-width: none;
+    margin: 0;
     padding: 0 var(--page-gutter) 80px;
     min-height: 75vh;
   }

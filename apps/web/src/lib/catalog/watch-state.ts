@@ -21,14 +21,16 @@ export function loadHistory(force = false): Promise<void> {
   void operation.finally(() => { if (pending === operation) pending = undefined; }).catch(() => {});
   return operation;
 }
-export async function markWatched(workId: string, watched: boolean) {
+export async function markWatched(workId: string, watched: boolean, fallbackDuration?: number) {
   const generation = getSessionGeneration();
   for (let attempt = 0; attempt < 3; attempt++) {
     const progress = await readProgress(workId);
     if (generation !== getSessionGeneration()) return;
-    if (!progress.duration) throw new Error('Durée inconnue : le média doit être analysé avant de le marquer.');
+    const duration = progress.duration > 0
+      ? progress.duration
+      : (fallbackDuration && Number.isFinite(fallbackDuration) && fallbackDuration > 0 ? fallbackDuration : 60);
     try {
-      await writeProgress({ ...progress, watched, position: watched ? progress.duration : 0 });
+      await writeProgress({ ...progress, duration, watched, position: watched ? duration : 0 });
       if (generation === getSessionGeneration()) await loadHistory(true);
       return;
     } catch (err) {

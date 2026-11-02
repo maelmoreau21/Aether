@@ -8,7 +8,7 @@ use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, State},
     http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::Response,
     routing::get,
 };
 use image::{ImageDecoder, ImageFormat, ImageReader, Limits};
@@ -16,12 +16,18 @@ use std::io::Cursor;
 use tokio::sync::Semaphore;
 const MAX_UPLOAD: usize = 2 * 1024 * 1024;
 static DECODERS: Semaphore = Semaphore::const_new(2);
+pub(crate) static POLICY_LOCK: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
 pub fn router(auth: AuthState) -> Router {
     Router::new()
         .route(
             "/api/v1/account/avatar",
             get(read).put(write).delete(remove),
+        )
+        .route("/api/v1/account/avatar/policy", get(policy))
+        .route(
+            "/api/v1/admin/avatar-policy",
+            get(admin_policy).put(set_admin_policy),
         )
         .layer(DefaultBodyLimit::max(MAX_UPLOAD))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
@@ -186,26 +192,87 @@ pub(crate) fn content_type(bytes: &[u8]) -> &'static str {
 }
 async fn read(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Response, StatusCode> {
     let user = auth.authenticate(&headers).await?;
-    let bytes: Option<Vec<u8>> =
-        query_scalar("SELECT image_data FROM user_avatars WHERE user_id=?")
-            .bind(user.user.id)
-            .fetch_optional(&auth.store.pool)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let bytes = bytes.ok_or(StatusCode::NOT_FOUND)?;
-    Ok((
-        [
-            (header::CONTENT_TYPE, content_type(&bytes)),
-            (
-                header::CONTENT_SECURITY_POLICY,
-                "default-src 'none'; sandbox",
-            ),
-            (header::CACHE_CONTROL, "private, no-store"),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-        ],
-        bytes,
+    let sha256: Option<String> = query_scalar("SELECT sha256 FROM user_avatars WHERE user_id=?")
+        .bind(user.user.id)
+        .fetch_optional(&auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let sha256 = sha256.ok_or(StatusCode::NOT_FOUND)?;
+    auth.store
+        .assets
+        .response_after_authorization(&sha256, &headers)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AvatarPolicy {
+    pub allow_custom: bool,
+    pub allow_gravatar: bool,
+    pub assign_on_create: bool,
+}
+impl Default for AvatarPolicy {
+    fn default() -> Self {
+        Self {
+            allow_custom: true,
+            allow_gravatar: false,
+            assign_on_create: false,
+        }
+    }
+}
+pub(crate) async fn load_policy(auth: &AuthState) -> Result<AvatarPolicy, StatusCode> {
+    let row: Option<(i64, i64, i64)> = crate::database::query_as(
+        "SELECT allow_custom,allow_gravatar,assign_on_create FROM avatar_policy WHERE singleton=1",
     )
-        .into_response())
+    .fetch_optional(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(row
+        .map(|(custom, gravatar, assign)| AvatarPolicy {
+            allow_custom: custom != 0,
+            allow_gravatar: gravatar != 0,
+            assign_on_create: assign != 0,
+        })
+        .unwrap_or_default())
+}
+async fn admin_policy(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+) -> Result<axum::Json<AvatarPolicy>, StatusCode> {
+    let user = auth.authenticate(&headers).await?;
+    if user.user.role != crate::identity::Role::Administrator {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(axum::Json(load_policy(&auth).await?))
+}
+async fn set_admin_policy(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    axum::Json(input): axum::Json<AvatarPolicy>,
+) -> Result<StatusCode, StatusCode> {
+    let user = auth.authenticate(&headers).await?;
+    if user.user.role != crate::identity::Role::Administrator {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    auth.require_csrf(&headers, &user)?;
+    let _policy_guard = POLICY_LOCK.write().await;
+    query("INSERT INTO avatar_policy(singleton,allow_custom,allow_gravatar,assign_on_create) VALUES(1,?,?,?) ON CONFLICT(singleton) DO UPDATE SET allow_custom=excluded.allow_custom,allow_gravatar=excluded.allow_gravatar,assign_on_create=excluded.assign_on_create")
+       .bind(i64::from(input.allow_custom)).bind(i64::from(input.allow_gravatar)).bind(i64::from(input.assign_on_create))
+       .execute(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn permissions(auth: &AuthState) -> Result<(bool, bool), StatusCode> {
+    Ok((load_policy(auth).await?.allow_custom, true))
+}
+async fn policy(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+    auth.authenticate(&headers).await?;
+    let (upload, remove) = permissions(&auth).await?;
+    Ok(axum::Json(
+        serde_json::json!({"uploadAllowed":upload,"removeAllowed":remove}),
+    ))
 }
 async fn write(
     State(auth): State<AuthState>,
@@ -214,37 +281,13 @@ async fn write(
 ) -> Result<StatusCode, StatusCode> {
     let user = auth.authenticate(&headers).await?;
     auth.require_csrf(&headers, &user)?;
-    if user.user.role != crate::identity::Role::Administrator {
-        let rows: Vec<(String, String)> = crate::database::query_as(
-            "SELECT es.settings_json,e.package_json FROM extension_settings es \
-             JOIN extensions e ON e.id = es.extension_id \
-             JOIN extension_publishers p ON p.id=e.publisher_id \
-             WHERE e.enabled = 1 AND p.active=1",
-        )
-        .fetch_all(&auth.store.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        for (json_str, package) in rows {
-            let package: media_extension_sdk::Package =
-                serde_json::from_str(&package).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            if !package.manifest.permissions.iter().any(|p| p == "avatars") {
-                continue;
-            }
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
-                && val
-                    .get("disallow_custom_avatars")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false)
-            {
-                return Err(StatusCode::FORBIDDEN);
-            }
-        }
+    if !permissions(&auth).await?.0 {
+        return Err(StatusCode::FORBIDDEN);
     }
     if bytes.is_empty() {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
-    let content_type = headers
+    let req_content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
@@ -254,11 +297,27 @@ async fn write(
         .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
     let bytes = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        normalize(bytes, &content_type)
+        normalize(bytes, &req_content_type)
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
-    query("INSERT INTO user_avatars(user_id,image_data) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET image_data=excluded.image_data").bind(user.user.id).bind(bytes).execute(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let _policy_guard = POLICY_LOCK.read().await;
+    if !permissions(&auth).await?.0 {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let mime = content_type(&bytes);
+    let meta = auth
+        .store
+        .assets
+        .put_bytes(&bytes, mime)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET sha256=excluded.sha256")
+        .bind(user.user.id)
+        .bind(&meta.sha256)
+        .execute(&auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn remove(
@@ -267,6 +326,9 @@ async fn remove(
 ) -> Result<StatusCode, StatusCode> {
     let user = auth.authenticate(&headers).await?;
     auth.require_csrf(&headers, &user)?;
+    if !permissions(&auth).await?.1 {
+        return Err(StatusCode::FORBIDDEN);
+    }
     query("DELETE FROM user_avatars WHERE user_id=?")
         .bind(user.user.id)
         .execute(&auth.store.pool)

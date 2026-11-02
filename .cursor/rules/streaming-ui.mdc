@@ -1,0 +1,12 @@
+---
+name: streaming-ui
+description: Expert UI/UX spécialisé dans les interfaces de streaming type Netflix, Apple TV+ et Disney+. À utiliser pour toute création ou refonte visuelle du frontend d'Aether.
+---
+# Design System Aether - Mode Streaming (Netflix / Apple TV+)
+- **Palette Dark Cinématique** : Fond principal `#0B0C10` ou `#141414` (jamais de fond blanc ou gris clair). Cartes et surfaces en `#18181B` avec bordures subtiles `rgba(255, 255, 255, 0.08)`.
+- **Couleurs d'accentuation** : Rouge cinématique `#E50914` ou Violet/Bleu électrique `#6366F1` pour les CTA principaux, blanc pur `#FFFFFF` pour les titres, gris `#A1A1AA` pour les textes secondaires.
+- **Glassmorphism** : Utilise `backdrop-filter: blur(16px)` avec fond `rgba(15, 15, 20, 0.75)` sur la barre de navigation fixe, les modales et les menus déroulants.
+- **Hero Banner (Mise en avant)** : Section haute immersive (70vh-80vh) avec visuel de fond, dégradé de fusion vers le bas (`linear-gradient(to top, #0B0C10 10%, transparent 90%)`), titre XXL, badges de métadonnées et 2 boutons ("Lancer / Ouvrir" plein + "Plus d'infos" translucide).
+- **Rails Horizontaux (Carrousels)** : Organisation par lignes thématiques avec défilement fluide (`scroll-snap-type: x mandatory`), flèches de navigation latérales apparaissant au survol de la ligne, barre de scroll masquée.
+- **Cartes Interactives (Cards)** : Coins arrondis (`8px`-`12px`), transition fluide au survol (`transform: scale(1.06)` en `250ms cubic-bezier(0.25, 0.8, 0.25, 1)`), ombre portée profonde et apparition d'un overlay avec actions rapides.
+- **UX & Fluidité** : Skeleton loaders animés pendant les chargements, modales de détails fluides sans rechargement brusque, interface 100% responsive.

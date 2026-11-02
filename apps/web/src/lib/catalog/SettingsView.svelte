@@ -10,6 +10,12 @@
   import Icon from '../ui/Icon.svelte';
   import { t, locale, setLocale } from '../i18n';
   import { themeMode, setTheme, type ThemeMode } from '../theme';
+  import { DEFAULT_SUBTITLE_STYLE, sanitizeSubtitleStyle, subtitleStyleToCss, type SubtitleStyle } from '../player/subtitle-style';
+  import { fetchServerConfig, type AppServerConfig } from '../config/brand';
+  import { defaultArtworkRotationPolicy, setArtworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
+  import { accessibleLibraries, loadLibraries } from './libraries';
+
+  let serverConfig = $state<AppServerConfig | null>(null);
 
   let {
     prefAudio = $bindable('fr'),
@@ -29,21 +35,52 @@
   let current = $state('account');
   let audioOffset = $state(preferences().offsets?.audio ?? 0);
   let subtitleOffset = $state(preferences().offsets?.subtitle ?? 0);
+  let skipIntroEnabled = $state(preferences().skipIntroEnabled !== false);
+  let skipCreditsEnabled = $state(preferences().skipCreditsEnabled !== false);
+  let autoSkipIntro = $state(preferences().autoSkipIntro === true);
+  let autoSkipCredits = $state(preferences().autoSkipCredits === true);
   let offsetsEdited = false;
+  let artworkRotation = $state<ArtworkRotationPolicy>({ ...defaultArtworkRotationPolicy, ...preferences().artworkRotation });
+  let artworkEdited = false;
+
+  let subtitleStyle = $state<Required<SubtitleStyle>>({
+    ...DEFAULT_SUBTITLE_STYLE,
+    ...sanitizeSubtitleStyle(preferences().subtitleStyle)
+  });
+  const previewSubtitleCss = $derived(subtitleStyleToCss(subtitleStyle));
+
+  function updateSubtitleStyle<K extends keyof Required<SubtitleStyle>>(key: K, value: Required<SubtitleStyle>[K]) {
+    subtitleStyle = { ...subtitleStyle, [key]: value };
+    savePreferences({ subtitleStyle: { ...subtitleStyle } });
+  }
   const pages = [
     { id: 'account', label: 'Compte', icon: 'profile' },
-    { id: 'appearance', label: 'Apparence', icon: 'sun' },
+    { id: 'display', label: 'Affichage & Affiches', icon: 'image' },
+    { id: 'security', label: 'Sécurité', icon: 'shield' },
+    { id: 'devices', label: 'Appareils', icon: 'server' },
     { id: 'playback', label: 'Lecture', icon: 'play' },
-    { id: 'sso', label: 'Connexion SSO', icon: 'shield' }
+    { id: 'about', label: 'À propos', icon: 'info' }
   ] as const;
   onMount(() => {
     let disposed = false;
+    void loadLibraries();
+    void fetchServerConfig().then(cfg => { if (!disposed) serverConfig = cfg; }).catch(() => {});
     void ensurePreferences().then(saved => {
-      if (disposed || offsetsEdited || !saved) return;
-      audioOffset = saved.offsets?.audio ?? 0;
-      subtitleOffset = saved.offsets?.subtitle ?? 0;
+      if (disposed || !saved) return;
+      if (!offsetsEdited) {
+        audioOffset = saved.offsets?.audio ?? 0;
+        subtitleOffset = saved.offsets?.subtitle ?? 0;
+      }
+      if (saved.subtitleStyle) {
+        subtitleStyle = { ...DEFAULT_SUBTITLE_STYLE, ...sanitizeSubtitleStyle(saved.subtitleStyle) };
+      }
+      skipIntroEnabled = saved.skipIntroEnabled !== false;
+      skipCreditsEnabled = saved.skipCreditsEnabled !== false;
+      autoSkipIntro = saved.autoSkipIntro === true;
+      autoSkipCredits = saved.autoSkipCredits === true;
+      if (!artworkEdited) artworkRotation = { ...defaultArtworkRotationPolicy, ...saved.artworkRotation };
     }).catch(() => {});
-    const sync = () => { const id = window.location.hash.slice(1); current = pages.some(page => page.id === id) ? id : 'account'; };
+    const sync = () => { const hash = window.location.hash.slice(1); const id = hash === 'appearance' ? 'account' : hash === 'sso' ? 'security' : hash; current = pages.some(page => page.id === id) ? id : 'account'; };
     sync(); window.addEventListener('hashchange', sync);
     return () => { disposed = true; window.removeEventListener('hashchange', sync); };
   });
@@ -53,6 +90,13 @@
     if ([audioOffset, subtitleOffset].every(value => Number.isFinite(value) && Math.abs(value) <= 30)) {
       savePreferences({ offsets: { audio: audioOffset, subtitle: subtitleOffset } });
     }
+  }
+  function saveArtworkRotation(event: SubmitEvent) {
+    event.preventDefault();
+    artworkEdited = true;
+    const value = { ...artworkRotation };
+    savePreferences({ artworkRotation: value });
+    setArtworkRotationPolicy(value);
   }
 </script>
 
@@ -83,24 +127,10 @@
       </div>
 
       <AvatarEditor />
-      <div class="profile-info-list">
-        <div class="info-row">
-          <span class="label">{$t('settings_unique_id')}</span>
-          <span class="val"><code>{$session?.user.id ?? 'Inconnu'}</code></span>
-        </div>
-        <div class="info-row">
-          <span class="label">{$t('settings_auth_type')}</span>
-          <span class="val">
-            {$session?.user.sso === true ? $t('sso_account') : $session?.user.sso === false ? $t('auth_local_sub') : 'Non communiqué'}
-          </span>
-        </div>
-      </div>
 
-      <AccountSecurity />
+
     </section>
-      </div>
-      <div hidden={current !== 'appearance'}><section class="card" aria-labelledby="appearance-heading"><h2 id="appearance-heading">Apparence</h2><p class="muted">Personnalisez le thème et la langue de l’interface.</p>
-      <div class="pref-fields">
+<section class="card"><h2>Préférences de l’interface</h2>      <div class="pref-fields">
         <label>
           <span><Icon name="sun" size={14} /> {$t('theme')}</span>
           <select
@@ -125,7 +155,69 @@
         </label>
 
       </div>
-      </section></div>
+</section>
+
+      <section class="card profile-card" aria-label="Informations du compte">
+        <div class="profile-info-list">
+          <div class="info-row">
+            <span class="label">{$t('settings_unique_id')}</span>
+            <span class="val"><code>{$session?.user.id ?? 'Inconnu'}</code></span>
+          </div>
+          <div class="info-row">
+            <span class="label">{$t('settings_auth_type')}</span>
+            <span class="val">
+              {$session?.user.sso === true ? $t('sso_account') : $session?.user.sso === false ? $t('auth_local_sub') : 'Non communiqué'}
+            </span>
+          </div>
+        </div>
+      </section>
+      </div>
+            <div hidden={current !== 'display'}>
+        <form class="card offsets" onsubmit={saveArtworkRotation}>
+          <h2>Rotation des affiches</h2>
+          <p class="muted">La rotation utilise les affiches déjà présentes en local. Les images choisies manuellement restent prioritaires.</p>
+          <label><span>Activer la rotation automatique</span><input type="checkbox" bind:checked={artworkRotation.enabled} onchange={() => artworkEdited = true} /></label>
+
+          <fieldset class="library-filter-fieldset">
+            <legend>Bibliothèques concernées</legend>
+            <p class="hint">Cochez les bibliothèques sur lesquelles activer la rotation des affiches.</p>
+            <div class="library-checks">
+              {#each ($accessibleLibraries.filter(l => l.kind !== 'music')) as lib (lib.id)}
+                <label class="lib-checkbox-label">
+                  <input type="checkbox"
+                    checked={artworkRotation.enabledLibraries ? artworkRotation.enabledLibraries.includes(lib.id) : (lib.kind === 'films' ? artworkRotation.enableMovies !== false : artworkRotation.enableSeries !== false)}
+                    onchange={(e) => {
+                      artworkEdited = true;
+                      const defaults = $accessibleLibraries.filter(l => l.kind !== 'music' && (l.kind === 'films' ? artworkRotation.enableMovies !== false : artworkRotation.enableSeries !== false)).map(l => l.id);
+                      let curr = artworkRotation.enabledLibraries ? [...artworkRotation.enabledLibraries] : defaults;
+                      if (e.currentTarget.checked) {
+                        if (!curr.includes(lib.id)) curr.push(lib.id);
+                      } else {
+                        curr = curr.filter(id => id !== lib.id);
+                      }
+                      artworkRotation.enabledLibraries = curr;
+                    }}
+                  />
+                  <span><strong>{lib.name}</strong> <small>({lib.kind === 'films' ? 'Films' : 'Séries'})</small></span>
+                </label>
+              {:else}
+                <p class="muted">Aucune bibliothèque vidéo disponible.</p>
+              {/each}
+            </div>
+          </fieldset>
+
+          <label>Ordre de rotation<select bind:value={artworkRotation.rotationMode} onchange={() => artworkEdited = true}><option value="random">Aléatoire</option><option value="sequential">Séquentiel</option></select></label>
+          <label>Intervalle minimal en heures (0 : nouvelle visite)<input type="number" min="0" max="720" step="1" required bind:value={artworkRotation.minHoursBetweenSwitches} oninput={() => artworkEdited = true} /></label>
+          <label>Nombre maximal d'affiches en réserve<input type="number" min="1" max="24" step="1" required bind:value={artworkRotation.poolSize} oninput={() => artworkEdited = true} /></label>
+          <label>Langue préférée des affiches<input type="text" pattern="[A-Za-z0-9-]+" minlength="2" maxlength="35" required bind:value={artworkRotation.preferredLanguage} oninput={() => artworkEdited = true} /></label>
+          <label>Langue de repli<input type="text" pattern="[A-Za-z0-9-]+" minlength="2" maxlength="35" required bind:value={artworkRotation.fallbackLanguage} oninput={() => artworkEdited = true} /></label>
+          <label><span>Inclure les affiches sans langue taguée</span><input type="checkbox" bind:checked={artworkRotation.includeUnknownLanguage} onchange={() => artworkEdited = true} /></label>
+          <label><span>Accepter les autres langues en repli si indisponible</span><input type="checkbox" bind:checked={artworkRotation.allowAnyLanguageFallback} onchange={() => artworkEdited = true} /></label>
+          <button type="submit">Enregistrer l'affichage</button>
+        </form>
+      </div>
+      <div hidden={current !== 'security'}><section class="card"><h2>Sécurité</h2><AccountSecurity mode="security" /><h3>Connexion SSO</h3><OidcSettings embedded /></section></div>
+      <div hidden={current !== 'devices'}><section class="card"><h2>Appareils</h2><AccountSecurity mode="devices" /></section></div>
       <div hidden={current !== 'playback'}><section class="card" aria-labelledby="playback-heading"><h2 id="playback-heading">Lecture</h2><p class="muted">Ces préférences s’appliquent à votre compte.</p>
       <div class="pref-fields">
         <label>
@@ -154,60 +246,294 @@
       </div>
 
 
+        <section class="offsets" aria-label="Sauts des génériques">
+          <h3>Intros et génériques</h3>
+          <label><input type="checkbox" bind:checked={skipIntroEnabled} onchange={() => savePreferences({ skipIntroEnabled })} /> Proposer « Passer l'intro »</label>
+          <label><input type="checkbox" bind:checked={skipCreditsEnabled} onchange={() => savePreferences({ skipCreditsEnabled })} /> Proposer « Passer le générique »</label>
+          <label><input type="checkbox" bind:checked={autoSkipIntro} onchange={() => savePreferences({ autoSkipIntro })} /> Sauter automatiquement l'introduction</label>
+          <label><input type="checkbox" bind:checked={autoSkipCredits} onchange={() => savePreferences({ autoSkipCredits })} /> Sauter automatiquement le générique de fin</label>
+        </section>
+
         <form class="offsets" onsubmit={saveOffsets}>
           <h3>Synchronisation</h3><p class="muted">Décalages par défaut, de −30 à +30 secondes. Un décalage positif retarde la piste. Le décalage audio concerne les pistes externes.</p>
           <label>Décalage audio (secondes)<input type="number" min="-30" max="30" step="0.1" required bind:value={audioOffset} oninput={() => { offsetsEdited = true; }} /></label>
           <label>Décalage des sous-titres (secondes)<input type="number" min="-30" max="30" step="0.1" required bind:value={subtitleOffset} oninput={() => { offsetsEdited = true; }} /></label>
           <button type="submit">Enregistrer les décalages</button>
         </form>
-      </section></div>
-      <div hidden={current !== 'sso'}>
-    <section class="card oidc-card" aria-labelledby="sso-settings-heading">
-      <h2 id="sso-settings-heading" class="card-title">Connexion SSO</h2>
-      <OidcSettings embedded />
-    </section>
 
+        <section class="subtitles-appearance" aria-labelledby="subtitles-style-heading">
+          <h3 id="subtitles-style-heading">Style des sous-titres</h3>
+          <p class="muted">Personnalisez l’affichage des sous-titres dans le lecteur vidéo.</p>
+
+          <div class="subtitle-preview-box" aria-hidden="true">
+            <span
+              class="subtitle-preview-text"
+              style:color={previewSubtitleCss.color}
+              style:font-size={previewSubtitleCss.fontSize}
+              style:font-family={previewSubtitleCss.fontFamily}
+              style:background-color={previewSubtitleCss.backgroundColor}
+              style:text-shadow={previewSubtitleCss.textShadow}
+            >
+              Exemple de sous-titre affiché
+            </span>
+          </div>
+
+          <div class="pref-fields">
+            <label>
+              <span>Taille de la police</span>
+              <select
+                value={subtitleStyle.fontSize}
+                onchange={(e) => updateSubtitleStyle('fontSize', e.currentTarget.value as 'small' | 'medium' | 'large')}
+              >
+                <option value="small">Petite</option>
+                <option value="medium">Moyenne (par défaut)</option>
+                <option value="large">Grande</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Police d’écriture</span>
+              <select
+                value={subtitleStyle.fontFamily}
+                onchange={(e) => updateSubtitleStyle('fontFamily', e.currentTarget.value as 'sans-serif' | 'serif' | 'monospace')}
+              >
+                <option value="sans-serif">Sans empattement (Moderne / Sans-serif)</option>
+                <option value="serif">Avec empattement (Classique / Serif)</option>
+                <option value="monospace">Chasse fixe (Monospace)</option>
+              </select>
+            </label>
+
+            <div class="color-row">
+              <label>
+                <span>Couleur du texte</span>
+                <div class="color-picker-wrap">
+                  <input
+                    type="color"
+                    value={subtitleStyle.textColor}
+                    onchange={(e) => updateSubtitleStyle('textColor', e.currentTarget.value)}
+                  />
+                  <span>{subtitleStyle.textColor.toUpperCase()}</span>
+                </div>
+              </label>
+
+              <label>
+                <span>Couleur d’arrière-plan</span>
+                <div class="color-picker-wrap">
+                  <input
+                    type="color"
+                    value={subtitleStyle.backgroundColor}
+                    onchange={(e) => updateSubtitleStyle('backgroundColor', e.currentTarget.value)}
+                  />
+                  <span>{subtitleStyle.backgroundColor.toUpperCase()}</span>
+                </div>
+              </label>
+            </div>
+
+            <label>
+              <span>Opacité de l’arrière-plan ({subtitleStyle.backgroundOpacity} %)</span>
+              <div class="slider-wrap">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="5"
+                  value={subtitleStyle.backgroundOpacity}
+                  oninput={(e) => updateSubtitleStyle('backgroundOpacity', Number(e.currentTarget.value))}
+                />
+              </div>
+              <small class="muted">À 0 %, aucun fond opaque ne vient masquer la vidéo.</small>
+            </label>
+
+            <label>
+              <span>Contour et ombre du texte</span>
+              <select
+                value={subtitleStyle.textShadow}
+                onchange={(e) => updateSubtitleStyle('textShadow', e.currentTarget.value as 'none' | 'outline' | 'drop-shadow')}
+              >
+                <option value="drop-shadow">Ombre portée nette (par défaut)</option>
+                <option value="outline">Contour noir renforcé</option>
+                <option value="none">Aucun contour / ombre</option>
+              </select>
+            </label>
+          </div>
+        </section>
+      </section></div>
+      <div hidden={current !== 'about'}>
+        <section class="card" aria-labelledby="about-heading">
+          <h2 id="about-heading" class="card-title">À propos de {serverConfig?.name || 'Aether'}</h2>
+          <div class="profile-info-list">
+            <div class="info-row">
+              <span class="label">Version</span>
+              <span class="val">
+                <strong>{serverConfig?.version || '0.1.0'}</strong>
+                {#if serverConfig?.channel}
+                  <span class="role-badge" class:admin-badge={serverConfig.channel === 'stable'}>
+                    {serverConfig.channel}
+                  </span>
+                {/if}
+              </span>
+            </div>
+            {#if serverConfig?.commit}
+              <div class="info-row">
+                <span class="label">Commit Git</span>
+                <span class="val"><code>{serverConfig.commit}</code></span>
+              </div>
+            {/if}
+            {#if serverConfig?.build_date}
+              <div class="info-row">
+                <span class="label">Date de compilation</span>
+                <span class="val">{serverConfig.build_date}</span>
+              </div>
+            {/if}
+            {#if serverConfig?.release_url}
+              <div class="info-row">
+                <span class="label">Notes de version</span>
+                <span class="val">
+                  <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+                  <a href={serverConfig.release_url} target="_blank" rel="noopener noreferrer">
+                    Consulter la release {serverConfig.version} sur GitHub
+                  </a>
+                </span>
+              </div>
+            {/if}
+            <div class="info-row">
+              <span class="label">Mode d'exécution</span>
+              <span class="val"><code>{serverConfig?.mode || 'standalone'}</code></span>
+            </div>
+          </div>
+        </section>
       </div>
-      <p class="save-note">Les modifications sont enregistrées dans votre compte. Un échec d’enregistrement est signalé en haut de la page.</p>
     </div>
   </div>
 </div>
 <style>
   .settings-view { padding-top: 24px; }
-  h1 { font-size: 28px; font-weight: 400; margin: 0 0 32px; }
-  .settings-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px; align-items: start; }
-  .settings-nav { display: grid; gap: 4px; }
-  .settings-nav a { display: flex; align-items: center; gap: 14px; padding: 14px; color: var(--text-secondary); font-size: 14px; min-height: 48px; }
+  h1 { font-size: clamp(24px, 2.8vw, 32px); font-weight: 800; letter-spacing: -0.02em; margin: 0 0 32px; }
+  .settings-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 40px; align-items: start; }
+  .settings-nav { display: grid; gap: 6px; }
+  .settings-nav a {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 16px;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    min-height: 48px;
+    border-radius: var(--radius-sm);
+    border-left: 3px solid transparent;
+    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  }
   .settings-nav a:hover, .settings-nav a.active { background: var(--bg-elevated); color: var(--text-primary); }
-  .settings-nav a.active { border-left: 3px solid var(--accent-primary); }
-  .server-link { margin-top: 20px; border-top: 1px solid var(--border-subtle); }
-  .settings-content { min-width: 0; max-width: 860px; }
-  .card { min-width: 0; overflow-wrap: anywhere; padding: 0; }
-  h2 { font-size: 24px; font-weight: 400; margin: 0 0 24px; }
-  h3 { margin: 0; font-size: 18px; font-weight: 500; }
+  .settings-nav a.active { border-left: 3px solid var(--accent-primary); font-weight: 700; }
+  .server-link { margin-top: 20px; border-top: 1px solid var(--border-subtle); padding-top: 16px; }
+  .settings-content { min-width: 0; max-width: none; }
+  .card {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    padding: 24px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    margin-bottom: 24px;
+  }
+  h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.015em; margin: 0 0 20px; }
+  h3 { margin: 0; font-size: 17px; font-weight: 650; }
   .profile-header-row { display: flex; align-items: center; gap: 20px; margin-bottom: 28px; }
   .profile-handle { margin: 6px 0; color: var(--text-secondary); }
-  .role-badge { display: inline-block; margin-top: 8px; padding: 4px 8px; font-size: 12px; background: var(--bg-elevated); }
+  .role-badge { display: inline-block; margin-top: 8px; padding: 4px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border-radius: var(--radius-full); background: var(--bg-elevated); }
   .admin-badge { background: var(--color-accent-soft); color: var(--accent-primary); }
   .profile-info-list { display: grid; gap: 0; }
   .info-row { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--border-subtle); font-size: 14px; }
+  .info-row:last-child { border-bottom: none; padding-bottom: 0; }
   .label { color: var(--text-secondary); }
   .val code { overflow-wrap: anywhere; }
-  .muted, .save-note { color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
-  .save-note { margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--border-subtle); font-size: 12px; }
+  .muted { color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
   .pref-fields, .offsets { display: grid; gap: 24px; margin-top: 24px; }
-  label { display: grid; gap: 10px; font-size: 14px; }
+  label { display: grid; gap: 10px; font-size: 14px; font-weight: 500; }
   label > span { display: flex; align-items: center; gap: 8px; }
-  select, input { min-width: 0; width: 100%; max-width: 520px; min-height: 44px; border: 1px solid var(--border-subtle); border-radius: 4px; background-color: var(--bg-surface); color: var(--text-primary); }
-  input { padding: 12px; }
-  button { justify-self: start; min-height: 44px; padding: 12px 20px; border: 0; border-radius: 4px; background: var(--color-play); color: var(--color-on-accent); }
+  select, input:not([type="checkbox"]):not([type="range"]):not([type="color"]) {
+    min-width: 0;
+    width: 100%;
+    max-width: 520px;
+    min-height: 44px;
+    padding: 10px 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-elevated);
+    color: var(--text-primary);
+    transition: border-color var(--transition-fast);
+  }
+  select:focus, input:focus { border-color: var(--accent-primary); }
+  button {
+    justify-self: start;
+    min-height: 44px;
+    padding: 12px 22px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--color-play);
+    color: var(--color-on-accent);
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: var(--shadow-glow);
+    transition: background var(--transition-fast), transform var(--transition-fast);
+  }
+  button:hover { background: var(--color-play-hover); transform: translateY(-1px); }
   .offsets { padding-top: 28px; border-top: 1px solid var(--border-subtle); }
   .offsets p { margin: 0; }
+  .subtitles-appearance { margin-top: 36px; padding-top: 28px; border-top: 1px solid var(--border-subtle); }
+  .subtitles-appearance h3 { margin-bottom: 8px; }
+  .subtitle-preview-box {
+    margin: 20px 0;
+    padding: 36px 20px;
+    background: linear-gradient(135deg, #18181B 0%, #0B0C10 100%);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 120px;
+    overflow: hidden;
+  }
+  .subtitle-preview-text {
+    padding: 4px 10px;
+    border-radius: 4px;
+    display: inline-block;
+    max-width: 90%;
+    word-break: break-word;
+    transition: all 0.15s ease-out;
+  }
+  .color-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+  }
+  .color-picker-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .color-picker-wrap input[type="color"] {
+    width: 48px;
+    height: 44px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    border: 1px solid var(--border-subtle);
+    background: transparent;
+    cursor: pointer;
+  }
+  .slider-wrap input[type="range"] {
+    width: 100%;
+    max-width: 520px;
+    accent-color: var(--color-play);
+  }
   @media (max-width: 760px) {
-    .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 28px; }
-    .settings-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+    .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+    .settings-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
     .settings-nav a { font-size: 13px; padding: 12px; gap: 10px; }
     .server-link { grid-column: 1 / -1; margin-top: 4px; }
+    .card { padding: 18px; }
     .info-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   }
 </style>

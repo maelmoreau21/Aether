@@ -2,6 +2,27 @@ name: Publication Docker GHCR
 
 on:
   workflow_call:
+    inputs:
+      version:
+        description: 'Version exacte SemVer à tagger (ex: 0.1.2 ou 0.2.0-beta.1)'
+        required: false
+        type: string
+        default: ''
+      series:
+        description: 'Série SemVer majeure.mineure (ex: 0.1 ou 0.2)'
+        required: false
+        type: string
+        default: ''
+      is_release:
+        description: 'True si déclenché depuis une release stable sur main'
+        required: false
+        type: boolean
+        default: false
+      push:
+        description: 'Effectuer le push réel des images'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -13,102 +34,123 @@ concurrency:
 
 jobs:
   build-and-publish:
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.base_ref == 'develop' || github.base_ref == 'main')
+    # Strict : Jamais de publication sur pull_request.
+    # Uniquement push direct / workflow_dispatch sur main ou develop, ou workflow_call validé.
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || inputs.is_release)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: aether
-            target: runtime
-          - image: aether-core
-            target: runtime-core
-          - image: aether-node
-            target: runtime-node
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+
       - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
+        if: inputs.push
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: docker/metadata-action@v5
-        id: meta
+        id: meta-standalone
         with:
-          images: ghcr.io/maelmoreau21/${{ matrix.image }}
+          bake-target: runtime
+          images: ghcr.io/${{ github.repository_owner }}/aether
           tags: |
-            type=ref,event=branch
-            type=raw,value=develop,enable=${{ github.base_ref == 'develop' || github.ref == 'refs/heads/develop' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' && !inputs.is_release }}
+            type=raw,value=latest,enable=${{ inputs.is_release }}
+            type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' && inputs.is_release }}
             type=sha,format=long
-      - uses: docker/build-push-action@v6
+
+      - uses: docker/metadata-action@v5
+        id: meta-core
+        with:
+          bake-target: runtime-core
+          images: ghcr.io/${{ github.repository_owner }}/aether-core
+          tags: |
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' && !inputs.is_release }}
+            type=raw,value=latest,enable=${{ inputs.is_release }}
+            type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' && inputs.is_release }}
+            type=sha,format=long
+
+      - uses: docker/metadata-action@v5
+        id: meta-node
+        with:
+          bake-target: runtime-node
+          images: ghcr.io/${{ github.repository_owner }}/aether-node
+          tags: |
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' && !inputs.is_release }}
+            type=raw,value=latest,enable=${{ inputs.is_release }}
+            type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' && inputs.is_release }}
+            type=sha,format=long
+
+      # One solve shares Rust/Web/FFmpeg stages across all three published images.
+      - uses: docker/bake-action@v6
         id: build
         with:
-          context: .
-          target: ${{ matrix.target }}
-          platforms: linux/amd64
-          build-args: |
-            GIT_BRANCH=${{ github.ref_name }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
-      - name: Vérifier le téléchargement et le rattachement de l'image publiée
+          files: |
+            docker-bake.ci.hcl
+            cwd://${{ steps.meta-standalone.outputs.bake-file }}
+            cwd://${{ steps.meta-core.outputs.bake-file }}
+            cwd://${{ steps.meta-node.outputs.bake-file }}
+          push: ${{ inputs.push }}
+          load: ${{ !inputs.push }}
+          set: |
+            runtime.cache-to=type=gha,mode=max,scope=publish-images
         env:
-          IMAGE: ghcr.io/maelmoreau21/${{ matrix.image }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          GIT_BRANCH: ${{ github.ref_name }}
+          MEDIA_VERSION: ${{ inputs.version }}
+
+      - name: Vérifier les trois images (provenance, version et runtime Node)
+        env:
+          BUILD_METADATA: ${{ steps.build.outputs.metadata }}
+          OWNER: ${{ github.repository_owner }}
           EXPECTED_SOURCE: ${{ github.server_url }}/${{ github.repository }}
           EXPECTED_REVISION: ${{ github.sha }}
+          EXPECTED_VERSION: ${{ inputs.version }}
+          PUSH_IMAGES: ${{ inputs.push }}
         run: |
           set -euo pipefail
-          ref="${IMAGE}@${DIGEST}"
-          docker pull "$ref"
-          test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$ref")" = "$EXPECTED_SOURCE"
-          test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")" = "$EXPECTED_REVISION"
-      - name: Vérifier le runtime Node optimisé
-        if: matrix.target == 'runtime-node'
-        env:
-          IMAGE: ghcr.io/maelmoreau21/${{ matrix.image }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          set -euo pipefail
-          ref="${IMAGE}@${DIGEST}"
-          docker run --rm --entrypoint sh "$ref" -ec '
-            ffprobe -version | head -n 1 | grep -F "ffprobe version 9.0.2"
-            ffmpeg -version | head -n 1 | grep -F "ffmpeg version 9.0.2"
-            test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
-          '
-          test "$(docker inspect --format '{{.Size}}' "$ref")" -lt 200000000
-      - name: Vérifier la commande version du conteneur
-        env:
-          IMAGE: ghcr.io/maelmoreau21/${{ matrix.image }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-          BINARY: ${{ matrix.image }}
-        run: |
-          set -euo pipefail
-          ref="${IMAGE}@${DIGEST}"
-          docker run --rm "$ref" "$BINARY" --version
-      - name: Vérifier l'association du package au dépôt sur GitHub
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE: ${{ matrix.image }}
-        run: |
-          set -euo pipefail
-          # L'API REST utilisateur /users/{owner}/packages/container/{package} peut renvoyer 403/404 avec
-          # le GITHUB_TOKEN standard (token d'installation restreint au dépôt, sans scope PAT utilisateur read:packages).
-          # On tente la vérification si l'endpoint est accessible, et on confirme la présence du label OCI source déjà validé.
-          if repository=$(gh api "/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${PACKAGE}" --jq '.repository.full_name' 2>/dev/null); then
-            if [ -n "$repository" ] && [ "$repository" != "null" ]; then
-              test "$repository" = "$GITHUB_REPOSITORY"
-              echo "Package associé avec succès au dépôt: $repository"
+          mkdir -p digests
+          for pair in aether:runtime aether-core:runtime-core aether-node:runtime-node; do
+            image=${pair%:*}
+            target=${pair#*:}
+            # metadata-action normalizes repository names to lowercase.
+            image_repo="ghcr.io/${OWNER,,}/$image"
+            if [ "$PUSH_IMAGES" = "true" ]; then
+              digest=$(jq -er --arg target "$target" '.[$target]["containerimage.digest"] | select(startswith("sha256:"))' <<< "$BUILD_METADATA")
+              target_ref="${image_repo}@${digest}"
+              docker pull "$target_ref"
+              printf '%s\n' "$digest" > "digests/$image.digest"
             else
-              echo "Package présent sur GHCR, association en cours d'indexation côté GitHub"
+              target_ref="${image_repo}:sha-${EXPECTED_REVISION}"
             fi
-          else
-            echo "API Packages utilisateur non accessible avec GITHUB_TOKEN (comportement standard sans PAT supplémentaire)."
-            echo "Association au dépôt confirmée via le label OCI org.opencontainers.image.source dans l'image publiée."
-          fi
+            test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$target_ref")" = "$EXPECTED_SOURCE"
+            test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$target_ref")" = "$EXPECTED_REVISION"
+            output=$(docker run --rm "$target_ref" "$image" --version)
+            echo "$image : $output"
+            if [ -n "$EXPECTED_VERSION" ]; then
+              echo "$output" | grep -F -- "$EXPECTED_VERSION"
+            fi
+            if [ "$target" = "runtime-node" ]; then
+              docker run --rm --entrypoint sh "$target_ref" -ec '
+                ffprobe -version | head -n 1 | grep -F "ffprobe version 9.0.2"
+                ffmpeg -version | head -n 1 | grep -F "ffmpeg version 9.0.2"
+                test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
+              '
+              test "$(docker inspect --format '{{.Size}}' "$target_ref")" -lt 200000000
+            fi
+          done
+
+      - name: Sauvegarder les digests en artifact
+        if: inputs.push
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-images
+          path: digests/*.digest
+          if-no-files-found: error
+          retention-days: 1

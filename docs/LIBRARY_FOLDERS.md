@@ -6,6 +6,23 @@ autorisée. Le nom, le type, les exclusions, les options et les permissions sont
 communs. L'interface montre les dossiers ajoutés et permet de les retirer.
 L'ajout d'un dossier ne déclenche pas automatiquement un scan.
 
+## Éditeur et navigation — 25 octobre 2026
+
+L'éditeur utilise une fenêtre large, adaptée au téléphone, avec les actions
+d'enregistrement accessibles pendant le défilement. Le sélecteur propose
+« Dossier parent » et « Racines / lecteurs ». Une navigation ne réinitialise
+plus le chemin vers le dossier de départ (notamment le dossier temporaire
+vide du Core). Un dossier vide peut être sélectionné ; seul un chemin résolu
+sans erreur peut être confirmé. Les demandes précédentes sont annulées lors
+d'une nouvelle navigation.
+
+Les chemins sont ceux du serveur choisi. Dans Docker, il faut monter les
+dossiers médias dans le conteneur ; le navigateur ne donne pas accès aux
+dossiers de l'ordinateur client. Les restrictions de racines du Node continuent
+de s'appliquer. Aucun droit disque supplémentaire n'est ajouté par l'interface.
+Pour un Node distant, l'API actuelle présente ses racines déclarées uniquement :
+la navigation dans ses sous-dossiers n'est pas fournie par ce correctif.
+
 ## Contrat HTTP
 
 `POST /api/v1/admin/libraries` et `PUT /api/v1/admin/libraries/{id}` acceptent :

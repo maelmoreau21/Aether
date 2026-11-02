@@ -181,6 +181,10 @@ fn package_authenticates_manifest_module_publisher_and_compatibility() {
     let key = key();
     let p = package(&key, good_module());
     assert!(extensions::validate_package(&p, key.public_key().as_ref()).is_ok());
+    let mut private = p.clone();
+    private.manifest.permissions.push("storage.private".into());
+    private.signature = STANDARD.encode(key.sign(&private.signing_bytes().unwrap()).as_ref());
+    assert!(extensions::validate_package(&private, key.public_key().as_ref()).is_ok());
     let mut bad = p.clone();
     bad.manifest.name = "Forged".into();
     assert_eq!(
@@ -262,6 +266,322 @@ async fn call(
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         cookie,
     )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artwork_batch_is_bounded_resumable_and_requires_admin_csrf() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "batch-admin",
+            Zeroizing::new("synthetic batch password".into()),
+        )
+        .await
+        .unwrap();
+    media_poc::libraries::initialize_local(&store)
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('folder','Folder','films','local','synthetic-child',1)").execute(store.pool()).await.unwrap();
+    media_poc::database::query(
+        "INSERT INTO library_folders(library_id,parent_id,active) VALUES('folder','films',1)",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    for (id, ids) in [("a", "{}"), ("b", "{\"tmdb\":\"42\"}")] {
+        media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json,title_sort) VALUES(?,?,?,?,?,?)")
+            .bind(id).bind(if id == "a" { "films" } else { "folder" }).bind(id).bind(if id == "b" { "ÉB" } else { id }).bind(ids).bind(if id == "b" { "éb" } else { id }).execute(store.pool()).await.unwrap();
+    }
+    media_poc::database::query("INSERT INTO work_image_entries(id,work_id,kind,position,width,height) VALUES('poster-b','b','poster',0,12,18)").execute(store.pool()).await.unwrap();
+    media_poc::database::query("UPDATE inventory_works SET manual_json=? WHERE id='a'")
+        .bind(r#"{"title":"Nom choisi"}"#)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let auth = AuthState::new(store, "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = extensions::router(auth.clone()).merge(auth::router(auth));
+    let (_, login, cookie) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        "",
+        json!({"login":"batch-admin","password":"synthetic batch password"}),
+    )
+    .await;
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let endpoint = "/api/v1/admin/artwork/collect-batch";
+    assert_ne!(
+        call(
+            &app,
+            "GET",
+            "/api/v1/admin/artwork/works?libraryId=films",
+            "",
+            "",
+            json!({})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            "/api/v1/admin/artwork/works?libraryId=films&limit=101",
+            &cookie,
+            "",
+            json!({})
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    let (status, listed, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&limit=1",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["items"][0]["workId"], "a");
+    assert_eq!(listed["items"][0]["title"], "Nom choisi");
+    assert_eq!(listed["items"][0]["posterCount"], 0);
+    assert_eq!(listed["nextCursor"], "a");
+    let (_, listed, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&limit=1&after=a",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(listed["items"][0]["workId"], "b");
+    assert!(listed["nextCursor"].is_null());
+    let (_, filtered, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&posters=with&q=B",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(filtered["items"].as_array().unwrap().len(), 1);
+    assert_eq!(filtered["items"][0]["workId"], "b");
+    assert_eq!(filtered["items"][0]["posterCount"], 1);
+    let (_, accented, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&q=%C3%89b",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(accented["items"][0]["workId"], "b");
+    let (_, filtered, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&posters=without",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(filtered["items"].as_array().unwrap().len(), 1);
+    assert_eq!(filtered["items"][0]["workId"], "a");
+    let (_, literal, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&q=%25",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert!(literal["items"].as_array().unwrap().is_empty());
+    let (_, renamed, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/artwork/works?libraryId=films&q=choisi",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(renamed["items"][0]["title"], "Nom choisi");
+    let request = json!({"libraryId":"films", "limit":1});
+    assert_ne!(
+        call(&app, "POST", endpoint, &cookie, "", request.clone())
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            endpoint,
+            &cookie,
+            csrf,
+            json!({"libraryId":"films","limit":6})
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    let (status, first, _) = call(&app, "POST", endpoint, &cookie, csrf, request).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["items"][0]["error"]["code"], "external_ids_required");
+    assert_eq!(first["nextCursor"], "a");
+    let (_, second, _) = call(
+        &app,
+        "POST",
+        endpoint,
+        &cookie,
+        csrf,
+        json!({"libraryId":"films","after":"a"}),
+    )
+    .await;
+    assert_eq!(second["items"][0]["workId"], "b");
+    assert_eq!(second["items"][0]["result"]["providers"], 0);
+    assert!(second["nextCursor"].is_null());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn image_collection_uses_only_enabled_providers_and_skips_known_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "image-admin",
+            Zeroizing::new("synthetic collection password".into()),
+        )
+        .await
+        .unwrap();
+    media_poc::libraries::initialize_local(&store)
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
+    media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','films','work','Film','{\"test.metadata\":\"known\"}')").execute(store.pool()).await.unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = extensions::router(auth.clone()).merge(auth::router(auth));
+    let (_, login, cookie) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        "",
+        json!({"login":"image-admin","password":"synthetic collection password"}),
+    )
+    .await;
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let signing = key();
+    let output = json!({"apiVersion":1,"result":[{"url":"https://images.example.org/known.png","imageType":"poster","language":"fr","isPrimary":false}]}).to_string();
+    let data = output
+        .bytes()
+        .map(|b| format!("\\{b:02x}"))
+        .collect::<String>();
+    let wasm = wat::parse_str(format!(
+        r#"(module (memory (export "memory") 1 256) (data (i32.const 4096) "{data}")
+        (func (export "media_alloc") (param i32) (result i32) i32.const 1024)
+        (func (export "media_run") (param i32 i32) (result i64) i64.const {}))"#,
+        (4096u64 << 32) | output.len() as u64
+    ))
+    .unwrap();
+    let mut p = package(&signing, wasm);
+    p.manifest.permissions = vec!["images".into(), "metadata.write".into()];
+    p.manifest.http_hosts = vec!["images.example.org".into()];
+    p.signature = STANDARD.encode(signing.sign(&p.signing_bytes().unwrap()).as_ref());
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/publishers",
+            &cookie,
+            csrf,
+            json!({"id":"test","publicKey":STANDARD.encode(signing.public_key().as_ref())})
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions",
+            &cookie,
+            csrf,
+            serde_json::to_value(p).unwrap()
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    let endpoint = "/api/v1/admin/extensions/images/collect";
+    let request = json!({"workId":"work","languages":["fr","en"]});
+    let (status, result, _) = call(&app, "POST", endpoint, &cookie, csrf, request.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(result["providers"], 0);
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            "/api/v1/admin/extensions/test.metadata",
+            &cookie,
+            csrf,
+            json!({"enabled":true,"libraryIds":["films"]})
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    media_poc::database::query("INSERT INTO work_image_entries(id,work_id,kind,position,width,height) VALUES('known-image','work','poster',0,12,18)").execute(store.pool()).await.unwrap();
+    let hash = format!(
+        "{:x}",
+        Sha256::digest(b"https://images.example.org/known.png")
+    );
+    media_poc::database::query("INSERT INTO artwork_image_sources(work_id,source_url_hash,image_id) VALUES('work',?,'known-image')").bind(hash).execute(store.pool()).await.unwrap();
+    let (status, result, _) = call(&app, "POST", endpoint, &cookie, csrf, request.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["providers"], 1, "{result}");
+    assert_eq!(result["skipped"], 1, "{result}");
+    assert_eq!(
+        result["attempts"], 0,
+        "No request may reach the synthetic external host: {result}"
+    );
+    assert_eq!(result["errors"], json!([]), "{result}");
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            "/api/v1/admin/extensions/test.metadata",
+            &cookie,
+            csrf,
+            json!({"enabled":false,"libraryIds":["films"]})
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, result, _) = call(&app, "POST", endpoint, &cookie, csrf, request).await;
+    assert_eq!(result["providers"], 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -737,11 +1057,19 @@ async fn browser_extension_installs_and_executes_real_rust_module() {
     let p = package(&key, wasm);
     let path = temp.path().join("package.json");
     std::fs::write(&path, serde_json::to_vec(&p).unwrap()).unwrap();
+    let mut avatars = package(&key, STANDARD.decode(&p.wasm).unwrap());
+    avatars.manifest.id = "test.avatars".into();
+    avatars.manifest.name = "Avatars de test".into();
+    avatars.manifest.permissions = vec!["avatars".into()];
+    avatars.signature = STANDARD.encode(key.sign(&avatars.signing_bytes().unwrap()).as_ref());
+    let avatar_path = temp.path().join("avatar-package.json");
+    std::fs::write(&avatar_path, serde_json::to_vec(&avatars).unwrap()).unwrap();
     let status = tokio::process::Command::new("node")
         .arg("scripts/test-extensions-live.mjs")
         .current_dir(root.join("apps/web"))
         .env("MEDIA_TEST_ORIGIN", origin)
         .env("MEDIA_TEST_PACKAGE", path)
+        .env("MEDIA_TEST_AVATAR_PACKAGE", avatar_path)
         .env(
             "MEDIA_TEST_PUBLIC_KEY",
             STANDARD.encode(key.public_key().as_ref()),
@@ -814,6 +1142,8 @@ fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
         http_count: 0,
         max_http_requests: 10,
         max_response_size: 1024,
+        last_http_at: None,
+        retry_after_seconds: None,
     };
 
     // 1. Non-HTTPS scheme is forbidden
@@ -1299,13 +1629,14 @@ async fn rich_operations_and_account_avatars_use_signed_permissions() {
             )
             .await;
             assert_eq!(status, StatusCode::OK, "{output}");
-            let data: Vec<u8> = media_poc::database::query_scalar(
-                "SELECT image_data FROM user_avatars WHERE user_id=?",
+            let sha: String = media_poc::database::query_scalar(
+                "SELECT sha256 FROM user_avatars WHERE user_id=?",
             )
             .bind(user_login["user"]["id"].as_str().unwrap())
             .fetch_one(store.pool())
             .await
             .unwrap();
+            let (_, data) = store.assets().read_all(&sha).await.unwrap();
             assert_eq!(data, svg.as_bytes());
             assert_eq!(
                 call(
@@ -1361,6 +1692,70 @@ async fn rich_operations_and_account_avatars_use_signed_permissions() {
                 assert_eq!(output["proposal"], result);
             }
             if id == "details" {
+                // A fixture that can only return details must identify from its
+                // existing NFO/catalogue ID even when the local title is wrong.
+                media_poc::database::query(
+                    "UPDATE inventory_works SET external_ids_json=? WHERE id='work'",
+                )
+                .bind(json!({"test.details":"candidate"}).to_string())
+                .execute(store.pool())
+                .await
+                .unwrap();
+                let identify = "/api/v1/admin/extensions/identify/search";
+                assert_eq!(
+                    call(
+                        &app,
+                        "POST",
+                        identify,
+                        &cookie,
+                        "",
+                        json!({"workId":"work"})
+                    )
+                    .await
+                    .0,
+                    StatusCode::FORBIDDEN
+                );
+                let (status, identified, _) = call(&app,"POST",identify,&cookie,csrf,
+                    json!({"workId":"work","provider":"test.details","title":"Unrelated release filename"})).await;
+                assert_eq!(status, StatusCode::OK, "{identified}");
+                assert_eq!(identified["results"][0]["id"], "candidate");
+                assert_eq!(identified["results"][0]["overview"], "Full plot");
+                assert_eq!(identified["errors"], json!([]));
+                let unchanged: String = media_poc::database::query_scalar(
+                    "SELECT editorial_json FROM inventory_works WHERE id='work'",
+                )
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+                assert_eq!(
+                    serde_json::from_str::<Value>(&unchanged).unwrap(),
+                    json!({})
+                );
+                let (status, title_only, _) = call(
+                    &app,
+                    "POST",
+                    identify,
+                    &cookie,
+                    csrf,
+                    json!({"workId":"work","provider":"test.details","externalIds":{}}),
+                )
+                .await;
+                assert_eq!(status, StatusCode::OK);
+                assert_eq!(title_only["results"], json!([]));
+                assert_eq!(title_only["errors"][0]["error"], "invalid_output");
+                assert_eq!(
+                    call(
+                        &app,
+                        "POST",
+                        identify,
+                        &cookie,
+                        csrf,
+                        json!({"workId":"work","externalIds":{"imdb":"123"}})
+                    )
+                    .await
+                    .0,
+                    StatusCode::BAD_REQUEST
+                );
                 assert_eq!(
                     call(
                         &app,
@@ -1471,4 +1866,675 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
             .await
             .is_err()
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn persistent_storage_synthetic_guest_survives_worker_restart_and_database_reopen() {
+    use media_extension_sdk::storage::{StorageOperation, StorageRequest, StorageScope};
+    use media_poc::{
+        extension_data,
+        extension_runtime::{Invocation, read_frame, write_frame},
+    };
+    use std::process::{Command, Stdio};
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("storage.sqlite");
+    let store = IdentityStore::open(&path).await.unwrap();
+    let signing = key();
+    let mut package = package(&signing, good_module());
+    package.manifest.permissions.push("storage.private".into());
+    package.signature = STANDARD.encode(signing.sign(&package.signing_bytes().unwrap()).as_ref());
+    assert!(extensions::validate_package(&package, signing.public_key().as_ref()).is_ok());
+    media_poc::database::query(
+        "INSERT INTO extension_publishers(id,public_key,active) VALUES('test','fixture',1)",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    media_poc::database::query("INSERT INTO extensions(id,publisher_id,package_json,generation,enabled) VALUES('test.metadata','test',?,'first',1)").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
+    store
+        .bootstrap(
+            "storage-admin",
+            Zeroizing::new("synthetic storage password".into()),
+        )
+        .await
+        .unwrap();
+    let user_id: String = media_poc::database::query_scalar(
+        "SELECT user_id FROM local_credentials WHERE login='storage-admin'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    let context = extension_data::Context {
+        user_id,
+        extension_id: "test.metadata".into(),
+        generation: "first".into(),
+        ..Default::default()
+    };
+    let scope = StorageScope {
+        kind: "global".into(),
+        id: String::new(),
+    };
+    for iteration in 0..2 {
+        let reopened = IdentityStore::open(&path).await.unwrap();
+        let request = StorageRequest {
+            api_version: 1,
+            scope: scope.clone(),
+            operation: if iteration == 0 {
+                StorageOperation::Put {
+                    key: "survives".into(),
+                    value: "durable fixture".into(),
+                    expected_version: None,
+                    expires_at: None,
+                    durability: "durable".into(),
+                }
+            } else {
+                StorageOperation::Get {
+                    key: "survives".into(),
+                }
+            },
+        };
+        let bytes = serde_json::to_vec(&request).unwrap();
+        let data = bytes
+            .iter()
+            .map(|b| format!("\\{b:02x}"))
+            .collect::<String>();
+        let output = r#"{"apiVersion":1,"result":{"title":"storage","summary":"completed"}}"#;
+        let encoded = output
+            .bytes()
+            .map(|b| format!("\\{b:02x}"))
+            .collect::<String>();
+        let wasm = wat::parse_str(format!(
+            r#"(module
+            (import "media" "media_host_storage_v1" (func $storage (param i32 i32) (result i64)))
+            (memory (export "memory") 1)
+            (data (i32.const 4096) "{data}") (data (i32.const 8192) "{encoded}")
+            (func (export "media_alloc") (param i32) (result i32) i32.const 1024)
+            (func (export "media_run") (param i32 i32) (result i64)
+                i32.const 4096 i32.const {} call $storage i64.eqz if unreachable end
+                i64.const {}))"#,
+            bytes.len(),
+            (8192u64 << 32) | output.len() as u64
+        ))
+        .unwrap();
+        let worker = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(if cfg!(windows) {
+                "media-extension-worker.exe"
+            } else {
+                "media-extension-worker"
+            });
+        let mut child = Command::new(worker)
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        write_frame(&mut stdin, &Invocation::new(STANDARD.encode(wasm), input())).unwrap();
+        let frame: Value = read_frame(&mut stdout, media_extension_sdk::MAX_JSON).unwrap();
+        assert_eq!(frame["kind"], "storage");
+        let incoming = serde_json::from_value(frame["request"].clone()).unwrap();
+        let result = extension_data::execute(&reopened, &context, incoming, 1_000).await;
+        assert_eq!(result.as_ref().unwrap().entries[0].value, "durable fixture");
+        write_frame(
+            &mut stdin,
+            &result.map_err(media_extension_sdk::storage::StorageError::from),
+        )
+        .unwrap();
+        let finished: Value = read_frame(&mut stdout, media_extension_sdk::MAX_JSON).unwrap();
+        assert_eq!(finished["kind"], "finished");
+        assert!(child.wait().unwrap().success());
+    }
+}
+
+#[tokio::test]
+async fn signed_private_storage_permission_installs_without_implicit_activation() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("install.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "storage-admin",
+            Zeroizing::new("synthetic install password".into()),
+        )
+        .await
+        .unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = extensions::router(auth.clone()).merge(auth::router(auth));
+    let (status, login, cookie) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        "",
+        json!({"login":"storage-admin","password":"synthetic install password"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let signing = key();
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/publishers",
+            &cookie,
+            csrf,
+            json!({"id":"test","publicKey":STANDARD.encode(signing.public_key().as_ref())})
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    let mut signed = package(&signing, good_module());
+    signed.manifest.permissions.push("storage.private".into());
+    signed.signature = STANDARD.encode(signing.sign(&signed.signing_bytes().unwrap()).as_ref());
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions",
+            &cookie,
+            csrf,
+            json!(signed)
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    let enabled: i64 = media_poc::database::query_scalar(
+        "SELECT enabled FROM extensions WHERE id='test.metadata'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(enabled, 0);
+    signed.manifest.id = "test.bad-storage".into();
+    signed.manifest.permissions.push("storage.sql".into());
+    signed.signature = STANDARD.encode(signing.sign(&signed.signing_bytes().unwrap()).as_ref());
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions",
+            &cookie,
+            csrf,
+            json!(signed)
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+async fn private_storage_http_fixture(
+    wasm: Vec<u8>,
+) -> (tempfile::TempDir, IdentityStore, Router, String, String) {
+    private_storage_http_fixture_with_id(wasm, "test.metadata").await
+}
+
+async fn private_storage_http_fixture_with_id(
+    wasm: Vec<u8>,
+    ext_id: &str,
+) -> (tempfile::TempDir, IdentityStore, Router, String, String) {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join(format!("{ext_id}.sqlite")))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "storage-admin",
+            Zeroizing::new("synthetic HTTP password".into()),
+        )
+        .await
+        .unwrap();
+    media_poc::libraries::initialize_local(&store)
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
+    media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','films','work','Synthetic','{}')").execute(store.pool()).await.unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = extensions::router(auth.clone()).merge(auth::router(auth));
+    let (_, login, cookie) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        "",
+        json!({"login":"storage-admin","password":"synthetic HTTP password"}),
+    )
+    .await;
+    let csrf = login["csrfToken"].as_str().unwrap().to_owned();
+    let signing = key();
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/publishers",
+            &cookie,
+            &csrf,
+            json!({"id":"test","publicKey":STANDARD.encode(signing.public_key().as_ref())})
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    let mut signed = package(&signing, wasm);
+    signed.manifest.id = ext_id.into();
+    signed.manifest.permissions.push("storage.private".into());
+    signed.signature = STANDARD.encode(signing.sign(&signed.signing_bytes().unwrap()).as_ref());
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions",
+            &cookie,
+            &csrf,
+            json!(signed)
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            &format!("/api/v1/admin/extensions/{ext_id}"),
+            &cookie,
+            &csrf,
+            json!({"enabled":true,"libraryIds":["films"]})
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    (temp, store, app, cookie, csrf)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn malicious_storage_guest_hits_host_operation_quota() {
+    let request = json!({"apiVersion":1,"scope":{"kind":"global","id":""},"operation":{"op":"get","key":"absent"}}).to_string();
+    let data = request
+        .bytes()
+        .map(|b| format!("\\{b:02x}"))
+        .collect::<String>();
+    let wasm = wat::parse_str(format!(
+        r#"(module
+        (import "media" "media_host_storage_v1" (func $storage (param i32 i32) (result i64)))
+        (memory (export "memory") 1) (data (i32.const 4096) "{data}")
+        (func (export "media_alloc") (param i32) (result i32) i32.const 1024)
+        (func (export "media_run") (param i32 i32) (result i64) (local $n i32)
+            (loop $again i32.const 4096 i32.const {} call $storage drop
+                local.get $n i32.const 1 i32.add local.tee $n i32.const 129 i32.lt_u br_if $again)
+            i64.const 0))"#,
+        request.len()
+    ))
+    .unwrap();
+    let (_temp, _store, app, cookie, csrf) =
+        private_storage_http_fixture_with_id(wasm, "test.quota").await;
+    let (status, result, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/test.quota/run",
+        &cookie,
+        &csrf,
+        json!({"workId":"work"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{result}");
+    assert_eq!(result["error"], "storage_operation_quota");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires Rust SDK Wasm fixture via MEDIA_TEST_STORAGE_WASM"]
+async fn rust_sdk_storage_guest_runs_through_signed_http_install_and_worker_broker() {
+    let path = std::env::var_os("MEDIA_TEST_STORAGE_WASM")
+        .expect("set MEDIA_TEST_STORAGE_WASM to compiled synthetic_persistent_extension.wasm");
+    let wasm = std::fs::read(path).unwrap();
+    let (_temp, _store, app, cookie, csrf) = private_storage_http_fixture(wasm).await;
+    for expected in 1..=2 {
+        let (status, result, _) = call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/test.metadata/run",
+            &cookie,
+            &csrf,
+            json!({"workId":"work"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{result}");
+        assert_eq!(
+            result["proposal"]["summary"],
+            format!("Successful durable invocation {expected}")
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "admin-upgrade",
+            Zeroizing::new("synthetic upgrade password".into()),
+        )
+        .await
+        .unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = extensions::router(auth.clone()).merge(auth::router(auth));
+    let (_, login, cookie) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        "",
+        json!({"login":"admin-upgrade","password":"synthetic upgrade password"}),
+    )
+    .await;
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let signing = key();
+
+    let wasm1 = wat::parse_str(r#"(module (memory (export "memory") 1 256))"#).unwrap();
+    let mut p1 = package(&signing, wasm1);
+    p1.manifest.id = "upgradable.ext".into();
+    p1.manifest.version = "1.0.0".into();
+    p1.manifest.permissions = vec!["storage.private".into()];
+    p1.signature = STANDARD.encode(signing.sign(&p1.signing_bytes().unwrap()).as_ref());
+
+    // 0. Trust publisher
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/publishers",
+            &cookie,
+            csrf,
+            json!({"id": p1.publisher_id, "publicKey": STANDARD.encode(signing.public_key().as_ref())})
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+
+    // 1. Install v1
+    let (status, resp, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions",
+        &cookie,
+        csrf,
+        serde_json::to_value(&p1).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{resp}");
+
+    call(
+        &app,
+        "PUT",
+        "/api/v1/admin/extensions/upgradable.ext",
+        &cookie,
+        csrf,
+        json!({"enabled": true, "allLibraries": true}),
+    )
+    .await;
+
+    media_poc::database::query(
+        "INSERT INTO extension_data_namespaces(extension_id,publisher_id,publisher_key,entries,bytes) VALUES('upgradable.ext','test','key',1,18)"
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    media_poc::database::query(
+        "INSERT INTO extension_data(extension_id,scope,scope_id,key,value,version,durability,value_bytes,sha256) VALUES('upgradable.ext','global','','state','durable_v1_payload','v1-uuid','durable',18,'sha')"
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    let gen_v1: String = media_poc::database::query_scalar(
+        "SELECT generation FROM extensions WHERE id='upgradable.ext'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+
+    // 2. Prepare v2 package
+    let wasm2 = good_module();
+    let mut p2 = package(&signing, wasm2.clone());
+    p2.manifest.id = "upgradable.ext".into();
+    p2.manifest.version = "2.0.0".into();
+    p2.manifest.permissions = vec!["storage.private".into()];
+    p2.signature = STANDARD.encode(signing.sign(&p2.signing_bytes().unwrap()).as_ref());
+
+    // 3. Refuse v2 until private-data compatibility and worker fencing are proven.
+    let (status, resp, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/upgradable.ext/upgrade",
+        &cookie,
+        csrf,
+        serde_json::to_value(&p2).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{resp}");
+    assert_eq!(resp["error"], "extension_update_compatibility_unverified");
+
+    // The alternate install endpoint must enforce exactly the same refusal.
+    let mut alternate = serde_json::to_value(&p2).unwrap();
+    alternate["upgrade"] = json!(true);
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions",
+        &cookie,
+        csrf,
+        alternate,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{response}");
+    assert_eq!(
+        response["error"],
+        "extension_update_compatibility_unverified"
+    );
+
+    // Reinstalling an existing id cannot bypass the protected update path.
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions",
+        &cookie,
+        csrf,
+        serde_json::to_value(&p2).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{response}");
+    assert_eq!(response["error"], "extension_exists");
+
+    for (field, value, expected) in [
+        (
+            "permissions",
+            json!(["storage.private", "metadata.read"]),
+            "extension_update_requires_authorization",
+        ),
+        (
+            "httpHosts",
+            json!(["example.com"]),
+            "extension_update_requires_authorization",
+        ),
+        ("targetAbi", json!("2.0"), "incompatible_server_version"),
+        (
+            "configSchema",
+            json!([{ "key": "added", "label": "Added", "fieldType": "text" }]),
+            "extension_settings_compatibility_unverified",
+        ),
+    ] {
+        let mut manifest = serde_json::to_value(&p2.manifest).unwrap();
+        manifest[field] = value;
+        let mut changed = p2.clone();
+        changed.manifest = serde_json::from_value(manifest).unwrap();
+        changed.signature =
+            STANDARD.encode(signing.sign(&changed.signing_bytes().unwrap()).as_ref());
+        let (_, response, _) = call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/upgradable.ext/upgrade",
+            &cookie,
+            csrf,
+            serde_json::to_value(changed).unwrap(),
+        )
+        .await;
+        assert_eq!(response["error"], expected, "{response}");
+    }
+
+    let mut bad_abi = p2.clone();
+    let invalid = wat::parse_str(r#"(module (memory (export "memory") 1))"#).unwrap();
+    bad_abi.wasm = STANDARD.encode(&invalid);
+    bad_abi.sha256 = format!("{:x}", Sha256::digest(&invalid));
+    bad_abi.signature = STANDARD.encode(signing.sign(&bad_abi.signing_bytes().unwrap()).as_ref());
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/upgradable.ext/upgrade",
+        &cookie,
+        csrf,
+        serde_json::to_value(bad_abi).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(response["error"], "incompatible_abi");
+
+    // 4. The active generation and package remain unchanged.
+    let gen_v2: String = media_poc::database::query_scalar(
+        "SELECT generation FROM extensions WHERE id='upgradable.ext'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(gen_v1, gen_v2);
+    let installed: String = media_poc::database::query_scalar(
+        "SELECT package_json FROM extensions WHERE id='upgradable.ext'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    let installed: media_extension_sdk::Package = serde_json::from_str(&installed).unwrap();
+    assert_eq!(installed.manifest.version, "1.0.0");
+
+    for version in ["1.0.0", "0.9.0"] {
+        let mut candidate = p2.clone();
+        candidate.manifest.version = version.into();
+        candidate.signature =
+            STANDARD.encode(signing.sign(&candidate.signing_bytes().unwrap()).as_ref());
+        let (status, response, _) = call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/upgradable.ext/upgrade",
+            &cookie,
+            csrf,
+            serde_json::to_value(candidate).unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(response["error"], "extension_version_not_newer");
+    }
+
+    let impostor = key();
+    let mut candidate = p2.clone();
+    candidate.signature =
+        STANDARD.encode(impostor.sign(&candidate.signing_bytes().unwrap()).as_ref());
+    let mut input = serde_json::to_value(&candidate).unwrap();
+    input["publicKey"] = json!(STANDARD.encode(impostor.public_key().as_ref()));
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/upgradable.ext/upgrade",
+        &cookie,
+        csrf,
+        input,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(response["error"], "publisher_key_mismatch");
+
+    candidate.signature = STANDARD.encode([0_u8; 64]);
+    let (status, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/upgradable.ext/upgrade",
+        &cookie,
+        csrf,
+        serde_json::to_value(candidate).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // 5. Verify durable storage was preserved!
+    let saved_state: String = media_poc::database::query_scalar(
+        "SELECT value FROM extension_data WHERE extension_id='upgradable.ext' AND key='state'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        saved_state, "durable_v1_payload",
+        "Durable data must be preserved on upgrade"
+    );
+
+    // 6. Verify mismatched ID is rejected
+    let mut p_bad_id = p2.clone();
+    p_bad_id.manifest.id = "wrong.id".into();
+    p_bad_id.signature = STANDARD.encode(signing.sign(&p_bad_id.signing_bytes().unwrap()).as_ref());
+    let (bad_status, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/upgradable.ext/upgrade",
+        &cookie,
+        csrf,
+        serde_json::to_value(&p_bad_id).unwrap(),
+    )
+    .await;
+    assert_eq!(bad_status, StatusCode::BAD_REQUEST);
+
+    // 7. Verify mismatched publisher key is rejected
+    let other_key = key();
+    let mut p_bad_key = package(&other_key, wasm2);
+    p_bad_key.manifest.id = "upgradable.ext".into();
+    p_bad_key.manifest.version = "3.0.0".into();
+    p_bad_key.publisher_id = "other_publisher".into();
+    p_bad_key.signature =
+        STANDARD.encode(other_key.sign(&p_bad_key.signing_bytes().unwrap()).as_ref());
+    let (key_status, resp, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/upgradable.ext/upgrade",
+        &cookie,
+        csrf,
+        json!({
+            "manifest": p_bad_key.manifest,
+            "publisherId": p_bad_key.publisher_id,
+            "sha256": p_bad_key.sha256,
+            "wasm": p_bad_key.wasm,
+            "signature": p_bad_key.signature,
+            "publicKey": STANDARD.encode(other_key.public_key().as_ref()),
+        }),
+    )
+    .await;
+    assert_eq!(key_status, StatusCode::FORBIDDEN, "{resp}");
 }

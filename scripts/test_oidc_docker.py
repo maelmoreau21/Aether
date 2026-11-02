@@ -93,7 +93,7 @@ threading.Thread(target=server.serve_forever,daemon=True).start()
 try:
     for mode,image in [('standalone',os.environ.get('MEDIA_TEST_STANDALONE_IMAGE','aether:oidc-qa')),('distributed',os.environ.get('MEDIA_TEST_CORE_IMAGE','aether-core:oidc-qa'))]:
         name=PREFIX+'-'+mode
-        env={'MEDIA_PUBLIC_URL':'http://127.0.0.1:48887','MEDIA_PORT':'3000','MEDIA_BIND_ADDR':'0.0.0.0','MEDIA_DB_PATH':'/data/core.sqlite3','MEDIA_WEB_DIST':'/app/apps/web/build','MEDIA_OIDC_ENABLED':'true','MEDIA_OIDC_ISSUER':ISSUER,'MEDIA_OIDC_CLIENT_ID':'docker-client','MEDIA_OIDC_CLIENT_SECRET':SECRET,'MEDIA_OIDC_USER_GROUPS':'media-users','MEDIA_MODE':mode}
+        env={'MEDIA_PUBLIC_URL':'http://127.0.0.1:48887','MEDIA_PORT':'3000','MEDIA_BIND_ADDR':'0.0.0.0','MEDIA_DB_PATH':'/data/core.sqlite3','MEDIA_OIDC_ENABLED':'true','MEDIA_OIDC_ISSUER':ISSUER,'MEDIA_OIDC_CLIENT_ID':'docker-client','MEDIA_OIDC_CLIENT_SECRET':SECRET,'MEDIA_OIDC_USER_GROUPS':'media-users','MEDIA_MODE':mode}
         envfile=WORK/(mode+'.env');envfile.write_text('\n'.join(k+'='+v for k,v in env.items()))
         docker('run','-d','--name',name,'--cap-drop','ALL','--security-opt','no-new-privileges:true','--env-file',envfile,'-p','127.0.0.1:48887:3000','-p','127.0.0.1:48888:48888',image);CONTAINERS.append(name)
         proxy=name+'-provider';docker('run','-d','--name',proxy,'--network','container:'+name,'--cap-drop','ALL','--security-opt','no-new-privileges:true','-v',str(WORK/'proxy.py')+':/proxy.py:ro','python:3.13-alpine','python','/proxy.py');CONTAINERS.append(proxy)

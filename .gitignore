@@ -22,3 +22,12 @@
 
 # Internal AI agent logs and teamwork artifacts
 /.agents/
+
+# Local first-run authentication secret
+.bootstrap_token
+
+# Per-installation backup keys must never be committed.
+**/secrets/backup.key
+
+# Local browser UX captures and synthetic media
+/output/playwright/

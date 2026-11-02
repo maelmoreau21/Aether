@@ -17,6 +17,36 @@ function setup() {
   return { video, audio, error, bridge };
 }
 describe('independent audio timeline',()=>{
+  it('handles an Opus packet tail at the saved position before the video seeks',async()=>{
+    const {video,audio,bridge}=setup();audio.duration=11.96;video.currentTime=0;
+    await bridge.load('/audio',false,undefined,11.97);
+    expect(audio.paused).toBe(true);bridge.destroy();
+  });
+  it('defers a short audio tail if video duration is still unknown',async()=>{
+    const {video,audio,bridge}=setup();video.duration=NaN;audio.duration=11.96;
+    await bridge.load('/audio',false,undefined,11.97);
+    expect(audio.currentTime).toBe(0);bridge.destroy();
+  });
+  it('clamps saved progress to the video duration when a different edition is shorter',async()=>{
+    const {audio,bridge}=setup();await bridge.load('/audio',false,undefined,100);
+    expect(audio.currentTime).toBeCloseTo(11.95);bridge.destroy();
+  });
+  it('cancels a readiness wait immediately on pause, before startup buffering begins',async()=>{
+    vi.useFakeTimers();const {audio,bridge}=setup();await bridge.load('/audio');
+    audio.readyState=1;audio.seeking=true;
+    const buffering=expect(bridge.bufferForPlayback()).rejects.toThrow('annulé');
+    bridge.pause();await buffering;
+    expect(vi.getTimerCount()).toBe(1); // Only the active clock synchronizer remains.
+    bridge.destroy();expect(vi.getTimerCount()).toBe(0);
+  });
+  it('cancels a pending audio start on pause without a later readiness event restarting it',async()=>{
+    vi.useFakeTimers();const {video,audio,bridge}=setup();await bridge.load('/audio');await video.play();
+    audio.readyState=1;audio.seeking=true;const played=vi.spyOn(audio,'play');
+    const playing=expect(bridge.play()).rejects.toThrow('annulé');
+    bridge.pause();await playing;
+    audio.readyState=4;audio.seeking=false;audio.dispatchEvent(new Event('canplay'));
+    expect(played).not.toHaveBeenCalled();bridge.destroy();expect(vi.getTimerCount()).toBe(0);
+  });
   it('replaces an unfinished audio seek when the user seeks back to a retained window',async()=>{
     const {video,audio,bridge}=setup();video.duration=3500;audio.duration=3500;await bridge.load('/audio');
     video.currentTime=900;video.dispatchEvent(new Event('seeked'));expect(audio.currentTime).toBe(900);
@@ -27,6 +57,26 @@ describe('independent audio timeline',()=>{
     const {video,audio,bridge}=setup();video.duration=NaN;video.currentTime=0;
     await bridge.load('/audio',false,'audio/mp4; codecs="opus"',6);
     expect(audio.currentTime).toBe(6);expect(video.muted).toBe(false);bridge.destroy();
+  });
+  it('loads metadata in parallel with delayed saved progress and aligns to the requested position',async()=>{
+    const {video,audio,bridge}=setup();video.currentTime=0;audio.auto=false;
+    let resolvePosition!:(value:number)=>void;
+    const loading=bridge.load('/audio',false,undefined,new Promise<number>(resolve=>{resolvePosition=resolve;}));
+    expect(audio.src).toBe('/audio');audio.dispatchEvent(new Event('loadedmetadata'));
+    await Promise.resolve();expect(audio.currentTime).toBe(0);
+    resolvePosition(6);await loading;expect(audio.currentTime).toBe(6);bridge.destroy();
+  });
+  it('cancels a delayed saved-position wait on closure and ignores a late result',async()=>{
+    vi.useFakeTimers();const {audio,bridge}=setup();let resolvePosition!:(value:number)=>void;
+    const loading=expect(bridge.load('/audio',false,undefined,new Promise<number>(resolve=>{resolvePosition=resolve;}))).rejects.toThrow('fermé');
+    await vi.advanceTimersByTimeAsync(0);bridge.destroy();await loading;
+    resolvePosition(6);await vi.advanceTimersByTimeAsync(0);expect(audio.currentTime).toBe(0);expect(vi.getTimerCount()).toBe(0);
+  });
+  it('cleans up the saved-position wait when metadata fails',async()=>{
+    vi.useFakeTimers();const {audio,bridge}=setup();audio.auto=false;
+    const loading=expect(bridge.load('/audio',false,undefined,new Promise<number>(()=>{}))).rejects.toThrow('illisible');
+    audio.dispatchEvent(new Event('error'));await loading;
+    expect(vi.getTimerCount()).toBe(0);bridge.destroy();
   });
   it('lets the video finish a normal Opus packet tail without a ten-second stall',async()=>{
     vi.useFakeTimers();const {video,audio,error,bridge}=setup();await bridge.load('/audio');

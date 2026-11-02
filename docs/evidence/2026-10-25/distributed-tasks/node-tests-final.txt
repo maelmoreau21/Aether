@@ -1,0 +1,95 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.54s
+     Running unittests src\lib.rs (target\debug\deps\media_node-f5f9df3fd8b5118c.exe)
+
+running 88 tests
+test cache_dirs::tests::abrupt_exit_releases_lease ... ok
+test cache_dirs::tests::crash_child ... ignored, helper launched by abrupt_exit_releases_lease
+test cache_dirs::tests::reclaims_orphan_but_preserves_active_and_unowned ... ok
+test files::tests::library_root_rejects_symlink_escape ... ok
+test files::tests::library_root_requires_existing_confined_absolute_directory ... ok
+test files::tests::nested_subdirectories_and_fallback_traversal_confinement ... ok
+test files::tests::opened_file_detects_in_place_mutation_via_verify_unchanged ... ok
+test files::tests::opened_file_reads_original_handle_even_if_path_is_substituted_after_open ... ok
+test files::tests::opened_file_rejects_traversal_and_directory_links ... ok
+test image_preview::tests::bounded_preview_is_small_cached_and_changes_with_source ... ok
+test image_preview::tests::transparency_and_conditional_range_head_contracts ... ok
+test images::tests::deterministic_names_formats_missing_and_original_bytes ... ok
+test images::tests::jellyfin_cover_aliases_preserve_identity_and_priority ... ok
+test images::tests::junction_or_directory_link_is_rejected ... ok
+test images::tests::rejects_corruption_misleading_extension_and_oversize ... ok
+test images::tests::shared_posters_never_cross_distinct_film_identities ... ok
+test inventory::tests::local_inventory_confinement_and_fixture_bench_flag ... ok
+test mp4_audio::tests::a_seek_retains_preroll_history_across_short_timing_runs ... ok
+test mp4_audio::tests::benchmark_native_sample_offsets ... ignored, CPU microbenchmark; warm moov metadata only, no browser or disk latency
+test mp4_audio::tests::cancelling_index_request_retains_admission_until_blocking_work_finishes ... ok
+test mp4_audio::tests::cold_index_admission_rejects_sixty_fifth_and_releases_cancelled_waiters ... ok
+test mp4_audio::tests::concurrent_native_windows_share_one_index_without_a_preparation_worker ... ok
+test mp4_audio::tests::malformed_concurrent_requests_do_not_poison_the_native_index_service ... ok
+test mp4_audio::tests::native_windows_preserve_opus_packets_timestamps_channels_and_track_ids ... ok
+test mp4_audio::tests::rejects_malformed_boxes_huge_moov_external_references_and_invalid_tables ... ok
+test mp4_audio::tests::sample_offsets_match_reference_across_variable_sizes_and_chunk_runs ... ok
+test mp4_audio::tests::unsupported_tracks_out_of_bounds_windows_and_changed_sources_fail ... ok
+test mp4_audio::tests::variable_packet_durations_resolve_fragment_local_roll_descriptions ... ok
+test mp4_audio::tests::virtual_ranges_match_full_representation_head_and_cancellation ... ok
+test nfo::tests::exact_priority_and_shared_ambiguity ... ok
+test nfo::tests::extracts_bounded_editorial_only_and_entities ... ok
+test nfo::tests::parses_tvshow_and_episodedetails_nfo ... ok
+test nfo::tests::preserves_credits_and_provider_scales ... ok
+test nfo::tests::rejects_hostile_malformed_and_resource_abuse ... ok
+test nfo::tests::rejects_oversize_sidecars_folder_conflicts_and_link_escape ... ok
+test packaging::tests::benchmark_preparation_cache_open_concurrency ... ignored, local I/O microbenchmark; run explicitly with --ignored --nocapture
+test packaging::tests::cached_output_is_pinned_without_holding_cache_lock_during_open ... ok
+test packaging::tests::cancelling_a_window_leader_allows_an_interested_follower_to_take_over ... ok
+test packaging::tests::copies_av1_opus_tracks_and_reuses_cache_with_source_validation ... ok
+test packaging::tests::copies_dual_51_opus_mp4_without_changing_packets_or_channels ... ignored, run python scripts/generate-dual-opus-fixture.py first; requires FFmpeg
+test packaging::tests::identical_cold_audio_windows_coalesce_without_consuming_worker_waiters ... ok
+test packaging::tests::idle_chunks_evict_before_full_preparations ... ok
+test packaging::tests::idle_full_preparations_evict_but_playing_handles_remain_pinned ... ok
+test packaging::tests::preserves_eight_opus_channels_and_packets_in_both_containers ... ok
+test probe::tests::probe_codecs_matrix_hevc_h264_aac_ac3_eac3 ... ok
+test probe::tests::probe_mp4_with_moov_at_end_validates_seek_via_file_descriptor ... ok
+test probe::tests::probe_opened_consumes_handle_and_resists_path_substitution ... ok
+test probe::tests::probe_real_mkv_and_mp4_containers_and_fragmented ... ok
+test probe::tests::probe_representative_10bit_av1_and_multitrack_opus ... ok
+test resources::tests::cpu_deltas_reject_resets_and_idle_overflow ... ok
+test resources::tests::sampler_coalesces_and_reports_real_available_counters ... ok
+test scanner::tests::artwork_is_never_shared_between_ambiguous_films ... ok
+test scanner::tests::cached_scan_skips_probe_and_temporary_files ... ok
+test scanner::tests::dense_directory_scan_caches_folder_videos_and_reuses_sidecars ... ok
+test scanner::tests::identity_handles_movies_in_folders_with_and_without_years ... ok
+test scanner::tests::parse_series_episode_fallback_for_movies_and_non_standard_folders ... ok
+test scanner::tests::qualified_identity_and_exact_folders_only ... ok
+test scanner::tests::scanner_ignores_nas_system_folders_nomedia_and_custom_exclusions ... ok
+test scanner::tests::single_film_discovers_prefixed_artwork_without_generic_image ... ok
+test scanner::tests::traversal_refuses_directory_links_and_windows_junctions ... ok
+test server::stream_signature_tests::background_tasks_resolve_only_owned_inventory_targets ... ok
+test server::stream_signature_tests::playback_preempts_a_running_scan_and_drops_its_future ... ok
+test server::stream_signature_tests::prepared_playback_demand_releases_background_work_before_acquiring_its_slot ... ok
+test server::stream_signature_tests::real_node_http_errors_and_head_keep_their_signed_framing ... ok
+test server::stream_signature_tests::real_uplink_post_binds_inferred_json_body_length_before_signing ... ok
+test server::stream_signature_tests::scan_admission_preserves_worker_ownership_and_playback_priority ... ok
+test server::stream_signature_tests::scan_cancel_requires_core_authentication_and_signs_its_response ... ok
+test server::stream_signature_tests::stream_signing_preserves_head_lengths_and_bodyless_status_rules ... ok
+test sidecar_manifest::tests::associations_are_versioned_confined_and_explicit ... ok
+test sidecar_manifest::tests::explicit_associations_override_ambiguous_stems_without_bypassing_probe ... ok
+test stream::tests::active_response_retains_preparation_cache_lease ... ok
+test stream::tests::range_parser_and_byte_range_resist_u64_max_overflow_and_boundary_cases ... ok
+test stream::tests::streams_get_head_and_ranges_from_confined_handle_even_if_path_replaced ... ok
+test subtitles::tests::ass_and_ssa_text_fallback_preserves_times_commas_and_escapes ... ok
+test subtitles::tests::association_is_exact_and_suffixes_are_explicit ... ok
+test subtitles::tests::conversion_validates_times_and_escapes_markup ... ok
+test subtitles::tests::discovery_rejects_ambiguous_stems_and_refreshes_sidecars ... ok
+test tasks::tests::analysis_uses_real_confined_asset_and_rejects_changed_fingerprint ... ok
+test tasks::tests::image_task_warms_the_same_resized_representation_served_to_clients ... ok
+test tests::local_node_serve_grant_streams_asset_and_validates_image_handle ... ok
+test transport::tests::metadata_and_multicast_destinations_are_denied_before_connect ... ok
+test transport::tests::origins_reject_credentials_paths_queries_and_non_http_schemes ... ok
+test video_stream::tests::cancelling_an_unread_pipe_releases_the_child_and_process_permit ... ok
+test video_stream::tests::head_range_and_invalid_method_do_not_acquire_process_slots ... ok
+test video_stream::tests::rejected_media_releases_the_child_slot_and_a_later_valid_stream_succeeds ... ok
+test video_stream::tests::saturated_video_admission_stays_bounded_for_four_eight_and_sixteen_requests ... ok
+test video_stream::tests::stream_positions_are_decimal_milliseconds_bounded_to_one_day ... ok
+test video_stream::tests::streams_av1_packet_copy_from_confined_mkv_and_mp4_without_prepared_files ... ok
+
+test result: ok. 84 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 22.16s
+

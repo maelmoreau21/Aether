@@ -23,6 +23,14 @@ pub struct MusicTrack {
     pub mime: String,
     #[serde(default)]
     pub lyrics: String,
+    #[serde(default)]
+    pub cover_path: Option<String>,
+    #[serde(default)]
+    pub cover_size: Option<u64>,
+    #[serde(default)]
+    pub cover_modified_ns: Option<String>,
+    #[serde(default)]
+    pub cover_mime: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +59,8 @@ where
 {
     let root = root.canonicalize()?;
     let mut directories = vec![PathBuf::new()];
+    let mut cover_cache: std::collections::HashMap<PathBuf, Option<crate::images::LocalImage>> =
+        std::collections::HashMap::new();
     let mut count = 0;
     while let Some(relative) = directories.pop() {
         if cancel.load(Ordering::Acquire) {
@@ -87,6 +97,9 @@ where
                 continue;
             }
             if kind.is_dir() {
+                if crate::scanner::directory_is_ignored(&root.join(&path)) {
+                    continue;
+                }
                 if directories.len() >= 10000 {
                     return Err(io::Error::other("too many directories"));
                 }
@@ -164,6 +177,20 @@ where
             if lyrics.len() > 32768 {
                 lyrics.clear();
             }
+            let parent_dir = relative.clone();
+            let cover = if let Some(cached) = cover_cache.get(&parent_dir) {
+                cached.clone()
+            } else {
+                let (discovered, _) = crate::images::discover_named(
+                    &root,
+                    &parent_dir,
+                    &std::collections::HashMap::new(),
+                    &["folder", "cover", "album", "poster", "front"],
+                )
+                .await;
+                cover_cache.insert(parent_dir, discovered.clone());
+                discovered
+            };
             let track = MusicTrack {
                 relative_path: path.to_string_lossy().into_owned(),
                 size: opened.size(),
@@ -196,6 +223,10 @@ where
                 codec: audio.codec_name.clone().unwrap_or_default(),
                 mime: mime.into(),
                 lyrics,
+                cover_path: cover.as_ref().map(|c| c.path.clone()),
+                cover_size: cover.as_ref().map(|c| c.size_bytes),
+                cover_modified_ns: cover.as_ref().map(|c| c.modified_ns.clone()),
+                cover_mime: cover.as_ref().map(|c| c.mime.clone()),
             };
             opened.verify_unchanged_sync()?;
             publish(track).await?;
@@ -203,4 +234,27 @@ where
         }
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn music_scan_respects_directory_ignore_markers() {
+        let root = tempfile::tempdir().unwrap();
+        for (index, marker) in [".nomedia", ".ignore", ".aetherignore"].iter().enumerate() {
+            let directory = root.path().join(format!("excluded-{index}"));
+            tokio::fs::create_dir(&directory).await.unwrap();
+            tokio::fs::write(directory.join(marker), b"").await.unwrap();
+            // Probing this invalid audio would fail the scan if the marker were ignored.
+            tokio::fs::write(directory.join("broken.mp3"), b"not audio")
+                .await
+                .unwrap();
+        }
+        let count = scan(root.path(), &AtomicBool::new(false), |_| async { Ok(()) })
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 }

@@ -32,7 +32,6 @@ Dans le même terminal (les variables précédentes s’appliquent aussi au Core
 $env:MEDIA_BIND_ADDR = '127.0.0.1'
 $env:MEDIA_PORT = '3000'
 $env:MEDIA_PUBLIC_URL = 'http://127.0.0.1:3000'
-$env:MEDIA_WEB_DIST = Join-Path (Get-Location) 'apps/web/build'
 $env:MEDIA_LIBRARY_ROOT = Read-Host 'Chemin complet du dossier de vos médias existants'
 if (!(Test-Path -LiteralPath $env:MEDIA_LIBRARY_ROOT -PathType Container)) { throw 'Dossier média introuvable' }
 .\target\debug\aether-core.exe
@@ -76,28 +75,10 @@ externe. Une clé TMDb/fanart.tv est délivrée par ce fournisseur : sa durée,
 ses quotas et ses conditions dépendent de lui. Un réglage Aether ne peut pas
 rendre un service tiers illimité.
 
-## 4. Activer les sauvegardes chiffrées
+## 4. Sauvegardes locales
 
-Avant le démarrage du Core (ou après l’avoir arrêté avec `Ctrl+C`), créer une
-clé privée locale une seule fois, puis la charger dans le même terminal :
-
-```powershell
-$secretDirectory = Join-Path $env:LOCALAPPDATA 'MediaServerSecrets'
-New-Item -ItemType Directory -Force $secretDirectory | Out-Null
-$backupKeyPath = Join-Path $secretDirectory 'backup.key'
-if (!(Test-Path -LiteralPath $backupKeyPath)) {
-    $backupBytes = New-Object byte[] 32
-    $random = [Security.Cryptography.RandomNumberGenerator]::Create()
-    $random.GetBytes($backupBytes)
-    $random.Dispose()
-    [IO.File]::WriteAllText($backupKeyPath, (-join ($backupBytes | ForEach-Object { $_.ToString('x2') })))
-}
-$env:MEDIA_BACKUP_KEY = [IO.File]::ReadAllText($backupKeyPath).Trim()
-.\target\debug\aether-core.exe
-```
-
-Administration → Sauvegardes permet alors de créer et télécharger une archive.
-Conserver une copie privée de `backup.key` séparément des archives : elle est
-nécessaire à la restauration et n’est jamais incluse dans les sauvegardes.
-Ne pas la remplacer lors des prochains démarrages. Les médias ne sont pas
-copiés dans ces archives ; [la restauration se fait hors ligne](ADMIN_BACKUPS.md).
+Démarrer le Core normalement, puis utiliser Administration → Sauvegardes pour
+créer une archive. Le format courant n'utilise aucune clé et n'est pas chiffré.
+Choisir un dossier privé et vérifier ses ACL Windows : la base et la
+configuration, y compris les secrets, sont lisibles dans l'archive. Les médias
+originaux ne sont pas copiés ; [la restauration se fait hors ligne](ADMIN_BACKUPS.md).md).

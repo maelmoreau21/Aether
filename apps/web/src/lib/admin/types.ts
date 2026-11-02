@@ -26,6 +26,7 @@ export interface EnrollmentToken {
   coreUrl: string;
 }
 
+export interface ProviderPreference { id: string; enabled: boolean }
 export interface LibraryOptions {
   preferredMetadataLanguage: string;
   metadataCountryCode: string;
@@ -33,11 +34,39 @@ export interface LibraryOptions {
   fetchPoster: boolean; fetchBackdrop: boolean; fetchLogo: boolean;
   fetchThumb: boolean; fetchBanner: boolean; fetchDisc: boolean;
   automaticRefreshIntervalDays: number;
+  preferEmbeddedTitles: boolean;
+  embeddedSubtitlePolicy: 'allow_all' | 'allow_text' | 'block_all';
+  metadataProviders: ProviderPreference[]; imageProviders: ProviderPreference[];
+  similarItemsProviders: ProviderPreference[]; segmentProviders: ProviderPreference[];
+  subtitleProviders: ProviderPreference[];
+  onlineRefreshIntervalDays: number;
+  realtimeMonitoring: boolean; automaticCollections: boolean; introDetectionEnabled: boolean;
+  saveNfoToMedia: boolean; saveImagesToMedia: boolean;
+  trickplayEnabled: boolean; trickplayDuringScan: boolean; trickplaySaveToMedia: boolean;
+  trickplayIntervalSeconds: number; trickplayWidth: number; trickplayQuality: number;
+  chapterImagesEnabled: boolean; chapterImagesDuringScan: boolean; chapterImagesSaveToMedia: boolean;
+  subtitleDownloadEnabled: boolean; subtitleLanguages: string[];
+  subtitleOnlyMissing: boolean; subtitleMatchAudio: boolean; subtitleRequireHash: boolean;
+  saveSubtitlesToMedia: boolean;
+  posterRotationEnabled?: boolean;
+  artworkDeduplicate: boolean;
+  artworkSimilarity: number;
+  artworkMinPosterWidth: number;
+  artworkMinPosterHeight: number;
 }
 export function defaultLibraryOptions(): LibraryOptions {
   return { preferredMetadataLanguage: 'fr', metadataCountryCode: 'FR', readLocalNfo: true,
     fetchPoster: true, fetchBackdrop: true, fetchLogo: true, fetchThumb: true, fetchBanner: true, fetchDisc: true,
-    automaticRefreshIntervalDays: 0 };
+    automaticRefreshIntervalDays: 0, preferEmbeddedTitles: false, embeddedSubtitlePolicy: 'allow_all',
+    metadataProviders: [], imageProviders: [], similarItemsProviders: [], segmentProviders: [], subtitleProviders: [],
+    onlineRefreshIntervalDays: 0, realtimeMonitoring: false, automaticCollections: false, introDetectionEnabled: false,
+    saveNfoToMedia: false, saveImagesToMedia: false,
+    trickplayEnabled: true, trickplayDuringScan: false, trickplaySaveToMedia: false, trickplayIntervalSeconds: 10, trickplayWidth: 320, trickplayQuality: 7,
+    chapterImagesEnabled: false, chapterImagesDuringScan: false, chapterImagesSaveToMedia: false,
+    subtitleDownloadEnabled: false, subtitleLanguages: ['fr'], subtitleOnlyMissing: true, subtitleMatchAudio: false,
+    subtitleRequireHash: true, saveSubtitlesToMedia: false,
+    posterRotationEnabled: false, artworkDeduplicate: true, artworkSimilarity: 5,
+    artworkMinPosterWidth: 0, artworkMinPosterHeight: 0 };
 }
 export interface LibraryFolder { nodeId: string; root: string }
 export interface Library {

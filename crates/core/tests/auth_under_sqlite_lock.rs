@@ -675,8 +675,8 @@ async fn auth_and_catalog_reads_succeed_under_30s_sqlite_begin_immediate_lock() 
     .await;
     assert_eq!(st, StatusCode::OK);
 
-    // Expire second session by inactivity (last_seen_at <= unixepoch() - 1800) and verify 401
-    sqlx::query("UPDATE sessions SET last_seen_at = unixepoch() - 1801")
+    // Expire second session by inactivity (last_seen_at <= unixepoch() - 604800) and verify 401
+    sqlx::query("UPDATE sessions SET last_seen_at = unixepoch() - 604801")
         .execute(reopened_store.pool())
         .await
         .unwrap();

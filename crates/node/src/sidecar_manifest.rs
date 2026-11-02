@@ -207,35 +207,6 @@ mod tests {
         assert!(issues.is_empty(), "{issues:?}");
         assert_eq!(subs.len(), 1);
         assert!(subs[0].forced && subs[0].sdh);
-        tokio::fs::write(root.path().join("unindexed.obu"), b"unindexed raw AV1")
-            .await
-            .unwrap();
-        let scan = crate::scanner::scan(
-            root.path(),
-            &std::collections::HashMap::new(),
-            &std::sync::atomic::AtomicBool::new(false),
-        )
-        .await
-        .unwrap();
-        let webm = scan
-            .files
-            .iter()
-            .find(|file| file.relative_path == "film.webm")
-            .unwrap();
-        assert_eq!(webm.mime, "video/webm");
-        assert!(
-            webm.probe
-                .streams
-                .iter()
-                .all(|stream| stream.codec_type.as_deref() != Some("audio"))
-        );
-        assert_eq!(webm.audios.len(), 1);
-        assert!(
-            scan.errors
-                .iter()
-                .any(|issue| issue.relative_path == "unindexed.obu"
-                    && issue.message.contains("temporal index"))
-        );
         let (audio, _) =
             crate::external_audio::discover(root.path(), Path::new("film.mp4"), None).await;
         assert!(

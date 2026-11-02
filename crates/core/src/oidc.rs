@@ -658,7 +658,7 @@ impl Oidc {
         let mut conn = self.auth.store.pool.acquire().await.map_err(db)?;
         let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
         let linked_user: Option<String> = if let Some(ref session_hash) = flow.link_session_hash {
-            Some(crate::database::query_scalar("SELECT s.user_id FROM sessions s JOIN users u ON u.id=s.user_id JOIN local_credentials c ON c.user_id=u.id WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-1800 AND u.disabled_at IS NULL")
+            Some(crate::database::query_scalar("SELECT s.user_id FROM sessions s JOIN users u ON u.id=s.user_id JOIN local_credentials c ON c.user_id=u.id WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-604800 AND u.disabled_at IS NULL")
                 .bind(session_hash).fetch_optional(&mut *tx).await.map_err(db)?
                 .ok_or_else(|| deny(StatusCode::UNAUTHORIZED,"link_session_expired"))?)
         } else {
@@ -692,7 +692,7 @@ impl Oidc {
                         .await
                         .map_err(db)?;
 
-                if is_admin {
+                if is_admin && !has_local_cred {
                     crate::database::query("UPDATE users SET role='administrator', display_name=COALESCE(?, display_name), sso_username=COALESCE(?, sso_username) WHERE id=?")
                         .bind(&display_name)
                         .bind(&sso_username)
@@ -737,7 +737,7 @@ impl Oidc {
             (None, target) => {
                 let id = target.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 crate::database::query(
-                    "INSERT INTO users(id,role,display_name,sso_username) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET role=CASE WHEN excluded.role='administrator' THEN 'administrator' ELSE users.role END, display_name=COALESCE(excluded.display_name, users.display_name), sso_username=COALESCE(excluded.sso_username, users.sso_username)",
+                    "INSERT INTO users(id,role,display_name,sso_username) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET display_name=COALESCE(excluded.display_name, users.display_name), sso_username=COALESCE(excluded.sso_username, users.sso_username)",
                 )
                 .bind(&id)
                 .bind(role)
@@ -761,7 +761,7 @@ impl Oidc {
             }
         };
         let raw = auth::random_token();
-        let created=crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+43200 FROM users WHERE id=? AND disabled_at IS NULL").bind(auth::hash(&raw)).bind(&user).execute(&mut *tx).await.map_err(db)?;
+        let created=crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+2592000 FROM users WHERE id=? AND disabled_at IS NULL").bind(auth::hash(&raw)).bind(&user).execute(&mut *tx).await.map_err(db)?;
         crate::database::query("UPDATE sessions SET device_label=? WHERE token_hash=?")
             .bind(auth::device_label(headers))
             .bind(auth::hash(&raw))
@@ -780,13 +780,20 @@ impl Oidc {
                 .map_err(db)?;
         }
         tx.commit().await.map_err(db)?;
+        if crate::extensions::collections::assign_new_user(&self.auth, &user)
+            .await
+            .is_err()
+        {
+            eprintln!("Automatic avatar assignment failed");
+        }
         // End the cross-site redirect chain on a Core document. A same-origin
         // external script starts a new navigation so Strict session cookies and
         // the existing cross-site guards both remain effective on /app/.
         let mut response = Html(include_str!("oidc_complete.html")).into_response();
         response.headers_mut().append(
             header::SET_COOKIE,
-            HeaderValue::from_str(&self.auth.cookie(&raw, 43200)).map_err(|_| invalid())?,
+            HeaderValue::from_str(&self.auth.cookie(&raw, auth::ABSOLUTE_SECONDS))
+                .map_err(|_| invalid())?,
         );
         Ok(response)
     }
@@ -1363,6 +1370,70 @@ mod tests {
             StatusCode::BAD_GATEWAY
         );
     }
+    #[tokio::test]
+    async fn oidc_admin_group_does_not_promote_a_linked_local_user() {
+        let mut f = fixture().await;
+        f.s.config.as_mut().unwrap().admin_groups = vec!["media-admins".into()];
+        crate::database::query("INSERT INTO users(id,role) VALUES('local-user','user')")
+            .execute(&f.s.auth.store.pool)
+            .await
+            .unwrap();
+        crate::database::query("INSERT INTO local_credentials(user_id,login,password_hash) SELECT 'local-user','local-user',password_hash FROM local_credentials WHERE login='rescue'")
+            .execute(&f.s.auth.store.pool).await.unwrap();
+        let login = req(
+            &f.s,
+            "/api/v1/auth/login",
+            "POST",
+            "",
+            "",
+            serde_json::json!({"login":"local-user","password":PASSWORD}),
+        )
+        .await;
+        assert_eq!(login.status(), StatusCode::OK);
+        let cookie = session_cookie(&login);
+        let csrf = body(login).await["csrfToken"].as_str().unwrap().to_owned();
+        let link = req(
+            &f.s,
+            "/api/v1/auth/oidc/link",
+            "POST",
+            &cookie,
+            &csrf,
+            serde_json::json!({"password":PASSWORD}),
+        )
+        .await;
+        assert_eq!(link.status(), StatusCode::OK);
+        let browser = link.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        let url = Url::parse(body(link).await["url"].as_str().unwrap()).unwrap();
+        let pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
+        let now = jsonwebtoken::get_current_timestamp();
+        *f.provider.claims.lock().unwrap() = serde_json::json!({"iss":f.provider.issuer,"sub":"local-subject","aud":"client","iat":now,"exp":now+300,"nonce":pairs["nonce"],"groups":["media-admins"]});
+        let linked = finish(&f, &browser, &pairs["state"]).await;
+        assert_eq!(linked.status(), StatusCode::OK);
+        let role: String =
+            crate::database::query_scalar("SELECT role FROM users WHERE id='local-user'")
+                .fetch_one(&f.s.auth.store.pool)
+                .await
+                .unwrap();
+        assert_eq!(role, "user");
+
+        let (browser, state) = begin(&f).await;
+        f.provider.claims.lock().unwrap()["sub"] = serde_json::json!("local-subject");
+        f.provider.claims.lock().unwrap()["groups"] = serde_json::json!(["media-admins"]);
+        assert_eq!(finish(&f, &browser, &state).await.status(), StatusCode::OK);
+        let role: String =
+            crate::database::query_scalar("SELECT role FROM users WHERE id='local-user'")
+                .fetch_one(&f.s.auth.store.pool)
+                .await
+                .unwrap();
+        assert_eq!(role, "user");
+    }
+
     #[tokio::test]
     async fn oidc_link_requires_local_proof_and_retains_rescue_account() {
         let f = fixture().await;

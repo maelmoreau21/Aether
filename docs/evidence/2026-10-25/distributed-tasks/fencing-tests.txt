@@ -1,0 +1,13 @@
+   Compiling media-poc v0.1.0 (C:\Users\Mael\Documents\GitHub\Aether\crates\core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 41s
+     Running unittests src\lib.rs (target\debug\deps\media_poc-efa80f9de9e5071d.exe)
+
+running 5 tests
+test nodes::transport_policy_tests::old_scan_completion_cannot_revert_a_changed_library_root ... ok
+test nodes::transport_policy_tests::playback_bearers_require_https_except_local_loopback ... ok
+test nodes::transport_policy_tests::relay_pending_is_bounded_and_reclaims_cancelled_receivers ... ok
+test nodes::transport_policy_tests::scan_results_require_current_node_library_and_live_attempt ... ok
+test nodes::transport_policy_tests::unavailable_task_node_is_not_retried_until_reconnected ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 55 filtered out; finished in 6.46s
+

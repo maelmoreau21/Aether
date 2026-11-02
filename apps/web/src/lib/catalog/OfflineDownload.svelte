@@ -33,11 +33,62 @@
   {/each}<button type="button" onclick={() => choosing = false}>Fermer</button></div>{/if}
 </div>{/if}
 <style>
-.download-action { display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:relative;margin-block:12px; }
-button,a { color:var(--color-text);background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-sm);cursor:pointer;font:inherit;text-decoration:none; }
-.download-icon { width:44px;height:44px;display:grid;place-items:center;padding:0; }
-.download-icon:hover { color:var(--color-accent);border-color:var(--color-accent); }
-button:focus-visible,a:focus-visible { outline:2px solid var(--color-accent);outline-offset:3px; }
-.download-choices button,.download-choices a { padding:10px; }
-.download-choices { display:grid;gap:8px;padding:14px;background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-md); }
+  .download-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+    z-index: 40;
+  }
+  button, a {
+    color: var(--color-text-bright);
+    background: var(--color-glass-raised);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font: inherit;
+    text-decoration: none;
+    transition: all var(--transition-fast);
+  }
+  .download-icon {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border-radius: 50%;
+  }
+  .download-icon:hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    background: var(--color-raised-hover);
+    transform: translateY(-1px);
+  }
+  button:focus-visible, a:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  .download-choices button, .download-choices a {
+    padding: 10px 12px;
+    background: var(--color-raised);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .download-choices {
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 0;
+    min-width: 220px;
+    z-index: 300;
+    display: grid;
+    gap: 8px;
+    padding: 14px;
+    background: var(--color-surface-elevated);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+  }
 </style>

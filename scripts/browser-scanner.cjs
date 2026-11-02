@@ -5,11 +5,14 @@ const origin = process.env.MEDIA_TEST_ORIGIN;
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('isolated test origin required');
 const restart = process.env.MEDIA_TEST_RESTART === '1';
 const long = process.env.MEDIA_TEST_LONG === '1';
-const out = process.env.MEDIA_REPORT_DIR || (long ? 'target/player-long' : 'target/browser-scanner');
+const rapidOnly = process.env.MEDIA_TEST_EXTERNAL_RAPID === '1';
+if (rapidOnly && restart) { console.log('Targeted external-audio MP4 scenario: restart/MKV phase intentionally skipped.'); process.exit(0); }
+const out = process.env.MEDIA_SCANNER_REPORT_DIR || process.env.MEDIA_REPORT_DIR || (long ? 'target/player-long' : 'target/browser-scanner');
 // Keep previous evidence; each successful run replaces its own reports only.
 fs.mkdirSync(out, {recursive: true});
 (async () => {
-  const browser = await chromium.launch({channel:'chrome', headless:true});
+  const executablePath = process.env.MEDIA_BROWSER_EXECUTABLE;
+  const browser = await chromium.launch({ ...(executablePath ? { executablePath } : { channel: process.env.MEDIA_BROWSER_CHANNEL || 'chrome' }), headless:true });
   const report = {browser:browser.version(), os:require('node:os').release(), headless:true, restart, results:{}};
   const preparations=[];
   try {
@@ -28,11 +31,18 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('input[autocomplete="current-password"]').fill('disposable scanner browser password');
     await page.locator('button[type="submit"]').click();
     await page.waitForURL(origin+'/app/');
+    const fixtureProviders = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/admin/extensions');
+      if (!response.ok) throw new Error('Cannot verify fixture provider isolation');
+      return (await response.json()).extensions;
+    });
+    assert(fixtureProviders.every(provider => !provider.enabled), 'Synthetic playback fixtures must not query external providers');
     if (!restart) {
-      await page.goto(origin+'/app/admin/libraries/');
+      await page.goto(origin+'/app/admin/libraries/#libraries-section');
       await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();
       await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
-      await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
+      await page.getByRole('tab', {name:'Sources et dossiers', exact:true}).click();
+        await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
       await page.getByRole('dialog').screenshot({path:`${out}/library-editor.png`});
       await page.setViewportSize({width:390,height:844});
       assert.ok(await page.getByRole('dialog').evaluate(dialog=>dialog.scrollWidth<=dialog.clientWidth+1),'library editor must fit mobile width');
@@ -62,6 +72,7 @@ fs.mkdirSync(out, {recursive: true});
     await card.click();
     await page.getByRole('heading',{name:'Scanner Film',exact:true}).waitFor();
     const container=restart?'MKV':'MP4';
+    await page.locator('.versions-panel summary').click();
     await page.getByRole('button',{name:`Sélectionner la version ${container}`,exact:true}).click();
     // Browser clock at the actual Svelte click handler boundary; excludes
     // Playwright dispatch latency. rVFC means compositor submission, not photons.
@@ -178,7 +189,7 @@ fs.mkdirSync(out, {recursive: true});
       assert.equal(await page.locator('.player-error').count(),0);
       report.results.finalAudioWindowAndBackwardSeek=true;
     }
-    if (long) {
+    if (long && !rapidOnly) {
       const cdp = await context.newCDPSession(page); await cdp.send('Performance.enable');
       const before = await cdp.send('Performance.getMetrics');
       report.results.long = {duration:await page.locator('video').evaluate(v=>v.duration),seeks:[]};
@@ -257,6 +268,28 @@ fs.mkdirSync(out, {recursive: true});
       source.disconnect(); await context.close(); return peak;
     });
     assert.ok(pcm>.001, `external audio PCM peak ${pcm}`);
+    if (rapidOnly) {
+      const events=[];
+      page.on('response',response=>{const u=new URL(response.url());if(u.pathname.includes('/stream/v1/')||u.pathname.includes('/prepared/')||u.pathname.includes('/audio/')||/\/assets\/[^/]+\/content$/.test(u.pathname))events.push({path:u.pathname,method:response.request().method(),status:response.status(),range:response.request().headers().range,timing:response.request().timing()});});
+      await page.keyboard.press('Shift');
+      await page.locator('button.return').click();
+      await page.waitForFunction(()=>!document.querySelector('dialog#player')?.hasAttribute('open'));
+      const reopenedAt=Date.now();await page.locator('.hero-cta').click();
+      await page.waitForFunction(()=>{const v=document.querySelector('video'),a=document.querySelector('audio[data-external-audio]'),slider=document.querySelector('input[aria-label="Position"]');return v&&a&&!v.paused&&!a.paused&&a.currentSrc.includes('/audio/')&&slider&&!slider.disabled;});
+      const reopenPlayingMs=Date.now()-reopenedAt;
+      const targets=long?[2,2700,5380,3,4200,600]:[1,9,2,8,3,.25], last=targets.at(-1), started=Date.now();
+      await page.keyboard.press('Shift');
+      const slider=page.getByRole('slider',{name:'Position',exact:true});
+      await slider.waitFor();
+      for(const target of targets){await slider.evaluate((element,value)=>{element.value=String(value);element.dispatchEvent(new Event('input',{bubbles:true}));element.dispatchEvent(new Event('change',{bubbles:true}));},target);await page.waitForTimeout(100);}
+      await page.waitForFunction(last=>{const v=document.querySelector('video'),a=document.querySelector('audio[data-external-audio]');return v&&a&&!v.seeking&&!a.seeking&&!v.paused&&!a.paused&&Math.abs(v.currentTime-last)<1.5&&Math.abs(v.currentTime-a.currentTime)<.3;},last,{timeout:15000});
+      const settledMs=Date.now()-started;
+      await page.waitForTimeout(10500);
+      const state=await page.evaluate(()=>({error:document.querySelector('.player-error')?.textContent||null,video:{position:document.querySelector('video')?.currentTime,paused:document.querySelector('video')?.paused,frames:document.querySelector('video')?.getVideoPlaybackQuality().totalVideoFrames},audio:{position:document.querySelector('audio[data-external-audio]')?.currentTime,paused:document.querySelector('audio[data-external-audio]')?.paused}}));
+      report.results.externalRapid={targets,reopenPlayingMs,settledMs,state,events,pcmBeforeSeek:pcm,scope:'targeted MP4 external audio; not the full scanner/restart suite'};
+      assert.equal(state.error,null);assert.ok(state.video.frames>0);report.passed=true;
+      await context.close();return;
+    }
     await page.evaluate(()=>{const video=document.querySelector('video');video.pause();video.currentTime=4;});
     await page.waitForFunction(()=>{const video=document.querySelector('video');return !video.seeking && video.paused && Math.abs(video.currentTime-4)<0.3;});
     await page.waitForFunction(()=>{const a=document.querySelector('audio[data-external-audio]');return a && a.paused && Math.abs(a.currentTime-4)<.3;});
@@ -287,6 +320,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForFunction(async()=>{ const r=await fetch('/api/v1/progress'); const data=await r.json(); return data.items.some(item=>item.position>3.8); });
     // The final-window and long-seek regressions can legitimately mark watched.
     // Establish the unwatched precondition before testing the manual toggle.
+    await page.locator('.personal-panel summary').click();
     if (await page.getByRole('button',{name:'Marquer non vu',exact:true}).isVisible()) await page.getByRole('button',{name:'Marquer non vu',exact:true}).click();
     await page.getByRole('button',{name:'Marquer comme vu',exact:true}).click();
     await page.getByRole('button',{name:'Marquer non vu',exact:true}).waitFor();

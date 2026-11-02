@@ -140,9 +140,14 @@ async fn admin_account_lifecycle_authorization_and_revocation() {
         StatusCode::NOT_FOUND
     );
     let avatar_data = vec![137u8, 80, 78, 71];
-    media_poc::database::query("INSERT INTO user_avatars(user_id,image_data) VALUES(?,?)")
+    let asset = store
+        .assets()
+        .put_bytes(&avatar_data, "image/png")
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?)")
         .bind(&user_id)
-        .bind(avatar_data.clone())
+        .bind(&asset.sha256)
         .execute(store.pool())
         .await
         .unwrap();

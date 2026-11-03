@@ -42,6 +42,8 @@ mod identify;
 mod image_collection;
 #[path = "extension_repositories.rs"]
 pub(crate) mod repositories;
+#[path = "extension_run_ownership.rs"]
+mod run_ownership;
 #[path = "extension_subtitles.rs"]
 pub(crate) mod subtitles;
 #[path = "extension_updates.rs"]
@@ -384,26 +386,13 @@ pub fn router(auth: AuthState) -> Router {
 
 /// Recover stale invocation history without interrupting another active Core.
 pub async fn initialize(auth: &AuthState) -> Result<(), sqlx::Error> {
-    let mut conn = auth.store.pool().acquire().await?;
-    if conn.backend_name() == "SQLite" {
-        query("UPDATE extension_runs SET status='interrupted' WHERE status='running'")
-            .execute(&mut *conn)
-            .await?;
-    } else {
-        // The current history table has no Core owner or heartbeat. A second Core
-        // must not declare a live invocation interrupted on startup. The worker
-        // deadline is bounded; old rows can be recovered after a conservative hour.
-        query("UPDATE extension_runs SET status='interrupted' WHERE status='running' AND started_at<?")
-            .bind(media_contracts::protocol::unix_now().saturating_sub(3600))
-            .execute(&mut *conn)
-            .await?;
-    }
+    run_ownership::recover(&auth.store).await?;
     Ok(())
 }
 
 struct RunGuard {
     auth: AuthState,
-    id: String,
+    lease: run_ownership::Lease,
     finished: bool,
 }
 impl Drop for RunGuard {
@@ -412,11 +401,12 @@ impl Drop for RunGuard {
             return;
         }
         let auth = self.auth.clone();
-        let id = self.id.clone();
+        let lease = self.lease.clone();
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn(async move {
-                let _ = query("UPDATE extension_runs SET status='interrupted' WHERE id=? AND status='running'")
-                    .bind(id).execute(auth.store.pool()).await;
+                let _ = lease
+                    .finish(&auth.store, "interrupted", &json!({}), 0)
+                    .await;
             });
         }
     }
@@ -1449,15 +1439,33 @@ async fn run(
         auth_headers: std::collections::BTreeMap::new(),
     };
     let run_id = uuid::Uuid::new_v4().to_string();
-    query("INSERT INTO extension_runs(id,extension_id,library_id,work_id,actor_id,started_at,status) VALUES(?,?,?,?,?,?,'running')")
-        .bind(&run_id).bind(&id).bind(&library).bind(&input.work_id).bind(&actor.user.id).bind(now()).execute(auth.store.pool()).await.map_err(db)?;
+    let lease = run_ownership::Lease::begin(
+        &auth.store,
+        run_id.clone(),
+        &id,
+        &library,
+        &input.work_id,
+        &actor.user.id,
+    )
+    .await
+    .map_err(db)?;
     let mut guard = RunGuard {
         auth: auth.clone(),
-        id: run_id.clone(),
+        lease: lease.clone(),
         finished: false,
     };
     let started = Instant::now();
-    let result = invoke_worker(&auth, &headers, &id, &library, &generation, invocation).await;
+    let result = invoke_worker_context(
+        &auth,
+        &headers,
+        &id,
+        &library,
+        &generation,
+        invocation,
+        None,
+        Some(&lease),
+    )
+    .await;
     let duration = started.elapsed().as_millis() as i64;
     let (status, mut details) = match &result {
         Ok(proposal) => (
@@ -1472,14 +1480,13 @@ async fn run(
     };
     details["version"] = json!(package.manifest.version);
     details["sha256"] = json!(package.sha256);
-    query("UPDATE extension_runs SET status=?,result_json=?,duration_ms=? WHERE id=?")
-        .bind(status)
-        .bind(details.to_string())
-        .bind(duration)
-        .bind(&run_id)
-        .execute(auth.store.pool())
+    if !lease
+        .finish(&auth.store, status, &details, duration)
         .await
-        .map_err(db)?;
+        .map_err(db)?
+    {
+        return Err(err(StatusCode::CONFLICT, "extension_run_lease_lost"));
+    }
     guard.finished = true;
     query("DELETE FROM extension_runs WHERE status!='running' AND id NOT IN (SELECT id FROM extension_runs ORDER BY started_at DESC,id DESC LIMIT 1000)")
         .execute(auth.store.pool()).await.map_err(db)?;
@@ -1497,7 +1504,10 @@ async fn invoke_worker(
     generation: &str,
     invocation: crate::extension_runtime::Invocation,
 ) -> Result<Value, Error> {
-    invoke_worker_context(auth, headers, id, library, generation, invocation, None).await
+    invoke_worker_context(
+        auth, headers, id, library, generation, invocation, None, None,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1509,8 +1519,14 @@ async fn invoke_worker_context(
     generation: &str,
     invocation: crate::extension_runtime::Invocation,
     background: Option<&crate::task_engine::Job>,
+    lease: Option<&run_ownership::Lease>,
 ) -> Result<Value, Error> {
     let requested_operation = invocation.input.operation.clone();
+    if let Some(lease) = lease
+        && !lease.live(&auth.store).await.map_err(db)?
+    {
+        return Err(err(StatusCode::CONFLICT, "extension_run_lease_lost"));
+    }
     let exe = std::env::current_exe()
         .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
     let mut dir = exe
@@ -1658,6 +1674,11 @@ async fn invoke_worker_context(
             if !worker_permitted(auth, headers, id, library, generation, background).await? {
                 return Err(err(StatusCode::FORBIDDEN, "extension_revoked"));
             }
+            if let Some(lease) = lease
+                && !lease.live(&auth.store).await.map_err(db)?
+            {
+                return Err(err(StatusCode::CONFLICT, "extension_run_lease_lost"));
+            }
             let result = match kind {
                 "storage" => {
                     let request = serde_json::from_value(frame["request"].clone())
@@ -1704,6 +1725,18 @@ async fn invoke_worker_context(
     ));
     tokio::pin!(deadline);
     let mut check = tokio::time::interval(Duration::from_millis(30));
+    let renewal = async {
+        if let Some(lease) = lease {
+            loop {
+                tokio::time::sleep(Duration::from_secs(run_ownership::HEARTBEAT_SECONDS)).await;
+                if !lease.renew(&auth.store).await.map_err(db)? {
+                    return Err::<(), Error>(err(StatusCode::CONFLICT, "extension_run_lease_lost"));
+                }
+            }
+        }
+        std::future::pending::<Result<(), Error>>().await
+    };
+    tokio::pin!(renewal);
     loop {
         tokio::select! {
             result = &mut operation => {
@@ -1714,6 +1747,7 @@ async fn invoke_worker_context(
             _ = check.tick() => {
                 if !worker_permitted(auth, headers, id, library, generation, background).await? { return Err(err(StatusCode::FORBIDDEN, "extension_revoked")); }
             }
+            result = &mut renewal => return result.map(|_| Value::Null),
         }
     }
 }
@@ -1730,6 +1764,7 @@ struct RunRow {
 }
 async fn runs(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
+    run_ownership::recover(&auth.store).await.map_err(db)?;
     let rows: Vec<RunRow> = query_as("SELECT id,extension_id,library_id,work_id,started_at,duration_ms,status,result_json FROM extension_runs ORDER BY started_at DESC,id DESC LIMIT 100").fetch_all(auth.store.pool()).await.map_err(db)?;
     Ok(Json(
         json!({"runs":rows.into_iter().map(|r| json!({"id":r.id,"extensionId":r.extension_id,"libraryId":r.library_id,"workId":r.work_id,"startedAt":r.started_at,"durationMs":r.duration_ms,"status":r.status,"result":serde_json::from_str::<Value>(&r.result_json).unwrap_or(Value::Null)})).collect::<Vec<_>>()}),
@@ -2135,6 +2170,7 @@ pub(crate) async fn run_automated(
         generation,
         invocation.clone(),
         Some(job),
+        None,
     )
     .await?;
     if let Some(id) = &known_id
@@ -2173,6 +2209,7 @@ pub(crate) async fn run_automated(
             generation,
             details,
             Some(job),
+            None,
         )
         .await?;
         if music_details_match(&enriched, candidate) {
@@ -2214,6 +2251,7 @@ pub(crate) async fn run_automated(
             generation,
             details,
             Some(job),
+            None,
         )
         .await?;
         let id_matches = enriched["providerId"]

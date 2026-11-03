@@ -74,6 +74,8 @@ pub struct TrickplayRequest {
     pub interval_ms: Option<u64>,
     pub width: Option<u32>,
     pub quality: Option<u8>,
+    /// A real chapter boundary: extract one image rather than a periodic grid.
+    pub chapter_time: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,9 +97,9 @@ pub struct TrickplayManager {
     max_cache_bytes: u64,
     ffmpeg_binary: PathBuf,
     enabled: bool,
-    active_streams: Option<Arc<AtomicU32>>,
-    jobs: Mutex<HashMap<String, JobState>>,
-    worker: Semaphore,
+    active_streams: Arc<Mutex<Option<Arc<AtomicU32>>>>,
+    jobs: Arc<Mutex<HashMap<String, JobState>>>,
+    worker: Arc<Semaphore>,
 }
 
 static GLOBAL_MANAGER: LazyLock<Arc<TrickplayManager>> =
@@ -126,9 +128,9 @@ impl TrickplayManager {
             max_cache_bytes,
             ffmpeg_binary,
             enabled,
-            active_streams,
-            jobs: Mutex::new(HashMap::new()),
-            worker: Semaphore::const_new(1),
+            active_streams: Arc::new(Mutex::new(active_streams)),
+            jobs: Arc::new(Mutex::new(HashMap::new())),
+            worker: Arc::new(Semaphore::const_new(1)),
         }
     }
 
@@ -155,9 +157,16 @@ impl TrickplayManager {
         Self::new(cache_root, max_cache_bytes, ffmpeg_binary, enabled, None)
     }
 
-    pub fn with_active_streams(mut self, counter: Arc<AtomicU32>) -> Self {
-        self.active_streams = Some(counter);
+    pub fn with_active_streams(self, counter: Arc<AtomicU32>) -> Self {
+        self.set_active_streams(counter);
         self
+    }
+
+    pub fn set_active_streams(&self, counter: Arc<AtomicU32>) {
+        *self
+            .active_streams
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(counter);
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -190,6 +199,10 @@ impl TrickplayManager {
         data.extend_from_slice(&width.to_le_bytes());
         data.push(b':');
         data.push(quality);
+        if let Some(time) = request.chapter_time {
+            data.extend_from_slice(b":chapter:");
+            data.extend_from_slice(&time.to_bits().to_le_bytes());
+        }
 
         media_contracts::protocol::sha256_hex(&data)
     }
@@ -239,6 +252,9 @@ impl TrickplayManager {
     /// Detect existing Jellyfin-style trickplay sheets beside an inventoried video file.
     /// Supports dynamic resolutions (e.g. 320, 240), grids (e.g. 10x10, 5x5) and intervals.
     pub async fn check_jellyfin(&self, request: &TrickplayRequest) -> Option<TrickplayManifest> {
+        if request.chapter_time.is_some() {
+            return None;
+        }
         let video = &request.relative_path;
         let root = &request.media_root;
 
@@ -412,7 +428,12 @@ impl TrickplayManager {
             let outcome = match this.worker.acquire().await {
                 Ok(_permit) => {
                     // Respect playback priority: yield if an active playback stream is running
-                    if let Some(ref counter) = this.active_streams
+                    let counter = this
+                        .active_streams
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
+                    if let Some(counter) = counter
                         && counter.load(Ordering::Relaxed) > 0
                     {
                         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -447,8 +468,8 @@ impl TrickplayManager {
             ffmpeg_binary: self.ffmpeg_binary.clone(),
             enabled: self.enabled,
             active_streams: self.active_streams.clone(),
-            jobs: Mutex::new(HashMap::new()),
-            worker: Semaphore::const_new(1),
+            jobs: self.jobs.clone(),
+            worker: self.worker.clone(),
         }
     }
 
@@ -458,6 +479,12 @@ impl TrickplayManager {
         request: &TrickplayRequest,
         key: &str,
     ) -> Result<(), &'static str> {
+        if key != self.fingerprint(request) {
+            return Err("invalid_fingerprint");
+        }
+        if !cache_outside_media(&self.cache_root, &request.media_root).await {
+            return Err("cache_inside_media_denied");
+        }
         let opened = OpenedFile::open_in_root(&request.media_root, &request.relative_path)
             .await
             .map_err(|_| "source_missing")?;
@@ -472,10 +499,31 @@ impl TrickplayManager {
         let interval_ms = request.interval_ms.unwrap_or(DEFAULT_INTERVAL_MS);
         let width = request.width.unwrap_or(DEFAULT_WIDTH);
         let quality = request.quality.unwrap_or(DEFAULT_QUALITY);
-        let cols = DEFAULT_COLUMNS;
-        let rows = DEFAULT_ROWS;
+        if !(160..=1920).contains(&width)
+            || !(1..=31).contains(&quality)
+            || interval_ms == 0
+            || request
+                .chapter_time
+                .is_some_and(|time| !time.is_finite() || time < 0.0 || time >= request.duration)
+        {
+            return Err("invalid_generation_parameters");
+        }
+        let cols = if request.chapter_time.is_some() {
+            1
+        } else {
+            DEFAULT_COLUMNS
+        };
+        let rows = if request.chapter_time.is_some() {
+            1
+        } else {
+            DEFAULT_ROWS
+        };
 
-        let frame_count = (request.duration * 1000.0 / interval_ms as f64).ceil() as usize;
+        let frame_count = if request.chapter_time.is_some() {
+            1
+        } else {
+            (request.duration * 1000.0 / interval_ms as f64).ceil() as usize
+        };
         let sheet_limit = frame_count.div_ceil((cols * rows) as usize).min(MAX_SHEETS);
         if sheet_limit == 0 {
             return Err("invalid_frame_count");
@@ -616,13 +664,19 @@ impl TrickplayManager {
         let source_path = request.media_root.join(&request.relative_path);
         let remaining_sheets = sheet_limit - start_sheet;
         let sheet_capacity = (cols * rows) as f64;
-        let start_time_secs = (start_sheet as f64 * sheet_capacity) * (interval_ms as f64 / 1000.0);
+        let start_time_secs = request
+            .chapter_time
+            .unwrap_or((start_sheet as f64 * sheet_capacity) * (interval_ms as f64 / 1000.0));
 
         // FFmpeg filterchain:
         // format=yuvj420p guarantees seamless compatibility with AV1 10-bit, HEVC 10-bit, VP9, etc.
-        let filter = format!(
-            "fps=1000/{interval_ms},scale={width}:-2:flags=fast_bilinear,format=yuvj420p,tile={cols}x{rows}"
-        );
+        let filter = if request.chapter_time.is_some() {
+            format!("scale={width}:-2:flags=fast_bilinear,format=yuvj420p")
+        } else {
+            format!(
+                "fps=1000/{interval_ms},scale={width}:-2:flags=fast_bilinear,format=yuvj420p,tile={cols}x{rows}"
+            )
+        };
 
         let mut cmd = Command::new(&self.ffmpeg_binary);
         cmd.args([
@@ -665,7 +719,16 @@ impl TrickplayManager {
         let mut child = cmd.spawn().map_err(|_| "ffmpeg_unavailable")?;
 
         // Monitor active streaming and yield if priority streaming starts
-        let active_counter = self.active_streams.clone();
+        let active_counter = self
+            .active_streams
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let runtime = if request.chapter_time.is_some() {
+            Duration::from_secs(60)
+        } else {
+            MAX_RUNTIME
+        };
         let wait_result = if let Some(counter) = active_counter {
             let mut interval = tokio::time::interval(Duration::from_millis(500));
             let start = Instant::now();
@@ -680,7 +743,7 @@ impl TrickplayManager {
                             let _ = child.kill().await;
                             return Err("streaming_priority_yield");
                         }
-                        if start.elapsed() > MAX_RUNTIME {
+                        if start.elapsed() > runtime {
                             let _ = child.kill().await;
                             return Err("generation_timeout");
                         }
@@ -688,7 +751,7 @@ impl TrickplayManager {
                 }
             }
         } else {
-            tokio::time::timeout(MAX_RUNTIME, child.wait())
+            tokio::time::timeout(runtime, child.wait())
                 .await
                 .map_err(|_| "generation_timeout")?
                 .map_err(|_| "generation_process_error")
@@ -714,17 +777,30 @@ impl TrickplayManager {
         let mut total_size = 0u64;
 
         while let Ok(Some(entry)) = read_dir.next_entry().await {
-            let Ok(meta) = entry.metadata().await else {
+            let Ok(meta) = tokio::fs::symlink_metadata(entry.path()).await else {
                 continue;
             };
+            if crate::files::is_linked(&meta) || !meta.is_dir() {
+                continue;
+            }
             let name = entry.file_name().to_string_lossy().to_string();
 
             // Clean orphaned crash directories older than 1 hour
-            if name.starts_with('.') && name.ends_with(".tmp") {
+            let partial = name
+                .strip_prefix('.')
+                .and_then(|s| s.strip_suffix(".in_progress"));
+            if partial.is_some_and(cache_key) {
+                let active = self
+                    .jobs
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(partial.unwrap_or(""))
+                    .is_some_and(|s| matches!(s, JobState::Running));
                 if let Ok(mtime) = meta.modified()
+                    && !active
                     && mtime
                         .elapsed()
-                        .map(|d| d > Duration::from_secs(3600))
+                        .map(|d| d > Duration::from_secs(86400))
                         .unwrap_or(false)
                 {
                     let _ = tokio::fs::remove_dir_all(entry.path()).await;
@@ -732,7 +808,7 @@ impl TrickplayManager {
                 continue;
             }
 
-            if meta.is_dir() && !name.starts_with('.') {
+            if cache_key(&name) {
                 let dir_size = dir_total_bytes(&entry.path()).await;
                 let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
                 total_size = total_size.saturating_add(dir_size);
@@ -821,6 +897,52 @@ impl TrickplayManager {
             "trickplay_sheet_not_found",
         ))
     }
+}
+
+fn cache_key(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
+async fn cache_outside_media(cache: &Path, media: &Path) -> bool {
+    let Ok(media) = tokio::fs::canonicalize(media).await else {
+        return false;
+    };
+    let absolute = if cache.is_absolute() {
+        cache.to_path_buf()
+    } else {
+        match std::env::current_dir() {
+            Ok(root) => root.join(cache),
+            Err(_) => return false,
+        }
+    };
+    if absolute
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return false;
+    }
+    let mut ancestor = absolute.as_path();
+    let mut suffix = Vec::new();
+    while !ancestor.exists() {
+        let Some(name) = ancestor.file_name() else {
+            return false;
+        };
+        suffix.push(name.to_owned());
+        let Some(parent) = ancestor.parent() else {
+            return false;
+        };
+        ancestor = parent;
+    }
+    let Ok(mut resolved) = tokio::fs::canonicalize(ancestor).await else {
+        return false;
+    };
+    for part in suffix.into_iter().rev() {
+        resolved.push(part);
+    }
+    !resolved.starts_with(media)
 }
 
 #[derive(Deserialize)]
@@ -948,6 +1070,7 @@ mod tests {
             interval_ms: Some(10_000),
             width: Some(320),
             quality: Some(7),
+            chapter_time: None,
         };
         let fp1 = mgr.fingerprint(&base);
 
@@ -962,6 +1085,107 @@ mod tests {
         let mut mod_interval = base.clone();
         mod_interval.interval_ms = Some(5_000);
         assert_ne!(fp1, mgr.fingerprint(&mod_interval));
+        let mut chapter = base.clone();
+        chapter.chapter_time = Some(10.0);
+        assert_ne!(fp1, mgr.fingerprint(&chapter));
+        let first = mgr.fingerprint(&chapter);
+        chapter.chapter_time = Some(20.0);
+        assert_ne!(first, mgr.fingerprint(&chapter));
+    }
+
+    #[tokio::test]
+    async fn failed_background_jobs_update_the_shared_admission_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manager = TrickplayManager::new(
+            tmp.path().join("cache"),
+            1024 * 1024,
+            "missing-ffmpeg".into(),
+            true,
+            None,
+        );
+        let request = TrickplayRequest {
+            asset_id: "missing".into(),
+            media_root: tmp.path().into(),
+            relative_path: "missing.mp4".into(),
+            duration: 12.0,
+            size: 1,
+            modified_ns: "0".into(),
+            interval_ms: None,
+            width: Some(320),
+            quality: Some(7),
+            chapter_time: Some(2.0),
+        };
+        assert_eq!(manager.enqueue(request.clone()), QueueStatus::Queued);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                if manager.enqueue(request.clone()) == QueueStatus::Failed {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("the manager must observe the worker's failure, not retain Running forever");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires FFmpeg and generated legal representative fixture"]
+    async fn chapter_image_extracts_one_frame_and_survives_manager_restart() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/generated/representative/representative.mp4")
+            .canonicalize()
+            .unwrap();
+        let root = source.parent().unwrap();
+        let relative = PathBuf::from(source.file_name().unwrap());
+        let opened = OpenedFile::open_in_root(root, &relative).await.unwrap();
+        let before = tokio::fs::read(&source).await.unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let manager = TrickplayManager::new(
+            tmp.path().join("cache"),
+            16 * 1024 * 1024,
+            "ffmpeg".into(),
+            true,
+            None,
+        );
+        let request = TrickplayRequest {
+            asset_id: "chapter-fixture".into(),
+            media_root: root.into(),
+            relative_path: relative,
+            duration: 12.0,
+            size: opened.size(),
+            modified_ns: opened.modified_ns().into(),
+            interval_ms: None,
+            width: Some(320),
+            quality: Some(7),
+            chapter_time: Some(2.0),
+        };
+        let key = manager.fingerprint(&request);
+        manager.execute_generation(&request, &key).await.unwrap();
+        let manifest = manager.check_native_cache(&request).await.unwrap();
+        assert_eq!(
+            (
+                manifest.columns,
+                manifest.rows,
+                manifest.sheet_count,
+                manifest.thumbnail_count
+            ),
+            (1, 1, 1, 1)
+        );
+        assert_eq!(manifest.width, 320);
+        let image = manager.open_sheet(&request, 0).await.unwrap();
+        assert_eq!(decode_opened_jpeg_dimensions(image).await.unwrap().0, 320);
+        let restarted = TrickplayManager::new(
+            tmp.path().join("cache"),
+            16 * 1024 * 1024,
+            "ffmpeg".into(),
+            true,
+            None,
+        );
+        assert!(restarted.check_native_cache(&request).await.is_some());
+        let mut changed = request;
+        changed.modified_ns = "changed".into();
+        assert!(restarted.check_native_cache(&changed).await.is_none());
+        assert_eq!(tokio::fs::read(&source).await.unwrap(), before);
     }
 
     #[tokio::test]
@@ -978,9 +1202,9 @@ mod tests {
         );
 
         // Create 3 mock cache directories of 1 MB each
-        let dir1 = cache_root.join("cache_entry_1");
-        let dir2 = cache_root.join("cache_entry_2");
-        let dir3 = cache_root.join("cache_entry_3");
+        let dir1 = cache_root.join("1".repeat(64));
+        let dir2 = cache_root.join("2".repeat(64));
+        let dir3 = cache_root.join("3".repeat(64));
         tokio::fs::create_dir(&dir1).await.unwrap();
         tokio::fs::create_dir(&dir2).await.unwrap();
         tokio::fs::create_dir(&dir3).await.unwrap();
@@ -989,6 +1213,11 @@ mod tests {
         tokio::fs::write(dir1.join("0.jpg"), &dummy).await.unwrap();
         tokio::fs::write(dir2.join("0.jpg"), &dummy).await.unwrap();
         tokio::fs::write(dir3.join("0.jpg"), &dummy).await.unwrap();
+        let unrelated = cache_root.join("personal-files");
+        tokio::fs::create_dir(&unrelated).await.unwrap();
+        tokio::fs::write(unrelated.join("keep.txt"), b"not a derivative")
+            .await
+            .unwrap();
 
         // Total is 3 MB > 2.5 MB quota
         mgr.enforce_quota().await;
@@ -1004,5 +1233,14 @@ mod tests {
             remaining += 1;
         }
         assert_eq!(remaining, 2);
+        assert!(unrelated.join("keep.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn chapter_cache_cannot_write_beneath_the_media_root() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(!cache_outside_media(&root.path().join("new-cache/nested"), root.path()).await);
+        let outside = tempfile::tempdir().unwrap();
+        assert!(cache_outside_media(&outside.path().join("new-cache"), root.path()).await);
     }
 }

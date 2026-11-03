@@ -6,6 +6,11 @@ variable "MEDIA_VERSION" {
   default = ""
 }
 
+// Each native runner loads and validates one architecture before publication.
+variable "TARGET_ARCH" {
+  default = "amd64"
+}
+
 group "default" {
   targets = ["runtime", "runtime-core", "runtime-node"]
 }
@@ -14,13 +19,13 @@ group "default" {
 target "common" {
   context = "."
   dockerfile = "Dockerfile"
-  platforms = ["linux/amd64"]
+  platforms = ["linux/${TARGET_ARCH}"]
   args = {
     GIT_BRANCH = GIT_BRANCH
     MEDIA_VERSION = MEDIA_VERSION
     CARGO_BUILD_JOBS = "2"
   }
-  cache-from = ["type=gha,scope=publish-images", "type=gha,scope=ci-images", "type=gha,scope=runtime", "type=gha,scope=runtime-core", "type=gha,scope=runtime-node"]
+  cache-from = ["type=gha,scope=publish-images-${TARGET_ARCH}", "type=gha,scope=ci-images-${TARGET_ARCH}"]
 }
 
 target "runtime" {
@@ -28,7 +33,7 @@ target "runtime" {
   target = "runtime"
   tags = ["media-ci:runtime"]
   // Standalone includes every shared builder stage; export that cache once.
-  cache-to = ["type=gha,mode=max,scope=ci-images"]
+  cache-to = ["type=gha,mode=max,scope=ci-images-${TARGET_ARCH}"]
 }
 
 target "runtime-core" {

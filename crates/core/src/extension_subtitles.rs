@@ -28,6 +28,7 @@ struct Context {
     size: i64,
     modified_ns: String,
     options_json: String,
+    active: i64,
 }
 impl Context {
     fn fingerprint(&self) -> String {
@@ -39,7 +40,17 @@ impl Context {
     }
 }
 async fn context(auth: &AuthState, asset: &str) -> Result<Context, Error> {
-    query_as("SELECT a.library_id,e.work_id,a.size,a.modified_ns,l.options_json FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND l.root=s.root_snapshot AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0))")
+    let ctx = admin_context(auth, asset).await?;
+    if ctx.active != 1 {
+        return Err(err(StatusCode::NOT_FOUND, "subtitle_asset_unavailable"));
+    }
+    Ok(ctx)
+}
+// Retained derivatives must remain manageable by administrators when their
+// source is missing or its library is disabled. This lookup grants no playback
+// or provider authority; acquisition still uses the active context above.
+async fn admin_context(auth: &AuthState, asset: &str) -> Result<Context, Error> {
+    query_as("SELECT a.library_id,e.work_id,a.size,a.modified_ns,l.options_json,CAST(CASE WHEN a.available=1 AND l.enabled=1 AND l.root=s.root_snapshot AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0)) THEN 1 ELSE 0 END AS BIGINT) AS active FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=?")
         .bind(asset).fetch_optional(auth.store.pool()).await.map_err(db)?
         .ok_or_else(|| err(StatusCode::NOT_FOUND,"subtitle_asset_unavailable"))
 }
@@ -92,8 +103,12 @@ async fn list(
     Path(asset): Path<String>,
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
-    let ctx = context(&auth, &asset).await?;
-    let code = availability(&ctx.options()?);
+    let ctx = admin_context(&auth, &asset).await?;
+    let code = if ctx.active != 1 {
+        Some("subtitle_asset_unavailable")
+    } else {
+        availability(&ctx.options()?)
+    };
     let ids: Vec<String> =
         query_scalar("SELECT id FROM extensions WHERE enabled=1 ORDER BY id LIMIT 64")
             .fetch_all(auth.store.pool())
@@ -139,9 +154,9 @@ async fn list(
             v
         })
         .collect();
-    let quotas:Vec<(String,Option<i64>,Option<String>,i64)>=query_as("SELECT provider_id,remaining,reset_time_utc,next_allowed_at FROM subtitle_download_limits ORDER BY provider_id")
+    let quotas:Vec<QuotaRow>=query_as("SELECT provider_id,remaining,reset_time_utc,next_allowed_at FROM subtitle_download_limits ORDER BY provider_id")
         .fetch_all(auth.store.pool()).await.map_err(db)?;
-    let quotas:Vec<Value>=quotas.into_iter().filter(|(id,_,_,_)|providers.iter().any(|p|p["id"].as_str()==Some(id))).map(|(id,remaining,reset,next)|json!({"providerId":id,"remaining":remaining,"resetTimeUtc":reset,"nextAllowedAt":next})).collect();
+    let quotas:Vec<Value>=quotas.into_iter().filter(|row|providers.iter().any(|p|p["id"].as_str()==Some(&row.provider_id))).map(|row|json!({"providerId":row.provider_id,"remaining":row.remaining,"resetTimeUtc":row.reset_time_utc,"nextAllowedAt":row.next_allowed_at})).collect();
     Ok(Json(
         json!({"enabled":code.is_none(),"unavailableCode":code,"providers":providers,"downloads":downloads,"quotas":quotas}),
     ))
@@ -157,6 +172,14 @@ struct DownloadRow {
     error_code: Option<String>,
     created_at: i64,
     fingerprint: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct QuotaRow {
+    provider_id: String,
+    remaining: Option<i64>,
+    reset_time_utc: Option<String>,
+    next_allowed_at: i64,
 }
 
 #[derive(Deserialize)]
@@ -397,6 +420,11 @@ async fn download(
         Ok::<_,Error>(())
     }.await;
     if let Err(error) = acquired {
+        if error.1.0["pluginError"].as_str() == Some("download_quota_exceeded") {
+            // A quota rejection need not contain a reset timestamp. Remember it
+            // conservatively instead of spending further calls on other files.
+            record_quota(&auth.store, &provider_id, &json!({"remaining":0})).await?;
+        }
         let code = error.1.0["error"]
             .as_str()
             .unwrap_or("subtitle_download_failed");
@@ -497,7 +525,9 @@ async fn reserve(
         .map_err(db)?;
     let active:i64=query_scalar("SELECT COUNT(*) FROM subtitle_downloads WHERE provider_id=? AND status='pending' AND created_at>?")
         .bind(provider).bind(now()-RESERVATION_SECONDS).fetch_one(&mut *tx).await.map_err(db)?;
-    if active>0 {return Err(err(StatusCode::CONFLICT,"subtitle_provider_busy"));}
+    if active > 0 {
+        return Err(err(StatusCode::CONFLICT, "subtitle_provider_busy"));
+    }
     // Bound DB storage including pending reservations: 16 MiB per asset, 256 MiB total.
 
     let total: i64 = query_scalar("SELECT COUNT(*) FROM subtitle_downloads")
@@ -518,7 +548,7 @@ async fn remove(
     Path((asset, id)): Path<(String, String)>,
 ) -> Result<StatusCode, Error> {
     admin(&auth, &headers, true).await?;
-    context(&auth, &asset).await?;
+    admin_context(&auth, &asset).await?;
     let removed=query("DELETE FROM subtitle_downloads WHERE id=? AND asset_id=? AND (status!='pending' OR created_at<=?)")
         .bind(id).bind(asset).bind(now()-RESERVATION_SECONDS).execute(auth.store.pool()).await.map_err(db)?;
     if removed.rows_affected() == 0 {

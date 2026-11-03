@@ -74,3 +74,20 @@ backend, ni du service OpenSubtitles, ni d'une lecture/synchronisation réelle.
 L'automatisation reste indisponible. Le hash indisponible bloque explicitement le
 parcours si la bibliothèque l'exige. Les validations backend, stockage après redémarrage
 et fournisseur doivent compléter ce lot avant de classer le parcours opérationnel.
+
+## Lot Core OpenSubtitles — compléments de validation du 3 novembre
+
+Le parcours manuel est **partiel, validé localement** : fournisseur optionnel,
+API administrateur, données persistantes et raccordement des pistes existent.
+Le [contrat complet](OPENSUBTITLES.md) décrit permissions, limites et retour arrière.
+L'accès réel au service et la synchronisation d'un sous-titre téléchargé réel
+restent non vérifiés. Aucun paquet n'a été signé ou publié par ces tests.
+
+- `cargo test --locked -p media-poc --lib signed_wasm_http_download_survives_reopen_and_requires_admin_csrf -- --test-threads=1` : **1/1 réussi**, 13,21 s hors compilation. Installation HTTP d'un Wasm synthétique signé, activation/grant, recherche puis acquisition via vrai worker, récupération CDN remplacée uniquement dans le code de test, doublon refusé, lecture protégée, persistance après réouverture SQLite, invalidation et suppression admin/CSRF.
+- `pwsh -NoProfile -File scripts/test-postgres.ps1 -OnlySubtitles` : **1/1 réussi**, 1,75 s hors compilation. PostgreSQL 18 réel dans un conteneur jetable tmpfs/boucle locale, deux pools indépendants, initialisation idempotente, réservation concurrente unique, quota/dérivé après réouverture, lecture GET/HEAD, refus d'un autre asset et invalidation après changement du média. Conteneur supprimé par le runner.
+
+La revue a corrigé l'attente obsolète `200` du test d'activation (contrat existant
+`204`) et la mémorisation d'un refus explicite de quota fournisseur sans échéance
+(repli prudent 24 heures). Aucun délai de lecture n'a été augmenté. Les durées
+sont celles de runs uniques locaux, sans comparaison avant/après ni p95 revendiqué.
+Le test PostgreSQL ne prouve pas le multi-Core, une panne de Core en vol ou le NAS.

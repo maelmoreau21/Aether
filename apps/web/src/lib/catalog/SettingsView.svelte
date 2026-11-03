@@ -5,6 +5,8 @@
   import { session } from '../auth/session';
   import ProfileAvatar from '../ui/ProfileAvatar.svelte';
   import AppearanceCustomization from './AppearanceCustomization.svelte';
+  import RecommendationSettings from './RecommendationSettings.svelte';
+  import NotificationSettings from './NotificationSettings.svelte';
   import AvatarEditor from './AvatarEditor.svelte';
   import OidcSettings from '../auth/OidcSettings.svelte';
   import AccountSecurity from '../auth/AccountSecurity.svelte';
@@ -205,6 +207,7 @@
       </div>
             <div hidden={current !== 'display'}>
         <AppearanceCustomization />
+        <RecommendationSettings />
         <section class="card" aria-labelledby="home-preferences-heading">
           <h2 id="home-preferences-heading">Accueil</h2>
           <label class="checkbox-row"><input type="checkbox" bind:checked={hidePlayedInLatest} onchange={() => void saveLatestPreference()} /> Masquer les contenus vus dans les nouveautés</label>
@@ -252,7 +255,7 @@
           <button type="submit">Enregistrer l'affichage</button>
         </form>
       </div>
-      <div hidden={current !== 'security'}><section class="card"><h2>Sécurité</h2><AccountSecurity mode="security" /><h3>Connexion SSO</h3><OidcSettings embedded /></section></div>
+      <div hidden={current !== 'security'}><section class="card"><h2>Sécurité</h2><AccountSecurity mode="security" /><h3>Connexion SSO</h3><OidcSettings embedded /></section><section class="card"><NotificationSettings /></section></div>
       <div hidden={current !== 'devices'}><section class="card"><h2>Appareils</h2><AccountSecurity mode="devices" /></section></div>
       <div hidden={current !== 'playback'}><section class="card" aria-labelledby="playback-heading"><h2 id="playback-heading">Lecture</h2><p class="muted">Ces préférences s’appliquent à votre compte.</p>
       <div class="pref-fields">

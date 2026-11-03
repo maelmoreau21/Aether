@@ -37,6 +37,8 @@ jobs:
         run: python scripts/test-release-policy.py
       - name: Verify FFmpeg source download fallback and integrity
         run: python scripts/test-build-ffmpeg.py
+      - name: Verify multiarchitecture manifest publication gates offline
+        run: python scripts/test-docker-multiarch.py
 
   # =========================================================================
   # 1. Vérifications et tests Rust (Core & Node)
@@ -407,10 +409,18 @@ jobs:
 
   images:
     concurrency:
-      group: ci-images-${{ github.ref }}
+      group: ci-images-${{ github.ref }}-${{ matrix.arch }}
       cancel-in-progress: true
-    name: Images Docker (compilation partagée)
-    runs-on: ubuntu-latest
+    name: Images Docker (${{ matrix.arch }}, compilation native partagée)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
         with:
@@ -425,6 +435,7 @@ jobs:
           push: false
         env:
           GIT_BRANCH: ${{ github.ref_name }}
+          TARGET_ARCH: ${{ matrix.arch }}
       - name: Vérifier le runtime Node optimisé avant publication
         run: |
           set -euo pipefail
@@ -434,6 +445,18 @@ jobs:
             test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
           '
           test "$(docker inspect --format '{{.Size}}' media-ci:runtime-node)" -lt 200000000
+      - name: Vérifier les trois services et une vraie image AV1 de chapitre
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          python3 scripts/smoke-docker-images.py --arch '${{ matrix.arch }}' --report 'target/docker-smoke-${{ matrix.arch }}/report.json'
+      - name: Conserver les mesures et aperçus Docker
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-smoke-${{ matrix.arch }}
+          path: target/docker-smoke-${{ matrix.arch }}/
+          if-no-files-found: warn
 
   # =========================================================================
   # 5. Publication des images Docker sur GHCR

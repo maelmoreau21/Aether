@@ -262,6 +262,7 @@ pub async fn list(
             false
         };
         let filter = crate::inventory::CatalogueFilter {
+            bypass_cache: false,
             user_id,
             hide_watched,
             genre: query.genre,

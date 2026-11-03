@@ -385,6 +385,10 @@ pub fn app_with_state(state: NodeServerState) -> Router {
             get(internal_trickplay_manifest),
         )
         .route(
+            "/internal/v1/node/assets/{id}/chapter-images/{index}",
+            get(internal_chapter_image).head(internal_chapter_image),
+        )
+        .route(
             "/internal/v1/node/assets/{id}/trickplay/{index}",
             get(internal_trickplay_tile).head(internal_trickplay_tile),
         )
@@ -1911,6 +1915,53 @@ async fn internal_stream_image(
     }
 }
 
+fn chapter_request(
+    state: &NodeServerState,
+    id: &str,
+    query: &str,
+) -> Option<crate::trickplay::TrickplayRequest> {
+    let (time, duration, width, quality) = crate::chapter_images::parameters(query)?;
+    let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
+    let asset = inv.assets.get(id)?;
+    Some(crate::trickplay::TrickplayRequest {
+        asset_id: id.into(),
+        media_root: PathBuf::from(&asset.root_snapshot),
+        relative_path: PathBuf::from(&asset.relative_path),
+        size: asset.size,
+        modified_ns: asset.modified_ns.clone(),
+        duration,
+        interval_ms: None,
+        width: Some(width),
+        quality: Some(quality),
+        chapter_time: Some(time),
+    })
+}
+
+async fn internal_chapter_image(
+    State(state): State<NodeServerState>,
+    AxumPath((id, _index)): AxumPath<(String, usize)>,
+    req: Request,
+) -> Response {
+    let path = req
+        .uri()
+        .path_and_query()
+        .map(|p| p.as_str())
+        .unwrap_or("")
+        .to_owned();
+    let (identity, nonce) =
+        match verify_signed_core_call(&state, req.headers(), req.method(), &path, b"") {
+            Ok(ok) => ok,
+            Err(res) => return res,
+        };
+    let response =
+        if let Some(request) = chapter_request(&state, &id, req.uri().query().unwrap_or("")) {
+            crate::chapter_images::response(&state.trickplay, request, req).await
+        } else {
+            node_error_response(NodeErrorCode::UnknownAsset, false)
+        };
+    sign_stream_response(response, &identity, &nonce)
+}
+
 async fn internal_trickplay_manifest(
     State(state): State<NodeServerState>,
     AxumPath(id): AxumPath<String>,
@@ -1989,6 +2040,7 @@ async fn internal_trickplay_manifest(
         interval_ms,
         width,
         quality,
+        chapter_time: None,
     };
 
     // 1. Check Aether native cache
@@ -2091,6 +2143,7 @@ async fn internal_trickplay_tile(
         interval_ms: None,
         width: None,
         quality: None,
+        chapter_time: None,
     };
 
     match state.trickplay.open_sheet(&trickplay_req, index).await {
@@ -2821,6 +2874,21 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
     }
     let synthetic_req = builder.body(Body::empty()).unwrap_or_default();
 
+    if let Some(parameters) = req.target_kind.strip_prefix("chapter-image:") {
+        let query = parameters
+            .split_once('?')
+            .map(|(_, query)| query)
+            .unwrap_or("");
+        let response = if let Some(request) = chapter_request(&state, &req.target_id, query) {
+            crate::chapter_images::response(&state.trickplay, request, synthetic_req).await
+        } else {
+            node_error_response(NodeErrorCode::UnknownAsset, false)
+        };
+        let _ =
+            send_stream_uplink_body(&state, core_url, &identity, &req.stream_id, response).await;
+        return;
+    }
+
     if let Some(component) = req.target_kind.strip_prefix("prepared:") {
         yield_background_for_playback(&state).await;
         let mut response = prepare_asset(&state, &req.target_id, component, synthetic_req).await;
@@ -2850,6 +2918,7 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
                 interval_ms: None,
                 width: None,
                 quality: None,
+                chapter_time: None,
             };
             match state.trickplay.open_sheet(&trickplay_req, index).await {
                 Ok(opened) => {
@@ -2911,6 +2980,7 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
             interval_ms: None,
             width: None,
             quality: None,
+            chapter_time: None,
         };
         let body = if let Some(cached) = state.trickplay.check_native_cache(&trickplay_req).await {
             serde_json::json!({

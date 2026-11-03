@@ -26,6 +26,7 @@ struct AssetSource {
     size: u64,
     modified_ns: String,
     options: LibraryOptions,
+    chapters: Vec<(f64, String)>,
 }
 
 async fn resolve_asset_source(
@@ -87,7 +88,73 @@ async fn resolve_asset_source(
         size: row.get::<i64, _>("size") as u64,
         modified_ns: row.get("modified_ns"),
         options,
+        chapters: crate::inventory::valid_chapters(
+            parsed["chapters"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+            Some(duration),
+        ),
     }))
+}
+
+pub async fn chapter_manifest(store: &IdentityStore, asset_id: &str) -> Response {
+    let source = match resolve_asset_source(store, asset_id).await {
+        Ok(Some(source)) => source,
+        Ok(None) => return crate::error(StatusCode::NOT_FOUND, "chapter_images_unavailable"),
+        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+    };
+    if !source.options.chapter_images_enabled {
+        return crate::error(StatusCode::NOT_FOUND, "chapter_images_disabled");
+    }
+    Json(json!({"chapters":source.chapters.iter().enumerate().map(|(index,(start,title))|json!({"index":index,"start":start,"title":title,"imageUrl":format!("/api/v1/assets/{asset_id}/chapter-images/{index}")})).collect::<Vec<_>>(),"mode":"on_demand"})).into_response()
+}
+
+pub async fn chapter_image(
+    store: &IdentityStore,
+    asset_id: &str,
+    index: usize,
+    request: Request,
+) -> Response {
+    let source = match resolve_asset_source(store, asset_id).await {
+        Ok(Some(source)) => source,
+        Ok(None) => return crate::error(StatusCode::NOT_FOUND, "chapter_images_unavailable"),
+        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+    };
+    if !source.options.chapter_images_enabled {
+        return crate::error(StatusCode::NOT_FOUND, "chapter_images_disabled");
+    }
+    let Some((time, _)) = source.chapters.get(index) else {
+        return crate::error(StatusCode::NOT_FOUND, "unknown_chapter");
+    };
+    if source.node_id != "local" {
+        let node = match crate::nodes::load_node(store, &source.node_id).await {
+            Ok(Some(node)) => node,
+            _ => return crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable"),
+        };
+        let path = format!(
+            "/internal/v1/node/assets/{asset_id}/chapter-images/{index}?time={time}&duration={}&width={}&quality={}",
+            source.duration, source.options.trickplay_width, source.options.trickplay_quality
+        );
+        return crate::nodes::relay_from_remote_node(store, &node, &path, request).await;
+    }
+    media_node::chapter_images::response(
+        &crate::node::LocalNode.trickplay(),
+        TrickplayRequest {
+            asset_id: asset_id.into(),
+            media_root: source.media_root,
+            relative_path: source.relative_path,
+            duration: source.duration,
+            size: source.size,
+            modified_ns: source.modified_ns,
+            interval_ms: None,
+            width: Some(source.options.trickplay_width.into()),
+            quality: Some(source.options.trickplay_quality),
+            chapter_time: Some(*time),
+        },
+        request,
+    )
+    .await
 }
 
 pub async fn manifest(store: &IdentityStore, asset_id: &str, request: Request) -> Response {
@@ -137,6 +204,7 @@ pub async fn manifest(store: &IdentityStore, asset_id: &str, request: Request) -
         interval_ms: Some((source.options.trickplay_interval_seconds as u64) * 1000),
         width: Some(source.options.trickplay_width as u32),
         quality: Some(source.options.trickplay_quality),
+        chapter_time: None,
     };
 
     // 1. Aether native cache priority
@@ -216,6 +284,7 @@ pub async fn tile(
         interval_ms: Some((source.options.trickplay_interval_seconds as u64) * 1000),
         width: Some(source.options.trickplay_width as u32),
         quality: Some(source.options.trickplay_quality),
+        chapter_time: None,
     };
 
     let opened = match mgr.open_sheet(&req, index).await {
@@ -239,6 +308,10 @@ pub async fn tile(
         Err(_) => crate::error(StatusCode::INTERNAL_SERVER_ERROR, "trickplay_stream_error"),
     }
 }
+
+#[cfg(test)]
+#[path = "chapter_images_tests.rs"]
+mod chapter_tests;
 
 #[cfg(test)]
 mod tests {

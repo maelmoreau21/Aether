@@ -376,7 +376,7 @@ async fn signed_wasm_http_download_survives_reopen_and_requires_admin_csrf() {
         json!({"enabled":true,"libraryIds":["subtitle-library"]}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{output}");
+    assert_eq!(status, StatusCode::NO_CONTENT, "{output}");
     let search_path = "/api/v1/admin/subtitles/asset-1/search";
     let input = json!({"providerId":"fixture.subtitles","language":"fr"});
     assert_eq!(
@@ -518,6 +518,41 @@ async fn signed_wasm_http_download_survives_reopen_and_requires_admin_csrf() {
         .execute(store.pool())
         .await
         .unwrap();
+    query("UPDATE inventory_assets SET available=0 WHERE id='asset-1'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("UPDATE libraries SET enabled=0 WHERE id='subtitle-library'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (status, listed, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/subtitles/asset-1",
+        &cookie,
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["enabled"], false);
+    assert_eq!(listed["unavailableCode"], "subtitle_asset_unavailable");
+    assert_eq!(listed["downloads"][0]["id"], id);
+    assert!(listed["providers"].as_array().unwrap().is_empty());
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            search_path,
+            &cookie,
+            csrf,
+            json!({"providerId":"fixture.subtitles","language":"fr"})
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
     assert_eq!(
         call(&app, "DELETE", &endpoint, &cookie, csrf, json!({}))
             .await
@@ -528,6 +563,14 @@ async fn signed_wasm_http_download_survives_reopen_and_requires_admin_csrf() {
         content(&store, "asset-1", &id, false).await.status(),
         StatusCode::NOT_FOUND
     );
+    query("UPDATE inventory_assets SET available=1 WHERE id='asset-1'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("UPDATE libraries SET enabled=1 WHERE id='subtitle-library'")
+        .execute(store.pool())
+        .await
+        .unwrap();
     reserve(
         &store,
         "active",
@@ -570,4 +613,109 @@ async fn signed_wasm_http_download_survives_reopen_and_requires_admin_csrf() {
         .0,
         StatusCode::NO_CONTENT
     );
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL server and MEDIA_TEST_POSTGRES_URL"]
+async fn postgres_subtitle_schema_reservations_and_derivatives_survive_reopen() {
+    let url = zeroize::Zeroizing::new(
+        std::env::var("MEDIA_TEST_POSTGRES_URL")
+            .expect("set MEDIA_TEST_POSTGRES_URL to a disposable PostgreSQL database"),
+    );
+    let first = crate::identity::IdentityStore::open_postgres(&url)
+        .await
+        .unwrap();
+    fixture(&first).await;
+    // A second independently opened pool reruns additive schema initialization.
+    let second = crate::identity::IdentityStore::open_postgres(&url)
+        .await
+        .unwrap();
+    let tables:i64=query_scalar("SELECT COUNT(*)::bigint FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('subtitle_searches','subtitle_downloads','subtitle_provider_limits','subtitle_download_limits')")
+        .fetch_one(second.pool()).await.unwrap();
+    assert_eq!(tables, 4);
+    let candidate = track();
+    let (a, b) = tokio::join!(
+        reserve(
+            &first,
+            "pg-attempt-a",
+            "asset-1",
+            "fixture.provider",
+            "42",
+            "100:1",
+            &candidate
+        ),
+        reserve(
+            &second,
+            "pg-attempt-b",
+            "asset-1",
+            "fixture.provider",
+            "42",
+            "100:1",
+            &candidate
+        ),
+    );
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+    let error = if let Err(error) = a {
+        error
+    } else {
+        b.unwrap_err()
+    };
+    assert_eq!(error.1.0["error"], "subtitle_attempt_exists");
+    let id: String = query_scalar("SELECT id FROM subtitle_downloads WHERE asset_id='asset-1'")
+        .fetch_one(first.pool())
+        .await
+        .unwrap();
+    query("UPDATE subtitle_downloads SET status='completed',content=? WHERE id=?")
+        .bind("WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nPostgreSQL derivative\n")
+        .bind(&id)
+        .execute(first.pool())
+        .await
+        .unwrap();
+    assert_eq!(descriptors(&second, "asset-1").await.unwrap().len(), 1);
+    record_quota(
+        &first,
+        "fixture.provider",
+        &json!({"remaining":0,"resetTimeUtc":"2099-01-01T00:00:00Z"}),
+    )
+    .await
+    .unwrap();
+    first.close().await;
+    second.close().await;
+    let reopened = crate::identity::IdentityStore::open_postgres(&url)
+        .await
+        .unwrap();
+    assert_eq!(descriptors(&reopened, "asset-1").await.unwrap().len(), 1);
+    assert_eq!(
+        check_download_limit(&reopened, "fixture.provider")
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    let response = content(&reopened, "asset-1", &id, false).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert!(
+        std::str::from_utf8(&bytes)
+            .unwrap()
+            .contains("PostgreSQL derivative")
+    );
+    assert_eq!(
+        content(&reopened, "asset-1", &id, true).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        content(&reopened, "asset-2", &id, false).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    query("UPDATE inventory_assets SET modified_ns='2' WHERE id='asset-1'")
+        .execute(reopened.pool())
+        .await
+        .unwrap();
+    assert!(descriptors(&reopened, "asset-1").await.unwrap().is_empty());
+    assert_eq!(
+        content(&reopened, "asset-1", &id, false).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    reopened.close().await;
 }

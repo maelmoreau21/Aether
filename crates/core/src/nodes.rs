@@ -2787,7 +2787,11 @@ pub async fn relay_from_remote_node(
             .nth(1)
             .and_then(|s| s.split('?').next())
             .map(|s| format!("prepared:{s}"));
-        let target_kind_str = if let Some(index) = path_and_query
+        let target_kind_str = if let Some(parameters) =
+            path_and_query.split("/chapter-images/").nth(1)
+        {
+            format!("chapter-image:{parameters}")
+        } else if let Some(index) = path_and_query
             .split("/trickplay/")
             .nth(1)
             .and_then(|s| s.split('?').next())

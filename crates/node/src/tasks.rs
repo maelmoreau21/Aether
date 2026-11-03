@@ -299,6 +299,7 @@ pub async fn run_task_on_grant(
                 interval_ms: None,
                 width,
                 quality: None,
+                chapter_time: None,
             };
             let key = mgr.fingerprint(&req);
             mgr.execute_generation(&req, &key)

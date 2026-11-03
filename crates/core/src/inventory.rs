@@ -2068,6 +2068,8 @@ pub async fn editorial_warnings(
 
 #[derive(Debug, Clone, Default)]
 pub struct CatalogueFilter {
+    /// Account-sensitive derived views can require fresh permission/catalogue reads.
+    pub bypass_cache: bool,
     pub user_id: Option<String>,
     pub hide_watched: bool,
     pub genre: Option<String>,
@@ -2546,6 +2548,7 @@ pub async fn catalogue_page(
     // Watched status changes independently of inventory generation. Never reuse
     // inventory-only cached pages for this account-owned filter.
     if state_fp > 0
+        && !filter.bypass_cache
         && !filter.hide_watched
         && let Some(lock) = CATALOGUE_CACHE.get()
         && let Ok(mut guard) = lock.lock()
@@ -2869,7 +2872,7 @@ pub async fn catalogue_page(
         "notice": "Bibliothèques locales indexées"
     });
 
-    if state_fp > 0 && !filter.hide_watched {
+    if state_fp > 0 && !filter.hide_watched && !filter.bypass_cache {
         let lock = CATALOGUE_CACHE
             .get_or_init(|| std::sync::Mutex::new(BoundedCatalogueCache::from_env()));
         if let Ok(mut guard) = lock.lock() {
@@ -4859,7 +4862,7 @@ pub async fn backfill_title_sort_unicode(
 
 // Probe output is external data: chapter ordering and timestamps cannot be
 // assumed valid, especially when their boundaries drive skip controls.
-fn valid_chapters(chapters: &[Value], duration: Option<f64>) -> Vec<(f64, String)> {
+pub(crate) fn valid_chapters(chapters: &[Value], duration: Option<f64>) -> Vec<(f64, String)> {
     let mut valid: Vec<_> = chapters
         .iter()
         .take(1000)

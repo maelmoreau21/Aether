@@ -49,10 +49,10 @@
   <p class="hint">Un intervalle plus court et des images plus grandes demanderont davantage de calcul et de stockage.</p>
 </details>
 
-<details class="advanced-section"><summary id="library-chapters-heading"><span>Images des chapitres</span><small>Moteur à venir</small></summary>
-  <p class="notice">Configuration conservée pour la future génération des miniatures de chapitres.</p>
+<details class="advanced-section"><summary id="library-chapters-heading"><span>Images des chapitres</span></summary>
+  <p class="notice">Aperçus des chapitres réellement présents, générés à la demande dans le stockage applicatif du Media Node. Largeur et qualité utilisent les valeurs de prévisualisation Trickplay ci-dessus. Aucun chapitre artificiel ni écriture dans les médias.</p>
   <label class="check"><input type="checkbox" bind:checked={options.chapterImagesEnabled} /> Activer l’extraction des images de chapitres</label>
-  <label class="check"><input type="checkbox" bind:checked={options.chapterImagesDuringScan} /> Extraire les images des chapitres pendant le scan</label>
+  <label class="check"><input type="checkbox" bind:checked={options.chapterImagesDuringScan} disabled /> Extraire pendant le scan (planification indisponible)</label>
 </details>
 
 <details class="advanced-section"><summary id="library-subtitle-heading"><span>Téléchargement des sous-titres</span></summary>

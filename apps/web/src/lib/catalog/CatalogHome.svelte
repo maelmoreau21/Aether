@@ -8,6 +8,7 @@
   import MediaShelf from '../ui/MediaShelf.svelte';
   import Poster from './Poster.svelte';
   import ContinueWatching from './ContinueWatching.svelte';
+  import RecommendationShelf from './RecommendationShelf.svelte';
 
   let { films = [], series = [], featured = null, onPlay, detailUrl }: {
     films: Work[];
@@ -23,6 +24,7 @@
 </script>
 
 <div class="catalog-home">
+  <RecommendationShelf />
   {#each ($preferenceState.homeSections ?? DEFAULT_HOME_SECTIONS) as section (section)}
     {#if section === 'hero'}
       <HeroBanner featured={activeFeatured} {onPlay} />

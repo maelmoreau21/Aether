@@ -10,6 +10,7 @@ pub mod files;
 mod image_preview;
 pub mod images;
 pub use image_preview::width as image_preview_width;
+pub mod chapter_images;
 pub mod inventory;
 pub mod mp4_audio;
 pub mod music;

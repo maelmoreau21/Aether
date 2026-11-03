@@ -16,6 +16,7 @@
   import WatchStatus from './WatchStatus.svelte';
   import Icon from '../ui/Icon.svelte';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
+  import ChapterImages from './ChapterImages.svelte';
 
   let { work, playableMedia = [], allowedIds = [], selected = $bindable(''), mediaError = '', similarCandidates = [], onPlay }: {
     work: Work; playableMedia: Media[]; allowedIds: string[]; selected: string; mediaError?: string; similarCandidates?: Work[]; onPlay: () => Promise<void>;
@@ -147,6 +148,7 @@
   {/if}
 
   <EditorialCredits {work} />
+  {#if currentSelectedMedia && !work.synthetic}{#key currentSelectedMedia.id}<ChapterImages assetId={currentSelectedMedia.id} />{/key}{/if}
   <SimilarWorks {work} candidates={similarCandidates} />
 </div>
 

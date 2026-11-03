@@ -1,5 +1,10 @@
 # Mission 5 — préparation de plusieurs Core actifs
 
+> Mise à jour du 3 novembre : **multi-Core toujours expérimental, non prêt pour
+> production**. Le lot de propriété de l'historique des extensions est détaillé
+> plus bas. Il ne résout pas le dispatch des Nodes ni le fencing de tous les
+> effets durables et externes.
+
 État au 26 octobre 2026. Le mode SQLite avec un Core reste le mode autonome.
 Deux Core actifs exigent une même base PostgreSQL ; cette configuration n'est
 pas encore validée comme déploiement pris en charge. Aucune donnée SQLite n'est
@@ -16,10 +21,11 @@ transférée automatiquement vers PostgreSQL.
   Le cache local est reconstruit depuis la base s'il est ancien ; une copie locale
   périmée ne fournit plus le code exécuté.
 - Le démarrage d'un second Core PostgreSQL ne marque plus immédiatement toutes
-  les exécutions d'extensions en cours comme interrompues. En l'absence de
-  propriétaire/heartbeat dans `extension_runs`, les lignes vieilles d'une heure
-  sont marquées interrompues. Cette fenêtre est une limite provisoire, non un
-  mécanisme de reprise des tâches.
+  les exécutions d'extensions en cours comme interrompues. Les nouvelles
+  exécutions manuelles de catalogue disposent d'un propriétaire, d'un jeton et
+  d'un heartbeat persistants. Les anciennes lignes sans propriétaire conservent
+  la fenêtre prudente d'une heure sur PostgreSQL. Ce n'est pas un mécanisme de
+  rejeu des opérations externes.
 - Une tâche système relancée après expiration de son lease peut reprendre un
   plan resté `running` après un arrêt brutal, sous contrôle de sa tentative
   courante. Cela ne rend pas les effets externes exactement une fois.
@@ -54,9 +60,11 @@ encore tous les parcours SQL ni les garanties de reprise sous charge.
    la configuration publique et les URL derrière répartiteur doivent être
    éprouvés avec deux processus et un proxy réel. Les changements de droits
    doivent être relus ou invalidés de façon bornée sur chaque Core.
-5. `extension_runs` nécessite un propriétaire et un heartbeat pour distinguer
-   un Core mort d'une exécution vivante. Le cache de paquets nécessite aussi
-   une écriture atomique entre processus si plusieurs Core partagent son volume.
+5. Le propriétaire et le heartbeat de l'historique manuel sont implémentés,
+   mais ne couvrent pas un journal unifié de toutes les opérations d'extensions.
+   Les effets des automatismes continuent de dépendre de leurs propres leases
+   et des points de fencing restant à compléter. Le cache de paquets nécessite
+   aussi une écriture atomique si plusieurs Core partagent son volume.
 
 La preuve de sortie reste un essai reproductible avec deux vrais processus Core,
 une PostgreSQL commune, 100 Nodes simulés, 100 000 tâches, arrêt brutal pendant
@@ -90,7 +98,59 @@ ni reprise, ni absence de double effet.
   21,6 Mio, session inter-Core valide, réponse du survivant en 35 ms. Les
   valeurs de démarrage varient avec la machine et les compilations concurrentes.
 
-## Schéma et données neuves
+## Lot du 3 novembre — propriété de l'historique des extensions
+
+`extension_run_owners` est une table additive SQLite/PostgreSQL liée par clé
+étrangère à `extension_runs`. La création de la ligne d'exécution et de son
+propriétaire est transactionnelle. Le propriétaire de processus est un UUID
+aléatoire stable pendant sa vie ; chaque exécution possède un jeton distinct.
+Son lease dure 30 secondes et est renouvelé toutes les 5 secondes pendant
+l'invocation, sans bloquer la progression de son worker sur une attente SQL.
+
+La publication terminale de l'historique et son nettoyage vérifient ensemble
+l'identifiant, le propriétaire, le jeton, l'état `running` et un lease encore
+valide dans une écriture conditionnelle transactionnelle. Un ancien propriétaire
+ne peut ni ressusciter son lease expiré, ni écraser un résultat déjà terminal.
+Le garde d'annulation utilise le même fencing. Un worker ayant perdu son lease
+est interrompu ; son résultat n'est pas retourné comme une réussite.
+
+Le démarrage et la lecture administrateur de l'historique récupèrent les leases
+expirés en marquant leurs lignes `interrupted`, sans rejouer l'invocation. Un
+second Core ne marque pas une exécution possédant un lease vivant comme morte.
+Les anciennes lignes sans propriétaire sont traitées avec le délai antérieur
+d'une heure sur PostgreSQL ; SQLite reste réservé à un Core unique.
+
+Ce lot concerne les lignes créées par le parcours manuel de métadonnées.
+L'acquisition de sous-titres possède ses réservations durables séparées ; les
+avatars et tous les automatismes ne sont pas artificiellement ajoutés au même
+journal. En particulier, le cache d'automatisation garde actuellement une
+transaction d'écriture pendant son appel worker : une centralisation naïve des
+insertions d'historique sur une autre connexion créerait un interblocage SQLite.
+Ce refactoring est différé plutôt que de changer ce parcours dans un lot de
+propriété de l'historique. Aucune URL temporaire de sous-titres ni configuration
+secrète n'est ajoutée à `extension_runs`.
+
+Les écritures privées du guest et les effets catalogue ou fichiers ne sont pas
+tous dans la même transaction que la vérification de ce lease. L'invariant
+garanti par le code porte donc sur **la publication de l'historique**, pas sur
+une exécution exactement une fois des effets ni une reprise multi-Core complète.
+`ACTIVE_CHANNELS`, `EFFECT_GATE`, les mutations d'extensions, les fichiers
+partagés/reconstructibles et les parcours OIDC derrière répartiteur restent les
+bloqueurs listés plus haut. Deux pools PostgreSQL ne sont pas deux processus Core.
+
+Tests ciblés préparés : SQLite avec deux pools, et
+`pwsh -NoProfile -File scripts/test-postgres.ps1 -OnlyExtensionRuns` pour une
+PostgreSQL 18 jetable et deux pools indépendants. Ils couvrent lease vivant,
+expiration, refus du jeton périmé, publication unique et conservation du résultat.
+La présence de ces tests ne signifie pas qu'ils ont été exécutés ; les résultats
+réels sont consignés dans la matrice de mission après passage.
+
+Retour arrière : un ancien binaire ignore la table additive, mais ne sait pas
+renouveler ou respecter ses leases. Arrêter toutes les instances avant un retour
+de version et utiliser un Core unique ; ne pas mélanger anciens et nouveaux
+binaires derrière un répartiteur pour prétendre conserver ce fencing.
+
+## Historique de consolidation du schéma
 
 Les bases neuves sont créées depuis un seul fichier SQL source contenant une
 section SQLite et une section PostgreSQL. Le Core n'exécute plus d'historique

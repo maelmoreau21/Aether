@@ -39,6 +39,7 @@ pub mod media;
 pub mod music;
 pub mod node;
 pub mod nodes;
+pub mod notifications;
 pub mod parties;
 pub mod permissions;
 pub mod playlists;
@@ -48,6 +49,7 @@ pub mod product;
 mod product_tests;
 pub mod progress;
 mod provider_download;
+pub mod recommendations;
 pub mod scans;
 pub mod trickplay;
 pub mod user_media_policy;
@@ -199,6 +201,14 @@ async fn secure_app_with_jobs_and_web_dist(
         .route("/api/v1/media/{id}", get(indexed_descriptor))
         .route("/api/v1/assets/{id}/trickplay", get(indexed_trickplay))
         .route(
+            "/api/v1/assets/{id}/chapter-images",
+            get(indexed_chapter_manifest),
+        )
+        .route(
+            "/api/v1/assets/{id}/chapter-images/{index}",
+            get(indexed_chapter_image).head(indexed_chapter_image),
+        )
+        .route(
             "/api/v1/assets/{id}/trickplay/{index}",
             get(indexed_trickplay_tile).head(indexed_trickplay_tile),
         )
@@ -227,6 +237,8 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(nodes::router(auth.clone(), replay_window))
             .merge(progress::router(auth.clone()))
             .merge(feedback::router(auth.clone()))
+            .merge(recommendations::router(auth.clone()))
+            .merge(notifications::router(auth.clone()))
             .merge(preferences::router(auth.clone()))
             .merge(account::router(auth.clone()))
             .merge(music::router(auth.clone()))
@@ -261,6 +273,7 @@ async fn local_stream_priority(
     request: Request,
     next: Next,
 ) -> Response {
+    media_node::trickplay::global_manager().set_active_streams(scans::LOCAL_STREAMS.clone());
     let path = request.uri().path();
     let is_prepared_or_audio = path.contains("/prepared/") || path.contains("/audio/");
     let streamed = path.contains("/content") || is_prepared_or_audio;
@@ -342,6 +355,21 @@ async fn indexed_trickplay(
     request: Request,
 ) -> Response {
     trickplay::manifest(&store, &id, request).await
+}
+
+async fn indexed_chapter_manifest(
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    trickplay::chapter_manifest(&store, &id).await
+}
+
+async fn indexed_chapter_image(
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path((id, index)): axum::extract::Path<(String, usize)>,
+    request: Request,
+) -> Response {
+    trickplay::chapter_image(&store, &id, index, request).await
 }
 
 async fn indexed_trickplay_tile(

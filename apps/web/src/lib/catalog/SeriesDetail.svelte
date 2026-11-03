@@ -2,6 +2,7 @@
   import { session } from '../auth/session';
   import { selectArtwork } from './artwork-selection';
   import WorkTools from './WorkTools.svelte';
+  import ChapterImages from './ChapterImages.svelte';
   import { imagePreviewUrl } from './image-url';
   import { request, type Work, localizedTitle, localizedPlot } from './api';
   import { locale } from '../i18n';
@@ -156,6 +157,7 @@
               <EpisodePlayer {episode} {media} {immersive} isLaunching={launchingEpisodeId === episode.id} onlaunch={onLaunchEpisode} onselect={() => onSelectEpisode(episode)} />
               {#if !episode.synthetic}<WatchStatus workId={episode.id} {duration} />{/if}
               {#if !episode.synthetic && $session?.user.role === 'administrator'}<WorkTools work={episode} selectedMedia={descriptor} />{/if}
+              {#if descriptor && !episode.synthetic}<ChapterImages assetId={descriptor.id} />{/if}
             </div>
           </div>
         </article>

@@ -42,6 +42,8 @@ mod identify;
 mod image_collection;
 #[path = "extension_repositories.rs"]
 pub(crate) mod repositories;
+#[path = "extension_subtitles.rs"]
+pub(crate) mod subtitles;
 #[path = "extension_updates.rs"]
 mod updates;
 
@@ -229,6 +231,7 @@ pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'st
                 "providers",
                 "storage.private",
                 "playback.markers",
+                "subtitles",
             ]
             .contains(&p.as_str())
         })
@@ -284,6 +287,7 @@ pub fn router(auth: AuthState) -> Router {
     Router::new()
         .merge(repositories::router())
         .merge(collections::router())
+        .merge(subtitles::router())
         .route("/api/v1/admin/extensions", get(list).post(install))
         .route(
             "/api/v1/admin/extensions/storage/health",

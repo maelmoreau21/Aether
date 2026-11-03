@@ -27,6 +27,15 @@ const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr',
 function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
+  it('disables a native caption before detaching it on a paused subtitle change', async () => {
+    const {video,player}=setup();
+    const caption={mode:'showing'};
+    const remove=vi.fn(()=>expect(caption.mode).toBe('disabled'));
+    vi.spyOn(video,'querySelectorAll').mockReturnValue([{track:caption,remove}] as never);
+    await player.selectSubtitle(null);
+    expect(remove).toHaveBeenCalledOnce();
+    player.destroy();
+  });
   it('keeps ASS offsets and releases renderers superseded by a repeated selection', async () => {
     vi.stubGlobal('OffscreenCanvas', class {}); vi.stubGlobal('Worker', class {});
     const {player}=setup();

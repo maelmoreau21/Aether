@@ -1,0 +1,1206 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load local bake definitions
+#1 reading docker-bake.ci.hcl 1.06kB / 1.06kB done
+#1 DONE 0.0s
+
+#2 [runtime internal] load build definition from Dockerfile
+#2 transferring dockerfile: 13.86kB 0.0s done
+#2 DONE 0.1s
+
+#3 [runtime-core internal] load metadata for docker.io/library/rust:slim-bookworm
+#3 DONE 2.2s
+
+#4 [runtime-core internal] load metadata for docker.io/library/node:22-bookworm-slim
+#4 DONE 2.2s
+
+#5 [runtime-node internal] load metadata for docker.io/library/debian:bookworm-slim
+#5 DONE 2.2s
+
+#6 [runtime internal] load .dockerignore
+#6 transferring context: 2.37kB 0.0s done
+#6 DONE 0.1s
+
+#7 [runtime-node internal] load build context
+#7 DONE 0.0s
+
+#8 [runtime internal] load build context
+#8 DONE 0.0s
+
+#9 [runtime-core internal] load build context
+#9 DONE 0.0s
+
+#10 [runtime-core rust-builder  1/13] FROM docker.io/library/rust:slim-bookworm@sha256:24707e70a4f1e23d9a7b25202ec43126d28a52294b96aad5c670df1fd1f1d400
+#10 resolve docker.io/library/rust:slim-bookworm@sha256:24707e70a4f1e23d9a7b25202ec43126d28a52294b96aad5c670df1fd1f1d400 0.1s done
+#10 resolve docker.io/library/rust:slim-bookworm@sha256:24707e70a4f1e23d9a7b25202ec43126d28a52294b96aad5c670df1fd1f1d400 0.1s done
+#10 CACHED
+
+#11 [runtime-node probe-runtime 1/4] FROM docker.io/library/debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3
+#11 resolve docker.io/library/debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 0.1s done
+#11 DONE 0.1s
+
+#12 [runtime web-builder 1/6] FROM docker.io/library/node:22-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
+#12 resolve docker.io/library/node:22-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da 0.1s done
+#12 DONE 0.1s
+
+#7 [runtime-node internal] load build context
+#7 transferring context: 4.81MB 3.1s done
+#7 DONE 3.2s
+
+#13 [runtime-node probe-runtime 3/4] COPY scripts/build-ffmpeg.sh /tmp/build-ffmpeg.sh
+#13 CACHED
+
+#14 [runtime-node probe-runtime 2/4] RUN apt-get update && apt-get install -y --no-install-recommends         build-essential ca-certificates curl pkg-config nasm xz-utils     && rm -rf /var/lib/apt/lists/*
+#14 CACHED
+
+#15 [runtime-node probe-runtime 4/4] RUN bash /tmp/build-ffmpeg.sh /probe runtime
+#15 CACHED
+
+#8 [runtime internal] load build context
+#8 ...
+
+#9 [runtime-core internal] load build context
+#9 transferring context: 8.52MB 3.4s done
+#9 DONE 3.7s
+
+#8 [runtime internal] load build context
+#8 transferring context: 8.52MB 3.4s done
+#8 DONE 3.7s
+
+#15 [runtime probe-runtime 4/4] RUN bash /tmp/build-ffmpeg.sh /probe runtime
+#15 CACHED
+
+#16 [runtime-core web-builder 2/6] WORKDIR /app/apps/web
+#16 CACHED
+
+#17 [runtime web-builder 3/6] COPY apps/web/package.json apps/web/package-lock.json ./
+#17 DONE 0.2s
+
+#18 [runtime-core web-builder 4/6] RUN npm ci --no-audit --no-fund
+#18 ...
+
+#19 [runtime-node rust-builder  2/13] RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+#19 1.010 Get:1 http://deb.debian.org/debian bookworm InRelease [151 kB]
+#19 1.131 Get:2 http://deb.debian.org/debian bookworm-updates InRelease [55.4 kB]
+#19 1.253 Get:3 http://deb.debian.org/debian-security bookworm-security InRelease [34.8 kB]
+#19 1.311 Get:4 http://deb.debian.org/debian bookworm/main amd64 Packages [8790 kB]
+#19 2.951 Get:5 http://deb.debian.org/debian bookworm-updates/main amd64 Packages [6924 B]
+#19 3.050 Get:6 http://deb.debian.org/debian-security bookworm-security/main amd64 Packages [360 kB]
+#19 4.124 Fetched 9398 kB in 3s (2744 kB/s)
+#19 4.124 Reading package lists...
+#19 4.781 Reading package lists...
+#19 5.248 Building dependency tree...
+#19 5.361 Reading state information...
+#19 5.476 The following additional packages will be installed:
+#19 5.480   libpkgconf3 pkgconf pkgconf-bin
+#19 5.481 Suggested packages:
+#19 5.481   libssl-doc
+#19 5.548 The following NEW packages will be installed:
+#19 5.549   libpkgconf3 libssl-dev pkg-config pkgconf pkgconf-bin
+#19 5.653 0 upgraded, 5 newly installed, 0 to remove and 1 not upgraded.
+#19 5.653 Need to get 2555 kB of archives.
+#19 5.653 After this operation, 12.8 MB of additional disk space will be used.
+#19 5.653 Get:1 http://deb.debian.org/debian bookworm/main amd64 libpkgconf3 amd64 1.8.1-1 [36.1 kB]
+#19 5.712 Get:2 http://deb.debian.org/debian-security bookworm-security/main amd64 libssl-dev amd64 3.0.22-1~deb12u2 [2450 kB]
+#19 6.126 Get:3 http://deb.debian.org/debian bookworm/main amd64 pkgconf-bin amd64 1.8.1-1 [29.5 kB]
+#19 6.150 Get:4 http://deb.debian.org/debian bookworm/main amd64 pkgconf amd64 1.8.1-1 [25.9 kB]
+#19 6.152 Get:5 http://deb.debian.org/debian bookworm/main amd64 pkg-config amd64 1.8.1-1 [13.7 kB]
+#19 6.402 debconf: delaying package configuration, since apt-utils is not installed
+#19 6.436 Fetched 2555 kB in 1s (4261 kB/s)
+#19 6.490 Selecting previously unselected package libpkgconf3:amd64.
+#19 6.490 (Reading database ... 
+(Reading database ... 5%
+(Reading database ... 10%
+(Reading database ... 15%
+(Reading database ... 20%
+(Reading database ... 25%
+(Reading database ... 30%
+(Reading database ... 35%
+(Reading database ... 40%
+(Reading database ... 45%
+(Reading database ... 50%
+(Reading database ... 55%
+(Reading database ... 60%
+(Reading database ... 65%
+(Reading database ... 70%
+(Reading database ... 75%
+(Reading database ... 80%
+(Reading database ... 85%
+(Reading database ... 90%
+(Reading database ... 95%
+(Reading database ... 100%
+(Reading database ... 9042 files and directories currently installed.)
+#19 6.541 Preparing to unpack .../libpkgconf3_1.8.1-1_amd64.deb ...
+#19 6.557 Unpacking libpkgconf3:amd64 (1.8.1-1) ...
+#19 6.610 Selecting previously unselected package libssl-dev:amd64.
+#19 6.611 Preparing to unpack .../libssl-dev_3.0.22-1~deb12u2_amd64.deb ...
+#19 6.619 Unpacking libssl-dev:amd64 (3.0.22-1~deb12u2) ...
+#19 6.902 Selecting previously unselected package pkgconf-bin.
+#19 6.904 Preparing to unpack .../pkgconf-bin_1.8.1-1_amd64.deb ...
+#19 6.914 Unpacking pkgconf-bin (1.8.1-1) ...
+#19 6.981 Selecting previously unselected package pkgconf:amd64.
+#19 6.983 Preparing to unpack .../pkgconf_1.8.1-1_amd64.deb ...
+#19 6.992 Unpacking pkgconf:amd64 (1.8.1-1) ...
+#19 7.075 Selecting previously unselected package pkg-config:amd64.
+#19 7.076 Preparing to unpack .../pkg-config_1.8.1-1_amd64.deb ...
+#19 7.091 Unpacking pkg-config:amd64 (1.8.1-1) ...
+#19 7.158 Setting up libpkgconf3:amd64 (1.8.1-1) ...
+#19 7.186 Setting up libssl-dev:amd64 (3.0.22-1~deb12u2) ...
+#19 7.214 Setting up pkgconf-bin (1.8.1-1) ...
+#19 7.247 Setting up pkgconf:amd64 (1.8.1-1) ...
+#19 7.278 Setting up pkg-config:amd64 (1.8.1-1) ...
+#19 7.305 Processing triggers for libc-bin (2.36-9+deb12u14) ...
+#19 DONE 7.7s
+
+#20 [runtime-core rust-builder  3/13] WORKDIR /build
+#20 DONE 0.1s
+
+#21 [runtime-core rust-builder  4/13] COPY Cargo.toml Cargo.lock ./
+#21 DONE 0.1s
+
+#22 [runtime-node rust-builder  5/13] COPY crates/shared/Cargo.toml ./crates/shared/
+#22 DONE 0.1s
+
+#23 [runtime-node rust-builder  6/13] COPY crates/node/Cargo.toml ./crates/node/
+#23 DONE 0.1s
+
+#24 [runtime-core rust-builder  7/13] COPY crates/core/Cargo.toml ./crates/core/
+#24 DONE 0.1s
+
+#25 [runtime rust-builder  8/13] COPY crates/extension-sdk/ ./crates/extension-sdk/
+#25 DONE 0.1s
+
+#26 [runtime rust-builder  9/13] COPY tests/fixtures/extension-sdk/ ./tests/fixtures/extension-sdk/
+#26 DONE 0.1s
+
+#27 [runtime-core rust-builder 10/13] RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/src crates/core/src/bin crates/core/tests &&     echo 'pub fn dummy() {}' > crates/shared/src/lib.rs &&     echo 'fn main() { println!("cargo:rustc-env=AETHER_APP_VERSION=0.1.0"); }' > crates/shared/build.rs &&     echo 'pub fn dummy() {}' > crates/node/src/lib.rs &&     echo 'fn main() {}' > crates/node/src/bin/aether-node.rs &&     echo 'pub fn dummy() {}' > crates/core/src/lib.rs &&     echo 'fn main() {}' > crates/core/src/main.rs &&     echo 'fn main() {}' > crates/core/src/bin/aether-core.rs &&     echo 'fn main() {}' > crates/core/src/bootstrap.rs &&     echo 'fn main() {}' > crates/core/src/bin/backup.rs &&     echo 'fn main() {}' > crates/core/src/bin/restore.rs &&     echo 'fn main() {}' > crates/core/src/bin/recover.rs &&     echo 'fn main() {}' > crates/core/src/bin/extension-worker.rs &&     echo 'fn main() {}' > crates/core/src/bin/extension-pack.rs &&     touch crates/core/tests/p0.rs crates/core/tests/catalog.rs
+#27 DONE 0.6s
+
+#28 [runtime rust-builder 11/13] RUN --mount=type=cache,target=/usr/local/cargo/registry     --mount=type=cache,target=/usr/local/cargo/git     cargo build --release --locked         --bin media-poc         --bin aether-core         --bin aether-node         --bin media-bootstrap         --bin media-backup         --bin media-restore         --bin media-recover         --bin media-extension-worker         --bin media-extension-pack
+#28 0.867     Updating crates.io index
+#28 ...
+
+#18 [runtime-core web-builder 4/6] RUN npm ci --no-audit --no-fund
+#18 7.234 
+#18 7.234 added 183 packages in 6s
+#18 7.235 npm notice
+#18 7.235 npm notice New major version of npm available! 10.9.9 -> 12.2.1
+#18 7.235 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+#18 7.235 npm notice To update run: npm install -g npm@12.2.1
+#18 7.235 npm notice
+#18 DONE 9.9s
+
+#29 [runtime-core web-builder 5/6] COPY apps/web/ ./
+#29 DONE 0.7s
+
+#30 [runtime web-builder 6/6] RUN npm run build
+#30 0.774 
+#30 0.774 > build
+#30 0.774 > vite build && node scripts/externalize-bootstrap.mjs
+#30 0.774 
+#30 2.837 vite v8.3.5 building ssr environment for production...
+#30 2.878 transforming...
+#30 4.903 ✓ 307 modules transformed.
+#30 5.020 rendering chunks...
+#30 5.084 computing gzip size...
+#30 5.087 .svelte-kit/output/server/.vite/manifest.json                                    11.81 kB │ gzip:  1.53 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/default.jVcJgvWm.woff2          145.97 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/MusicArtwork.CqOL11Vc.css         0.40 kB │ gzip:  0.24 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/_page.BQlzd9RC.css                0.96 kB │ gzip:  0.42 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/Catalog.BCEnHDvt.css              2.43 kB │ gzip:  0.90 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/ProfileMenu.f_I2lxU8.css          4.16 kB │ gzip:  1.28 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/_page.lzNNsKlt.css                6.10 kB │ gzip:  1.48 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/_page.CA1Tma7t.css                6.25 kB │ gzip:  1.60 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/_page.TGe5Ti4l.css                7.16 kB │ gzip:  1.73 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/SettingsView.CNSZjLl2.css        11.42 kB │ gzip:  2.73 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/_layout.vsTEeQsn.css             18.47 kB │ gzip:  4.77 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/Navbar.BypjXuXo.css              18.73 kB │ gzip:  3.73 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/ImmersivePlayer.nul2CTuG.css     28.44 kB │ gzip:  5.66 kB
+#30 5.087 .svelte-kit/output/server/_app/immutable/assets/_page.C7rPlghK.css              106.36 kB │ gzip: 16.97 kB
+#30 5.087 .svelte-kit/output/server/entries/pages/_layout.ts.js                             0.17 kB │ gzip:  0.14 kB │ map:   0.24 kB
+#30 5.087 .svelte-kit/output/server/chunks/errors.js                                        0.18 kB │ gzip:  0.15 kB │ map:   0.37 kB
+#30 5.087 .svelte-kit/output/server/chunks/index-server2.js                                 0.22 kB │ gzip:  0.15 kB │ map:   0.77 kB
+#30 5.087 .svelte-kit/output/server/chunks/server.js                                        0.22 kB │ gzip:  0.15 kB │ map:   0.56 kB
+#30 5.087 .svelte-kit/output/server/chunks/queue.js                                         0.23 kB │ gzip:  0.20 kB │ map:   1.93 kB
+#30 5.087 .svelte-kit/output/server/entries/pages/_page.svelte.js                           0.26 kB │ gzip:  0.19 kB │ map:   0.26 kB
+#30 5.087 .svelte-kit/output/server/entries/pages/films/_page.svelte.js                     0.29 kB │ gzip:  0.20 kB │ map:   0.29 kB
+#30 5.087 .svelte-kit/output/server/entries/pages/search/_page.svelte.js                    0.29 kB │ gzip:  0.20 kB │ map:   0.29 kB
+#30 5.087 .svelte-kit/output/server/entries/pages/series/_page.svelte.js                    0.29 kB │ gzip:  0.20 kB │ map:   0.29 kB
+#30 5.087 .svelte-kit/output/server/entries/pages/settings/_page.svelte.js                  0.30 kB │ gzip:  0.21 kB │ map:   0.29 kB
+#30 5.087 .svelte-kit/output/server/env.js                                                  0.31 kB │ gzip:  0.19 kB │ map:   0.57 kB
+#30 5.087 .svelte-kit/output/server/chunks/index-server.js                                  0.43 kB │ gzip:  0.27 kB │ map:   1.63 kB
+#30 5.087 .svelte-kit/output/server/entries/fallbacks/error.svelte.js                       0.45 kB │ gzip:  0.28 kB │ map:   0.46 kB
+#30 5.087 .svelte-kit/output/server/chunks/navigation.js                                    0.65 kB │ gzip:  0.31 kB │ map:   1.21 kB
+#30 5.087 .svelte-kit/output/server/entries/endpoints/manifest.webmanifest/_server.ts.js    0.74 kB │ gzip:  0.44 kB │ map:   1.19 kB
+#30 5.087 .svelte-kit/output/server/chunks/state.js                                         0.76 kB │ gzip:  0.31 kB │ map:   2.22 kB
+#30 5.087 .svelte-kit/output/server/chunks/MusicArtwork.js                                  0.83 kB │ gzip:  0.48 kB │ map:   1.32 kB
+#30 5.087 .svelte-kit/output/server/chunks/playlists.js                                     0.83 kB │ gzip:  0.53 kB │ map:   1.38 kB
+#30 5.087 .svelte-kit/output/server/chunks/brand.js                                         1.14 kB │ gzip:  0.49 kB │ map:   2.31 kB
+#30 5.087 .svelte-kit/output/server/entries/pages/_layout.svelte.js                         1.15 kB │ gzip:  0.57 kB │ map:   4.99 kB
+#30 5.087 .svelte-kit/output/server/chunks/ass-renderer.js                                  1.56 kB │ gzip:  0.79 kB │ map:   3.04 kB
+#30 5.087 .svelte-kit/output/server/chunks/playback-preferences.js                          1.64 kB │ gzip:  0.67 kB │ map:   2.70 kB
+#30 5.087 .svelte-kit/output/server/chunks/source-selection.js                              2.09 kB │ gzip:  0.82 kB │ map:   5.24 kB
+#30 5.087 .svelte-kit/output/server/index.js                                                2.30 kB │ gzip:  0.91 kB │ map:   3.32 kB
+#30 5.087 .svelte-kit/output/server/entries/pages/downloads/_page.svelte.js                 2.92 kB │ gzip:  1.16 kB │ map:  12.32 kB
+#30 5.087 .svelte-kit/output/server/entries/pages/login/_page.svelte.js                     3.87 kB │ gzip:  1.35 kB │ map:  27.74 kB
+#30 5.087 .svelte-kit/output/server/entries/pages/lists/_page.svelte.js                     5.31 kB │ gzip:  1.82 kB │ map:  18.91 kB
+#30 5.087 .svelte-kit/output/server/chunks/ProfileMenu.js                                   6.49 kB │ gzip:  1.57 kB │ map:  15.35 kB
+#30 5.087 .svelte-kit/output/server/entries/pages/music/_page.svelte.js                     9.51 kB │ gzip:  2.67 kB │ map:  21.42 kB
+#30 5.087 .svelte-kit/output/server/entries/pages/admin/libraries/_page.svelte.js          10.13 kB │ gzip:  3.03 kB │ map: 472.85 kB
+#30 5.087 .svelte-kit/output/server/chunks/Icon.js                                         10.90 kB │ gzip:  4.10 kB │ map:  23.94 kB
+#30 5.087 .svelte-kit/output/server/chunks/Catalog.js                                      13.62 kB │ gzip:  4.30 kB │ map:  58.18 kB
+#30 5.087 .svelte-kit/output/server/chunks/Navbar.js                                       16.34 kB │ gzip:  4.24 kB │ map:  62.36 kB
+#30 5.087 .svelte-kit/output/server/chunks/server-errors.js                                24.00 kB │ gzip:  4.50 kB │ map:  34.73 kB
+#30 5.087 .svelte-kit/output/server/chunks/page-cache.js                                   30.49 kB │ gzip:  8.78 kB │ map:  64.10 kB
+#30 5.087 .svelte-kit/output/server/chunks/SettingsView.js                                 39.44 kB │ gzip:  8.14 kB │ map:  73.64 kB
+#30 5.087 .svelte-kit/output/server/chunks/server2.js                                      47.65 kB │ gzip: 13.15 kB │ map: 155.67 kB
+#30 5.087 .svelte-kit/output/server/remote-entry.js                                        54.43 kB │ gzip: 11.83 kB │ map:  89.77 kB
+#30 5.087 .svelte-kit/output/server/chunks/native.js                                       70.25 kB │ gzip: 15.92 kB │ map: 132.00 kB
+#30 5.087 .svelte-kit/output/server/chunks/ImmersivePlayer.js                              76.58 kB │ gzip: 18.29 kB │ map: 202.59 kB
+#30 5.087 .svelte-kit/output/server/chunks/internal.js                                     92.93 kB │ gzip: 25.30 kB │ map: 196.91 kB
+#30 5.087 .svelte-kit/output/server/chunks/instance.js                                    118.57 kB │ gzip: 31.92 kB │ map: 239.43 kB
+#30 5.087 
+#30 5.089 ✓ built in 2.25s
+#30 5.096 Analysing routes
+#30 ...
+
+#28 [runtime rust-builder 11/13] RUN --mount=type=cache,target=/usr/local/cargo/registry     --mount=type=cache,target=/usr/local/cargo/git     cargo build --release --locked         --bin media-poc         --bin aether-core         --bin aether-node         --bin media-bootstrap         --bin media-backup         --bin media-restore         --bin media-recover         --bin media-extension-worker         --bin media-extension-pack
+#28 6.666  Downloading crates ...
+#28 7.314   Downloaded adler2 v2.0.1
+#28 7.408   Downloaded sqlx-macros-core v0.9.0
+#28 7.430   Downloaded sqlx-macros v0.9.0
+#28 7.437   Downloaded sqlx-mysql v0.9.0
+#28 7.467   Downloaded stable_deref_trait v1.2.1
+#28 7.467   Downloaded native-tls v0.2.18
+#28 7.473   Downloaded multiversion_no_op v1.0.0
+#28 7.487   Downloaded time-core v0.1.9
+#28 7.495   Downloaded subtle v2.6.1
+#28 7.527   Downloaded byteorder v1.5.0
+#28 7.538   Downloaded once_cell v1.21.4
+#28 7.544   Downloaded sqlx-core v0.9.0
+#28 7.580   Downloaded string-interner v0.19.0
+#28 7.583   Downloaded thiserror v2.0.21
+#28 7.604   Downloaded multer v3.1.0
+#28 7.613   Downloaded rustc-hash v2.1.3
+#28 7.620   Downloaded tokio-macros v2.7.2
+#28 7.623   Downloaded try-lock v0.2.5
+#28 7.627   Downloaded tokio-native-tls v0.3.1
+#28 7.637   Downloaded num-conv v0.2.2
+#28 7.639   Downloaded powerfmt v0.2.1
+#28 7.644   Downloaded tower-service v0.3.3
+#28 7.647   Downloaded sync_wrapper v1.0.2
+#28 7.653   Downloaded tempfile v3.27.0
+#28 7.665   Downloaded stringprep v0.1.5
+#28 7.667   Downloaded synstructure v0.14.0
+#28 7.671   Downloaded tokio-rustls v0.26.6
+#28 7.679   Downloaded tokio-tungstenite v0.29.0
+#28 7.685   Downloaded phc v0.6.1
+#28 7.688   Downloaded sqlx-sqlite v0.9.0
+#28 7.700   Downloaded tinystr v0.8.5
+#28 7.703   Downloaded time-macros v0.2.32
+#28 7.709   Downloaded tokio-stream v0.1.19
+#28 7.724   Downloaded thiserror-impl v2.0.21
+#28 7.729   Downloaded unicase v2.10.0
+#28 7.732   Downloaded unicode-properties v0.1.5
+#28 7.737   Downloaded zerofrom v0.1.8
+#28 7.740   Downloaded unicode-ident v1.0.27
+#28 7.747   Downloaded axum-core v0.5.6
+#28 7.752   Downloaded num-traits v0.2.19
+#28 7.766   Downloaded openssl-sys v0.9.118
+#28 7.770   Downloaded slab v0.4.12
+#28 7.772   Downloaded moxcms v0.8.1
+#28 7.807   Downloaded cfg_aliases v0.2.2
+#28 7.808   Downloaded crossbeam-utils v0.8.23
+#28 7.815   Downloaded parking v2.2.1
+#28 7.819   Downloaded tracing-attributes v0.1.31
+#28 7.828   Downloaded openssl-macros v0.1.1
+#28 7.831   Downloaded parking_lot_core v0.9.12
+#28 7.837   Downloaded version_check v0.9.5
+#28 7.840   Downloaded num-integer v0.1.47
+#28 7.843   Downloaded wat v1.263.0
+#28 7.844   Downloaded want v0.3.2
+#28 7.845   Downloaded zerofrom-derive v0.1.8
+#28 7.848   Downloaded tower-layer v0.3.3
+#28 7.849   Downloaded atoi v2.0.0
+#28 7.854   Downloaded untrusted v0.7.1
+#28 7.857   Downloaded yoke v0.8.4
+#28 7.862   Downloaded tinyvec v1.13.3
+#28 7.869   Downloaded tungstenite v0.29.0
+#28 7.877   Downloaded atomic-waker v1.1.2
+#28 7.881   Downloaded yoke-derive v0.8.4
+#28 7.883   Downloaded zeroize_derive v1.5.0
+#28 7.885   Downloaded block-buffer v0.12.1
+#28 7.886   Downloaded openssl-probe v0.2.2
+#28 7.888   Downloaded ppv-lite86 v0.2.21
+#28 7.890   Downloaded block-buffer v0.10.4
+#28 7.895   Downloaded rand_chacha v0.9.0
+#28 7.897   Downloaded proc-macro2 v1.0.107
+#28 7.905   Downloaded quick-xml v0.42.0
+#28 7.921   Downloaded password-hash v0.6.1
+#28 7.924   Downloaded percent-encoding v2.3.2
+#28 7.927   Downloaded utf8_iter v1.1.0
+#28 7.928   Downloaded quinn v0.11.12
+#28 7.934   Downloaded rand v0.9.5
+#28 7.944   Downloaded parking_lot v0.12.5
+#28 7.950   Downloaded num-bigint v0.4.8
+#28 7.958   Downloaded rand_core v0.9.5
+#28 7.965   Downloaded writeable v0.6.4
+#28 7.969   Downloaded zune-core v0.5.3
+#28 7.973   Downloaded wasmi_collections v2.0.0
+#28 7.976   Downloaded utf_types v1.0.0
+#28 7.981   Downloaded unicode-bidi v0.3.18
+#28 7.985   Downloaded autocfg v1.5.1
+#28 7.989   Downloaded zerovec-derive v0.11.7
+#28 7.991   Downloaded whoami v2.1.3
+#28 7.995   Downloaded zeroize v1.9.1
+#28 8.008   Downloaded zmij v1.0.23
+#28 8.015   Downloaded openssl v0.10.82
+#28 8.045   Downloaded png v0.18.1
+#28 8.052   Downloaded untrusted v0.9.0
+#28 8.061   Downloaded smallvec v1.16.4
+#28 8.064   Downloaded rustversion v1.0.23
+#28 8.066   Downloaded quinn-proto v0.11.19
+#28 8.080   Downloaded rpassword v7.5.4
+#28 8.086   Downloaded reqwest v0.13.5
+#28 8.103   Downloaded argon2 v0.6.0
+#28 8.109   Downloaded base64ct v1.8.3
+#28 8.114   Downloaded blake2 v0.11.0
+#28 8.118   Downloaded rustls-native-certs v0.8.5
+#28 8.121   Downloaded rand v0.10.3
+#28 8.126   Downloaded quick-error v2.0.1
+#28 8.128   Downloaded potential_utf v0.1.6
+#28 8.131   Downloaded sha1 v0.11.0
+#28 8.133   Downloaded pem v3.0.6
+#28 8.136   Downloaded signature v2.2.0
+#28 8.138   Downloaded serde_derive v1.0.229
+#28 8.144   Downloaded scopeguard v1.2.0
+#28 8.146   Downloaded pin-project-lite v0.2.17
+#28 8.156   Downloaded rtoolbox v0.0.6
+#28 8.161   Downloaded rustls-pki-types v1.15.1
+#28 8.164   Downloaded rand_core v0.6.4
+#28 8.167   Downloaded sha2 v0.11.1
+#28 8.175   Downloaded simdutf8 v0.1.5
+#28 8.180   Downloaded simple_asn1 v0.6.4
+#28 8.182   Downloaded wasmi_core v2.0.0
+#28 8.188   Downloaded wasmi_ir v2.0.0
+#28 8.192   Downloaded bitflags v2.13.2
+#28 8.200   Downloaded crc v3.4.0
+#28 8.202   Downloaded serde_urlencoded v0.7.1
+#28 8.205   Downloaded tracing-core v0.1.36
+#28 8.211   Downloaded byteorder-lite v0.1.0
+#28 8.216   Downloaded rand_pcg v0.10.2
+#28 8.220   Downloaded bytemuck v1.25.2
+#28 8.224   Downloaded rand_core v0.10.1
+#28 8.225   Downloaded cfg-if v1.0.5
+#28 8.230   Downloaded quote v1.0.47
+#28 8.232   Downloaded digest v0.10.7
+#28 8.234   Downloaded pkg-config v0.3.34
+#28 8.239   Downloaded semver v1.0.28
+#28 8.244   Downloaded url v2.5.8
+#28 8.245   Downloaded base64 v0.22.1
+#28 8.254   Downloaded crypto-common v0.2.2
+#28 8.256   Downloaded crc-catalog v2.5.0
+#28 8.259   Downloaded quinn-udp v0.5.16
+#28 8.260   Downloaded allocator-api2 v0.2.21
+#28 8.264   Downloaded crypto-common v0.1.7
+#28 8.265   Downloaded core_detect v1.0.0
+#28 8.267   Downloaded serde v1.0.229
+#28 8.273   Downloaded crossbeam-queue v0.3.14
+#28 8.275   Downloaded cpufeatures v0.3.1
+#28 8.277   Downloaded data-encoding v2.11.1
+#28 8.277   Downloaded chacha20 v0.10.2
+#28 8.280   Downloaded uuid v1.29.0
+#28 8.287   Downloaded cpufeatures v0.2.17
+#28 8.287   Downloaded zune-jpeg v0.5.15
+#28 8.296   Downloaded deranged v0.5.9
+#28 8.299   Downloaded serde_path_to_error v0.1.20
+#28 8.305   Downloaded sha1 v0.10.7
+#28 8.309   Downloaded sha2 v0.10.9
+#28 8.312   Downloaded typenum v1.20.1
+#28 8.318   Downloaded zerotrie v0.2.5
+#28 8.323   Downloaded simd-adler32 v0.3.10
+#28 8.325   Downloaded base64 v0.23.1
+#28 8.333   Downloaded cmov v0.5.4
+#28 8.336   Downloaded signal-hook-registry v1.4.8
+#28 8.338   Downloaded tower v0.5.3
+#28 8.352   Downloaded cmake v0.1.58
+#28 8.356   Downloaded shlex v2.0.1
+#28 8.357   Downloaded crc32fast v1.5.4
+#28 8.361   Downloaded rustls-webpki v0.103.16
+#28 8.365   Downloaded ctutils v0.4.7
+#28 8.367   Downloaded spin v0.9.9
+#28 8.372   Downloaded socket2 v0.6.5
+#28 8.375   Downloaded bumpalo v3.20.3
+#28 8.378   Downloaded ryu v1.0.23
+#28 8.382   Downloaded sqlx-postgres v0.9.0
+#28 8.395   Downloaded rustls-platform-verifier v0.7.1
+#28 8.399   Downloaded serde_core v1.0.229
+#28 8.402   Downloaded wasm-encoder v0.263.0
+#28 8.416   Downloaded bytes v1.12.1
+#28 8.421   Downloaded serde_json v1.0.154
+#28 8.433   Downloaded tower-http v0.6.11
+#28 8.457   Downloaded cc v1.11.0
+#28 8.464   Downloaded unicode-normalization v0.1.26
+#28 8.475   Downloaded zerovec v0.11.9
+#28 8.484   Downloaded tokio-util v0.7.20
+#28 8.495   Downloaded sqlx v0.9.0
+#28 8.534   Downloaded wast v263.0.0
+#28 8.553   Downloaded rustls v0.23.46
+#28 8.576   Downloaded rustix v1.1.6
+#28 8.617   Downloaded axum v0.8.9
+#28 8.628   Downloaded tower-http v0.7.1
+#28 8.646   Downloaded pxfm v0.1.30
+#28 8.693   Downloaded webpki-roots v1.0.11
+#28 8.705   Downloaded unicode-width v0.2.3
+#28 8.713   Downloaded zlib-rs v0.6.8
+#28 8.726   Downloaded vcpkg v0.2.15
+#28 8.782   Downloaded syn v3.0.9
+#28 8.797   Downloaded time v0.3.55
+#28 8.822   Downloaded wasmparser v0.228.0
+#28 8.838   Downloaded ring v0.17.14
+#28 8.912   Downloaded futures-channel v0.3.34
+#28 8.919   Downloaded foldhash v0.2.0
+#28 8.919   Downloaded generic-array v0.14.7
+#28 8.919   Downloaded hashlink v0.11.1
+#28 8.924   Downloaded hyper-util v0.1.21
+#28 8.936   Downloaded aws-lc-rs v1.19.0
+#28 8.958   Downloaded icu_properties_data v2.4.0
+#28 8.972   Downloaded syn v2.0.119
+#28 8.991   Downloaded wasmi v2.0.0
+#28 9.016   Downloaded wasmparser v0.263.0
+#28 9.052   Downloaded zerocopy v0.8.63
+#28 9.094   Downloaded tracing v0.1.44
+#28 9.121   Downloaded litemap v0.8.3
+#28 9.132   Downloaded tokio v1.54.1
+#28 9.205   Downloaded linux-raw-sys v0.12.1
+#28 9.312   Downloaded hashbrown v0.15.5
+#28 9.319   Downloaded futures-core v0.3.34
+#28 9.321   Downloaded foldhash v0.1.5
+#28 9.324   Downloaded futures-intrusive v0.5.0
+#28 9.331   Downloaded hashbrown v0.17.1
+#28 9.340   Downloaded http-body v1.1.0
+#28 9.341   Downloaded hyper-rustls v0.27.10
+#28 9.343   Downloaded icu_provider v2.4.0
+#28 9.350   Downloaded memchr v2.8.3
+#28 9.745   Downloaded find-msvc-tools v0.1.15
+#28 9.826   Downloaded dunce v1.0.5
+#28 9.829   Downloaded foreign-types-shared v0.1.1
+#28 9.833   Downloaded libsqlite3-sys v0.37.0
+#28 9.941   Downloaded leb128fmt v0.1.0
+#28 9.942   Downloaded event-listener v5.4.2
+#28 9.946   Downloaded futures-sink v0.3.34
+#28 9.949   Downloaded futures-task v0.3.34
+#28 9.950   Downloaded idna v1.1.0
+#28 9.957   Downloaded matchit v0.8.4
+#28 9.960   Downloaded foreign-types v0.3.2
+#28 9.962   Downloaded icu_properties v2.4.0
+#28 9.969   Downloaded http v1.5.0
+#28 9.976   Downloaded jsonwebtoken v11.1.0
+#28 10.20   Downloaded mime_guess v2.0.5
+#28 10.22   Downloaded aws-lc-sys v0.47.0
+#28 10.65   Downloaded digest v0.11.3
+#28 10.65   Downloaded either v1.19.0
+#28 10.65   Downloaded flate2 v1.1.10
+#28 10.66   Downloaded encoding_rs v0.8.44
+#28 10.67   Downloaded futures-io v0.3.34
+#28 10.67   Downloaded futures-util v0.3.34
+#28 10.68   Downloaded http-range-header v0.4.2
+#28 10.68   Downloaded hmac v0.13.0
+#28 10.68   Downloaded httparse v1.10.1
+#28 10.69   Downloaded itoa v1.0.18
+#28 10.69   Downloaded image v0.25.10
+#28 10.70   Downloaded libc v0.2.191
+#28 10.76   Downloaded miniz_oxide v0.8.9
+#28 10.77   Downloaded dotenvy v0.15.7
+#28 10.77   Downloaded flume v0.12.0
+#28 10.78   Downloaded errno v0.3.14
+#28 10.78   Downloaded form_urlencoded v1.2.2
+#28 10.78   Downloaded getrandom v0.2.17
+#28 10.78   Downloaded futures-executor v0.3.34
+#28 10.79   Downloaded hkdf v0.13.0
+#28 10.79   Downloaded httpdate v1.0.3
+#28 10.80   Downloaded icu_collections v2.4.0
+#28 10.80   Downloaded icu_locale_core v2.4.0
+#28 10.81   Downloaded image-webp v0.2.4
+#28 10.81   Downloaded lock_api v0.4.14
+#28 10.81   Downloaded indexmap v2.14.2
+#28 10.83   Downloaded md-5 v0.11.0
+#28 10.83   Downloaded mio v1.2.4
+#28 10.86   Downloaded displaydoc v0.2.7
+#28 10.86   Downloaded jobserver v0.1.35
+#28 10.87   Downloaded equivalent v1.0.3
+#28 10.87   Downloaded futures-macro v0.3.34
+#28 10.87   Downloaded mime v0.3.17
+#28 10.88   Downloaded hybrid-array v0.4.15
+#28 10.88   Downloaded hashbrown v0.16.1
+#28 10.89   Downloaded getrandom v0.4.3
+#28 10.90   Downloaded hyper v1.12.0
+#28 10.91   Downloaded libm v0.2.16
+#28 10.92   Downloaded fs_extra v1.3.0
+#28 10.92   Downloaded heck v0.5.0
+#28 10.92   Downloaded fastrand v2.5.0
+#28 10.92   Downloaded log v0.4.35
+#28 10.93   Downloaded icu_normalizer_data v2.4.0
+#28 10.93   Downloaded icu_normalizer v2.4.0
+#28 10.94   Downloaded hex v0.4.3
+#28 10.95   Downloaded lru-slab v0.1.3
+#28 10.95   Downloaded http-body-util v0.1.5
+#28 10.95   Downloaded fdeflate v0.3.7
+#28 10.96   Downloaded ipnet v2.12.2
+#28 10.96   Downloaded getrandom v0.3.4
+#28 10.96   Downloaded miniz_oxide v0.9.1
+#28 10.96   Downloaded idna_adapter v1.2.2
+#28 11.22    Compiling proc-macro2 v1.0.107
+#28 11.22    Compiling quote v1.0.47
+#28 11.96    Compiling unicode-ident v1.0.27
+#28 12.08    Compiling libc v0.2.191
+#28 12.95    Compiling syn v3.0.9
+#28 13.61    Compiling jobserver v0.1.35
+#28 13.88    Compiling shlex v2.0.1
+#28 14.01    Compiling find-msvc-tools v0.1.15
+#28 14.18    Compiling cc v1.11.0
+#28 ...
+
+#30 [runtime-core web-builder 6/6] RUN npm run build
+#30 6.078 Building app
+#30 6.080 vite v8.3.5 building client environment for production...
+#30 6.096 transforming...
+#30 8.303 ✓ 391 modules transformed.
+#30 8.429 rendering chunks...
+#30 8.516 computing gzip size...
+#30 8.571 .svelte-kit/output/client/_app/version.json                                              0.02 kB │ gzip:   0.04 kB
+#30 8.571 .svelte-kit/output/client/.vite/manifest.json                                           15.33 kB │ gzip:   2.08 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/workers/jassub-worker-DMjjNpwC.js              29.83 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/workers/worker-BtmCwW4G.js                    112.60 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/default.jVcJgvWm.woff2                 145.97 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/jassub-worker.CkfUMbe_.wasm          2,110.10 kB │ gzip: 908.71 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/workers/assets/jassub-worker-CkfUMbe_.wasm  2,110.10 kB │ gzip: 908.71 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/jassub-worker-modern.Bwy5Vua-.wasm   2,189.91 kB │ gzip: 930.78 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/MusicArtwork.CqOL11Vc.css                0.40 kB │ gzip:   0.24 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/4.BQlzd9RC.css                           0.96 kB │ gzip:   0.42 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/ProfileMenu.f_I2lxU8.css                 4.16 kB │ gzip:   1.28 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/FilmDetail.C6HuEKfV.css                  4.94 kB │ gzip:   1.23 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/6.lzNNsKlt.css                           6.10 kB │ gzip:   1.48 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/7.CA1Tma7t.css                           6.25 kB │ gzip:   1.60 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/SeriesDetail.BIzhm6gu.css                6.33 kB │ gzip:   1.52 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/8.TGe5Ti4l.css                           7.16 kB │ gzip:   1.73 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/ImageManager.C-u6braf.css                8.97 kB │ gzip:   2.04 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/SettingsView.CNSZjLl2.css               11.42 kB │ gzip:   2.73 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/0.vsTEeQsn.css                          18.47 kB │ gzip:   4.77 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/Navbar.BypjXuXo.css                     18.73 kB │ gzip:   3.73 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/ImmersivePlayer.nul2CTuG.css            28.44 kB │ gzip:   5.66 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/Catalog.DejDhyWz.css                    28.69 kB │ gzip:   5.44 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/WatchStatus.bcfpAGNS.css                31.27 kB │ gzip:   5.86 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/assets/3.BK0McR2-.css                         100.25 kB │ gzip:  16.02 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/Ci433WGm.js                              0.02 kB │ gzip:   0.04 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/WFYYzx59.js                              0.05 kB │ gzip:   0.06 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/entry/payload.DSmR2FwN.js                       0.06 kB │ gzip:   0.07 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/nodes/2.myzJsGqJ.js                             0.11 kB │ gzip:   0.11 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/nodes/5.dxTTz4FG.js                             0.13 kB │ gzip:   0.12 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/nodes/10.CLtBZpol.js                            0.13 kB │ gzip:   0.12 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/nodes/9.BY4-eEdb.js                             0.13 kB │ gzip:   0.12 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/nodes/11.DCSEdxVs.js                            0.13 kB │ gzip:   0.12 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/nodes/1.BL1wm9tq.js                             0.32 kB │ gzip:   0.24 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/CHrOhcOk.js                              0.54 kB │ gzip:   0.31 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/Bv7mCIqQ.js                              0.58 kB │ gzip:   0.43 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/entry/start.BzMFn6q9.js                         0.59 kB │ gzip:   0.33 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/BpO0IXWi.js                              0.69 kB │ gzip:   0.45 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/XKyaHtl9.js                              0.72 kB │ gzip:   0.42 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/BdUalomz.js                              0.73 kB │ gzip:   0.39 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/CAeNxkOp.js                              0.78 kB │ gzip:   0.52 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/BaPW0O53.js                              1.05 kB │ gzip:   0.54 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/Dbk4wgIR.js                              1.09 kB │ gzip:   0.51 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/C0EzQq8z.js                              1.15 kB │ gzip:   0.63 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/Bjy-W4x2.js                              1.36 kB │ gzip:   0.65 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/CRzLMJPS.js                              1.53 kB │ gzip:   0.80 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/DZZClsF-.js                              2.62 kB │ gzip:   1.20 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/Pw1UmmTu.js                              2.76 kB │ gzip:   0.96 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/entry/app.CuiWuuqG.js                           3.93 kB │ gzip:   1.19 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/nodes/4.l3Xhy3Ki.js                             5.37 kB │ gzip:   2.55 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/D2MoB3vp.js                              5.78 kB │ gzip:   2.45 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/CWP_Z9jr.js                              7.72 kB │ gzip:   3.38 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/CI98QWtS.js                              9.18 kB │ gzip:   3.25 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/nodes/8.CZBEfPhm.js                            12.31 kB │ gzip:   4.71 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/DBSO_vjO.js                             12.55 kB │ gzip:   5.06 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/D0QHlZP7.js                             13.90 kB │ gzip:   5.40 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/nodes/7.BUe-x6L0.js                            14.19 kB │ gzip:   4.48 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/nodes/0.I-_vMC9_.js                            14.20 kB │ gzip:   5.81 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/nodes/6.sLCJ_cOD.js                            15.20 kB │ gzip:   5.20 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/wuMaCoaX.js                             21.46 kB │ gzip:   7.62 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/CrfwidMK.js                             22.95 kB │ gzip:   7.78 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/3CplnqMT.js                             23.18 kB │ gzip:   8.23 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/UHQc2LIK.js                             40.96 kB │ gzip:  15.07 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/DoNie-Wl.js                             43.61 kB │ gzip:  14.14 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/fa8uXAyS.js                             45.64 kB │ gzip:  12.63 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/DnLG-kNH.js                             54.03 kB │ gzip:  16.71 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/DB5Vq10y.js                             54.42 kB │ gzip:  18.41 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/Dt31U8AQ.js                             57.14 kB │ gzip:  22.10 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/chunks/D9WMuE8a.js                             73.53 kB │ gzip:  23.18 kB
+#30 8.571 .svelte-kit/output/client/_app/immutable/nodes/3.BvZ8VI2A.js                           293.38 kB │ gzip:  83.63 kB
+#30 8.571 
+#30 8.572 ✓ built in 2.49s
+#30 9.532 Prerendering
+#30 9.653 Building service worker
+#30 9.653 vite v8.3.5 building serviceWorker environment for production...
+#30 9.668 transforming...
+#30 9.685 ✓ 16 modules transformed.
+#30 9.708 rendering chunks...
+#30 9.712 computing gzip size...
+#30 9.712 .svelte-kit/output/client/.vite/service-worker-manifest.json  0.16 kB │ gzip: 0.11 kB
+#30 9.712 .svelte-kit/output/client/service-worker.js                   7.24 kB │ gzip: 2.81 kB
+#30 9.712 
+#30 9.712 ✓ built in 58ms
+#30 9.713 
+#30 9.713 Run npm run preview to preview your production build locally.
+#30 9.713 
+#30 9.713 > Using @sveltejs/adapter-static
+#30 9.731 Wrote site to "build"
+#30 9.731 ✔ done
+#30 DONE 10.9s
+
+#28 [runtime rust-builder 11/13] RUN --mount=type=cache,target=/usr/local/cargo/registry     --mount=type=cache,target=/usr/local/cargo/git     cargo build --release --locked         --bin media-poc         --bin aether-core         --bin aether-node         --bin media-bootstrap         --bin media-backup         --bin media-restore         --bin media-recover         --bin media-extension-worker         --bin media-extension-pack
+#28 16.79    Compiling pkg-config v0.3.34
+#28 17.07    Compiling synstructure v0.14.0
+#28 17.10    Compiling serde v1.0.229
+#28 17.21    Compiling serde_derive v1.0.229
+#28 17.41    Compiling zerofrom-derive v0.1.8
+#28 18.73    Compiling cfg-if v1.0.5
+#28 18.75    Compiling yoke-derive v0.8.4
+#28 19.28    Compiling syn v2.0.119
+#28 19.71    Compiling zerovec-derive v0.11.7
+#28 20.31    Compiling displaydoc v0.2.7
+#28 20.64    Compiling version_check v0.9.5
+#28 20.78    Compiling serde_core v1.0.229
+#28 20.90    Compiling cmake v0.1.58
+#28 21.09    Compiling dunce v1.0.5
+#28 21.12    Compiling fs_extra v1.3.0
+#28 21.26    Compiling aws-lc-sys v0.47.0
+#28 22.48    Compiling generic-array v0.14.7
+#28 22.53    Compiling pin-project-lite v0.2.17
+#28 22.58    Compiling itoa v1.0.18
+#28 22.71    Compiling typenum v1.20.1
+#28 23.27    Compiling bytes v1.12.1
+#28 23.64    Compiling futures-core v0.3.34
+#28 23.77    Compiling memchr v2.8.3
+#28 24.12    Compiling icu_properties_data v2.4.0
+#28 24.18    Compiling icu_normalizer_data v2.4.0
+#28 24.24    Compiling autocfg v1.5.1
+#28 24.41    Compiling zmij v1.0.23
+#28 24.45    Compiling zerofrom v0.1.8
+#28 24.50    Compiling errno v0.3.14
+#28 24.51    Compiling stable_deref_trait v1.2.1
+#28 24.53    Compiling yoke v0.8.4
+#28 24.57    Compiling signal-hook-registry v1.4.8
+#28 24.64    Compiling tracing-attributes v0.1.31
+#28 24.79    Compiling tokio-macros v2.7.2
+#28 25.09    Compiling socket2 v0.6.5
+#28 25.31    Compiling mio v1.2.4
+#28 25.52    Compiling futures-sink v0.3.34
+#28 25.56    Compiling vcpkg v0.2.15
+#28 25.63    Compiling serde_json v1.0.154
+#28 25.70    Compiling tokio v1.54.1
+#28 25.96    Compiling smallvec v1.16.4
+#28 26.18    Compiling thiserror-impl v2.0.21
+#28 27.25    Compiling getrandom v0.4.3
+#28 27.35    Compiling log v0.4.35
+#28 28.02    Compiling once_cell v1.21.4
+#28 28.24    Compiling zerovec v0.11.9
+#28 30.29    Compiling zeroize_derive v1.5.0
+#28 30.54    Compiling futures-macro v0.3.34
+#28 30.90    Compiling rustls v0.23.46
+#28 30.96    Compiling futures-task v0.3.34
+#28 31.05    Compiling slab v0.4.12
+#28 31.14    Compiling parking_lot_core v0.9.12
+#28 31.22    Compiling futures-io v0.3.34
+#28 31.29    Compiling futures-util v0.3.34
+#28 32.64    Compiling zeroize v1.9.1
+#28 33.16    Compiling bitflags v2.13.2
+#28 33.68    Compiling tinystr v0.8.5
+#28 33.80    Compiling http v1.5.0
+#28 35.15    Compiling scopeguard v1.2.0
+#28 35.19    Compiling crossbeam-utils v0.8.23
+#28 35.29    Compiling utf_types v1.0.0
+#28 35.45    Compiling writeable v0.6.4
+#28 35.60    Compiling litemap v0.8.3
+#28 35.72    Compiling percent-encoding v2.3.2
+#28 35.83    Compiling icu_locale_core v2.4.0
+#28 37.18    Compiling utf8_iter v1.1.0
+#28 37.26    Compiling potential_utf v0.1.6
+#28 37.33    Compiling tracing-core v0.1.36
+#28 37.77    Compiling zerotrie v0.2.5
+#28 37.99    Compiling num-traits v0.2.19
+#28 38.05    Compiling thiserror v2.0.21
+#28 38.17    Compiling aws-lc-rs v1.19.0
+#28 38.35    Compiling icu_provider v2.4.0
+#28 38.66    Compiling tracing v0.1.44
+#28 38.84    Compiling icu_collections v2.4.0
+#28 39.25    Compiling lock_api v0.4.14
+#28 39.39    Compiling block-buffer v0.10.4
+#28 39.45    Compiling crypto-common v0.1.7
+#28 39.73    Compiling rand_core v0.10.1
+#28 41.56    Compiling digest v0.10.7
+#28 42.47    Compiling rustls-pki-types v1.15.1
+#28 79.96    Compiling httparse v1.10.1
+#28 80.08    Compiling cpufeatures v0.2.17
+#28 80.10    Compiling untrusted v0.7.1
+#28 80.15    Compiling cmov v0.5.4
+#28 80.31    Compiling ctutils v0.4.7
+#28 82.61    Compiling icu_normalizer v2.4.0
+#28 83.21    Compiling icu_properties v2.4.0
+#28 84.30    Compiling form_urlencoded v1.2.2
+#28 84.40    Compiling http-body v1.1.0
+#28 84.46    Compiling hybrid-array v0.4.15
+#28 85.19    Compiling untrusted v0.9.0
+#28 86.00    Compiling idna_adapter v1.2.2
+#28 86.29    Compiling zerocopy v0.8.63
+#28 86.43    Compiling tower-service v0.3.3
+#28 86.59    Compiling getrandom v0.3.4
+#28 86.83    Compiling idna v1.1.0
+#28 89.18    Compiling crypto-common v0.2.2
+#28 89.89    Compiling block-buffer v0.12.1
+#28 90.95    Compiling libsqlite3-sys v0.37.0
+#28 91.08    Compiling openssl-sys v0.9.118
+#28 91.31    Compiling futures-channel v0.3.34
+#28 91.84    Compiling subtle v2.6.1
+#28 91.91    Compiling base64 v0.22.1
+#28 92.30    Compiling equivalent v1.0.3
+#28 92.47    Compiling rustversion v1.0.23
+#28 93.93    Compiling digest v0.11.3
+#28 94.17    Compiling url v2.5.8
+#28 95.11    Compiling rustls-webpki v0.103.16
+#28 98.19    Compiling spin v0.9.9
+#28 98.93    Compiling foldhash v0.2.0
+#28 99.12    Compiling allocator-api2 v0.2.21
+#28 99.37    Compiling simd-adler32 v0.3.10
+#28 100.00    Compiling httpdate v1.0.3
+#28 100.3    Compiling tower-layer v0.3.3
+#28 100.4    Compiling try-lock v0.2.5
+#28 102.5    Compiling want v0.3.2
+#28 105.1    Compiling hashbrown v0.16.1
+#28 106.0    Compiling rand_core v0.9.5
+#28 106.0    Compiling ppv-lite86 v0.2.21
+#28 106.3    Compiling parking_lot v0.12.5
+#28 106.7    Compiling sha2 v0.10.9
+#28 106.8    Compiling sync_wrapper v1.0.2
+#28 106.8    Compiling cpufeatures v0.3.1
+#28 106.9    Compiling openssl-probe v0.2.2
+#28 107.0    Compiling crc-catalog v2.5.0
+#28 107.1    Compiling parking v2.2.1
+#28 107.1    Compiling hashbrown v0.17.1
+#28 107.3    Compiling crc32fast v1.5.4
+#28 107.4    Compiling mime v0.3.17
+#28 107.6    Compiling base64 v0.23.1
+#28 107.6    Compiling atomic-waker v1.1.2
+#28 107.8    Compiling adler2 v2.0.1
+#28 108.2    Compiling hyper v1.12.0
+#28 109.9    Compiling indexmap v2.14.2
+#28 111.0    Compiling event-listener v5.4.2
+#28 111.1    Compiling crc v3.4.0
+#28 111.4    Compiling encoding_rs v0.8.44
+#28 111.4    Compiling futures-intrusive v0.5.0
+#28 111.7    Compiling rand_chacha v0.9.0
+#28 111.9    Compiling crossbeam-queue v0.3.14
+#28 112.0    Compiling hashlink v0.11.1
+#28 112.1    Compiling tokio-stream v0.1.19
+#28 112.4    Compiling webpki-roots v1.0.11
+#28 112.4    Compiling http-body-util v0.1.5
+#28 112.5    Compiling either v1.19.0
+#28 112.7    Compiling ipnet v2.12.2
+#28 112.9    Compiling openssl v0.10.82
+#28 113.0    Compiling tinyvec v1.13.3
+#28 113.2    Compiling foreign-types-shared v0.1.1
+#28 113.2    Compiling foreign-types v0.3.2
+#28 113.2    Compiling unicode-normalization v0.1.26
+#28 113.3    Compiling sqlx-core v0.9.0
+#28 113.5    Compiling hyper-util v0.1.21
+#28 115.6    Compiling atoi v2.0.0
+#28 115.7    Compiling rand v0.9.5
+#28 116.3    Compiling miniz_oxide v0.9.1
+#28 116.3    Compiling chacha20 v0.10.2
+#28 116.5    Compiling tower v0.5.3
+#28 116.9    Compiling hmac v0.13.0
+#28 117.4    Compiling sha1 v0.10.7
+#28 117.6    Compiling openssl-macros v0.1.1
+#28 117.7    Compiling multer v3.1.0
+#28 117.8    Compiling ryu v1.0.23
+#28 117.9    Compiling core_detect v1.0.0
+#28 118.0    Compiling unicode-properties v0.1.5
+#28 118.1    Compiling native-tls v0.2.18
+#28 118.1    Compiling simdutf8 v0.1.5
+#28 118.3    Compiling libm v0.2.16
+#28 118.4    Compiling hex v0.4.3
+#28 118.6    Compiling unicode-bidi v0.3.18
+#28 118.9    Compiling multiversion_no_op v1.0.0
+#28 119.0    Compiling data-encoding v2.11.1
+#28 120.1    Compiling rustix v1.1.6
+#28 121.4    Compiling tungstenite v0.29.0
+#28 122.8    Compiling stringprep v0.1.5
+#28 123.3    Compiling serde_urlencoded v0.7.1
+#28 124.4    Compiling flume v0.12.0
+#28 124.6    Compiling hkdf v0.13.0
+#28 124.6    Compiling flate2 v1.1.10
+#28 124.9    Compiling rand v0.10.3
+#28 125.9    Compiling miniz_oxide v0.8.9
+#28 126.6    Compiling sha2 v0.11.1
+#28 126.8    Compiling futures-executor v0.3.34
+#28 126.9    Compiling fdeflate v0.3.7
+#28 127.0    Compiling md-5 v0.11.0
+#28 127.5    Compiling byteorder v1.5.0
+#28 127.5    Compiling leb128fmt v0.1.0
+#28 127.6    Compiling whoami v2.1.3
+#28 127.6    Compiling num-conv v0.2.2
+#28 127.7    Compiling byteorder-lite v0.1.0
+#28 127.7    Compiling time-core v0.1.9
+#28 127.8    Compiling media-contracts v0.1.0 (/build/crates/shared)
+#28 127.9    Compiling linux-raw-sys v0.12.1
+#28 127.9    Compiling zune-core v0.5.3
+#28 128.1    Compiling dotenvy v0.15.7
+#28 128.1    Compiling quick-error v2.0.1
+#28 128.4    Compiling pxfm v0.1.30
+#28 128.5    Compiling unicase v2.10.0
+#28 128.6    Compiling mime_guess v2.0.5
+#28 129.1    Compiling sqlx-postgres v0.9.0
+#28 131.8    Compiling moxcms v0.8.1
+#28 133.0    Compiling image-webp v0.2.4
+#28 136.3    Compiling zune-jpeg v0.5.15
+#28 137.4    Compiling time-macros v0.2.32
+#28 138.3    Compiling wasm-encoder v0.263.0
+#28 141.8    Compiling png v0.18.1
+#28 143.2    Compiling sqlx-sqlite v0.9.0
+#28 145.0    Compiling tokio-tungstenite v0.29.0
+#28 145.2    Compiling axum-core v0.5.6
+#28 146.3    Compiling uuid v1.29.0
+#28 146.5    Compiling num-integer v0.1.47
+#28 146.9    Compiling serde_path_to_error v0.1.20
+#28 147.2    Compiling wasmi_ir v2.0.0
+#28 147.9    Compiling powerfmt v0.2.1
+#28 148.0    Compiling unicode-width v0.2.3
+#28 148.0    Compiling heck v0.5.0
+#28 148.1    Compiling matchit v0.8.4
+#28 149.1    Compiling bumpalo v3.20.3
+#28 149.2    Compiling fastrand v2.5.0
+#28 149.4    Compiling wasmparser v0.228.0
+#28 149.5    Compiling base64ct v1.8.3
+#28 149.7    Compiling bytemuck v1.25.2
+#28 150.0    Compiling deranged v0.5.9
+#28 150.9    Compiling time v0.3.55
+#28 152.8    Compiling image v0.25.10
+#28 162.7    Compiling phc v0.6.1
+#28 163.0    Compiling tempfile v3.27.0
+#28 163.5    Compiling wast v263.0.0
+#28 173.2    Compiling axum v0.8.9
+#28 179.1    Compiling sqlx-macros-core v0.9.0
+#28 180.3    Compiling num-bigint v0.4.8
+#28 182.5    Compiling wasmi_core v2.0.0
+#28 183.0    Compiling tokio-native-tls v0.3.1
+#28 183.8    Compiling rustls-native-certs v0.8.5
+#28 184.2    Compiling tokio-rustls v0.26.6
+#28 184.8    Compiling quick-xml v0.42.0
+#28 186.0    Compiling ring v0.17.14
+#28 186.8    Compiling wasmi v2.0.0
+#28 199.7    Compiling media-node v0.1.0 (/build/crates/node)
+#28 199.7    Compiling hyper-rustls v0.27.10
+#28 199.9    Compiling rustls-platform-verifier v0.7.1
+#28 201.2    Compiling simple_asn1 v0.6.4
+#28 202.8    Compiling sqlx-macros v0.9.0
+#28 203.5    Compiling wat v1.263.0
+#28 204.0    Compiling password-hash v0.6.1
+#28 204.1    Compiling tower-http v0.6.11
+#28 204.4    Compiling blake2 v0.11.0
+#28 204.6    Compiling pem v3.0.6
+#28 204.9    Compiling tokio-util v0.7.20
+#28 205.3    Compiling getrandom v0.2.17
+#28 205.4    Compiling rtoolbox v0.0.6
+#28 205.5    Compiling wasmi_collections v2.0.0
+#28 205.9    Compiling http-range-header v0.4.2
+#28 206.2    Compiling signature v2.2.0
+#28 206.2    Compiling jsonwebtoken v11.1.0
+#28 209.8    Compiling tower-http v0.7.1
+#28 210.8    Compiling rpassword v7.5.4
+#28 213.0    Compiling argon2 v0.6.0
+#28 213.5    Compiling reqwest v0.13.5
+#28 218.7    Compiling sqlx v0.9.0
+#28 221.8    Compiling media-extension-sdk v0.1.0 (/build/crates/extension-sdk)
+#28 223.0    Compiling media-poc v0.1.0 (/build/crates/core)
+#28 238.2     Finished `release` profile [optimized] target(s) in 3m 57s
+#28 DONE 240.4s
+
+#31 [runtime-node rust-builder 12/13] COPY crates/ ./crates/
+#31 DONE 0.3s
+
+#32 [runtime-node rust-builder 13/13] RUN --mount=type=cache,target=/usr/local/cargo/registry     --mount=type=cache,target=/usr/local/cargo/git     touch crates/shared/src/lib.rs           crates/shared/build.rs           crates/node/src/lib.rs           crates/node/src/bin/aether-node.rs           crates/core/src/lib.rs           crates/core/src/main.rs           crates/core/src/bin/aether-core.rs           crates/core/src/bootstrap.rs           crates/core/src/bin/backup.rs           crates/core/src/bin/restore.rs           crates/core/src/bin/recover.rs           crates/core/src/bin/extension-worker.rs           crates/core/src/bin/extension-pack.rs &&     rm -f target/release/deps/*media_contracts*           target/release/deps/*media_node*           target/release/deps/*aether_node*           target/release/deps/*media_poc*           target/release/deps/*aether_core*           target/release/deps/*media_bootstrap*           target/release/deps/*media_backup*           target/release/deps/*media_restore*           target/release/deps/*media_recover*           target/release/media-poc           target/release/aether-core           target/release/aether-node           target/release/media-bootstrap           target/release/media-backup           target/release/media-restore           target/release/media-recover &&     cargo build --release --locked         --bin media-poc         --bin aether-core         --bin aether-node         --bin media-bootstrap         --bin media-backup         --bin media-restore         --bin media-recover         --bin media-extension-worker         --bin media-extension-pack &&     strip --strip-all         target/release/media-poc         target/release/aether-core         target/release/aether-node         target/release/media-bootstrap         target/release/media-backup         target/release/media-restore         target/release/media-recover         target/release/media-extension-worker         target/release/media-extension-pack
+#32 1.147    Compiling media-contracts v0.1.0 (/build/crates/shared)
+#32 1.161    Compiling media-poc v0.1.0 (/build/crates/core)
+#32 4.529    Compiling media-node v0.1.0 (/build/crates/node)
+#32 538.7     Finished `release` profile [optimized] target(s) in 8m 57s
+#32 DONE 539.5s
+
+#33 [runtime-core runtime-core  1/10] RUN groupadd --gid 10001 aether     && useradd --uid 10001 --gid 10001 --create-home --home-dir /app --shell /usr/sbin/nologin aether
+#33 CACHED
+
+#34 [runtime-core runtime-core  2/10] RUN mkdir -p /data /backups /app/apps/web/build     && chown -R aether:aether /data /backups /app     && chmod 0750 /data     && chmod 0700 /backups     && chmod 0755 /app
+#34 CACHED
+
+#35 [runtime-core rust-builder 13/13] RUN --mount=type=cache,target=/usr/local/cargo/registry     --mount=type=cache,target=/usr/local/cargo/git     touch crates/shared/src/lib.rs           crates/shared/build.rs           crates/node/src/lib.rs           crates/node/src/bin/aether-node.rs           crates/core/src/lib.rs           crates/core/src/main.rs           crates/core/src/bin/aether-core.rs           crates/core/src/bootstrap.rs           crates/core/src/bin/backup.rs           crates/core/src/bin/restore.rs           crates/core/src/bin/recover.rs           crates/core/src/bin/extension-worker.rs           crates/core/src/bin/extension-pack.rs &&     rm -f target/release/deps/*media_contracts*           target/release/deps/*media_node*           target/release/deps/*aether_node*           target/release/deps/*media_poc*           target/release/deps/*aether_core*           target/release/deps/*media_bootstrap*           target/release/deps/*media_backup*           target/release/deps/*media_restore*           target/release/deps/*media_recover*           target/release/media-poc           target/release/aether-core           target/release/aether-node           target/release/media-bootstrap           target/release/media-backup           target/release/media-restore           target/release/media-recover &&     cargo build --release --locked         --bin media-poc         --bin aether-core         --bin aether-node         --bin media-bootstrap         --bin media-backup         --bin media-restore         --bin media-recover         --bin media-extension-worker         --bin media-extension-pack &&     strip --strip-all         target/release/media-poc         target/release/aether-core         target/release/aether-node         target/release/media-bootstrap         target/release/media-backup         target/release/media-restore         target/release/media-recover         target/release/media-extension-worker         target/release/media-extension-pack
+#35 CACHED
+
+#36 [runtime-core rust-builder 12/13] COPY crates/ ./crates/
+#36 CACHED
+
+#37 [runtime-core rust-builder  8/13] COPY crates/extension-sdk/ ./crates/extension-sdk/
+#37 CACHED
+
+#38 [runtime-core rust-builder  5/13] COPY crates/shared/Cargo.toml ./crates/shared/
+#38 CACHED
+
+#39 [runtime-core rust-builder  6/13] COPY crates/node/Cargo.toml ./crates/node/
+#39 CACHED
+
+#40 [runtime-core rust-builder 10/13] RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/src crates/core/src/bin crates/core/tests &&     echo 'pub fn dummy() {}' > crates/shared/src/lib.rs &&     echo 'fn main() { println!("cargo:rustc-env=AETHER_APP_VERSION=0.1.0"); }' > crates/shared/build.rs &&     echo 'pub fn dummy() {}' > crates/node/src/lib.rs &&     echo 'fn main() {}' > crates/node/src/bin/aether-node.rs &&     echo 'pub fn dummy() {}' > crates/core/src/lib.rs &&     echo 'fn main() {}' > crates/core/src/main.rs &&     echo 'fn main() {}' > crates/core/src/bin/aether-core.rs &&     echo 'fn main() {}' > crates/core/src/bootstrap.rs &&     echo 'fn main() {}' > crates/core/src/bin/backup.rs &&     echo 'fn main() {}' > crates/core/src/bin/restore.rs &&     echo 'fn main() {}' > crates/core/src/bin/recover.rs &&     echo 'fn main() {}' > crates/core/src/bin/extension-worker.rs &&     echo 'fn main() {}' > crates/core/src/bin/extension-pack.rs &&     touch crates/core/tests/p0.rs crates/core/tests/catalog.rs
+#40 CACHED
+
+#41 [runtime-core rust-builder  4/13] COPY Cargo.toml Cargo.lock ./
+#41 CACHED
+
+#42 [runtime-core rust-builder 11/13] RUN --mount=type=cache,target=/usr/local/cargo/registry     --mount=type=cache,target=/usr/local/cargo/git     cargo build --release --locked         --bin media-poc         --bin aether-core         --bin aether-node         --bin media-bootstrap         --bin media-backup         --bin media-restore         --bin media-recover         --bin media-extension-worker         --bin media-extension-pack
+#42 CACHED
+
+#43 [runtime-core rust-builder  7/13] COPY crates/core/Cargo.toml ./crates/core/
+#43 CACHED
+
+#44 [runtime-core rust-builder  9/13] COPY tests/fixtures/extension-sdk/ ./tests/fixtures/extension-sdk/
+#44 CACHED
+
+#45 [runtime-node runtime-node  5/10] RUN ln -s /usr/local/bin/ffmpeg /usr/bin/ffmpeg     && ln -s /usr/local/bin/ffprobe /usr/bin/ffprobe
+#45 CACHED
+
+#46 [runtime-node runtime-node  2/10] RUN apt-get update && apt-get install -y --no-install-recommends         ca-certificates         curl         tini     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc /usr/share/locale /usr/share/info
+#46 CACHED
+
+#47 [runtime-node runtime-node  4/10] COPY --from=probe-runtime --chmod=0755 /probe/bin/ffprobe /usr/local/bin/ffprobe
+#47 CACHED
+
+#48 [runtime-node runtime-node  7/10] RUN groupadd --gid 10001 aether     && useradd --uid 10001 --gid 10001 --create-home --home-dir /app --shell /usr/sbin/nologin aether
+#48 CACHED
+
+#49 [runtime-node runtime-node  6/10] COPY --from=probe-runtime /probe/share/media-probe /usr/share/media-probe
+#49 CACHED
+
+#50 [runtime-node runtime-node  3/10] COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg
+#50 CACHED
+
+#51 [runtime-node runtime-node  8/10] RUN mkdir -p /data /media /app     && chown -R aether:aether /data /media /app     && chmod 0750 /data     && chmod 0755 /media /app
+#51 CACHED
+
+#52 [runtime probe-runtime 3/4] COPY scripts/build-ffmpeg.sh /tmp/build-ffmpeg.sh
+#52 CACHED
+
+#53 [runtime runtime  3/16] RUN ln -s /usr/local/bin/ffmpeg /usr/bin/ffmpeg     && ln -s /usr/local/bin/ffprobe /usr/bin/ffprobe
+#53 CACHED
+
+#14 [runtime probe-runtime 2/4] RUN apt-get update && apt-get install -y --no-install-recommends         build-essential ca-certificates curl pkg-config nasm xz-utils     && rm -rf /var/lib/apt/lists/*
+#14 CACHED
+
+#54 [runtime runtime  4/16] COPY --from=probe-runtime /probe/share/media-probe /usr/share/media-probe
+#54 CACHED
+
+#55 [runtime backup-runtime 2/2] RUN apt-get update && apt-get install -y --no-install-recommends         ca-certificates         curl         tini     && curl -fsSL --retry 3 https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/keyrings/postgresql-pgdg.asc     && printf '%s\n' 'deb [signed-by=/usr/share/keyrings/postgresql-pgdg.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main' > /etc/apt/sources.list.d/pgdg.list     && apt-get update     && apt-get install -y --no-install-recommends postgresql-client-18     && pg_dump --version     && pg_restore --version     && apt-get clean     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc /usr/share/locale /usr/share/info
+#55 CACHED
+
+#56 [runtime runtime  1/16] COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg
+#56 CACHED
+
+#57 [runtime runtime  5/16] RUN groupadd --gid 10001 aether     && useradd --uid 10001 --gid 10001 --create-home --home-dir /app --shell /usr/sbin/nologin aether
+#57 CACHED
+
+#58 [runtime runtime  2/16] COPY --from=probe-runtime --chmod=0755 /probe/bin/ffprobe /usr/local/bin/ffprobe
+#58 CACHED
+
+#59 [runtime probe-runtime 4/4] RUN bash /tmp/build-ffmpeg.sh /probe runtime
+#59 CACHED
+
+#60 [runtime runtime  6/16] RUN mkdir -p /data /backups /media /app/apps/web/build     && chown -R aether:aether /data /backups /media /app     && chmod 0750 /data     && chmod 0700 /backups     && chmod 0755 /media /app
+#60 CACHED
+
+#61 [runtime rust-builder 13/13] RUN --mount=type=cache,target=/usr/local/cargo/registry     --mount=type=cache,target=/usr/local/cargo/git     touch crates/shared/src/lib.rs           crates/shared/build.rs           crates/node/src/lib.rs           crates/node/src/bin/aether-node.rs           crates/core/src/lib.rs           crates/core/src/main.rs           crates/core/src/bin/aether-core.rs           crates/core/src/bootstrap.rs           crates/core/src/bin/backup.rs           crates/core/src/bin/restore.rs           crates/core/src/bin/recover.rs           crates/core/src/bin/extension-worker.rs           crates/core/src/bin/extension-pack.rs &&     rm -f target/release/deps/*media_contracts*           target/release/deps/*media_node*           target/release/deps/*aether_node*           target/release/deps/*media_poc*           target/release/deps/*aether_core*           target/release/deps/*media_bootstrap*           target/release/deps/*media_backup*           target/release/deps/*media_restore*           target/release/deps/*media_recover*           target/release/media-poc           target/release/aether-core           target/release/aether-node           target/release/media-bootstrap           target/release/media-backup           target/release/media-restore           target/release/media-recover &&     cargo build --release --locked         --bin media-poc         --bin aether-core         --bin aether-node         --bin media-bootstrap         --bin media-backup         --bin media-restore         --bin media-recover         --bin media-extension-worker         --bin media-extension-pack &&     strip --strip-all         target/release/media-poc         target/release/aether-core         target/release/aether-node         target/release/media-bootstrap         target/release/media-backup         target/release/media-restore         target/release/media-recover         target/release/media-extension-worker         target/release/media-extension-pack
+#61 CACHED
+
+#62 [runtime rust-builder  6/13] COPY crates/node/Cargo.toml ./crates/node/
+#62 CACHED
+
+#63 [runtime rust-builder  7/13] COPY crates/core/Cargo.toml ./crates/core/
+#63 CACHED
+
+#64 [runtime rust-builder 10/13] RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/src crates/core/src/bin crates/core/tests &&     echo 'pub fn dummy() {}' > crates/shared/src/lib.rs &&     echo 'fn main() { println!("cargo:rustc-env=AETHER_APP_VERSION=0.1.0"); }' > crates/shared/build.rs &&     echo 'pub fn dummy() {}' > crates/node/src/lib.rs &&     echo 'fn main() {}' > crates/node/src/bin/aether-node.rs &&     echo 'pub fn dummy() {}' > crates/core/src/lib.rs &&     echo 'fn main() {}' > crates/core/src/main.rs &&     echo 'fn main() {}' > crates/core/src/bin/aether-core.rs &&     echo 'fn main() {}' > crates/core/src/bootstrap.rs &&     echo 'fn main() {}' > crates/core/src/bin/backup.rs &&     echo 'fn main() {}' > crates/core/src/bin/restore.rs &&     echo 'fn main() {}' > crates/core/src/bin/recover.rs &&     echo 'fn main() {}' > crates/core/src/bin/extension-worker.rs &&     echo 'fn main() {}' > crates/core/src/bin/extension-pack.rs &&     touch crates/core/tests/p0.rs crates/core/tests/catalog.rs
+#64 CACHED
+
+#65 [runtime rust-builder  8/13] COPY crates/extension-sdk/ ./crates/extension-sdk/
+#65 CACHED
+
+#66 [runtime rust-builder  5/13] COPY crates/shared/Cargo.toml ./crates/shared/
+#66 CACHED
+
+#67 [runtime rust-builder 12/13] COPY crates/ ./crates/
+#67 CACHED
+
+#68 [runtime rust-builder  9/13] COPY tests/fixtures/extension-sdk/ ./tests/fixtures/extension-sdk/
+#68 CACHED
+
+#69 [runtime rust-builder  4/13] COPY Cargo.toml Cargo.lock ./
+#69 CACHED
+
+#70 [runtime rust-builder 11/13] RUN --mount=type=cache,target=/usr/local/cargo/registry     --mount=type=cache,target=/usr/local/cargo/git     cargo build --release --locked         --bin media-poc         --bin aether-core         --bin aether-node         --bin media-bootstrap         --bin media-backup         --bin media-restore         --bin media-recover         --bin media-extension-worker         --bin media-extension-pack
+#70 CACHED
+
+#71 [runtime runtime  7/16] COPY --from=rust-builder --chmod=0755 /build/target/release/media-extension-worker /usr/local/bin/media-extension-worker
+#71 ...
+
+#72 [runtime-core runtime-core  3/10] COPY --from=rust-builder --chmod=0755 /build/target/release/aether-core /usr/local/bin/aether-core
+#72 DONE 0.4s
+
+#71 [runtime runtime  7/16] COPY --from=rust-builder --chmod=0755 /build/target/release/media-extension-worker /usr/local/bin/media-extension-worker
+#71 DONE 0.4s
+
+#73 [runtime-node runtime-node  9/10] COPY --from=rust-builder --chmod=0755 /build/target/release/aether-node /usr/local/bin/aether-node
+#73 DONE 0.4s
+
+#74 [runtime-node runtime-node 10/10] WORKDIR /app
+#74 ...
+
+#75 [runtime-core runtime-core  4/10] COPY --from=rust-builder --chmod=0755 /build/target/release/media-bootstrap /usr/local/bin/media-bootstrap
+#75 DONE 0.2s
+
+#74 [runtime-node runtime-node 10/10] WORKDIR /app
+#74 DONE 0.4s
+
+#76 [runtime-core runtime-core  5/10] COPY --from=rust-builder --chmod=0755 /build/target/release/media-backup /usr/local/bin/media-backup
+#76 DONE 0.3s
+
+#77 [runtime runtime  8/16] COPY --from=rust-builder --chmod=0755 /build/target/release/aether-core /usr/local/bin/aether-core
+#77 DONE 0.4s
+
+#78 [runtime-node] exporting to image
+#78 exporting layers
+#78 ...
+
+#79 [runtime runtime  9/16] COPY --from=rust-builder --chmod=0755 /build/target/release/aether-node /usr/local/bin/aether-node
+#79 DONE 0.6s
+
+#80 [runtime runtime 10/16] COPY --from=rust-builder --chmod=0755 /build/target/release/media-bootstrap /usr/local/bin/media-bootstrap
+#80 ...
+
+#81 [runtime-core runtime-core  6/10] COPY --from=rust-builder --chmod=0755 /build/target/release/media-restore /usr/local/bin/media-restore
+#81 DONE 1.3s
+
+#78 [runtime-node] exporting to image
+#78 exporting layers 1.4s done
+#78 exporting manifest sha256:f42194cc81b5a7f12050f3153d3bed105e322947d62a2912fad0245b6443884d
+#78 exporting manifest sha256:f42194cc81b5a7f12050f3153d3bed105e322947d62a2912fad0245b6443884d 0.7s done
+#78 exporting config sha256:71b5c6e0511585b3650680e0335ef825ca933d5bd16c52e3d8bdd944a4e68006
+#78 ...
+
+#80 [runtime runtime 10/16] COPY --from=rust-builder --chmod=0755 /build/target/release/media-bootstrap /usr/local/bin/media-bootstrap
+#80 DONE 1.6s
+
+#82 [runtime runtime 11/16] COPY --from=rust-builder --chmod=0755 /build/target/release/media-backup /usr/local/bin/media-backup
+#82 ...
+
+#83 [runtime-core runtime-core  7/10] COPY --from=rust-builder --chmod=0755 /build/target/release/media-recover /usr/local/bin/media-recover
+#83 DONE 1.0s
+
+#84 [runtime-core runtime-core  8/10] COPY --from=rust-builder --chmod=0755 /build/target/release/media-extension-worker /usr/local/bin/media-extension-worker
+#84 ...
+
+#82 [runtime runtime 11/16] COPY --from=rust-builder --chmod=0755 /build/target/release/media-backup /usr/local/bin/media-backup
+#82 DONE 0.8s
+
+#78 [runtime-node] exporting to image
+#78 exporting config sha256:71b5c6e0511585b3650680e0335ef825ca933d5bd16c52e3d8bdd944a4e68006 0.1s done
+#78 exporting attestation manifest sha256:1425b88461c6cd658f1ac15b1f40eb2909bdd7a1b4cb5d6fc3f9997e0f6b1ed4 0.2s done
+#78 exporting manifest list sha256:e77f10d9fe7489da3eafe22c521de0b71637467c3ebea19389633bed194e5a44 0.1s done
+#78 naming to docker.io/library/media-ci:runtime-node 0.2s done
+#78 unpacking to docker.io/library/media-ci:runtime-node
+#78 ...
+
+#84 [runtime-core runtime-core  8/10] COPY --from=rust-builder --chmod=0755 /build/target/release/media-extension-worker /usr/local/bin/media-extension-worker
+#84 DONE 1.1s
+
+#85 [runtime-core runtime-core  9/10] COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
+#85 ...
+
+#78 [runtime-node] exporting to image
+#78 unpacking to docker.io/library/media-ci:runtime-node 0.8s done
+#78 DONE 4.2s
+
+#86 [runtime runtime 12/16] COPY --from=rust-builder --chmod=0755 /build/target/release/media-restore /usr/local/bin/media-restore
+#86 DONE 1.5s
+
+#85 [runtime-core runtime-core  9/10] COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
+#85 DONE 2.1s
+
+#87 [runtime runtime 13/16] COPY --from=rust-builder --chmod=0755 /build/target/release/media-recover /usr/local/bin/media-recover
+#87 DONE 0.8s
+
+#88 [runtime runtime 14/16] RUN ln -s /usr/local/bin/aether-core /usr/local/bin/media-poc     && ln -s /usr/local/bin/aether-core /usr/local/bin/aether
+#88 ...
+
+#89 [runtime-core runtime-core 10/10] WORKDIR /app
+#89 DONE 0.3s
+
+#90 [runtime-core] exporting to image
+#90 ...
+
+#88 [runtime runtime 14/16] RUN ln -s /usr/local/bin/aether-core /usr/local/bin/media-poc     && ln -s /usr/local/bin/aether-core /usr/local/bin/aether
+#88 DONE 1.1s
+
+#91 [runtime web-builder 3/6] COPY apps/web/package.json apps/web/package-lock.json ./
+#91 CACHED
+
+#92 [runtime web-builder 5/6] COPY apps/web/ ./
+#92 CACHED
+
+#93 [runtime web-builder 6/6] RUN npm run build
+#93 CACHED
+
+#94 [runtime web-builder 4/6] RUN npm ci --no-audit --no-fund
+#94 CACHED
+
+#95 [runtime runtime 15/16] COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
+#95 DONE 1.1s
+
+#90 [runtime-core] exporting to image
+#90 ...
+
+#96 [runtime runtime 16/16] WORKDIR /app
+#96 DONE 0.1s
+
+#97 [runtime] exporting to image
+#97 exporting layers
+#97 exporting layers 3.0s done
+#97 exporting manifest sha256:5dba98a5ed91562f4a14c8adf3fb11596b10418e17273be68650cf84a05bbbf1 0.1s done
+#97 exporting config sha256:321a4665a23b3081fd346b4bb4a0c3763fddb1f86af7a772c4331e9de6f3eb8c 0.1s done
+#97 exporting attestation manifest sha256:48acb8070578301d56d2b070fca0978aac692e41c5aab7249cc4bd049051cf9f 0.1s done
+#97 exporting manifest list sha256:794d84cf1a4fb5d0e642edecda78a957babdf37ec3c600fa51f99dd5fe975453
+#97 exporting manifest list sha256:794d84cf1a4fb5d0e642edecda78a957babdf37ec3c600fa51f99dd5fe975453 0.1s done
+#97 naming to docker.io/library/media-ci:runtime done
+#97 unpacking to docker.io/library/media-ci:runtime
+#97 ...
+
+#90 [runtime-core] exporting to image
+#90 exporting layers 4.3s done
+#90 exporting manifest sha256:5e709516271de5a807739408ece34e447840b5e67a66e1d535f860d3143ec530 0.1s done
+#90 exporting config sha256:81477ef7d0ace318d3a27b1fcc77167227757a965843a2548ee30be9196225c3 0.1s done
+#90 exporting attestation manifest sha256:e1541b1fd7f3b672ab52b2e017a5145bc6c6ff9e4e31d5a633e91a243bf77a89 0.1s done
+#90 exporting manifest list sha256:f0b96f05337bb10d2747b5029b0368baf9391ca1a2c01e04d979af6bb78c492a 0.1s done
+#90 naming to docker.io/library/media-ci:runtime-core 0.0s done
+#90 unpacking to docker.io/library/media-ci:runtime-core 1.5s done
+#90 DONE 6.6s
+
+#97 [runtime] exporting to image
+#97 unpacking to docker.io/library/media-ci:runtime 1.6s done
+#97 DONE 5.1s
+
+View build details: 
+  runtime-node: docker-desktop://dashboard/build/desktop-linux/desktop-linux/x4w6rh78u6zv318blrruw7srr
+  runtime-core: docker-desktop://dashboard/build/desktop-linux/desktop-linux/b10vnzu3in4om99klqmekw7fq
+  runtime: docker-desktop://dashboard/build/desktop-linux/desktop-linux/4ssemc4b24rzd2vkeo3r5psvh

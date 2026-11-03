@@ -1,6 +1,7 @@
 <script lang="ts">
   import ImageManager from './ImageManager.svelte';
   import IdentifyModal from './IdentifyModal.svelte';
+  import SubtitleDownloads from './SubtitleDownloads.svelte';
   import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
   import { session } from '../auth/session';
   import type { Work } from './api';
@@ -26,6 +27,7 @@
   let imagesChanged = $state(false);
   let metadataOpen = $state(false);
   let identifyOpen = $state(false);
+  let subtitlesOpen = $state(false);
   let infoOpen = $state(false);
   let listOpen = $state(false);
   let menuOpen = $state(false);
@@ -219,6 +221,10 @@
   />
 {/if}
 
+{#if subtitlesOpen && isAdmin}
+  <SubtitleDownloads {work} {selectedMedia} onclose={() => (subtitlesOpen = false)} />
+{/if}
+
 <!-- Actions bar (Add to playlist + Three dots menu) -->
 <div class="work-tools-container">
   <!-- Quick Playlist Dropdown -->
@@ -349,6 +355,21 @@
         {#if isAdmin}
           <div class="menu-divider" role="separator"></div>
           <div class="menu-section-header">Administration</div>
+
+          {#if work.kind !== 'series' && !work.synthetic}
+            <button
+              type="button"
+              class="menu-item"
+              role="menuitem"
+              onclick={() => {
+                menuOpen = false;
+                subtitlesOpen = true;
+              }}
+            >
+              <Icon name="search" size={16} />
+              <span>Rechercher des sous-titres</span>
+            </button>
+          {/if}
 
           <button
             type="button"

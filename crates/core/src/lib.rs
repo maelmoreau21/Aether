@@ -47,6 +47,7 @@ pub mod product;
 #[cfg(test)]
 mod product_tests;
 pub mod progress;
+mod provider_download;
 pub mod scans;
 pub mod trickplay;
 pub mod user_media_policy;
@@ -292,10 +293,22 @@ async fn local_stream_priority(
 
 async fn indexed_subtitle(
     axum::Extension(store): axum::Extension<identity::IdentityStore>,
-    axum::extract::Path((id, index)): axum::extract::Path<(String, usize)>,
+    axum::extract::Path((id, index)): axum::extract::Path<(String, String)>,
     request: Request,
 ) -> Response {
-    inventory::subtitle(&store, &id, index, request).await
+    if let Some(download) = index.strip_prefix("downloaded-") {
+        return extensions::subtitles::content(
+            &store,
+            &id,
+            download,
+            request.method() == axum::http::Method::HEAD,
+        )
+        .await;
+    }
+    match index.parse::<usize>() {
+        Ok(index) => inventory::subtitle(&store, &id, index, request).await,
+        Err(_) => error(StatusCode::NOT_FOUND, "unknown_subtitle"),
+    }
 }
 
 async fn indexed_prepared(

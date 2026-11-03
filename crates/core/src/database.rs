@@ -383,6 +383,9 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
     sqlx::raw_sql(include_str!("extension_update_schema.sql"))
         .execute(&mut *tx)
         .await?;
+    sqlx::raw_sql(include_str!("subtitle_schema.sql"))
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await
 }
 

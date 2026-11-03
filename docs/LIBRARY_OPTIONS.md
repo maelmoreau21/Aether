@@ -52,9 +52,10 @@ accès public.
 Validation locale ciblée et limites : voir le bilan du lot dans MEMORY.md. Les
 vérifications SQLite et fournisseur simulé ne prouvent pas PostgreSQL, NAS,
 précision acoustique d'Intro Skipper ni les services externes réels. La dépendance
-SDK Git du dépôt Aether-Plugins reste épinglée : la livraison du champ collection
-nécessite d'abord un commit Core publié puis une mise à jour explicite de cette
-révision ; aucun push, paquet signé ni déploiement n'est réalisé ici.
+SDK Git du dépôt Aether-Plugins a été alignée le 3 novembre sur le commit Core
+publié `133896830c609a177e4c4c611084154d7e4aab5d`. Le fournisseur TMDb doit encore
+être reconstruit, signé et installé pour livrer le champ collection ; aucune
+nouvelle publication de paquet ni aucun déploiement n'est réalisé ici.
 
 
 ## Éditeur de bibliothèque — 25 octobre 2026

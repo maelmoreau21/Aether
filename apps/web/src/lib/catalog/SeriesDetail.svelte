@@ -155,6 +155,7 @@
             <div class="episode-actions-row">
               <EpisodePlayer {episode} {media} {immersive} isLaunching={launchingEpisodeId === episode.id} onlaunch={onLaunchEpisode} onselect={() => onSelectEpisode(episode)} />
               {#if !episode.synthetic}<WatchStatus workId={episode.id} {duration} />{/if}
+              {#if !episode.synthetic && $session?.user.role === 'administrator'}<WorkTools work={episode} selectedMedia={descriptor} />{/if}
             </div>
           </div>
         </article>

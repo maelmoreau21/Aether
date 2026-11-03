@@ -4,6 +4,7 @@
   import ProviderPriority from './ProviderPriority.svelte';
   let { options = $bindable(), kind }: { options: LibraryOptions; kind: string } = $props();
   let providers = $state<{ id: string; name: string }[]>([]);
+  let subtitleProviders = $state<{ id: string; name: string }[]>([]);
   let providerError = $state('');
   let languages = $derived(options.subtitleLanguages.join(', '));
   onMount(() => {
@@ -12,7 +13,9 @@
       .then(async response => {
         if (!response.ok) throw new Error();
         const data = await response.json();
-        providers = (data.extensions ?? []).map((entry: { manifest: { id: string; name: string } }) => ({ id:entry.manifest.id, name:entry.manifest.name }));
+        const extensions = (data.extensions ?? []) as { manifest: { id: string; name: string; permissions?: string[] } }[];
+        providers = extensions.map(entry => ({ id:entry.manifest.id, name:entry.manifest.name }));
+        subtitleProviders = extensions.filter(entry => entry.manifest.permissions?.includes('subtitles')).map(entry => ({ id:entry.manifest.id, name:entry.manifest.name }));
       }).catch(() => { if (!controller.signal.aborted) providerError = 'Les suggestions d’extensions sont indisponibles. Vous pouvez saisir leur identifiant.'; });
     return () => controller.abort();
   });
@@ -52,16 +55,17 @@
   <label class="check"><input type="checkbox" bind:checked={options.chapterImagesDuringScan} /> Extraire les images des chapitres pendant le scan</label>
 </details>
 
-<details class="advanced-section"><summary id="library-subtitle-heading"><span>Téléchargement des sous-titres</span><small>Fournisseurs à venir</small></summary>
-  <p class="notice">Ces préférences seront utilisées par les futurs fournisseurs de sous-titres. Aucun téléchargement n’est effectué actuellement.</p>
-  <label class="check"><input type="checkbox" bind:checked={options.subtitleDownloadEnabled} /> Activer le téléchargement automatique des sous-titres</label>
+<details class="advanced-section"><summary id="library-subtitle-heading"><span>Téléchargement des sous-titres</span></summary>
+  <p class="notice">Les administrateurs peuvent rechercher et télécharger explicitement des sous-titres depuis les actions d’un film ou d’un épisode. Configurez le compte et la clé du fournisseur signé dans Extensions. Les fichiers sont conservés dans les données applicatives, jamais dans les médias. Aucun téléchargement automatique n’est effectué.</p>
+  <label class="check"><input type="checkbox" bind:checked={options.subtitleDownloadEnabled} /> Autoriser la recherche et le téléchargement manuels des sous-titres</label>
   <label for="subtitle-languages">Langues des sous-titres (par ordre de préférence)</label>
   <input id="subtitle-languages" value={languages} onchange={event => options.subtitleLanguages = event.currentTarget.value.split(',').map(value => value.trim()).filter(Boolean)} maxlength="575" placeholder="fr, en" aria-describedby="subtitle-languages-hint" />
-  <p id="subtitle-languages-hint" class="hint">Codes de langue séparés par des virgules, par exemple fr, en ou fr-CA. Maximum 16 langues distinctes.</p>
-  <label class="check"><input type="checkbox" bind:checked={options.subtitleOnlyMissing} /> Télécharger uniquement les sous-titres manquants</label>
-  <label class="check"><input type="checkbox" bind:checked={options.subtitleMatchAudio} /> Rechercher uniquement les langues correspondant à l’audio</label>
+  <p id="subtitle-languages-hint" class="hint">Préférence réservée à une future automatisation ; la langue de recherche manuelle est choisie sur la fiche du média. Codes séparés par des virgules, par exemple fr, en ou fr-CA. Maximum 16 langues distinctes.</p>
+  <label class="check"><input type="checkbox" bind:checked={options.subtitleOnlyMissing} disabled /> Télécharger uniquement les sous-titres manquants (automatisation indisponible)</label>
+  <label class="check"><input type="checkbox" bind:checked={options.subtitleMatchAudio} disabled /> Rechercher uniquement les langues correspondant à l’audio (automatisation indisponible)</label>
   <label class="check"><input type="checkbox" bind:checked={options.subtitleRequireHash} /> Exiger une correspondance exacte du fichier (hash)</label>
-  <ProviderPriority id="subtitle-providers" label="Sous-titres" bind:value={options.subtitleProviders} suggestions={providers} />
+  <p class="hint">La correspondance par hash n’est pas encore disponible. Cette exigence bloque la recherche et le téléchargement manuels tant qu’elle reste activée. Une correspondance par identifiant ou titre ne garantit pas la synchronisation.</p>
+  <ProviderPriority id="subtitle-providers" label="Sous-titres" bind:value={options.subtitleProviders} suggestions={subtitleProviders} />
 </details>
 {/if}
 

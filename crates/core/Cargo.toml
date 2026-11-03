@@ -30,6 +30,7 @@ sha2 = "0.10.9"
 bytes = "1"
 http-body-util = "0.1"
 httpdate = "1"
+time = { version = "0.3", features = ["parsing"] }
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 url = "2"

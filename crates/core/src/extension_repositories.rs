@@ -92,7 +92,7 @@ fn safe_url(raw: &str) -> Result<url::Url, Error> {
     }
     Ok(url)
 }
-fn public_ip(ip: IpAddr) -> bool {
+pub(crate) fn public_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v) => {
             let [a, b, _, _] = v.octets();

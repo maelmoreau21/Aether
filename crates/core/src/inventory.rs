@@ -3720,6 +3720,7 @@ pub async fn descriptor_for_user(
         asset_id,
         row.get::<Option<String>, _>("subtitles_json").as_deref(),
     )?;
+    subtitles.extend(crate::extensions::subtitles::descriptors(store, asset_id).await?);
     let audios: Vec<media_contracts::inventory::ExternalAudio> = serde_json::from_str(
         row.get::<Option<String>, _>("audios_json")
             .as_deref()

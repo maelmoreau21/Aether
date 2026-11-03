@@ -1,5 +1,14 @@
 # Rendu ASS/SSA — 2 novembre 2026
 
+## Correctif de transition en pause et CI — 3 novembre 2026
+
+Avant de détacher une piste texte native, le lecteur la désactive explicitement.
+Cela évite qu'un ancien sous-titre reste incrusté sur une image en pause sous le
+nouveau canvas ASS. Le scénario scanner contrôle maintenant les pixels libass,
+le décalage en pause, le nettoyage et le repli WebVTT séparément. Il attend la
+fin d'initialisation du renderer, pas seulement son canvas provisoire.
+Résultats MP4/MKV, commandes et limites : [bilan P0](CI_P0_REPAIRS_2026_11_03.md).
+
 Les sidecars ASS/SSA conservent désormais leur texte original dans l'instantané
 du Node, avec un repli WebVTT échappé. Les anciennes observations restent
 lisibles ; un nouveau scan incrémental récupère l'original. La limite par fichier

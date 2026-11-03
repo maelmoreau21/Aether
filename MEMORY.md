@@ -1,3 +1,36 @@
+## 3 novembre 2026 — Automatismes, personnalisation, ASS et cycle des extensions
+
+- Bibliothèques : surveillance incrémentale dans le Node (cadence minimale60s,
+  pas événements OS), refresh Internet durable films/séries/musique, priorités
+  fournisseurs appliquées à l'admission/exécution et provenance des champs.
+  Collections calculées avec identités fournisseur, permissions/parental vivants,
+  minimum2 films ; plafond10000 candidats. Fournisseurs similaires préparatoires.
+- Extensions : compatibilité privée signée, renommages KV bornés, contrôle santé
+  sans broker, snapshot transactionnel paramètres/grants/KV/objets/blocs et rollback
+  explicite vers une extension désactivée. Transformations arbitraires non prises
+  en charge. Observation NAS précédente : TMDb/fanart réussis, IMDb/OMDb en erreur,
+  Intro désactivé ; nouveau lifecycle non testé sur NAS/PostgreSQL.
+- P2 : sections accueil ordonnées/masquables, tailles/densité cartes et4 palettes,
+  préférences par compte rechargées au focus. Affiches manuelles et lecteur
+  configurable existants conservés ; aucune nouvelle dépendance de personnalisation.
+- ASS/SSA : original sidecar + extraction intégrée sur Node, JASSUB chargé à la
+  sélection, police locale, décalage en pause, repli WebVTT et libération worker.
+  Polices jointes aux conteneurs non extraites. Téléchargements de sous-titres et
+  OpenSubtitles reportés explicitement par l'utilisateur.
+- Reprise finale : collections HTTP1, inventaire sous-titres1, extraction ASS
+  MKV1, fournisseurs/musique2, extensions migration/refus/rollback2 et contrat
+  SDK1 passent. Avant reprise : scheduler1, Node sous-titres5, Web native41 et
+  préférences9, HTTP préférences1 ; Chrome apparence390/1440 et rendu ASS sous
+  CSP passent, check Svelte0/0, lint ciblé/build et fmt/diff-check réussis.
+- Aether-Plugins épingle maintenant le SDK Core publié1338968 ; compilation
+  workspace tous targets et fixture TMDb réussies sans patch local. Projection
+  manifeste conserve storageMigration ; modèle privé répond lifecycle.verify.
+  Tests projection Python et santé sans broker réussis, détails dans sa mémoire.
+- Docs : LIBRARY_OPTIONS.md, PLUGIN_UPDATE_LIFECYCLE.md, PREFERENCES.md et
+  SUBTITLE_ASS_RENDERING.md. Aucun nouveau push/publication/déploiement pendant
+  la reprise finale. Paquets compatibles à reconstruire/signer/installer avant
+  validation réelle ; les commits intermédiaires ont été effectués hors agent.
+
 ## 2 novembre 2026 — Planificateur, aperçus, Trickplay et sauvegarde NAS
 
 - Planificateur : plans visibles, activation/désactivation conservant le dernier

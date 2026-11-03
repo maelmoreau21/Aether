@@ -23,6 +23,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import re
 from pathlib import Path
 import sys
 import unittest
@@ -223,6 +224,35 @@ class AetherReleasePolicyTests(unittest.TestCase):
         self.assertNotIn("git push origin main", content)
         # Git tags are pushed, which point to the exact commit
         self.assertIn('git push origin "$TAG"', content)
+
+    def test_bake_uses_checked_out_source_in_ci_and_publication(self):
+        # Bake v6 defaults to a remote Git definition even after checkout.
+        # A deleted PR merge ref must not be fetched a second time by BuildKit.
+        root = Path(__file__).resolve().parent.parent
+        for name in ("ci.yml", "publish.yml"):
+            with self.subTest(workflow=name):
+                content = (root / ".github" / "workflows" / name).read_text(encoding="utf-8")
+                matches = list(re.finditer(
+                    r"^(?P<indent> +)- uses: docker/bake-action@v6\s*$", content, re.MULTILINE
+                ))
+                self.assertEqual(len(matches), 1)
+                action = matches[0]
+                indent = len(action.group("indent"))
+                tail = content[action.end():]
+                next_step = re.search(rf"^ {{0,{indent}}}- ", tail, re.MULTILINE)
+                block = tail[:next_step.start()] if next_step else tail
+                self.assertRegex(block, r"(?m)^ +source: \.\s*$")
+                checkout = content[:action.start()].rfind("uses: actions/checkout@v4")
+                self.assertGreaterEqual(checkout, 0)
+                checkout_tail = content[checkout:action.start()]
+                next_step = re.search(rf"^ {{{indent}}}- ", checkout_tail, re.MULTILINE)
+                checkout_block = checkout_tail[:next_step.start()] if next_step else checkout_tail
+                self.assertIn("ref: ${{ github.sha }}", checkout_block)
+                self.assertIn("docker-bake.ci.hcl", block)
+        publish = (root / ".github/workflows/publish.yml").read_text(encoding="utf-8")
+        self.assertIn("github.event_name != 'pull_request'", publish)
+        for metadata in ("meta-standalone", "meta-core", "meta-node"):
+            self.assertIn("cwd://${{ steps." + metadata + ".outputs.bake-file }}", publish)
 
 if __name__ == "__main__":
     unittest.main()

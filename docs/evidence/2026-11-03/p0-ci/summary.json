@@ -1,0 +1,34 @@
+[
+  {
+    "report": "report.json",
+    "passed": true,
+    "browser": "156.0.8078.80",
+    "os": "10.0.26300",
+    "restart": false,
+    "ass": {
+      "rendered": true,
+      "pausedOffset": true,
+      "cleanup": true
+    },
+    "fallback": true,
+    "pcm": 0.04840671271085739,
+    "sync": true,
+    "cspErrors": []
+  },
+  {
+    "report": "report-restart.json",
+    "passed": true,
+    "browser": "156.0.8078.80",
+    "os": "10.0.26300",
+    "restart": true,
+    "ass": {
+      "rendered": true,
+      "pausedOffset": true,
+      "cleanup": true
+    },
+    "fallback": true,
+    "pcm": 0.04840671271085739,
+    "sync": true,
+    "cspErrors": []
+  }
+]

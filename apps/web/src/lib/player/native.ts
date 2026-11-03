@@ -200,7 +200,7 @@ export class NativePlayer implements Player {
     this.externalAudio?.destroy(); this.externalAudio = undefined;
     this.clearStall();
     // Hide obsolete captions before the new resource is ready.
-    this.video.querySelectorAll('track').forEach(track => track.remove());
+    this.removeNativeSubtitles();
     const nowSecs = Math.floor(Date.now() / 1000);
     const hasFreshDirect = Boolean(
       source.directUrl && (!source.tokenExpiresAt || source.tokenExpiresAt > nowSecs + 5)
@@ -382,13 +382,21 @@ export class NativePlayer implements Player {
       throw new Error(message);
     }
   }
+  private removeNativeSubtitles() {
+    this.video.querySelectorAll('track').forEach(track => {
+      // Disable before detaching: Chromium can retain the last native cue on
+      // a paused frame, including underneath a new libass canvas.
+      track.track.mode = 'disabled';
+      track.remove();
+    });
+  }
   async selectSubtitle(id: string | null) {
     const revision = ++this.subtitleRevision;
     this.subtitle = id;
     const previousAss = this.ass; this.ass = undefined;
     if (previousAss) await previousAss.destroy().catch(() => {});
     if (this.destroyed || revision !== this.subtitleRevision) return;
-    this.video.querySelectorAll('track').forEach(track => track.remove());
+    this.removeNativeSubtitles();
     if (id === null) return;
     const subtitle = this.media?.subtitles.find(s => s.id === id);
     if (!subtitle) throw new Error('Sous-titres indisponibles.');

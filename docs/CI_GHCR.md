@@ -1,5 +1,23 @@
 # CI et publication GHCR
 
+## A01 — Définition Bake locale et SHA explicite — 3 novembre 2026
+
+Les jobs Images et Publication utilisent désormais `source: .` avec
+`docker/bake-action@v6`, après checkout de `github.sha`. Depuis v6, l'action
+charge par défaut une définition Git distante : le `context = "."` du HCL
+ne suffit pas à empêcher cette récupération préalable. Le run PR
+[41511991820](https://github.com/maelmoreau21/Aether/actions/runs/41511991820)
+avait réussi le checkout puis échoué sur `refs/pull/35/merge` dans Bake.
+Le choix local suit le [contrat officiel de Bake v6](https://github.com/docker/bake-action/tree/v6#path-context).
+
+Les trois cibles, leurs caches, les overlays `cwd://` de metadata-action et
+l'interdiction de publication depuis une PR sont conservés. Le test de
+politique de release vérifie la définition locale et le checkout du SHA dans
+les deux workflows ; il échoue sur les sources antérieures au correctif.
+La validation d'un plan local ne remplace pas les événements GitHub ou une
+construction d'image. Résultats et limites du lot :
+[CI_DOCKER_A01_2026_11_03.md](CI_DOCKER_A01_2026_11_03.md).
+
 ## Préférences mémorisées du scénario scanner — 2 novembre 2026
 
 Le [run 41504190433](https://github.com/maelmoreau21/Aether/actions/runs/41504190433)

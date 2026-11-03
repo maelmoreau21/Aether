@@ -19,6 +19,7 @@ pub(super) fn authorize_operation(manifest: &Manifest, operation: &str) -> Resul
             "metadata.read"
         }
         "metadata.images" => "images",
+        "subtitles.search" | "subtitles.download" => "subtitles",
         "avatars.list" | "avatars.generate" => "avatars",
         "intro.detect"
         | "markers.detect"
@@ -148,6 +149,9 @@ pub(super) fn validate_result(operation: &str, result: Value) -> Result<Value, E
         ));
     }
     let invalid = || err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output");
+    if operation.starts_with("subtitles.") {
+        return super::subtitles::validate_result(operation, result);
+    }
     match operation {
         "metadata.propose" => {
             let proposal: MetadataProposal =

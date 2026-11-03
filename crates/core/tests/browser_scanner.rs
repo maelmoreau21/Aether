@@ -157,6 +157,15 @@ async fn browser_scanner_persists_and_plays_after_core_restart() {
     drop(listener);
     let mut completed_before_restart = 0_i64;
     for restart in [false, true] {
+        if restart && std::env::var("MEDIA_TEST_DOWNLOADED_SUBTITLE").as_deref() == Ok("1") {
+            // Seed only an application derivative, after scan and before a real restart.
+            // Acquisition itself is covered by the signed-Wasm HTTP test, without a real provider.
+            let check = IdentityStore::open(&db).await.unwrap();
+            let track=serde_json::json!({"language":"fr","label":"Downloaded offline fixture","forced":false,"sdh":false,"match":"identity"}).to_string();
+            media_poc::database::query("INSERT INTO subtitle_downloads(id,asset_id,provider_id,file_id,fingerprint,track_json,status,created_at,content) SELECT 'browser-'||id,id,'offline-fixture','42',CAST(size AS TEXT)||':'||modified_ns,?,'completed',0,? FROM inventory_assets WHERE available=1")
+                .bind(track).bind("WEBVTT\n\n00:00:00.000 --> 00:00:12.000\nDownloaded application subtitle").execute(check.pool()).await.unwrap();
+            check.close().await;
+        }
         let mut child = start(&root, &db, &library, port).await;
         let mut cmd = tokio::process::Command::new("node");
         cmd.arg("scripts/browser-scanner.cjs")

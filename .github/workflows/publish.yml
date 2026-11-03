@@ -92,6 +92,7 @@ jobs:
       - uses: docker/bake-action@v6
         id: build
         with:
+          source: .
           files: |
             docker-bake.ci.hcl
             cwd://${{ steps.meta-standalone.outputs.bake-file }}

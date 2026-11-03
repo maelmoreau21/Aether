@@ -107,6 +107,10 @@ restauration des KV/objets/blocs, confirmation obligatoire, version périmée,
 désactivation après rollback et refus de réutiliser un snapshot consommé.
 Le test de refus historique couvre droits/domaines, signature/éditeur, ABI,
 version égale ou inférieure et absence de déclaration de compatibilité privée.
+Le dépôt Aether-Plugins conserve désormais `storageMigration` lors de la
+projection du manifeste avant signature ; un test de contrat vérifie ce point.
+Son modèle `templates/persistent-storage` répond à `lifecycle.verify` sans
+incrémenter le compteur privé, et documente la déclaration de compatibilité.
 Les résultats réellement exécutés sont consignés dans `MEMORY.md` ; le schéma
 PostgreSQL aligné ne constitue pas une preuve d'exécution du nouveau rollback
 sur PostgreSQL ni sur NAS.

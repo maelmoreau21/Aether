@@ -246,6 +246,10 @@ fs.mkdirSync(out, {recursive: true});
       report.results.long.interruptedAudioRequestRecovered=true;
       await page.locator('video').evaluate(v=>{v.pause();v.currentTime=2;});await page.waitForFunction(()=>!document.querySelector('video').seeking);await page.locator('video').evaluate(v=>v.play());
     }
+    // Earlier playback checks can exhaust the 12-second fixture on slower CI
+    // runners. Keep the playhead inside the ASS cue while checking subtitles.
+    await page.locator('video').evaluate(v=>{v.pause();v.currentTime=2;});
+    await page.waitForFunction(()=>{const v=document.querySelector('video');return v.paused&&!v.seeking&&Math.abs(v.currentTime-2)<.1;});
     await openMenu('subtitles');
     await page.locator('[data-subtitle-id]').filter({hasText:'EN · ASS'}).click();
     await page.waitForFunction(()=>[...document.querySelector('video').textTracks].some(t=>t.mode==='showing' && t.activeCues?.[0]?.text.includes('ASS Hello, world')));
@@ -258,6 +262,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('.menu-heading').click();
     await page.locator('[aria-label="Fermer le menu"]').click();
     await page.screenshot({path:`${out}/ass-fallback${restart?'-restart':''}.png`});
+    await page.locator('video').evaluate(v=>v.play());
     if (!long) {
       await page.locator('video').evaluate(v=>{v.pause();v.currentTime=4.25;});
       await page.waitForFunction(()=>!document.querySelector('video').seeking);

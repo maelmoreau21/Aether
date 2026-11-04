@@ -13,3 +13,11 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# Dev/test builds: line tables only for workspace crates (backtraces keep file:line),
+# no debuginfo for dependencies. Each of the ~60 integration test binaries links the
+# whole Core; full debuginfo made target/debug reach hundreds of GB and slowed linking.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

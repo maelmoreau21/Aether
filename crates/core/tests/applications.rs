@@ -19,7 +19,7 @@ async fn fixture()->Fixture {
             .bind(format!("{:x}",Sha256::digest(&raw))).bind(id).bind(now).bind(now).bind(now+3600).execute(store.pool()).await.unwrap();
         sessions.push((format!("media_session={raw}"),format!("{:x}",Sha256::digest(format!("csrf:{raw}")))));
     }
-    query("INSERT INTO media_nodes(id,name) VALUES('local','Test Node')").execute(store.pool()).await.unwrap();
+    // The fresh schema already seeds the 'local' media node.
     query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','/test',1)").execute(store.pool()).await.unwrap();
     query("INSERT INTO library_permissions(user_id,library_id) VALUES('alice','films')").execute(store.pool()).await.unwrap();
     query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work-1','films','film:1','Synthetic','{}')").execute(store.pool()).await.unwrap();

@@ -353,8 +353,10 @@ button:active:not(:disabled) {
 }
 
 /* Account-owned appearance presets; no injected CSS or remote theme bundle. */
-:root[data-card-size="small"] { --poster-width:140px; --mobile-card-columns:3; --mobile-shelf-columns:2.8; }
-:root[data-card-size="large"] { --poster-width:230px; --mobile-card-columns:1; --mobile-shelf-columns:1.55; }
+/* Les tailles « petite / grande » restent proportionnelles à --poster-base (halo.css),
+   qui grandit sur les écrans TV / 4K. */
+:root[data-card-size="small"] { --poster-width:max(120px, calc(var(--poster-base) * 0.74)); --mobile-card-columns:3; --mobile-shelf-columns:2.8; }
+:root[data-card-size="large"] { --poster-width:calc(var(--poster-base) * 1.21); --mobile-card-columns:1; --mobile-shelf-columns:1.55; }
 :root[data-card-density="compact"] { --card-gap:8px; --card-row-gap:14px; }
 /* Accent presets live in halo.css (--ac); the aliases above follow them. */
 

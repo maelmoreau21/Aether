@@ -3,7 +3,10 @@ import {
   aspectRatioLabel, clock, menuTitle, nextAspectRatio, percentOf, projectedEndTime,
   speedOptionLabel, speedSettingLabel
 } from './controls-format';
-import { chapterAt, chapterSkipTarget, inRange, markerSegmentStyle, timelineChapters } from './chapters';
+import {
+  chapterAt, chapterSkipTarget, inRange, markerSegmentStyle, rangeInSegment, segmentFill, segmentIndexAt,
+  timelineChapters, timelineSegments
+} from './chapters';
 import { nextMenuIndex } from './menu-navigation';
 
 describe('controls-format', () => {
@@ -73,6 +76,40 @@ describe('chapters', () => {
     expect(inRange(undefined, 5)).toBe(false);
     expect(markerSegmentStyle({ start: 10, end: 20 }, 100)).toEqual({ left: '10%', width: '10%' });
     expect(markerSegmentStyle({ start: 10, end: 10.1 }, 100).width).toBe('0.5%');
+  });
+
+  it('splits the bar into contiguous chapter segments', () => {
+    expect(timelineSegments([], 0)).toEqual([]);
+    expect(timelineSegments([], 100)).toEqual([{ start: 0, end: 100, title: null }]);
+    const list = timelineChapters(chapters, 3000);
+    expect(timelineSegments(list, 3000)).toEqual([
+      { start: 0, end: 600, title: 'A' },
+      { start: 600, end: 1200, title: 'B' },
+      { start: 1200, end: 3000, title: 'C' }
+    ]);
+    // Premier chapitre tardif : tronçon d'ouverture sans titre ; débuts identiques fusionnés.
+    expect(timelineSegments([{ start: 30, title: 'x' }, { start: 30, title: 'y' }, { start: 60, title: '' }], 90)).toEqual([
+      { start: 0, end: 30, title: null },
+      { start: 30, end: 60, title: 'y' },
+      { start: 60, end: 90, title: null }
+    ]);
+    // Premier chapitre à 0,4 s : rattaché au début, pas de tronçon minuscule.
+    expect(timelineSegments([{ start: 0.4, title: 'a' }], 10)).toEqual([{ start: 0, end: 10, title: 'a' }]);
+  });
+
+  it('locates, fills and overlays segments', () => {
+    const segments = timelineSegments(timelineChapters(chapters, 3000), 3000);
+    expect(segmentIndexAt(segments, 0)).toBe(0);
+    expect(segmentIndexAt(segments, 600)).toBe(1);
+    expect(segmentIndexAt(segments, 2999)).toBe(2);
+    expect(segmentIndexAt([], 5)).toBe(-1);
+    expect(segmentFill(segments[1], 300)).toBe(0);
+    expect(segmentFill(segments[1], 900)).toBe(50);
+    expect(segmentFill(segments[1], 2000)).toBe(100);
+    expect(rangeInSegment({ start: 500, end: 900 }, segments[1])).toEqual({ left: 0, width: 50 });
+    expect(rangeInSegment({ start: 500, end: 900 }, segments[0])).toEqual({ left: (500 / 600) * 100, width: (100 / 600) * 100 });
+    expect(rangeInSegment({ start: 500, end: 900 }, segments[2])).toBeNull();
+    expect(rangeInSegment(undefined, segments[0])).toBeNull();
   });
 });
 

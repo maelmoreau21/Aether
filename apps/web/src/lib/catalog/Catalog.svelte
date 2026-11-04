@@ -736,7 +736,7 @@
   }
 
   h1 {
-    font-size: clamp(32px, 4vw, 44px);
+    font-size: clamp(32px, 4vw, calc(44px * var(--ui-scale, 1)));
     font-weight: 800;
     line-height: 1.02;
     letter-spacing: -0.03em;

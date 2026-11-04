@@ -185,7 +185,7 @@
   .primary, .primary:hover:not(:disabled) { border: 0; background: var(--btn); color: var(--btn-tx); }
   .primary:hover:not(:disabled) { opacity: 0.9; }
   .page-note { font-size: 13px; margin: 4px 0 20px; max-width: 75ch; }
-  .music-covers { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 28px 16px; margin: 16px 0; }
+  .music-covers { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--poster-base, 170px), 1fr)); gap: 28px 16px; margin: 16px 0; }
   .music-covers > button, .music-covers > button:hover:not(:disabled) { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 0; border: 0; background: transparent; text-align: left; padding: 0; min-width: 0; font-weight: 500; }
   .cover { display: block; width: 100%; aspect-ratio: 1; margin-bottom: 10px; border-radius: var(--r-md); overflow: hidden; transition: transform var(--t-slow) var(--ease), box-shadow var(--t-slow) ease; }
   .music-covers > button:hover .cover { transform: translateY(-4px); box-shadow: var(--shadow); }

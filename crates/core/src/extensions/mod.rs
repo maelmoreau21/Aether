@@ -50,6 +50,7 @@ mod install;
 mod matching;
 pub mod objects;
 mod package;
+pub(crate) mod person_images;
 pub(crate) mod repositories;
 mod router;
 mod run;

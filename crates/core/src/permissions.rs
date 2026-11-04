@@ -97,6 +97,7 @@ pub async fn require_media(
                         .or_else(|| value.strip_suffix("/image"))
                         .or_else(|| value.strip_suffix("/trickplay"))
                         .or_else(|| value.strip_suffix("/chapter-images"))
+                        .or_else(|| value.strip_suffix("/details"))
                         .or_else(|| value.split_once("/chapter-images/").map(|(id, _)| id))
                         .or_else(|| value.split_once("/trickplay/").map(|(id, _)| id))
                         .or_else(|| value.split_once("/subtitles/").map(|(id, _)| id))

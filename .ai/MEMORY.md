@@ -17,6 +17,26 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 4 novembre 2026 — Portraits « Distribution & équipe »
+
+- Cause : les crédits TMDb contenaient `thumbUrl` (`image.tmdb.org`), mais l'interface le
+  chargeait directement et la CSP `img-src 'self'` le bloquait ; les NFO ignoraient `<thumb>`.
+- Décision : route Core `/api/v1/works/{work}/people/{key}/image` (clé = SHA-256 tronqué de
+  l'URL), téléchargement paresseux via les hôtes d'une extension autorisée, JPEG ≤ 400×600 en
+  cache d'assets (`person_images`). Détails : `docs/CATALOGUE_PRESENTATION.md`, `docs/API.md`.
+- Limites : rendu visuel non vérifié dans un navigateur réel ; dossiers `.actors/` non lus.
+
+## 4 novembre 2026 — Fiche « Informations média » par fichier
+
+- Retrait du panneau « Versions et informations techniques » de `FilmDetail.svelte` ; le
+  choix de version reste dans le Hero (`aria-label` « Sélectionner la version … »).
+- `GET /api/v1/assets/{id}/details` (`crates/core/src/inventory/details.rs`) : Node, bibliothèque,
+  pistes, conteneur ; chemins relatif/absolu côté Node **administrator uniquement**.
+  La modale `WorkTools.svelte` regroupe par fichier (version ou copie multi-Node).
+- Vérifié : `cargo test -p media-poc --test asset_details`, tests unitaires, check/lint/test Web,
+  captures Playwright sur fixtures synthétiques (375/768/1440/1920). Scripts `browser-*.cjs`
+  adaptés mais non relancés intégralement.
+
 ## 4 novembre 2026 — Assainissement du dépôt et de `crates/core`
 
 Branche `chore/core-restructure`, partie de `feat/requests-and-reports` (WIP commité d'abord).

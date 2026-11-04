@@ -1,79 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Work } from './api';
+  import { creditPeople, initials } from './credits';
   import Icon from '../ui/Icon.svelte';
 
   let { work }: { work: Work } = $props();
 
-  interface CreditPerson {
-    key: string;
-    name: string;
-    role: string;
-    photoUrl: string;
-  }
-
   let failedPhotos = $state<Record<string, boolean>>({});
+  let loadedPhotos = $state<Record<string, boolean>>({});
   let track = $state<HTMLDivElement>();
   let canScrollLeft = $state(false);
   let canScrollRight = $state(false);
 
-  const people = $derived.by(() => {
-    const list: CreditPerson[] = [];
-    const seen: Record<string, boolean> = {};
-
-    for (const actor of work.actors ?? []) {
-      const name = actor.name?.trim();
-      if (!name) continue;
-      const key = `actor:${name.toLowerCase()}`;
-      if (seen[key]) continue;
-      seen[key] = true;
-      list.push({
-        key,
-        name,
-        role: actor.role?.trim() || 'Distribution',
-        photoUrl: (actor.thumbUrl || actor.thumb_url || '').trim()
-      });
-    }
-
-    for (const director of work.directors ?? []) {
-      const name = director?.trim();
-      if (!name) continue;
-      const key = `director:${name.toLowerCase()}`;
-      if (seen[key]) continue;
-      seen[key] = true;
-      list.push({
-        key,
-        name,
-        role: 'Réalisateur',
-        photoUrl: ''
-      });
-    }
-
-    for (const writer of work.writers ?? []) {
-      const name = writer?.trim();
-      if (!name) continue;
-      const key = `writer:${name.toLowerCase()}`;
-      if (seen[key]) continue;
-      seen[key] = true;
-      list.push({
-        key,
-        name,
-        role: 'Scénario',
-        photoUrl: ''
-      });
-    }
-
-    return list;
-  });
-
-  function initials(name: string): string {
-    return name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map(part => part[0]?.toUpperCase() ?? '')
-      .join('');
-  }
+  const people = $derived(creditPeople(work));
 
   function updateScrollState() {
     if (!track) return;
@@ -134,23 +73,27 @@
       {#each people as person (person.key)}
         <article class="cast-card">
           <div class="portrait-card">
+            <!-- Initials stay underneath: visible while the portrait loads, if it is missing or fails. -->
+            <div class="portrait-fallback" aria-hidden="true">
+              <span class="initials-badge">{initials(person.name)}</span>
+            </div>
             {#if person.photoUrl && !failedPhotos[person.key]}
               <img
                 class="portrait-img"
+                class:loaded={loadedPhotos[person.key]}
                 src={person.photoUrl}
-                alt={person.name}
-                width="300"
-                height="450"
+                alt=""
+                width="400"
+                height="600"
                 loading="lazy"
                 decoding="async"
+                onload={() => {
+                  loadedPhotos = { ...loadedPhotos, [person.key]: true };
+                }}
                 onerror={() => {
                   failedPhotos = { ...failedPhotos, [person.key]: true };
                 }}
               />
-            {:else}
-              <div class="portrait-fallback" aria-hidden="true">
-                <span class="initials-badge">{initials(person.name)}</span>
-              </div>
             {/if}
           </div>
           <div class="cast-meta">
@@ -266,16 +209,24 @@
   }
 
   .portrait-img {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
     object-position: center 20%;
     display: block;
+    opacity: 0;
+    transition: opacity var(--t-med) var(--ease);
+  }
+
+  .portrait-img.loaded {
+    opacity: 1;
   }
 
   .portrait-fallback {
-    width: 100%;
-    height: 100%;
+    position: absolute;
+    inset: 0;
     display: grid;
     place-items: center;
     background: var(--pn-2);
@@ -308,6 +259,33 @@
     font-size: 12px;
     line-height: 1.35;
     overflow-wrap: anywhere;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .portrait-img {
+      transition: none;
+    }
+  }
+
+  @media (min-width: 1920px) {
+    .cast-carousel {
+      gap: 28px;
+    }
+    .cast-card {
+      flex-basis: 168px;
+    }
+    .portrait-card {
+      width: 144px;
+    }
+    .initials-badge {
+      font-size: 38px;
+    }
+    .cast-name {
+      font-size: 17px;
+    }
+    .cast-role {
+      font-size: 14px;
+    }
   }
 
   @media (max-width: 639px) {

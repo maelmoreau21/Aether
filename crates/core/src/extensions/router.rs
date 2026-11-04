@@ -40,6 +40,10 @@ pub fn router(auth: AuthState) -> Router {
             get(adapters::preview_image),
         )
         .route(
+            "/api/v1/works/{work}/people/{key}/image",
+            get(person_images::read),
+        )
+        .route(
             "/api/v1/admin/extensions/identify/search",
             axum::routing::post(identify::search),
         )

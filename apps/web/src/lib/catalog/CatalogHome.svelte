@@ -5,6 +5,7 @@
   import { selectArtwork } from './artwork-selection';
   import type { Work } from './api';
   import HeroBanner from '../ui/HeroBanner.svelte';
+  import { newHeroSeed, pickHero } from './hero-picks';
   import MediaShelf from '../ui/MediaShelf.svelte';
   import Poster from './Poster.svelte';
   import ContinueWatching from './ContinueWatching.svelte';
@@ -21,25 +22,16 @@
     onPlay: (work: Work) => void;
     detailUrl: (work: Work) => string;
   } = $props();
-  const HERO_SCAN = 24;
   const sections = $derived($preferenceState.homeSections ?? DEFAULT_HOME_SECTIONS);
   const allWorks = $derived([...films, ...series]);
   // Use the same language/manual artwork selection as cards and detail pages.
-  const activeFeatured = $derived(allWorks.find(work => selectArtwork(work, $session).backdrop) ?? featured ?? allWorks[0] ?? null);
   const hasWideArt = (work: Work) => { const artwork = selectArtwork(work, $session); return Boolean(artwork.backdrop || artwork.landscape); };
   const hasArt = (work: Work) => { const artwork = selectArtwork(work, $session); return Boolean(artwork.poster || artwork.landscape || artwork.backdrop); };
-  // À l'affiche : le premier choix actuel, puis films et séries en alternance, tous avec une grande image.
-  const heroCandidates = $derived.by(() => {
-    const picked: Work[] = activeFeatured ? [activeFeatured] : [];
-    const pools = (activeFeatured?.kind === 'series' ? [films, series] : [series, films]).map(pool => pool.slice(0, HERO_SCAN).filter(hasWideArt));
-    for (let index = 0; picked.length < 3 && index < HERO_SCAN; index++) {
-      for (const pool of pools) {
-        const work = pool[index];
-        if (work && picked.length < 3 && !picked.some(item => item.id === work.id)) picked.push(work);
-      }
-    }
-    return picked;
-  });
+  // À l'affiche : quatre œuvres avec une grande image, tirées au hasard à chaque visite de l'accueil
+  // (graine fixe pendant la visite pour ne pas remélanger quand les listes se mettent à jour).
+  const heroSeed = newHeroSeed();
+  const heroCandidates = $derived(pickHero(films, series, hasWideArt, heroSeed));
+  const activeFeatured = $derived(heroCandidates[0] ?? featured ?? allWorks[0] ?? null);
   const showHero = $derived(sections.includes('hero'));
   const tonight = $derived(pickTonight(films, series, showHero ? heroCandidates.map(work => work.id) : [], hasArt));
   const topRated = $derived(allWorks.filter(work => (work.rating ?? 0) >= 6).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 12));

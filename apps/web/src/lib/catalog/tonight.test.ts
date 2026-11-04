@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Work } from './api';
-import { mosaicLayout, pickTonight } from './tonight';
+import { arrangeTonight, mosaicLayout, pickTonight } from './tonight';
 
 const work = (id: string, kind: 'film' | 'series', addedAt?: number): Work => ({ id, kind, title: id, year: null, description: '', libraryId: 'lib', synthetic: false, addedAt });
 const withArt = () => true;
@@ -23,26 +23,37 @@ describe('pour ce soir', () => {
     expect(pickTonight([work('f1', 'film'), work('f2', 'film')], [work('s1', 'series')], [], withArt)).toEqual([]);
   });
 
-  it('fills every band without gaps on each screen size', () => {
-    const columns = { desktop: 6, tablet: 4, phone: 2 } as const;
+  it('uses one 16:9 feature then only 2:3 posters, filling each grid exactly', () => {
     for (let count = 4; count <= 9; count++) {
-      const tiles = mosaicLayout(count);
-      expect(tiles.length).toBe(Math.min(7, count));
-      expect(tiles[0].shape).toBe('wide');
+      const layout = mosaicLayout(count);
+      if (!layout) throw new Error(`no layout for ${count}`);
+      expect(layout.tiles.length).toBe(Math.min(7, count));
+      expect(layout.tiles.map(tile => tile.shape)).toEqual(['feature', ...Array(layout.posters).fill('poster')]);
+      expect(layout.tiles[0].hidden).toEqual({ desktop: false, tablet: false, phone: false });
       for (const breakpoint of ['desktop', 'tablet', 'phone'] as const) {
-        const visible = tiles.filter(tile => !tile.hidden[breakpoint]);
-        expect(visible.length).toBeGreaterThanOrEqual(4);
-        let used = 0;
-        for (const tile of visible) {
-          const span = tile.span[breakpoint];
-          expect(span).toBeLessThanOrEqual(columns[breakpoint]);
-          used = used + span > columns[breakpoint] ? span : used + span;
-          expect(used).toBeLessThanOrEqual(columns[breakpoint]);
-        }
-        expect(used).toBe(columns[breakpoint]);
-        expect(visible.reduce((total, tile) => total + tile.span[breakpoint], 0) % columns[breakpoint]).toBe(0);
+        const { columns, featureRows } = layout.grids[breakpoint];
+        const visible = layout.tiles.filter(tile => tile.shape === 'poster' && !tile.hidden[breakpoint]).length;
+        expect(visible).toBeGreaterThanOrEqual(3);
+        expect(visible % columns).toBe(0);
+        // Ordinateur : la vedette couvre exactement les rangées d'affiches à côté d'elle.
+        if (featureRows) expect(visible).toBe(columns * featureRows);
       }
+      // Ordinateur et tablette : aucune œuvre masquée.
+      expect(layout.tiles.every(tile => !tile.hidden.desktop && !tile.hidden.tablet)).toBe(true);
     }
-    expect(mosaicLayout(3)).toEqual([]);
+    expect(mosaicLayout(3)).toBeNull();
+  });
+
+  it('keeps all seven works visible on every screen size', () => {
+    const layout = mosaicLayout(7);
+    expect(layout?.tiles.filter(tile => tile.hidden.desktop || tile.hidden.tablet || tile.hidden.phone)).toEqual([]);
+    expect(layout?.grids).toEqual({ desktop: { columns: 3, featureRows: 2 }, tablet: { columns: 6, featureRows: 0 }, phone: { columns: 3, featureRows: 0 } });
+  });
+
+  it('features the first work that has landscape artwork', () => {
+    const works = [work('a', 'film'), work('b', 'series'), work('c', 'film')];
+    expect(arrangeTonight(works, item => item.id === 'b').map(item => item.id)).toEqual(['b', 'a', 'c']);
+    expect(arrangeTonight(works, () => false)).toBe(works);
+    expect(arrangeTonight(works, () => true)).toBe(works);
   });
 });

@@ -69,7 +69,10 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
         "premiered": metadata["premiered"],
         "rating": metadata["rating"],
         "mpaa": metadata["mpaa"],
-        "actors": metadata["actors"].as_array().cloned().unwrap_or_default(),
+        "actors": crate::extensions::person_images::decorate_credits(
+            &row.get::<String, _>("id"),
+            metadata["actors"].as_array().map(Vec::as_slice).unwrap_or_default(),
+        ),
         "directors": metadata["directors"].as_array().cloned().unwrap_or_default(),
         "writers": metadata["writers"].as_array().cloned().unwrap_or_default(),
         "ratings": metadata["ratings"].as_array().cloned().unwrap_or_default(),

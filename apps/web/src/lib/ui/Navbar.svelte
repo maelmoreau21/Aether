@@ -9,7 +9,6 @@
 <script lang="ts">
   import { preloadCatalog } from '../catalog/page-cache';
   import { onMount, tick } from 'svelte';
-  import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { session } from '../auth/session';
   import { accessibleLibraries, loadLibraries, type AccessibleLibrary } from '../catalog/libraries';
@@ -29,10 +28,6 @@
 
   const kindLabels: Record<Kind, string> = { films: 'Films', series: 'Séries', music: 'Musique' };
 
-  let libraryError = $state('');
-  let loadingLibraries = $state(false);
-  let libraryDialog: HTMLDialogElement;
-  let libraryMenuOpen = $state(false);
   let watchPartyOpen = $state(false);
   let pendingInvitesCount = $state(0);
 
@@ -50,13 +45,11 @@
       }
     } catch {}
   }
-  let opener: HTMLElement | null = null;
   let isScrolled = $state(false);
   let searchExpanded = $state(false);
   let headerSearchQuery = $state('');
   let headerSearchInput = $state<HTMLInputElement>();
 
-  const currentLibrary = $derived($accessibleLibraries.find(library => library.id === page.url.searchParams.get('library')));
   // Until libraries load, show the video destinations so the bar does not jump.
   const kinds = $derived(
     $accessibleLibraries.length
@@ -77,11 +70,9 @@
     preloadCatalog(kind, libraries.length === 1 ? libraries[0].id : undefined);
   }
 
+  // En cas d'échec, la navigation garde ses destinations vidéo par défaut.
   async function refreshLibraries(force = false) {
-    loadingLibraries = true;
-    try { await loadLibraries(force); libraryError = ''; }
-    catch { libraryError = 'Impossible de charger vos bibliothèques.'; }
-    finally { loadingLibraries = false; }
+    try { await loadLibraries(force); } catch { /* repli : films et séries */ }
   }
 
   $effect(() => { if ($session?.user.id) void refreshLibraries(); });
@@ -97,14 +88,6 @@
       window.removeEventListener('focus', refresh);
     };
   });
-
-  function openLibraries(event: MouseEvent) {
-    opener = event.currentTarget as HTMLElement;
-    libraryDialog.showModal();
-    libraryMenuOpen = true;
-  }
-
-  function closeLibraries() { libraryDialog.close(); }
 
   async function toggleQuickSearch(event: MouseEvent) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || section === 'search') return;
@@ -174,20 +157,7 @@
       </a>
       <button
         type="button"
-        class="icon-btn"
-        class:active={libraryMenuOpen || Boolean(currentLibrary)}
-        title="Bibliothèques"
-        aria-label={currentLibrary ? `Bibliothèque : ${currentLibrary.name}` : 'Bibliothèques'}
-        aria-haspopup="dialog"
-        aria-expanded={libraryMenuOpen}
-        aria-controls="library-navigation"
-        onclick={openLibraries}
-      >
-        <Icon name="film" size={19} />
-      </button>
-      <button
-        type="button"
-        class="icon-btn watch-party-btn hide-phone"
+        class="icon-btn watch-party-btn"
         title="Séances Watch Party"
         aria-label="Séances Watch Party"
         onclick={() => (watchPartyOpen = true)}
@@ -226,50 +196,6 @@
   </a>
 </nav>
 
-<dialog id="library-navigation" class="library-dialog" bind:this={libraryDialog} aria-labelledby="library-navigation-title" onclose={() => { libraryMenuOpen = false; opener?.focus(); }}>
-  <header class="dialog-heading">
-    <div>
-      <p>Votre médiathèque</p>
-      <h2 id="library-navigation-title">Bibliothèques</h2>
-    </div>
-    <button class="icon-btn" aria-label="Fermer les bibliothèques" onclick={closeLibraries}><Icon name="close" /></button>
-  </header>
-  <nav class="library-list" aria-label="Choisir une bibliothèque">
-    {#each $accessibleLibraries as library (library.id)}
-      <a
-        href={resolve(`${library.kind}/?library=${encodeURIComponent(library.id)}` as 'films/')}
-        onclick={closeLibraries}
-        aria-current={currentLibrary?.id === library.id ? 'page' : undefined}
-        onpointerenter={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }}
-        onfocus={() => { if (library.kind !== 'music') preloadCatalog(library.kind, library.id); }}
-      >
-        <span class="library-icon" aria-hidden="true">
-          {#if library.kind === 'music'}♫{:else}<Icon name={library.kind === 'films' ? 'film' : 'tv'} size={22} />{/if}
-        </span>
-        <span class="library-name">
-          <strong>{library.name}</strong>
-          <small>{kindLabels[library.kind]}</small>
-        </span>
-        <Icon name="chevron" size={16} />
-      </a>
-    {/each}
-  </nav>
-  {#if libraryError}
-    <p role="alert">{libraryError}</p>
-    <button class="retry" disabled={loadingLibraries} onclick={() => refreshLibraries(true)}>Réessayer</button>
-  {:else if loadingLibraries}
-    <p role="status">Chargement des bibliothèques…</p>
-  {:else if !$accessibleLibraries.length}
-    <p>Aucune bibliothèque accessible avec ce compte.</p>
-  {/if}
-  <button type="button" class="downloads-link" onclick={() => { closeLibraries(); watchPartyOpen = true; }}>
-    <Icon name="users" size={18} /> Séances Watch Party <Icon name="chevron" size={16} />
-  </button>
-  <a class="downloads-link" href={resolve('downloads/')} onclick={closeLibraries}>
-    <Icon name="download" size={18} /> Téléchargements sur cet appareil <Icon name="chevron" size={16} />
-  </a>
-</dialog>
-
 {#if watchPartyOpen}
   <WatchPartyModal
     onClose={() => (watchPartyOpen = false)}
@@ -301,7 +227,7 @@
     display: flex;
     align-items: center;
     gap: 24px;
-    min-height: 72px;
+    min-height: calc(72px * var(--ui-scale, 1));
     width: 100%;
     max-width: var(--maxw);
     margin: 0 auto;
@@ -314,13 +240,13 @@
     gap: 10px;
     min-width: 0;
     flex-shrink: 0;
-    font-size: 20px;
+    font-size: calc(20px * var(--ui-scale, 1));
     font-weight: 800;
     letter-spacing: -0.03em;
     color: var(--tx);
   }
 
-  .brand-mark { flex: none; }
+  .brand-mark { flex: none; width: calc(28px * var(--ui-scale, 1)); height: calc(28px * var(--ui-scale, 1)); }
 
   .brand span {
     max-width: 200px;
@@ -346,11 +272,11 @@
   .desktop-nav a {
     display: inline-flex;
     align-items: center;
-    height: 38px;
-    padding: 0 16px;
+    height: calc(38px * var(--ui-scale, 1));
+    padding: 0 calc(16px * var(--ui-scale, 1));
     border-radius: var(--r-pill);
     color: var(--mu);
-    font-size: 14px;
+    font-size: calc(14px * var(--ui-scale, 1));
     font-weight: 600;
     white-space: nowrap;
     flex-shrink: 0;
@@ -409,8 +335,8 @@
     position: relative;
     display: grid;
     place-items: center;
-    width: 44px;
-    height: 44px;
+    width: calc(44px * var(--ui-scale, 1));
+    height: calc(44px * var(--ui-scale, 1));
     flex: none;
     border: 0;
     border-radius: 14px;
@@ -445,142 +371,6 @@
 
   .mobile-nav { display: none; }
 
-  .library-dialog {
-    width: min(500px, calc(100% - 32px));
-    max-width: none;
-    max-height: calc(100dvh - 32px);
-    padding: 24px;
-    border: 1px solid var(--line);
-    border-radius: var(--r-xl);
-    color: var(--tx);
-    background: var(--bg-3);
-    box-shadow: var(--shadow);
-    overscroll-behavior: contain;
-  }
-
-  .library-dialog[open] {
-    display: flex;
-    flex-direction: column;
-  }
-
-  :global(body:has(.library-dialog[open])) { overflow: hidden; }
-
-  .library-dialog::backdrop {
-    background: rgb(6 8 14 / 0.55);
-    backdrop-filter: blur(4px);
-  }
-
-  .dialog-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 16px;
-    flex: none;
-  }
-
-  .dialog-heading p {
-    margin: 0 0 4px;
-    font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--mu);
-  }
-
-  h2 {
-    margin: 0;
-    font-size: 24px;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-  }
-
-  .library-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    overflow-y: auto;
-    min-height: 0;
-    overscroll-behavior: contain;
-  }
-
-  .library-list a {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-height: 64px;
-    padding: 10px 12px;
-    border-radius: var(--r-md);
-    flex: none;
-    transition: background-color var(--t-fast) ease;
-  }
-
-  .library-list a:hover { background: var(--pn); }
-  .library-list [aria-current='page'] { background: var(--ac-soft); }
-
-  .library-icon {
-    display: grid;
-    place-items: center;
-    width: 44px;
-    height: 44px;
-    flex: none;
-    border-radius: 14px;
-    background: var(--pn-2);
-    font-size: 20px;
-  }
-
-  .library-name {
-    flex: 1;
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .library-name strong {
-    display: block;
-    font-size: 15px;
-    font-weight: 700;
-  }
-
-  small {
-    display: block;
-    margin-top: 2px;
-    color: var(--mu);
-    font-size: 13px;
-  }
-
-  .downloads-link {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    min-height: 52px;
-    padding: 0 12px;
-    border: 0;
-    border-top: 1px solid var(--line);
-    background: none;
-    color: var(--tx);
-    font-size: 14px;
-    font-weight: 600;
-    text-align: left;
-    flex: none;
-  }
-
-  .downloads-link:first-of-type { margin-top: 12px; }
-  .downloads-link:hover { background: var(--pn); }
-  .downloads-link > :global(svg:last-child) { margin-left: auto; flex: none; }
-
-  .retry {
-    min-height: 44px;
-    padding: 0 16px;
-    border: 0;
-    border-radius: var(--r-sm);
-    background: var(--pn-2);
-    color: inherit;
-    font-weight: 700;
-  }
-
-  [role='alert'] { color: var(--err); }
-
   @media (max-width: 1023px) {
     .header-inner { gap: 16px; }
     .desktop-nav a { padding: 0 12px; }
@@ -590,8 +380,7 @@
 
   @media (max-width: 760px) {
     .desktop-nav,
-    .header-search-form,
-    .hide-phone { display: none; }
+    .header-search-form { display: none; }
     .header-inner { min-height: 60px; gap: 8px; }
     .brand { font-size: 19px; }
     .brand span { max-width: calc(100vw - 230px); }
@@ -620,13 +409,6 @@
       font-weight: 700;
     }
     .mobile-nav [aria-current='page'] { color: var(--tx); }
-    .library-dialog {
-      margin: auto 0 0;
-      width: 100%;
-      max-height: 85dvh;
-      border-radius: var(--r-xl) var(--r-xl) 0 0;
-      padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px));
-    }
     :global(body:has(.mobile-nav)) {
       padding-bottom: calc(66px + env(safe-area-inset-bottom, 0px));
     }

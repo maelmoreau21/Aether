@@ -622,7 +622,7 @@ pub(crate) struct ImportImage {
 
 static IMAGE_PREVIEWS: Semaphore = Semaphore::const_new(4);
 
-async fn download_provider_image(
+pub(super) async fn download_provider_image(
     package: &Package,
     raw_url: &str,
 ) -> Result<(Vec<u8>, String), Error> {

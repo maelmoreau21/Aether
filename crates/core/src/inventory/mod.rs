@@ -4,6 +4,7 @@
 //! publication transaction owns editorial/consolidation and automation writes.
 
 mod catalogue;
+mod details;
 mod editorial;
 mod playback;
 mod publication;
@@ -24,6 +25,7 @@ pub use catalogue::{
 pub(crate) use catalogue::{
     refresh_work_availability_from_editions, sort_edition_sources_by_score,
 };
+pub use details::asset_details;
 pub use editorial::{editorial_warnings, refresh_editorial_for_works, refresh_work_editorial};
 pub(crate) use playback::{audio_operational_id, report_track_allowed, valid_chapters};
 pub use playback::{descriptor, descriptor_for_user};

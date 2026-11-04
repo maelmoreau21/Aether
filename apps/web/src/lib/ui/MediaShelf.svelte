@@ -125,14 +125,14 @@
 
   h2 {
     margin: 0;
-    font-size: 24px;
+    font-size: calc(24px * var(--ui-scale, 1));
     font-weight: 800;
     letter-spacing: -0.02em;
     line-height: 1.15;
     color: var(--tx);
   }
 
-  .count-badge { font-size: 14px; font-weight: 600; color: var(--mu); font-variant-numeric: tabular-nums; }
+  .count-badge { font-size: calc(14px * var(--ui-scale, 1)); font-weight: 600; color: var(--mu); font-variant-numeric: tabular-nums; }
 
   .actions-group { display: flex; align-items: center; gap: 8px; flex: none; }
 

@@ -27,7 +27,7 @@ export interface Work {
   available?: boolean;
   originalTitle?: string | null; plot?: string | null; outline?: string | null;
   premiered?: string | null; genres?: string[]; rating?: number | null; mpaa?: string | null;
-  actors?: { name: string; role?: string; thumbUrl?: string | null; thumb_url?: string | null }[]; directors?: string[]; writers?: string[];
+  actors?: { name: string; role?: string; imageUrl?: string | null; thumbUrl?: string | null; thumb_url?: string | null }[]; directors?: string[]; writers?: string[];
   ratings?: { provider:string;value:number;max:number }[];
   externalIds?: Record<string, string>; metadataProvenance?: string | null;
   seasonCount?: number; episodeCount?: number; editions?: Edition[];

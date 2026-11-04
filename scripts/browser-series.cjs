@@ -369,10 +369,9 @@ fs.mkdirSync(out, {recursive: true});
     const filmCard = page.locator('.media-card').filter({hasText:'Synthetic Film'});
     await filmCard.waitFor();
     await filmCard.click();
-    await page.locator('.versions-panel summary').click();
     await page.getByText('Film Actor',{exact:true}).waitFor();
-    assert.match(await page.locator('.specs-grid').innerText(),/français/);
-    assert.match(await page.locator('.specs-grid').innerText(),/anglais/);
+    assert.match(await page.locator('.media-experience-strip').innerText(),/français/);
+    assert.match(await page.locator('.media-experience-strip').innerText(),/anglais/);
     for (const theme of ['light','dark']) {
       await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
       for (const width of [390,1440]) {

@@ -404,6 +404,9 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
     sqlx::raw_sql(include_str!("../migrations/reports.sql"))
         .execute(&mut *tx)
         .await?;
+    sqlx::raw_sql(include_str!("../migrations/person_images.sql"))
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await
 }
 

@@ -14,7 +14,7 @@
 
   let { featured = null, candidates = [], onPlay, onTint }: {
     featured?: Work | null;
-    /** Jusqu'à trois œuvres à l'affiche ; la première est montrée d'abord. */
+    /** Jusqu'à quatre œuvres à l'affiche ; la première est montrée d'abord. */
     candidates?: Work[];
     onPlay?: (work: Work) => void;
     /** Couleur dominante de la grande image active, pour la couche d'ambiance de la page. */
@@ -23,7 +23,7 @@
 
   const uid = $props.id();
   const panelId = `${uid}-hero`;
-  const list = $derived((candidates.length ? candidates : featured ? [featured] : []).slice(0, 3));
+  const list = $derived((candidates.length ? candidates : featured ? [featured] : []).slice(0, 4));
   let activeId = $state<string | null>(null);
   const active = $derived(list.find(work => work.id === activeId) ?? list[0] ?? null);
   const switcher = $derived(list.length > 1);
@@ -219,7 +219,7 @@
   /* PC : grande image + colonne de vignettes à droite */
   .stage.has-switcher {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 232px;
+    grid-template-columns: minmax(0, 1fr) clamp(232px, 12vw, 420px);
     gap: 16px;
   }
 
@@ -284,8 +284,8 @@
     align-items: flex-start;
     gap: 14px;
     width: 100%;
-    max-width: 680px;
-    padding: clamp(20px, 3vw, 40px);
+    max-width: calc(680px * var(--ui-scale, 1));
+    padding: clamp(20px, 3vw, calc(40px * var(--ui-scale, 1)));
     animation: cap-in var(--t-slow) var(--ease);
   }
 
@@ -294,14 +294,14 @@
     to { opacity: 1; }
   }
 
-  .main.has-clearart .cap { max-width: min(680px, 58%); }
+  .main.has-clearart .cap { max-width: min(calc(680px * var(--ui-scale, 1)), 58%); }
 
   .tag {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 6px 12px;
-    font-size: 13px;
+    font-size: calc(13px * var(--ui-scale, 1));
     font-weight: 700;
     opacity: 0.92;
   }
@@ -322,7 +322,7 @@
 
   h1 {
     margin: 0;
-    font-size: clamp(36px, 5vw, 68px);
+    font-size: clamp(36px, 5vw, calc(68px * var(--ui-scale, 1)));
     font-weight: 800;
     letter-spacing: -0.035em;
     line-height: 0.95;
@@ -333,8 +333,8 @@
     display: block;
     width: auto;
     height: auto;
-    max-width: min(100%, 460px);
-    max-height: 150px;
+    max-width: min(100%, calc(460px * var(--ui-scale, 1)));
+    max-height: calc(150px * var(--ui-scale, 1));
     object-fit: contain;
     object-position: left bottom;
     filter: drop-shadow(0 4px 24px rgb(0 0 0 / 0.35));
@@ -343,7 +343,7 @@
   .synopsis {
     margin: 0;
     max-width: 56ch;
-    font-size: 15px;
+    font-size: calc(15px * var(--ui-scale, 1));
     line-height: 1.6;
     opacity: 0.88;
     display: -webkit-box;
@@ -372,11 +372,11 @@
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    height: 56px;
-    padding: 0 24px;
+    height: calc(56px * var(--ui-scale, 1));
+    padding: 0 calc(24px * var(--ui-scale, 1));
     border: 0;
     border-radius: 18px;
-    font-size: 15px;
+    font-size: calc(15px * var(--ui-scale, 1));
     font-weight: 700;
     transition: transform var(--t-fast) var(--ease), background-color var(--t-fast) ease, opacity var(--t-fast) ease;
   }
@@ -415,10 +415,11 @@
   }
 
   /* Sélecteur d'œuvres : vignettes 16:9 (landscape.jpg) */
+  /* Colonne de vignettes : réparties sur toute la hauteur de la grande image, sans vide en haut. */
   .queue {
     display: flex;
     flex-direction: column;
-    justify-content: flex-end;
+    justify-content: space-between;
     gap: 12px;
     min-width: 0;
   }
@@ -484,11 +485,17 @@
     display: block;
     min-width: 0;
     overflow: hidden;
-    font-size: 14px;
+    font-size: calc(14px * var(--ui-scale, 1));
     font-weight: 700;
     line-height: 1.2;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* TV / grands écrans : la grande image garde des proportions de salon
+     au lieu de plafonner à 580 px de haut sur toute la largeur. */
+  @media (min-width: 1920px) {
+    .hero.has-image { min-height: clamp(580px, 34vw, min(1100px, 70vh)); }
   }
 
   /* Tablette et téléphone : vignettes en rangée sous la grande image */
@@ -515,7 +522,8 @@
   }
 
   @media (max-width: 639px) {
-    .queue { gap: 8px; }
+    /* Téléphone : quatre vignettes en 2 × 2 plutôt qu'une rangée illisible. */
+    .queue { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
     .qi { padding: 8px; border-radius: var(--r-sm); }
     .qi-title { font-size: 12px; }
   }

@@ -211,6 +211,7 @@ async fn secure_app_with_jobs_and_web_dist(
             get(indexed_subtitle).head(indexed_subtitle),
         )
         .route("/api/v1/media/{id}", get(indexed_descriptor))
+        .route("/api/v1/assets/{id}/details", get(indexed_asset_details))
         .route("/api/v1/assets/{id}/trickplay", get(indexed_trickplay))
         .route(
             "/api/v1/assets/{id}/chapter-images",
@@ -413,6 +414,24 @@ async fn indexed_descriptor(
     .await
     {
         Ok(Some(media)) => Json(media).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, "unknown_media"),
+        Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+    }
+}
+
+/// Technical sheet of one asset; Node-side paths only for administrators.
+async fn indexed_asset_details(
+    axum::Extension(identity): axum::Extension<auth::Authenticated>,
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    let administrator = identity.user.role == identity::Role::Administrator;
+    match inventory::asset_details(&store, &id, administrator).await {
+        Ok(Some(details)) => (
+            [(header::CACHE_CONTROL, "private, no-store")],
+            Json(details),
+        )
+            .into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, "unknown_media"),
         Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
     }

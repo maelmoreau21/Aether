@@ -972,12 +972,11 @@
   .marker-editor button:first-of-type { background: #eef1f8; color: #0b0e18; }
   .marker-editor [role='alert'] { margin: 0; color: var(--err); font-weight: 600; }
 
-  /* Carte « À suivre » : verre liquide, en bas à droite, au-dessus du dock quand il est visible */
+  /* Carte « À suivre » : panneau sombre du lecteur, en bas à droite, au-dessus des commandes quand elles sont visibles */
   .next-card {
     position: absolute;
     z-index: 6;
-    /* Bord droit aligné sur celui du dock (1180 px max, centré). */
-    right: max(28px, env(safe-area-inset-right), calc((100% - 1180px) / 2));
+    right: max(var(--gutter, 40px), env(safe-area-inset-right));
     bottom: max(28px, env(safe-area-inset-bottom));
     display: flex;
     gap: 14px;
@@ -985,17 +984,18 @@
     width: min(440px, calc(100% - 32px));
     padding: 12px;
     border-radius: 24px;
-    background: linear-gradient(180deg, rgb(255 255 255 / 0.1) 0%, rgb(255 255 255 / 0.03) 100%), rgb(16 18 26 / 0.5);
-    backdrop-filter: blur(28px) saturate(180%);
-    -webkit-backdrop-filter: blur(28px) saturate(180%);
-    border: 1px solid rgb(255 255 255 / 0.14);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2), 0 24px 60px rgb(0 0 0 / 0.5);
+    background: rgb(17 21 31 / 0.92);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
     color: #f4f6fb;
     font-family: var(--font);
     animation: next-in var(--t-slow) var(--ease);
     transition: bottom var(--t-slow) var(--ease);
   }
-  .next-card.raised { bottom: calc(max(22px, env(safe-area-inset-bottom)) + 136px); }
+  /* Hauteur des commandes (PlayerControls) : barre 28 px + rangée 60 px + marges. */
+  .next-card.raised { bottom: calc(max(20px, env(safe-area-inset-bottom)) + 108px); }
+  @media (min-width: 1920px) { .next-card.raised { bottom: calc(max(32px, env(safe-area-inset-bottom)) + 124px); } }
   @keyframes next-in { from { opacity: 0; transform: translateY(16px) scale(0.98); } to { opacity: 1; transform: none; } }
   .next-thumb {
     flex: none;
@@ -1035,9 +1035,13 @@
   .next-card button:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
   @media (max-width: 768px) {
     .next-card { right: 12px; left: 12px; width: auto; padding: 10px; gap: 10px; border-radius: 20px; }
-    .next-card.raised { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 150px); }
+    .next-card.raised { bottom: calc(max(20px, env(safe-area-inset-bottom)) + 96px); }
     .next-thumb { width: 112px; }
     .next-info strong { font-size: 14px; }
+  }
+  /* Téléphone : commandes sur trois rangées (barre, temps + options, transport). */
+  @media (max-width: 720px) {
+    .next-card.raised { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 156px); }
   }
   @media (prefers-reduced-motion: reduce) { .next-card { animation: none; transition: none; } }
   .inactive :global(*) { cursor: none !important; }

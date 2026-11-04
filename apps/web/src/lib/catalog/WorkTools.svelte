@@ -5,17 +5,27 @@
   import SubtitleDownloads from './SubtitleDownloads.svelte';
   import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
   import { session } from '../auth/session';
-  import type { Work } from './api';
+  import { playbackIds, type Work } from './api';
   import type { Media } from '../player/types';
   import Icon from '../ui/Icon.svelte';
-  import {
-    videoResolutionBadge,
-    containerLabel,
-    colorProfileLabel,
-    inspectedAudioTracks
-  } from '../player/track-labels';
+  import { containerLabel } from '../player/track-labels';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
   import { metadataFormFromWork, metadataPayloadFromForm } from './work-metadata';
+  import {
+    audioSummary,
+    codecLabel,
+    fetchAssetDetails,
+    formatBitrate,
+    formatBytes,
+    formatDuration,
+    groupTracks,
+    nodeKindLabel,
+    nodeStatusLabel,
+    trackRoles,
+    versionLabel,
+    videoSummary,
+    type AssetDetails
+  } from './media-details';
 
   let {
     work,
@@ -40,7 +50,9 @@
   let error = $state('');
   let message = $state('');
   let busy = $state(false);
-  let copiedId = $state(false);
+  let copiedKey = $state('');
+  let detailsById = $state<Record<string, { status: 'loading' | 'ready' | 'error'; data?: AssetDetails; error?: string }>>({});
+  let detailsController: AbortController | null = null;
 
   // Form metadata states
   let title = $state('');
@@ -77,10 +89,38 @@
 
   const isAdmin = $derived($session?.user.role === 'administrator');
 
-  const currentVideoTrack = $derived(
-    selectedMedia?.sources[0]?.tracks?.find(t => t.codec_type === 'video')
-  );
-  const currentAudioTracks = $derived(selectedMedia ? inspectedAudioTracks(selectedMedia) : []);
+  // Every indexed file of this work (versions and multi-Node copies), selected one included.
+  const assetIds = $derived.by(() => {
+    const ids = playbackIds(work);
+    return selectedMedia && !ids.includes(selectedMedia.id) ? [selectedMedia.id, ...ids] : ids;
+  });
+
+  function openInfo() {
+    infoOpen = true;
+    void loadDetails();
+  }
+
+  function closeInfo() {
+    infoOpen = false;
+    detailsController?.abort();
+    detailsController = null;
+  }
+
+  async function loadDetails(only?: string) {
+    if (!only) detailsController?.abort();
+    const controller = only && detailsController ? detailsController : new AbortController();
+    detailsController = controller;
+    const ids = only ? [only] : assetIds.filter(id => detailsById[id]?.status !== 'ready');
+    for (const id of ids) detailsById[id] = { status: 'loading' };
+    await Promise.all(ids.map(async id => {
+      try {
+        const data = await fetchAssetDetails(id, controller.signal);
+        if (!controller.signal.aborted) detailsById[id] = { status: 'ready', data };
+      } catch (cause) {
+        if (!controller.signal.aborted) detailsById[id] = { status: 'error', error: cause instanceof Error ? cause.message : 'Informations indisponibles.' };
+      }
+    }));
+  }
 
   async function loadLists() {
     try {
@@ -155,19 +195,18 @@
     }
   }
 
-  function copyWorkId() {
-    if (navigator?.clipboard) {
-      void navigator.clipboard.writeText(work.id).then(() => {
-        copiedId = true;
-        setTimeout(() => { copiedId = false; }, 2000);
-      });
-    }
+  function copyText(key: string, text: string) {
+    if (!navigator?.clipboard) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      copiedKey = key;
+      setTimeout(() => { if (copiedKey === key) copiedKey = ''; }, 2000);
+    }).catch(() => {});
   }
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
       menuOpen = false;
-      if (infoOpen) infoOpen = false;
+      if (infoOpen) closeInfo();
       if (metadataOpen) metadataOpen = false;
       if (listOpen) listOpen = false;
     }
@@ -325,7 +364,7 @@
           role="menuitem"
           onclick={() => {
             menuOpen = false;
-            infoOpen = true;
+            openInfo();
           }}
         >
           <Icon name="info" size={16} />
@@ -413,7 +452,7 @@
   {#if message}<p class="status-msg success" role="status">{message}</p>{/if}
 </div>
 
-<!-- Modal: Informations média -->
+<!-- Modal: Informations média (fichiers par version : Media Node, chemin, pistes, conteneur) -->
 {#if infoOpen}
   <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="media-info-title">
     <button
@@ -421,9 +460,9 @@
       class="modal-backdrop-click"
       aria-label="Fermer la fenêtre"
       tabindex="-1"
-      onclick={() => (infoOpen = false)}
+      onclick={closeInfo}
     ></button>
-    <div class="modal-card">
+    <div class="modal-card wide info-card">
       <div class="modal-header">
         <div class="modal-title-group">
           <Icon name="info" size={20} />
@@ -433,144 +472,318 @@
           type="button"
           class="close-modal-btn"
           aria-label="Fermer"
-          onclick={() => (infoOpen = false)}
+          onclick={closeInfo}
         >
           <Icon name="close" size={18} />
         </button>
       </div>
 
       <div class="modal-body info-body">
-        <div class="info-section">
-          <h4>Emplacement et Media Node</h4>
-          <div class="info-grid">
-            <div class="info-item">
-              <span class="info-label">Nœud source :</span>
-              <span class="info-value">
-                <code>{work.nodeId ?? 'local'}</code>
-                {#if work.available === false}
-                  <span class="tag-status offline">Hors ligne</span>
-                {:else}
-                  <span class="tag-status online">Connecté</span>
+        {#if assetIds.length === 0}
+          <p class="info-note">
+            {work.kind === 'series'
+              ? 'Les fichiers sont décrits épisode par épisode : ouvrez « Informations média » depuis un épisode.'
+              : 'Aucun fichier indexé n’est disponible pour ce média.'}
+          </p>
+        {:else if assetIds.length > 1}
+          <p class="info-note">{assetIds.length} fichiers disponibles pour ce média (versions ou copies sur plusieurs Media Nodes).</p>
+        {/if}
+
+        {#each assetIds as id, position (id)}
+          {@const entry = detailsById[id]}
+          {@const info = entry?.data}
+          <details class="version-card" open={id === (assetIds.includes(selectedMedia?.id ?? '') ? selectedMedia?.id : assetIds[0])}>
+            <summary>
+              <span class="version-title">{versionLabel(info, position)}</span>
+              {#if id === selectedMedia?.id && assetIds.length > 1}<span class="tag-status online">Sélectionnée</span>{/if}
+              {#if info}
+                {@const status = nodeStatusLabel(info.node.status)}
+                <span class="version-node"><Icon name="server" size={14} />{info.node.name}<span class="status-dot {status.tone}" role="img" aria-label={status.label}></span></span>
+              {/if}
+            </summary>
+
+            {#if !entry || entry.status === 'loading'}
+              <p class="info-note" role="status">Chargement des informations du fichier…</p>
+            {:else if entry.status === 'error'}
+              <div class="info-error-row" role="alert">
+                <span>{entry.error}</span>
+                <button type="button" class="btn small outline-btn" onclick={() => void loadDetails(id)}>Réessayer</button>
+              </div>
+            {:else if info}
+              {@const status = nodeStatusLabel(info.node.status)}
+              {@const groups = groupTracks(info.tracks)}
+              <div class="version-body">
+                <section class="info-section" aria-label="Emplacement du fichier">
+                  <h4>Emplacement du fichier</h4>
+                  <dl class="info-grid">
+                    <div class="info-item">
+                      <dt class="info-label">Media Node</dt>
+                      <dd class="info-value">
+                        {info.node.name}
+                        <span class="tag-status {status.tone}">{status.label}</span>
+                        <span class="info-sub">{nodeKindLabel(info.node.kind)} · <code>{info.node.id}</code>{info.node.version ? ` · v${info.node.version}` : ''}</span>
+                      </dd>
+                    </div>
+                    <div class="info-item">
+                      <dt class="info-label">Bibliothèque</dt>
+                      <dd class="info-value">{info.library.name}</dd>
+                    </div>
+                    {#if info.pathsVisible && info.file.absolutePath}
+                      <div class="info-item full">
+                        <dt class="info-label">Chemin sur le Media Node</dt>
+                        <dd class="info-value path-row">
+                          <code class="path">{info.file.absolutePath}</code>
+                          <button type="button" class="copy-btn" aria-label="Copier le chemin complet" onclick={() => copyText(`abs-${id}`, info.file.absolutePath ?? '')}>
+                            <Icon name={copiedKey === `abs-${id}` ? 'check' : 'copy'} size={14} />
+                            <span>{copiedKey === `abs-${id}` ? 'Copié' : 'Copier'}</span>
+                          </button>
+                        </dd>
+                      </div>
+                      <div class="info-item full">
+                        <dt class="info-label">Chemin dans la bibliothèque</dt>
+                        <dd class="info-value path-row">
+                          <code class="path">{info.file.relativePath}</code>
+                          <button type="button" class="copy-btn" aria-label="Copier le chemin relatif" onclick={() => copyText(`rel-${id}`, info.file.relativePath ?? '')}>
+                            <Icon name={copiedKey === `rel-${id}` ? 'check' : 'copy'} size={14} />
+                            <span>{copiedKey === `rel-${id}` ? 'Copié' : 'Copier'}</span>
+                          </button>
+                        </dd>
+                        <span class="info-sub">Racine de la bibliothèque : <code>{info.file.libraryRoot}</code></span>
+                      </div>
+                    {:else}
+                      <div class="info-item full">
+                        <dt class="info-label">Chemin</dt>
+                        <dd class="info-value muted">Visible uniquement par les administrateurs.</dd>
+                      </div>
+                    {/if}
+                    {#if !info.available}
+                      <div class="info-item full"><dd class="info-value info-error">Fichier signalé absent lors du dernier scan.</dd></div>
+                    {/if}
+                  </dl>
+                </section>
+
+                <section class="info-section" aria-label="Pistes vidéo">
+                  <h4>Vidéo ({groups.video.length})</h4>
+                  <ul class="track-list">
+                    {#each groups.video as track (track.index)}
+                      <li class="track-row">
+                        <div class="track-head">
+                          <span class="track-index">#{track.index}</span>
+                          <strong>{codecLabel(track)}</strong>
+                          {#if track.title}<span class="track-title">{track.title}</span>{/if}
+                        </div>
+                        <div class="track-chips">
+                          {#each videoSummary(track) as part (part)}<span class="track-chip">{part}</span>{/each}
+                          {#each trackRoles(track.disposition) as role (role)}<span class="track-chip role">{role}</span>{/each}
+                        </div>
+                      </li>
+                    {:else}
+                      <li class="track-row muted">Aucune piste vidéo analysée.</li>
+                    {/each}
+                  </ul>
+                </section>
+
+                <section class="info-section" aria-label="Pistes audio">
+                  <h4>Audio ({groups.audio.length + info.externalAudio.length})</h4>
+                  <ul class="track-list">
+                    {#each groups.audio as track (track.index)}
+                      <li class="track-row">
+                        <div class="track-head">
+                          <span class="track-index">#{track.index}</span>
+                          <LanguageLabel language={track.language ?? 'und'} />
+                          <strong>{codecLabel(track)}</strong>
+                          {#if track.title}<span class="track-title">{track.title}</span>{/if}
+                        </div>
+                        <div class="track-chips">
+                          {#each audioSummary(track) as part (part)}<span class="track-chip">{part}</span>{/each}
+                          {#each trackRoles(track.disposition) as role (role)}<span class="track-chip role">{role}</span>{/each}
+                        </div>
+                      </li>
+                    {/each}
+                    {#each info.externalAudio as audio, index (index)}
+                      <li class="track-row">
+                        <div class="track-head">
+                          <span class="track-index">Externe</span>
+                          <LanguageLabel language={audio.language} />
+                          {#if audio.track}<strong>{codecLabel(audio.track)}</strong>{/if}
+                        </div>
+                        <div class="track-chips">
+                          {#if audio.track}{#each audioSummary(audio.track) as part (part)}<span class="track-chip">{part}</span>{/each}{/if}
+                          <span class="track-chip">{formatBytes(audio.size)}</span>
+                          {#if audio.offsetSeconds}<span class="track-chip">Décalage {audio.offsetSeconds.toLocaleString('fr-FR')} s</span>{/if}
+                        </div>
+                        {#if audio.absolutePath}<code class="path small">{audio.absolutePath}</code>{/if}
+                      </li>
+                    {/each}
+                    {#if groups.audio.length + info.externalAudio.length === 0}
+                      <li class="track-row muted">Aucune piste audio analysée.</li>
+                    {/if}
+                  </ul>
+                </section>
+
+                <section class="info-section" aria-label="Sous-titres">
+                  <h4>Sous-titres ({groups.subtitle.length + info.externalSubtitles.length})</h4>
+                  <ul class="track-list">
+                    {#each groups.subtitle as track (track.index)}
+                      <li class="track-row">
+                        <div class="track-head">
+                          <span class="track-index">#{track.index}</span>
+                          <LanguageLabel language={track.language ?? 'und'} />
+                          <strong>{codecLabel(track)}</strong>
+                          {#if track.title}<span class="track-title">{track.title}</span>{/if}
+                        </div>
+                        {#if trackRoles(track.disposition).length}
+                          <div class="track-chips">
+                            {#each trackRoles(track.disposition) as role (role)}<span class="track-chip role">{role}</span>{/each}
+                          </div>
+                        {/if}
+                      </li>
+                    {/each}
+                    {#each info.externalSubtitles as subtitle, index (index)}
+                      <li class="track-row">
+                        <div class="track-head">
+                          <span class="track-index">{subtitle.origin === 'downloaded' ? 'Téléchargé' : 'Externe'}</span>
+                          <LanguageLabel language={subtitle.language} />
+                          {#if subtitle.sourceFormat}<strong>{subtitle.sourceFormat.toUpperCase()}</strong>{/if}
+                          {#if subtitle.label}<span class="track-title">{subtitle.label}</span>{/if}
+                        </div>
+                        {#if subtitle.forced || subtitle.sdh}
+                          <div class="track-chips">
+                            {#if subtitle.forced}<span class="track-chip role">Forcés</span>{/if}
+                            {#if subtitle.sdh}<span class="track-chip role">Malentendants (SDH)</span>{/if}
+                          </div>
+                        {/if}
+                      </li>
+                    {/each}
+                    {#if groups.subtitle.length + info.externalSubtitles.length === 0}
+                      <li class="track-row muted">Aucun sous-titre.</li>
+                    {/if}
+                  </ul>
+                </section>
+
+                {#if groups.other.length}
+                  <section class="info-section" aria-label="Autres flux">
+                    <h4>Autres flux ({groups.other.length})</h4>
+                    <ul class="track-list">
+                      {#each groups.other as track (track.index)}
+                        <li class="track-row">
+                          <div class="track-head">
+                            <span class="track-index">#{track.index}</span>
+                            <strong>{codecLabel(track)}</strong>
+                            <span class="track-title">{track.codecType ?? 'flux'}{track.title ? ` · ${track.title}` : ''}</span>
+                          </div>
+                        </li>
+                      {/each}
+                    </ul>
+                  </section>
                 {/if}
-              </span>
-            </div>
-            <div class="info-item">
-              <span class="info-label">Bibliothèque :</span>
-              <span class="info-value">{work.libraryId}</span>
-            </div>
-            <div class="info-item full">
-              <span class="info-label">Identifiant copie :</span>
-              <span class="info-value id-row">
-                <code>{work.id}</code>
-                <button
-                  type="button"
-                  class="copy-btn"
-                  title="Copier l'identifiant"
-                  aria-label="Copier l'identifiant"
-                  onclick={copyWorkId}
-                >
-                  <Icon name="copy" size={14} />
-                  <span>{copiedId ? 'Copié !' : 'Copier'}</span>
-                </button>
-              </span>
-            </div>
-            {#if work.globalMediaId}
-              <div class="info-item full">
-                <span class="info-label">Identité globale :</span>
-                <span class="info-value"><code>{work.globalMediaId}</code></span>
+
+                <section class="info-section" aria-label="Conteneur et détails techniques">
+                  <h4>Conteneur et détails techniques</h4>
+                  <dl class="info-grid">
+                    <div class="info-item">
+                      <dt class="info-label">Conteneur</dt>
+                      <dd class="info-value">
+                        {containerLabel(info.file.mime)}
+                        {#if info.container.formatLongName}<span class="info-sub">{info.container.formatLongName}{info.container.formatName ? ` (${info.container.formatName})` : ''}</span>{/if}
+                      </dd>
+                    </div>
+                    <div class="info-item">
+                      <dt class="info-label">Taille</dt>
+                      <dd class="info-value">{formatBytes(info.file.size)}</dd>
+                    </div>
+                    <div class="info-item">
+                      <dt class="info-label">Durée</dt>
+                      <dd class="info-value">{formatDuration(info.container.durationSeconds) ?? '—'}</dd>
+                    </div>
+                    <div class="info-item">
+                      <dt class="info-label">Débit global</dt>
+                      <dd class="info-value">{formatBitrate(info.container.bitRate) ?? '—'}</dd>
+                    </div>
+                    <div class="info-item">
+                      <dt class="info-label">Chapitres</dt>
+                      <dd class="info-value">{info.chapterCount || 'Aucun'}</dd>
+                    </div>
+                    {#if info.file.modifiedAt}
+                      <div class="info-item">
+                        <dt class="info-label">Modifié le</dt>
+                        <dd class="info-value">{new Date(info.file.modifiedAt * 1000).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' })}</dd>
+                      </div>
+                    {/if}
+                    <div class="info-item">
+                      <dt class="info-label">Type MIME</dt>
+                      <dd class="info-value"><code>{info.file.mime}</code></dd>
+                    </div>
+                    <div class="info-item full">
+                      <dt class="info-label">Identifiant du fichier</dt>
+                      <dd class="info-value path-row">
+                        <code class="path">{info.assetId}</code>
+                        <button type="button" class="copy-btn" aria-label="Copier l'identifiant du fichier" onclick={() => copyText(`asset-${id}`, info.assetId)}>
+                          <Icon name={copiedKey === `asset-${id}` ? 'check' : 'copy'} size={14} />
+                          <span>{copiedKey === `asset-${id}` ? 'Copié' : 'Copier'}</span>
+                        </button>
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
               </div>
             {/if}
-          </div>
-        </div>
+          </details>
+        {/each}
 
-        <div class="info-section">
-          <h4>Catalogue et Provenance</h4>
-          <div class="info-grid">
+        <section class="info-section" aria-label="Catalogue et provenance">
+          <h4>Catalogue et provenance</h4>
+          <dl class="info-grid">
             <div class="info-item">
-              <span class="info-label">Provenance métadonnées :</span>
-              <span class="info-value">{work.metadataProvenance === 'nfo' ? 'Fichier NFO local' : 'Indexation automatique'}</span>
+              <dt class="info-label">Provenance des métadonnées</dt>
+              <dd class="info-value">{work.metadataProvenance === 'nfo' ? 'Fichier NFO local' : 'Indexation automatique'}</dd>
             </div>
             {#if work.addedAt}
               <div class="info-item">
-                <span class="info-label">Ajouté le :</span>
-                <span class="info-value">{new Date(work.addedAt * 1000).toLocaleDateString('fr-FR')}</span>
+                <dt class="info-label">Ajouté le</dt>
+                <dd class="info-value">{new Date(work.addedAt * 1000).toLocaleDateString('fr-FR')}</dd>
               </div>
             {/if}
             {#if work.premiered}
               <div class="info-item">
-                <span class="info-label">Première diffusion :</span>
-                <span class="info-value">{work.premiered}</span>
+                <dt class="info-label">Première diffusion</dt>
+                <dd class="info-value">{work.premiered}</dd>
               </div>
             {/if}
             {#if work.rating}
               <div class="info-item">
-                <span class="info-label">Note :</span>
-                <span class="info-value">{work.rating.toFixed(1)} / 10</span>
+                <dt class="info-label">Note</dt>
+                <dd class="info-value">{work.rating.toFixed(1)} / 10</dd>
               </div>
             {/if}
             {#if work.mpaa}
               <div class="info-item">
-                <span class="info-label">Classification :</span>
-                <span class="info-value">{work.mpaa}</span>
+                <dt class="info-label">Classification</dt>
+                <dd class="info-value">{work.mpaa}</dd>
               </div>
             {/if}
-          </div>
-        </div>
-
-        {#if selectedMedia}
-          <div class="info-section">
-            <h4>Pistes et spécifications techniques</h4>
-            <div class="info-grid">
-              <div class="info-item">
-                <span class="info-label">Conteneur :</span>
-                <span class="info-value">{containerLabel(selectedMedia.sources[0]?.mime)}</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">Vidéo :</span>
-                <span class="info-value">
-                  {currentVideoTrack?.codec_name?.toUpperCase() ?? 'Inconnu'}
-                  {#if currentVideoTrack?.width && currentVideoTrack?.height}
-                    · {currentVideoTrack.width} × {currentVideoTrack.height}
-                  {/if}
-                  {#if videoResolutionBadge(currentVideoTrack?.width, currentVideoTrack?.height)}
-                    ({videoResolutionBadge(currentVideoTrack?.width, currentVideoTrack?.height)})
-                  {/if}
-                  {#if colorProfileLabel(currentVideoTrack?.pix_fmt)}
-                    · {colorProfileLabel(currentVideoTrack?.pix_fmt)}
-                  {/if}
-                </span>
-              </div>
-              <div class="info-item full">
-                <span class="info-label">Pistes audio ({currentAudioTracks.length}) :</span>
-                <div class="audio-list">
-                  {#each currentAudioTracks as at, idx (idx)}
-                    <span class="track-chip">
-                      <LanguageLabel language={at.language} /> · {at.codec_name?.toUpperCase() ?? 'Inconnu'}{at.channel_layout || at.channels ? ` · ${at.channel_layout ?? `${at.channels} canaux`}` : ''}{at.tags?.title ? ` (${at.tags.title})` : ''}
-                    </span>
-                  {:else}
-                    <span class="info-value">Aucune piste audio analysée</span>
-                  {/each}
-                </div>
-              </div>
-              {#if selectedMedia.subtitles.length > 0}
-                <div class="info-item full">
-                  <span class="info-label">Sous-titres ({selectedMedia.subtitles.length}) :</span>
-                  <div class="sub-list">
-                    {#each selectedMedia.subtitles as sub (sub.id)}
-                      <span class="track-chip">
-                        <LanguageLabel language={sub.language} />{sub.sourceFormat ? ` · ${sub.sourceFormat.toUpperCase()}` : ''}{sub.forced ? ' (Forcés)' : ''}{sub.sdh ? ' (SDH)' : ''}
-                      </span>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
+            <div class="info-item full">
+              <dt class="info-label">Identifiant de l’œuvre</dt>
+              <dd class="info-value path-row">
+                <code class="path">{work.id}</code>
+                <button type="button" class="copy-btn" aria-label="Copier l'identifiant de l'œuvre" onclick={() => copyText('work', work.id)}>
+                  <Icon name={copiedKey === 'work' ? 'check' : 'copy'} size={14} />
+                  <span>{copiedKey === 'work' ? 'Copié' : 'Copier'}</span>
+                </button>
+              </dd>
             </div>
-          </div>
-        {/if}
+            {#if work.globalMediaId}
+              <div class="info-item full">
+                <dt class="info-label">Identité globale</dt>
+                <dd class="info-value"><code class="path">{work.globalMediaId}</code></dd>
+              </div>
+            {/if}
+          </dl>
+        </section>
       </div>
 
       <div class="modal-footer">
-        <button type="button" class="btn primary-btn" onclick={() => (infoOpen = false)}>Fermer</button>
+        <button type="button" class="btn primary-btn" onclick={closeInfo}>Fermer</button>
       </div>
     </div>
   </div>
@@ -1097,15 +1310,119 @@
   }
 
   /* Info modal styles */
+  .modal-card.info-card {
+    max-width: 860px;
+  }
+
+  .info-note {
+    margin: 0;
+    color: var(--mu);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .version-card {
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: var(--pn);
+    overflow: hidden;
+  }
+
+  .version-card > summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    min-height: 52px;
+    padding: 12px 16px;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .version-card > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .version-card > summary::before {
+    content: '';
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid var(--mu);
+    border-bottom: 2px solid var(--mu);
+    transform: rotate(-45deg);
+    transition: transform var(--t-fast) var(--ease);
+  }
+
+  .version-card[open] > summary::before {
+    transform: rotate(45deg);
+  }
+
+  .version-card > summary:focus-visible {
+    outline: 2px solid var(--ac);
+    outline-offset: -2px;
+  }
+
+  .version-title {
+    font-size: 15px;
+    font-weight: 750;
+    color: var(--tx);
+    overflow-wrap: anywhere;
+  }
+
+  .version-node {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--mu);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--err);
+  }
+
+  .status-dot.online { background: var(--ok); }
+  .status-dot.revoked { background: var(--warn); }
+
+  .version-body {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    padding: 6px 16px 18px;
+    border-top: 1px solid var(--line);
+    background: var(--bg-3);
+  }
+
+  .version-card > .info-note,
+  .info-error-row {
+    padding: 4px 16px 16px;
+  }
+
+  .info-error-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    color: var(--err);
+    font-size: 14px;
+  }
+
   .info-section {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    min-width: 0;
   }
 
   .info-section h4 {
     margin: 0;
-    padding-bottom: 8px;
+    padding: 12px 0 8px;
     font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
@@ -1118,6 +1435,7 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px 20px;
+    margin: 0;
   }
 
   .info-item {
@@ -1129,7 +1447,7 @@
   }
 
   .info-item.full {
-    grid-column: span 2;
+    grid-column: 1 / -1;
   }
 
   .info-label {
@@ -1138,26 +1456,67 @@
   }
 
   .info-value {
+    margin: 0;
     color: var(--tx);
     font-weight: 600;
     overflow-wrap: anywhere;
   }
 
-  .info-value code {
+  .info-value.muted,
+  .track-row.muted {
+    color: var(--mu);
+    font-weight: 500;
+  }
+
+  .info-error {
+    color: var(--err);
+  }
+
+  .info-sub {
+    display: block;
+    margin-top: 2px;
+    color: var(--mu);
+    font-size: 12.5px;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+
+  .info-value code,
+  .info-sub code,
+  code.path {
     font-family: var(--font-mono);
     font-size: 12.5px;
     font-weight: 500;
   }
 
-  .id-row {
+  .path-row {
     display: flex;
-    align-items: center;
-    flex-wrap: wrap;
+    align-items: flex-start;
     gap: 10px;
+  }
+
+  code.path {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: var(--r-sm);
+    background: var(--pn);
+    color: var(--tx);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    word-break: break-all;
+    user-select: all;
+  }
+
+  code.path.small {
+    display: block;
+    margin-top: 8px;
+    font-size: 12px;
   }
 
   .copy-btn {
     display: inline-flex;
+    flex: none;
     align-items: center;
     gap: 6px;
     min-height: 36px;
@@ -1174,6 +1533,11 @@
 
   .copy-btn:hover {
     background: var(--pn-2);
+  }
+
+  .copy-btn:focus-visible {
+    outline: 2px solid var(--ac);
+    outline-offset: 2px;
   }
 
   .tag-status {
@@ -1195,20 +1559,85 @@
     color: var(--err);
   }
 
-  .audio-list, .sub-list {
+  .tag-status.revoked {
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+
+  .version-card > summary .tag-status {
+    margin-left: 0;
+  }
+
+  .track-list {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .track-row {
+    padding: 10px 12px;
+    border-radius: var(--r-md);
+    background: var(--pn);
+    font-size: 14px;
+    min-width: 0;
+  }
+
+  .track-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    color: var(--tx);
+    overflow-wrap: anywhere;
+  }
+
+  .track-index {
+    padding: 1px 7px;
+    border-radius: var(--r-pill);
+    background: var(--pn-2);
+    color: var(--mu);
+    font-size: 11.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .track-title {
+    color: var(--mu);
+    font-weight: 500;
+  }
+
+  .track-chips {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    margin-top: 4px;
+    margin-top: 8px;
   }
 
   .track-chip {
-    padding: 5px 10px;
+    padding: 4px 10px;
     border-radius: var(--r-pill);
-    background: var(--pn);
+    background: var(--bg-3);
+    border: 1px solid var(--line);
     color: var(--tx);
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
+  }
+
+  .track-chip.role {
+    background: var(--ac-soft);
+    border-color: transparent;
+    color: var(--ac);
+  }
+
+  /* TV and very large screens: readable from a distance. */
+  @media (min-width: 1600px) {
+    .modal-card.info-card { max-width: 1040px; }
+    .info-item, .track-row, .info-note { font-size: 16px; }
+    .info-label, .info-section h4 { font-size: 14px; }
+    .track-chip, .info-value code, code.path { font-size: 14px; }
+    .version-title { font-size: 18px; }
   }
 
   /* Form styles */
@@ -1449,6 +1878,10 @@
 
     .info-grid { grid-template-columns: minmax(0, 1fr); }
     .info-item.full { grid-column: auto; }
+    .path-row { flex-wrap: wrap; }
+    .path-row code.path { flex-basis: 100%; }
+    .version-node { margin-left: 0; flex-basis: 100%; }
+    .version-body { padding: 4px 12px 14px; }
 
     .col-8, .col-6, .col-4 { grid-column: span 12; }
   }

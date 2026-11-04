@@ -1,26 +1,30 @@
 import type { Work } from './api';
 
-/** Forme d'une tuile de la mosaïque « Pour ce soir » (toutes occupent deux rangées). */
-export type TileShape = 'wide' | 'tall' | 'square';
+/**
+ * Mosaïque « Pour ce soir » : une tuile vedette 16:9 (image paysage) suivie d'affiches 2:3.
+ * Aucun autre format : la grille est dimensionnée par `aspect-ratio`, jamais par une hauteur fixe.
+ */
+export type TileShape = 'feature' | 'poster';
 export type TileBreakpoint = 'desktop' | 'tablet' | 'phone';
-export type MosaicTile = { shape: TileShape; span: Record<TileBreakpoint, number>; hidden: Record<TileBreakpoint, boolean> };
+export type MosaicTile = { shape: TileShape; hidden: Record<TileBreakpoint, boolean> };
+/**
+ * Grille d'un point de rupture. Ordinateur : vedette à gauche sur `featureRows` rangées
+ * d'affiches. Tablette et téléphone : vedette pleine largeur, affiches dessous.
+ */
+export type MosaicGrid = { columns: number; featureRows: number };
+export type MosaicLayout = { posters: number; tiles: MosaicTile[]; grids: Record<TileBreakpoint, MosaicGrid> };
 
 export const TONIGHT_MIN = 4;
 export const TONIGHT_MAX = 7;
 const RECENT_WINDOW = 24;
 
-const COLUMNS: Record<TileBreakpoint, number> = { desktop: 6, tablet: 4, phone: 2 };
-const SPANS: Record<TileBreakpoint, Record<TileShape, number>> = {
-  desktop: { wide: 3, tall: 1, square: 2 },
-  tablet: { wide: 4, tall: 1, square: 2 },
-  phone: { wide: 2, tall: 1, square: 1 }
-};
-// Suites choisies pour remplir exactement les bandes de 6 colonnes sur PC.
-const PATTERNS: Record<number, TileShape[]> = {
-  4: ['wide', 'tall', 'square', 'wide'],
-  5: ['wide', 'tall', 'square', 'wide', 'wide'],
-  6: ['wide', 'tall', 'square', 'square', 'tall', 'wide'],
-  7: ['wide', 'tall', 'square', 'tall', 'square', 'square', 'tall']
+// Par nombre d'affiches : chaque grille est remplie exactement, sans case vide.
+const GRIDS: Record<number, Record<TileBreakpoint, MosaicGrid>> = {
+  3: { desktop: { columns: 3, featureRows: 1 }, tablet: { columns: 3, featureRows: 0 }, phone: { columns: 3, featureRows: 0 } },
+  4: { desktop: { columns: 2, featureRows: 2 }, tablet: { columns: 4, featureRows: 0 }, phone: { columns: 2, featureRows: 0 } },
+  // Cinq affiches ne remplissent pas deux colonnes : la dernière est masquée sur téléphone.
+  5: { desktop: { columns: 5, featureRows: 1 }, tablet: { columns: 5, featureRows: 0 }, phone: { columns: 2, featureRows: 0 } },
+  6: { desktop: { columns: 3, featureRows: 2 }, tablet: { columns: 6, featureRows: 0 }, phone: { columns: 3, featureRows: 0 } }
 };
 
 function interleave(first: Work[], second: Work[]): Work[] {
@@ -55,38 +59,27 @@ export function pickTonight(films: Work[], series: Work[], excludedIds: string[]
   return picked.length >= TONIGHT_MIN ? picked : [];
 }
 
-/** Répartit les tuiles par bandes de deux rangées ; une bande incomplète est comblée par sa dernière tuile. */
-export function mosaicLayout(count: number): MosaicTile[] {
+/** Place en vedette la première œuvre qui a une image paysage ; l'ordre des autres est conservé. */
+export function arrangeTonight(works: Work[], hasWideArtwork: (work: Work) => boolean): Work[] {
+  const index = works.findIndex(hasWideArtwork);
+  return index <= 0 ? works : [works[index], ...works.slice(0, index), ...works.slice(index + 1)];
+}
+
+/** Une vedette puis des affiches ; les affiches qui ne complètent pas une rangée sont masquées. */
+export function mosaicLayout(count: number): MosaicLayout | null {
   const size = Math.min(TONIGHT_MAX, count);
-  if (size < TONIGHT_MIN) return [];
-  const tiles: MosaicTile[] = PATTERNS[size].map(shape => ({
-    shape,
-    span: { desktop: 0, tablet: 0, phone: 0 },
-    hidden: { desktop: false, tablet: false, phone: false }
-  }));
-  for (const breakpoint of Object.keys(COLUMNS) as TileBreakpoint[]) {
-    const columns = COLUMNS[breakpoint];
-    let band: MosaicTile[] = [];
-    let used = 0;
-    const close = () => {
-      const last = band.at(-1);
-      if (!last || used >= columns) return;
-      // Une affiche seule étirée sur toute la largeur serait trop recadrée : on la masque.
-      if (band.length === 1 && last.shape !== 'wide' && tiles.filter(tile => !tile.hidden[breakpoint]).length > TONIGHT_MIN) last.hidden[breakpoint] = true;
-      else last.span[breakpoint] += columns - used;
-    };
-    for (const tile of tiles) {
-      const span = Math.min(SPANS[breakpoint][tile.shape], columns);
-      if (used + span > columns) {
-        close();
-        band = [];
-        used = 0;
+  if (size < TONIGHT_MIN) return null;
+  const posters = size - 1;
+  const grids = GRIDS[posters];
+  const tiles: MosaicTile[] = Array.from({ length: size }, (_, index) => {
+    const hidden = { desktop: false, tablet: false, phone: false };
+    if (index > 0) {
+      for (const breakpoint of Object.keys(grids) as TileBreakpoint[]) {
+        const { columns } = grids[breakpoint];
+        hidden[breakpoint] = index > posters - (posters % columns);
       }
-      tile.span[breakpoint] = span;
-      band.push(tile);
-      used += span;
     }
-    close();
-  }
-  return tiles;
+    return { shape: index === 0 ? 'feature' : 'poster', hidden };
+  });
+  return { posters, tiles, grids };
 }

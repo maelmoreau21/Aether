@@ -72,7 +72,6 @@ fs.mkdirSync(out, {recursive: true});
     await card.click();
     await page.getByRole('heading',{name:'Scanner Film',exact:true}).waitFor();
     const container=restart?'MKV':'MP4';
-    await page.locator('.versions-panel summary').click();
     await page.getByRole('button',{name:`Sélectionner la version ${container}`,exact:true}).click();
     // Browser clock at the actual Svelte click handler boundary; excludes
     // Playwright dispatch latency. rVFC means compositor submission, not photons.

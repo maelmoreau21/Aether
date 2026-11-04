@@ -6,4 +6,4 @@
 <svelte:head><title>Mes statistiques</title></svelte:head>
 <Navbar section="settings" name={$serverPresentation.serverName} />
 <main><Statistics /></main>
-<style>main{padding:clamp(20px,4vw,56px);padding-bottom:calc(48px + var(--music-player-height,0px));}</style>
+<style>main{padding:clamp(20px,4vw,56px) var(--gutter);padding-bottom:calc(48px + var(--music-player-height,0px));}</style>

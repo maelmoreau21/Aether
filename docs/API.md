@@ -237,6 +237,39 @@ Media contient aussi `synthetic` (true pour les démos, false pour l'inventaire)
 Configuration publique mode standalone-local avec MEDIA_LIBRARY_ROOT ; mode
 localhost-fixtures conservé pour le banc expérimental isolé.
 
+### Fiche technique d'un fichier — 4 novembre 2026
+
+`GET /api/v1/assets/{assetId}/details` alimente le panneau « Informations
+média ». Mêmes contrôles que les autres routes `/api/v1/assets/{id}/…` :
+session (`401`), bibliothèque autorisée et non révoquée, Node non révoqué,
+restriction parentale (`403 permission_denied` / `parental_restriction`, aussi
+pour un identifiant inconnu). `404 unknown_media` si la ligne disparaît entre le
+contrôle et la lecture. `Cache-Control: private, no-store`. Aucun paramètre :
+l'asset est résolu par son identifiant opaque dans l'inventaire.
+
+Réponse : `assetId`, `workId`, `available`, `pathsVisible`, `node`
+(`id`, `name`, `kind` local/remote, `status` effectif connected/disconnected,
+`connectionMode`), `library` (`id`, `name`, `kind` ; bibliothèque logique parente
+pour un dossier multi-emplacements), `file` (`size`, `mime`, `modifiedAt` en
+secondes), `container` (`formatName`, `formatLongName`, `durationSeconds`,
+`bitRate`, `startTime`), `tracks` (index, `codecType`, `codecName`,
+`codecLongName`, profil, dimensions, `pixFmt`, couleurs, `frameRate`, `bitRate`,
+canaux, `sampleRate`, `language`, `title`, `disposition` booléenne),
+`externalAudio` (langue, taille, décalage, piste), `externalSubtitles`
+(`origin` sidecar/downloaded, langue, libellé, forcés, SDH, format) et
+`chapterCount`. Les champs du probe sont copiés par liste blanche :
+`format.filename`, extradata, données annexes et étiquettes arbitraires ne sont
+jamais renvoyés.
+
+Chemins : **administrator uniquement** (`pathsVisible: true`). `file.name`,
+`file.relativePath` (relatif à la racine de la bibliothèque), `file.libraryRoot`,
+`file.absolutePath` (racine telle que connue par le Node + chemin relatif, avec
+le séparateur du Node) ainsi que `node.version` et les chemins des pistes audio
+externes. Un compte `user` reçoit le Node, la bibliothèque et la description
+technique sans aucun nom de fichier ni chemin. Ces chemins sont informatifs :
+aucune route n'accepte de chemin en entrée. Test :
+`cargo test -p media-poc --test asset_details`.
+
 ## P2 — contrôle interne de chaque requête directe (17 octobre 2026)
 
 POST `/internal/v1/core/playback/authorize` reçoit des `PlaybackTokenClaims`
@@ -420,6 +453,29 @@ descripteurs sans ce champ conservent `preparedVideoUrl`, une copie complète
 validée avant publication. Les fenêtres audio évitent une copie audio complète
 sur le parcours MKV quand MSE Opus est disponible.
 
+
+### Portraits de la distribution (4 novembre 2026)
+
+Chaque élément de `actors` du catalogue dont le fournisseur a donné un portrait
+`https://` (`thumbUrl`, ou `thumb` d'un NFO) reçoit `imageUrl` :
+`/api/v1/works/{work}/people/{key}/image`, où `key` vaut les 32 premiers
+caractères hexadécimaux du SHA-256 de l'URL du fournisseur. `GET` exige une
+session autorisée à lire l'œuvre (mêmes règles que les images de l'œuvre) et une
+clé correspondant à un crédit de cette œuvre ; sinon `401`, `403` ou `404`
+`unknown_person_image`. Au premier appel, le Core télécharge le portrait
+seulement via un hôte HTTPS déclaré (`httpHosts`) par une extension activée,
+autorisée pour la bibliothèque et disposant de `metadata.read` ou `images`
+(mêmes contrôles DNS/IP, sans redirection, 10 Mio et 12 s au plus que les aperçus).
+L'image décodée est réencodée en JPEG d'au plus 400×600 et conservée dans le
+magasin d'assets (`person_images`). Réponses : `200 image/jpeg` avec `ETag`,
+`Cache-Control: private, max-age=31536000, immutable`, `304` si l'`ETag`
+correspond ; `404 person_image_host_denied` si aucun fournisseur autorisé ne
+déclare l'hôte (non mémorisé) ; `404 person_image_unavailable` après un échec de
+téléchargement ou de décodage, mémorisé six heures ; `503 person_image_busy` ou
+`person_image_timeout` (quatre téléchargements simultanés au plus). L'URL du
+fournisseur n'est jamais transmise au navigateur par cette route ; `thumbUrl`
+reste présent dans le catalogue pour compatibilité mais l'interface ne le charge
+pas (la CSP `img-src 'self'` le bloquerait).
 
 ## Détail de série paginé — 23 octobre 2026
 

@@ -252,6 +252,13 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
                     if name == "role" {
                         actor.role = text.to_owned();
                     }
+                    if name == "thumb"
+                        && actor.thumb.is_none()
+                        && text.len() <= 2048
+                        && text.starts_with("https://")
+                    {
+                        actor.thumb = Some(text.to_owned());
+                    }
                 }
                 if name == "actor"
                     && stack.len() == 1
@@ -499,9 +506,20 @@ mod tests {
     }
     use super::*;
     #[test]
+    fn keeps_only_remote_https_actor_portraits() {
+        let meta = parse(br#"<movie><actor><name>A</name><thumb>https://image.example.org/a.jpg</thumb></actor><actor><name>B</name><thumb>/config/metadata/People/B/folder.jpg</thumb></actor><actor><name>C</name><thumb>http://image.example.org/c.jpg</thumb></actor></movie>"#).unwrap();
+        assert_eq!(
+            meta.actors[0].thumb.as_deref(),
+            Some("https://image.example.org/a.jpg")
+        );
+        assert_eq!(meta.actors[1].thumb, None);
+        assert_eq!(meta.actors[2].thumb, None);
+    }
+    #[test]
     fn preserves_credits_and_provider_scales() {
         let meta=parse(br#"<tvshow><actor><name>Actor</name><role>Role</role></actor><director>Director</director><credits>Writer</credits><ratings><rating name="tomatometer" max="100"><value>95</value></rating><rating name="imdb"><value>8.4</value></rating></ratings></tvshow>"#).unwrap();
         assert_eq!(meta.actors[0].role, "Role");
+        assert_eq!(meta.actors[0].thumb, None);
         assert_eq!(meta.writers, ["Writer"]);
         assert_eq!(meta.ratings[0].max, 100.0);
         assert_eq!(meta.ratings[1].max, 10.0);

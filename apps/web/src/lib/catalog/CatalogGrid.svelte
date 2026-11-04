@@ -481,7 +481,7 @@
 
   .shelf { display: flex; flex-direction: column; gap: 14px; }
   .section-heading { display: flex; align-items: baseline; gap: 12px; }
-  h2 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: var(--tx); }
+  h2 { margin: 0; font-size: calc(24px * var(--ui-scale, 1)); font-weight: 800; letter-spacing: -0.02em; color: var(--tx); }
   .count-badge { font-size: 14px; font-weight: 600; color: var(--mu); }
 
   .media-grid {

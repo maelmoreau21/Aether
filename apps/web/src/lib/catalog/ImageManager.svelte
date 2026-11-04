@@ -192,12 +192,39 @@
     }
   }
 
+  // Les vignettes sont réduites (?width=320) : leur taille naturelle n'est pas
+  // celle du fichier. Quand le Core ne connaît pas les dimensions (images locales),
+  // on mesure l'original une seule fois, en arrière-plan, avec un cache par URL.
+  // Caches internes non affichés : les dimensions sont reportées sur l'entrée réactive.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const originalSizes = new Map<string, { width: number; height: number }>();
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const probes = new Set<string>();
   function dimensions(event: Event, entry: Entry) {
-    if (!entry.width) {
+    if (entry.width && entry.height) return;
+    if (!workId) {
+      // Sans paramètre width, l'aperçu est déjà l'original.
       const image = event.currentTarget as HTMLImageElement;
       entry.width = image.naturalWidth;
       entry.height = image.naturalHeight;
+      return;
     }
+    const known = originalSizes.get(entry.url);
+    if (known) { entry.width = known.width; entry.height = known.height; return; }
+    if (probes.has(entry.url)) return;
+    probes.add(entry.url);
+    const original = new Image();
+    original.decoding = 'async';
+    original.onload = () => {
+      probes.delete(entry.url);
+      if (!original.naturalWidth) return;
+      const size = { width: original.naturalWidth, height: original.naturalHeight };
+      originalSizes.set(entry.url, size);
+      entry.width = size.width;
+      entry.height = size.height;
+    };
+    original.onerror = () => probes.delete(entry.url);
+    original.src = entry.url;
   }
 
   function provenance(entry: Entry) {

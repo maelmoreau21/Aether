@@ -5,6 +5,7 @@
   import { selectArtwork } from './artwork-selection';
   import { imagePreviewUrl } from './image-url';
   import { mosaicLayout } from './tonight';
+  import { fitArtwork } from '../ui/fit-artwork';
 
   let { works = [], detailUrl }: { works?: Work[]; detailUrl: (work: Work) => string } = $props();
 
@@ -43,7 +44,7 @@
           <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- detailUrl() returns a resolved URL. -->
           <a class="tile" class:has-image={hasImage} href={detailUrl(work)}>
             {#if hasImage}
-              <img src={image} alt="" width={tile.shape === 'wide' ? 1280 : 640} height={tile.shape === 'wide' ? 720 : 960} loading="lazy" decoding="async" onerror={() => (failedImages = [...failedImages, image])} />
+              <img src={image} alt="" width={tile.shape === 'wide' ? 1280 : 640} height={tile.shape === 'wide' ? 720 : 960} loading="lazy" decoding="async" use:fitArtwork onerror={() => (failedImages = [...failedImages, image])} />
               <span class="shade" aria-hidden="true"></span>
             {/if}
             <span class="kind">{work.kind === 'series' ? 'Série' : 'Film'}</span>

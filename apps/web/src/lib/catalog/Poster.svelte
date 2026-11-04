@@ -9,6 +9,7 @@
   import Icon from '../ui/Icon.svelte';
   import { imagePreviewUrl, isImageLoaded, markImageLoaded } from './image-url';
   import { tvLayout } from '../theme';
+  import { fitArtwork } from '../ui/fit-artwork';
 
   let failedUrls = $state<string[]>([]);
   let {
@@ -68,6 +69,7 @@
         fetchpriority={eager ? 'high' : 'auto'}
         decoding="async"
         use:checkLoaded
+        use:fitArtwork
         onload={() => {
           loadedUrl = imageUrl;
           markImageLoaded(imageUrl);

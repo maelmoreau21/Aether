@@ -206,7 +206,7 @@
   .search-field:hover { background: var(--pn-2); }
   .search-field:focus-within { outline: 2px solid var(--ac); outline-offset: 2px; background: var(--pn); }
   .search-field :global(svg) { flex: none; }
-  .search-field input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: var(--tx); font: inherit; font-size: 14px; font-weight: 500; outline: none; }
+  .search-field input { flex: 1; min-width: 0; height: 100%; min-height: 0; box-shadow: none; padding: 0; border: 0; background: transparent; color: var(--tx); font: inherit; font-size: 14px; font-weight: 500; outline: none; }
   .search-field input::placeholder { color: var(--mu); opacity: 1; }
   .search-results ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
   .search-result { min-height: 44px; padding-block: 8px; }

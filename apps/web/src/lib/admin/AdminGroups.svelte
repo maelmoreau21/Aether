@@ -540,7 +540,7 @@
     transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
   }
   .search-box:focus-within { border-color: var(--ac); background: var(--bg-3); }
-  .search-box input { width: 180px; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: var(--tx); font: inherit; font-size: 14px; outline: none; }
+  .search-box input { width: 180px; min-width: 0; height: 100%; min-height: 0; box-shadow: none; padding: 0; border: 0; background: transparent; color: var(--tx); font: inherit; font-size: 14px; outline: none; }
   .search-box input::placeholder { color: var(--mu-2); }
 
   /* Tableaux */

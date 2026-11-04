@@ -123,7 +123,6 @@ fs.mkdirSync(out, {recursive: true});
     assert.equal(await page.locator('.main-nav a[href*="search"]').count(),0);
     assert.equal(await page.locator('main + footer').count(),0);
     assert.equal(await page.getByRole('link',{name:'Rechercher',exact:true}).count(),1);
-    await page.locator('.personal-panel summary').click();
     const favoriteSaved=page.waitForResponse(r=>r.url().includes('/api/v1/feedback/')&&r.request().method()==='PUT');
     await page.getByRole('button',{name:'Ajouter aux favoris',exact:true}).click();
     assert.equal((await favoriteSaved).status(),200);
@@ -141,7 +140,6 @@ fs.mkdirSync(out, {recursive: true});
     } finally {releaseRating();await page.unrouteAll({behavior:'wait'});}
     assert.equal((await ratingSaved).status(),200);
     await page.reload();
-    await page.locator('.personal-panel summary').click();
     await page.getByRole('button',{name:'Retirer des favoris',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'4,5 sur 5',exact:true}).getAttribute('aria-pressed'),'true');
     await page.locator('summary[aria-label="Ajouter à une playlist"]').first().click();

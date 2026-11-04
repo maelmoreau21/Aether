@@ -199,7 +199,7 @@ input[type='range'] {
   height: 18px;
 }
 
-select {
+:where(select) {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -220,13 +220,13 @@ select {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
-select:hover:not(:disabled) {
+:where(select):hover:not(:disabled) {
   background-color: var(--bg-elevated, var(--color-raised-hover));
   border-color: var(--color-line-strong);
 }
 
-select:focus,
-select:focus-visible {
+:where(select):focus,
+:where(select):focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
   border-color: var(--color-accent);
@@ -304,8 +304,10 @@ optgroup {
   }
 }
 
-/* Shared form grammar, including administration and music. */
-input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea {
+/* Shared form grammar, including administration and music.
+   :where() garde une spécificité nulle : les champs stylés par un composant
+   (recherche avec loupe, champs intégrés) gardent toujours la main. */
+:where(input:not([type="range"], [type="checkbox"], [type="radio"], [type="color"], [type="file"]), textarea) {
   min-height: 44px;
   border: 1px solid var(--color-line);
   border-radius: var(--radius-md);
@@ -316,12 +318,23 @@ input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea {
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
 }
 
-input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):focus,
-textarea:focus {
+:where(input:not([type="range"], [type="checkbox"], [type="radio"], [type="color"], [type="file"]), textarea):focus {
   outline: none;
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
+
+input[type="search"] { -webkit-appearance: none; appearance: none; }
+input[type="search"]::-webkit-search-decoration { -webkit-appearance: none; }
+input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  width: 16px; height: 16px; margin-left: 6px; cursor: pointer;
+  background: currentColor;
+  opacity: 0.55;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 4l8 8M12 4l-8 8' stroke='black' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") center / 12px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 4l8 8M12 4l-8 8' stroke='black' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") center / 12px no-repeat;
+}
+input[type="search"]::-webkit-search-cancel-button:hover { opacity: 0.9; }
 
 button:active:not(:disabled) {
   filter: brightness(0.94);
@@ -344,3 +357,14 @@ button:active:not(:disabled) {
 :root[data-card-size="large"] { --poster-width:230px; --mobile-card-columns:1; --mobile-shelf-columns:1.55; }
 :root[data-card-density="compact"] { --card-gap:8px; --card-row-gap:14px; }
 /* Accent presets live in halo.css (--ac); the aliases above follow them. */
+
+/* fitArtwork (lib/ui/fit-artwork.ts) : image entière + même image floutée en fond
+   quand le cadre rognerait trop l'illustration. */
+img[data-artwork-fit='contain'] { object-fit: contain !important; object-position: center !important; }
+img.artwork-fill {
+  object-fit: cover !important;
+  object-position: center !important;
+  filter: blur(28px) saturate(1.15) brightness(0.7);
+  transform: scale(1.15) !important;
+  pointer-events: none;
+}

@@ -11,6 +11,8 @@
   import RecommendationShelf from './RecommendationShelf.svelte';
   import TonightMosaic from './TonightMosaic.svelte';
   import { pickTonight } from './tonight';
+  import DiscoverFeed from './DiscoverFeed.svelte';
+  import { page } from '$app/state';
 
   let { films = [], series = [], featured = null, onPlay, detailUrl }: {
     films: Work[];
@@ -42,6 +44,9 @@
   const tonight = $derived(pickTonight(films, series, showHero ? heroCandidates.map(work => work.id) : [], hasArt));
   const topRated = $derived(allWorks.filter(work => (work.rating ?? 0) >= 6).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 12));
   let heroTint = $state<string | null>(null);
+  // Œuvres déjà mises en avant plus haut : le fil sans fin ne les repropose pas.
+  const shownAbove = $derived([...heroCandidates, ...tonight, ...films.slice(0, 16), ...series.slice(0, 16), ...topRated].map(work => work.id));
+  const library = $derived(page.url.searchParams.get('library') ?? '');
 </script>
 
 <div class="catalog-home">
@@ -71,6 +76,9 @@
       </MediaShelf>
     {/if}
   {/each}
+  {#if allWorks.length}
+    <DiscoverFeed {films} {series} exclude={shownAbove} {library} {detailUrl} />
+  {/if}
   {#if $preferenceState.homeSections?.length === 0}
     <p>Les sections de l’accueil sont masquées. Vous pouvez les réactiver dans les <a href={resolve('settings/#display')}>paramètres d’affichage</a>.</p>
   {/if}

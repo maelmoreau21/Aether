@@ -3,6 +3,7 @@
   import { request, type Work } from './api';
   import MediaShelf from '../ui/MediaShelf.svelte';
   import Poster from './Poster.svelte';
+  import DiscoverFeed from './DiscoverFeed.svelte';
 
   let { work, candidates = [] }: { work: Work; candidates?: Work[] } = $props();
   let fetchedItems = $state<Work[]>([]);
@@ -14,18 +15,18 @@
       return;
     }
     const controller = new AbortController();
-    const params = new URLSearchParams({
-      kind: currentWork.kind === 'series' ? 'series' : 'film',
-      limit: '36',
-      count: 'false'
-    });
-    void request<{ items: Work[] }>(`/api/v1/catalog?${params}`, controller.signal)
-      .then(result => {
-        if (!controller.signal.aborted && Array.isArray(result.items)) {
-          fetchedItems = result.items;
-        }
-      })
-      .catch(() => {});
+    const kind = currentWork.kind === 'series' ? 'series' : 'film';
+    // Candidats : les plus récents du même type, plus ceux qui partagent les genres principaux.
+    const queries = [
+      { kind, limit: '60', count: 'false', sort: 'added-desc' },
+      ...(currentWork.genres ?? []).slice(0, 3).map(genre => ({ kind, genre, limit: '40', count: 'false', sort: 'year-desc' }))
+    ];
+    fetchedItems = [];
+    void Promise.allSettled(queries.map(params => request<{ items: Work[] }>(`/api/v1/catalog?${new URLSearchParams(params)}`, controller.signal)))
+      .then(results => {
+        if (controller.signal.aborted) return;
+        fetchedItems = results.flatMap(result => result.status === 'fulfilled' && Array.isArray(result.value.items) ? result.value.items : []);
+      });
     return () => controller.abort();
   });
 
@@ -65,7 +66,7 @@
         return { candidate, score };
       })
       .sort((a, b) => b.score - a.score || (b.candidate.rating ?? 0) - (a.candidate.rating ?? 0))
-      .slice(0, 16)
+      .slice(0, 24)
       .map(entry => entry.candidate);
   });
 
@@ -76,13 +77,26 @@
   }
 </script>
 
-{#if similarWorks.length > 0}
+{#if !work.synthetic}
   <div class="similar-works-section">
-    <MediaShelf title={work.kind === 'series' ? 'Séries similaires' : 'Films similaires'}>
-      {#each similarWorks as item (item.id)}
-        <Poster work={item} href={itemHref(item)} />
-      {/each}
-    </MediaShelf>
+    {#if similarWorks.length > 0}
+      <MediaShelf title={work.kind === 'series' ? 'Séries similaires' : 'Films similaires'}>
+        {#each similarWorks as item (item.id)}
+          <Poster work={item} href={itemHref(item)} />
+        {/each}
+      </MediaShelf>
+    {/if}
+    <!-- Puis un fil sans fin du même type, en commençant par les genres de l'œuvre. -->
+    {#key work.id}
+      <DiscoverFeed
+        films={work.kind === 'series' ? [] : [work, ...similarWorks]}
+        series={work.kind === 'series' ? [work, ...similarWorks] : []}
+        exclude={[work.id, ...similarWorks.map(item => item.id)]}
+        kind={work.kind === 'series' ? 'series' : 'film'}
+        gridTitle={work.kind === 'series' ? 'Encore plus de séries' : 'Encore plus de films'}
+        detailUrl={itemHref}
+      />
+    {/key}
   </div>
 {/if}
 
@@ -92,5 +106,8 @@
     margin-top: 48px;
     padding-top: 24px;
     border-top: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: clamp(28px, 4vw, 48px);
   }
 </style>

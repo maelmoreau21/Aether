@@ -121,7 +121,9 @@
 
 
     skipBackSeconds = 10, skipForwardSeconds = 10,
-    onWake
+    onWake,
+    buffered = 0,
+    hideCreditsSkip = false
 
 
 
@@ -227,6 +229,22 @@
 
 
     onWake: () => void;
+
+
+
+    /** Position (s) jusqu’où le média est déjà chargé. */
+
+
+
+    buffered?: number;
+
+
+
+    /** La carte « épisode suivant » remplace le bouton « Passer le générique ». */
+
+
+
+    hideCreditsSkip?: boolean;
 
 
 
@@ -593,7 +611,7 @@
 
 
   let canSkipIntro = $derived(Boolean(media?.intro && playback.position >= media.intro.start && playback.position < media.intro.end));
-  let canSkipCredits = $derived(Boolean(media?.credits && playback.position >= media.credits.start && playback.position < media.credits.end));
+  let canSkipCredits = $derived(Boolean(!hideCreditsSkip && media?.credits && playback.position >= media.credits.start && playback.position < media.credits.end));
   let canSkipRecap = $derived(Boolean(media?.recap && playback.position >= media.recap.start && playback.position < media.recap.end));
   let canSkipPreview = $derived(Boolean(media?.preview && playback.position >= media.preview.start && playback.position < media.preview.end));
 
@@ -1930,6 +1948,9 @@
     </div>
   {/if}
 
+<div class="dock">
+  <div class="timeline-row">
+  <span class="bar-time" aria-hidden="true">{clock(playback.position)}</span>
   <div class="progress-line">
     {#if timelineChapters.length}
       <div class="chapter-ticks" aria-hidden="true">
@@ -2024,6 +2045,7 @@
 
       class="seek"
       style:--seek-progress={`${playback.duration > 0 ? Math.min(100, Math.max(0, (playback.position / playback.duration) * 100)) : 0}%`}
+      style:--seek-buffered={`${playback.duration > 0 ? Math.min(100, Math.max(0, (Math.max(buffered, playback.position) / playback.duration) * 100)) : 0}%`}
 
 
 
@@ -2168,7 +2190,18 @@
 
 
 
+  <span class="bar-time end" aria-hidden="true">{playback.duration > 0 ? `−${clock(Math.max(0, playback.duration - playback.position))}` : clock(0)}</span>
+  </div>
   <div class="control-row">
+    <div class="info-controls">
+      <span class="time" aria-label="{clock(playback.position)} sur {clock(playback.duration)}{projectedEndTime ? ', fin à ' + projectedEndTime : ''}">
+        <span class="current-time">{clock(playback.position)}</span>
+        <span class="duration-time"> / {clock(playback.duration)}</span>
+        {#if playback.duration > 0 && projectedEndTime}
+          <span class="remaining-time">Fin à {projectedEndTime}</span>
+        {/if}
+      </span>
+    </div>
 
 
 
@@ -2372,31 +2405,7 @@
 
 
 
-      <span class="time" aria-label="{clock(playback.position)} sur {clock(playback.duration)}{projectedEndTime ? ', fin à ' + projectedEndTime : ''}">
 
-
-
-        <span class="current-time">{clock(playback.position)}</span>
-
-
-
-        <span class="duration-time"> / {clock(playback.duration)}</span>
-
-
-
-        {#if playback.duration > 0 && projectedEndTime}
-
-
-
-          <span class="remaining-time"> (Fin à {projectedEndTime})</span>
-
-
-
-        {/if}
-
-
-
-      </span>
 
 
 
@@ -2581,6 +2590,7 @@
 
 
           value={playback.volume}
+          style:--volume-level={`${Math.round(playback.volume * 100)}%`}
 
 
 
@@ -2680,6 +2690,7 @@
 
 
 
+</div>
 </div>
 
 
@@ -4532,6 +4543,154 @@
       width: 380px;
       max-height: none;
     }
+  }
+
+  /* ==========================================================================
+     Dock « verre liquide » : timeline + commandes dans une même capsule vitrée,
+     dans la lignée du panneau de réglages. Couche finale, après Halo.
+     ========================================================================== */
+  .player-controls {
+    padding: 140px max(28px, env(safe-area-inset-right)) max(22px, env(safe-area-inset-bottom)) max(28px, env(safe-area-inset-left));
+    background: linear-gradient(0deg, rgb(0 0 0 / 0.6) 0%, rgb(0 0 0 / 0.2) 55%, rgb(0 0 0 / 0) 100%);
+  }
+  .dock {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 12px 16px 10px;
+    border-radius: 30px;
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.1) 0%, rgb(255 255 255 / 0.03) 100%),
+      rgb(16 18 26 / 0.42);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid rgb(255 255 255 / 0.13);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.2),
+      inset 0 -1px 0 rgb(255 255 255 / 0.04),
+      0 24px 60px rgb(0 0 0 / 0.45);
+    transition: transform var(--t-slow) var(--ease);
+  }
+  .concealed .dock { transform: translateY(14px); }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .dock { background: rgb(16 18 26 / 0.88); }
+  }
+
+  .timeline-row { display: flex; align-items: center; gap: 14px; padding: 0 4px; }
+  .timeline-row .progress-line { flex: 1; min-width: 0; margin-bottom: 0; }
+  .bar-time {
+    flex: none;
+    min-width: 56px;
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #f4f6fb;
+  }
+  .bar-time.end { text-align: right; color: rgb(244 246 251 / 0.68); }
+
+  /* Piste fine qui s'épaissit au survol, partie lue en accent */
+  .progress-line { --track-h: 4px; --thumb: 14px; }
+  .progress-line:hover, .progress-line:focus-within { --track-h: 7px; }
+  .seek { height: 26px; }
+  .seek::-webkit-slider-runnable-track {
+    height: var(--track-h);
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--ac) var(--seek-progress, 0%), rgb(255 255 255 / 0.2) var(--seek-progress, 0%));
+    transition: height var(--t-fast) var(--ease);
+  }
+  .seek::-webkit-slider-thumb {
+    width: var(--thumb);
+    height: var(--thumb);
+    margin-top: calc((var(--track-h) - var(--thumb)) / 2);
+    box-shadow: 0 0 0 5px rgb(255 255 255 / 0.16), 0 2px 8px rgb(0 0 0 / 0.4);
+    transform: scale(0.85);
+  }
+  .seek:hover::-webkit-slider-thumb, .seek:focus-visible::-webkit-slider-thumb, .seek:active::-webkit-slider-thumb { transform: scale(1.15); }
+  .seek::-moz-range-track { height: var(--track-h); border-radius: 999px; background: rgb(255 255 255 / 0.2); transition: height var(--t-fast) var(--ease); }
+  .seek::-moz-range-progress { height: var(--track-h); border-radius: 999px; background: var(--ac); }
+  .seek::-moz-range-thumb { width: var(--thumb); height: var(--thumb); box-shadow: 0 0 0 5px rgb(255 255 255 / 0.16), 0 2px 8px rgb(0 0 0 / 0.4); }
+  .timeline-markers-track { height: var(--track-h); border-radius: 999px; transition: height var(--t-fast) var(--ease); }
+  .chapter-tick { height: calc(var(--track-h) + 2px); }
+  .seek-preview { bottom: calc(100% + 10px); }
+  .seek-preview > span {
+    padding: 4px 10px;
+    border-radius: 10px;
+    background: rgb(16 18 26 / 0.6);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border: 1px solid rgb(255 255 255 / 0.12);
+  }
+  .trickplay-frame { border-radius: 14px; border: 1px solid rgb(255 255 255 / 0.5); }
+
+  /* Commandes : infos à gauche, transport centré, options à droite */
+  .control-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; margin-top: 2px; }
+  .info-controls { display: flex; align-items: center; min-width: 0; padding-left: 4px; }
+  .info-controls .time { margin: 0; }
+  .info-controls .current-time, .info-controls .duration-time { display: none; }
+  .info-controls .remaining-time { font-size: 12.5px; font-weight: 600; color: rgb(244 246 251 / 0.62); }
+  .left-controls { justify-content: center; gap: 6px; }
+  .right-controls { justify-content: flex-end; gap: 4px; min-width: 0; }
+  .control-btn { width: 44px; height: 44px; min-width: 44px; min-height: 44px; border-radius: 50%; }
+  .right-controls > button { border: 0; border-radius: 50%; width: 44px; padding: 0; }
+  .control-btn:hover:not(:disabled), .right-controls > button:hover:not(:disabled), .volume-group .mute:hover {
+    background: rgb(255 255 255 / 0.14);
+    border-color: transparent;
+  }
+  .primary.play-btn,
+  .primary.play-btn:hover:not(:disabled) {
+    border-radius: 50%;
+    background: rgb(248 249 252 / 0.94);
+    color: #0b0e18;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.9);
+  }
+  .primary.play-btn:hover:not(:disabled) { background: #fff; transform: scale(1.05); }
+  .primary.play-btn:active:not(:disabled) { transform: scale(0.95); }
+  @media (min-width: 769px) {
+    .primary.play-btn { width: 56px; height: 56px; min-width: 56px; min-height: 56px; }
+  }
+  .volume-group { gap: 2px; padding: 0 12px 0 0; border: 0; border-radius: 999px; background: rgb(255 255 255 / 0.06); }
+  .volume-group .mute { border: 0; border-radius: 50%; width: 44px; padding: 0; }
+  .volume {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 84px;
+    height: 20px;
+    background: transparent;
+  }
+  .volume::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: linear-gradient(90deg, #fff var(--volume-level), rgb(255 255 255 / 0.28) var(--volume-level)); }
+  .volume::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.4); }
+  .volume::-moz-range-track { height: 4px; border-radius: 999px; background: rgb(255 255 255 / 0.28); }
+  .volume::-moz-range-progress { height: 4px; border-radius: 999px; background: #fff; }
+  .volume::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: #fff; }
+
+  @media (max-width: 768px) {
+    .player-controls { padding: 64px max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
+    .dock { padding: 8px 10px; border-radius: 24px; }
+    .timeline-row { gap: 10px; padding: 0 2px; }
+    .bar-time { min-width: 44px; font-size: 12px; }
+    .seek { height: 40px; }
+    .control-row { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }
+    .info-controls { display: none; }
+    .right-controls { justify-content: center; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dock, .concealed .dock { transition: none; transform: none; }
+  }
+
+  /* Zone déjà chargée : entre la partie lue et le reste de la piste */
+  .seek::-webkit-slider-runnable-track {
+    background: linear-gradient(90deg,
+      var(--ac) var(--seek-progress, 0%),
+      rgb(255 255 255 / 0.42) var(--seek-progress, 0%),
+      rgb(255 255 255 / 0.42) var(--seek-buffered, 0%),
+      rgb(255 255 255 / 0.16) var(--seek-buffered, 0%));
+  }
+  .seek::-moz-range-track {
+    background: linear-gradient(90deg, rgb(255 255 255 / 0.42) var(--seek-buffered, 0%), rgb(255 255 255 / 0.16) var(--seek-buffered, 0%));
+  }
+  /* Boutons « Passer… » : juste au-dessus du dock vitré */
+  .skip-marker-overlay { bottom: calc(100% - 124px); right: max(28px, env(safe-area-inset-right)); }
+  @media (max-width: 768px) {
+    .skip-marker-overlay { bottom: calc(100% - 56px); right: max(12px, env(safe-area-inset-right)); }
   }
 </style>
 

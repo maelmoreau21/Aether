@@ -447,7 +447,8 @@
   .search-icon { position: absolute; left: 14px; display: grid; color: var(--mu); pointer-events: none; }
   .search-box input { width: 100%; height: 44px; padding: 0 40px 0 42px; border: 1px solid transparent; border-radius: var(--r-sm); background: var(--pn); color: var(--tx); font-size: 14px; transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease; }
   .search-box input:hover { background: var(--pn-2); }
-  .search-box input:focus { outline: none; border-color: var(--ac); background: var(--bg-3); }
+  .search-box input:focus { outline: none; border-color: var(--ac); background: var(--bg-3); box-shadow: 0 0 0 3px var(--ac-soft); }
+  .search-box input::-webkit-search-cancel-button { display: none; }
   .clear-btn { position: absolute; right: 6px; width: 32px; height: 32px; border: 0; border-radius: 10px; background: none; color: var(--mu); font-size: 18px; }
   .clear-btn:hover { background: var(--pn-2); color: var(--tx); }
 

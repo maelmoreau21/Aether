@@ -418,7 +418,6 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForFunction(async()=>{ const r=await fetch('/api/v1/progress'); const data=await r.json(); return data.items.some(item=>item.position>3.8); });
     // The final-window and long-seek regressions can legitimately mark watched.
     // Establish the unwatched precondition before testing the manual toggle.
-    await page.locator('.personal-panel summary').click();
     if (await page.getByRole('button',{name:'Marquer non vu',exact:true}).isVisible()) await page.getByRole('button',{name:'Marquer non vu',exact:true}).click();
     await page.getByRole('button',{name:'Marquer comme vu',exact:true}).click();
     await page.getByRole('button',{name:'Marquer non vu',exact:true}).waitFor();

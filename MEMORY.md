@@ -17,6 +17,21 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 4 novembre 2026 — Correctifs visuels de la refonte
+
+- Recherche : la règle globale des champs (spécificité 0,3,1) écrasait les styles
+  des champs avec loupe ; passée sous `:where()` dans `tokens.css`.
+- Fiches : vu (coche seule), favori (cœur) et note passent dans la rangée du
+  bouton Lecture ; l'ancien panneau « Mon suivi » est retiré.
+- Images : dimensions mesurées sur l'original, plus sur la vignette `?width=320` ;
+  `lib/ui/fit-artwork.ts` évite les rognages forts (image entière + fond flouté),
+  affiche floutée en repli sans image large, bannières 16:9 sur téléphone.
+- Lecteur : timeline et commandes dans un dock vitré. Accueil et fiches : fil
+  sans fin (`DiscoverFeed.svelte`, `discover.ts`), 24 similaires au lieu de 16.
+- Vérifié : `npm run check`, `npm run lint`, vitest 260/260, build, et
+  `browser_series` + `browser_scanner` (`--ignored`, Chrome) passent. Fil sans
+  fin non exercé sur un grand catalogue réel.
+
 ## 3 novembre 2026 — Documentation UX
 
 - Les rapports UX datés sont conservés comme preuves historiques, sans feuille de

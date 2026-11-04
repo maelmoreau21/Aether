@@ -1,7 +1,7 @@
 <script lang="ts">
   import { session, getSessionGeneration } from '../auth/session';
   type Feedback = {favorite:boolean;rating:number|null};
-  let { workId }: { workId:string } = $props();
+  let { workId, compact = false }: { workId:string; compact?: boolean } = $props();
   let value = $state<Feedback>({favorite:false,rating:null});
   let loaded = $state(false); let saving = $state(false); let error = $state(''); let preview = $state<number|null>(null);
   let confirmed:Feedback = {favorite:false,rating:null};
@@ -40,21 +40,24 @@
     } finally { if(current===epoch){processing=false;saving=false;} }
   }
 </script>
-<div class="personal-feedback" aria-label="Vos préférences privées" aria-busy={saving}>
+<div class="personal-feedback" class:compact aria-label="Vos préférences privées" aria-busy={saving}>
   <button
     type="button"
     class="favorite-btn"
+    class:compact
     disabled={!loaded}
     aria-label={value.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
     title={value.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
     aria-pressed={value.favorite}
     onclick={() => save({ ...value, favorite: !value.favorite })}
   >
-    <span class="heart-glyph" aria-hidden="true">{value.favorite ? '♥' : '♡'}</span>
-    <span class="fav-label">{value.favorite ? 'Favori' : 'Favoris'}</span>
+    <svg class="heart-glyph" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78Z" stroke-width="2" stroke-linejoin="round" />
+    </svg>
+    {#if !compact}<span class="fav-label">{value.favorite ? 'Favori' : 'Favoris'}</span>{/if}
   </button>
 
-  <div class="rating-pill">
+  <div class="rating-pill" class:rated={Boolean(value.rating)}>
     <div class="stars" role="group" aria-label="Ma note privée sur 5, par demi-étoile" onpointerleave={() => (preview = null)}>
       {#each [1, 2, 3, 4, 5] as star (star)}
         <span class="star">
@@ -81,8 +84,8 @@
       {/each}
     </div>
     {#if shownRating}
-      <span class="rating-value">{shownRating.toLocaleString('fr-FR')}/5</span>
-    {:else}
+      <span class="rating-value">{shownRating.toLocaleString('fr-FR')}</span>
+    {:else if !compact}
       <span class="rating-placeholder">Noter</span>
     {/if}
   </div>
@@ -142,18 +145,35 @@
     transform: scale(0.98);
   }
 
-  .favorite-btn[aria-pressed="true"] .heart-glyph {
-    color: var(--ac);
+  .heart-glyph {
+    flex: none;
+    fill: transparent;
+    stroke: currentColor;
+    color: var(--tx);
+    transition: fill var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-med) var(--ease);
   }
 
-  .heart-glyph {
-    display: inline-grid;
-    place-items: center;
-    width: 24px;
-    font-size: 19px;
-    line-height: 1;
-    color: var(--mu);
+  .favorite-btn[aria-pressed="true"] .heart-glyph {
+    color: var(--ac);
+    fill: var(--ac);
+    animation: heart-pop var(--t-slow) var(--ease);
   }
+
+  @keyframes heart-pop {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.28); }
+    100% { transform: scale(1); }
+  }
+
+  .favorite-btn.compact {
+    width: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .personal-feedback.compact { gap: 10px; flex-wrap: nowrap; }
+  .personal-feedback.compact .rating-pill { padding: 0 12px 0 8px; }
+  .personal-feedback.compact .star { width: 22px; font-size: 19px; }
 
   .rating-pill {
     display: inline-flex;
@@ -212,6 +232,8 @@
     padding: 0;
     background: transparent;
   }
+
+  .rating-pill.rated { background: var(--ac-soft); }
 
   .rating-value {
     font-size: 13px;

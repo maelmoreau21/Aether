@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { fitArtwork } from '../ui/fit-artwork';
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import { session } from '../auth/session';
@@ -127,7 +128,7 @@
           aria-label={`Reprendre la lecture de ${item.title}`}
         >
           <div class="card-thumb">
-            {#if image && !failedImages.includes(image)}<img class="resume-image" src={image} alt="" width="640" height="360" loading="lazy" decoding="async" onerror={() => failedImages = [...failedImages, image]} />{/if}
+            {#if image && !failedImages.includes(image)}<img class="resume-image" src={image} alt="" width="640" height="360" loading="lazy" decoding="async" use:fitArtwork onerror={() => failedImages = [...failedImages, image]} />{/if}
             <div class="thumb-bg" aria-hidden="true">
               <span class="thumb-letter">{(item.title ?? 'M').charAt(0)}</span>
             </div>

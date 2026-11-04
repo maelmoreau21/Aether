@@ -10,6 +10,7 @@
   import { isResumable } from '../player/progress';
   import { serverPresentation } from '../config/presentation';
   import { imageTint } from './ambient-tint';
+  import { fitArtwork } from './fit-artwork';
 
   let { featured = null, candidates = [], onPlay, onTint }: {
     featured?: Work | null;
@@ -28,14 +29,19 @@
   const switcher = $derived(list.length > 1);
 
   // backdrop.jpg first, landscape.jpg as a wide fallback.
+  // Sans image large, l'affiche floutée sert de fond d'ambiance (jamais rognée en net).
   function heroImage(work: Work): string {
     const artwork = selectArtwork(work, $session);
-    return imagePreviewUrl(artwork.backdrop || artwork.landscape, 1280);
+    return imagePreviewUrl(artwork.backdrop || artwork.landscape || artwork.poster, 1280);
+  }
+  function isAmbient(work: Work): boolean {
+    const artwork = selectArtwork(work, $session);
+    return !artwork.backdrop && !artwork.landscape && Boolean(artwork.poster);
   }
   // Vignettes du sélecteur : landscape.jpg, puis backdrop.
   function tabImage(work: Work): string {
     const artwork = selectArtwork(work, $session);
-    return imagePreviewUrl(artwork.landscape || artwork.backdrop, 640);
+    return imagePreviewUrl(artwork.landscape || artwork.backdrop || artwork.poster, 640);
   }
 
   const detailUrl = $derived(
@@ -115,6 +121,7 @@
           <img
             class="backdrop"
             class:on={work.id === active?.id}
+            class:ambient={isAmbient(work)}
             src={url}
             alt=""
             width="1280"
@@ -123,6 +130,7 @@
             fetchpriority={index === 0 ? 'high' : 'low'}
             decoding="async"
             use:sampleTint={url}
+            use:fitArtwork={{ threshold: isAmbient(work) ? 1 : 0.3 }}
             onerror={() => fail(url)}
           />
         {/if}
@@ -192,7 +200,7 @@
           onkeydown={event => onTabKeydown(event, index)}
         >
           {#if usable(thumb)}
-            <img src={thumb} alt="" width="640" height="360" loading="lazy" decoding="async" onerror={() => fail(thumb)} />
+            <img src={thumb} alt="" width="640" height="360" loading="lazy" decoding="async" use:fitArtwork onerror={() => fail(thumb)} />
             <span class="qi-shade" aria-hidden="true"></span>
           {/if}
           <span class="qi-title">{localizedTitle(work, $locale)}</span>
@@ -253,6 +261,10 @@
 
   /* Fondu enchaîné entre les œuvres à l'affiche */
   .backdrop.on { opacity: 1; }
+
+  /* Seule l'affiche existe : fond d'ambiance flouté plutôt qu'une affiche rognée */
+  .backdrop.ambient { object-position: center; filter: blur(36px) saturate(1.2) brightness(0.6); transform: scale(1.2); }
+  .hero:hover .backdrop.ambient { transform: scale(1.2); }
 
   .hero:hover .backdrop { transform: scale(1.035); }
 
@@ -487,7 +499,12 @@
   }
 
   @media (max-width: 760px) {
-    .hero.has-image { min-height: 480px; }
+    /* Téléphone : l'image large reste entière (16:9) en haut, le texte passe dessous. */
+    .hero.has-image { min-height: 0; padding-top: calc(56.25% - 64px); }
+    .hero.has-image .backdrop { inset: 0 0 auto 0; height: auto; aspect-ratio: 16 / 9; }
+    .hero.has-image .backdrop.ambient { inset: 0; height: 100%; aspect-ratio: auto; }
+    .hero.has-image .shade { inset: 0 0 auto 0; aspect-ratio: 16 / 9; background: linear-gradient(0deg, #06080e 0%, rgb(6 8 14 / 0.35) 40%, rgb(6 8 14 / 0) 100%); }
+
     .hero { border-radius: var(--r-lg); }
     .cap, .main.has-clearart .cap { max-width: none; }
     .acts { width: 100%; }

@@ -18,6 +18,7 @@
   import WatchStatus from './WatchStatus.svelte';
   import EpisodePlayer from './EpisodePlayer.svelte';
   import Icon from '../ui/Icon.svelte';
+  import { fitArtwork } from '../ui/fit-artwork';
 
   let {
     work,
@@ -112,6 +113,11 @@
         heading?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
       }}><Icon name="play" size={20} />Voir les épisodes</button>
       {#if !work.synthetic}
+        <div class="personal-actions" aria-label="Mon suivi">
+          <WatchStatus workId={work.id} compact />
+          <PersonalFeedback workId={work.id} compact />
+        </div>
+        <span class="action-divider" aria-hidden="true"></span>
         <WorkTools {work} />
       {/if}
     </div>
@@ -161,13 +167,13 @@
         {@const epTitle = localizedTitle(episode, $locale)}
         {@const epDesc = localizedPlot(episode, $locale)}
         {@const episodeArtwork = selectArtwork(episode, $session)}
-        {@const thumbnail = imagePreviewUrl(episodeArtwork.thumb || episodeArtwork.landscape || episodeArtwork.backdrop, 640)}
+        {@const thumbnail = imagePreviewUrl(episodeArtwork.thumb || episodeArtwork.landscape || episodeArtwork.backdrop || artwork.landscape || artwork.backdrop, 640)}
         {@const progress = $history.find(item => item.workId === episode.id)}
         {@const descriptor = media.find(item => item.workId === episode.id)}
         {@const duration = descriptor?.sources[0]?.durationSeconds}
         <article class="episode" aria-label={`Épisode ${episode.number ?? ''} — ${epTitle}`}>
           <div class="episode-artwork">
-            {#if thumbnail && !failedImages.includes(thumbnail)}<img class="episode-thumb" src={thumbnail} alt="" width="640" height="360" loading="lazy" decoding="async" onerror={() => failedImages = [...failedImages, thumbnail]} />{:else}<Icon name="tv" size={32} />{/if}
+            {#if thumbnail && !failedImages.includes(thumbnail)}<img class="episode-thumb" src={thumbnail} alt="" width="640" height="360" loading="lazy" decoding="async" use:fitArtwork onerror={() => failedImages = [...failedImages, thumbnail]} />{:else}<Icon name="tv" size={32} />{/if}
             {#if progress && isResumable(progress, $serverPresentation) && progress.duration > 0}<progress value={progress.position} max={progress.duration} aria-label={`Progression de ${epTitle}`}></progress>{/if}
           </div>
           <div class="episode-content">
@@ -176,7 +182,7 @@
             {#if epDesc}<p class="episode-desc">{epDesc}</p>{/if}
             <div class="episode-actions-row">
               <EpisodePlayer {episode} {media} {immersive} isLaunching={launchingEpisodeId === episode.id} onlaunch={onLaunchEpisode} onselect={() => onSelectEpisode(episode)} />
-              {#if !episode.synthetic}<WatchStatus workId={episode.id} {duration} />{/if}
+              {#if !episode.synthetic}<WatchStatus workId={episode.id} {duration} compact />{/if}
               {#if !episode.synthetic && $session?.user.role === 'administrator'}<WorkTools work={episode} selectedMedia={descriptor} />{/if}
               {#if descriptor && !episode.synthetic}<ChapterImages assetId={descriptor.id} />{/if}
             </div>
@@ -193,21 +199,16 @@
     {/if}
   </section>
 
-  {#if !work.synthetic}
-    <details class="personal-panel">
-      <summary>Mes préférences pour cette série</summary>
-      <WatchStatus workId={work.id} />
-      <PersonalFeedback workId={work.id} />
-    </details>
-  {/if}
-
   <EditorialCredits {work} />
   <SimilarWorks {work} candidates={similarCandidates} />
 </div>
 
 <style>
   .series-detail-view { padding-bottom: 40px; }
-  .series-hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; width: 100%; }
+  .series-hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; width: 100%; margin-top: 8px; }
+  .personal-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .action-divider { width: 1px; height: 28px; background: var(--line-2); }
+  @media (max-width: 760px) { .action-divider { display: none; } }
   .hero-cta { display: inline-flex; align-items: center; justify-content: center; gap: 10px; height: 56px; padding: 0 26px; border: 0; border-radius: 18px; background: var(--btn); color: var(--btn-tx); font-size: 15px; font-weight: 700; transition: transform var(--t-fast) var(--ease), opacity var(--t-fast) ease; }
   .hero-cta:hover:not(:disabled) { opacity: 0.9; }
   .hero-cta:active { transform: scale(0.98); }
@@ -248,6 +249,4 @@
   .empty-episodes-box { padding: 36px 24px; border-radius: var(--r-lg); background: var(--bg-2); color: var(--mu); text-align: center; }
   @media (max-width: 760px) { .episode { grid-template-columns: 128px minmax(0, 1fr); gap: 12px; padding: 10px 4px; } .episode-actions-row { grid-column: 1 / -1; } .season-cards { grid-auto-columns: 112px; } .hero-cta { width: 100%; height: 50px; } }
 
-  .personal-panel { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); margin-top: 24px; padding: 4px 20px; }
-  .personal-panel summary { min-height: 52px; padding-block: 14px; cursor: pointer; font-weight: 700; color: var(--tx); }
 </style>

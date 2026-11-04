@@ -7,11 +7,14 @@
   import { imagePreviewUrl } from './image-url';
   import Poster from './Poster.svelte';
   import Icon from '../ui/Icon.svelte';
+  import { fitArtwork } from '../ui/fit-artwork';
 
   let { work, duration, children }: { work: Work; duration?: number; children: Snippet } = $props();
   const artwork = $derived(selectArtwork(work, $session));
   // backdrop.jpg is the detail image; landscape.jpg is a wide fallback.
-  const wideArtwork = $derived(artwork.backdrop || artwork.landscape);
+  const wideArtwork = $derived(artwork.backdrop || artwork.landscape || artwork.poster);
+  // Sans image large, l'affiche floutée sert de fond d'ambiance (jamais rognée en net).
+  const ambient = $derived(!artwork.backdrop && !artwork.landscape && Boolean(artwork.poster));
   const previewBackdrop = $derived(imagePreviewUrl(wideArtwork, 1280));
   const backdrop = $derived([previewBackdrop, wideArtwork ?? ''].find(url => url && !failedBackdrops.includes(url)) ?? '');
   const logo = $derived(imagePreviewUrl(artwork.logo, 640));
@@ -46,7 +49,7 @@
   <div class="stage" class:has-clearart={hasClearart}>
     <div class="hero" class:has-backdrop={hasBackdrop}>
       {#if hasBackdrop}
-        <img class="backdrop" src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
+        <img class="backdrop" class:ambient src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" use:fitArtwork={{ threshold: ambient ? 1 : 0.3 }} onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
         <div class="shade" aria-hidden="true"></div>
       {/if}
       <div class="cap">
@@ -77,7 +80,7 @@
     {/if}
   </div>
 
-  <div class="body" class:has-backdrop={hasBackdrop}>
+  <div class="body" class:has-backdrop={hasBackdrop && !ambient}>
     <div class="main">
       {#if work.available === false}
         <p class="availability" role="status">Ce contenu est temporairement indisponible. Le serveur qui l’héberge est hors ligne.</p>
@@ -162,8 +165,13 @@
     color: var(--tx);
   }
 
+  /* Format de l'image (16:9), plafonné à la hauteur de l'écran : peu ou pas de rognage. */
   .hero.has-backdrop {
-    min-height: clamp(380px, 38vw, 540px);
+    /* Largeur explicite : sinon max-height réduirait aussi la largeur via le ratio. */
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    min-height: 380px;
+    max-height: min(72vh, 680px);
     background: #06080e;
     color: var(--on-media);
   }
@@ -177,6 +185,8 @@
     object-fit: cover;
     object-position: 70% 25%;
   }
+
+  .backdrop.ambient { object-position: center; filter: blur(36px) saturate(1.2) brightness(0.6); transform: scale(1.2); }
 
   /* Voile de lisibilité : seul dégradé autorisé sur une image */
   .shade {
@@ -377,7 +387,12 @@
 
   @media (max-width: 760px) {
     .hero { border-radius: var(--r-lg); }
-    .hero.has-backdrop { min-height: 380px; }
+    /* Téléphone : l'image large reste entière (16:9) en haut, le texte passe dessous. */
+    .hero.has-backdrop { min-height: 0; padding-top: calc(56.25% - 64px); }
+    .hero.has-backdrop .backdrop { inset: 0 0 auto 0; height: auto; aspect-ratio: 16 / 9; }
+    .hero.has-backdrop .backdrop.ambient { inset: 0; height: 100%; aspect-ratio: auto; }
+    .hero.has-backdrop .shade { inset: 0 0 auto 0; aspect-ratio: 16 / 9; background: linear-gradient(0deg, #06080e 0%, rgb(6 8 14 / 0.35) 40%, rgb(6 8 14 / 0) 100%); }
+    .hero.has-backdrop { aspect-ratio: auto; max-height: none; }
     .cap, .stage.has-clearart .cap { max-width: none; }
     .title-logo { max-width: 80%; max-height: 96px; }
     .clearart { display: none; }

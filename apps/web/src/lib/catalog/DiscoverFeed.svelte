@@ -8,7 +8,7 @@
   // Fil sans fin de l'accueil : des rangées thématiques chargées au fil du défilement,
   // puis tout le catalogue en grille paginée. Aucune requête tant que l'utilisateur
   // n'approche pas du bas de la page.
-  let { films = [], series = [], exclude = [], library = '', kind, gridTitle = 'Tout votre catalogue', detailUrl }: {
+  let { films = [], series = [], exclude = [], library = '', kind, gridTitle = 'Encore plus à découvrir', detailUrl }: {
     films: Work[];
     series: Work[];
     /** Œuvres déjà visibles plus haut : elles ne sont pas reproposées dans les rangées. */
@@ -91,7 +91,10 @@
     if (items.length < GRID_PAGE) gridDone = true;
      
     const known = new Set(gridItems.map(item => item.id));
-    gridItems = [...gridItems, ...items.filter(item => item.id && !known.has(item.id) && !(kind && seen.has(item.id)))];
+    // Jamais deux fois la même œuvre sur la page : ni celles du haut, ni celles des rangées.
+    const fresh = items.filter(item => item.id && !known.has(item.id) && !seen.has(item.id));
+    for (const item of fresh) seen.add(item.id);
+    gridItems = [...gridItems, ...fresh];
   }
 
   async function loadMore() {

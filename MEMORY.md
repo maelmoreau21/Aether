@@ -31,6 +31,16 @@ Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur
 - Vérifié : `npm run check`, `npm run lint`, vitest 260/260, build, et
   `browser_series` + `browser_scanner` (`--ignored`, Chrome) passent. Fil sans
   fin non exercé sur un grand catalogue réel.
+- Lecteur, second lot : zone déjà chargée sur la timeline, pointeur masqué avec
+  les commandes (micro-mouvements < 4 px ignorés), carte vitrée « À suivre »
+  (vignette, saison/épisode, Lire maintenant, masquer) au début du générique ou
+  30 s avant la fin d'un épisode de plus de 5 min ; elle remplace « Passer le
+  générique ». Distinct du bouton permanent retiré le 22/10. `browser_series`
+  vérifie carte et zone chargée via un marqueur injecté côté test ; passe.
+- CI `browser_series` (commit dccdc67) : la grille du fil d'accueil réaffichait
+  une œuvre déjà visible, d'où deux cartes pour un locator strict. Grille
+  dédupliquée contre toute la page (renommée « Encore plus à découvrir ») ;
+  le scénario vérifie l'absence de doublon après chargement complet du fil. Passe en local.
 
 ## 3 novembre 2026 — Documentation UX
 

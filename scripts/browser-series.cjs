@@ -85,6 +85,16 @@ fs.mkdirSync(out, {recursive: true});
       await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
       await page.screenshot({path:`${out}/home-${theme}.png`});
     }
+    // The endless home feed loads to its end and never repeats a work shown above it.
+    await page.evaluate(()=>window.scrollTo(0,document.body.scrollHeight));
+    await page.waitForFunction(()=>document.querySelector('.discover-feed')&&!document.querySelector('.discover-feed .loading-row'));
+    await page.waitForTimeout(300);
+    const feedDuplicates=await page.evaluate(()=>{
+      const above=new Set([...document.querySelectorAll('.media-card')].filter(card=>!card.closest('.discover-feed')).map(card=>card.getAttribute('href')));
+      return [...document.querySelectorAll('.discover-feed .media-card')].map(card=>card.getAttribute('href')).filter(href=>above.has(href));
+    });
+    assert.deepEqual(feedDuplicates,[],'Home feed must not repeat works already shown');
+    await page.evaluate(()=>window.scrollTo(0,0));
     // 3. Open Series catalogue
     await page.goto(origin + '/app/series/');
     const card = page.locator('.media-card').filter({hasText:'Browser Series'});
@@ -195,6 +205,14 @@ fs.mkdirSync(out, {recursive: true});
     await chapterVersion.selectOption({label:'MP4'});
     const ep1PlayButton = page.getByRole('button', {name:'Lire Episode One', exact:true});
     await ep1PlayButton.waitFor();
+    // Test-only credits marker on the first descriptor: the "Up next" card appears during the credits.
+    await page.route('**/api/v1/media/**', async route => {
+      const response = await route.fetch();
+      const type = response.headers()['content-type'] ?? '';
+      if (!type.includes('json')) return route.fulfill({response});
+      const body = await response.json();
+      await route.fulfill({response, json: Array.isArray(body?.sources) ? {...body, credits: {start: 1, end: 2.5}} : body});
+    });
     const launchStarted = Date.now();
     await ep1PlayButton.click();
 
@@ -204,6 +222,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForFunction(()=>{const video=document.querySelector('video');return video?.videoWidth>0&&(video.getVideoPlaybackQuality?.().totalVideoFrames??0)>0;});
     report.results.decodedVideoFrames=await page.evaluate(()=>document.querySelector('video').getVideoPlaybackQuality().totalVideoFrames);
     report.results.episode1Playback = true;
+    await page.unroute('**/api/v1/media/**');
     report.results.episodeLaunchMs = Date.now() - launchStarted;
     assert.equal(await page.getByRole('combobox',{name:'Chapitres vidéo'}).count(),0);
     assert.equal(await page.locator('.chapter-tick').count(),2);
@@ -223,6 +242,20 @@ fs.mkdirSync(out, {recursive: true});
     });
     report.results.seekAndPause = true;
     await page.screenshot({path:`${out}/immersive-playback.png`});
+
+    // Already-buffered range is drawn on the timeline.
+    await page.waitForFunction(()=>parseFloat(document.querySelector('input.seek')?.style.getPropertyValue('--seek-buffered')||'0')>0);
+    // "Up next" card appears during the credits (position 2 s, credits 1–2.5 s) and can be dismissed.
+    const nextCard=page.getByRole('complementary',{name:'Épisode suivant'});
+    await nextCard.waitFor();
+    assert.match(await nextCard.innerText(),/À suivre/i);
+    await nextCard.getByRole('button',{name:'Lire maintenant',exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Passer le générique',exact:true}).count(),0,'The card replaces the credits skip button');
+    assert.ok(await nextCard.evaluate(card=>{const r=card.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;}),'Up next card must fit in the viewport');
+    await page.screenshot({path:`${out}/up-next-card.png`});
+    await nextCard.getByRole('button',{name:'Masquer l’épisode suivant',exact:true}).click();
+    await nextCard.waitFor({state:'detached'});
+    report.results.upNextCard = true;
 
     // Continuous playback is opt-in; the manual next-episode button is removed.
     assert.equal(await page.getByRole('button',{name:/^Épisode suivant :/}).count(),0);

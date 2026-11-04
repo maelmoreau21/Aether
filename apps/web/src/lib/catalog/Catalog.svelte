@@ -14,6 +14,8 @@
   import Navbar from '../ui/Navbar.svelte';
   import { bestVersion } from '../player/version-choice';
   import CatalogHome from './CatalogHome.svelte';
+  import { selectArtwork } from './artwork-selection';
+  import { imagePreviewUrl } from './image-url';
   import CatalogGrid from './CatalogGrid.svelte';
   import CatalogSkeleton from './CatalogSkeleton.svelte';
   import Icon from '../ui/Icon.svelte';
@@ -187,6 +189,14 @@
     return index >= 0 ? episodes[index + 1] : undefined;
   });
 
+  // Carte « À suivre » du lecteur : vignette de l'épisode, sinon images de la série.
+  const nextImage = $derived.by(() => {
+    if (!nextEpisode) return '';
+    const episode = selectArtwork(nextEpisode, $session);
+    const show = selectArtwork(detail, $session);
+    return imagePreviewUrl(episode.thumb || episode.landscape || episode.backdrop || show.landscape || show.backdrop || show.poster, 640);
+  });
+  const nextLabel = $derived(nextEpisode ? [nextEpisode.seasonNumber ? `Saison ${nextEpisode.seasonNumber}` : '', nextEpisode.number ? `Épisode ${nextEpisode.number}` : ''].filter(Boolean).join(' · ') : '');
   $effect(() => {
     const work = detail;
     const episode = playingEpisode;
@@ -632,6 +642,8 @@
     catalogue={playerMedia}
     {createPlayer}
     nextTitle={nextEpisode?.title}
+    {nextLabel}
+    {nextImage}
     onNext={nextEpisode ? playNext : undefined}
   />
 {/if}

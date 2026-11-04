@@ -19,7 +19,14 @@
   import { SyncPartyClient } from '../syncplay/sync-client.svelte';
   import { applyPartyPlayback } from '../syncplay/player-sync';
   import WatchPartyOverlay from '../syncplay/WatchPartyOverlay.svelte';
-  let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
+  let { catalogue, createPlayer, nextTitle, nextLabel = '', nextImage = '', onNext }: {
+    catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string;
+    /** « Saison 1 · Épisode 3 » de l'épisode suivant. */
+    nextLabel?: string;
+    /** Vignette de l'épisode suivant (ou image de la série en repli). */
+    nextImage?: string;
+    onNext?: () => void;
+  } = $props();
   let autoplayNext = $state(false);
   let skipBackSeconds = $state(10);
   let skipForwardSeconds = $state(10);
@@ -67,6 +74,11 @@
   let keyboardPinned = $state(false);
   let paused = $state(true);
   let playback = $state<PlaybackState>({ position: 0, duration: 0, paused: true, volume: 1, speed: 1 });
+  // Fin de la plage déjà chargée, exprimée dans le temps du lecteur (pas de la balise vidéo).
+  let bufferedUntil = $state(0);
+  let nextDismissed = $state(false);
+  let nextImageFailed = $state('');
+  let lastPointer = { x: -1, y: -1 };
   let aspectRatio = $state<'contain' | 'cover' | 'fill'>('contain');
   let repeat = $state(false);
   let idle: ReturnType<typeof setTimeout> | undefined;
@@ -81,6 +93,7 @@
     const snapshot = engine.state();
     playback = { ...snapshot, duration: Number.isFinite(snapshot.duration) ? snapshot.duration : 0 };
     paused = snapshot.paused;
+    bufferedUntil = bufferedEnd(playback.position);
     if (!busy) progressTracker?.save(playback);
     if (!busy && !paused && syncClient?.connected && syncClient.party?.state === 'playing'
       && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs()) {
@@ -95,6 +108,36 @@
       }
     }
   }
+  function bufferedEnd(position: number): number {
+    if (!video) return position;
+    const now = video.currentTime;
+    let ahead = 0;
+    for (let index = 0; index < video.buffered.length; index++) {
+      if (now >= video.buffered.start(index) - 0.25 && now <= video.buffered.end(index)) ahead = Math.max(ahead, video.buffered.end(index) - now);
+    }
+    return position + ahead;
+  }
+  // Les micro-déplacements (souris posée, capteur) ne réveillent plus les commandes,
+  // sinon le pointeur ne disparaît jamais.
+  function pointerMoved(event: PointerEvent) {
+    if (event.pointerType === 'touch') return;
+    // L'ancre reste fixe pendant que les commandes sont cachées : un geste lent s'additionne.
+    const distance = Math.hypot(event.clientX - lastPointer.x, event.clientY - lastPointer.y);
+    if (!visible && distance < 4) return;
+    lastPointer = { x: event.clientX, y: event.clientY };
+    wake();
+  }
+  // Carte « À suivre » : au début du générique, sinon 30 s avant la fin d'un épisode long.
+  const nextCardStart = $derived.by(() => {
+    const duration = playback.duration;
+    if (!active || duration <= 0) return Infinity;
+    if (active.credits && active.credits.start > 0 && active.credits.start < duration) return active.credits.start;
+    return duration > 300 ? duration - 30 : Infinity;
+  });
+  const showNextCard = $derived(Boolean(nextTitle && onNext && !syncClient && opened && !busy && !error && !nextDismissed
+    && playback.position >= nextCardStart && playback.position < playback.duration - 0.25));
+  const postCreditsScene = $derived(Boolean(active?.credits && active.credits.end < playback.duration - 10 && playback.position < active.credits.end));
+  $effect(() => { void active?.id; nextDismissed = false; });
   function armIdle() {
     clearTimeout(idle);
     if (!opened || statistics || paused || menu || busy || error || keyboardPinned) { visible = true; return; }
@@ -557,7 +600,7 @@
   <!-- The media shell owns focus and shortcuts; the controls do not know the playback implementation. -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = true; wake(); }} onkeydown={keyboard}
-    onpointermove={event => { if (event.pointerType !== 'touch') wake(); }} onpointerdown={() => { keyboardPinned = false; surface?.focus(); }}>
+    onpointermove={pointerMoved} onpointerdown={() => { keyboardPinned = false; surface?.focus(); }}>
     <video
       bind:this={video}
       playsinline
@@ -575,6 +618,7 @@
       oncanplay={() => reportBuffering(false)}
       onplaying={() => reportBuffering(false)}
       onplay={sync}
+      onprogress={sync}
       onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }}
       onended={ended}
     ><track kind="captions" /></video>
@@ -633,7 +677,32 @@
       {skipBackSeconds} {skipForwardSeconds}
       {aspectRatio} onAspectRatio={r => aspectRatio = r} {repeat} onRepeat={r => repeat = r} onStats={() => { statistics = true; wake(); }}
       onPlay={togglePlayback} onVolume={volume} onMute={mute} onSeek={seek} onAudio={selectAudio} onSubtitle={selectSubtitle} onSource={selectSource}
-      onSpeed={speed => action(player => player.setSpeed(speed))} onFullscreen={toggleFullscreen} onWake={wake} />{/if}
+      onSpeed={speed => action(player => player.setSpeed(speed))} onFullscreen={toggleFullscreen} onWake={wake}
+      buffered={bufferedUntil} hideCreditsSkip={showNextCard} />{/if}
+    {#if showNextCard}
+      <aside class="next-card" class:raised={visible} aria-label="Épisode suivant">
+        <div class="next-thumb">
+          {#if nextImage && nextImageFailed !== nextImage}
+            <img src={nextImage} alt="" width="640" height="360" decoding="async" onerror={() => nextImageFailed = nextImage} />
+          {:else}
+            <Icon name="tv" size={28} />
+          {/if}
+        </div>
+        <div class="next-info">
+          <span class="next-kicker">À suivre{nextLabel ? ` · ${nextLabel}` : ''}</span>
+          <strong title={nextTitle}>{nextTitle}</strong>
+          {#if autoplayNext}<small>Lecture automatique à la fin</small>{/if}
+          <div class="next-actions">
+            <button type="button" class="next-play" onclick={() => onNext?.()}><Icon name="play" size={16} /><span>Lire maintenant</span></button>
+            {#if postCreditsScene && active?.credits}
+              {@const creditsEnd = active.credits.end}
+              <button type="button" class="next-secondary" onclick={() => { seek(creditsEnd); wake(); }}>Passer le générique</button>
+            {/if}
+          </div>
+        </div>
+        <button type="button" class="next-dismiss" aria-label="Masquer l’épisode suivant" title="Masquer" onclick={() => { nextDismissed = true; surface?.focus(); }}><Icon name="close" size={16} /></button>
+      </aside>
+    {/if}
   </div>
 </dialog>
 
@@ -858,4 +927,74 @@
   .marker-editor button { min-height: 44px; border: 0; border-radius: 14px; background: rgb(255 255 255 / 0.14); color: #f4f6fb; font-weight: 700; }
   .marker-editor button:first-of-type { background: #eef1f8; color: #0b0e18; }
   .marker-editor [role='alert'] { margin: 0; color: var(--err); font-weight: 600; }
+
+  /* Carte « À suivre » : verre liquide, en bas à droite, au-dessus du dock quand il est visible */
+  .next-card {
+    position: absolute;
+    z-index: 6;
+    /* Bord droit aligné sur celui du dock (1180 px max, centré). */
+    right: max(28px, env(safe-area-inset-right), calc((100% - 1180px) / 2));
+    bottom: max(28px, env(safe-area-inset-bottom));
+    display: flex;
+    gap: 14px;
+    align-items: stretch;
+    width: min(440px, calc(100% - 32px));
+    padding: 12px;
+    border-radius: 24px;
+    background: linear-gradient(180deg, rgb(255 255 255 / 0.1) 0%, rgb(255 255 255 / 0.03) 100%), rgb(16 18 26 / 0.5);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid rgb(255 255 255 / 0.14);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2), 0 24px 60px rgb(0 0 0 / 0.5);
+    color: #f4f6fb;
+    font-family: var(--font);
+    animation: next-in var(--t-slow) var(--ease);
+    transition: bottom var(--t-slow) var(--ease);
+  }
+  .next-card.raised { bottom: calc(max(22px, env(safe-area-inset-bottom)) + 136px); }
+  @keyframes next-in { from { opacity: 0; transform: translateY(16px) scale(0.98); } to { opacity: 1; transform: none; } }
+  .next-thumb {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 160px;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: 14px;
+    background: rgb(255 255 255 / 0.08);
+    color: #a2a9ba;
+  }
+  .next-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .next-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 2px 28px 2px 0; }
+  .next-kicker { font-size: 11.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: rgb(244 246 251 / 0.65); }
+  .next-info strong { font-size: 16px; font-weight: 800; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
+  .next-info small { font-size: 12px; color: rgb(244 246 251 / 0.6); }
+  .next-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 6px; }
+  .next-play, .next-secondary {
+    display: inline-flex; align-items: center; gap: 8px;
+    min-height: 40px; padding: 0 16px; border: 0; border-radius: 999px;
+    font: inherit; font-size: 13.5px; font-weight: 800; cursor: pointer;
+  }
+  .next-play { background: rgb(248 249 252 / 0.95); color: #0b0e18; }
+  .next-play:hover { background: #fff; }
+  .next-play :global(svg) { fill: currentColor; }
+  .next-secondary { background: rgb(255 255 255 / 0.12); color: #f4f6fb; }
+  .next-secondary:hover { background: rgb(255 255 255 / 0.2); }
+  .next-dismiss {
+    position: absolute; top: 8px; right: 8px;
+    display: grid; place-items: center;
+    width: 32px; height: 32px; min-height: 32px; padding: 0;
+    border: 0; border-radius: 50%;
+    background: transparent; color: rgb(244 246 251 / 0.7); cursor: pointer;
+  }
+  .next-dismiss:hover { background: rgb(255 255 255 / 0.12); color: #fff; }
+  .next-card button:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+  @media (max-width: 768px) {
+    .next-card { right: 12px; left: 12px; width: auto; padding: 10px; gap: 10px; border-radius: 20px; }
+    .next-card.raised { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 150px); }
+    .next-thumb { width: 112px; }
+    .next-info strong { font-size: 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .next-card { animation: none; transition: none; } }
+  .inactive :global(*) { cursor: none !important; }
 </style>

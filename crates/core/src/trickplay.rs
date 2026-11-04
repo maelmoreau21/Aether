@@ -310,7 +310,6 @@ pub async fn tile(
 }
 
 #[cfg(test)]
-#[path = "chapter_images_tests.rs"]
 mod chapter_tests;
 
 #[cfg(test)]

@@ -15,9 +15,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 #[cfg(test)]
-#[path = "notification_tests.rs"]
 mod tests;
-#[path = "notification_transport.rs"]
 mod transport;
 type Error = (StatusCode, Json<Value>);
 type Outcome<T> = Result<T, Error>;
@@ -477,7 +475,6 @@ pub(crate) async fn collect(store: &IdentityStore, timestamp: i64) -> Result<(),
     Ok(())
 }
 
-#[path="application_notifications.rs"]
 mod application_notifications;
 
 async fn enqueue(

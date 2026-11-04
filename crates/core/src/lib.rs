@@ -49,8 +49,6 @@ pub mod permissions;
 pub mod playlists;
 pub mod preferences;
 pub mod product;
-#[cfg(test)]
-mod product_tests;
 pub mod progress;
 mod provider_download;
 pub mod recommendations;

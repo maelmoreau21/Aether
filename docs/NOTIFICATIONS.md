@@ -109,7 +109,7 @@ autonome. Les erreurs conservées sont des codes bornés sans réponse distante.
 
 ## Validation et retour arrière
 
-Les tests ciblés sont dans `notification_tests.rs`. Ils utilisent exclusivement
+Les tests ciblés sont dans `crates/core/src/notifications/tests.rs`. Ils utilisent exclusivement
 des récepteurs HTTP/SMTP locaux et des données synthétiques. Les résultats
 réellement exécutés sont consignés dans la matrice de mission et le rapport de
 validation Core ; la présence d'un test ne prouve pas son passage. Aucun email,

@@ -35,34 +35,25 @@ use tokio::{
 
 static MUTATIONS: Mutex<()> = Mutex::const_new(());
 
-#[path = "../extension_adapters.rs"]
 pub(crate) mod adapters;
 mod admin;
-#[path = "../extension_artwork_rotation.rs"]
 mod artwork_rotation;
 mod automated;
-#[path = "../extension_avatar_collections.rs"]
 pub(crate) mod collections;
 mod common;
-#[path = "../extension_identify.rs"]
 mod identify;
-#[path = "../extension_image_collection.rs"]
 mod image_collection;
 mod install;
 mod matching;
 mod package;
-#[path = "../extension_repositories.rs"]
 pub(crate) mod repositories;
 mod router;
 mod run;
-#[path = "../extension_run_ownership.rs"]
 mod run_ownership;
 mod settings;
-#[path = "../extension_subtitles.rs"]
 pub(crate) mod subtitles;
 #[cfg(test)]
 mod tests;
-#[path = "../extension_updates.rs"]
 mod updates;
 
 use admin::*;

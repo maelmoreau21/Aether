@@ -1,6 +1,5 @@
 //! Optional, account-owned local ranking. No provider, persistent profile or result cache.
 #[cfg(test)]
-#[path = "recommendation_tests.rs"]
 mod http_tests;
 use crate::{
     auth::AuthState,

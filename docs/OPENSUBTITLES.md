@@ -106,7 +106,7 @@ par blocs et arrêté à sa limite ; aucun chemin disque libre n'est accepté.
 
 ## Vérifications, risques et retour arrière
 
-Les tests ciblés sont dans `subtitle_tests.rs`, `provider_download.rs`,
+Les tests ciblés sont dans `crates/core/src/extensions/subtitles/tests.rs`, `provider_download.rs`,
 `subtitle-download-api.test.ts`, `browser-subtitle-downloads.cjs` et les scripts
 Wasm du dépôt des plugins. Ils distinguent contrats hors ligne, vrai worker
 Wasm signé, persistance SQLite, API synthétiques du navigateur et lecture réelle.

@@ -604,5 +604,4 @@ pub(crate) async fn content(
 }
 
 #[cfg(test)]
-#[path = "subtitle_tests.rs"]
 mod tests;

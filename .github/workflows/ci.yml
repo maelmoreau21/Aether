@@ -347,7 +347,7 @@ jobs:
           MEDIA_TEST_PLAYLIST_BROWSER: '1'
           MEDIA_WEB_DIST: ${{ github.workspace }}/apps/web/build
           MEDIA_REPORT_DIR: docs/evidence/2026-10-22/playlists/ci
-        run: cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1
+        run: cargo test --locked -p media-poc --lib product::tests::mixed_playlists -- --test-threads=1
 
       - name: Vérifier le MP4 AV1 10 bits et deux Opus 5.1 en audio segmenté
         env:

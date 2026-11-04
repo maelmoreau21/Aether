@@ -1378,3 +1378,6 @@ mod automatic_collection_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod tests;

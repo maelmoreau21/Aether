@@ -1,4 +1,9 @@
-# Cinema Design System — 23 octobre 2026
+# Cinema Design System — règles durables
+
+> Ce document est la source de référence pour les règles UX/UI partagées :
+> tokens, thèmes, responsive, images, navigation et accessibilité. Les sections
+> datées ci-dessous résument des décisions intégrées ; leurs rapports détaillés
+> sont historiques et ne constituent pas une feuille de route.
 
 ## Direction et périmètre
 

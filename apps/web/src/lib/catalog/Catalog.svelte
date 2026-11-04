@@ -637,104 +637,156 @@
 {/if}
 
 <style>
-  .server-welcome { color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; padding-block: 16px; }
+  .server-welcome { margin: 0; padding: 16px 0; color: var(--mu); font-size: 15px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
   .skip-link {
     position: fixed;
     top: -80px;
     left: 20px;
     z-index: 50;
-    background: var(--color-text-bright);
-    color: var(--color-canvas);
+    background: var(--btn);
+    color: var(--btn-tx);
     padding: 12px 18px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--r-md);
     font-weight: 700;
-    transition: top var(--transition-fast);
+    transition: top var(--t-fast) ease;
   }
 
   .skip-link:focus {
     top: 14px;
   }
 
+  .skip-link:focus-visible,
+  .retry-action-btn:focus-visible,
+  main button:focus-visible {
+    outline: 2px solid var(--ac);
+    outline-offset: 3px;
+  }
+
   main {
     width: 100%;
-    max-width: none;
-    margin: 0;
-    padding: 0 var(--page-gutter) 80px;
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 0 var(--gutter) 80px;
     min-height: 75vh;
+    min-width: 0;
   }
+
+  main:focus { outline: none; }
+
+  main > [role='status'],
+  main > [role='alert'] {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin: 12px 0 0;
+    padding: 12px 16px;
+    border-radius: var(--r-md);
+    background: var(--pn);
+    color: var(--mu);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  main > [role='alert'] {
+    background: var(--err-soft);
+    color: var(--err);
+  }
+
+  main > [role='status'] button {
+    min-height: 40px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: var(--pn-2);
+    color: var(--tx);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  main > [role='status'] button:hover { background: var(--pn-3); }
 
   .page-heading {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding-top: 16px;
+    gap: 4px;
+    padding-top: 20px;
+  }
+
+  .page-heading .eyebrow {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--mu);
   }
 
   h1 {
-    font-family: var(--font-display);
-    font-size: clamp(32px, 4vw, 52px);
-    font-weight: 750;
-    line-height: 1.15;
-    letter-spacing: -0.04em;
-    color: var(--color-text-bright);
-    margin: 8px 0 16px;
+    font-size: clamp(32px, 4vw, 44px);
+    font-weight: 800;
+    line-height: 1.02;
+    letter-spacing: -0.03em;
+    color: var(--tx);
+    margin: 4px 0 16px;
   }
 
-  /* Empty / Loading States */
+  /* États vide / erreur */
   .empty {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
-    padding: 80px 24px;
-    border-radius: var(--radius-lg);
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
+    gap: 12px;
+    max-width: 640px;
+    margin: 32px auto;
+    padding: 48px 24px;
+    border-radius: var(--r-lg);
+    background: var(--bg-2);
+    border: 1px solid var(--line);
     text-align: center;
-    margin: 32px 0;
   }
 
-
-
   .error {
-    border-color: rgba(248, 113, 113, 0.3);
-    color: var(--color-danger);
+    color: var(--err);
   }
 
   .error h2 {
-    font-size: 20px;
-    font-weight: 700;
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
     margin: 0;
-    color: var(--color-text-bright);
+    color: var(--tx);
   }
 
   .error p {
     margin: 0;
-    color: var(--color-muted);
-    font-size: 14px;
+    color: var(--mu);
+    font-size: 15px;
+    line-height: 1.6;
     max-width: 500px;
   }
 
   .retry-action-btn {
     display: inline-flex;
     align-items: center;
-    padding: 10px 22px;
-    border-radius: var(--radius-sm);
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
-    color: var(--color-text-bright);
-    font-size: 13px;
-    font-weight: 600;
+    height: 48px;
+    padding: 0 22px;
+    border-radius: var(--r-md);
+    background: var(--btn);
+    color: var(--btn-tx);
+    font-size: 15px;
+    font-weight: 700;
     margin-top: 8px;
-    transition: all var(--transition-fast);
+    transition: opacity var(--t-fast) ease, transform var(--t-fast) var(--ease);
   }
 
   .retry-action-btn:hover {
-    background: var(--color-accent-soft);
-    border-color: var(--color-accent);
-    color: var(--color-accent-hover);
-    transform: translateY(-1px);
+    opacity: 0.9;
   }
 
+  .retry-action-btn:active {
+    transform: scale(0.98);
+  }
 </style>

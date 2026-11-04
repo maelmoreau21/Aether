@@ -26,4 +26,40 @@
   <p>Ce droit contrôle le téléchargement proposé par l’application. Un client autorisé à lire reçoit les octets du média et peut les enregistrer. Une copie déjà téléchargée reste sur l’appareil.</p>
   <button>Enregistrer les permissions</button>
 </fieldset>{#if error}<p role="alert">{error}</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}</form>
-<style>fieldset { display:grid;gap:12px;border:1px solid var(--color-line);border-radius:var(--radius-md);margin-block:20px;padding:16px; } label { display:flex;gap:10px;align-items:center; } p { font-size:13px;line-height:1.5; } button { padding:12px;background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-line);border-radius: var(--radius-md); }</style>
+<style>
+form { display: grid; gap: 16px; font-family: var(--font); color: var(--tx); }
+  fieldset { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }
+  fieldset:disabled { opacity: 0.7; }
+  legend { margin: 0 0 16px; padding: 0; font-size: 17px; font-weight: 700; }
+  label { display: flex; align-items: center; gap: 12px; min-height: 44px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--ac); }
+  p { max-width: 720px; margin: 0; color: var(--mu); font-size: 13px; line-height: 1.5; }
+  button {
+    justify-self: start;
+    height: 48px;
+    margin-top: 8px;
+    padding: 0 22px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: var(--btn);
+    color: var(--btn-tx);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  }
+  button:hover:not(:disabled) { opacity: 0.9; }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  p[role='alert'], p[role='status'] { max-width: none; padding: 12px 16px; border-radius: var(--r-md); color: var(--tx); font-size: 14px; }
+  p[role='alert'] { background: var(--err-soft); }
+  p[role='status'] { background: var(--ok-soft); }
+  @media (max-width: 640px) {
+    button { width: 100%; justify-self: stretch; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button { transition: none; }
+  }
+</style>

@@ -50,6 +50,31 @@
   }
   const activeNodes = $derived(nodes.filter(n => n.status !== 'revoked'));
   function closeMenu(event: MouseEvent) { const details = (event.currentTarget as HTMLElement).closest('details'); details?.removeAttribute('open'); details?.querySelector('summary')?.focus(); }
+  function nodeName(id: string) { return nodes.find(node => node.id === id)?.name ?? (id === 'local' ? 'Node local' : id); }
+  // The table scrolls horizontally, so an open "⋮" menu is placed in the viewport instead of being clipped by it.
+  let menuOpen = $state(false);
+  function placeMenu(event: Event) {
+    const details = event.currentTarget as HTMLDetailsElement;
+    if (!details.open) { menuOpen = Boolean(document.querySelector('.library-menu[open]')); return; }
+    for (const other of document.querySelectorAll<HTMLDetailsElement>('.library-menu[open]')) if (other !== details) other.open = false;
+    const summary = details.querySelector('summary'), menu = details.querySelector<HTMLElement>('.menu-actions');
+    if (!summary || !menu) return;
+    const zoom = (details as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom || 1;
+    const anchor = summary.getBoundingClientRect(), height = menu.getBoundingClientRect().height;
+    const above = anchor.bottom + 6 + height > innerHeight && anchor.top - 6 - height > 0;
+    menu.style.right = `${Math.max(8, innerWidth - anchor.right) / zoom}px`;
+    menu.style.top = above ? 'auto' : `${(anchor.bottom + 6) / zoom}px`;
+    menu.style.bottom = above ? `${(innerHeight - anchor.top + 6) / zoom}px` : 'auto';
+    menuOpen = true;
+  }
+  $effect(() => {
+    if (!menuOpen) return;
+    const closeAll = () => { for (const open of document.querySelectorAll<HTMLDetailsElement>('.library-menu[open]')) open.open = false; };
+    const outside = (event: PointerEvent) => { if (!(event.target instanceof Element && event.target.closest('.library-menu[open]'))) closeAll(); };
+    const scrolled = (event: Event) => { if (!(event.target instanceof Element && event.target.closest('.menu-actions'))) closeAll(); };
+    addEventListener('resize', closeAll); addEventListener('scroll', scrolled, true); document.addEventListener('pointerdown', outside);
+    return () => { removeEventListener('resize', closeAll); removeEventListener('scroll', scrolled, true); document.removeEventListener('pointerdown', outside); };
+  });
   function manage(library?: Library) { if (library) onedit(library); else onreset(); activeSection = 'general'; formError = ''; editor?.showModal(); }
   function refreshLibrary(library: Library | null) { target = library; mode = 'incremental'; refresher?.showModal(); }
   async function submit(event: SubmitEvent) {
@@ -88,34 +113,59 @@
 <section id="libraries-section" aria-labelledby="libraries-heading">
   <h2 id="libraries-heading">Bibliothèques</h2>
   <div class="toolbar"><button class="primary" onclick={() => manage()}><span aria-hidden="true">+</span> Ajouter une bibliothèque</button><button onclick={() => refreshLibrary(null)} disabled={libraries.length === 0 || refreshing}><Icon name="refresh" size={18} /> Actualiser toutes les bibliothèques</button></div>
-  <div class="library-grid">
+  {#if libraries.length}
+  <div class="library-table-panel">
+    <table class="library-table">
+      <caption class="h-sr">Bibliothèques configurées</caption>
+      <thead><tr><th scope="col">Nom</th><th scope="col">Type</th><th scope="col">Media Node</th><th scope="col" class="numeric">Dossiers</th><th scope="col">Dernière analyse</th><th scope="col"><span class="h-sr">Actions</span></th></tr></thead>
+      <tbody>
     {#each libraries as library (library.id)}
       {@const folderCount = library.folders?.length ?? 1}
-      {@const serverCount = new Set((library.folders ?? [{nodeId:library.nodeId}]).map(folder => folder.nodeId)).size}
-      <article class="library-card">
-      <button class="library-cover" onclick={() => manage(library)} aria-label={`Gérer ${library.name}`}>
-        {#if library.imageKinds?.includes('backdrop') || library.imageKinds?.includes('poster')}
-          <img class="custom-cover" src={`/api/v1/admin/libraries/${encodeURIComponent(library.id)}/images/${library.imageKinds.includes('backdrop') ? 'backdrop' : 'poster'}?v=${library.imageVersions?.[library.imageKinds.includes('backdrop') ? 'backdrop' : 'poster'] ?? ''}`} alt="" loading="lazy" />
-        {:else if library.coverUrls?.length}<div class="cover-collage" aria-hidden="true">{#each library.coverUrls as url (url)}<img src={url} alt="" loading="lazy" decoding="async" />{/each}</div>
-        {:else}<Icon name={library.kind === 'films' ? 'film' : 'tv'} size={48} />{/if}
-        <span>{library.name}</span>
-      </button>
-      <div class="card-bottom"><div class="card-text"><h3>{library.name}</h3><p>{library.kind === 'music' ? 'Musique' : library.kind === 'films' ? 'Films' : 'Séries'}{library.enabled ? '' : ' · Désactivée'}</p></div>
-        <details class="library-menu"><summary aria-label={`Actions ${library.name}`}>⋮</summary><div class="menu-actions">
-          <button onclick={(event) => { closeMenu(event); manage(library); }}>Gérer la bibliothèque</button>
-          <button onclick={(event) => { closeMenu(event); manage(library); }}>Renommer</button>
-          <button disabled={!library.enabled || pending.includes(library.id) || ['queued','running'].includes(scans[library.id]?.status)} onclick={(event) => { closeMenu(event); void onscan(library); }}>Scanner la bibliothèque</button>
-          <button onclick={(event) => { closeMenu(event); imageTarget = library; }}>Modifier les images</button>
-          <button disabled={!library.enabled || pending.includes(library.id) || ['queued','running'].includes(scans[library.id]?.status)} onclick={(event) => { closeMenu(event); target = library; mode = 'missing_metadata'; refresher?.showModal(); }}>Rechercher les métadonnées manquantes</button>
-          <button disabled={!library.enabled || pending.includes(library.id) || ['queued','running'].includes(scans[library.id]?.status)} onclick={(event) => { closeMenu(event); refreshLibrary(library); }}>Actualiser la bibliothèque</button>
-          <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(library.id)}`)}>Planifier l’actualisation</a>
-        </div></details>
-      </div>
-      <p class="folder-count">{folderCount} {folderCount > 1 ? 'dossiers' : 'dossier'} · {serverCount} {serverCount > 1 ? 'serveurs' : 'serveur'}</p>
-      {#if scans[library.id]}<p class="scan-status scan-counters" role="status">Scan : {scanLabels[scans[library.id].status]} · {scans[library.id].discovered} fichier(s) découvert(s) · {scans[library.id].probed} analysé(s) · {scans[library.id].reused} réutilisé(s)</p>{/if}
-      {#if ['queued','running'].includes(scans[library.id]?.status)}<progress aria-label={`Scan de ${library.name} en cours`}></progress>{/if}
-    </article>{:else}<p>Ajoutez votre première bibliothèque de films ou de séries.</p>{/each}
+      {@const serverNames = [...new Set((library.folders ?? [{ nodeId: library.nodeId }]).map(folder => folder.nodeId))].map(nodeName)}
+      {@const kindLabel = library.kind === 'music' ? 'Musique' : library.kind === 'films' ? 'Films' : 'Séries'}
+      {@const scan = scans[library.id]}
+      {@const scanning = ['queued','running'].includes(scan?.status)}
+      {@const unavailable = !library.enabled || pending.includes(library.id) || scanning}
+      {@const scanErrors = scan ? scan.errorsCount ?? scan.errors.length : 0}
+      <tr class="library-row" class:disabled-library={!library.enabled}>
+        <th scope="row" class="name-cell">
+          <button class="library-name" onclick={() => manage(library)} aria-label={`Gérer ${library.name}`}>
+            <span class="kind-icon"><Icon name={library.kind === 'films' ? 'film' : library.kind === 'music' ? 'playlist' : 'tv'} size={20} /></span>
+            <span class="name-text"><span class="name">{library.name}</span><span class="row-meta">{kindLabel}{library.enabled ? '' : ' · Désactivée'} · {folderCount} {folderCount > 1 ? 'dossiers' : 'dossier'} · {serverNames.join(', ')}</span></span>
+          </button>
+        </th>
+        <td class="type-cell">{kindLabel}{#if !library.enabled}<span class="badge">Désactivée</span>{/if}</td>
+        <td class="node-cell">{serverNames.join(', ')}</td>
+        <td class="folders-cell numeric">{folderCount}<span class="h-sr"> {folderCount > 1 ? 'dossiers' : 'dossier'} · {serverNames.length} {serverNames.length > 1 ? 'serveurs' : 'serveur'}</span></td>
+        <td class="status-cell">
+          {#if scan}
+            <div class="scan-status scan-counters" role="status">
+              <span class="badge" class:ok={scan.status === 'completed' && !scanErrors} class:warn={scan.status === 'completed' && scanErrors > 0} class:err={scan.status === 'error'} class:ac={scanning}><span class="h-sr">Scan : </span>{scanLabels[scan.status]}{scan.status === 'completed' && scanErrors > 0 ? ` · ${scanErrors} erreur(s)` : ''}</span>
+              <span class="counters">{scan.discovered} fichier(s) découvert(s) · {scan.probed} analysé(s) · {scan.reused} réutilisé(s)</span>
+            </div>
+            {#if scanning}<progress aria-label={`Scan de ${library.name} en cours`}></progress>{/if}
+          {:else}<span class="no-scan">—</span>{/if}
+        </td>
+        <td class="actions-cell">
+          <div class="row-actions">
+            <button class="icon-action" disabled={unavailable} aria-label={`Scanner ${library.name}`} title="Scanner la bibliothèque" onclick={() => void onscan(library)}><Icon name="refresh" size={18} /></button>
+            <details class="library-menu" ontoggle={placeMenu}><summary aria-label={`Actions ${library.name}`}>⋮</summary><div class="menu-actions">
+              <button onclick={(event) => { closeMenu(event); manage(library); }}>Gérer la bibliothèque</button>
+              <button onclick={(event) => { closeMenu(event); manage(library); }}>Renommer</button>
+              <button disabled={unavailable} onclick={(event) => { closeMenu(event); void onscan(library); }}>Scanner la bibliothèque</button>
+              <button onclick={(event) => { closeMenu(event); imageTarget = library; }}>Modifier les images</button>
+              <button disabled={unavailable} onclick={(event) => { closeMenu(event); target = library; mode = 'missing_metadata'; refresher?.showModal(); }}>Rechercher les métadonnées manquantes</button>
+              <button disabled={unavailable} onclick={(event) => { closeMenu(event); refreshLibrary(library); }}>Actualiser la bibliothèque</button>
+              <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(library.id)}`)}>Planifier l’actualisation</a>
+            </div></details>
+          </div>
+        </td>
+      </tr>
+    {/each}
+      </tbody>
+    </table>
   </div>
+  {:else}<p class="empty-libraries">Ajoutez votre première bibliothèque de films ou de séries.</p>{/if}
 </section>
 <dialog class="library-editor" bind:this={editor} aria-labelledby="library-form" oncancel={event => { if (saving) event.preventDefault(); }}>
   <header class="editor-header"><div><p class="eyebrow">{editing ? name : 'Nouvelle bibliothèque'}</p><h2 id="library-form">{editing ? 'Modifier la bibliothèque' : 'Ajouter une bibliothèque'}</h2></div><button type="button" disabled={saving} aria-label="Fermer les réglages de la bibliothèque" onclick={() => editor?.close()}><Icon name="close" size={20} /></button></header>
@@ -184,109 +234,169 @@
   />
 {/if}
 <style>
-  dialog.library-editor { width:min(1040px,calc(100vw - 48px)); height:min(800px,calc(100dvh - 48px)); max-width:none; max-height:calc(100dvh - 48px); padding:0; overflow:hidden; }
-  dialog.library-editor[open] { display:flex; flex-direction:column; }
-  .editor-header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:20px 24px; background:var(--color-surface); border-bottom:1px solid var(--color-line); flex:none; }
-  .editor-header h2 { margin:4px 0 0; font-size:24px; font-weight:650; }
-  .editor-header button { width:44px; height:44px; padding:0; flex:none; }
-  .eyebrow { margin:0; font-size:12px; color:var(--color-muted); max-width:70ch; overflow-wrap:anywhere; }
-  .library-editor form,.library-editor fieldset { display:flex; flex-direction:column; flex:1; min-height:0; }
-  .editor-workspace { display:grid; grid-template-columns:190px minmax(0,1fr); flex:1; min-height:0; }
-  .editor-navigation { background:var(--color-surface); border-right:1px solid var(--color-line); padding:20px 12px; overflow-y:auto; }
-  .editor-tabs { display:grid; gap:4px; }
-  .editor-tabs button { justify-content:start; border:0; background:transparent; text-align:left; font-size:13px; line-height:1.5; padding:12px; }
-  .editor-tabs button[aria-selected=true] { background:var(--color-accent-soft); color:var(--color-accent); font-weight:600; }
-  .editor-select { display:none; }
-  .editor-content { min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:24px; }
-  .editor-content h3 { font-size:20px; font-weight:600; letter-spacing:-.02em; }
-  .panel-description { margin:8px 0 20px; }
-  .identity-fields { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr); gap:20px; }
-  .source-summary { border-top:1px solid var(--color-line); padding-top:20px; margin-top:24px; }
-  .source-summary p { margin:8px 0 16px; }
-  .section-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-  .section-heading span { color:var(--color-muted); font-size:13px; }
-  .folders { list-style:none; padding:0; margin:20px 0; display:grid; gap:8px; }
-  .folders li { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--color-line); }
-  .folders li div { min-width:0; display:grid; gap:5px; }
-  .folders li span { overflow-wrap:anywhere; font-size:13px; color:var(--color-muted); }
-  .folders li button { flex:none; padding:8px 12px; }
-  .folder-count { margin:0; padding:0 18px 18px; font-size:12px; }
-  .editor-actions { flex:none; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px 20px; padding:16px 24px; background:var(--color-surface); border-top:1px solid var(--color-line); }
-  .save-hint { flex:1; min-width:160px; margin:0; font-size:12px; }
-  .footer-buttons { display:flex; gap:12px; margin-left:auto; }
-  .editor-error { flex-basis:100%; margin:0; font-size:13px; }
-  h2 { font-size: 28px; font-weight: 400; margin: 0 0 28px; overflow-wrap: anywhere; }
-  .toolbar { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 32px; }
-  button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 10px 18px; font: inherit; font-size: 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); color: var(--text-primary); }
-  button:hover:not(:disabled), .menu-actions a:hover { background: var(--bg-elevated); }
-  .primary { border: 0; background: var(--color-play); color: var(--color-on-play); }
-  .primary:hover:not(:disabled) { background: var(--color-play); box-shadow: var(--shadow-sm); }
-  .library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 24px; }
-  .library-card { min-width: 0; background: var(--bg-surface); border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); }
-  .library-cover { position:relative;overflow:hidden;isolation:isolate;width: 100%; min-height: 175px; border: 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; display: flex; flex-direction: column; gap: 16px; padding: 24px; background: var(--bg-elevated); color: var(--text-primary); }
-  .custom-cover,.cover-collage { position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-2; }
-  .cover-collage { display:flex;transform:rotate(-12deg) scale(1.3);gap:5px; }
-  .cover-collage img { flex:1;min-width:0;object-fit:cover; }
-  .library-cover:has(img)::after { content:'';position:absolute;inset:0;background:linear-gradient(transparent,rgb(0 0 0 / .8));z-index:-1; }
-  .library-cover:has(img) span { color:white;text-shadow:0 2px 5px black; }
-  progress { display:block;width:calc(100% - 36px);margin:0 18px 16px;accent-color:var(--accent-primary); }
-  .library-cover span { font-size: clamp(22px, 2vw, 30px); font-weight: 650; overflow-wrap: anywhere; }
-  .library-cover :global(svg) { color: var(--accent-secondary); flex-shrink: 0; }
-  .card-bottom { display: flex; align-items: center; gap: 12px; padding: 18px; }
-  .card-text { min-width: 0; flex: 1; } h3 { font-size: 17px; font-weight: 500; margin: 0; overflow-wrap: anywhere; }
-  p { font-size: 14px; line-height: 1.6; color: var(--text-secondary); }
-  .card-text p { margin: 8px 0 0; }
+  /* Liste des bibliothèques */
+  h2 { margin: 0 0 20px; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; overflow-wrap: anywhere; }
+  h3 { margin: 0; font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
+  p { font-size: 14px; line-height: 1.6; color: var(--mu); }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 0 18px; border: 0; border-radius: var(--r-md); background: var(--pn-2); color: var(--tx); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) ease, color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
+  button:hover:not(:disabled) { background: var(--pn-3); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .primary { min-height: 46px; background: var(--btn); color: var(--btn-tx); box-shadow: none; }
+  .primary:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
+  button:focus-visible, summary:focus-visible, a:focus-visible, [role='tabpanel']:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .library-table-panel { overflow-x: auto; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-lg); }
+  .library-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .library-table thead th { padding: 12px 16px; border-bottom: 1px solid var(--line); color: var(--mu); font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+  .library-table td, .library-table tbody th { padding: 10px 16px; border-bottom: 1px solid var(--line); color: var(--tx); font-weight: 500; text-align: left; vertical-align: middle; transition: background-color var(--t-fast) ease; }
+  .library-table tbody tr:last-child > * { border-bottom: 0; }
+  .library-table tbody tr:hover > * { background: var(--pn); }
+  .library-table .numeric { text-align: right; font-variant-numeric: tabular-nums; }
+  .library-table tbody th.name-cell { min-width: 220px; padding-left: 8px; }
+  .library-name { justify-content: flex-start; gap: 12px; width: 100%; min-height: 48px; padding: 4px 8px; border-radius: var(--r-sm); background: transparent; text-align: left; }
+  .library-name:hover:not(:disabled) { background: var(--pn-2); }
+  .kind-icon { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border-radius: var(--r-sm); background: var(--pn-2); color: var(--mu); }
+  .name-text { display: grid; gap: 2px; min-width: 0; }
+  .name { font-size: 15px; font-weight: 700; color: var(--tx); overflow-wrap: anywhere; }
+  .row-meta { display: none; color: var(--mu); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+  .type-cell { white-space: nowrap; }
+  .type-cell .badge { margin-left: 8px; }
+  .library-table td.node-cell { min-width: 120px; color: var(--mu); overflow-wrap: anywhere; }
+  .disabled-library .kind-icon, .disabled-library .name { opacity: 0.7; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--pn-2); color: var(--tx); font-size: 12px; font-weight: 700; line-height: 1; white-space: nowrap; }
+  .badge.ok { background: var(--ok-soft); color: var(--ok); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .badge.err { background: var(--err-soft); color: var(--err); }
+  .badge.ac { background: var(--ac-soft); color: var(--ac); }
+  .status-cell { min-width: 220px; }
+  .scan-status { display: grid; justify-items: start; gap: 4px; }
+  .counters { color: var(--mu); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .no-scan { color: var(--mu); }
+  .actions-cell { width: 1%; white-space: nowrap; }
+  .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+  .icon-action { width: 44px; padding: 0; border-radius: 14px; background: var(--pn); color: var(--tx); }
+  .icon-action:hover:not(:disabled) { background: var(--pn-2); }
+  .empty-libraries { margin: 0; padding: 32px 24px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); text-align: center; }
+  progress { display: block; width: 100%; max-width: 220px; height: 4px; margin: 8px 0 0; border: 0; border-radius: var(--r-pill); overflow: hidden; background: var(--pn-2); color: var(--ac); appearance: none; -webkit-appearance: none; }
+  progress::-webkit-progress-bar { background: var(--pn-2); border-radius: var(--r-pill); }
+  progress::-webkit-progress-value { background: var(--ac); border-radius: var(--r-pill); }
+  progress::-moz-progress-bar { background: var(--ac); border-radius: var(--r-pill); }
   .library-menu { position: relative; flex-shrink: 0; }
-  summary { display: grid; place-items: center; cursor: pointer; list-style: none; width: 44px; height: 44px; font-size: 28px; }
+  summary { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: var(--pn); color: var(--tx); font-size: 22px; font-weight: 800; line-height: 1; list-style: none; cursor: pointer; transition: background-color var(--t-fast) ease; }
+  summary:hover, .library-menu[open] summary { background: var(--pn-2); }
   summary::-webkit-details-marker { display: none; }
-  .menu-actions { position: absolute; right: 0; top: 44px; width: min(280px, calc(100vw - 48px)); padding: 8px; border-radius:var(--radius-lg); z-index: 20; background: var(--bg-elevated); border: 1px solid var(--border-subtle); box-shadow: var(--shadow-md); }
-  .menu-actions button, .menu-actions a { display: flex; justify-content: flex-start; width: 100%; padding: 12px; border: 0; border-radius: 0; background: transparent; font-size: 14px; text-align: left; min-height: 44px; }
-  .scan-status { margin: 0; padding: 0 18px 16px; color: var(--text-secondary); font-size: 12px; }
-  dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 28px; border: 1px solid var(--border-subtle); border-radius: var(--radius-xl); background: var(--bg-main); color: var(--text-primary); }
-  dialog::backdrop { background: rgb(0 0 0 / .65); }
-  fieldset { min-width: 0; padding: 0; margin: 0; border: 0; }
-  label { display: block; margin: 24px 0 10px; font-size: 14px; }
-  input:not([type='checkbox']), select { width: 100%; min-width: 0; min-height: 44px; padding: 12px; background-color: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
-  .field-hint { font-size: 12px; color: var(--text-secondary); margin: 6px 0 14px; }
-  .check { display: flex; align-items: center; gap: 10px; }
+  .menu-actions { position: fixed; z-index: 120; width: min(290px, calc(100vw - 48px)); padding: 6px; background: var(--bg-3); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow); }
+  .menu-actions button, .menu-actions a { display: flex; justify-content: flex-start; align-items: center; width: 100%; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--tx); font-size: 14px; font-weight: 600; text-align: left; transition: background-color var(--t-fast) ease; }
+  .menu-actions button:hover:not(:disabled), .menu-actions a:hover { background: var(--pn); }
+
+  /* Dialogues */
+  dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 28px; border: 1px solid var(--line); border-radius: var(--r-xl); background: var(--bg-3); color: var(--tx); font-family: var(--font); box-shadow: var(--shadow); }
+  dialog::backdrop { background: rgb(6 8 14 / 0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+  dialog > form > h2 { margin-bottom: 4px; }
+  fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+  label { display: block; margin: 20px 0 8px; font-size: 14px; font-weight: 700; color: var(--tx); }
+  input:not([type='checkbox']), select { width: 100%; min-width: 0; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  select { padding-right: 40px; }
+  input:not([type='checkbox']):hover, select:hover:not(:disabled) { background-color: var(--pn-2); border-color: transparent; }
+  input:not([type='checkbox']):focus, select:focus, select:focus-visible { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--ac); }
+  .field-hint { margin: 8px 0 14px; font-size: 13px; color: var(--mu); }
+  .check { display: flex; align-items: center; gap: 12px; min-height: 44px; margin-bottom: 0; font-weight: 600; cursor: pointer; }
   .actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
-  [role='alert'] { color: var(--status-error); overflow-wrap: anywhere; }
-  .folder-input-row { display: flex; gap: 8px; align-items: center; }
+  [role='alert'] { color: var(--err); overflow-wrap: anywhere; }
+
+  /* Éditeur de bibliothèque */
+  dialog.library-editor { width: min(1040px, calc(100vw - 48px)); height: min(800px, calc(100dvh - 48px)); max-width: none; max-height: calc(100dvh - 48px); padding: 0; overflow: hidden; }
+  dialog.library-editor[open] { display: flex; flex-direction: column; }
+  .editor-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--line); }
+  .editor-header h2 { margin: 4px 0 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+  .editor-header button { flex: none; width: 44px; height: 44px; padding: 0; border-radius: 14px; background: var(--pn); }
+  .editor-header button:hover:not(:disabled) { background: var(--pn-2); }
+  .eyebrow { max-width: 70ch; margin: 0; color: var(--mu); font-size: 12px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; overflow-wrap: anywhere; }
+  .library-editor form, .library-editor fieldset { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+  .editor-workspace { display: grid; flex: 1; grid-template-columns: 210px minmax(0, 1fr); min-height: 0; }
+  .editor-navigation { padding: 20px 12px; overflow-y: auto; border-right: 1px solid var(--line); }
+  .editor-tabs { display: grid; gap: 2px; }
+  .editor-tabs button { justify-content: flex-start; min-height: 42px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--mu); font-size: 14px; font-weight: 600; line-height: 1.3; text-align: left; }
+  .editor-tabs button:hover:not(:disabled) { background: var(--pn); color: var(--tx); }
+  .editor-tabs button[aria-selected='true'] { background: var(--pn-2); color: var(--tx); font-weight: 700; }
+  .editor-select { display: none; }
+  .editor-content { min-height: 0; padding: 24px 28px; overflow-y: auto; overscroll-behavior: contain; }
+  .editor-content h3 { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+  .panel-description { margin: 6px 0 20px; }
+  .identity-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 20px; }
+  .identity-fields label { margin-top: 0; }
+  .source-summary { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+  .source-summary strong { font-size: 15px; font-weight: 700; }
+  .source-summary p { margin: 6px 0 16px; }
+  .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .section-heading span { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--pn-2); color: var(--tx); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .folders { display: grid; margin: 16px 0 20px; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+  .folders li { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 60px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .folders li div { display: grid; gap: 4px; min-width: 0; }
+  .folders li strong { font-size: 14px; font-weight: 700; }
+  .folders li span { font-family: var(--font-mono); font-size: 13px; color: var(--mu); overflow-wrap: anywhere; }
+  .folders li button { flex: none; padding: 0 14px; background: transparent; color: var(--mu); }
+  .folders li button:hover:not(:disabled) { background: var(--pn); color: var(--tx); }
+  .folders .empty-folders { min-height: 52px; color: var(--mu); font-size: 14px; }
+  #library-root { font-family: var(--font-mono); font-size: 14px; }
+  .folder-input-row { display: flex; align-items: center; gap: 8px; }
   .folder-input-row input { flex: 1; min-width: 0; }
-  .browse-btn { flex-shrink: 0; white-space: nowrap; height: 44px; }
-  .add-folder-btn { margin-top: 10px; width: 100%; }
-  @media(max-width:800px), (max-height:520px) and (max-width:1100px) {
-    .editor-workspace { grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); }
-    .editor-navigation { padding:12px 20px; border-right:0; border-bottom:1px solid var(--color-line); overflow:visible; }
-    .editor-tabs { display:none; }
-    .editor-select { display:flex; align-items:center; gap:12px; margin:0; font-size:12px; }
-    .editor-select select { flex:1; width:auto; min-width:0; min-height:44px; padding:8px 12px; font-size:16px; }
+  .browse-btn { flex-shrink: 0; height: 46px; white-space: nowrap; }
+  .add-folder-btn { width: 100%; margin-top: 12px; }
+  .editor-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; padding: 16px 24px; border-top: 1px solid var(--line); }
+  .save-hint { flex: 1; min-width: 160px; margin: 0; font-size: 13px; }
+  .footer-buttons { display: flex; gap: 12px; margin-left: auto; }
+  .editor-error { flex-basis: 100%; margin: 0; font-size: 14px; }
+
+  @media (max-width: 800px), (max-height: 520px) and (max-width: 1100px) {
+    .editor-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+    .editor-navigation { padding: 12px 20px; overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
+    .editor-tabs { display: none; }
+    .editor-select { display: flex; align-items: center; gap: 12px; margin: 0; }
+    .editor-select select { flex: 1; width: auto; min-width: 0; font-size: 16px; }
   }
-  @media(max-width:600px) {
-    .library-grid { grid-template-columns:minmax(0,1fr); }
-    dialog { padding:20px; }
-    dialog.library-editor { width:100vw; height:100dvh; max-height:100dvh; margin:0; border:0; border-radius:0; }
-    .editor-header { padding:16px; }
-    .editor-header h2 { font-size:21px; }
-    .editor-navigation { padding:10px 16px; }
-    .editor-content { padding:20px 16px; }
-    .identity-fields { grid-template-columns:minmax(0,1fr); gap:0; }
-    .folder-input-row { flex-wrap:wrap; }
-    .folder-input-row input { flex-basis:100%; }
-    .browse-btn { width:100%; }
-    .editor-actions { padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px)); gap:8px; }
-    .save-hint { flex-basis:100%; }
-    .footer-buttons { width:100%; }
-    .footer-buttons button { flex:1; }
-    .library-editor input:not([type=checkbox]),.library-editor select { font-size:16px; }
+  @media (max-width: 640px) {
+    .library-table, .library-table tbody { display: block; }
+    .library-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; padding: 10px 8px 12px; border-bottom: 1px solid var(--line); }
+    .library-table tbody tr:last-child { border-bottom: 0; }
+    .library-table tbody tr > *, .library-table tbody tr:hover > * { display: block; padding: 0; border-bottom: 0; background: transparent; }
+    .library-table tbody tr:hover { background: var(--pn); }
+    .library-table tbody th.name-cell { min-width: 0; padding: 0; }
+    .library-table thead, .library-table tbody tr > .type-cell, .library-table tbody tr > .node-cell, .library-table tbody tr > .folders-cell { display: none; }
+    .row-meta { display: block; }
+    .actions-cell { grid-column: 2; grid-row: 1; width: auto; }
+    .library-table td.status-cell { grid-column: 1 / -1; min-width: 0; padding: 0 8px; }
+    .toolbar button { width: 100%; }
+    dialog { padding: 20px; border-radius: var(--r-lg); }
+    dialog.library-editor { width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; }
+    .editor-header { padding: 14px 16px; }
+    .editor-header h2 { font-size: 20px; }
+    .editor-navigation { padding: 10px 16px; }
+    .editor-content { padding: 20px 16px; }
+    .identity-fields { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .identity-fields div + div label { margin-top: 20px; }
+    .folder-input-row { flex-wrap: wrap; }
+    .folder-input-row input { flex-basis: 100%; }
+    .browse-btn { width: 100%; }
+    .editor-actions { gap: 8px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); }
+    .save-hint { flex-basis: 100%; }
+    .footer-buttons { width: 100%; }
+    .footer-buttons button { flex: 1; }
+    .actions button { flex: 1; }
+    input:not([type='checkbox']), select { font-size: 16px; }
   }
-  @media(max-height:520px) and (max-width:1100px) {
-    dialog.library-editor { height:100dvh; max-height:100dvh; width:100vw; margin:0; border:0; border-radius:0; }
-    .editor-header { padding:8px 16px; }
-    .editor-header h2 { margin:0; font-size:20px; }
-    .eyebrow,.save-hint { display:none; }
-    .editor-navigation { padding:8px 16px; }
-    .editor-actions { padding:8px 16px calc(8px + env(safe-area-inset-bottom,0px)); }
-    .editor-content { padding:16px; }
+  @media (max-height: 520px) and (max-width: 1100px) {
+    dialog.library-editor { width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; }
+    .editor-header { padding: 8px 16px; }
+    .editor-header h2 { margin: 0; font-size: 20px; }
+    .eyebrow, .save-hint { display: none; }
+    .editor-navigation { padding: 8px 16px; }
+    .editor-actions { padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px)); }
+    .editor-content { padding: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button, summary, .library-table td, .library-table tbody th { transition: none; }
   }
 </style>

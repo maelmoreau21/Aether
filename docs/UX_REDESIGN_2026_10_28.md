@@ -1,5 +1,8 @@
 # Refonte UX — audit et premier jalon, 28 octobre 2026
 
+> **Document historique.** Ce rapport conserve l’audit et les décisions du
+> 28 octobre 2026. Les règles durables sont dans [UI_DIRECTION.md](UI_DIRECTION.md).
+
 ## Périmètre et méthode
 
 Lecture des règles, architecture, spécification, direction visuelle, sources Svelte,

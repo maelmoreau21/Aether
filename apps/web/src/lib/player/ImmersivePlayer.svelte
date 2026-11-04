@@ -721,7 +721,7 @@
     width: 40px;
     height: 40px;
     display: block;
-    filter: drop-shadow(0 0 16px rgba(245, 158, 11, 0.35));
+    filter: drop-shadow(0 0 16px var(--warn));
   }
   .player-error {
     position: absolute;
@@ -798,4 +798,64 @@
       max-width: calc(100% - 36px);
     }
   }
+
+  /* ---------- Halo : barre supérieure, erreurs et épisode suivant ---------- */
+  .top-bar {
+    background: linear-gradient(180deg, rgb(0 0 0 / 0.6) 0%, rgb(0 0 0 / 0) 100%);
+    font-family: var(--font);
+    transition: opacity var(--t-slow) ease;
+  }
+  .return {
+    border: 0;
+    border-radius: 16px;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .return:hover { background: rgb(255 255 255 / 0.14); border-color: transparent; transform: none; box-shadow: none; }
+  .title > span { font-weight: 800; }
+  .next-episode label { font-size: 13px; font-weight: 700; }
+  .next-episode input { accent-color: var(--ac); width: 18px; height: 18px; }
+  .loading { font-family: var(--font); font-size: 14px; font-weight: 700; }
+  .loading button { border: 0; border-radius: 14px; background: rgb(255 255 255 / 0.16); color: #f4f6fb; font-weight: 700; }
+  .loading button:hover { background: rgb(255 255 255 / 0.26); }
+  .player-spinner { filter: none; }
+  .player-error {
+    padding: 28px;
+    border: 0;
+    border-radius: 24px;
+    background: rgb(17 21 31 / 0.94);
+    color: var(--err);
+    box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+    font-family: var(--font);
+  }
+  .player-error strong { font-size: 18px; font-weight: 800; color: #fff; }
+  .player-error p { font-size: 14px; color: #a2a9ba; }
+  .player-error button { height: 48px; padding: 0 22px; border-radius: 16px; background: #eef1f8; color: #0b0e18; font-size: 14px; font-weight: 800; }
+  .player-error button:hover { background: #fff; box-shadow: none; transform: none; }
+  .marker-editor, .stream-statistics {
+    padding: 20px;
+    border: 0;
+    border-radius: 24px;
+    background: rgb(17 21 31 / 0.92);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    color: #eef1f8;
+    box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+    font-family: var(--font);
+  }
+  .stream-statistics { font-size: 13px; }
+  .stream-statistics dt, .stream-statistics p { color: #a2a9ba; }
+  .stream-statistics dd { font-family: var(--font-mono); font-size: 12px; }
+  .marker-editor label { font-size: 14px; font-weight: 700; }
+  .stream-statistics button { min-height: 40px; border: 0; border-radius: 12px; background: rgb(255 255 255 / 0.14); color: #f4f6fb; font-weight: 700; }
+  .stream-statistics button:hover { background: rgb(255 255 255 / 0.24); }
+  .fullscreen-notice { color: #a2a9ba; font-size: 12px; font-weight: 600; }
+  .marker-editor h2 { margin: 0 0 4px; font-size: 17px; font-weight: 800; }
+  .marker-editor select, .marker-editor input[type='number'] { height: 44px; padding: 0 12px; border: 1px solid transparent; border-radius: 12px; background-color: rgb(255 255 255 / 0.07); color: #fff; box-shadow: none; }
+  .marker-editor select:focus, .marker-editor input[type='number']:focus { outline: none; border-color: var(--ac); }
+  .marker-editor input[type='checkbox'] { accent-color: var(--ac); width: 18px; height: 18px; }
+  .marker-editor button { min-height: 44px; border: 0; border-radius: 14px; background: rgb(255 255 255 / 0.14); color: #f4f6fb; font-weight: 700; }
+  .marker-editor button:first-of-type { background: #eef1f8; color: #0b0e18; }
+  .marker-editor [role='alert'] { margin: 0; color: var(--err); font-weight: 600; }
 </style>

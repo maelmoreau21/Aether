@@ -24,6 +24,8 @@ function getStoredTheme(): ThemeMode {
 }
 
 export const themeMode = writable<ThemeMode>(getStoredTheme());
+/** True when the TV layout is active (data-tv on <html>). */
+export const tvLayout = writable(false);
 
 export const effectiveTheme = derived(themeMode, ($mode) => {
   if ($mode === 'system') {
@@ -55,6 +57,7 @@ export function initTheme() {
 
   const effective = currentMode === 'system' ? getSystemTheme() : currentMode;
   document.documentElement.setAttribute('data-theme', effective);
+  tvLayout.set(document.documentElement.dataset.tv === 'true');
 
   // Watch for OS theme changes when in 'system' mode
   const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
@@ -72,4 +75,34 @@ export function initTheme() {
   } else if (typeof mediaQuery.addListener === 'function') {
     mediaQuery.addListener(listener);
   }
+}
+
+/** Per-device TV layout (10-foot UI). `auto` follows the device detection in static/theme-init.js. */
+export type TvMode = 'auto' | 'on' | 'off';
+const TV_STORAGE_KEY = 'media_tv';
+const TV_USER_AGENT = /SMART-TV|SmartTV|Tizen|Web0S|webOS|HbbTV|NetCast|BRAVIA|Android TV|GoogleTV|AFT[A-Z]|CrKey/i;
+
+export function getTvMode(): TvMode {
+  if (typeof window === 'undefined') return 'auto';
+  try {
+    const stored = localStorage.getItem(TV_STORAGE_KEY);
+    if (stored === 'on' || stored === 'off') return stored;
+  } catch {
+    // LocalStorage inaccessible
+  }
+  return 'auto';
+}
+
+export function setTvMode(mode: TvMode) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (mode === 'auto') localStorage.removeItem(TV_STORAGE_KEY);
+    else localStorage.setItem(TV_STORAGE_KEY, mode);
+  } catch {
+    // LocalStorage inaccessible: the choice still applies to this page.
+  }
+  const enabled = mode === 'on' || (mode === 'auto' && TV_USER_AGENT.test(navigator.userAgent));
+  if (enabled) document.documentElement.dataset.tv = 'true';
+  else delete document.documentElement.dataset.tv;
+  tvLayout.set(enabled);
 }

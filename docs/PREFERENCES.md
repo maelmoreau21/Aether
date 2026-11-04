@@ -136,7 +136,9 @@ Les fournisseurs de métadonnées en ligne restent à développer.
 ## Personnalisation de l’accueil (2 novembre 2026)
 
 `homeSections` est une liste ordonnée, sans doublon, parmi `hero`, `continue`,
-`films`, `series`, `rated`. L’absence conserve les cinq sections par défaut ;
+`tonight` (mosaïque « Pour ce soir », 4 novembre 2026), `films`, `series`, `rated`.
+L’absence conserve les six sections par défaut ; une liste enregistrée avant l’ajout
+de `tonight` ne l’affiche pas tant qu’elle n’est pas réactivée dans les paramètres ;
 une liste vide masque tout et affiche un lien vers les paramètres. Les flèches
 Monter/Descendre sont utilisables au clavier ; les sections masquées peuvent
 être réactivées et l’affichage par défaut restauré.

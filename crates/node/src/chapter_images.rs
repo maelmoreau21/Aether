@@ -21,21 +21,20 @@ pub async fn response(
         )
             .into_response();
     }
-    if manager.check_native_cache(&request).await.is_some() {
-        if let Ok(opened) = manager.open_sheet(&request, 0).await {
-            if let Ok(response) = crate::serve_opened(opened, &http, "image/jpeg").await {
-                let (mut parts, body) = response.into_parts();
-                parts.headers.insert(
-                    header::CACHE_CONTROL,
-                    axum::http::HeaderValue::from_static("private, no-store"),
-                );
-                parts.headers.insert(
-                    header::X_CONTENT_TYPE_OPTIONS,
-                    axum::http::HeaderValue::from_static("nosniff"),
-                );
-                return Response::from_parts(parts, Body::new(body));
-            }
-        }
+    if manager.check_native_cache(&request).await.is_some()
+        && let Ok(opened) = manager.open_sheet(&request, 0).await
+        && let Ok(response) = crate::serve_opened(opened, &http, "image/jpeg").await
+    {
+        let (mut parts, body) = response.into_parts();
+        parts.headers.insert(
+            header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("private, no-store"),
+        );
+        parts.headers.insert(
+            header::X_CONTENT_TYPE_OPTIONS,
+            axum::http::HeaderValue::from_static("nosniff"),
+        );
+        return Response::from_parts(parts, Body::new(body));
     }
     let (status, code) = match manager.enqueue(request) {
         QueueStatus::Queued => (StatusCode::ACCEPTED, "generating"),

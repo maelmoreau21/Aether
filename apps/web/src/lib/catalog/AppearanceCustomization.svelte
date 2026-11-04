@@ -1,6 +1,6 @@
 <script lang="ts">
   import { preferenceState, savePreferences, DEFAULT_HOME_SECTIONS, type HomeSection } from '../preferences';
-  const names: Record<HomeSection, string> = { hero: 'À la une', continue: 'Reprendre la lecture', films: 'Films récents', series: 'Séries récentes', rated: 'Les mieux notés' };
+  const names: Record<HomeSection, string> = { hero: 'À la une', continue: 'Reprendre la lecture', tonight: 'Pour ce soir', films: 'Films récents', series: 'Séries récentes', rated: 'Les mieux notés' };
   const sections = $derived($preferenceState.homeSections ?? DEFAULT_HOME_SECTIONS);
   let saveError = $state('');
   async function save(patch: Parameters<typeof savePreferences>[0]) {
@@ -52,10 +52,28 @@
   {#if saveError}<p role="alert">{saveError}</p>{/if}
 </section>
 <style>
-  .customization { padding:24px; margin-bottom:24px; border:1px solid var(--color-line); border-radius:var(--radius-md); background:var(--color-surface); }
-  h2 { margin-top:0; } p { color:var(--color-muted); line-height:1.5; }
-  .choices { display:flex; flex-wrap:wrap; gap:16px; } label { display:grid; gap:8px; }
-  select,button { color:var(--color-text); background:var(--color-raised); border:1px solid var(--color-line-strong); padding:8px 10px; border-radius:8px; }
-  button { cursor:pointer; } button:disabled { opacity:.4; cursor:default; } ol { padding:0; list-style:none; }
-  li { display:flex; align-items:center; gap:8px; margin:10px 0; flex-wrap:wrap; } li span { flex:1; min-width:120px; } .restore { margin:0 8px 12px 0; }
+  .customization { display: grid; gap: 16px; min-width: 0; padding: 24px; margin-bottom: 20px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); color: var(--tx); overflow-wrap: anywhere; }
+  h2 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+  h3 { margin: 8px 0 0; padding-top: 20px; border-top: 1px solid var(--line); font-size: 17px; font-weight: 700; }
+  p { margin: 0; color: var(--mu); font-size: 14px; line-height: 1.6; }
+  .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 20px; }
+  label { display: grid; gap: 8px; font-size: 14px; font-weight: 700; }
+  select { width: 100%; max-width: 520px; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  select { padding-right: 40px; }
+  select:hover { background-color: var(--pn-2); }
+  select:focus { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  button { justify-self: start; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 18px; border: 0; border-radius: var(--r-md); background: var(--pn-2); color: var(--tx); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
+  button:hover:not(:disabled) { background: var(--pn-3); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  [role='alert'] { margin: 0; padding: 12px 14px; border-radius: var(--r-sm); background: var(--err-soft); color: var(--err); font-weight: 600; }
+  ol { display: grid; margin: 0; padding: 0; list-style: none; border-radius: var(--r-md); background: var(--pn); overflow: hidden; }
+  li { display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 6px 8px 6px 16px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  li:first-child { border-top: 0; }
+  li span { flex: 1; min-width: 120px; font-size: 15px; font-weight: 600; }
+  li button { min-width: 44px; padding: 0 14px; background: transparent; color: var(--mu); }
+  li button:hover:not(:disabled) { background: var(--pn-2); color: var(--tx); }
+  .restore { margin: 0 8px 0 0; }
+  @media (max-width: 640px) { .customization { padding: 16px; border-radius: var(--r-md); } }
 </style>

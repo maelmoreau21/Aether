@@ -1,5 +1,10 @@
 > Moteur de tâches (25 octobre 2026) : API administrateur persistante `GET/POST /api/v1/admin/tasks/jobs`, détail `GET /api/v1/admin/tasks/jobs/{id}` et contrôles `POST /api/v1/admin/tasks/jobs/{id}/{pause|resume|cancel}`. Session administrateur et CSRF pour les mutations ; catégories scan/analyze/prepare/image et cibles inventoriées. Contrat, limites et validation : [tâches distribuées](DISTRIBUTED_TASKS.md).
 
+> Parcours du 3 novembre 2026 : [sous-titres manuels](OPENSUBTITLES.md),
+> [images de chapitres](CHAPTER_IMAGES.md), [recommandations personnelles](RECOMMENDATIONS.md)
+> et [notifications](NOTIFICATIONS.md). Chaque contrat précise ses routes,
+> droits, données persistantes et limites de validation.
+
 > Bibliothèques avec plusieurs dossiers/nœuds : [contrat du 22 octobre](LIBRARY_FOLDERS.md).
 > Navigation par bibliothèque et images multiples : [contrat du 21 octobre](RESPONSIVENESS_AND_ARTWORK.md).
 

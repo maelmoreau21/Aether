@@ -9,6 +9,11 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
  enabled BIGINT NOT NULL DEFAULT 0, scans BIGINT NOT NULL DEFAULT 0, tasks BIGINT NOT NULL DEFAULT 0
 );
+-- Separate additive subscription preserves databases created before content events.
+CREATE TABLE IF NOT EXISTS notification_content_preferences (
+ user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ enabled BIGINT NOT NULL DEFAULT 0, since_at BIGINT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS notification_events (
  id TEXT PRIMARY KEY, kind TEXT NOT NULL, task_id TEXT NOT NULL, library_id TEXT,
  occurred_at BIGINT NOT NULL, source_attempt BIGINT NOT NULL, source_status TEXT NOT NULL

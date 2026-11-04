@@ -274,8 +274,172 @@ async fn fixture(store: &IdentityStore, user: &str) {
     query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('allowed-library','Private','films','local','/read-only',1)").execute(store.pool()).await.unwrap();
 }
 async fn terminal_task(store: &IdentityStore, id: &str, at: i64) {
-    query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,status,created_at,updated_at,finished_at) VALUES(?,'allowed-library','test',?,'local','scan','completed',?,?,?)")
-        .bind(id).bind(id).bind(at).bind(at).bind(at).execute(store.pool()).await.unwrap();
+    query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,status,created_at,updated_at,available_at,finished_at) VALUES(?,'allowed-library','test',?,'local','scan','completed',?,?,?,?)")
+        .bind(id).bind(id).bind(at).bind(at).bind(at).bind(at).execute(store.pool()).await.unwrap();
+}
+
+async fn content_contract(store: &IdentityStore) {
+    let at = now();
+    query("INSERT INTO users(id,role) VALUES('content-reader','user')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("INSERT INTO library_permissions(library_id,user_id) VALUES('allowed-library','content-reader')").execute(store.pool()).await.unwrap();
+    query("INSERT INTO parental_policies(user_id,maximum_age,allow_unrated) VALUES('content-reader',12,1)").execute(store.pool()).await.unwrap();
+    query("INSERT INTO notification_preferences(user_id,enabled,scans,tasks) VALUES('content-reader',1,0,0)").execute(store.pool()).await.unwrap();
+    query("INSERT INTO notification_content_preferences(user_id,enabled,since_at) VALUES('content-reader',1,?)").bind(at-10).execute(store.pool()).await.unwrap();
+    assert!(
+        load_preferences(store, "content-reader")
+            .await
+            .unwrap()
+            .content
+    );
+    let (destination, captures, _, server) = receiver().await;
+    transport::test_destinations()
+        .lock()
+        .unwrap()
+        .insert(destination.clone());
+    persist_channel(
+        store,
+        "content-channel",
+        ChannelInput {
+            name: "Content fixture".into(),
+            recipient_id: "content-reader".into(),
+            kind: "webhook".into(),
+            enabled: true,
+            config: Config {
+                destination,
+                secret: Some("fixture-secret-at-least-32-characters".into()),
+                ..Default::default()
+            },
+        },
+        false,
+    )
+    .await
+    .unwrap();
+    query("UPDATE notification_channels SET created_at=? WHERE id='content-channel'")
+        .bind(at)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    for (id, added, age) in [
+        ("old-content", at - 20, 0),
+        ("new-content", at, 0),
+        ("adult-content", at, 21),
+    ] {
+        query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json,kind,added_at,minimum_age,has_available_asset) VALUES(?,'allowed-library',?,'PRIVATE TITLE','{}','film',?,?,1)")
+            .bind(id).bind(id).bind(added).bind(age).execute(store.pool()).await.unwrap();
+    }
+    collect(store, at).await.unwrap();
+    collect(store, at).await.unwrap();
+    let events: Vec<Event> =
+        query_as("SELECT * FROM notification_events WHERE kind='content.added' ORDER BY task_id")
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        events.len(),
+        2,
+        "old catalogue omitted; repeated reconciliation deduplicated"
+    );
+    let channel: Channel =
+        query_as("SELECT * FROM notification_channels WHERE id='content-channel'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert!(
+        !recipient_allowed(store, &channel, &events[0])
+            .await
+            .unwrap(),
+        "parental restriction"
+    );
+    assert!(
+        recipient_allowed(store, &channel, &events[1])
+            .await
+            .unwrap()
+    );
+    for _ in 0..2 {
+        query("UPDATE notification_channels SET next_allowed_at=0 WHERE id='content-channel'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        run_once(store, at).await.unwrap();
+    }
+    let received = captures.lock().unwrap().clone();
+    assert_eq!(received.len(), 1);
+    let body: Value = serde_json::from_str(&received[0].1).unwrap();
+    assert_eq!(body["workId"], "new-content");
+    assert!(body.get("taskId").is_none());
+    assert!(!body.to_string().contains("PRIVATE TITLE"));
+    query("DELETE FROM library_permissions WHERE user_id='content-reader'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert!(
+        !recipient_allowed(store, &channel, &events[1])
+            .await
+            .unwrap(),
+        "live rights revoked"
+    );
+    query("INSERT INTO library_permissions(library_id,user_id) VALUES('allowed-library','content-reader')").execute(store.pool()).await.unwrap();
+    query("UPDATE inventory_works SET has_available_asset=0 WHERE id='new-content'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert!(
+        !recipient_allowed(store, &channel, &events[1])
+            .await
+            .unwrap(),
+        "removed content"
+    );
+    query("UPDATE inventory_works SET has_available_asset=1 WHERE id='new-content'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("UPDATE notification_content_preferences SET enabled=0 WHERE user_id='content-reader'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert!(
+        !recipient_allowed(store, &channel, &events[1])
+            .await
+            .unwrap(),
+        "live opt-out"
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn content_additions_are_opt_in_deduplicated_and_permission_filtered() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("content.sqlite");
+    let store = IdentityStore::open(&path).await.unwrap();
+    fixture(&store, "content-admin").await;
+    // Simulate an existing installation from before the additive content subscription table.
+    query("DROP TABLE notification_content_preferences")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    store.close().await;
+    let store = IdentityStore::open(&path).await.unwrap();
+    content_contract(&store).await;
+    store.close().await;
+    let store = IdentityStore::open(&path).await.unwrap();
+    assert!(
+        !load_preferences(&store, "content-reader")
+            .await
+            .unwrap()
+            .content
+    );
+    assert_eq!(
+        query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM notification_events WHERE kind='content.added'"
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap(),
+        2
+    );
 }
 #[tokio::test]
 async fn queue_is_durable_deduplicated_permission_filtered_and_retries_with_backoff() {
@@ -489,7 +653,7 @@ async fn http_configuration_requires_admin_csrf_and_never_returns_secrets() {
         false
     );
     query("UPDATE users SET role='user' WHERE id=?")
-        .bind(user)
+        .bind(&user)
         .execute(store.pool())
         .await
         .unwrap();
@@ -513,7 +677,7 @@ async fn http_configuration_requires_admin_csrf_and_never_returns_secrets() {
             "PUT",
             &cookie,
             csrf,
-            json!({"enabled":true,"scans":true,"tasks":true})
+            json!({"enabled":true,"scans":true,"tasks":true,"content":true})
         )
         .await
         .0,
@@ -532,6 +696,7 @@ async fn http_configuration_requires_admin_csrf_and_never_returns_secrets() {
         .1["tasks"],
         false
     );
+    assert!(load_preferences(&store, &user).await.unwrap().content);
 }
 
 #[tokio::test]
@@ -608,6 +773,7 @@ async fn postgres_notification_claim_is_fenced_and_queue_survives_reopen() {
             .unwrap(),
         1
     );
+    content_contract(&reopened).await;
     reopened.close().await;
     server.abort();
 }

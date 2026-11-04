@@ -67,19 +67,17 @@
   .watch-toggle-btn {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     min-height: 44px;
-    padding: 0 16px 0 12px;
-    border: 1px solid var(--color-line-strong);
-    border-radius: var(--radius-pill);
-    background: var(--color-glass-raised);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    color: var(--color-text);
-    font-size: 13.5px;
-    font-weight: 650;
+    padding: 0 16px 0 10px;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    background: var(--pn);
+    color: var(--tx);
+    font-size: 14px;
+    font-weight: 700;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
   }
 
   .watch-toggle-btn.compact {
@@ -94,45 +92,44 @@
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    border: 1.5px solid var(--color-line-strong);
-    background: rgba(255, 255, 255, 0.04);
-    color: var(--color-muted);
-    transition: all var(--transition-fast);
+    border: 1.5px solid var(--line-2);
+    color: var(--mu);
+    transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
   }
 
   .watch-toggle-btn:hover:not(:disabled) {
-    background: var(--color-raised-hover);
-    border-color: var(--color-text);
-    color: var(--color-text-bright);
-    transform: translateY(-1px);
+    background: var(--pn-2);
+  }
+
+  .watch-toggle-btn:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  .watch-toggle-btn:focus-visible {
+    outline: 2px solid var(--ac);
+    outline-offset: 3px;
   }
 
   .watch-toggle-btn:hover:not(:disabled) .check-circle {
-    border-color: var(--color-text-bright);
-    color: var(--color-text-bright);
+    border-color: var(--tx);
+    color: var(--tx);
   }
 
-  .watch-toggle-btn.is-watched {
-    background: rgba(16, 185, 129, 0.16);
-    border-color: rgba(16, 185, 129, 0.5);
-    color: #34D399;
-  }
-
-  .watch-toggle-btn.is-watched .check-circle {
-    background: #10B981;
-    border-color: #10B981;
-    color: #ffffff;
-    box-shadow: 0 0 10px rgba(16, 185, 129, 0.45);
+  .watch-toggle-btn.is-watched .check-circle,
+  .watch-toggle-btn.is-watched:hover:not(:disabled) .check-circle {
+    background: var(--ac);
+    border-color: var(--ac);
+    color: var(--on-ac);
   }
 
   .watch-toggle-btn:disabled {
-    opacity: 0.6;
+    opacity: 0.45;
     cursor: wait;
   }
 
   small {
     flex-basis: 100%;
-    color: var(--color-danger);
-    font-size: 12px;
+    color: var(--err);
+    font-size: 13px;
   }
 </style>

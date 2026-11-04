@@ -9,6 +9,8 @@
   import Poster from './Poster.svelte';
   import ContinueWatching from './ContinueWatching.svelte';
   import RecommendationShelf from './RecommendationShelf.svelte';
+  import TonightMosaic from './TonightMosaic.svelte';
+  import { pickTonight } from './tonight';
 
   let { films = [], series = [], featured = null, onPlay, detailUrl }: {
     films: Work[];
@@ -17,19 +19,44 @@
     onPlay: (work: Work) => void;
     detailUrl: (work: Work) => string;
   } = $props();
+  const HERO_SCAN = 24;
+  const sections = $derived($preferenceState.homeSections ?? DEFAULT_HOME_SECTIONS);
   const allWorks = $derived([...films, ...series]);
   // Use the same language/manual artwork selection as cards and detail pages.
   const activeFeatured = $derived(allWorks.find(work => selectArtwork(work, $session).backdrop) ?? featured ?? allWorks[0] ?? null);
+  const hasWideArt = (work: Work) => { const artwork = selectArtwork(work, $session); return Boolean(artwork.backdrop || artwork.landscape); };
+  const hasArt = (work: Work) => { const artwork = selectArtwork(work, $session); return Boolean(artwork.poster || artwork.landscape || artwork.backdrop); };
+  // À l'affiche : le premier choix actuel, puis films et séries en alternance, tous avec une grande image.
+  const heroCandidates = $derived.by(() => {
+    const picked: Work[] = activeFeatured ? [activeFeatured] : [];
+    const pools = (activeFeatured?.kind === 'series' ? [films, series] : [series, films]).map(pool => pool.slice(0, HERO_SCAN).filter(hasWideArt));
+    for (let index = 0; picked.length < 3 && index < HERO_SCAN; index++) {
+      for (const pool of pools) {
+        const work = pool[index];
+        if (work && picked.length < 3 && !picked.some(item => item.id === work.id)) picked.push(work);
+      }
+    }
+    return picked;
+  });
+  const showHero = $derived(sections.includes('hero'));
+  const tonight = $derived(pickTonight(films, series, showHero ? heroCandidates.map(work => work.id) : [], hasArt));
   const topRated = $derived(allWorks.filter(work => (work.rating ?? 0) >= 6).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 12));
+  let heroTint = $state<string | null>(null);
 </script>
 
 <div class="catalog-home">
+  {#if showHero}
+    <!-- Couche d'ambiance unique : teinte de l'œuvre à l'affiche (aucun formulaire sur l'accueil). -->
+    <div class="ambient" aria-hidden="true" style:--ambient-tint={heroTint ?? 'transparent'}></div>
+  {/if}
   <RecommendationShelf />
-  {#each ($preferenceState.homeSections ?? DEFAULT_HOME_SECTIONS) as section (section)}
+  {#each sections as section (section)}
     {#if section === 'hero'}
-      <HeroBanner featured={activeFeatured} {onPlay} />
+      <HeroBanner featured={activeFeatured} candidates={heroCandidates} {onPlay} onTint={color => (heroTint = color)} />
     {:else if section === 'continue'}
       <ContinueWatching works={allWorks} />
+    {:else if section === 'tonight' && tonight.length}
+      <TonightMosaic works={tonight} {detailUrl} />
     {:else if section === 'films' && films.length}
       <MediaShelf title="Films récemment ajoutés" viewAllHref={resolve('films/?sort=added-desc')}>
         {#each films.slice(0, 16) as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
@@ -50,5 +77,40 @@
 </div>
 
 <style>
-  .catalog-home { display:flex; flex-direction:column; gap:clamp(28px,4vw,48px); }
+  /* Interpolation de la teinte entre deux œuvres (sans @property : changement direct). */
+  @property --ambient-tint {
+    syntax: '<color>';
+    inherits: false;
+    initial-value: transparent;
+  }
+
+  .catalog-home { position: relative; isolation: isolate; display: flex; flex-direction: column; gap: clamp(28px, 4vw, 48px); }
+
+  /* Fond d'ambiance : une seule couche par page, sous le contenu, jamais derrière un formulaire */
+  .ambient {
+    position: absolute;
+    z-index: -1;
+    top: -160px;
+    left: 50%;
+    width: 100vw;
+    height: 960px;
+    margin-left: -50vw;
+    background: radial-gradient(70% 60% at 40% 0%, var(--ambient-tint) 0%, transparent 70%);
+    opacity: var(--ambient-opacity);
+    pointer-events: none;
+    transition: background var(--t-slow) var(--ease), --ambient-tint var(--t-slow) var(--ease);
+  }
+
+  @media (max-width: 639px) {
+    .ambient { height: 720px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ambient { transition: none; }
+  }
+
+  .catalog-home > p { max-width: 65ch; margin: 0 auto; padding: 40px 24px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); color: var(--mu); font-size: 15px; line-height: 1.6; text-align: center; }
+  .catalog-home > p a { color: var(--tx); font-weight: 700; text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
+  .catalog-home > p a:hover { text-decoration-color: var(--tx); }
+  .catalog-home > p a:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; border-radius: 4px; }
 </style>

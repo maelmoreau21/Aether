@@ -1,5 +1,7 @@
 <script lang="ts">
+  import '@fontsource-variable/manrope';
   import '../app.css';
+  import '../lib/styles/halo.css';
   import '../lib/styles/tokens.css';
   import { onMount } from 'svelte';
   import { loadServerPresentation } from '../lib/config/presentation';

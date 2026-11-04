@@ -89,25 +89,82 @@
   {#if history.length}
     <h4>Derniers traitements</h4>
     <div class="history-list" role="region" aria-label="Derniers traitements des métadonnées">
-      {#each history.slice(0, 25) as task (task.id)}<article><header><strong>{extensions.find(extension => extension.manifest.id === task.extensionId)?.manifest.name ?? 'Traitement de métadonnées'}</strong><span>{statuses[task.status] ?? task.status}</span></header><p>{libraries.find(library => library.id === task.libraryId)?.name ?? task.libraryId}</p><p class="history-meta">{task.attempt} tentative(s) · Durée : {task.durationSeconds == null ? 'indisponible' : `${task.durationSeconds} s`}</p>{#if task.error}<p class="history-error">{task.error}</p>{/if}<details><summary>Détails du traitement</summary><p>Extension : {task.extensionId}</p><p>Identifiant : {task.id} · Opération : {task.operation} · Priorité : {task.priority}</p></details></article>{/each}
+      {#each history.slice(0, 25) as task (task.id)}<article><header><strong>{extensions.find(extension => extension.manifest.id === task.extensionId)?.manifest.name ?? 'Traitement de métadonnées'}</strong><span class="history-status" data-status={task.status}>{statuses[task.status] ?? task.status}</span></header><p>{libraries.find(library => library.id === task.libraryId)?.name ?? task.libraryId}</p><p class="history-meta">{task.attempt} tentative(s) · Durée : {task.durationSeconds == null ? 'indisponible' : `${task.durationSeconds} s`}</p>{#if task.error}<p class="history-error">{task.error}</p>{/if}<details><summary>Détails du traitement</summary><p>Extension : {task.extensionId}</p><p>Identifiant : {task.id} · Opération : {task.operation} · Priorité : {task.priority}</p></details></article>{/each}
     </div>
   {/if}
   {#if quotas.length}<h4>Quotas fournisseurs</h4><ul>{#each quotas as quota (quota.provider)}<li>{quota.provider} : intervalle {quota.minIntervalSeconds} s, {quota.maxConcurrent} en parallèle ; prochain appel après {new Date(quota.nextAllowedAt * 1000).toLocaleString()}</li>{/each}</ul>{/if}
   {#if sources.length}<h4>Provenance récente</h4><ul>{#each sources.slice(0, 15) as source (`${source.workId}:${source.field}`)}<li>{source.workId} · {source.field} : {source.extensionId}{source.providerId ? ` (${source.providerId})` : ''}, priorité {source.priority}</li>{/each}</ul>{/if}
 </section>
 <style>
-  section { min-width:0; padding-bottom:16px; }
-  h3 { font-size:20px; font-weight:600; }
-  form { display: flex; flex-wrap: wrap; align-items: end; gap: .8rem; }
-  label { display: grid; gap: .5rem; flex:1 1 200px; min-width:0; font-size:14px; }
-  select, input, button { min-height:44px; min-width:0; max-width:100%; padding:10px 12px; font:inherit; color:var(--text-primary); background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-md); }
-  p,li { max-width:75ch; line-height:1.6; overflow-wrap:anywhere; color:var(--text-secondary); }
-  [role=alert] { padding:12px; border-left:3px solid var(--status-error); background:var(--color-danger-soft); }
-  .history-list { min-width:0; }
-  article { padding:20px 0; border-block-start:1px solid var(--border-subtle); overflow-wrap:anywhere; }
-  article header { display:flex; align-items:start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
-  article p { margin:8px 0; } .history-meta,details { font-size:13px; color:var(--text-secondary); }
-  .history-error { padding:12px; border-left:3px solid var(--status-error); background:var(--color-danger-soft); color:var(--text-primary); }
-  summary { min-height:44px; padding-block:12px; cursor:pointer; }
-  @media(max-width:640px) { select,input { font-size:16px; } form > button { flex:1 1 200px; } }
+  section { min-width: 0; padding-bottom: 16px; color: var(--tx); font-family: var(--font); }
+  h3 { margin: 0 0 6px; font-size: 17px; font-weight: 700; }
+  h4 { margin: 24px 0 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mu); }
+  p, li { max-width: 75ch; margin: 0 0 12px; font-size: 14px; line-height: 1.6; color: var(--mu); overflow-wrap: anywhere; }
+  ul { margin: 0; padding-left: 20px; }
+  li { margin-bottom: 6px; }
+
+  /* Formulaire */
+  form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 16px 0; }
+  label { display: grid; gap: 8px; flex: 1 1 200px; min-width: 0; font-size: 14px; font-weight: 700; color: var(--tx); }
+  select, input {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    height: 46px;
+    padding: 0 14px;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    background-color: var(--pn);
+    color: var(--tx);
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: none;
+    transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease;
+  }
+  select { padding-right: 40px; }
+  select:hover, input:hover { background-color: var(--pn-2); }
+  select:focus, input:focus { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  select:focus-visible, input:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  select:disabled, input:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; max-width: 100%; padding: 0 16px; border: 0; border-radius: var(--r-md); background: var(--pn-2); color: var(--tx); font-family: var(--font); font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
+  button:hover:not(:disabled) { background: var(--pn-3); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button[type='submit'] { height: 48px; padding: 0 22px; background: var(--btn); color: var(--btn-tx); box-shadow: none; }
+  button[type='submit']:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
+
+  /* Retours */
+  [role='alert'], [role='status'] { max-width: none; padding: 14px 16px; border-radius: var(--r-md); color: var(--tx); }
+  [role='alert'] { background: var(--err-soft); }
+  [role='status'] { background: var(--pn); }
+
+  /* Historique : lignes séparées */
+  .history-list { min-width: 0; border-top: 1px solid var(--line); }
+  article { padding: 16px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  article header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  article header strong { font-size: 15px; font-weight: 700; color: var(--tx); }
+  article p { margin: 6px 0; }
+  .history-status { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--pn-2); color: var(--tx); font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .history-status[data-status='completed'], .history-status[data-status='succeeded'] { background: var(--ok-soft); color: var(--ok); }
+  .history-status[data-status='error'], .history-status[data-status='failed'] { background: var(--err-soft); color: var(--err); }
+  .history-status[data-status='paused'], .history-status[data-status='interrupted'] { background: var(--warn-soft); color: var(--warn); }
+  .history-status[data-status='running'], .history-status[data-status='queued'] { background: var(--ac-soft); color: var(--ac); }
+  .history-meta, details { font-size: 13px; color: var(--mu); }
+  .history-error { padding: 12px 14px; border-radius: var(--r-md); background: var(--err-soft); color: var(--tx); }
+  details p { font-family: var(--font-mono); font-size: 12px; }
+  summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; font-weight: 700; color: var(--tx); }
+  summary:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; border-radius: var(--r-xs); }
+
+  @media (max-width: 640px) {
+    select, input { font-size: 16px; }
+    form > button { flex: 1 1 200px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    button, select, input { transition: none; }
+  }
 </style>

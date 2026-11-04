@@ -57,4 +57,32 @@
 <button disabled={busy || devices.length === 0} onclick={() => revoke()}>Déconnecter tous les appareils</button>
 {/if}
 {#if error}<p role="alert">{error}</p>{/if}</section>
-<style>dl { display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin:12px 0; } dt { color:var(--text-secondary);font-size:12px; } dd { margin:6px 0 0;font-size:14px; } article button { justify-self:start; } button { min-height:44px; } .current-device { color:var(--accent-primary);font-size:12px; } section { margin-top:24px; } form { display:grid; gap:12px; } label { display:grid; gap:6px; } input { width:100%; box-sizing:border-box; padding:10px; background:var(--color-surface); color:var(--color-text); border:1px solid var(--color-line); border-radius:8px; } button { padding:10px 14px; background:var(--color-surface); color:var(--color-text); border:1px solid var(--color-line); border-radius:8px; cursor:pointer; } article { display:grid;gap:6px;background:var(--bg-elevated); margin:12px 0; padding:12px; border:1px solid var(--color-line); border-radius:8px; overflow-wrap:anywhere; } p { color:var(--color-muted); } </style>
+<style>
+  section { display: grid; gap: 12px; margin-top: 24px; min-width: 0; }
+  h3 { margin: 0; font-size: 17px; font-weight: 700; color: var(--tx); }
+  p { margin: 0; color: var(--mu); font-size: 14px; line-height: 1.6; }
+  form { display: grid; gap: 16px; }
+  label { display: grid; gap: 8px; font-size: 14px; font-weight: 700; color: var(--tx); }
+  input { width: 100%; max-width: 520px; height: 46px; min-height: 46px; box-sizing: border-box; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background: var(--pn); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  input:hover:not(:disabled) { background: var(--pn-2); }
+  input:focus { outline: none; border-color: var(--ac); background: var(--bg-3); }
+  input:disabled { opacity: 0.45; }
+  button { justify-self: start; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 18px; border: 0; border-radius: var(--r-md); background: var(--pn-2); color: var(--tx); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
+  button:hover:not(:disabled) { background: var(--pn-3); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  form button { height: 48px; padding: 0 22px; background: var(--btn); color: var(--btn-tx); }
+  form button:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
+  article button, section > button:last-of-type:not(:first-of-type) { background: var(--err-soft); color: var(--err); }
+  article button:hover:not(:disabled), section > button:last-of-type:not(:first-of-type):hover:not(:disabled) { background: var(--err-soft); opacity: 0.85; }
+  article { display: grid; gap: 8px; margin: 0; padding: 16px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+  article strong { font-size: 15px; font-weight: 700; color: var(--tx); }
+  article + button { margin-top: 4px; }
+  .current-device { justify-self: start; display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--ac-soft); color: var(--ac); font-size: 12px; font-weight: 700; }
+  dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 16px; margin: 4px 0; }
+  dt { color: var(--mu); font-size: 13px; font-weight: 600; }
+  dd { margin: 4px 0 0; font-size: 14px; font-weight: 600; color: var(--tx); font-variant-numeric: tabular-nums; }
+  [role='alert'] { padding: 12px 14px; border-radius: var(--r-sm); background: var(--err-soft); color: var(--err); font-weight: 600; }
+  [role='status'] { color: var(--mu); }
+</style>

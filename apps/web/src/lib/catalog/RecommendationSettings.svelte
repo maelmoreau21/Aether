@@ -53,7 +53,22 @@
   {#if error}<p role="alert">{error}</p>{/if}
 </section>
 <style>
-  .card { padding:24px; margin-bottom:24px; border:1px solid var(--color-line); border-radius:var(--radius-md); background:var(--color-surface); }
-  fieldset { border:0; padding:0; display:grid; gap:12px; } label { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  p { color:var(--color-muted); line-height:1.5; } input[type='number'] { width:100px; } button,input { color:var(--color-text); background:var(--color-raised); border:1px solid var(--color-line-strong); padding:8px; border-radius:8px; }
+  .card { display: grid; gap: 14px; min-width: 0; padding: 24px; margin-bottom: 20px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); color: var(--tx); overflow-wrap: anywhere; }
+  h2 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+  p { margin: 0; color: var(--mu); font-size: 14px; line-height: 1.6; }
+  form { margin: 0; }
+  fieldset { display: grid; gap: 14px; min-width: 0; margin: 0; padding: 0; border: 0; }
+  fieldset:disabled { opacity: 0.7; }
+  label { display: flex; align-items: center; gap: 12px; min-height: 44px; flex-wrap: wrap; font-size: 14px; font-weight: 600; }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--ac); }
+  input[type='number'] { width: 120px; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background: var(--pn); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  input[type='number']:hover { background: var(--pn-2); }
+  input[type='number']:focus { outline: none; border-color: var(--ac); background: var(--bg-3); }
+  button { justify-self: start; height: 48px; padding: 0 22px; border: 0; border-radius: var(--r-md); background: var(--btn); color: var(--btn-tx); font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; transition: opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
+  button:hover:not(:disabled) { opacity: 0.9; }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  [role='alert'] { padding: 12px 14px; border-radius: var(--r-sm); background: var(--err-soft); color: var(--err); font-weight: 600; }
+  @media (max-width: 640px) { .card { padding: 16px; border-radius: var(--r-md); } }
 </style>

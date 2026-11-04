@@ -7,10 +7,10 @@ facultatives. Prérequis : Rust/Cargo avec l’outillage C++ Windows, Node.js/np
 
 ## 1. Compiler et créer le compte administrateur
 
-Dans PowerShell :
+Dans PowerShell, remplacer le chemin d’exemple par la racine du dépôt :
 
 ```powershell
-Set-Location C:\Users\Mael\Documents\GitHub\Aether
+Set-Location 'C:\chemin\vers\Aether'
 npm --prefix apps/web ci
 npm --prefix apps/web run build
 cargo build --locked -p media-poc --bin aether-core --bin media-bootstrap --bin media-extension-worker --bin media-extension-pack -j 1
@@ -81,4 +81,4 @@ Démarrer le Core normalement, puis utiliser Administration → Sauvegardes pour
 créer une archive. Le format courant n'utilise aucune clé et n'est pas chiffré.
 Choisir un dossier privé et vérifier ses ACL Windows : la base et la
 configuration, y compris les secrets, sont lisibles dans l'archive. Les médias
-originaux ne sont pas copiés ; [la restauration se fait hors ligne](ADMIN_BACKUPS.md).md).
+originaux ne sont pas copiés ; [la restauration se fait hors ligne](ADMIN_BACKUPS.md).

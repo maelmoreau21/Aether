@@ -12,7 +12,7 @@
   import AccountSecurity from '../auth/AccountSecurity.svelte';
   import Icon from '../ui/Icon.svelte';
   import { t, locale, setLocale } from '../i18n';
-  import { themeMode, setTheme, type ThemeMode } from '../theme';
+  import { themeMode, setTheme, getTvMode, setTvMode, type ThemeMode, type TvMode } from '../theme';
   import { DEFAULT_SUBTITLE_STYLE, sanitizeSubtitleStyle, subtitleStyleToCss, type SubtitleStyle } from '../player/subtitle-style';
   import { fetchServerConfig, type AppServerConfig } from '../config/brand';
   import { defaultArtworkRotationPolicy, setArtworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
@@ -79,14 +79,17 @@
     savePreferences({ subtitleStyle: { ...subtitleStyle } });
   }
   const pages = [
-    { id: 'account', label: 'Compte', icon: 'profile' },
-    { id: 'display', label: 'Affichage & Affiches', icon: 'image' },
-    { id: 'security', label: 'Sécurité', icon: 'shield' },
-    { id: 'devices', label: 'Appareils', icon: 'server' },
-    { id: 'playback', label: 'Lecture', icon: 'play' },
-    { id: 'about', label: 'À propos', icon: 'info' }
+    { id: 'account', label: 'Profil', icon: 'profile', group: 'Moi' },
+    { id: 'playback', label: 'Lecture et sous-titres', icon: 'play', group: 'Expérience' },
+    { id: 'display', label: 'Apparence et accueil', icon: 'image', group: 'Expérience' },
+    { id: 'security', label: 'Mot de passe et SSO', icon: 'shield', group: 'Sécurité' },
+    { id: 'devices', label: 'Appareils et sessions', icon: 'server', group: 'Sécurité' },
+    { id: 'about', label: 'À propos', icon: 'info', group: 'Sécurité' }
   ] as const;
+  const pageGroups = ['Moi', 'Expérience', 'Sécurité'] as const;
+  let tvMode = $state<TvMode>('auto');
   onMount(() => {
+    tvMode = getTvMode();
     let disposed = false;
     void loadLibraries();
     void fetchServerConfig().then(cfg => { if (!disposed) serverConfig = cfg; }).catch(() => {});
@@ -137,8 +140,12 @@
   <h1>Paramètres</h1>
   <div class="settings-layout">
     <nav class="settings-nav" aria-label="Paramètres personnels">
-      {#each pages as page (page.id)}
-        <a href={resolve(`settings/#${page.id}`)} onclick={() => current = page.id} class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined}><Icon name={page.icon} size={20} />{page.label}</a>
+      {#each pageGroups as group (group)}
+        <p class="nav-group">{group}</p>
+        {#each pages.filter(page => page.group === group) as page (page.id)}
+          <a href={resolve(`settings/#${page.id}`)} onclick={() => current = page.id} class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined}><Icon name={page.icon} size={18} />{page.label}</a>
+        {/each}
+        {#if group === 'Moi'}<a href={resolve('downloads/')}><Icon name="download" size={18} />Téléchargements</a>{/if}
       {/each}
       {#if $session?.user.role === 'administrator'}<a class="server-link" href={resolve('admin/libraries/#overview')}><Icon name="server" size={20} />Administration du serveur</a>{/if}
     </nav>
@@ -184,6 +191,15 @@
           >
             <option value="fr">{$t('language_fr')}</option>
             <option value="en">{$t('language_en')}</option>
+          </select>
+        </label>
+
+        <label>
+          <span><Icon name="tv" size={14} /> Mode TV sur cet appareil</span>
+          <select value={tvMode} onchange={(e) => { tvMode = e.currentTarget.value as TvMode; setTvMode(tvMode); }}>
+            <option value="auto">Automatique (téléviseurs détectés)</option>
+            <option value="on">Activé</option>
+            <option value="off">Désactivé</option>
           </select>
         </label>
 
@@ -464,95 +480,110 @@
   </div>
 </div>
 <style>
-  .settings-view { padding-top: 24px; }
-  h1 { font-size: clamp(24px, 2.8vw, 32px); font-weight: 800; letter-spacing: -0.02em; margin: 0 0 32px; }
-  .settings-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 40px; align-items: start; }
-  .settings-nav { display: grid; gap: 6px; }
+  .settings-view { padding: 20px 0 48px; }
+  h1 { font-size: clamp(32px, 4vw, 44px); font-weight: 800; letter-spacing: -0.03em; line-height: 1.02; margin: 0 0 28px; }
+  .settings-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 32px; align-items: start; }
+  .settings-nav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 88px; }
+  .nav-group { margin: 18px 0 6px; padding: 0 12px; font-size: 12px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mu); }
+  .nav-group:first-child { margin-top: 0; }
   .settings-nav a {
     display: flex;
     align-items: center;
-    gap: 14px;
-    padding: 12px 16px;
-    color: var(--text-secondary);
+    gap: 12px;
+    min-height: 42px;
+    padding: 0 12px;
+    border-radius: 12px;
+    color: var(--mu);
     font-size: 14px;
-    font-weight: 500;
-    min-height: 48px;
-    border-radius: var(--radius-sm);
-    border-left: 3px solid transparent;
-    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+    font-weight: 600;
+    transition: background-color var(--t-fast) ease, color var(--t-fast) ease;
   }
-  .settings-nav a:hover, .settings-nav a.active { background: var(--bg-elevated); color: var(--text-primary); }
-  .settings-nav a.active { border-left: 3px solid var(--accent-primary); font-weight: 700; }
-  .server-link { margin-top: 20px; border-top: 1px solid var(--border-subtle); padding-top: 16px; }
-  .settings-content { min-width: 0; max-width: none; }
+  .settings-nav a:hover { background: var(--pn); color: var(--tx); }
+  .settings-nav a.active { background: var(--pn-2); color: var(--tx); }
+  .server-link { margin-top: 16px; border-top: 1px solid var(--line); border-radius: 0 0 12px 12px; padding-top: 4px; }
+  .settings-content { min-width: 0; display: flex; flex-direction: column; }
   .card {
     min-width: 0;
     overflow-wrap: anywhere;
     padding: 24px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    margin-bottom: 24px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    margin-bottom: 20px;
   }
-  h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.015em; margin: 0 0 20px; }
-  h3 { margin: 0; font-size: 17px; font-weight: 650; }
-  .profile-header-row { display: flex; align-items: center; gap: 20px; margin-bottom: 28px; }
-  .profile-handle { margin: 6px 0; color: var(--text-secondary); }
-  .role-badge { display: inline-block; margin-top: 8px; padding: 4px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border-radius: var(--radius-full); background: var(--bg-elevated); }
-  .admin-badge { background: var(--color-accent-soft); color: var(--accent-primary); }
-  .profile-info-list { display: grid; gap: 0; }
-  .info-row { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--border-subtle); font-size: 14px; }
+  h2 { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 18px; }
+  h3 { margin: 0; font-size: 17px; font-weight: 700; }
+  .profile-header-row { display: flex; align-items: center; gap: 20px; margin-bottom: 24px; }
+  .profile-handle { margin: 4px 0; color: var(--mu); }
+  .role-badge { display: inline-flex; align-items: center; height: 24px; margin-top: 8px; padding: 0 9px; font-size: 12px; font-weight: 700; border-radius: var(--r-xs); background: var(--pn-2); }
+  .admin-badge { background: var(--ac-soft); color: var(--ac); }
+  .profile-info-list { display: grid; }
+  .info-row { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .info-row:first-child { padding-top: 0; }
   .info-row:last-child { border-bottom: none; padding-bottom: 0; }
-  .label { color: var(--text-secondary); }
-  .val code { overflow-wrap: anywhere; }
-  .muted { color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
-  .pref-fields, .offsets { display: grid; gap: 24px; margin-top: 24px; }
-  label { display: grid; gap: 10px; font-size: 14px; font-weight: 500; }
-  .checkbox-row { display: flex; align-items: flex-start; gap: 10px; }
-  .checkbox-row input { flex: 0 0 auto; width: auto; margin-top: 2px; }
+  .label { color: var(--mu); font-weight: 600; }
+  .val { font-weight: 600; }
+  .val code { overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 13px; }
+  .muted { color: var(--mu); font-size: 14px; line-height: 1.6; }
+  .hint { color: var(--mu); font-size: 13px; margin: 4px 0 10px; }
+  .pref-fields, .offsets { display: grid; gap: 20px; margin-top: 8px; }
+  label { display: grid; gap: 8px; font-size: 14px; font-weight: 700; }
+  .checkbox-row { display: flex; align-items: center; gap: 12px; min-height: 44px; font-weight: 600; }
+  .checkbox-row input { flex: 0 0 auto; width: 20px; height: 20px; margin: 0; accent-color: var(--ac); }
+  input[type='checkbox'] { accent-color: var(--ac); width: 20px; height: 20px; }
   label > span { display: flex; align-items: center; gap: 8px; }
-  select, input:not([type="checkbox"]):not([type="range"]):not([type="color"]) {
+  select, input:not([type='checkbox']):not([type='range']):not([type='color']) {
     min-width: 0;
     width: 100%;
     max-width: 520px;
-    min-height: 44px;
-    padding: 10px 14px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    background-color: var(--bg-elevated);
-    color: var(--text-primary);
-    transition: border-color var(--transition-fast);
+    height: 46px;
+    min-height: 46px;
+    padding: 0 14px;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    background-color: var(--pn);
+    color: var(--tx);
+    font-weight: 500;
+    box-shadow: none;
+    transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease;
   }
-  select:focus, input:focus { border-color: var(--accent-primary); }
+  select { padding-right: 40px; }
+  select:hover, input:not([type='checkbox']):not([type='range']):not([type='color']):hover { background-color: var(--pn-2); }
+  select:focus, input:focus { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
   button {
     justify-self: start;
-    min-height: 44px;
-    padding: 12px 22px;
+    height: 48px;
+    padding: 0 22px;
     border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--color-play);
-    color: var(--color-on-accent);
+    border-radius: var(--r-md);
+    background: var(--btn);
+    color: var(--btn-tx);
     font-weight: 700;
     cursor: pointer;
-    box-shadow: var(--shadow-glow);
-    transition: background var(--transition-fast), transform var(--transition-fast);
+    transition: opacity var(--t-fast) ease, transform var(--t-fast) var(--ease);
   }
-  button:hover { background: var(--color-play-hover); transform: translateY(-1px); }
-  .offsets { padding-top: 28px; border-top: 1px solid var(--border-subtle); }
+  button:hover { opacity: 0.9; }
+  button:active { transform: scale(0.98); }
+  .offsets { padding-top: 0; }
   .offsets p { margin: 0; }
-  .subtitles-appearance { margin-top: 36px; padding-top: 28px; border-top: 1px solid var(--border-subtle); }
+  .library-filter-fieldset { margin: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-md); }
+  .library-filter-fieldset legend { padding: 0 6px; font-size: 14px; font-weight: 700; }
+  .library-checks { display: grid; gap: 4px; }
+  .lib-checkbox-label { display: flex; align-items: center; gap: 12px; min-height: 40px; font-weight: 600; }
+  .lib-checkbox-label small { color: var(--mu); font-weight: 500; }
+  .subtitles-appearance { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line); }
   .subtitles-appearance h3 { margin-bottom: 8px; }
+  /* Aperçu des sous-titres : posé sur une image sombre neutre, comme dans le lecteur */
   .subtitle-preview-box {
-    margin: 20px 0;
+    margin: 16px 0;
     padding: 36px 20px;
-    background: linear-gradient(135deg, #18181B 0%, #0B0C10 100%);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
+    background: #11151f;
+    border-radius: var(--r-md);
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: center;
     text-align: center;
-    min-height: 120px;
+    min-height: 160px;
     overflow: hidden;
   }
   .subtitle-preview-text {
@@ -561,38 +592,21 @@
     display: inline-block;
     max-width: 90%;
     word-break: break-word;
-    transition: all 0.15s ease-out;
+    transition: all var(--t-fast) ease-out;
   }
-  .color-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 20px;
+  .color-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+  .color-picker-wrap { display: flex; align-items: center; gap: 12px; }
+  .color-picker-wrap input[type='color'] { width: 48px; height: 44px; padding: 2px 4px; border-radius: 10px; border: 1px solid var(--line); background: transparent; cursor: pointer; }
+  .slider-wrap input[type='range'] { width: 100%; max-width: 520px; accent-color: var(--ac); }
+  @media (max-width: 1023px) {
+    .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+    .settings-nav { position: static; flex-direction: row; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
+    .nav-group { display: none; }
+    .settings-nav a { flex: none; white-space: nowrap; background: var(--pn); min-height: 40px; }
+    .server-link { margin-top: 0; border-top: 0; border-radius: 12px; padding-top: 0; }
   }
-  .color-picker-wrap {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .color-picker-wrap input[type="color"] {
-    width: 48px;
-    height: 44px;
-    padding: 2px 4px;
-    border-radius: 4px;
-    border: 1px solid var(--border-subtle);
-    background: transparent;
-    cursor: pointer;
-  }
-  .slider-wrap input[type="range"] {
-    width: 100%;
-    max-width: 520px;
-    accent-color: var(--color-play);
-  }
-  @media (max-width: 760px) {
-    .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 24px; }
-    .settings-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-    .settings-nav a { font-size: 13px; padding: 12px; gap: 10px; }
-    .server-link { grid-column: 1 / -1; margin-top: 4px; }
-    .card { padding: 18px; }
-    .info-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  @media (max-width: 640px) {
+    .card { padding: 16px; border-radius: var(--r-md); }
+    .info-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
   }
 </style>

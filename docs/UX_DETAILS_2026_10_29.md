@@ -1,5 +1,9 @@
 # Refonte UX — fiches film et série, 29 octobre 2026
 
+> **Document historique.** Ce rapport décrit un jalon vérifié le 29 octobre 2026.
+> Les règles UX durables sont dans [UI_DIRECTION.md](UI_DIRECTION.md) ; les
+> résultats plus récents sont dans [MISSION_WEB_VALIDATION_2026_11_03.md](MISSION_WEB_VALIDATION_2026_11_03.md).
+
 ## Changements du jalon
 
 L’action principale passe avant les outils d’organisation, le suivi et les détails
@@ -79,12 +83,9 @@ Preuves locales : `target/ux-details/report.json`, captures et dossier `before/`
 Les images éditoriales restent des SVG de test, exclusivement dans le banc.
 Pas de mesure comparative de performance ni d’audit WCAG exhaustif revendiqué.
 
-## Suite
+## Statut documentaire
 
-Le cadre administrateur a depuis été livré et vérifié localement :
-[Administration UX](UX_ADMIN_2026_10_29.md). La suite porte sur ses parcours internes.
-
-La prochaine priorité est le shell administrateur : navigation persistante sur
-large écran, menu accessible sur mobile et conservation des fragments existants,
-avant de simplifier chaque parcours d’administration. Les changements backend et
-administrateur déjà présents dans le worktree sont indépendants et conservés.
+Le shell administrateur et l’éditeur de bibliothèques mentionnés dans les anciens
+jalons ont depuis été traités dans leurs rapports respectifs. Ce document reste
+une preuve de méthode et de limites pour les fiches ; il ne définit pas la
+prochaine priorité produit.

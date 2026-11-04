@@ -42,4 +42,8 @@
   </MediaShelf>
 {:else if enabled}<p role="status">Aucun autre titre accessible à proposer pour le moment.</p>{/if}
 {#if error}<p role="status">{error}</p>{/if}
-<style>.recommendation { min-width:0; } small { display:block; margin-top:8px; color:var(--color-muted); line-height:1.4; }</style>
+<style>
+  .recommendation { min-width: 0; }
+  small { display: block; margin-top: 6px; color: var(--mu); font-size: 13px; line-height: 1.4; }
+  p { margin: 0; color: var(--mu); font-size: 14px; line-height: 1.6; }
+</style>

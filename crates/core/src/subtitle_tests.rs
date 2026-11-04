@@ -69,8 +69,10 @@ fn contracts_strip_secrets_reject_bad_results_and_require_subtitle_permission() 
         )
         .is_err()
     );
-    let mut manifest = Manifest::default();
-    manifest.permissions = vec!["metadata.read".into()];
+    let mut manifest = Manifest {
+        permissions: vec!["metadata.read".into()],
+        ..Default::default()
+    };
     for operation in ["subtitles.search", "subtitles.download"] {
         assert_eq!(
             adapters::authorize_operation(&manifest, operation)

@@ -81,6 +81,7 @@ async fn preferences_are_account_owned_csrf_protected_bounded_and_persistent() {
         json!({"theme":"invalid"}),
         json!({"homeSections":["hero","hero"]}),
         json!({"homeSections":["unknown"]}),
+        json!({"homeSections":["hero","continue","tonight","films","series","rated","hero"]}),
         json!({"cardSize":"huge"}),
         json!({"cardDensity":"negative"}),
         json!({"accentColor":"url(example)"}),
@@ -105,6 +106,19 @@ async fn preferences_are_account_owned_csrf_protected_bounded_and_persistent() {
                 .is_client_error()
         );
     }
+    // All six home sections, including the "Pour ce soir" mosaic, can be saved and hidden.
+    let all_sections =
+        json!({"homeSections":["hero","continue","tonight","films","series","rated"]});
+    assert_eq!(
+        request(&app, "PUT", cookie, csrf, all_sections.clone())
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        body(request(&app, "GET", cookie, "", json!(null)).await).await["homeSections"],
+        all_sections["homeSections"]
+    );
     let wanted = json!({"homeSections":["series","continue","films"],"cardSize":"small","cardDensity":"compact","accentColor":"blue","theme":"dark","locale":"en","audioLanguage":"fr","subtitles":"forced","audioTrack":{"mediaId":"media-1","trackId":"audio-2","language":"en"},"offsets":{"audio":0.5,"subtitle":-1.0},"subtitlePreference":{"enabled":true,"language":"fr","forced":true},"autoplayNextEpisode":true,"skipBackSeconds":5,"skipForwardSeconds":30,"rememberAudioSelections":false,"rememberSubtitleSelections":true,"playDefaultAudioTrack":true,"hidePlayedInLatest":true});
     assert_eq!(
         request(&app, "PUT", cookie, csrf, wanted.clone())

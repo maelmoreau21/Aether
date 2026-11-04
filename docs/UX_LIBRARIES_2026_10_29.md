@@ -1,5 +1,10 @@
 # Bibliothèques — jalon UX du 29 octobre 2026
 
+> **Document historique.** Ce rapport conserve les décisions et preuves du jalon
+> bibliothèques du 29 octobre 2026. Les règles partagées sont dans
+> [UI_DIRECTION.md](UI_DIRECTION.md) ; ne pas utiliser la section de suite comme
+> feuille de route actuelle.
+
 ## Diagnostic et arbitrages
 
 Le formulaire rassemblait identité, dossiers multi-Node, images, langues et
@@ -67,5 +72,5 @@ Pas de preuve de clavier virtuel sur téléphone physique ou de conformité WCAG
 exhaustive. Aucune amélioration de performance mesurée ou revendiquée.
 Les limites du test historique des extensions restent celles du rapport admin.
 
-Prochaine priorité : clarifier les états et actions de tâches/indexations,
-puis harmoniser les pages musique, recherche, listes et téléchargements.
+La suite indiquée dans ce rapport est historique. Les priorités actuelles doivent
+être définies dans le suivi de travail et vérifiées contre le code présent.

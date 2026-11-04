@@ -6,7 +6,7 @@
 > réutilisable conditionnée à tous les contrôles et aux trois builds Docker.
 > JWT utilise AWS-LC ; aucun changement de schéma ni de modes de déploiement.
 > Validation distante/publication encore en attente d'autorisation explicite.
-> Contrat et limites : [CI/GHCR](docs/CI_GHCR.md). PostgreSQL 18 reste non implémenté.
+> Contrat et limites de ce jalon historique : [CI/GHCR](docs/CI_GHCR.md). Pour PostgreSQL, voir l’état et les limites dans [POSTGRESQL.md](docs/POSTGRESQL.md).
 >
 > Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités
 > issuer/subject et sessions Core communes aux deux modes Docker.
@@ -18,6 +18,16 @@
 > Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
 
 # ARCHITECTURE.md — Architecture cible Aether
+
+## Organisation interne du backend — 4 novembre 2026
+
+Les façades `crates/core/src/inventory/mod.rs`, `crates/core/src/nodes/mod.rs`
+et `crates/node/src/server/mod.rs` conservent les chemins publics Rust existants.
+Leurs sous-modules privés séparent publication/catalogue/livraison, gestion des
+Nodes et serveur média, avec des imports explicites et les mêmes instances d'état.
+La publication garde sa transaction unique ; les signatures, capacités, gardes
+de flux et leases restent avec leurs opérations. Rôles, dépendances, validations
+et limites : [modules backend](docs/BACKEND_MODULES.md).
 
 Stockage privé des extensions (25 octobre 2026) : connexions SQLx exclusivement
 dans le Core, broker borné via les pipes du worker Wasm, données KV et objets
@@ -39,16 +49,18 @@ Le probe technique et le lecteur restent distincts. Voir [LOCAL_FILM_NFO.md](doc
 Mise à jour scanner Films P1 (16 octobre 2026) : inventaire relationnel SQLite,
 jobs locaux et lecture native autorisée implémentés. Le parcours des fichiers
 reste dans le Node interne, l'ingestion et le catalogue dans le Core. Le mode
-`MEDIA_LIBRARY_ROOT` démarre sans fixtures. État/limites :
+`MEDIA_LIBRARY_ROOT` configure la racine locale du Core ; `MEDIA_LIBRARY_DIR` est la variable de montage hôte de l’exemple Compose. État/limites :
 [LOCAL_FILM_SCANNER.md](docs/LOCAL_FILM_SCANNER.md). Les mentions antérieures
 « pas de scanner » ci-dessous sont historiques.
 
-État local du 16 octobre 2026 : connexion/session SQLite ajoutées au Core existant,
-permissions communes avant les routes catalogue/média et séparation du banc P0
-par feature de test. Voir `docs/LOCAL_SESSIONS.md`. Aucun Node distant, OIDC ou
-gestion de bibliothèques personnelles ajouté ; les sections cibles restent futures.
+État local : le Core persiste les comptes et sessions SQLite, applique les
+permissions communes et expose le catalogue issu des bibliothèques locales.
+OIDC et le transport multi-Node disposent de contrats et de parcours ciblés ;
+leurs limites de déploiement restent documentées dans les preuves associées.
+Voir `docs/LOCAL_SESSIONS.md`, `docs/OIDC.md` et
+`docs/P2_DOCKER_VALIDATION.md`.
 
-> **Architecture cible, pas un état de livraison.** Un banc P0 expérimental et le changement FR/EN par remux sont testés localement ; les composants produit ci-dessous restent des intentions. Voir `MEMORY.md` et les preuves de compatibilité pour l'état réel.
+> **Architecture cible et décisions historiques.** Les sections datées décrivent leur jalon, pas nécessairement l’état courant. Vérifier le code, les tests et les preuves de compatibilité avant de conclure qu’une fonction est disponible.
 
 ## 1. Objectif
 

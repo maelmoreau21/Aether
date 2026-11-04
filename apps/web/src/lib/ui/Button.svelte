@@ -5,10 +5,12 @@
 </script>
 <button class="ui-button {variant} {className}" {...rest}>{@render children()}</button>
 <style>
-  .ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 12px 20px; border: 0; border-radius: var(--radius-md); font-size: 13px; font-weight: 650; line-height: 1.2; white-space: nowrap; }
-  .solid { background: var(--color-play); color: var(--color-on-play); }
-  .solid:hover:not(:disabled) { background: var(--color-play-hover); transform: translateY(-1px); }
-  .quiet { background: var(--color-surface); color: var(--color-text); }
-  .quiet:hover:not(:disabled) { background: var(--color-raised); }
-  .ui-button:active:not(:disabled) { transform: translateY(0); }
+  .ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 0 22px; border: 0; border-radius: var(--r-md); font: inherit; font-size: 15px; font-weight: 700; line-height: 1.2; white-space: nowrap; cursor: pointer; transition: background-color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
+  .solid { background: var(--btn); color: var(--btn-tx); }
+  .solid:hover:not(:disabled) { opacity: 0.9; }
+  .quiet { background: var(--pn-2); color: var(--tx); }
+  .quiet:hover:not(:disabled) { background: var(--pn-3); }
+  .ui-button:active:not(:disabled) { transform: scale(0.98); }
+  .ui-button:disabled { opacity: 0.45; cursor: default; }
+  .ui-button:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
 </style>

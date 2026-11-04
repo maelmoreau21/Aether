@@ -915,6 +915,13 @@
 
 
 
+  const menuTabs = $derived(([
+    ...(selectableAudio.length > 1 ? [{ id: 'audio', label: 'Audio' }] : []),
+    { id: 'subtitles', label: 'Sous-titres' },
+    { id: 'video', label: 'Version' },
+    { id: 'speed', label: 'Vitesse' },
+    { id: 'settings', label: 'Réglages' }
+  ]) as { id: Exclude<Menu, null>; label: string }[]);
   export function closeMenu() {
 
 
@@ -1227,6 +1234,12 @@
 
 
 
+      </div>
+      <!-- Halo : le panneau garde toutes les sections à portée, une par onglet. -->
+      <div class="menu-tabs" role="group" aria-label="Sections du panneau de lecture">
+        {#each menuTabs as tab (tab.id)}
+          <button type="button" role="menuitem" tabindex="-1" aria-current={menu === tab.id ? 'true' : undefined} onclick={() => { if (menu !== tab.id) void toggleMenu(tab.id); }}>{tab.label}</button>
+        {/each}
       </div>
 
 
@@ -2010,6 +2023,7 @@
 
 
       class="seek"
+      style:--seek-progress={`${playback.duration > 0 ? Math.min(100, Math.max(0, (playback.position / playback.duration) * 100)) : 0}%`}
 
 
 
@@ -4322,8 +4336,203 @@
 
   }
 
+  /* ==========================================================================
+     Halo — habillage du lecteur (couche finale).
+     Uniquement couleurs, rayons, fonds et typographie : la mise en page et les
+     tailles responsives définies plus haut restent en vigueur.
+     ========================================================================== */
+  .player-controls {
+    background: linear-gradient(0deg, rgb(0 0 0 / 0.78) 0%, rgb(0 0 0 / 0.42) 55%, rgb(0 0 0 / 0) 100%);
+    color: #f4f6fb;
+    font-family: var(--font);
+    transition: opacity var(--t-slow) ease;
+  }
 
+  .control-btn {
+    border: 0;
+    border-radius: 16px;
+    background: transparent;
+    color: #f4f6fb;
+    box-shadow: none;
+    transition: background-color var(--t-fast) ease, color var(--t-fast) ease;
+  }
 
+  .control-btn:hover:not(:disabled),
+  button[aria-expanded='true'] {
+    background: rgb(255 255 255 / 0.14);
+    color: #fff;
+    border-color: transparent;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .primary.play-btn,
+  .primary.play-btn:hover:not(:disabled) {
+    border: 0;
+    border-radius: 20px;
+    background: rgb(255 255 255 / 0.16);
+    color: #f4f6fb;
+    box-shadow: none;
+  }
+
+  .primary.play-btn:hover:not(:disabled) { background: rgb(255 255 255 / 0.26); transform: none; }
+  .primary.play-btn:active:not(:disabled) { transform: scale(0.96); }
+
+  @media (min-width: 769px) {
+    .primary.play-btn { width: 60px; height: 60px; min-width: 60px; min-height: 60px; }
+  }
+
+  .time { font-weight: 700; font-variant-numeric: tabular-nums; color: #f4f6fb; }
+  .duration-time, .remaining-time { color: rgb(244 246 251 / 0.65); font-weight: 600; }
+
+  .volume { accent-color: #f4f6fb; }
+
+  /* Barre de progression : piste fine, partie lue en accent, curseur blanc */
+  .seek {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+  }
+  .seek::-webkit-slider-runnable-track {
+    height: 5px;
+    border-radius: 5px;
+    background: linear-gradient(90deg, var(--ac) var(--seek-progress, 0%), rgb(255 255 255 / 0.24) var(--seek-progress, 0%));
+  }
+  .seek::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: -5.5px;
+    border: 0;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 0 4px rgb(255 255 255 / 0.18);
+    transition: transform var(--t-fast) var(--ease);
+  }
+  .seek:hover::-webkit-slider-thumb, .seek:focus-visible::-webkit-slider-thumb { transform: scale(1.15); }
+  .seek::-moz-range-track { height: 5px; border-radius: 5px; background: rgb(255 255 255 / 0.24); }
+  .seek::-moz-range-progress { height: 5px; border-radius: 5px; background: var(--ac); }
+  .seek::-moz-range-thumb { width: 16px; height: 16px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 0 0 4px rgb(255 255 255 / 0.18); }
+  .seek:focus-visible { outline: none; }
+  .seek:focus-visible::-webkit-slider-runnable-track { outline: 2px solid var(--ac); outline-offset: 4px; }
+
+  .timeline-markers-track { height: 5px; border-radius: 5px; }
+  .marker-segment, .marker-segment.recap, .marker-segment.preview { background-color: rgb(255 255 255 / 0.22); opacity: 1; border-radius: 0; }
+  .marker-segment.intro, .marker-segment.credits { background-color: rgb(255 255 255 / 0.34); }
+  .chapter-tick { width: 3px; height: 7px; transform: translate(-1.5px, -50%); background: rgb(0 0 0 / 0.55); border-radius: 0; }
+
+  /* Aperçu au survol (miniatures Trickplay) */
+  .seek-preview {
+    gap: 6px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .seek-preview > span { padding: 3px 8px; border-radius: 8px; background: rgb(0 0 0 / 0.6); }
+  .trickplay-frame { border-radius: 12px; border: 2px solid rgb(255 255 255 / 0.9); box-shadow: 0 10px 30px rgb(0 0 0 / 0.5); }
+
+  /* Panneau de réglages (audio, sous-titres, version, vitesse, réglages) */
+  .floating-menu {
+    padding: 10px;
+    border: 0;
+    border-radius: 24px;
+    background: rgb(17 21 31 / 0.92);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+    color: #eef1f8;
+    font-family: var(--font);
+  }
+  .menu-heading { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; color: #fff; }
+  .menu-heading button, .menu-close, .menu-back {
+    border: 0;
+    border-radius: 14px;
+    background: transparent;
+    color: #eef1f8;
+  }
+  .menu-heading button:hover:not(:disabled), .menu-close:hover, .menu-back:hover:not(:disabled) { background: rgb(255 255 255 / 0.1); }
+  .floating-menu button[role='menuitemradio'],
+  .floating-menu button[role='menuitem'] {
+    border: 0;
+    border-radius: 14px;
+    background: transparent;
+    color: #eef1f8;
+    font-weight: 700;
+  }
+  .floating-menu button[role='menuitemradio']:hover:not(:disabled),
+  .floating-menu button[role='menuitem']:hover:not(:disabled) { background: rgb(255 255 255 / 0.07); }
+  .floating-menu button[aria-checked='true'] {
+    background: rgb(255 255 255 / 0.09);
+    border-color: transparent;
+    color: #fff;
+    box-shadow: inset 3px 0 0 var(--ac);
+  }
+  .floating-menu small, .setting-value, .menu-note { color: #a2a9ba; }
+  .setting-arrow { color: #8189a0; }
+  .menu-section {
+    color: #8189a0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+  .menu-separator { background: rgb(255 255 255 / 0.09); }
+  .track-badge {
+    border: 0;
+    border-radius: 8px;
+    background: rgb(255 255 255 / 0.12);
+    color: #eef1f8;
+    font-weight: 700;
+  }
+  .offset-control input {
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: rgb(255 255 255 / 0.07);
+    color: #fff;
+  }
+  .offset-control input:focus { border-color: var(--ac); }
+
+  /* Passer l'intro / le générique : bouton clair, lisible sur toutes les images */
+  .skip-marker-btn {
+    gap: 10px;
+    min-height: 52px;
+    padding: 0 22px;
+    border: 0;
+    border-radius: 16px;
+    background: rgb(255 255 255 / 0.92);
+    backdrop-filter: none;
+    color: #0b0e18;
+    font-size: 15px;
+    font-weight: 800;
+    box-shadow: 0 10px 30px rgb(0 0 0 / 0.4);
+  }
+  .skip-marker-btn:hover { background: #fff; border-color: transparent; transform: none; }
+  .skip-marker-btn:active { transform: scale(0.98); }
+  .skip-marker-arrow { color: #0b0e18; }
+
+  /* Halo : panneau latéral à onglets (ordinateur), feuille basse sur téléphone */
+  .menu-tabs { display: flex; gap: 4px; margin: 2px 0 10px; padding: 4px; border-radius: 999px; background: rgb(255 255 255 / 0.06); overflow-x: auto; scrollbar-width: none; }
+  .menu-tabs::-webkit-scrollbar { display: none; }
+  .floating-menu .menu-tabs button { flex: none; min-height: 34px; height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: #a2a9ba; font-size: 13px; font-weight: 700; white-space: nowrap; box-shadow: none; }
+  .floating-menu .menu-tabs button:hover:not(:disabled) { background: rgb(255 255 255 / 0.08); color: #fff; }
+  .floating-menu .menu-tabs button[aria-current='true'] { background: #eef1f8; color: #0b0e18; box-shadow: none; }
+  @media (min-width: 769px) {
+    .floating-menu {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      bottom: 16px;
+      left: auto;
+      width: 380px;
+      max-height: none;
+    }
+  }
 </style>
 
 

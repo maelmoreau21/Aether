@@ -35,7 +35,7 @@
   }
 
 </script>
-<section aria-label="Collections d’avatars">
+<section class="avatar-collections" class:embedded={!!extensionId} aria-label="Collections d’avatars">
   {#if extensionId}
     <p>Cette collection appartient à une ancienne extension. Les avatars sont désormais gérés nativement dans Administration → Avatars. Les anciennes collections ne sont pas transférées automatiquement : les supprimer ou désinstaller l’extension peut les retirer.</p>
   {:else}
@@ -48,7 +48,7 @@
     <fieldset disabled={busy||!policyLoaded}><legend>Politique des avatars</legend>
       <label><input type="checkbox" bind:checked={policy.allowCustom} /> Autoriser les images personnalisées</label>
       <label><input type="checkbox" bind:checked={policy.assignOnCreate} /> Attribuer un avatar de la galerie aux nouveaux comptes</label>
-      <button type="button" onclick={()=>void savePolicy()}>Enregistrer la politique</button>
+      <button type="button" class="primary" onclick={()=>void savePolicy()}>Enregistrer la politique</button>
     </fieldset>
   {/if}
   <h3>Votre galerie d’avatars</h3><p>Ajoutez vos images ou importez une collection. Les utilisateurs choisissent ensuite leur avatar dans leur profil.</p>
@@ -58,7 +58,7 @@
       <label>Destination<select bind:value={uploadTarget} disabled={busy}><option value="">Nouvelle collection</option>{#each packs as pack (pack.id)}<option value={pack.id}>{pack.name} · {pack.count} avatars</option>{/each}</select></label>
       {#if !uploadTarget}<label>Nom de la collection<input required maxlength="100" bind:value={uploadName} disabled={busy} /></label>{/if}
       <label>Images<input type="file" bind:this={uploadInput} required multiple accept="image/png,image/jpeg,image/webp" disabled={busy} onchange={event=>uploadFiles=Array.from(event.currentTarget.files??[])} /></label>
-      <button disabled={busy||!uploadFiles.length}>Ajouter les avatars</button>
+      <button class="primary" disabled={busy||!uploadFiles.length}>Ajouter les avatars</button>
     </form><small>PNG, JPEG, WebP · 2 Mo par image · 64 Mo par import · 500 images par collection.</small>
   </details>
   <details class="upload"><summary>Importer un pack depuis GitHub</summary>
@@ -68,7 +68,7 @@
   </form>
   {#if folders.length}<form class="import-form" onsubmit={event=>{event.preventDefault();void importPack();}}>
     <label>Collection<select aria-label="Collection" bind:value={folder} disabled={busy} onchange={()=>name=folder||'Collection'}>{#each folders as item (item.folder)}<option value={item.folder}>{item.folder||'Racine'} · {item.count} avatars</option>{/each}</select></label>
-    <label>Nom affiché<input required maxlength="100" bind:value={name} disabled={busy} /></label><button disabled={busy}>Importer la collection</button>
+    <label>Nom affiché<input required maxlength="100" bind:value={name} disabled={busy} /></label><button class="primary" disabled={busy}>Importer la collection</button>
   </form>{/if}
   </details>
   {#if busy}<p role="status">Chargement… L’import peut prendre quelques minutes.</p>{/if}
@@ -77,14 +77,76 @@
     <label class="collection-picker">Collection<select disabled={busy} value={selected} onchange={event=>void showPack(event.currentTarget.value).catch(()=>error='Galerie indisponible.')}>{#each packs as pack (pack.id)}<option value={pack.id}>{pack.name} · {pack.count} avatar{pack.count>1?'s':''}</option>{/each}</select></label>
     <form onsubmit={event=>{event.preventDefault();void galleryAction(()=>adminRequest(`${endpoint}/${encodeURIComponent(selected)}`,{method:'PUT',body:JSON.stringify({name:renaming})}),'Collection renommée.');}}>
       <label>Nom de la collection<input required maxlength="100" bind:value={renaming} disabled={busy} /></label><button disabled={busy}>Renommer</button>
-      <button type="button" disabled={busy} onclick={()=>void remove(selected)}>Supprimer la collection</button>
+      <button type="button" class="danger" disabled={busy} onclick={()=>void remove(selected)}>Supprimer la collection</button>
     </form>
-    <div class="gallery">{#each images as avatar (avatar.id)}<article><img src={avatar.url} alt={avatar.name} loading="lazy" width="112" height="112" /><span>{avatar.name}</span><button aria-label={`Supprimer ${avatar.name}`} disabled={busy} onclick={()=>{if(window.confirm(`Retirer « ${avatar.name} » de la galerie ? Les photos déjà choisies sont conservées.`))void galleryAction(()=>adminRequest(`${endpoint}/${encodeURIComponent(selected)}/images/${encodeURIComponent(avatar.id)}`,{method:'DELETE'}),'Avatar supprimé de la galerie.');}}>Supprimer</button></article>{:else}<p>Cette collection est vide.</p>{/each}</div>
+    <div class="gallery">{#each images as avatar (avatar.id)}<article><img src={avatar.url} alt={avatar.name} loading="lazy" width="112" height="112" /><span>{avatar.name}</span><button class="danger" aria-label={`Supprimer ${avatar.name}`} disabled={busy} onclick={()=>{if(window.confirm(`Retirer « ${avatar.name} » de la galerie ? Les photos déjà choisies sont conservées.`))void galleryAction(()=>adminRequest(`${endpoint}/${encodeURIComponent(selected)}/images/${encodeURIComponent(avatar.id)}`,{method:'DELETE'}),'Avatar supprimé de la galerie.');}}>Supprimer</button></article>{:else}<p>Cette collection est vide.</p>{/each}</div>
   {:else}<p>Aucun avatar pour le moment. Ajoutez des images ou importez un pack.</p>{/if}
 </section>
 <style>
-section{margin-top:28px;}fieldset{display:grid;gap:12px;border:1px solid var(--border-subtle);padding:16px;}fieldset label{display:flex;align-items:center;gap:8px;}fieldset input[type=checkbox]{width:auto;min-height:0;}h3{font-size:18px;margin:0 0 8px;}p,small{font-size:13px;color:var(--text-secondary);line-height:1.5;}form{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:20px 0;}label{display:grid;gap:8px;font-size:13px;flex:1;min-width:160px;}input,select{box-sizing:border-box;width:100%;min-height:44px;background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px;font:inherit;}button{min-height:44px;padding:10px 16px;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);font:inherit;cursor:pointer;}button:disabled{opacity:.5;cursor:wait;}.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:16px;}.gallery article{display:grid;justify-items:center;gap:8px;min-width:0;padding:12px;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);}.gallery img{width:100%;height:auto;aspect-ratio:1;object-fit:cover;border-radius:var(--radius-sm);}.gallery span{font-size:12px;max-width:100%;overflow-wrap:anywhere;}.gallery button{font-size:12px;min-height:36px;padding:6px 10px;color:var(--status-error);}.collection-picker{margin-top:24px;}[role=alert]{color:var(--status-error);}.import-form{padding:16px;background:var(--bg-elevated);border-radius:var(--radius-sm);}
-@media(max-width:650px){form{display:grid;grid-template-columns:minmax(0,1fr);align-items:stretch;}label{min-width:0;}button{width:100%;}.import-form{padding:14px;}}
-.upload{margin:24px 0;padding:16px;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);}summary{font-size:14px;cursor:pointer;}input[type=file]{font-size:12px;}
-.legacy-notice{margin:16px 0;padding:16px;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);background:var(--bg-elevated);}
+  .avatar-collections { display: grid; gap: 20px; min-width: 0; margin-top: 8px; font-family: var(--font); color: var(--tx); }
+  .avatar-collections > p { margin: 0; }
+  h3 { margin: 4px 0 -12px; font-size: 17px; font-weight: 700; }
+  p, small { font-size: 14px; line-height: 1.6; color: var(--mu); }
+  small { display: block; font-size: 13px; }
+  /* Panneaux de réglages */
+  fieldset, .upload, .legacy-notice { min-width: 0; margin: 0; padding: 24px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); }
+  fieldset { display: grid; gap: 4px; }
+  legend { float: left; width: 100%; margin: 0 0 8px; padding: 0; font-size: 17px; font-weight: 700; color: var(--tx); }
+  legend + label { clear: both; }
+  fieldset label { display: flex; flex: none; align-items: center; gap: 12px; min-height: 44px; font-size: 14px; font-weight: 600; }
+  fieldset > button { justify-self: start; margin-top: 12px; }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; min-height: 0; margin: 0; accent-color: var(--ac); }
+  .legacy-notice { display: grid; justify-items: start; gap: 4px; background: var(--info-soft); border-color: transparent; }
+  .legacy-notice strong { font-size: 15px; font-weight: 700; color: var(--tx); }
+  .legacy-notice p { margin: 0 0 12px; color: var(--tx); }
+  .avatar-collections > button { justify-self: start; }
+  .upload { padding-top: 8px; padding-bottom: 8px; }
+  .upload[open] { padding-bottom: 24px; }
+  summary { display: flex; align-items: center; min-height: 48px; font-size: 17px; font-weight: 700; cursor: pointer; }
+  summary:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; border-radius: var(--r-xs); }
+  /* Formulaires */
+  form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; margin: 12px 0 0; }
+  .upload form + small { margin-top: 12px; }
+  label { display: grid; flex: 1; gap: 8px; min-width: 180px; font-size: 14px; font-weight: 700; color: var(--tx); }
+  input:not([type='checkbox']), select { box-sizing: border-box; width: 100%; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  select { padding-right: 40px; }
+  input[type='url'] { font-family: var(--font-mono); font-size: 14px; }
+  input[type='file'] { display: flex; align-items: center; height: auto; min-height: 46px; padding: 6px 8px; font-size: 13px; color: var(--mu); }
+  input[type='file']::file-selector-button { height: 34px; margin-right: 12px; padding: 0 14px; border: 0; border-radius: var(--r-xs); background: var(--pn-2); color: var(--tx); font: inherit; font-weight: 700; cursor: pointer; }
+  input:not([type='checkbox']):hover, select:hover:not(:disabled) { background-color: var(--pn-2); border-color: transparent; }
+  input:not([type='checkbox']):focus, select:focus, select:focus-visible { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  .import-form { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .collection-picker { max-width: 520px; margin-top: 8px; }
+  /* Boutons */
+  button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 18px; border: 0; border-radius: var(--r-md); background: var(--pn-2); color: var(--tx); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
+  button:hover:not(:disabled) { background: var(--pn-3); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled { opacity: 0.45; cursor: wait; }
+  button:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .primary { min-height: 46px; background: var(--btn); color: var(--btn-tx); box-shadow: none; }
+  .primary:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
+  .danger { background: var(--err-soft); color: var(--err); }
+  .danger:hover:not(:disabled) { background: var(--err-soft); opacity: 0.85; }
+  /* Galerie : l'image est la carte */
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 20px 16px; }
+  .gallery article { display: grid; justify-items: center; align-content: start; gap: 8px; min-width: 0; }
+  .gallery img { width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: var(--r-md); background: var(--pn); }
+  .gallery span { max-width: 100%; font-size: 13px; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
+  .gallery button { width: 100%; min-height: 44px; padding: 0 10px; font-size: 13px; }
+  [role='alert'] { margin: 0; color: var(--err); }
+  [role='status'] { margin: 0; }
+  /* Dans la carte d'une extension : pas de panneau dans un panneau */
+  .embedded fieldset, .embedded .upload { padding: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
+  .embedded .upload[open] { padding-bottom: 8px; }
+  @media (max-width: 640px) {
+    fieldset, .upload, .legacy-notice { padding: 16px; border-radius: var(--r-md); }
+    .upload { padding-top: 4px; padding-bottom: 4px; }
+    .upload[open] { padding-bottom: 16px; }
+    form { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+    label { min-width: 0; }
+    button, fieldset > button, .avatar-collections > button { width: 100%; justify-self: stretch; }
+    .gallery { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 16px 12px; }
+    input:not([type='checkbox']), select { font-size: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) { button, input, select { transition: none; } }
 </style>

@@ -5,7 +5,7 @@
   type History = { id:string; eventId:string; channelId:string; status:string; attempt:number; errorCode?:string; occurredAt:number };
   const emptyConfig = ():Config => ({destination:'',smtpHost:'',smtpPort:465,sender:'',recipient:'',username:''});
   const admin=$derived($session?.user.role==='administrator');
-  let enabled=$state(false),scans=$state(false),tasks=$state(false),loaded=$state(false),busy=$state(false),error=$state(''),notice=$state('');
+  let enabled=$state(false),scans=$state(false),tasks=$state(false),content=$state(false),loaded=$state(false),busy=$state(false),error=$state(''),notice=$state('');
   let channels=$state<Channel[]>([]),history=$state<History[]>([]),users=$state<{id:string;role:string;name?:string}[]>([]);
   let editId=$state(''),name=$state(''),recipientId=$state(''),kind=$state('webhook'),channelEnabled=$state(false),config=$state<Config>(emptyConfig()),secret=$state('');
   async function request<T>(path:string,method='GET',body?:unknown,signal?:AbortSignal):Promise<T> {
@@ -16,8 +16,8 @@
   $effect(()=>{
     const id=$session?.user.id,controller=new AbortController();loaded=false;
     if(!id)return;
-    void request<{enabled:boolean;scans:boolean;tasks:boolean}>('/api/v1/account/notifications','GET',undefined,controller.signal).then(value=>{
-      if(controller.signal.aborted)return;enabled=value.enabled;scans=value.scans;tasks=value.tasks;loaded=true;
+    void request<{enabled:boolean;scans:boolean;tasks:boolean;content?:boolean}>('/api/v1/account/notifications','GET',undefined,controller.signal).then(value=>{
+      if(controller.signal.aborted)return;enabled=value.enabled;scans=value.scans;tasks=value.tasks;content=value.content??false;loaded=true;
     }).catch(()=>{if(!controller.signal.aborted)error='Préférences de notification indisponibles.';});
     if(admin)void loadAdmin(controller.signal);
     return ()=>controller.abort();
@@ -31,7 +31,7 @@
   }
   async function savePreferences(event:SubmitEvent){
     event.preventDefault();busy=true;error='';notice='';
-    try{await request('/api/v1/account/notifications','PUT',{enabled,scans,tasks:admin&&tasks});notice='Préférences enregistrées.';}catch(cause){error=cause instanceof Error?cause.message:'Erreur';}finally{busy=false;}
+    try{await request('/api/v1/account/notifications','PUT',{enabled,scans,tasks:admin&&tasks,content});notice='Préférences enregistrées.';}catch(cause){error=cause instanceof Error?cause.message:'Erreur';}finally{busy=false;}
   }
   function edit(channel?:Channel){editId=channel?.id??'';name=channel?.name??'';recipientId=channel?.recipientId??$session?.user.id??'';kind=channel?.kind??'webhook';channelEnabled=channel?.enabled??false;config=channel?{...channel.config}:emptyConfig();secret='';}
   async function saveChannel(event:SubmitEvent){
@@ -47,17 +47,18 @@
 
 <section class="notification-settings" aria-labelledby="notification-heading">
   <h2 id="notification-heading">Notifications</h2>
-  <p>Les notifications externes sont facultatives. Un administrateur configure vos destinations. Seuls les scans des bibliothèques auxquelles vous avez encore accès peuvent vous être signalés.</p>
+  <p>Les notifications externes sont facultatives. Un administrateur configure vos destinations. Les scans et nouveaux contenus respectent vos droits de bibliothèque actuels ; les nouveaux contenus respectent aussi votre contrôle parental.</p>
   <form onsubmit={savePreferences}><fieldset disabled={busy||!loaded}>
     <legend>Mes préférences</legend>
     <label class="check"><input type="checkbox" bind:checked={enabled} /> Recevoir les notifications sur mes destinations configurées</label>
     <label class="check"><input type="checkbox" bind:checked={scans} /> Scans terminés de mes bibliothèques autorisées</label>
+    <label class="check"><input type="checkbox" bind:checked={content} /> Nouveaux films, séries et épisodes autorisés après activation</label>
     {#if admin}<label class="check"><input type="checkbox" bind:checked={tasks} /> Tâches terminées ou en échec (administration)</label>{/if}
     <button>Enregistrer mes préférences</button>
   </fieldset></form>
   {#if admin}
     <details><summary>Destinations et historique administrateur</summary>
-      <p>Adaptateurs email SMTP TLS, ntfy, Gotify et webhook. Un envoi exige une destination activée et le consentement du compte destinataire. Aucun envoi automatique de test. Les événements Node indisponible, erreur fournisseur et nouveau contenu ne sont pas encore disponibles.</p>
+      <p>Adaptateurs email SMTP TLS, ntfy, Gotify et webhook. Un envoi exige une destination activée et le consentement du compte destinataire. Aucun envoi automatique de test. Les événements Node indisponible et erreur fournisseur ne sont pas encore disponibles.</p>
       <p>File persistante, cinq tentatives maximum avec délais croissants, un départ par destination par minute. Historique conservé 30 jours. Une reprise après coupure peut dupliquer un message ; les webhooks portent un identifiant stable.</p>
       <button type="button" disabled={busy} onclick={()=>edit()}>Nouvelle destination</button>
       {#each channels as channel (channel.id)}<div class="channel"><span>{channel.name} · {channel.kind} · {channel.enabled?'Activée':'Désactivée'}</span><button type="button" disabled={busy} onclick={()=>edit(channel)}>Modifier</button><button type="button" disabled={busy} onclick={()=>remove(channel.id)}>Supprimer</button></div>{/each}
@@ -87,5 +88,40 @@
   {#if error}<p role="alert">{error}</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}
 </section>
 <style>
-  .notification-settings { display:grid;gap:12px; } fieldset { display:grid;gap:12px;border:1px solid var(--color-line);border-radius:var(--radius-md);padding:16px;margin-block:12px; } label { display:grid;gap:6px; } .check { display:flex;align-items:center;gap:10px; } p,li { font-size:13px;line-height:1.5; } .channel { display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-block:12px; } button,input,select { padding:10px;background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-line);border-radius:var(--radius-md); } summary { cursor:pointer;padding-block:12px; }
+  .notification-settings { display: grid; gap: 12px; min-width: 0; color: var(--tx); overflow-wrap: anywhere; }
+  h2 { margin: 0 0 6px; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+  p, li { margin: 0; color: var(--mu); font-size: 14px; line-height: 1.6; }
+  form { margin: 0; }
+  fieldset { display: grid; gap: 14px; min-width: 0; margin: 8px 0 0; padding: 20px 0 0; border: 0; border-top: 1px solid var(--line); }
+  fieldset:disabled { opacity: 0.7; }
+  legend { float: left; width: 100%; margin-bottom: 2px; padding: 0; font-size: 17px; font-weight: 700; color: var(--tx); }
+  label { display: grid; gap: 8px; font-size: 14px; font-weight: 700; }
+  .check { display: flex; align-items: center; gap: 12px; min-height: 44px; font-weight: 600; }
+  select, input:not([type='checkbox']) { width: 100%; max-width: 520px; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  select { padding-right: 40px; }
+  select:hover, input:not([type='checkbox']):hover { background-color: var(--pn-2); }
+  select:focus, input:focus { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--ac); }
+  button { justify-self: start; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 18px; border: 0; border-radius: var(--r-md); background: var(--pn-2); color: var(--tx); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
+  button:hover:not(:disabled) { background: var(--pn-3); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  [role='alert'] { margin: 0; padding: 12px 14px; border-radius: var(--r-sm); background: var(--err-soft); color: var(--err); font-weight: 600; }
+  fieldset > button:last-child { height: 48px; padding: 0 22px; background: var(--btn); color: var(--btn-tx); }
+  fieldset > button:last-child:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
+  details { margin-top: 8px; border-top: 1px solid var(--line); }
+  details[open] { display: grid; gap: 12px; }
+  summary { display: flex; align-items: center; min-height: 52px; padding-top: 12px; font-size: 15px; font-weight: 700; cursor: pointer; border-radius: var(--r-xs); }
+  summary:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .channel { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 56px; padding: 6px 8px 6px 16px; border-radius: var(--r-md); background: var(--pn); }
+  .channel span { flex: 1; min-width: 180px; font-size: 14px; font-weight: 600; color: var(--tx); }
+  .channel button { background: transparent; color: var(--mu); }
+  .channel button:hover:not(:disabled) { background: var(--pn-2); color: var(--tx); }
+  .channel button:last-child { color: var(--err); }
+  .channel button:last-child:hover:not(:disabled) { background: var(--err-soft); color: var(--err); }
+  ul { display: grid; margin: 0; padding: 0; list-style: none; border-radius: var(--r-md); background: var(--pn); overflow: hidden; }
+  li { padding: 12px 16px; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  li:first-child { border-top: 0; }
+  [role='status'] { margin: 0; padding: 12px 14px; border-radius: var(--r-sm); background: var(--ok-soft); color: var(--ok); font-weight: 600; }
 </style>

@@ -1,6 +1,7 @@
 # AGENTS.md — Consignes obligatoires pour les agents IA
 
-> Projet : **Aether** (nom provisoire). **État initial : conception, pas de code fonctionnel présumé.**
+> Projet : **Aether** (nom provisoire). Le dépôt évolue ; aucune fonctionnalité ne
+> doit être considérée comme acquise sans vérification dans le code et les tests.
 > Ce fichier vaut pour tout le dépôt. La réalité du code et des tests prime sur les annonces.
 
 ## 1. Mission et ordre des priorités
@@ -19,13 +20,13 @@ Ne jamais sacrifier P0 pour une interface spectaculaire, un cluster, un système
 
 ## 2. Lecture obligatoire avant chaque intervention
 
-1. Lire `AGENTS.md`, `MEMORY.md`, `ARCHITECTURE.md`, `docs/SPECIFICATION.md`, puis la documentation du domaine concerné.
+1. Lire `AGENTS.md`, le point d’entrée `MEMORY.md`, `ARCHITECTURE.md`, `docs/SPECIFICATION.md`, puis la documentation du domaine concerné. Consulter les archives de mémoire seulement si le sujet le nécessite.
 2. Inspecter les fichiers réellement présents, `git status`, le diff, les tests et dépendances. **Les documents sont des exigences, pas des preuves d'implémentation.**
 3. Découper la mission en une étape vérifiable, annoncer les hypothèses, les critères d'acceptation et le périmètre.
 4. Implémenter un **parcours vertical fonctionnel** avant de multiplier les couches ou crates vides.
 5. Exécuter les tests adaptés ; signaler honnêtement les vérifications impossibles, ainsi que les limites navigateur/client.
 6. Terminer par les changements, commandes de tests réellement lancées, résultats, risques restants et prochain petit jalon.
-7. Mettre à jour `MEMORY.md` après chaque jalon réel ou changement de décision, sans cocher des fonctions sur la seule base d'un plan.
+7. Consigner brièvement dans `MEMORY.md` chaque jalon réel ou changement de décision, avec preuves et limites ; détailler dans le document du domaine et archiver les entrées anciennes. Ne pas déduire une réalisation d’un plan.
 8. Ne pas détruire des données, changer de licence, pousser sur Git, publier d'images ou modifier des médias sans demande explicite.
 
 ## 3. Règles produit non négociables

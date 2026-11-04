@@ -98,21 +98,21 @@
   }
 
   button {
-    color: var(--color-text);
+    color: var(--tx);
     border: 0;
     background: transparent;
     cursor: pointer;
   }
 
   button:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: wait;
   }
 
   button:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
-    border-radius: var(--radius-xs);
+    outline: 2px solid var(--ac);
+    outline-offset: 3px;
+    border-radius: var(--r-xs);
   }
 
   .favorite-btn {
@@ -120,33 +120,39 @@
     align-items: center;
     gap: 8px;
     min-height: 44px;
-    padding: 0 16px;
-    border-radius: var(--radius-pill);
-    background: var(--color-glass-raised);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--color-line-strong);
-    color: var(--color-text-bright);
-    font-size: 13.5px;
-    font-weight: 650;
-    transition: all var(--transition-fast);
+    padding: 0 16px 0 12px;
+    border-radius: 14px;
+    background: var(--pn);
+    border: 1px solid transparent;
+    color: var(--tx);
+    font-size: 14px;
+    font-weight: 700;
+    transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  }
+
+  .favorite-btn:focus-visible {
+    border-radius: 14px;
   }
 
   .favorite-btn:hover:not(:disabled) {
-    background: var(--color-raised-hover);
-    border-color: var(--color-text);
-    transform: translateY(-1px);
+    background: var(--pn-2);
   }
 
-  .favorite-btn[aria-pressed="true"] {
-    background: rgba(239, 68, 68, 0.16);
-    border-color: rgba(239, 68, 68, 0.45);
-    color: #F87171;
+  .favorite-btn:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  .favorite-btn[aria-pressed="true"] .heart-glyph {
+    color: var(--ac);
   }
 
   .heart-glyph {
-    font-size: 18px;
+    display: inline-grid;
+    place-items: center;
+    width: 24px;
+    font-size: 19px;
     line-height: 1;
+    color: var(--mu);
   }
 
   .rating-pill {
@@ -154,12 +160,9 @@
     align-items: center;
     gap: 8px;
     min-height: 44px;
-    padding: 0 14px;
-    border-radius: var(--radius-pill);
-    background: var(--color-glass-raised);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--color-line-strong);
+    padding: 0 14px 0 8px;
+    border-radius: 14px;
+    background: var(--pn);
   }
 
   .stars {
@@ -171,9 +174,9 @@
     position: relative;
     display: flex;
     width: 26px;
-    height: 36px;
-    font-size: 22px;
-    line-height: 36px;
+    height: 40px;
+    font-size: 21px;
+    line-height: 40px;
   }
 
   .outline,
@@ -185,12 +188,11 @@
   }
 
   .outline {
-    color: var(--color-muted);
-    opacity: 0.45;
+    color: var(--line-2);
   }
 
   .fill {
-    color: #F59E0B;
+    color: var(--ac);
     clip-path: inset(0 100% 0 0);
   }
 
@@ -206,26 +208,28 @@
     z-index: 1;
     width: 50%;
     height: 100%;
+    min-height: 0;
     padding: 0;
     background: transparent;
   }
 
   .rating-value {
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 700;
-    color: #FBBF24;
+    color: var(--tx);
+    font-variant-numeric: tabular-nums;
     min-width: 32px;
   }
 
   .rating-placeholder {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
-    color: var(--color-muted);
+    color: var(--mu);
   }
 
   .feedback-error {
     flex-basis: 100%;
-    font-size: 12px;
-    color: var(--color-danger);
+    font-size: 13px;
+    color: var(--err);
   }
 </style>

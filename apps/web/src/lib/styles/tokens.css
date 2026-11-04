@@ -1,200 +1,107 @@
-/* Design System Aether — Mode Streaming (Netflix / Apple TV+)
-   Palette Dark Cinématique (#0B0C10 / Orange Aether #F97316) & Mode Clair Doux Anti-Éblouissement
-   Rétrocompatibilité totale avec toutes les variables du projet. */
+/* Aether — couche de compatibilité du design system Halo.
+   Les jetons Halo (halo.css) sont la source de vérité. Les anciennes variables
+   ci-dessous n'en sont que des alias, pour que tous les composants existants
+   suivent le thème clair/sombre et l'accent sans valeurs en dur.
+   Nouveau code : utiliser directement les jetons Halo (--bg, --tx, --ac, --r-md…).
+   Redéclarés sur le lecteur pour qu'il suive ses jetons sombres forcés. */
 
-:root, [data-theme="dark"] {
-  color-scheme: dark;
-  --color-on-accent: #FFFFFF;
-  --color-play: #F97316;
-  --color-on-play: #FFFFFF;
-  --color-play-hover: #FB923C;
+:root,
+.immersive-dialog {
+  --color-on-accent: var(--on-ac);
+  --color-play: var(--btn);
+  --color-on-play: var(--btn-tx);
+  --color-play-hover: var(--btn);
 
-  /* Couleurs de marque & États (Orange/Ambre Aether) */
-  --brand-amber: #F59E0B;
-  --brand-orange: #F97316;
-  --brand-red: #EA580C;
-  --brand-indigo: #6366F1;
-  --brand-gradient: linear-gradient(135deg, #F59E0B 0%, #EA580C 100%);
+  --brand-amber: var(--logo-a);
+  --brand-orange: var(--ac);
+  --brand-red: var(--logo-b);
+  --brand-indigo: var(--info);
+  --brand-gradient: var(--ac);
 
-  /* Thème Sombre Profond — Netflix / Apple TV+ */
-  --bg-main: #0B0C10;
-  --bg-surface: #141418;
-  --bg-elevated: #18181B;
-  --border-subtle: rgba(255, 255, 255, 0.08);
+  --bg-main: var(--bg);
+  --bg-surface: var(--bg-2);
+  --bg-elevated: var(--bg-3);
+  --border-subtle: var(--line);
 
-  --text-primary: #FFFFFF;
-  --text-secondary: #A1A1AA;
-  --text-muted: #71717A;
+  --text-primary: var(--tx);
+  --text-secondary: var(--mu);
+  --text-muted: var(--mu-2);
 
-  --status-success: #10B981;
-  --status-warning: #F59E0B;
-  --status-error: #EF4444;
-  --accent-primary: #F97316;
-  --accent-secondary: #F59E0B;
+  --status-success: var(--ok);
+  --status-warning: var(--warn);
+  --status-error: var(--err);
+  --accent-primary: var(--ac);
+  --accent-secondary: var(--ac);
 
-  /* Surfaces & Canvas Aether */
-  --color-canvas: var(--bg-main);
-  --color-canvas-rgb: 11, 12, 16;
-  --color-surface: var(--bg-surface);
-  --color-surface-hover: #1F1F25;
-  --color-raised: var(--bg-elevated);
-  --color-raised-hover: #25252C;
-  --color-overlay: #1C1C22;
-  --color-surface-elevated: #18181B;
-  --color-glass: rgba(15, 15, 20, 0.78);
-  --color-glass-raised: rgba(24, 24, 30, 0.88);
+  --color-canvas: var(--bg);
+  --color-canvas-rgb: var(--bg-rgb);
+  --color-surface: var(--bg-2);
+  --color-surface-hover: var(--bg-3);
+  --color-raised: var(--pn-2);
+  --color-raised-hover: var(--pn-3);
+  --color-overlay: var(--bg-3);
+  --color-surface-elevated: var(--bg-3);
+  --color-glass: var(--glass);
+  --color-glass-raised: var(--glass);
 
-  /* Borders & Lines */
-  --color-line: rgba(255, 255, 255, 0.09);
-  --color-line-subtle: rgba(255, 255, 255, 0.05);
-  --color-line-strong: rgba(255, 255, 255, 0.18);
+  --color-line: var(--line);
+  --color-line-subtle: var(--pn);
+  --color-line-strong: var(--line-2);
 
-  /* Typography */
-  --color-text: #F4F4F5;
-  --color-text-bright: #FFFFFF;
-  --color-muted: #A1A1AA;
-  --color-subtle: #8E8E98;
+  --color-text: var(--tx);
+  --color-text-bright: var(--tx);
+  --color-muted: var(--mu);
+  --color-subtle: var(--mu-2);
 
-  /* Accent Orange Aether */
-  --color-accent: #F97316;
-  --color-accent-hover: #FB923C;
-  --color-accent-soft: rgba(249, 115, 22, 0.16);
-  --color-accent-soft-hover: rgba(249, 115, 22, 0.26);
-  --color-accent-solid: #EA580C;
-  --color-accent-glow: rgba(249, 115, 22, 0.42);
+  --color-accent: var(--ac);
+  --color-accent-hover: var(--ac);
+  --color-accent-soft: var(--ac-soft);
+  --color-accent-soft-hover: var(--ac-soft);
+  --color-accent-solid: var(--ac);
+  --color-accent-glow: transparent;
 
-  /* Status Colors */
-  --color-success: var(--status-success);
-  --color-warning: var(--status-warning);
-  --color-danger: var(--status-error);
-  --color-info: #38BDF8;
+  --color-success: var(--ok);
+  --color-warning: var(--warn);
+  --color-danger: var(--err);
+  --color-info: var(--info);
+  --color-success-soft: var(--ok-soft);
+  --color-warning-soft: var(--warn-soft);
+  --color-danger-soft: var(--err-soft);
 
-  /* Shadows */
-  --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.55);
-  --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.72);
-  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.85);
-  --shadow-screen: 0 25px 90px rgba(0, 0, 0, 0.92);
-  --shadow-card: 0 6px 20px rgba(0, 0, 0, 0.6);
-  --shadow-card-hover: 0 20px 44px rgba(0, 0, 0, 0.88), 0 0 0 1px rgba(255, 255, 255, 0.18);
-  --shadow-glow: 0 0 24px rgba(249, 115, 22, 0.35);
+  --shadow-sm: 0 2px 10px var(--shadow-c);
+  --shadow-md: 0 10px 30px var(--shadow-c);
+  --shadow-lg: var(--shadow);
+  --shadow-screen: var(--shadow);
+  --shadow-card: 0 4px 14px var(--shadow-c);
+  --shadow-card-hover: var(--shadow);
+  --shadow-glow: none;
 
-  /* Gradients */
-  --gradient-hero: linear-gradient(to top, #0B0C10 8%, rgba(11, 12, 16, 0.72) 45%, rgba(11, 12, 16, 0.15) 100%);
-  --gradient-hero-horizontal: linear-gradient(90deg, #0B0C10 0%, rgba(11, 12, 16, 0.88) 38%, rgba(11, 12, 16, 0.25) 72%, transparent 100%);
-  --gradient-card: linear-gradient(180deg, transparent 35%, rgba(11, 12, 16, 0.96) 100%);
-  --gradient-accent: var(--brand-gradient);
+  /* Seuls dégradés autorisés : voile de lisibilité sur image */
+  --gradient-hero: linear-gradient(0deg, var(--bg) 4%, rgb(var(--bg-rgb) / 0) 75%);
+  --gradient-hero-horizontal: linear-gradient(90deg, var(--bg) 0%, rgb(var(--bg-rgb) / 0) 75%);
+  --gradient-card: linear-gradient(0deg, var(--media-shade) 0%, rgb(6 8 14 / 0) 58%);
+  --gradient-accent: var(--ac);
 
-  /* Scrollbar & Skeleton */
-  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
-  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.36);
-  --skeleton-bg: linear-gradient(90deg, rgba(255, 255, 255, 0.03) 25%, rgba(255, 255, 255, 0.08) 37%, rgba(255, 255, 255, 0.03) 63%);
-}
+  --scrollbar-thumb: var(--pn-3);
+  --scrollbar-thumb-hover: var(--line-2);
+  --skeleton-bg: var(--pn-2);
 
-[data-theme="light"] {
-  color-scheme: light;
-  --color-on-accent: #FFFFFF;
-  --color-play: #EA580C;
-  --color-on-play: #FFFFFF;
-  --color-play-hover: #C2410C;
+  --font-sans: var(--font);
+  --font-display: var(--font);
 
-  --brand-amber: #D97706;
-  --brand-orange: #EA580C;
-  --brand-red: #C2410C;
-  --brand-indigo: #4F46E5;
-  --brand-gradient: linear-gradient(135deg, #F59E0B 0%, #EA580C 100%);
-
-  /* Thème Clair Doux Anti-Éblouissement — "Sable & Pierre Chaude" (sans blanc éblouissant) */
-  --bg-main: #E3DED6;
-  --bg-surface: #ECE8E1;
-  --bg-elevated: #DAD4CA;
-  --border-subtle: #C9C2B6;
-
-  --text-primary: #211E1B;
-  --text-secondary: #544E48;
-  --text-muted: #736B63;
-
-  --accent-primary: #EA580C;
-  --accent-secondary: #D97706;
-
-  --status-success: #059669;
-  --status-warning: #B45309;
-  --status-error: #DC2626;
-
-  --color-canvas: var(--bg-main);
-  --color-canvas-rgb: 227, 222, 214;
-  --color-surface: var(--bg-surface);
-  --color-surface-hover: #E2DDD4;
-  --color-raised: var(--bg-elevated);
-  --color-raised-hover: #CFC8BC;
-  --color-overlay: #D2CBC0;
-  --color-surface-elevated: #ECE8E1;
-  --color-glass: rgba(227, 222, 214, 0.85);
-  --color-glass-raised: rgba(236, 232, 225, 0.92);
-
-  --color-line: var(--border-subtle);
-  --color-line-subtle: rgba(33, 30, 27, 0.08);
-  --color-line-strong: #B8B0A2;
-
-  --color-text: var(--text-primary);
-  --color-text-bright: #171412;
-  --color-muted: var(--text-secondary);
-  --color-subtle: var(--text-muted);
-
-  --color-accent: #EA580C;
-  --color-accent-hover: #C2410C;
-  --color-accent-soft: rgba(234, 88, 12, 0.14);
-  --color-accent-soft-hover: rgba(234, 88, 12, 0.22);
-  --color-accent-solid: #EA580C;
-  --color-accent-glow: rgba(234, 88, 12, 0.24);
-
-  --color-success: var(--status-success);
-  --color-warning: var(--status-warning);
-  --color-danger: var(--status-error);
-  --color-info: #0284C7;
-
-  --shadow-sm: 0 2px 8px rgba(33, 30, 27, 0.07);
-  --shadow-md: 0 8px 24px rgba(33, 30, 27, 0.10);
-  --shadow-lg: 0 16px 40px rgba(33, 30, 27, 0.14);
-  --shadow-screen: 0 20px 80px rgba(33, 30, 27, 0.18);
-  --shadow-card: 0 4px 14px rgba(33, 30, 27, 0.08);
-  --shadow-card-hover: 0 16px 36px rgba(33, 30, 27, 0.15), 0 0 0 1px var(--border-subtle);
-  --shadow-glow: 0 4px 18px rgba(234, 88, 12, 0.25);
-
-  --gradient-hero: linear-gradient(180deg, rgba(227, 222, 214, 0.15) 0%, rgba(227, 222, 214, 0.85) 65%, #E3DED6 100%);
-  --gradient-hero-horizontal: linear-gradient(90deg, #E3DED6 0%, rgba(227, 222, 214, 0.9) 35%, rgba(227, 222, 214, 0.3) 70%, transparent 100%);
-  --gradient-card: linear-gradient(180deg, transparent 40%, rgba(227, 222, 214, 0.96) 100%);
-  --gradient-accent: var(--brand-gradient);
-
-  --scrollbar-thumb: rgba(33, 30, 27, 0.22);
-  --scrollbar-thumb-hover: rgba(33, 30, 27, 0.38);
-  --skeleton-bg: linear-gradient(90deg, rgba(33, 30, 27, 0.04) 25%, rgba(33, 30, 27, 0.09) 37%, rgba(33, 30, 27, 0.04) 63%);
-}
-
-:root {
-  --color-success-soft: color-mix(in srgb, var(--status-success) 14%, var(--bg-surface));
-  --color-warning-soft: color-mix(in srgb, var(--status-warning) 14%, var(--bg-surface));
-  --color-danger-soft: color-mix(in srgb, var(--status-error) 14%, var(--bg-surface));
-
-  /* Typography — Inter / Plus Jakarta Sans / SF Pro / Segoe UI Variable */
-  --font-sans: 'Inter', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', Roboto, system-ui, sans-serif;
-  --font-display: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', Roboto, system-ui, sans-serif;
-
-  /* Radii */
   --radius-xs: 6px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
-  --radius-2xl: 24px;
-  --radius-pill: var(--radius-full);
+  --radius-sm: 10px;
+  --radius-md: var(--r-sm);
+  --radius-lg: var(--r-md);
+  --radius-xl: var(--r-lg);
+  --radius-2xl: var(--r-xl);
+  --radius-pill: var(--r-pill);
   --radius-full: 9999px;
 
-  /* Transitions Cinématiques */
-  --transition-fast: 160ms cubic-bezier(0.25, 0.8, 0.25, 1);
-  --transition-normal: 250ms cubic-bezier(0.25, 0.8, 0.25, 1);
-  --transition-smooth: 320ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: var(--t-fast) var(--ease);
+  --transition-normal: var(--t-med) var(--ease);
+  --transition-smooth: var(--t-slow) var(--ease);
 
-  /* Spacing — Pleine largeur fluide */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -203,13 +110,7 @@
   --space-8: 32px;
   --space-12: 48px;
   --space-16: 64px;
-  --page-gutter: clamp(16px, 2.6vw, 44px);
-}
-
-@media (min-width: 1920px) {
-  :root {
-    --page-gutter: clamp(32px, 3vw, 64px);
-  }
+  --page-gutter: var(--gutter);
 }
 
 * {
@@ -442,9 +343,4 @@ button:active:not(:disabled) {
 :root[data-card-size="small"] { --poster-width:140px; --mobile-card-columns:3; --mobile-shelf-columns:2.8; }
 :root[data-card-size="large"] { --poster-width:230px; --mobile-card-columns:1; --mobile-shelf-columns:1.55; }
 :root[data-card-density="compact"] { --card-gap:8px; --card-row-gap:14px; }
-:root[data-accent="blue"] { --color-accent:#60A5FA; --color-accent-hover:#93C5FD; --color-accent-solid:#2563EB; --color-accent-soft:rgb(59 130 246 / .16); --color-accent-glow:rgb(59 130 246 / .4); --accent-primary:var(--color-accent); --color-play:#2563EB; --color-play-hover:#1D4ED8; }
-:root[data-accent="violet"] { --color-accent:#A78BFA; --color-accent-hover:#C4B5FD; --color-accent-solid:#7C3AED; --color-accent-soft:rgb(139 92 246 / .16); --color-accent-glow:rgb(139 92 246 / .4); --accent-primary:var(--color-accent); --color-play:#7C3AED; --color-play-hover:#6D28D9; }
-:root[data-accent="green"] { --color-accent:#34D399; --color-accent-hover:#6EE7B7; --color-accent-solid:#047857; --color-accent-soft:rgb(16 185 129 / .16); --color-accent-glow:rgb(16 185 129 / .4); --accent-primary:var(--color-accent); --color-play:#047857; --color-play-hover:#065F46; }
-:root[data-theme="light"][data-accent="blue"] { --color-accent:#1D4ED8; --color-accent-hover:#1E40AF; }
-:root[data-theme="light"][data-accent="violet"] { --color-accent:#6D28D9; --color-accent-hover:#5B21B6; }
-:root[data-theme="light"][data-accent="green"] { --color-accent:#047857; --color-accent-hover:#065F46; }
+/* Accent presets live in halo.css (--ac); the aliases above follow them. */

@@ -1,10 +1,19 @@
 # Requires Docker, Rust and the generated legal media fixtures used by the tests.
 # Runs only a disposable PostgreSQL 18 instance; never targets an existing database.
 [CmdletBinding()]
-param([switch]$OnlyDistributed, [switch]$OnlySubtitles, [switch]$OnlyNotifications, [switch]$OnlyExtensionRuns)
+param([switch]$OnlyDistributed, [switch]$OnlySubtitles, [switch]$OnlyNotifications, [switch]$OnlyExtensionRuns, [switch]$OnlyMultiCoreExtension, [string]$TestBinary)
 
 $ErrorActionPreference = 'Stop'
-if ((@($OnlyDistributed, $OnlySubtitles, $OnlyNotifications, $OnlyExtensionRuns) | Where-Object { $_ }).Count -gt 1) {
+if ($TestBinary) {
+    $testBinaryPath = (Resolve-Path -LiteralPath $TestBinary).Path
+    $expectedDirectory = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../target/debug/deps'))
+    if ([System.IO.Path]::GetDirectoryName($testBinaryPath) -ne $expectedDirectory -or
+        [System.IO.Path]::GetFileName($testBinaryPath) -notmatch '^media_poc-[a-f0-9]+\.exe$' -or
+        -not ($OnlySubtitles -or $OnlyNotifications -or $OnlyExtensionRuns)) {
+        throw 'TestBinary requires a freshly built Core unit-test executable and one matching targeted group.'
+    }
+}
+if ((@($OnlyDistributed, $OnlySubtitles, $OnlyNotifications, $OnlyExtensionRuns, $OnlyMultiCoreExtension) | Where-Object { $_ }).Count -gt 1) {
     throw 'Choose one targeted PostgreSQL test group.'
 }
 $containerId = $null
@@ -17,7 +26,13 @@ $pushedLocation = $false
 
 function Invoke-CheckedCargo {
     param([Parameter(Mandatory)][string[]]$CargoArguments)
-    & cargo @CargoArguments
+    if ($TestBinary) {
+        $libIndex = [Array]::IndexOf($CargoArguments, '--lib')
+        if ($libIndex -lt 0 -or $libIndex + 1 -ge $CargoArguments.Length) { throw 'Unit test filter missing.' }
+        & $testBinaryPath $CargoArguments[$libIndex + 1] --ignored --test-threads=1
+    } else {
+        & cargo @CargoArguments
+    }
     if ($LASTEXITCODE -ne 0) {
         throw 'PostgreSQL validation failed; the disposable database will be removed.'
     }
@@ -79,6 +94,11 @@ try {
     if ($OnlyExtensionRuns) {
         Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--lib', 'postgres_history_owner_is_fenced_between_independent_pools', '--', '--ignored', '--test-threads=1')
         Write-Host 'Targeted PostgreSQL extension-run ownership tests passed.'
+        return
+    }
+    if ($OnlyMultiCoreExtension) {
+        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--test', 'multi_core_extension_runs', '--', '--ignored', '--nocapture', '--test-threads=1')
+        Write-Host 'Targeted two-process Core extension crash test passed.'
         return
     }
     if ($OnlyNotifications) {

@@ -110,7 +110,11 @@ async fn remove(
     Ok(StatusCode::NO_CONTENT)
 }
 /// Dropping the guard cancels and releases the worker; test routers never spawn background loops.
-pub struct Scheduler(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>);
+pub struct Scheduler(
+    tokio::task::JoinHandle<()>,
+    tokio::task::JoinHandle<()>,
+    tokio::task::JoinHandle<()>,
+);
 impl Drop for Scheduler {
     fn drop(&mut self) {
         self.0.abort();
@@ -120,14 +124,19 @@ impl Drop for Scheduler {
 }
 impl Scheduler {
     pub fn start(auth: AuthState, root: PathBuf, jobs: Arc<ScanJobs>) -> Self {
-        let notification_auth=auth.clone();
-        let notification_jobs=jobs.clone();
-        let notifications=tokio::spawn(async move {
-            let mut interval=tokio::time::interval(Duration::from_secs(15));
+        let notification_auth = auth.clone();
+        let notification_jobs = jobs.clone();
+        let notifications = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(15));
             loop {
                 interval.tick().await;
-                if notification_jobs.is_cancelled() {break;}
-                if crate::notifications::tick(&notification_auth.store).await.is_err() {
+                if notification_jobs.is_cancelled() {
+                    break;
+                }
+                if crate::notifications::tick(&notification_auth.store)
+                    .await
+                    .is_err()
+                {
                     eprintln!("Notification worker pass failed; retrying on next tick");
                 }
             }

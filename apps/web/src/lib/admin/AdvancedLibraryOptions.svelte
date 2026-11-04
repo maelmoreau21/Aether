@@ -81,14 +81,30 @@
 </details>
 
 <style>
-  .advanced-section { min-width:0; border-bottom:1px solid var(--color-line); padding-bottom:12px; }
-  summary { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; min-height:52px; padding:8px 0; cursor:pointer; font-size:16px; font-weight:600; }
-  summary::after { content:'+'; color:var(--color-muted); margin-left:auto; } details[open]>summary::after { content:'−'; }
-  summary small { font-size:11px; font-weight:400; color:var(--color-muted); }
-  p { color:var(--color-muted); font-size:13px; line-height:1.6; } .notice { border-left:2px solid var(--color-line-strong); padding-left:12px; } .hint { font-size:12px; }
-  label { display:block; margin:18px 0 8px; font-size:14px; line-height:1.5; } .check { display:flex; align-items:flex-start; gap:12px; min-height:44px; padding:12px 0; cursor:pointer; }
-  input[type=checkbox] { width:20px; height:20px; flex:none; margin-top:2px; accent-color:var(--color-play); }
-  input:not([type=checkbox]),select { width:100%; min-width:0; min-height:44px; padding:10px 12px; font-size:16px; background:var(--color-surface); color:var(--color-text); border:1px solid var(--color-line-strong); border-radius:var(--radius-sm); }
-  .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
-  @media(max-width:600px) { .grid { grid-template-columns:minmax(0,1fr); gap:0; } }
+  .advanced-section { min-width: 0; padding-bottom: 12px; border-bottom: 1px solid var(--line); font-family: var(--font); color: var(--tx); }
+  .advanced-section:first-of-type { border-top: 1px solid var(--line); }
+  summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; min-height: 56px; padding: 8px 0; font-size: 15px; font-weight: 700; list-style: none; cursor: pointer; border-radius: var(--r-xs); }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: '+'; margin-left: auto; color: var(--mu); font-size: 20px; font-weight: 600; line-height: 1; }
+  details[open] > summary::after { content: '−'; }
+  summary:hover::after { color: var(--tx); }
+  summary:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  summary small { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--pn-2); color: var(--mu); font-size: 12px; font-weight: 700; }
+  p { font-size: 14px; line-height: 1.6; color: var(--mu); }
+  .notice { margin: 4px 0 12px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--pn); }
+  .hint { margin-top: 8px; font-size: 13px; }
+  label { display: block; margin: 20px 0 8px; font-size: 14px; font-weight: 700; line-height: 1.5; color: var(--tx); }
+  .check { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; margin: 0; padding: 12px 0; font-weight: 600; cursor: pointer; }
+  .check:has(input:disabled) { color: var(--mu); cursor: not-allowed; }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--ac); }
+  input:not([type='checkbox']), select { width: 100%; min-width: 0; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  select { padding-right: 40px; }
+  input:not([type='checkbox']):hover, select:hover:not(:disabled) { background-color: var(--pn-2); border-color: transparent; }
+  input:not([type='checkbox']):focus, select:focus, select:focus-visible { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
+  @media (max-width: 640px) {
+    .grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    input:not([type='checkbox']), select { font-size: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) { input, select { transition: none; } }
 </style>

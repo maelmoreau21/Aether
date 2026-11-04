@@ -147,7 +147,7 @@
 
 <section id="backups-section" class="maintenance" aria-labelledby="maintenance-heading">
   <header><p class="eyebrow">MAINTENANCE</p><h2 id="maintenance-heading">Sauvegardes et base de données</h2><p>Sauvegardez la base complète et la configuration du serveur dans une archive non chiffrée. Réservez son accès à l'administrateur. Sur un serveur Windows, vérifiez les ACL du dossier de sauvegarde et de ses copies : Aether hérite des autorisations du dossier et ne les contrôle pas.</p></header>
-  <div class="actions"><button onclick={create} disabled={loading || creating || !listing?.available || listing?.running}>{creating || listing?.running ? 'Sauvegarde en cours…' : 'Créer une sauvegarde'}</button><button onclick={refresh} disabled={loading}>Actualiser</button></div>
+  <div class="actions"><button class="primary" onclick={create} disabled={loading || creating || !listing?.available || listing?.running}>{creating || listing?.running ? 'Sauvegarde en cours…' : 'Créer une sauvegarde'}</button><button onclick={refresh} disabled={loading}>Actualiser</button></div>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if success}<p role="status">{success}</p>{/if}
 
@@ -205,8 +205,8 @@
     {#if !listing.available}<div class="notice"><strong>Sauvegarde indisponible</strong><p>{listing.reason ?? "Le service de sauvegarde n'est pas disponible actuellement."}</p></div>{:else}
       <article><h3>Planification automatique</h3>
         <form onsubmit={saveSchedule}>
-          <label><input type="checkbox" bind:checked={scheduleEnabled} disabled={saving} /> Activer les sauvegardes automatiques</label>
-          <label>Intervalle en minutes <input type="number" min="60" max="10080" step="1" required bind:value={intervalMinutes} disabled={saving} /></label>
+          <label class="check-row"><input type="checkbox" bind:checked={scheduleEnabled} disabled={saving} /> Activer les sauvegardes automatiques</label>
+          <label class="interval-field">Intervalle en minutes <input type="number" min="60" max="10080" step="1" required bind:value={intervalMinutes} disabled={saving} /></label>
           <button type="submit" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer la planification'}</button>
         </form>
         <p>De 1 heure à 7 jours. Le Core doit être démarré. Aucune suppression automatique des archives.</p>
@@ -222,33 +222,114 @@
 </section>
 
 <style>
-  .maintenance { display: grid; gap: 1.5rem; }
-  header p, article p { color: var(--text-secondary); line-height: 1.65; }
-  h2, h3 { color: var(--text-primary); margin: 0 0 .75rem; }
-  h2 { font-size: 1.5rem; }
-  .eyebrow { font-size: .7rem; letter-spacing: .15em; font-weight: 700; }
-  article, .notice { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 16px; padding: 1.5rem; min-width: 0; }
-  .notice { border-inline-start: 3px solid var(--accent-primary); }
-  .notice p { color: var(--text-secondary); }
-  .notice .advice { margin-top: .5rem; font-size: .85rem; color: var(--text-secondary); }
-  form { display: grid; gap: 1rem; }
-  form label { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; color: var(--text-primary); }
-  input[type="number"] { max-width: 10rem; padding: .6rem; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius:var(--radius-md); }
-  .actions { display: flex; flex-wrap: wrap; gap: .75rem; }
-  button, a { border: 1px solid var(--border-subtle); border-radius:var(--radius-md); padding: .7rem 1rem; background: var(--bg-elevated); color: var(--text-primary); font: inherit; }
-  button { cursor: pointer; } button:disabled { cursor: default; opacity: .5; }
-  .archives { padding: 0; margin: 0; list-style: none; }
-  li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--border-subtle); }
-  small { display: block; margin-top: .35rem; color: var(--text-secondary); overflow-wrap: anywhere; }
-  .error { color: var(--status-error); }
-  .memory-card { display: grid; gap: 1.25rem; }
-  .memory-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
-  .memory-header h3 { margin: 0 0 .25rem; }
-  .memory-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; }
-  .metric { display: grid; gap: .35rem; padding: 1rem; background: var(--bg-main); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
-  .metric.highlight { border-color: var(--accent-primary); }
-  .metric small { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); margin: 0; }
-  .metric strong { font-size: 1.5rem; color: var(--text-primary); }
-  .metric span { font-size: .75rem; color: var(--text-secondary); }
-  @media (max-width: 650px) { li { align-items: start; flex-direction: column; } article, .notice { padding: 1.1rem; } }
+  .maintenance { display: grid; gap: 20px; min-width: 0; color: var(--tx); font-family: var(--font); }
+
+  /* En-tête */
+  header { min-width: 0; }
+  header p, article p { max-width: 80ch; margin: 0 0 8px; font-size: 14px; line-height: 1.6; color: var(--mu); }
+  .eyebrow { margin: 0 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mu); }
+  h2 { margin: 0 0 8px; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: var(--tx); }
+  h3 { margin: 0 0 10px; font-size: 17px; font-weight: 700; color: var(--tx); }
+
+  /* Actions */
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  button, a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: var(--pn-2);
+    color: var(--tx);
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease);
+  }
+  button:hover:not(:disabled), a:hover { background: var(--pn-3); }
+  button:active:not(:disabled), a:active { transform: scale(0.98); }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .primary { height: 48px; padding: 0 22px; background: var(--btn); color: var(--btn-tx); font-size: 15px; box-shadow: none; }
+  .primary:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
+
+  /* Retours et avis */
+  [role='status'] { margin: 0; padding: 14px 16px; border-radius: var(--r-md); background: var(--pn); color: var(--tx); font-size: 14px; line-height: 1.5; }
+  .error { margin: 0; padding: 14px 16px; border-radius: var(--r-md); background: var(--err-soft); color: var(--tx); font-size: 14px; line-height: 1.5; }
+  .notice { min-width: 0; padding: 14px 16px; border-radius: var(--r-md); background: var(--info-soft); color: var(--tx); font-size: 14px; }
+  .notice strong { font-weight: 700; color: var(--tx); }
+  .notice p { margin: 4px 0 0; color: var(--tx); line-height: 1.55; }
+  .notice .advice { margin-top: 8px; font-size: 13px; color: var(--mu); }
+
+  /* Panneaux */
+  article { min-width: 0; padding: 24px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-lg); }
+
+  /* Planification */
+  form { display: grid; justify-items: start; gap: 16px; margin: 4px 0 16px; }
+  form label { color: var(--tx); font-size: 14px; font-weight: 700; }
+  .check-row { display: flex; align-items: center; gap: 12px; min-height: 44px; font-weight: 600; }
+  .check-row input { width: 20px; height: 20px; margin: 0; accent-color: var(--ac); }
+  .interval-field { display: grid; gap: 8px; }
+  input[type='number'] {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 200px;
+    height: 46px;
+    padding: 0 14px;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    background-color: var(--pn);
+    color: var(--tx);
+    font-family: var(--font);
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    box-shadow: none;
+    transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease;
+  }
+  input[type='number']:hover { background-color: var(--pn-2); }
+  input[type='number']:focus { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  input:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+
+  /* Archives : lignes séparées comme un tableau */
+  .archives { margin: 12px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+  li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 8px; border-bottom: 1px solid var(--line); transition: background-color var(--t-fast) ease; }
+  li:last-child { border-bottom: 0; }
+  li:hover { background: var(--pn); }
+  li > div { min-width: 0; }
+  li strong { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--tx); }
+  small { display: block; margin-top: 4px; font-size: 13px; color: var(--mu); overflow-wrap: anywhere; }
+  li small { font-family: var(--font-mono); font-size: 12px; }
+
+  /* Mémoire */
+  .memory-card { display: grid; gap: 20px; }
+  .memory-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .memory-header > div { min-width: 0; flex: 1 1 320px; }
+  .memory-header h3 { margin: 0 0 4px; }
+  .memory-header p { margin: 0; }
+  .memory-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+  .metric { display: grid; gap: 6px; padding: 16px; border-radius: var(--r-md); background: var(--pn); }
+  .metric.highlight { background: var(--ok-soft); }
+  .metric small { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mu); }
+  .metric strong { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--tx); }
+  .metric span { font-size: 13px; color: var(--mu); }
+
+  @media (max-width: 640px) {
+    article { padding: 16px; }
+    li { flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 4px; }
+    li a { width: 100%; }
+    .actions button { flex: 1 1 auto; }
+    .memory-header button { width: 100%; }
+    .memory-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    input[type='number'] { max-width: none; font-size: 16px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    button, a, li, input { transition: none; }
+  }
 </style>

@@ -50,9 +50,9 @@ const translations = {
     admin_category_access: 'ACCÈS & SÉCURITÉ',
     admin_nav_overview: 'Vue d’ensemble',
     admin_nav_libraries: 'Bibliothèques',
-    admin_nav_nodes: 'Nœuds de stockage',
+    admin_nav_nodes: 'Media Nodes',
     admin_nav_users: 'Utilisateurs',
-    admin_nav_tasks: 'Planificateur de tâches',
+    admin_nav_tasks: 'Tâches planifiées',
     admin_nav_sso: 'SSO (OpenID Connect)',
 
     // Users section

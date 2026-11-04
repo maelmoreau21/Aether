@@ -58,19 +58,31 @@
 </div>
 
 <style>
-  .library-options { display:grid; gap:28px; min-width:0; }
-  .option-section { min-width:0; } .option-section + .option-section { border-top:1px solid var(--color-line); padding-top:24px; }
-  h3 { margin:0; font-size:20px; font-weight:600; letter-spacing:-.02em; }
-  p,.hint { font-size:13px; color:var(--color-muted); line-height:1.6; } .hint { margin:8px 0 0; font-size:12px; }
-  .language-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
-  label { display:block; font-size:14px; line-height:1.5; margin:18px 0 8px; }
-  input:not([type=checkbox]),select { width:100%; min-width:0; min-height:44px; padding:10px 12px; background:var(--color-surface); color:var(--color-text); border:1px solid var(--color-line-strong); border-radius:var(--radius-sm); font-size:16px; }
-  input[type=checkbox] { width:20px; height:20px; flex:none; accent-color:var(--color-play); margin:2px 0 0; }
-  .toggle-row { display:flex; align-items:flex-start; gap:12px; min-height:44px; padding-block:12px; cursor:pointer; }
-  strong { font-weight:550; } small { display:block; margin-top:4px; font-size:12px; line-height:1.5; color:var(--color-muted); }
-  .image-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
-  .image-option { display:flex; align-items:flex-start; gap:12px; padding:12px; margin:0; border:1px solid var(--color-line); border-radius:var(--radius-sm); cursor:pointer; }
-  .image-option:has(input:checked) { border-color:var(--color-accent); }
-  .image-option:has(input:focus-visible) { outline:2px solid var(--color-accent); outline-offset:2px; }
-  @media(max-width:520px) { .language-grid,.image-grid { grid-template-columns:minmax(0,1fr); } }
+  .library-options { display: grid; gap: 28px; min-width: 0; font-family: var(--font); color: var(--tx); }
+  .option-section { min-width: 0; }
+  .option-section + .option-section { padding-top: 24px; border-top: 1px solid var(--line); }
+  h3 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+  p, .hint { font-size: 14px; line-height: 1.6; color: var(--mu); }
+  .hint { margin: 8px 0 0; font-size: 13px; }
+  .language-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+  label { display: block; margin: 20px 0 8px; font-size: 14px; font-weight: 700; line-height: 1.5; color: var(--tx); }
+  input:not([type='checkbox']), select { width: 100%; min-width: 0; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  select { padding-right: 40px; }
+  input:not([type='checkbox']):hover, select:hover:not(:disabled) { background-color: var(--pn-2); border-color: transparent; }
+  input:not([type='checkbox']):focus, select:focus, select:focus-visible { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--ac); }
+  .toggle-row { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; margin: 8px 0 0; padding-block: 12px; font-weight: 400; cursor: pointer; }
+  strong { font-size: 15px; font-weight: 700; }
+  small { display: block; margin-top: 4px; font-size: 13px; font-weight: 500; line-height: 1.5; color: var(--mu); }
+  .image-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+  .image-option { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; margin: 0; padding: 14px; border: 1px solid transparent; border-radius: var(--r-sm); background: var(--pn); font-weight: 400; cursor: pointer; transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease; }
+  .image-option:hover { background: var(--pn-2); }
+  .image-option:has(input:checked) { border-color: var(--ac); }
+  .image-option:has(input:focus-visible) { outline: 2px solid var(--ac); outline-offset: 3px; }
+  @media (max-width: 640px) {
+    .language-grid, .image-grid { grid-template-columns: minmax(0, 1fr); }
+    .language-grid { gap: 0; }
+    input:not([type='checkbox']), select { font-size: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) { input, select, .image-option { transition: none; } }
 </style>

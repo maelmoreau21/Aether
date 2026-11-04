@@ -132,11 +132,11 @@ fn hex_color(value: &str) -> bool {
 impl Preferences {
     fn valid(&self) -> bool {
         self.home_sections.as_ref().is_none_or(|sections| {
-            sections.len() <= 5
+            sections.len() <= 6
                 && sections.iter().enumerate().all(|(index, section)| {
                     matches!(
                         section.as_str(),
-                        "hero" | "continue" | "films" | "series" | "rated"
+                        "hero" | "continue" | "tonight" | "films" | "series" | "rated"
                     ) && !sections[..index].contains(section)
                 })
         }) && self

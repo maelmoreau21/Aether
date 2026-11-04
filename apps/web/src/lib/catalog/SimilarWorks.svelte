@@ -78,7 +78,7 @@
 
 {#if similarWorks.length > 0}
   <div class="similar-works-section">
-    <MediaShelf title="Plus de ce genre">
+    <MediaShelf title={work.kind === 'series' ? 'Séries similaires' : 'Films similaires'}>
       {#each similarWorks as item (item.id)}
         <Poster work={item} href={itemHref(item)} />
       {/each}
@@ -87,7 +87,10 @@
 {/if}
 
 <style>
+  /* Toujours en bas de la fiche, séparé du reste */
   .similar-works-section {
-    margin-top: 36px;
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
   }
 </style>

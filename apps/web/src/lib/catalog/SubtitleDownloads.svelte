@@ -157,12 +157,39 @@
 </dialog>
 
 <style>
-  dialog { width:min(720px,calc(100vw - 32px)); max-height:90dvh; padding:0; border:1px solid var(--color-line); border-radius:var(--radius-sm); background:var(--color-surface); color:var(--color-text); }
-  dialog::backdrop { background:rgba(0,0,0,.75); }
-  .modal-header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:20px; border-bottom:1px solid var(--color-line); }
-  h3 { margin:0; font-size:18px; } .modal-body { padding:20px; } p { font-size:13px; line-height:1.6; color:var(--color-muted); }
-  label { display:block; margin:16px 0; } input:not([type=checkbox]),select { display:block; width:100%; margin-top:8px; padding:10px; background:var(--color-bg); color:var(--color-text); border:1px solid var(--color-line); border-radius:var(--radius-sm); }
-  .check { display:flex; gap:10px; align-items:center; } button { padding:10px 14px; border:1px solid var(--color-line); border-radius:var(--radius-sm); background:var(--color-bg); color:var(--color-text); cursor:pointer; } button:disabled { opacity:.5; cursor:default; }
-  .subtitle-row { display:flex; justify-content:space-between; gap:16px; align-items:center; padding:16px 0; border-bottom:1px solid var(--color-line); overflow-wrap:anywhere; } .subtitle-row p { margin:4px 0; } .error { color:var(--color-error,#ef7878); } nav { display:flex; gap:12px; align-items:center; margin-top:16px; }
-  @media(max-width:600px) { .subtitle-row { align-items:flex-start; flex-direction:column; } }
+  dialog { width: min(720px, calc(100vw - 48px)); max-width: none; max-height: calc(100dvh - 48px); padding: 0; border: 1px solid var(--line); border-radius: var(--r-xl); background: var(--bg-3); color: var(--tx); box-shadow: var(--shadow); overscroll-behavior: contain; }
+  dialog::backdrop { background: rgb(6 8 14 / 0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+  .modal-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 24px 28px 12px; background: var(--bg-3); }
+  .modal-header button { flex: none; width: 44px; padding: 0; border-radius: 14px; }
+  h3 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+  h4 { margin: 28px 0 4px; font-size: 17px; font-weight: 700; }
+  .modal-body { padding: 4px 28px 28px; }
+  p { font-size: 13px; line-height: 1.6; color: var(--mu); }
+  label { display: block; margin: 16px 0; font-size: 14px; font-weight: 700; color: var(--tx); }
+  input:not([type=checkbox]), select { box-sizing: border-box; display: block; width: 100%; min-height: 46px; margin-top: 8px; padding: 0 14px; background: var(--pn); color: var(--tx); border: 1px solid transparent; border-radius: var(--r-sm); font: inherit; font-size: 14px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease); }
+  input:not([type=checkbox]):focus, select:focus { outline: none; border-color: var(--ac); background: var(--bg-3); box-shadow: none; }
+  select option { background: var(--bg-3); color: var(--tx); }
+  input[type=checkbox] { flex: none; width: 18px; height: 18px; accent-color: var(--ac); }
+  .check { display: flex; gap: 10px; align-items: center; min-height: 44px; margin: 4px 0; font-weight: 600; }
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 16px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--pn); color: var(--tx); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); }
+  button:hover:not(:disabled) { background: var(--pn-2); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button[type=submit] { background: var(--btn); color: var(--btn-tx); }
+  button[type=submit]:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
+  .subtitle-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  .subtitle-row strong { font-size: 14px; font-weight: 700; color: var(--tx); }
+  .subtitle-row p { margin: 4px 0; }
+  .subtitle-row button { flex: none; }
+  .error { color: var(--err); }
+  p.error[role=alert] { padding: 12px 16px; border-radius: var(--r-sm); background: var(--err-soft); font-weight: 600; }
+  nav { display: flex; gap: 12px; align-items: center; margin-top: 16px; font-variant-numeric: tabular-nums; }
+  @media (max-width: 639px) {
+    dialog { width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; }
+    .modal-header { padding: 16px 16px 8px; }
+    h3 { font-size: 20px; }
+    .modal-body { padding: 4px 16px calc(24px + env(safe-area-inset-bottom, 0px)); }
+    .subtitle-row { align-items: flex-start; flex-direction: column; }
+  }
 </style>

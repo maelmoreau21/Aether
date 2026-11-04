@@ -167,7 +167,7 @@
 
 <style>
   .credits-section {
-    margin-top: 36px;
+    margin-top: 40px;
   }
 
   .credits-header {
@@ -179,12 +179,11 @@
   }
 
   h2 {
-    font-family: var(--font-display);
-    font-size: clamp(20px, 2.1vw, 25px);
-    font-weight: 700;
-    letter-spacing: -0.03em;
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
     margin: 0;
-    color: var(--color-text-bright);
+    color: var(--tx);
   }
 
   .carousel-nav {
@@ -196,37 +195,42 @@
   .nav-arrow {
     display: grid;
     place-items: center;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: var(--color-glass-raised);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--color-line-strong);
-    color: var(--color-text-bright);
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 14px;
+    background: var(--pn);
+    border: 1px solid transparent;
+    color: var(--tx);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: background-color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
   }
 
   .nav-arrow:hover:not(:disabled) {
-    background: var(--color-accent);
-    border-color: var(--color-accent);
-    color: var(--color-on-accent);
-    transform: scale(1.06);
+    background: var(--pn-2);
+  }
+
+  .nav-arrow:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  .nav-arrow:focus-visible {
+    outline: 2px solid var(--ac);
+    outline-offset: 3px;
   }
 
   .nav-arrow:disabled {
-    opacity: 0.25;
+    opacity: 0.45;
     cursor: default;
   }
 
   .cast-carousel {
     display: flex;
-    gap: 18px;
+    gap: 20px;
     overflow-x: auto;
     scroll-behavior: smooth;
-    padding: 8px 6px 16px;
-    margin: -4px -6px;
+    padding: 6px 6px 12px;
+    margin: -6px -6px 0;
     scrollbar-width: none;
     -ms-overflow-style: none;
     scroll-snap-type: x mandatory;
@@ -237,39 +241,35 @@
   }
 
   .cast-card {
-    flex: 0 0 clamp(142px, 12.5vw, 178px);
+    flex: 0 0 132px;
     scroll-snap-align: start;
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 10px;
     min-width: 0;
     text-align: center;
   }
 
   .portrait-card {
-    aspect-ratio: 2 / 3;
+    width: 112px;
+    aspect-ratio: 1;
     position: relative;
     overflow: hidden;
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    box-shadow: var(--shadow-card);
-    transition:
-      transform 240ms cubic-bezier(0.25, 0.8, 0.25, 1),
-      border-color 240ms ease,
-      box-shadow 240ms ease;
+    border-radius: 50%;
+    background: var(--pn-2);
+    transition: transform var(--t-med) var(--ease);
   }
 
   .cast-card:hover .portrait-card {
-    transform: scale(1.04);
-    border-color: var(--color-line-strong);
-    box-shadow: var(--shadow-card-hover);
+    transform: scale(1.03);
   }
 
   .portrait-img {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    object-position: center 20%;
     display: block;
   }
 
@@ -278,23 +278,13 @@
     height: 100%;
     display: grid;
     place-items: center;
-    background:
-      radial-gradient(circle at 50% 30%, rgba(249, 115, 22, 0.16), transparent 68%),
-      var(--color-raised);
+    background: var(--pn-2);
   }
 
   .initials-badge {
-    display: grid;
-    place-items: center;
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    background: var(--color-surface);
-    border: 1px solid var(--color-line-strong);
-    color: var(--color-text-bright);
-    font-family: var(--font-display);
-    font-size: 22px;
-    font-weight: 750;
+    color: var(--tx);
+    font-size: 30px;
+    font-weight: 800;
     letter-spacing: -0.02em;
   }
 
@@ -302,33 +292,39 @@
     display: flex;
     flex-direction: column;
     gap: 3px;
-    padding: 0 4px;
+    padding: 0 2px;
   }
 
   .cast-name {
-    color: var(--color-text-bright);
+    color: var(--tx);
     font-size: 14px;
-    font-weight: 650;
+    font-weight: 700;
     line-height: 1.35;
     overflow-wrap: anywhere;
   }
 
   .cast-role {
-    color: var(--color-muted);
-    font-size: 12.5px;
+    color: var(--mu);
+    font-size: 12px;
     line-height: 1.35;
     overflow-wrap: anywhere;
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 639px) {
     .carousel-nav {
       display: none;
     }
-    .cast-card {
-      flex: 0 0 calc((100vw - 64px) / 2.35);
-    }
     .cast-carousel {
-      gap: 12px;
+      gap: 14px;
+    }
+    .cast-card {
+      flex-basis: 104px;
+    }
+    .portrait-card {
+      width: 88px;
+    }
+    .initials-badge {
+      font-size: 24px;
     }
   }
 </style>

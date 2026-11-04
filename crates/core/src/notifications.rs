@@ -1,4 +1,4 @@
-//! Durable, opt-in notifications. Task completion rows are the durable event source.
+//! Durable, opt-in notifications from task completion and inventory addition facts.
 use crate::{
     auth::AuthState,
     database::{query, query_as, query_scalar},
@@ -94,15 +94,26 @@ struct Preferences {
     enabled: bool,
     scans: bool,
     tasks: bool,
+    content: bool,
 }
-#[derive(Clone, Serialize, sqlx::FromRow)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, sqlx::FromRow)]
 struct Event {
     id: String,
     kind: String,
     task_id: String,
     library_id: Option<String>,
     occurred_at: i64,
+}
+impl Serialize for Event {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut value = json!({"id":self.id,"kind":self.kind,"libraryId":self.library_id,"occurredAt":self.occurred_at});
+        value[if self.kind == "content.added" {
+            "workId"
+        } else {
+            "taskId"
+        }] = json!(self.task_id);
+        value.serialize(serializer)
+    }
 }
 #[derive(sqlx::FromRow)]
 struct Delivery {
@@ -174,7 +185,7 @@ async fn channels(State(auth): State<AuthState>, headers: HeaderMap) -> Outcome<
         json!({"id":r.id,"name":r.name,"recipientId":r.recipient_id,"kind":r.kind,"enabled":r.enabled==1,"config":config.redacted()})
     }).collect();
     Ok(Json(
-        json!({"items":items,"users":users.into_iter().map(|(id,role,name)|json!({"id":id,"role":role,"name":name})).collect::<Vec<_>>(),"events":["task.completed","task.failed","scan.completed"],"unavailableEvents":["node.unavailable","provider.error","content.added"],"retentionDays":30}),
+        json!({"items":items,"users":users.into_iter().map(|(id,role,name)|json!({"id":id,"role":role,"name":name})).collect::<Vec<_>>(),"events":["task.completed","task.failed","scan.completed","content.added"],"unavailableEvents":["node.unavailable","provider.error"],"retentionDays":30}),
     ))
 }
 async fn create(
@@ -216,15 +227,13 @@ async fn persist_channel(
                 .fetch_optional(store.pool())
                 .await
                 .map_err(db)?;
-        if let Some((kind, previous)) = previous {
-            if let Ok(previous) = serde_json::from_str::<Config>(&previous) {
-                if kind == input.kind
-                    && previous.destination == input.config.destination
-                    && previous.smtp_host == input.config.smtp_host
-                {
-                    input.config.secret = previous.secret;
-                }
-            }
+        if let Some((kind, previous)) = previous
+            && let Ok(previous) = serde_json::from_str::<Config>(&previous)
+            && kind == input.kind
+            && previous.destination == input.config.destination
+            && previous.smtp_host == input.config.smtp_host
+        {
+            input.config.secret = previous.secret;
         }
     }
     transport::validate(&input.kind, &input.config)
@@ -294,11 +303,17 @@ async fn load_preferences(store: &IdentityStore, user: &str) -> Result<Preferenc
             .bind(user)
             .fetch_optional(store.pool())
             .await?;
+    let content: Option<i64> =
+        query_scalar("SELECT enabled FROM notification_content_preferences WHERE user_id=?")
+            .bind(user)
+            .fetch_optional(store.pool())
+            .await?;
     Ok(row
         .map(|(e, s, t)| Preferences {
             enabled: e == 1,
             scans: s == 1,
             tasks: t == 1,
+            content: content == Some(1),
         })
         .unwrap_or_default())
 }
@@ -311,11 +326,19 @@ async fn save_preferences(
     if actor.user.role != Role::Administrator {
         input.tasks = false;
     }
+    let mut conn = auth.store.pool().acquire().await.map_err(db)?;
+    let mut tx = crate::database::begin_write_serialized(&mut conn, LOCK)
+        .await
+        .map_err(db)?;
     query("INSERT INTO notification_preferences(user_id,enabled,scans,tasks) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,scans=excluded.scans,tasks=excluded.tasks")
-        .bind(&actor.user.id).bind(i64::from(input.enabled)).bind(i64::from(input.scans)).bind(i64::from(input.tasks)).execute(auth.store.pool()).await.map_err(db)?;
+        .bind(&actor.user.id).bind(i64::from(input.enabled)).bind(i64::from(input.scans)).bind(i64::from(input.tasks)).execute(&mut *tx).await.map_err(db)?;
+    // Starting/restarting a subscription never sends the old catalogue as new content.
+    query("INSERT INTO notification_content_preferences(user_id,enabled,since_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,since_at=CASE WHEN notification_content_preferences.enabled=1 AND excluded.enabled=1 THEN notification_content_preferences.since_at ELSE excluded.since_at END")
+        .bind(&actor.user.id).bind(i64::from(input.enabled && input.content)).bind(now()).execute(&mut *tx).await.map_err(db)?;
     if !input.enabled {
-        query("UPDATE notification_deliveries SET status='suppressed',error_code='recipient_opted_out',completed_at=? WHERE status='pending' AND channel_id IN (SELECT id FROM notification_channels WHERE recipient_id=?)").bind(now()).bind(&actor.user.id).execute(auth.store.pool()).await.map_err(db)?;
+        query("UPDATE notification_deliveries SET status='suppressed',error_code='recipient_opted_out',completed_at=? WHERE status='pending' AND channel_id IN (SELECT id FROM notification_channels WHERE recipient_id=?)").bind(now()).bind(&actor.user.id).execute(&mut *tx).await.map_err(db)?;
     }
+    tx.commit().await.map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn history(State(auth): State<AuthState>, headers: HeaderMap) -> Outcome<Json<Value>> {
@@ -352,11 +375,27 @@ async fn recipient_allowed(
     if !prefs.enabled {
         return Ok(false);
     }
-    if event.kind != "scan.completed" {
+    if event.kind != "scan.completed" && event.kind != "content.added" {
         return Ok(role == "administrator" && prefs.tasks);
     }
-    if !prefs.scans {
+    if event.kind == "scan.completed" && !prefs.scans {
         return Ok(false);
+    }
+    if event.kind == "content.added" {
+        let subscribed: i64 = query_scalar("SELECT COUNT(*) FROM notification_content_preferences WHERE user_id=? AND enabled=1 AND since_at<?")
+            .bind(&channel.recipient_id).bind(event.occurred_at).fetch_one(store.pool()).await?;
+        if !prefs.content || subscribed != 1 {
+            return Ok(false);
+        }
+        let source: i64 = query_scalar("SELECT COUNT(*) FROM inventory_works WHERE id=? AND library_id=? AND has_available_asset=1 AND kind IN ('film','series','episode')")
+            .bind(&event.task_id).bind(&event.library_id).fetch_one(store.pool()).await?;
+        if source != 1
+            || !crate::product::parental_allowed(store, &channel.recipient_id, &event.task_id)
+                .await
+                .unwrap_or(false)
+        {
+            return Ok(false);
+        }
     }
     let Some(library) = event.library_id.as_ref() else {
         return Ok(false);
@@ -404,29 +443,53 @@ pub(crate) async fn collect(store: &IdentityStore, timestamp: i64) -> Result<(),
             library_id: library,
             occurred_at: at,
         };
-        let mut conn = store.pool().acquire().await?;
-        let mut tx = crate::database::begin_write_serialized(&mut conn, LOCK).await?;
-        let inserted=query("INSERT INTO notification_events(id,kind,task_id,library_id,occurred_at,source_attempt,source_status) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING").bind(&event.id).bind(&event.kind).bind(&event.task_id).bind(&event.library_id).bind(event.occurred_at).bind(attempt).bind(status).execute(&mut *tx).await?.rows_affected();
-        if inserted == 1 {
-            let channels:Vec<(String,String)>=query_as("SELECT id,generation FROM notification_channels WHERE enabled=1 AND created_at<=? ORDER BY id LIMIT 32").bind(at).fetch_all(&mut *tx).await?;
-            for (id, generation) in channels {
-                // Audience is rechecked before delivery as well; queued payloads contain no metadata.
-                let pending:i64=query_scalar("SELECT COUNT(*) FROM notification_deliveries WHERE channel_id=? AND status IN ('pending','sending')").bind(&id).fetch_one(&mut *tx).await?;
-                let (state, error) = if pending >= 100 {
-                    ("suppressed", Some("notification_queue_limit"))
-                } else {
-                    ("pending", None)
-                };
-                query("INSERT INTO notification_deliveries(id,event_id,channel_id,generation,status,available_at,error_code,completed_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(event_id,channel_id) DO NOTHING")
-                    .bind(uuid::Uuid::new_v4().to_string()).bind(&event.id).bind(id).bind(generation).bind(state).bind(timestamp).bind(error).bind((state=="suppressed").then_some(timestamp)).execute(&mut *tx).await?;
-            }
-        }
-        tx.commit().await?;
+        enqueue(store, timestamp, &event, attempt, &status).await?;
+    }
+    // Only additions after a subscription started qualify; existing catalogue is not announced.
+    let content: Vec<(String, String, i64)> = query_as("SELECT w.id,w.library_id,w.added_at FROM inventory_works w WHERE w.added_at>? AND w.added_at<=? AND w.kind IN ('film','series','episode') AND w.has_available_asset=1 AND EXISTS(SELECT 1 FROM notification_content_preferences p JOIN notification_preferences base ON base.user_id=p.user_id WHERE p.enabled=1 AND base.enabled=1 AND p.since_at<w.added_at) AND NOT EXISTS(SELECT 1 FROM notification_events e WHERE e.kind='content.added' AND e.task_id=w.id AND e.occurred_at=w.added_at) ORDER BY w.added_at,w.id LIMIT 100")
+        .bind(timestamp-LOOKBACK).bind(timestamp).fetch_all(store.pool()).await?;
+    for (work, library, at) in content {
+        let event = Event {
+            id: format!("event-{:x}", Sha256::digest(format!("content:{work}:{at}"))),
+            kind: "content.added".into(),
+            task_id: work,
+            library_id: Some(library),
+            occurred_at: at,
+        };
+        enqueue(store, timestamp, &event, 0, "added").await?;
     }
     query("DELETE FROM notification_events WHERE occurred_at<?")
         .bind(timestamp - RETENTION)
         .execute(store.pool())
         .await?;
+    Ok(())
+}
+
+async fn enqueue(
+    store: &IdentityStore,
+    timestamp: i64,
+    event: &Event,
+    attempt: i64,
+    status: &str,
+) -> Result<(), sqlx::Error> {
+    let mut conn = store.pool().acquire().await?;
+    let mut tx = crate::database::begin_write_serialized(&mut conn, LOCK).await?;
+    let inserted=query("INSERT INTO notification_events(id,kind,task_id,library_id,occurred_at,source_attempt,source_status) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING").bind(&event.id).bind(&event.kind).bind(&event.task_id).bind(&event.library_id).bind(event.occurred_at).bind(attempt).bind(status).execute(&mut *tx).await?.rows_affected();
+    if inserted == 1 {
+        let channels:Vec<(String,String)>=query_as("SELECT id,generation FROM notification_channels c WHERE enabled=1 AND created_at<=? AND (?!='content.added' OR EXISTS(SELECT 1 FROM notification_content_preferences p JOIN notification_preferences base ON base.user_id=p.user_id WHERE p.user_id=c.recipient_id AND p.enabled=1 AND base.enabled=1 AND p.since_at<?)) ORDER BY id LIMIT 32").bind(event.occurred_at).bind(&event.kind).bind(event.occurred_at).fetch_all(&mut *tx).await?;
+        for (id, generation) in channels {
+            // Audience is rechecked before delivery as well; queued payloads contain no metadata.
+            let pending:i64=query_scalar("SELECT COUNT(*) FROM notification_deliveries WHERE channel_id=? AND status IN ('pending','sending')").bind(&id).fetch_one(&mut *tx).await?;
+            let (state, error) = if pending >= 100 {
+                ("suppressed", Some("notification_queue_limit"))
+            } else {
+                ("pending", None)
+            };
+            query("INSERT INTO notification_deliveries(id,event_id,channel_id,generation,status,available_at,error_code,completed_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(event_id,channel_id) DO NOTHING")
+                    .bind(uuid::Uuid::new_v4().to_string()).bind(&event.id).bind(id).bind(generation).bind(state).bind(timestamp).bind(error).bind((state=="suppressed").then_some(timestamp)).execute(&mut *tx).await?;
+        }
+    }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -471,17 +534,16 @@ pub(crate) async fn run_once(store: &IdentityStore, timestamp: i64) -> Result<bo
         .await?;
     let mut result = Err("notification_revoked");
     let mut suppressed = true;
-    if let (Some(channel), Some(event)) = (channel, event) {
-        if recipient_allowed(store, &channel, &event).await? {
-            suppressed = false;
-            result = match serde_json::from_str::<Config>(&channel.config_json) {
-                Ok(config) => {
-                    transport::deliver_checked(&channel.kind, &config, &event, store, &channel)
-                        .await
-                }
-                Err(_) => Err("notification_invalid_config"),
-            };
-        }
+    if let (Some(channel), Some(event)) = (channel, event)
+        && recipient_allowed(store, &channel, &event).await?
+    {
+        suppressed = false;
+        result = match serde_json::from_str::<Config>(&channel.config_json) {
+            Ok(config) => {
+                transport::deliver_checked(&channel.kind, &config, &event, store, &channel).await
+            }
+            Err(_) => Err("notification_invalid_config"),
+        };
     }
     let (status, error) = match result {
         Ok(()) => ("sent", None),

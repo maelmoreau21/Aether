@@ -24,5 +24,16 @@
   div {
     display: block;
     flex-shrink: 0;
+    background: var(--pn-2);
+    animation: halo-skeleton-pulse 1.6s var(--ease) infinite;
+  }
+
+  @keyframes halo-skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    div { animation: none; }
   }
 </style>

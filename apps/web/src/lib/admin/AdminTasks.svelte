@@ -395,7 +395,7 @@
                 <span class="task-copy">
                   <span class="task-title">{task.name}</span>
                   <span class="task-subtitle">{task.plan?.enabled ? `${intervalLabel(task.plan.interval)} · prochaine échéance ${date(task.plan.next)}` : 'Lancement manuel · aucun intervalle actif'}</span>
-                  <span class="task-subtitle">{executionLabel(task)}</span>
+                  <span class="task-subtitle task-status" data-outcome={task.running ? 'running' : task.plan?.outcome}>{executionLabel(task)}</span>
                   <span class="task-subtitle">{lastRun(task)}</span>
                   {#if task.reason}<span class="task-subtitle">{task.reason}</span>{/if}
                 </span>
@@ -445,47 +445,120 @@
 </dialog>
 
 <style>
-  section { min-width: 0; color: var(--text-primary); }
-  .plans-section,.automation-section,.queue-section { margin-top:32px; border-top:1px solid var(--border-subtle); }
-  .plans-section > summary,.automation-section > summary,.queue-section > summary { cursor:pointer; padding:20px 0; min-height:44px; font-size:18px; font-weight:600; }
-  .section-intro { margin:0; color:var(--text-secondary); line-height:1.6; }
-  h2 { font-size: clamp(24px, 2.2vw, 32px); font-weight: 400; margin: 0; overflow-wrap: anywhere; }
+  section { min-width: 0; color: var(--tx); font-family: var(--font); }
+
+  /* Titres */
+  h2 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+  h3 { margin: 0; font-size: 17px; font-weight: 700; }
   .list-header, .detail-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-  .category { margin-top: 32px; } .category > h3 { font-size: 24px; font-weight: 400; margin: 0 0 18px; }
-  .task-list, .trigger-list { background: var(--bg-surface); }
-  .task-row { display: flex; align-items: center; min-height: 96px; padding-right: 20px; }
-  .task-row:hover { background: var(--bg-elevated); }
-  .task-link { display: flex; align-items: center; gap: 20px; flex: 1; min-width: 0; padding: 20px 24px; }
-  .clock { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; color: var(--text-secondary); }
-  .task-copy { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
-  .task-title { font-size: 18px; } .task-subtitle { font-size: 14px; color: var(--text-secondary); line-height: 1.45; }
-  button { font: inherit; color: var(--text-primary); min-height: 44px; padding: 10px 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); }
-  button:hover:not(:disabled) { background: var(--bg-elevated); }
-  .run { display: grid; place-items: center; width: 48px; padding: 8px; flex-shrink: 0; border: 0; background: transparent; }
-  .refresh { display: inline-flex; align-items: center; gap: 8px; }
-  .primary { display: inline-flex; align-items: center; gap: 12px; border: 0; background: var(--color-play); color: var(--color-on-play); }
-  .primary:hover:not(:disabled) { background: var(--color-play); box-shadow: var(--shadow-sm); } .primary > span { font-size: 24px; line-height: 1; }
-  .back { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; margin-bottom: 24px; color: var(--text-secondary); }
-  .description { margin: 24px 0; font-size: 16px; color: var(--text-secondary); line-height: 1.6; }
-  .description + .refresh { margin-bottom:12px; }
-  .reason { color: var(--text-secondary); line-height: 1.6; } .reason a { color: var(--accent-primary); text-decoration: underline; }
-  .trigger-list { margin: 24px 0 32px; } .trigger-list h3 { margin: 0; padding: 18px 24px; font-size: 16px; border-bottom: 1px solid var(--border-subtle); }
-  .trigger-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--border-subtle); }
-  .trigger-row p { margin: 0 0 6px; font-size: 18px; } small, .results p { color: var(--text-secondary); }
-  .remove { border: 0; background: var(--status-error); color: white; font-size: 24px; border-radius: 50%; width: 44px; padding: 0; flex-shrink: 0; }
-  .remove:hover:not(:disabled) { background: var(--status-error); opacity: .85; }
-  .no-trigger { padding: 24px; color: var(--text-secondary); line-height: 1.6; } .results h3 { font-weight: 500; }
-  dl { display: flex; flex-wrap: wrap; gap: 24px; margin: 24px 0; } dt { font-size: 13px; color: var(--text-secondary); } dd { margin: 6px 0 0; font-size: 18px; }
-  li { overflow-wrap: anywhere; line-height: 1.6; } .feedback { padding: 16px; background: var(--color-success-soft); margin-top: 20px; }
-  .error { background: var(--color-danger-soft); border-left: 3px solid var(--status-error); }
-  dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-xl); background: var(--bg-elevated); color: var(--text-primary); padding: 24px; }
-  dialog::backdrop { background: rgb(0 0 0 / .65); } dialog form, label { display: grid; gap: 10px; }
-  dialog form { gap: 20px; } dialog p { margin: 0; line-height: 1.5; color: var(--text-secondary); }
-  input { min-width: 0; width: 100%; padding: 12px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
-  .enabled { display:flex; align-items:center; gap:10px; } .enabled input { width:auto; }
-  .dialog-actions { display: flex; justify-content: flex-end; gap: 12px; }
+
+  /* Sections repliables */
+  .plans-section, .automation-section, .queue-section { margin-top: 20px; padding: 0 24px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-lg); }
+  .plans-section { padding-bottom: 24px; }
+  .plans-section:not([open]), .automation-section:not([open]), .queue-section:not([open]) { padding-bottom: 0; }
+  .automation-section[open], .queue-section[open] { padding-bottom: 8px; }
+  .plans-section > summary, .automation-section > summary, .queue-section > summary { display: flex; align-items: center; gap: 10px; min-height: 64px; cursor: pointer; font-size: 17px; font-weight: 700; color: var(--tx); list-style: none; }
+  .plans-section > summary::-webkit-details-marker, .automation-section > summary::-webkit-details-marker, .queue-section > summary::-webkit-details-marker { display: none; }
+  .plans-section > summary::after, .automation-section > summary::after, .queue-section > summary::after { content: ''; width: 8px; height: 8px; margin-left: auto; border-right: 2px solid var(--mu); border-bottom: 2px solid var(--mu); transform: rotate(45deg); transition: transform var(--t-med) var(--ease); }
+  .plans-section[open] > summary::after, .automation-section[open] > summary::after, .queue-section[open] > summary::after { transform: rotate(-135deg); }
+  summary:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; border-radius: var(--r-xs); }
+  .section-intro { margin: 0 0 16px; max-width: 75ch; color: var(--mu); font-size: 14px; line-height: 1.6; }
+
+  /* Catégories et lignes de tâches */
+  .category { margin-top: 28px; }
+  .category > h3 { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mu); }
+  .task-list { border-top: 1px solid var(--line); }
+  .task-row { display: flex; align-items: center; gap: 12px; min-height: 88px; padding-right: 8px; border-bottom: 1px solid var(--line); border-radius: 0; transition: background-color var(--t-fast) ease; }
+  .task-row:hover { background: var(--pn); }
+  .task-link { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0; padding: 16px 8px; color: var(--tx); border-radius: var(--r-sm); }
+  .task-link:focus-visible { outline: 2px solid var(--ac); outline-offset: -2px; }
+  .clock { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 14px; background: var(--pn); color: var(--mu); }
+  .task-copy { display: grid; justify-items: start; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+  .task-title { font-size: 15px; font-weight: 700; color: var(--tx); }
+  .task-subtitle { font-size: 13px; line-height: 1.45; color: var(--mu); }
+  .task-status { display: inline-flex; align-items: center; height: 24px; margin: 2px 0; padding: 0 9px; border-radius: var(--r-xs); background: var(--pn-2); color: var(--tx); font-size: 12px; font-weight: 700; line-height: 1; white-space: nowrap; }
+  .task-status[data-outcome='completed'], .task-status[data-outcome='succeeded'] { background: var(--ok-soft); color: var(--ok); }
+  .task-status[data-outcome='error'], .task-status[data-outcome='failed'] { background: var(--err-soft); color: var(--err); }
+  .task-status[data-outcome='interrupted'], .task-status[data-outcome='unavailable'], .task-status[data-outcome='stopped'], .task-status[data-outcome='paused'] { background: var(--warn-soft); color: var(--warn); }
+  .task-status[data-outcome='running'], .task-status[data-outcome='queued'], .task-status[data-outcome='dispatching'], .task-status[data-outcome='already_running'] { background: var(--ac-soft); color: var(--ac); }
+
+  /* Boutons */
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 16px; border: 0; border-radius: var(--r-md); background: var(--pn-2); color: var(--tx); font-family: var(--font); font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
+  button:hover:not(:disabled) { background: var(--pn-3); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .run { display: grid; place-items: center; flex: none; width: 44px; height: 44px; min-height: 44px; padding: 0; border-radius: 14px; background: var(--pn); }
+  .run:hover:not(:disabled) { background: var(--pn-2); }
+  .refresh { margin-bottom: 4px; }
+  .primary { height: 48px; padding: 0 22px; background: var(--btn); color: var(--btn-tx); font-size: 15px; box-shadow: none; }
+  .primary:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
+  .primary > span { font-size: 20px; line-height: 1; }
+
+  /* Détail d'une tâche */
+  .back { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; margin-bottom: 16px; padding: 0 14px 0 8px; border-radius: var(--r-sm); color: var(--mu); font-size: 14px; font-weight: 600; transition: background-color var(--t-fast) ease, color var(--t-fast) ease; }
+  .back:hover { background: var(--pn); color: var(--tx); }
+  .back:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .description { max-width: 75ch; margin: 12px 0 20px; font-size: 15px; line-height: 1.6; color: var(--mu); }
+  .description + .refresh { margin-bottom: 16px; }
+  .reason { margin: 0 0 16px; padding: 14px 16px; border-radius: var(--r-md); background: var(--warn-soft); color: var(--tx); font-size: 14px; line-height: 1.6; }
+  .reason a { color: var(--tx); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+  .reason a:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+
+  .trigger-list, .results { margin: 20px 0; padding: 24px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-lg); }
+  .trigger-list h3, .results h3 { margin: 0 0 12px; }
+  .trigger-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); }
+  .trigger-row p { margin: 0 0 4px; font-size: 15px; font-weight: 700; color: var(--tx); }
+  small { font-size: 13px; color: var(--mu); }
+  .trigger-list > p, .results p { margin: 6px 0; font-size: 14px; line-height: 1.6; color: var(--mu); }
+  .remove { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border-radius: 14px; background: var(--err-soft); color: var(--err); font-size: 22px; }
+  .remove:hover:not(:disabled) { background: var(--err-soft); box-shadow: inset 0 0 0 1px currentColor; }
+  .no-trigger { margin: 0; padding: 16px 0; color: var(--mu); font-size: 14px; line-height: 1.6; }
+  .results p.error { padding: 12px 14px; border-radius: var(--r-md); background: var(--err-soft); color: var(--tx); }
+  dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 16px; margin: 20px 0; }
+  dl > div { padding: 14px 16px; border-radius: var(--r-md); background: var(--pn); }
+  dt { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mu); }
+  dd { margin: 6px 0 0; font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--tx); }
+  details summary { min-height: 44px; cursor: pointer; }
+  .results details summary { display: flex; align-items: center; font-size: 14px; font-weight: 700; }
+  li { color: var(--mu); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+
+  /* Retours */
+  .feedback { margin: 16px 0 0; padding: 14px 16px; border-radius: var(--r-md); background: var(--ok-soft); color: var(--tx); font-size: 14px; line-height: 1.5; }
+  .feedback.error { background: var(--err-soft); }
+  [role='status'] { color: var(--mu); }
+
+  /* Dialogue */
+  dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 28px; border: 1px solid var(--line); border-radius: var(--r-xl); background: var(--bg-3); color: var(--tx); font-family: var(--font); box-shadow: var(--shadow); }
+  dialog::backdrop { background: rgb(6 8 14 / 0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+  dialog form { display: grid; gap: 18px; }
+  dialog h2 { font-size: 22px; }
+  dialog p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--mu); }
+  dialog .feedback { margin: 0; color: var(--tx); }
+  label { display: grid; gap: 8px; font-size: 14px; font-weight: 700; color: var(--tx); }
+  input:not([type='checkbox']), select { box-sizing: border-box; width: 100%; min-width: 0; height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font-family: var(--font); font-size: 14px; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  select { padding-right: 40px; }
+  input:not([type='checkbox']):hover, select:hover { background-color: var(--pn-2); }
+  input:not([type='checkbox']):focus, select:focus { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  input:focus-visible, select:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .enabled { display: flex; align-items: center; gap: 12px; min-height: 44px; font-weight: 600; }
+  .enabled input { width: 20px; height: 20px; margin: 0; accent-color: var(--ac); }
+  .dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .dialog-actions button { min-height: 48px; }
+
   @media (max-width: 640px) {
-    .list-header { flex-wrap: wrap; } .task-link { padding: 16px 12px; gap: 12px; } .task-row { padding-right: 8px; }
-    .clock { width: 40px; height: 40px; } .task-title { font-size: 16px; } .task-subtitle { font-size: 13px; } .trigger-list h3, .trigger-row { padding: 16px; }
+    .list-header { flex-wrap: wrap; }
+    .plans-section, .automation-section, .queue-section { padding: 0 16px; }
+    .plans-section[open] { padding-bottom: 16px; }
+    .task-link { gap: 12px; padding: 14px 4px; }
+    .task-row { padding-right: 4px; }
+    .trigger-list, .results { padding: 16px; }
+    dialog { width: 100vw; max-width: 100vw; margin: auto 0 0; padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px)); border-radius: var(--r-xl) var(--r-xl) 0 0; }
+    .dialog-actions button { flex: 1 1 auto; }
+    input:not([type='checkbox']), select { font-size: 16px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    button, .task-row, .back, input, select, summary::after { transition: none; }
   }
 </style>

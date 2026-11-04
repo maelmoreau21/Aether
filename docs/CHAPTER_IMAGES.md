@@ -74,9 +74,54 @@ requêtes/polls frontend ; une extraction déjà admise continue sur le Node et 
 de cette extraction. Les échecs conservent un délai de reprise de cinq minutes ;
 le frontend attend de manière bornée et propose une actualisation explicite.
 La reprise porte sur les fichiers de cache, pas sur une tâche durable en vol.
-Le distribué direct/canal inverse nécessite encore une validation dédiée.
+Les transports direct et inverse ont un contrôle TCP local détaillé ci-dessous ;
+une machine distante physique et les pannes réseau restent à qualifier.
 
 Retour arrière : désactiver `chapterImagesEnabled` dans la bibliothèque ; les
 images déjà stockées restent des dérivés évictables. Aucun schéma catalogue n'est
 modifié pour ce lot. Prochain lot : tâches Core durables, annulation, génération
 planifiée et tests distribués avec pannes.
+
+## Complément du 4 novembre : transports TCP direct et inverse
+
+Défaut confirmé par lecture du chemin inverse : la branche `chapter-image:`
+ne passait pas ses réponses HEAD dans `encode_head_uplink`, contrairement aux
+autres dérivés. Elle transmettait une longueur JPEG avec un corps POST vide.
+La branche réutilise désormais cet encodage existant, y compris HEAD avec Range.
+Le protocole et les signatures ne changent pas.
+
+`crates/core/tests/chapter_images_remote.rs` lance un serveur Core et un serveur
+Node sur deux ports TCP, dans le même processus de test Windows. FFmpeg 9.0.2
+remuxe sans réencoder la fixture AV1/Opus en ajoutant deux chapitres explicites.
+Le Node scanne et extrait réellement le JPEG de largeur 320. Le test vérifie le
+lien direct signé, refuse l'appel Node non signé, puis supprime `base_url`,
+actualise le registre Core et attend la présence effective du canal inverse.
+Le repli direct est ainsi impossible. GET, HEAD, GET+Range et HEAD+Range sont
+exercés dans les deux modes ; les octets du JPEG correspondent, les corps HEAD
+sont vides et les longueurs sont conservées. Le média readonly est inchangé,
+aucun dérivé n'apparaît à côté de lui. Le test Core de droits déjà validé reste
+la preuve distincte des refus bibliothèque/parental/Node révoqué.
+
+**Résultat final : 1/1 réussi, 13,66 s**, journal
+`target/mission-chapter-remote-20261104-fixed.log`. Commande après compilation :
+
+```powershell
+& target/debug/deps/chapter_images_remote-c7e94c515b2d22b5.exe --ignored --nocapture
+```
+
+Cette exécution portait encore l'attribut ignored opt-in. Après réussite,
+l'attribut a été retiré : le sharder Cargo existant découvre ce nouveau target
+et la CI prépare déjà FFmpeg et la fixture sur chaque shard. Aucun workflow
+supplémentaire n'a été ajouté ; une CI distante sur le futur commit reste à faire.
+
+Résultats défavorables conservés : le premier harnais passait en 12,60 s mais
+pouvait revenir au direct ; il n'est pas retenu comme preuve inverse. Le premier
+essai avec canal imposé a expiré sur login pendant les compilations concurrentes
+(27,93 s au total), sans atteindre HEAD ; il ne reproduit donc pas le défaut HEAD.
+Le délai HTTP borné du harnais est passé de 12 à 30 secondes. L'essai final passe
+avec la correction de production. Aucune causalité du timeout ni amélioration
+de performance n'est déduite de ces observations.
+
+Ce test ne prouve ni deux machines, ni TLS à travers un proxy, ni NAS, ni panne
+en cours d'extraction. Retour arrière de ce correctif : désactiver les images
+de chapitres sur canal inverse avant de revenir au binaire précédent.

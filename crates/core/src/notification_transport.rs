@@ -34,12 +34,12 @@ fn url(config: &Config) -> Result<reqwest::Url> {
         reqwest::Url::parse(&config.destination).map_err(|_| "notification_destination_denied")?;
     let local =
         config.local_test() && value.scheme() == "http" && value.host_str() == Some("127.0.0.1");
-    if let Some(host) = value.host_str() {
-        if let Ok(ip) = host.trim_matches(['[', ']']).parse::<std::net::IpAddr>() {
-            if !local && !crate::extensions::repositories::public_ip(ip) {
-                return Err("notification_destination_denied");
-            }
-        }
+    if let Some(host) = value.host_str()
+        && let Ok(ip) = host.trim_matches(['[', ']']).parse::<std::net::IpAddr>()
+        && !local
+        && !crate::extensions::repositories::public_ip(ip)
+    {
+        return Err("notification_destination_denied");
     }
     if config.destination.len() > 2048
         || value.host_str().is_none()
@@ -121,13 +121,20 @@ fn message(event: &Event) -> (&'static str, String) {
     let title = match event.kind.as_str() {
         "scan.completed" => "Scan termine",
         "task.failed" => "Tache en echec",
+        "content.added" => "Nouveau contenu disponible",
         _ => "Tache terminee",
     };
     (
         title,
         format!(
-            "{title}. Evenement : {}. Tache : {}.",
-            event.id, event.task_id
+            "{title}. Evenement : {}. {} : {}.",
+            event.id,
+            if event.kind == "content.added" {
+                "Oeuvre"
+            } else {
+                "Tache"
+            },
+            event.task_id
         ),
     )
 }
@@ -148,13 +155,12 @@ async fn allowed(
     context: Option<(&crate::identity::IdentityStore, &super::Channel)>,
     event: &Event,
 ) -> Result<()> {
-    if let Some((store, channel)) = context {
-        if !super::still_allowed(store, channel, event)
+    if let Some((store, channel)) = context
+        && !super::still_allowed(store, channel, event)
             .await
             .map_err(|_| "notification_authorization_error")?
-        {
-            return Err("notification_revoked");
-        }
+    {
+        return Err("notification_revoked");
     }
     Ok(())
 }

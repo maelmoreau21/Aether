@@ -106,10 +106,12 @@
 {#if section === '#general-section'}
 <section id="general-section" aria-labelledby="general-heading"><h2 id="general-heading">Général</h2>
   <form onsubmit={save}><fieldset disabled={loading || saving}>
+    <div class="settings-panel">
     <label>Nom du serveur<input bind:value={name} required maxlength="80" autocomplete="off" /></label>
     <label>Message d’accueil<textarea bind:value={welcome} maxlength="500" rows="3"></textarea></label>
     <label>Texte du bouton de connexion SSO<input bind:value={ssoLabel} required maxlength="80" placeholder="Se connecter avec Authentik" /></label>
     <label class="policy-toggle"><input type="checkbox" bind:checked={blockSsoLocalAccounts} />Empêcher les utilisateurs SSO de créer des identifiants locaux</label>
+    </div>
 
     <fieldset class="trickplay-fieldset">
       <legend>Reprise de lecture</legend>
@@ -174,24 +176,57 @@
 </section>
 {/if}
 {#if ['#general-section','#trickplay-section','#network-section'].includes(section)}
-  {#if loading}<p role="status">Chargement…</p>{/if}{#if error}<p role="alert">{error}</p><button disabled={loading} onclick={() => void load(section)}>Réessayer</button>{/if}{#if notice}<p role="status">{notice}</p>{/if}
+  {#if loading}<p role="status">Chargement…</p>{/if}{#if error}<p role="alert">{error}</p><button class="retry-btn" disabled={loading} onclick={() => void load(section)}>Réessayer</button>{/if}{#if notice}<p role="status">{notice}</p>{/if}
 {/if}
 <style>
-  .policy-toggle { display:flex;align-items:center;gap:12px; }
-  .trickplay-fieldset { border: 1px solid var(--border-subtle); padding: 16px; margin-top: 24px; border-radius: var(--radius-sm); }
-  .trickplay-fieldset legend { font-weight: 600; padding: 0 8px; color: var(--text-primary); }
-  .trickplay-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-top: 16px; }
-  .maintenance-btn { margin-top: 8px; padding: 10px 18px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); cursor: pointer; font-size: 14px; font-weight: 500; }
-  .maintenance-btn:hover:not(:disabled) { background: var(--border-subtle); }
-  .maintenance-btn:disabled { opacity: 0.6; cursor: wait; }
-  .maintenance-notice { margin-top: 8px; font-size: 13px; color: var(--color-accent); }.policy-toggle input { width:20px;min-height:20px; }
-  h2 { font-size: 28px; font-weight: 400; margin: 0 0 32px; }
-  form { max-width: 850px; } fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
-  label { display: grid; gap: 12px; margin-top: 24px; font-size: 15px; }
-  input, textarea { box-sizing: border-box; width: 100%; padding: 14px; min-height: 48px; font: inherit; background: var(--bg-surface); color: var(--text-primary); border: 0; border-bottom: 2px solid var(--border-subtle); border-radius: 0; }
-  textarea { resize: vertical; } p { font-size: 14px; line-height: 1.7; color: var(--text-secondary); }
-  button { margin-top: 16px; padding: 12px 24px; min-height: 44px; border: 0; border-radius: var(--radius-md); background: var(--color-play); color: var(--color-on-play); }
-  dl { max-width: 850px; } dl div { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr); gap: 24px; padding: 20px; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle); }
-  dd { margin: 0; overflow-wrap: anywhere; } dt { color: var(--text-secondary); }
-  @media(max-width: 640px) { dl div { grid-template-columns: minmax(0,1fr); gap: 10px; } }
+  section { min-width: 0; font-family: var(--font); color: var(--tx); }
+  h2 { margin: 0 0 20px; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
+  h2 + p { margin: -12px 0 20px; }
+  p { font-size: 14px; line-height: 1.6; color: var(--mu); }
+  form { max-width: 880px; }
+  fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+  /* Panneaux de réglages */
+  .settings-panel, .trickplay-fieldset { display: grid; gap: 16px; margin: 0 0 20px; padding: 24px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); }
+  .trickplay-fieldset legend { float: left; width: 100%; margin: 0 0 4px; padding: 0; font-size: 17px; font-weight: 700; color: var(--tx); }
+  .trickplay-fieldset legend + * { clear: both; }
+  .trickplay-fieldset p { margin: 0; }
+  .trickplay-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 20px; }
+  label { display: grid; gap: 8px; font-size: 14px; font-weight: 700; color: var(--tx); }
+  .policy-toggle { display: flex; align-items: center; gap: 12px; min-height: 44px; font-weight: 600; cursor: pointer; }
+  .policy-toggle input { flex: none; width: 20px; height: 20px; min-height: 20px; margin: 0; accent-color: var(--ac); }
+  input:not([type='checkbox']), textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  input:not([type='checkbox']) { height: 46px; min-height: 46px; }
+  textarea { min-height: 96px; padding: 12px 14px; line-height: 1.5; resize: vertical; }
+  input:not([type='checkbox']):hover, textarea:hover { background-color: var(--pn-2); }
+  input:not([type='checkbox']):focus, textarea:focus { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  /* Boutons : principal = encre inversée, maintenance = secondaire */
+  button { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 22px; border: 0; border-radius: var(--r-md); background: var(--btn); color: var(--btn-tx); font: inherit; font-size: 15px; font-weight: 700; box-shadow: none; cursor: pointer; transition: background-color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
+  button:hover:not(:disabled) { opacity: 0.9; }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible, summary:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .maintenance-btn, .retry-btn { justify-self: start; min-height: 44px; padding: 0 18px; background: var(--pn-2); color: var(--tx); font-size: 14px; }
+  .maintenance-btn:hover:not(:disabled), .retry-btn:hover:not(:disabled) { background: var(--pn-3); opacity: 1; }
+  .maintenance-btn:disabled { cursor: wait; }
+  .maintenance-notice { font-size: 14px; font-weight: 600; color: var(--tx); }
+  [role='alert'] { color: var(--err); }
+  /* Réseau */
+  dl { max-width: 880px; margin: 0 0 20px; padding: 4px 24px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); }
+  dl div { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr); gap: 24px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+  dl div:last-child { border-bottom: 0; }
+  dt { font-size: 14px; font-weight: 600; color: var(--mu); }
+  dd { margin: 0; font-family: var(--font-mono); font-size: 14px; overflow-wrap: anywhere; }
+  dl div:last-child dd { font-family: var(--font); font-weight: 600; }
+  details { max-width: 880px; padding: 4px 24px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); }
+  details[open] { padding-bottom: 12px; }
+  summary { display: flex; align-items: center; min-height: 52px; font-size: 15px; font-weight: 700; cursor: pointer; border-radius: var(--r-xs); }
+  code { font-family: var(--font-mono); font-size: 13px; padding: 2px 6px; border-radius: 6px; background: var(--pn-2); color: var(--tx); }
+  @media (max-width: 640px) {
+    .settings-panel, .trickplay-fieldset { padding: 16px; border-radius: var(--r-md); }
+    dl, details { padding-inline: 16px; border-radius: var(--r-md); }
+    dl div { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+    button, .maintenance-btn, .retry-btn { width: 100%; justify-self: stretch; }
+    input:not([type='checkbox']), textarea { font-size: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) { button, input, textarea { transition: none; } }
 </style>

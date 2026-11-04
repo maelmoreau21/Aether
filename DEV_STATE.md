@@ -1,5 +1,59 @@
 # État de développement
 
+## 4 novembre 2026 — Compléments ciblés de la mission
+
+- Après fetch, Aether et Plugins restent chacun deux commits devant
+  `origin/develop`, sans commit distant nouveau ; travail visuel concurrent conservé.
+- Notifications nouveau contenu raccordées : consentement séparé facultatif,
+  table additive, déduplication et contrôle parental/droits avant livraison.
+  SQLite/récepteurs locaux 6/6 (10,26 s), PostgreSQL 18 deux pools 1/1 (2,39 s).
+  Chrome avec API simulée et Web check passent ; aucun envoi externe.
+- TVDB optimisé réel exécuté dans Wasmi avec les limites du Core : recherche
+  de 20 résultats renseignés, détails/traduction et images, 1/1 en 9,98 s.
+  Réponses synthétiques uniquement ; licence et service réels non vérifiés.
+- Les trois images AMD64 ont passé le smoke, dont extraction AV1 réelle.
+  Build ARM64 interrompu hier puis repris sous émulation avec cache et arrêté à nouveau avec Docker Desktop ; aucun
+  succès ARM final ou matériel physique revendiqué. Rapport Docker séparé.
+- Chapitres : HEAD inverse corrigé, un scénario TCP direct puis inverse imposé
+  passe en 13,66 s avec AV1, HEAD/Range et média intact. Rapports défavorables conservés.
+- Prochaine priorité : moteur Docker stable puis trois images ARM64/smoke ;
+  faits durables Node/fournisseur pour les deux notifications encore indisponibles.
+  Le multi-Core reste expérimental pour les raisons détaillées ci-dessous.
+
+## 3 novembre 2026 — Validation ciblée de la mission fonctionnalités
+
+- Base observée `525b61f` sur `develop` ; les changements visuels concurrents
+  restent conservés et ne font pas partie de cette validation backend.
+- 16 tests Core ciblés passent : recommandations 3, notifications 5,
+  OpenSubtitles 3, téléchargement SSRF 3, propriété SQLite des exécutions 1,
+  autorisation/images de chapitres 1. Pas de suite globale exécutée.
+- PostgreSQL 18 jetable : notifications 1/1 et propriété des exécutions 1/1
+  passent avec deux pools ; runners nettoyés, aucune installation existante modifiée.
+- Deux vrais processus Core + PostgreSQL : scénario Wasm signé/écriture KV
+  bloquée/arrêt brutal/expiration passe 1/1 en 43,48 s hors compilation.
+  Zéro effet durable de la tentative tuée ; une entrée KV et un historique
+  terminé après nouvelle invocation explicite sur le survivant ; ancienne
+  invocation conservée interrompue. Aucun rejeu automatique n'est prétendu.
+- Une fixture de notification omettait `durable_tasks.available_at` : elle a
+  été corrigée, puis le filtre a passé. Le reset HTTP attendu après arrêt du
+  Core est traité explicitement dans le harnais ; vérification Rust ciblée réussie.
+- Contrats et preuves : `docs/NOTIFICATIONS.md`, `docs/RECOMMENDATIONS.md`,
+  `docs/OPENSUBTITLES.md`, `docs/CHAPTER_IMAGES.md` et
+  `docs/MISSION_CORE_VALIDATION_2026_11_03.md`.
+- Le multi-Core reste expérimental : canaux/propriété Nodes, dispatch,
+  fencing de tous les effets, mutations d'extensions, fichiers partagés et
+  OIDC derrière répartiteur restent ouverts. Le nouveau lease protège la
+  publication de l'historique manuel existant, pas tous les effets guest.
+- Les services OpenSubtitles/TVDB réels, SMTP/ntfy/Gotify externes, le NAS,
+  la pertinence utilisateur et le matériel ARM restent non vérifiés ici.
+  Les contrôles navigateur et Docker ont leurs rapports séparés ; aucune
+  publication, aucun push ni déploiement réel effectué par ces tests.
+- Prochaine action : terminer la synthèse des images Docker et des contrôles
+  d'interface restants, puis préparer des lots/PR cohérents en gardant les
+  réparations CI préexistantes et la refonte visuelle concurrente identifiées.
+
+Les notes ci-dessous sont historiques et ne remplacent pas cet état courant.
+
 ## 21 octobre 2026 — Parcours des extensions raccordés
 
 - Métadonnées : contexte catalogue réel, search → choix du candidat → details →

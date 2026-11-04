@@ -81,164 +81,38 @@ MEDIA_OIDC_USER_GROUPS=media-users
 </section>
 
 <style>
-  .dashboard-section {
-    margin-bottom: 48px;
-    scroll-margin-top: 24px;
+.dashboard-section { margin-bottom: 48px; scroll-margin-top: 24px; font-family: var(--font); color: var(--tx); }
+  .section-header { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+  .header-icon-wrap { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 14px; background: var(--pn); color: var(--tx); }
+  .section-title { margin: 0; color: var(--tx); font-size: 24px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
+  .section-subtitle { margin: 4px 0 0; color: var(--mu); font-size: 14px; line-height: 1.5; }
+  .card { min-width: 0; padding: 24px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); }
+  .card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+  .card-title-group { min-width: 0; }
+  .card-title-group h3 { margin: 0 0 6px; font-size: 17px; font-weight: 700; }
+  .card-subtitle { margin: 2px 0 0; color: var(--mu); font-size: 13px; line-height: 1.5; }
+  .badge { display: inline-flex; align-items: center; flex: none; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--pn-2); color: var(--tx); font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .badge[data-status='connected'] { background: var(--ok-soft); color: var(--ok); }
+  .badge[data-status='disconnected'] { background: var(--pn-2); color: var(--mu); }
+  .details-grid { display: grid; border-top: 1px solid var(--line); }
+  .detail-item { display: grid; grid-template-columns: 240px minmax(0, 1fr); align-items: center; gap: 16px; min-height: 60px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .detail-label { color: var(--tx); font-size: 14px; font-weight: 700; }
+  .detail-value { min-width: 0; color: var(--mu); font-size: 14px; overflow-wrap: anywhere; }
+  .detail-value code { color: var(--tx); font-family: var(--font-mono); font-size: 13px; }
+  .muted-note { margin: 0 0 12px; color: var(--mu); font-size: 14px; line-height: 1.6; }
+  .env-code { margin: 0; padding: 16px; overflow-x: auto; border-radius: var(--r-md); background: var(--pn); color: var(--tx); font-family: var(--font-mono); font-size: 13px; line-height: 1.7; }
+  .env-code code { font-family: inherit; }
+  .security-note { display: flex; align-items: flex-start; gap: 12px; margin-top: 20px; padding: 14px 16px; border-radius: var(--r-md); background: var(--ok-soft); color: var(--tx); font-size: 14px; line-height: 1.5; }
+  .security-note :global(svg) { flex: none; margin-top: 2px; color: var(--ok); }
+  .security-note strong { display: block; margin-bottom: 4px; font-weight: 700; }
+  .security-note p { margin: 0; color: var(--mu); font-size: 13px; }
+  .security-note code { font-family: var(--font-mono); font-size: 12px; color: var(--tx); }
+  @media (max-width: 820px) {
+    .detail-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   }
-
-  .section-header {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-bottom: 24px;
-    padding-bottom: 14px;
-    border-bottom: 1px solid var(--color-line);
-  }
-
-  .header-icon-wrap {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-sm);
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-
-  .section-title {
-    font-size: 20px;
-    font-weight: 650;
-    letter-spacing: -0.02em;
-    margin: 0;
-    color: var(--color-text);
-  }
-
-  .section-subtitle {
-    margin: 4px 0 0;
-    font-size: 13px;
-    color: var(--color-muted);
-  }
-
-  .card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-md);
-    padding: 24px;
-  }
-
-  .card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 20px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--color-line);
-    flex-wrap: wrap;
-  }
-
-  .card-title-group h3 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-  }
-
-  .card-subtitle {
-    margin: 4px 0 0;
-    font-size: 12px;
-    color: var(--color-muted);
-  }
-
-  .details-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 20px;
-  }
-
-  .detail-item {
-    padding: 12px;
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-  }
-
-  .detail-label {
-    display: block;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--color-muted);
-    margin-bottom: 6px;
-    font-weight: 500;
-  }
-
-  .detail-value {
-    font-size: 13px;
-    color: var(--color-text);
-    line-height: 1.5;
-  }
-
-  .env-code {
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    padding: 16px;
-    overflow-x: auto;
-    font-size: 12px;
-    color: var(--color-text);
-    line-height: 1.6;
-  }
-
-  .security-note {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    margin-top: 20px;
-    padding: 16px;
-    background: var(--color-raised);
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--color-muted);
-  }
-
-  .security-note strong {
-    color: var(--color-text);
-  }
-
-  .security-note p {
-    margin: 4px 0 0;
-  }
-
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    font-weight: 500;
-    padding: 2px 8px;
-    border-radius: 99px;
-    border: 1px solid var(--color-line);
-    vertical-align: middle;
-  }
-
-  .badge[data-status='connected'] {
-    color: var(--color-success);
-    border-color: var(--color-success);
-    background: var(--color-success-soft);
-  }
-
-  .badge[data-status='disconnected'] {
-    color: var(--color-warning);
-    border-color: var(--color-warning);
-    background: var(--color-warning-soft);
-  }
-
-  .muted-note {
-    font-size: 13px;
-    color: var(--color-muted);
-    line-height: 1.6;
+  @media (max-width: 640px) {
+    .header-icon-wrap { display: none; }
+    .card { padding: 16px; border-radius: var(--r-md); }
+    .card-header { flex-direction: column; }
   }
 </style>

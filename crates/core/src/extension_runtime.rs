@@ -174,6 +174,25 @@ pub fn execute_host_http(
     req: HostHttpRequest,
 ) -> Result<HostHttpResponse, HostHttpError> {
     #[cfg(test)]
+    if let Some((url, body)) = TEST_HTTP_SEQUENCE.with(|v| {
+        v.borrow_mut().as_mut().map(|queue| {
+            queue
+                .pop_front()
+                .expect("unexpected HTTP request in offline guest test")
+        })
+    }) {
+        assert_eq!(
+            req.url, url,
+            "offline guest requested an unexpected endpoint"
+        );
+        assert!(body.len() <= DEFAULT_MAX_RESPONSE_SIZE);
+        return Ok(HostHttpResponse {
+            status: 200,
+            headers: BTreeMap::new(),
+            body,
+        });
+    }
+    #[cfg(test)]
     if let Some(body) = TEST_HTTP_BODY.with(|v| v.borrow_mut().take()) {
         return Ok(HostHttpResponse {
             status: 200,
@@ -652,6 +671,16 @@ pub fn write_frame(
 
 #[cfg(test)]
 thread_local! {static TEST_HTTP_BODY: std::cell::RefCell<Option<Vec<u8>>> = const { std::cell::RefCell::new(None) };}
+
+#[cfg(test)]
+type TestHttpResponses = std::collections::VecDeque<(String, Vec<u8>)>;
+
+#[cfg(test)]
+thread_local! {static TEST_HTTP_SEQUENCE: std::cell::RefCell<Option<TestHttpResponses>> = const { std::cell::RefCell::new(None) };}
+
+#[cfg(test)]
+#[path = "extension_provider_budget_tests.rs"]
+mod provider_budget_tests;
 
 #[cfg(test)]
 mod storage_frames {

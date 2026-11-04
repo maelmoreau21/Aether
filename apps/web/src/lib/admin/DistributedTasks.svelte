@@ -123,7 +123,7 @@
     <div class="jobs" aria-busy={loading}>
       {#each visibleJobs as job (job.id)}
         <article aria-label={`Tâche ${job.id}`}>
-          <div class="job-heading"><div><h4>{categories[job.category] ?? job.category}</h4><p>{libraries.find(library => library.id === job.libraryId)?.name ?? job.libraryId}</p></div><span class="status" class:failed={job.status === 'error'}>{labels[job.status] ?? job.status}</span></div>
+          <div class="job-heading"><div><h4>{categories[job.category] ?? job.category}</h4><p>{libraries.find(library => library.id === job.libraryId)?.name ?? job.libraryId}</p></div><span class="status" data-status={job.status} class:failed={job.status === 'error'}>{labels[job.status] ?? job.status}</span></div>
           <dl>
             <div><dt>Nœud exécutant</dt><dd>{nodes.find(node => node.id === job.nodeId)?.name ?? (job.nodeId === 'local' ? 'Nœud local' : job.nodeId || 'En attente d’attribution')}</dd></div>
             <div><dt>Durée</dt><dd>{duration(job)}</dd></div>
@@ -147,28 +147,113 @@
 </section>
 
 <style>
-  section { margin-top: 24px; min-width: 0; }
+  section { min-width: 0; margin-top: 4px; padding-bottom: 16px; color: var(--tx); font-family: var(--font); }
   header, .job-heading, .actions, nav, .progress { display: flex; align-items: center; gap: 12px; }
   header, .job-heading { justify-content: space-between; }
-  h3 { margin: 0; font-size: 21px; font-weight: 600; }
-  h4 { margin:0; font-size:17px; font-weight:600; } .job-heading > div { min-width:0; } .job-heading p { margin:6px 0 0; font-size:14px; color:var(--text-secondary); }
-  .queue-tools { display:flex; align-items:end; justify-content:space-between; gap:16px; margin:24px 0 16px; }
-  .queue-tools label { flex:0 1 260px; min-width:0; } .queue-tools p { margin:0; text-align:right; font-size:12px; color:var(--text-secondary); line-height:1.6; } .queue-tools span { display:block; }
-  .enqueue { border-block:1px solid var(--border-subtle); padding-block:4px; } .enqueue > summary { font-size:14px; color:var(--text-primary); }
-  .explanation, dt, details, .empty { color: var(--text-secondary); line-height: 1.6; }
-  form { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
-  label { display: grid; gap: 8px; flex: 1; min-width: min(240px, 100%); }
-  button, select, input { font: inherit; color: var(--text-primary); min-height: 44px; padding: 10px 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); }
-  select, input { width: 100%; min-width: 0; } .form-help { flex-basis: 100%; margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
-  button { flex-shrink: 0; } button:hover:not(:disabled) { background: var(--bg-elevated); }
-  .jobs { display: grid; gap: 12px; } article { padding: 20px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); min-width: 0; overflow-wrap: anywhere; }
-  .job-heading { align-items: start; } .status { color: var(--text-secondary); flex-shrink: 0; }
-  dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; font-size: 14px; } dd { margin: 4px 0 0; } dt { font-size: 12px; }
-  .progress { margin: 16px 0; } progress { flex: 1; min-width: 0; accent-color: var(--accent-primary); } .progress span { font-variant-numeric: tabular-nums; font-size: 13px; }
-  .processed { color: var(--text-secondary); font-size: 13px; }
-  details { font-size: 13px; } details p { margin: 8px 0; } summary { cursor: pointer; min-height: 44px; padding-block:12px; } .failed { color:var(--text-primary); font-weight:600; } .empty { padding:24px 0; border-block:1px solid var(--border-subtle); }
-  pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; font-size: 12px; }
-  .actions { margin: 12px 0; flex-wrap: wrap; } nav { justify-content: end; margin-top: 16px; flex-wrap: wrap; } nav span { color: var(--text-secondary); font-size: 14px; }
-  .error, .job-error, .notice { padding: 12px; line-height: 1.5; overflow-wrap: anywhere; } .error, .job-error { background: var(--color-danger-soft); border-left: 3px solid var(--status-error); } .notice { background: var(--color-success-soft); }
-  @media (max-width: 640px) { header { flex-wrap: wrap; } article { padding: 14px; } .job-heading { flex-wrap: wrap; } .queue-tools { align-items:stretch; flex-direction:column; gap:8px; } .queue-tools label { flex:auto; } .queue-tools p { text-align:left; } input,select { font-size:16px; } }
+  h3 { margin: 0; font-size: 17px; font-weight: 700; }
+  h4 { margin: 0; font-size: 15px; font-weight: 700; }
+  .job-heading { align-items: flex-start; }
+  .job-heading > div { min-width: 0; }
+  .job-heading p { margin: 4px 0 0; font-size: 13px; color: var(--mu); }
+  .explanation, dt, details, .empty { color: var(--mu); line-height: 1.6; }
+  .explanation { max-width: 75ch; margin: 8px 0 16px; font-size: 14px; }
+
+  /* Ajout d'une tâche */
+  .enqueue { border-block: 1px solid var(--line); }
+  .enqueue > summary { font-size: 14px; color: var(--tx); }
+  .form-help { flex-basis: 100%; margin: 0; font-size: 13px; line-height: 1.5; color: var(--mu); }
+  form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 16px 0 20px; }
+  label { display: grid; gap: 8px; flex: 1; min-width: min(240px, 100%); font-size: 14px; font-weight: 700; color: var(--tx); }
+  select, input {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 46px;
+    padding: 0 14px;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    background-color: var(--pn);
+    color: var(--tx);
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: none;
+    transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease;
+  }
+  select { padding-right: 40px; }
+  select:hover, input:hover { background-color: var(--pn-2); }
+  select:focus, input:focus { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  select:focus-visible, input:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  select:disabled, input:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Boutons */
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0; min-height: 44px; padding: 0 16px; border: 0; border-radius: var(--r-md); background: var(--pn-2); color: var(--tx); font-family: var(--font); font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
+  button:hover:not(:disabled) { background: var(--pn-3); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button[type='submit'] { height: 48px; padding: 0 22px; background: var(--btn); color: var(--btn-tx); box-shadow: none; }
+  button[type='submit']:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
+
+  /* Outils de la file */
+  .queue-tools { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin: 20px 0 12px; }
+  .queue-tools label { flex: 0 1 260px; min-width: 0; }
+  .queue-tools p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--mu); text-align: right; font-variant-numeric: tabular-nums; }
+  .queue-tools span { display: block; }
+
+  /* Tâches : lignes séparées dans le panneau parent */
+  .jobs { display: grid; border-top: 1px solid var(--line); }
+  article { min-width: 0; padding: 16px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  .status { display: inline-flex; align-items: center; flex-shrink: 0; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--pn-2); color: var(--tx); font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .status[data-status='completed'] { background: var(--ok-soft); color: var(--ok); }
+  .status[data-status='error'], .failed { background: var(--err-soft); color: var(--err); }
+  .status[data-status='paused'] { background: var(--warn-soft); color: var(--warn); }
+  .status[data-status='running'], .status[data-status='queued'] { background: var(--ac-soft); color: var(--ac); }
+  dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 12px 0; font-size: 14px; }
+  dt { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  dd { margin: 4px 0 0; font-weight: 600; color: var(--tx); }
+
+  /* Progression */
+  .progress { margin: 12px 0; }
+  progress { flex: 1; min-width: 0; height: 6px; border: 0; border-radius: var(--r-pill); background: var(--pn-3); overflow: hidden; appearance: none; -webkit-appearance: none; accent-color: var(--ac); }
+  progress::-webkit-progress-bar { background: var(--pn-3); border-radius: var(--r-pill); }
+  progress::-webkit-progress-value { background: var(--ac); border-radius: var(--r-pill); }
+  progress::-moz-progress-bar { background: var(--ac); border-radius: var(--r-pill); }
+  .progress span { min-width: 44px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--mu); text-align: right; }
+  .processed { margin: 8px 0; font-size: 13px; color: var(--mu); }
+
+  .actions { flex-wrap: wrap; margin: 12px 0; }
+  details { font-size: 13px; }
+  details p { margin: 6px 0; }
+  summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; font-weight: 700; color: var(--tx); }
+  summary:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; border-radius: var(--r-xs); }
+  pre { max-height: 320px; margin: 8px 0; padding: 14px; overflow: auto; border-radius: var(--r-sm); background: var(--pn); color: var(--tx); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .empty { padding: 24px 0; font-size: 14px; }
+  .empty p { margin: 0 0 12px; }
+
+  /* Pagination */
+  nav { justify-content: flex-end; flex-wrap: wrap; margin-top: 16px; }
+  nav span { font-size: 14px; font-weight: 600; color: var(--mu); font-variant-numeric: tabular-nums; }
+
+  /* Retours */
+  .error, .job-error, .notice { padding: 14px 16px; border-radius: var(--r-md); color: var(--tx); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .error, .job-error { background: var(--err-soft); }
+  .error p { margin: 0 0 8px; }
+  .notice { background: var(--ok-soft); }
+  [role='status']:not(.notice) { color: var(--mu); }
+
+  @media (max-width: 640px) {
+    header { flex-wrap: wrap; }
+    .job-heading { flex-wrap: wrap; }
+    .queue-tools { flex-direction: column; align-items: stretch; gap: 8px; }
+    .queue-tools label { flex: auto; }
+    .queue-tools p { text-align: left; }
+    dl { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+    form > button { flex: 1 1 100%; }
+    input, select { font-size: 16px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    button, select, input { transition: none; }
+  }
 </style>

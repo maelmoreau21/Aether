@@ -10,12 +10,17 @@
 
   let { work, duration, children }: { work: Work; duration?: number; children: Snippet } = $props();
   const artwork = $derived(selectArtwork(work, $session));
-  const previewBackdrop = $derived(imagePreviewUrl(artwork.backdrop, 1280));
-  const backdrop = $derived([previewBackdrop, artwork.backdrop ?? ''].find(url => url && !failedBackdrops.includes(url)) ?? '');
+  // backdrop.jpg is the detail image; landscape.jpg is a wide fallback.
+  const wideArtwork = $derived(artwork.backdrop || artwork.landscape);
+  const previewBackdrop = $derived(imagePreviewUrl(wideArtwork, 1280));
+  const backdrop = $derived([previewBackdrop, wideArtwork ?? ''].find(url => url && !failedBackdrops.includes(url)) ?? '');
   const logo = $derived(imagePreviewUrl(artwork.logo, 640));
+  const clearart = $derived(imagePreviewUrl(artwork.illustration, 640));
   let failedBackdrops = $state<string[]>([]);
   let failedLogo = $state('');
+  let failedClearart = $state('');
   const hasBackdrop = $derived(Boolean(backdrop));
+  const hasClearart = $derived(Boolean(clearart) && failedClearart !== clearart);
   const meaningful = (value?: string | null) => Boolean(value?.trim() && !['Média local indexé', 'Média local'].includes(value.trim()));
   const displayTitle = $derived(localizedTitle(work, $locale));
   const displayPlot = $derived(localizedPlot(work, $locale));
@@ -37,36 +42,43 @@
   );
 </script>
 
-<section class="detail-hero" class:has-backdrop={hasBackdrop} aria-label={`Présentation de ${displayTitle}`}>
-  <div class="detail-backdrop-clip" class:has-backdrop={hasBackdrop}>
-    {#if hasBackdrop}
-      <img class="detail-backdrop" src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
+<section class="detail" aria-label={`Présentation de ${displayTitle}`}>
+  <div class="stage" class:has-clearart={hasClearart}>
+    <div class="hero" class:has-backdrop={hasBackdrop}>
+      {#if hasBackdrop}
+        <img class="backdrop" src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
+        <div class="shade" aria-hidden="true"></div>
+      {/if}
+      <div class="cap">
+        <div class="essential-meta">
+          <span class="badge">{work.kind === 'series' ? 'Série' : 'Film'}{work.synthetic ? ' · Démonstration' : ''}</span>
+          {#if work.year}<span>{work.year}</span>{/if}
+          {#if duration && Number.isFinite(duration) && duration > 0}<span>{Math.ceil(duration / 60)} min</span>{/if}
+          {#if work.kind === 'series' && work.seasonCount}<span>{work.seasonCount} {work.seasonCount > 1 ? 'saisons' : 'saison'}</span>{/if}
+          {#if work.genres?.length}<span>{work.genres.slice(0, 3).join(', ')}</span>{/if}
+          {#if work.mpaa}<span class="badge">{work.mpaa}</span>{/if}
+          {#if formattedRating}<span class="rating"><Icon name="star" size={13} /> {formattedRating} / 10</span>{/if}
+        </div>
+        <h1>
+          {#if logo && logo !== failedLogo}
+            <span class="h-sr">{displayTitle}</span>
+            <img class="title-logo" src={logo} alt="" width="640" height="200" decoding="async" onerror={() => failedLogo = logo} />
+          {:else}
+            {displayTitle}
+          {/if}
+        </h1>
+        {#if meaningful(displayTagline)}
+          <p class="tagline">« {displayTagline} »</p>
+        {/if}
+      </div>
+    </div>
+    {#if hasClearart}
+      <img class="clearart" src={clearart} alt="" width="640" height="360" decoding="async" loading="lazy" onerror={() => failedClearart = clearart} />
     {/if}
   </div>
 
-  <div class="hero-layout">
-    <div class="detail-poster-column"><Poster {work} showMetadata={false} /></div>
-    <div class="detail-info-column">
-      <p class="eyebrow">{work.kind === 'series' ? 'Série' : 'Film'}{work.synthetic ? ' · Démonstration' : ''}</p>
-      <h1>
-        {#if logo && logo !== failedLogo}
-          <img class="title-logo" src={logo} alt={displayTitle} width="640" height="200" decoding="async" onerror={() => failedLogo = logo} />
-        {:else}
-          {displayTitle}
-        {/if}
-      </h1>
-      {#if meaningful(displayTagline)}
-        <p class="tagline">« {displayTagline} »</p>
-      {/if}
-
-      <div class="essential-meta">
-        {#if work.year}<span class="meta-pill">{work.year}</span>{/if}
-        {#if duration && Number.isFinite(duration) && duration > 0}<span class="meta-pill">{Math.ceil(duration / 60)} min</span>{/if}
-        {#if work.mpaa}<span class="meta-badge mpaa">{work.mpaa}</span>{/if}
-        {#if work.kind === 'series' && work.seasonCount}<span class="meta-pill">{work.seasonCount} {work.seasonCount > 1 ? 'saisons' : 'saison'}</span>{/if}
-        {#if formattedRating}<span class="meta-badge rating"><Icon name="star" size={13} /> {formattedRating} / 10</span>{/if}
-      </div>
-
+  <div class="body" class:has-backdrop={hasBackdrop}>
+    <div class="main">
       {#if work.available === false}
         <p class="availability" role="status">Ce contenu est temporairement indisponible. Le serveur qui l’héberge est hors ligne.</p>
       {/if}
@@ -84,15 +96,9 @@
 
       {#if hasImdb || hasTmdb || hasTvdb || work.ratings?.length}
         <div class="provider-badges-row" aria-label="Sources et notes externes">
-          {#if hasImdb}
-            <span class="provider-logo imdb">IMDb</span>
-          {/if}
-          {#if hasTmdb}
-            <span class="provider-logo tmdb">TMDB</span>
-          {/if}
-          {#if hasTvdb}
-            <span class="provider-logo tvdb">TVDB</span>
-          {/if}
+          {#if hasImdb}<span class="provider-logo">IMDb</span>{/if}
+          {#if hasTmdb}<span class="provider-logo">TMDB</span>{/if}
+          {#if hasTvdb}<span class="provider-logo">TVDB</span>{/if}
           {#each work.ratings ?? [] as r, idx (idx)}
             <span class="provider-score-pill">
               <strong>{r.provider.toUpperCase()}</strong>
@@ -103,7 +109,7 @@
       {/if}
 
       {#if work.directors?.length || work.writers?.length || work.genres?.length || (work.originalTitle && work.originalTitle !== work.title)}
-        <dl class="jellyfin-meta-table">
+        <dl class="meta-table">
           {#if work.directors?.length}
             <div class="meta-row">
               <dt>{work.directors.length > 1 ? 'Réalisateurs' : 'Réalisateur'}</dt>
@@ -131,301 +137,255 @@
         </dl>
       {/if}
     </div>
+    <!-- folder.jpg : l’affiche reste visible à côté des informations -->
+    <aside class="side" aria-label="Affiche"><Poster {work} showMetadata={false} /></aside>
   </div>
 </section>
 
 <style>
-  .detail-hero {
+  .detail {
     position: relative;
-    z-index: 10;
-    margin-top: 20px;
-    padding: clamp(28px, 4vw, 52px);
-    background: radial-gradient(circle at 80% 15%, rgba(249, 115, 22, 0.14), transparent 55%), var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-2xl);
-    box-shadow: var(--shadow-lg);
-    overflow: visible;
+    margin-top: 12px;
   }
 
-  .detail-backdrop-clip {
-    position: absolute;
-    inset: 0;
+  .stage { position: relative; }
+
+  .hero {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    align-items: flex-end;
+    min-height: 260px;
     overflow: hidden;
-    border-radius: inherit;
-    z-index: 0;
-    pointer-events: none;
+    border-radius: var(--r-xl);
+    background: var(--bg-2);
+    color: var(--tx);
   }
 
-  .detail-backdrop {
+  .hero.has-backdrop {
+    min-height: clamp(380px, 38vw, 540px);
+    background: #06080e;
+    color: var(--on-media);
+  }
+
+  .backdrop {
     position: absolute;
     inset: 0;
+    z-index: -2;
     width: 100%;
     height: 100%;
     object-fit: cover;
-    object-position: 75% 25%;
+    object-position: 70% 25%;
   }
 
-  .detail-backdrop-clip.has-backdrop::after {
-    content: '';
+  /* Voile de lisibilité : seul dégradé autorisé sur une image */
+  .shade {
     position: absolute;
     inset: 0;
+    z-index: -1;
     background:
-      linear-gradient(90deg, var(--color-canvas) 0%, color-mix(in srgb, var(--color-canvas) 92%, transparent) 45%, color-mix(in srgb, var(--color-canvas) 45%, transparent) 100%),
-      linear-gradient(0deg, var(--color-canvas) 5%, transparent 85%);
+      linear-gradient(0deg, var(--media-shade) 0%, rgb(6 8 14 / 0.25) 55%, rgb(6 8 14 / 0) 100%),
+      linear-gradient(90deg, rgb(6 8 14 / 0.45) 0%, rgb(6 8 14 / 0) 55%);
   }
 
-  .hero-layout {
-    position: relative;
-    z-index: 1;
-    display: grid;
-    grid-template-columns: clamp(170px, 18vw, 250px) minmax(0, 1fr);
-    gap: clamp(24px, 4vw, 48px);
-    align-items: start;
-  }
-
-  .detail-info-column {
+  .cap {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 14px;
-    min-width: 0;
-    overflow-wrap: anywhere;
+    gap: 12px;
+    width: 100%;
+    max-width: 780px;
+    padding: clamp(20px, 3vw, 40px);
   }
 
-  .eyebrow {
-    margin: 0;
-    color: var(--color-accent);
-    font-size: 11px;
-    font-weight: 750;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+  .stage.has-clearart .cap { max-width: min(780px, 58%); }
+
+  .essential-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+    font-size: 14px;
+    font-weight: 600;
+    opacity: 0.92;
   }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 9px;
+    border-radius: var(--r-xs);
+    background: rgb(255 255 255 / 0.18);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .hero:not(.has-backdrop) .badge { background: var(--pn-2); }
+
+  .rating { display: inline-flex; align-items: center; gap: 4px; }
 
   h1 {
     margin: 0;
-    font-family: var(--font-display);
-    font-size: clamp(30px, 4vw, 52px);
-    line-height: 1.08;
+    font-size: clamp(34px, 5vw, 68px);
+    line-height: 0.95;
     letter-spacing: -0.035em;
     font-weight: 800;
-    color: var(--color-text-bright);
-    max-width: 24ch;
+    max-width: 18ch;
   }
 
   .title-logo {
     display: block;
     width: auto;
     height: auto;
-    max-width: min(100%, 380px);
-    max-height: 125px;
+    max-width: min(100%, 520px);
+    max-height: 150px;
     object-fit: contain;
-    object-position: left;
-    filter: drop-shadow(0 6px 20px rgba(0, 0, 0, 0.6));
+    object-position: left bottom;
+    filter: drop-shadow(0 4px 24px rgb(0 0 0 / 0.35));
   }
 
   .tagline {
-    margin: -4px 0 0;
-    font-size: 14px;
+    margin: 0;
+    font-size: 15px;
     font-style: italic;
-    color: var(--color-muted);
+    opacity: 0.85;
   }
 
-  .essential-meta {
+  /* clearart.png : dépasse du haut de la grande image */
+  .clearart {
+    position: absolute;
+    right: clamp(24px, 5vw, 72px);
+    bottom: 0;
+    z-index: 2;
+    width: auto;
+    height: min(116%, 620px);
+    max-width: 40%;
+    object-fit: contain;
+    object-position: bottom right;
+    pointer-events: none;
+    filter: drop-shadow(0 18px 40px rgb(0 0 0 / 0.45));
+  }
+
+  .body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(200px, 20vw, 280px);
+    gap: clamp(24px, 4vw, 48px);
+    align-items: start;
+    margin-top: 24px;
+  }
+
+  .main {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px 14px;
-    color: var(--color-text);
-    font-size: 14px;
-    font-weight: 600;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
-  .essential-meta:empty {
-    display: none;
-  }
-
-  .meta-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 10px;
-    border-radius: var(--radius-xs);
-    font-size: 12.5px;
-    font-weight: 750;
-  }
-
-  .meta-badge.mpaa {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid var(--color-line-strong);
-    color: var(--color-text-bright);
-  }
-
-  .meta-badge.rating {
-    background: rgba(245, 158, 11, 0.16);
-    border: 1px solid rgba(245, 158, 11, 0.38);
-    color: #FBBF24;
+  .side {
+    position: sticky;
+    top: 88px;
   }
 
   .synopsis {
-    max-width: 110ch;
+    max-width: 72ch;
     margin: 4px 0 0;
-    font-size: 15.5px;
-    line-height: 1.72;
-    color: var(--color-text-bright);
+    font-size: 17px;
+    line-height: 1.65;
+    color: var(--tx);
   }
 
   .tags-line {
     margin: 0;
-    max-width: 105ch;
-    font-size: 13.5px;
+    max-width: 90ch;
+    font-size: 14px;
     line-height: 1.6;
-    color: var(--color-muted);
+    color: var(--mu);
   }
 
-  .tags-label {
-    margin-right: 6px;
-  }
+  .tags-label { margin-right: 6px; }
 
   .tags-line strong {
-    color: var(--color-text-bright);
-    font-weight: 650;
+    color: var(--tx);
+    font-weight: 600;
   }
 
   .provider-badges-row {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
-    margin-top: 2px;
+    gap: 8px;
   }
 
-  .provider-logo {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 3px 9px;
-    border-radius: 5px;
-    font-size: 11.5px;
-    font-weight: 900;
-    letter-spacing: 0.03em;
-    line-height: 1.2;
-  }
-
-  .provider-logo.imdb {
-    background: #F5C518;
-    color: #000000;
-  }
-
-  .provider-logo.tmdb {
-    background: linear-gradient(90deg, #90CEA1 0%, #01B4E4 100%);
-    color: #081C24;
-  }
-
-  .provider-logo.tvdb {
-    background: #35C759;
-    color: #071F0E;
-  }
-
+  .provider-logo,
   .provider-score-pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 3px 10px;
-    border-radius: var(--radius-pill);
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
+    height: 26px;
+    padding: 0 10px;
+    border-radius: var(--r-xs);
+    background: var(--pn-2);
+    color: var(--tx);
     font-size: 12px;
-    color: var(--color-text);
+    font-weight: 700;
   }
 
-  .provider-score-pill strong {
-    color: var(--color-accent);
-  }
+  .provider-score-pill strong { color: var(--mu); }
 
-  .jellyfin-meta-table {
+  .meta-table {
     display: grid;
-    gap: 8px;
+    gap: 10px;
     margin: 4px 0 0;
     width: 100%;
-    max-width: 900px;
+    max-width: 760px;
     font-size: 14px;
   }
 
   .meta-row {
     display: grid;
-    grid-template-columns: 120px minmax(0, 1fr);
+    grid-template-columns: 130px minmax(0, 1fr);
     gap: 16px;
     align-items: baseline;
   }
 
   .meta-row dt {
-    color: var(--color-muted);
-    font-weight: 500;
+    color: var(--mu);
+    font-weight: 600;
   }
 
   .meta-row dd {
     margin: 0;
-    color: var(--color-text-bright);
-    font-weight: 650;
+    color: var(--tx);
+    font-weight: 600;
   }
 
   .availability {
     margin: 0;
     max-width: 65ch;
-    color: var(--color-danger);
+    color: var(--err);
     font-size: 14px;
+    font-weight: 700;
     line-height: 1.6;
   }
 
-  @media (min-width: 1600px) {
-    .detail-info-column {
-      max-width: 1250px;
-    }
+  @media (max-width: 1023px) {
+    .body { grid-template-columns: minmax(0, 1fr) 200px; }
   }
 
-  @media (max-width: 820px) {
-    .hero-layout {
-      grid-template-columns: minmax(0, 1fr);
-    }
-    .detail-poster-column {
-      max-width: 120px;
-    }
-    .has-backdrop .detail-poster-column {
-      display: none;
-    }
-    .has-backdrop {
-      padding-top: 180px;
-    }
-    .detail-backdrop {
-      height: 300px;
-      mask-image: linear-gradient(#000 30%, transparent);
-    }
-    .detail-backdrop-clip.has-backdrop::after {
-      background: linear-gradient(0deg, var(--color-canvas) 30%, color-mix(in srgb, var(--color-canvas) 85%, transparent) 65%, transparent);
-    }
-    .title-logo {
-      max-height: 100px;
-    }
-  }
-
-  @media (max-width: 480px) {
-    .detail-hero {
-      margin-top: 16px;
-      padding: 24px 16px;
-      border-radius: var(--radius-lg);
-    }
-    .has-backdrop {
-      padding-top: 160px;
-    }
-    .detail-info-column {
-      gap: 12px;
-    }
-    .meta-row {
-      grid-template-columns: 95px minmax(0, 1fr);
-      gap: 10px;
-    }
-    h1 {
-      font-size: 30px;
-    }
+  @media (max-width: 760px) {
+    .hero { border-radius: var(--r-lg); }
+    .hero.has-backdrop { min-height: 380px; }
+    .cap, .stage.has-clearart .cap { max-width: none; }
+    .title-logo { max-width: 80%; max-height: 96px; }
+    .clearart { display: none; }
+    .body { grid-template-columns: minmax(0, 1fr); margin-top: 16px; }
+    .side { display: none; }
+    /* Sans image de fond, l'affiche reste la seule image : on la garde. */
+    .body:not(.has-backdrop) .side { display: block; position: static; order: -1; width: 140px; }
+    .synopsis { font-size: 15px; }
+    .meta-row { grid-template-columns: 100px minmax(0, 1fr); gap: 10px; }
   }
 </style>

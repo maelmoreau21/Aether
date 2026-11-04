@@ -124,11 +124,21 @@ fn terms(item: &Value, field: &str) -> HashSet<String> {
         .filter(|s| !s.is_empty())
         .collect()
 }
-struct Features([HashSet<String>;3]);
+struct Features([HashSet<String>; 3]);
 impl Features {
-    fn new(item:&Value)->Self {Self([terms(item,"genres"),terms(item,"directors"),terms(item,"actors")])}
-    fn affinity(&self,other:&Self)->f64 {
-        [2.0,4.0,1.0].iter().enumerate().map(|(i,weight)|self.0[i].intersection(&other.0[i]).count().min(4) as f64*weight).sum()
+    fn new(item: &Value) -> Self {
+        Self([
+            terms(item, "genres"),
+            terms(item, "directors"),
+            terms(item, "actors"),
+        ])
+    }
+    fn affinity(&self, other: &Self) -> f64 {
+        [2.0, 4.0, 1.0]
+            .iter()
+            .enumerate()
+            .map(|(i, weight)| self.0[i].intersection(&other.0[i]).count().min(4) as f64 * weight)
+            .sum()
     }
 }
 #[derive(Default)]
@@ -154,11 +164,11 @@ fn rank(
             signals
                 .get(key(item))
                 .filter(|s| s.weight != 0.0)
-                .map(|s| (item, s.weight,Features::new(item)))
+                .map(|s| (item, s.weight, Features::new(item)))
         })
         .take(100)
         .collect();
-    let personalized = seeds.iter().any(|(_, w,_)| *w > 0.0);
+    let personalized = seeds.iter().any(|(_, w, _)| *w > 0.0);
     let mut seen = HashSet::new();
     let mut scored: Vec<Scored> = pool
         .iter()
@@ -166,7 +176,7 @@ fn rank(
         .filter(|item| !exclude_watched || !signals.get(key(item)).is_some_and(|s| s.watched))
         .filter(|item| !signals.get(key(item)).is_some_and(|s| s.weight < 0.0))
         .map(|item| {
-            let features=Features::new(item);
+            let features = Features::new(item);
             let mut score = item["rating"]
                 .as_f64()
                 .filter(|n| n.is_finite())
@@ -176,7 +186,7 @@ fn rank(
             let mut best = 0.0;
             let mut reason = "À découvrir dans votre catalogue".to_owned();
             let mut seed_id = None;
-            for (seed, weight,seed_features) in &seeds {
+            for (seed, weight, seed_features) in &seeds {
                 if key(seed) == key(item) {
                     continue;
                 }
@@ -198,7 +208,7 @@ fn rank(
                 score,
                 reason,
                 seed_id,
-                genres:features.0[0].clone(),
+                genres: features.0[0].clone(),
             }
         })
         .collect();
@@ -208,7 +218,8 @@ fn rank(
         // Penalize repeated genres, while keeping small/single-genre catalogues usable.
         let adjusted = |entry: &Scored| {
             entry.score
-                - entry.genres
+                - entry
+                    .genres
                     .iter()
                     .map(|g| *genres.get(g).unwrap_or(&0) as f64)
                     .sum::<f64>()
@@ -299,7 +310,9 @@ async fn recommend(
             .is_ok()
         {
             if let Some(seed) = item["recommendationSeedId"].as_str()
-                && crate::feedback::authorized(&auth, &headers, seed, false).await.is_err()
+                && crate::feedback::authorized(&auth, &headers, seed, false)
+                    .await
+                    .is_err()
             {
                 item["recommendationReason"] = json!("À découvrir dans votre catalogue");
             }

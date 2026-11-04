@@ -11,6 +11,6 @@
   {#if $session && !failed}<img src={source} alt="" width={size} height={size} onerror={() => failed = true} />{:else}<Icon name="profile" size={Math.round(size * .52)} />{/if}
 </span>
 <style>
-  .profile-image { display: inline-grid; place-items: center; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--color-accent-soft); color: var(--accent-primary); }
+  .profile-image { display: inline-grid; place-items: center; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--pn-2); color: var(--mu); }
   img { display: block; width: 100%; height: 100%; object-fit: cover; }
 </style>

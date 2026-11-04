@@ -1,0 +1,143 @@
+/* Halo — jetons du design system d'Aether (source de vérité).
+   Référence complète : .agents/skills/aether-halo/SKILL.md
+   Les composants consomment ces jetons dans leurs styles scopés ; tokens.css
+   ne contient plus que des alias pour les anciens noms de variables. */
+
+:root,
+:root[data-theme='dark'],
+.halo.dark,
+.immersive-dialog {
+  color-scheme: dark;
+  /* Logo : seul dégradé de marque */
+  --logo-a: #f59e0b;
+  --logo-b: #ef4444;
+  /* Fonds */
+  --bg: #0b0e18;
+  --bg-rgb: 11, 14, 24;
+  --bg-2: #11151f;
+  --bg-3: #171c28;
+  /* Surfaces translucides */
+  --pn: rgb(255 255 255 / 0.055);
+  --pn-2: rgb(255 255 255 / 0.09);
+  --pn-3: rgb(255 255 255 / 0.14);
+  --line: rgb(255 255 255 / 0.09);
+  --line-2: rgb(255 255 255 / 0.16);
+  /* Texte */
+  --tx: #eef1f8;
+  --mu: #a2a9ba;
+  --mu-2: #8189a0;
+  /* Accent « braise » : progression, focus, état actif — jamais décoratif */
+  --ac: #ff7b47;
+  --ac-soft: rgb(255 123 71 / 0.16);
+  --on-ac: #1a0a03;
+  /* États */
+  --ok: #4ade9b;
+  --warn: #f5b544;
+  --err: #ff6b6b;
+  --info: #7aa8ff;
+  --ok-soft: rgb(74 222 155 / 0.14);
+  --warn-soft: rgb(245 181 68 / 0.14);
+  --err-soft: rgb(255 107 107 / 0.14);
+  --info-soft: rgb(122 168 255 / 0.14);
+  /* Bouton principal = encre inversée */
+  --btn: #eef1f8;
+  --btn-tx: #0b0e18;
+  /* Texte posé sur une image : toujours clair */
+  --on-media: #f4f6fb;
+  --media-shade: rgb(6 8 14 / 0.8);
+  --ambient-opacity: 0.3;
+  --glass: rgb(17 21 31 / 0.82);
+  --shadow-c: rgb(0 0 0 / 0.4);
+  --shadow: 0 18px 50px var(--shadow-c);
+}
+
+:root[data-theme='light'],
+.halo.light {
+  color-scheme: light;
+  --logo-a: #e08a00;
+  --logo-b: #dc3a2e;
+  --bg: #eef0f4;
+  --bg-rgb: 238, 240, 244;
+  --bg-2: #f7f8fa;
+  --bg-3: #ffffff;
+  --pn: rgb(17 21 34 / 0.045);
+  --pn-2: rgb(17 21 34 / 0.08);
+  --pn-3: rgb(17 21 34 / 0.12);
+  --line: rgb(17 21 34 / 0.1);
+  --line-2: rgb(17 21 34 / 0.18);
+  --tx: #111522;
+  --mu: #515869;
+  --mu-2: #646b7c;
+  --ac: #c2410c;
+  --ac-soft: rgb(194 65 12 / 0.1);
+  --on-ac: #ffffff;
+  --ok: #0f7a4b;
+  --warn: #9a5b00;
+  --err: #c42b2b;
+  --info: #2f5fd0;
+  --ok-soft: rgb(15 122 75 / 0.1);
+  --warn-soft: rgb(154 91 0 / 0.1);
+  --err-soft: rgb(196 43 43 / 0.1);
+  --info-soft: rgb(47 95 208 / 0.1);
+  --btn: #111522;
+  --btn-tx: #f4f5f8;
+  --ambient-opacity: 0.2;
+  --glass: rgb(247 248 250 / 0.88);
+  --shadow-c: rgb(17 21 34 / 0.12);
+}
+
+/* Accent choisi par l'utilisateur (Compte › Apparence). Braise par défaut. */
+:root[data-accent='blue'],
+:root[data-accent='blue'] .immersive-dialog { --ac: #7aa8ff; --ac-soft: rgb(122 168 255 / 0.16); }
+:root[data-accent='violet'],
+:root[data-accent='violet'] .immersive-dialog { --ac: #b39dff; --ac-soft: rgb(179 157 255 / 0.16); }
+:root[data-accent='green'],
+:root[data-accent='green'] .immersive-dialog { --ac: #4ade9b; --ac-soft: rgb(74 222 155 / 0.16); }
+:root[data-theme='light'][data-accent='blue'] { --ac: #1d4ed8; --ac-soft: rgb(29 78 216 / 0.1); }
+:root[data-theme='light'][data-accent='violet'] { --ac: #6d28d9; --ac-soft: rgb(109 40 217 / 0.1); }
+:root[data-theme='light'][data-accent='green'] { --ac: #047857; --ac-soft: rgb(4 120 87 / 0.1); }
+
+:root {
+  /* Rayons */
+  --r-xs: 8px;
+  --r-sm: 12px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+  /* Mouvement */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --t-fast: 160ms;
+  --t-med: 240ms;
+  --t-slow: 420ms;
+  /* Typographie */
+  --font: 'Manrope Variable', 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  /* Mise en page */
+  --gutter: 40px;
+  --maxw: 1360px;
+}
+
+@media (max-width: 1023px) { :root { --gutter: 28px; } }
+@media (max-width: 639px) { :root { --gutter: 16px; } }
+
+/* Le lecteur vidéo reste sombre quel que soit le thème (jetons sombres ci-dessus). */
+
+/* Mode TV (data-tv sur <html>, posé par theme-init.js : détection de l'appareil
+   ou réglage « Mode TV ») : même mise en page qu'un écran de 1440 px, agrandie,
+   focus très visible pour la télécommande. Le lecteur garde son échelle native. */
+:root[data-tv='true'] body { zoom: 1.333; }
+:root[data-tv='true'] .immersive-dialog { zoom: 0.75; }
+:root[data-tv='true'] :focus-visible { outline: 3px solid var(--tx); outline-offset: 4px; }
+/* Les cartes passent en 16:9 (landscape.jpg) : rails et grilles plus larges. */
+:root[data-tv='true'] { --poster-width: 260px; }
+
+/* Utilitaire global, préfixé pour ne pas croiser les styles scopés existants */
+.h-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

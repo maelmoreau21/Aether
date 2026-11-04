@@ -4,8 +4,8 @@ import type { SubtitlePreference } from './player/subtitle-preference';
 import { sanitizeSubtitleStyle, type SubtitleStyle } from './player/subtitle-style';
 import type { ArtworkRotationPolicy } from './catalog/artwork-rotation-policy.svelte';
 
-export type HomeSection = 'hero' | 'continue' | 'films' | 'series' | 'rated';
-export const DEFAULT_HOME_SECTIONS: HomeSection[] = ['hero', 'continue', 'films', 'series', 'rated'];
+export type HomeSection = 'hero' | 'continue' | 'tonight' | 'films' | 'series' | 'rated';
+export const DEFAULT_HOME_SECTIONS: HomeSection[] = ['hero', 'continue', 'tonight', 'films', 'series', 'rated'];
 export type Preferences = {
   theme?: 'light' | 'dark' | 'system'; locale?: 'fr' | 'en'; audioLanguage?: string;
   subtitles?: 'forced' | 'always' | 'off'; audioTrack?: { mediaId: string; trackId: string; language?: string };

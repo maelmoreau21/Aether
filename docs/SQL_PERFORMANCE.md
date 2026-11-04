@@ -189,7 +189,7 @@ La migration additive `0043_global_catalogue_consolidation.sql` complète le mod
 
 ### 6.3 Benchmarks reproductibles sur 1 000, 10 000, 100 000 et 1 000 000 d'œuvres
 
-Exécuté via `cargo test --package media-poc --test global_catalogue_consolidation scale_benchmark_1k_10k_100k_and_1m_works -- --nocapture` :
+Exécuté via `cargo test --package media-poc --test global_catalogue_consolidation scale_benchmark_1k_10k_100k_and_1m_works -- --ignored --nocapture` (benchmark exclu de la suite par défaut) :
 
 | Volumétrie | Cold Page 1 (shelf, sans `COUNT`) | Warm Cache serveur | Cold Page 1 (`+COUNT(*)`) | Cold Search (`'matrix'`, FTS5) | Cold 5-Filter Combo (`genre`+`year`+`4K`+`AV1`+`fra`) |
 |---|---|---|---|---|---|

@@ -898,6 +898,7 @@ async fn series_seasons_and_episodes_unification_across_libraries() {
 }
 
 #[tokio::test]
+#[ignore = "benchmark: ~2 min seed of 1M works with millisecond thresholds; flaky on a loaded machine. Run with: cargo test -p media-poc --test global_catalogue_consolidation scale_benchmark -- --ignored --nocapture"]
 async fn scale_benchmark_1k_10k_100k_and_1m_works() {
     let temp = tempfile::tempdir().unwrap();
     let db_path = temp.path().join("scale_1m.sqlite");

@@ -245,7 +245,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.screenshot({path:`${out}/immersive-playback.png`});
 
     // Already-buffered range is drawn on the timeline.
-    await page.waitForFunction(()=>parseFloat(document.querySelector('input.seek')?.style.getPropertyValue('--seek-buffered')||'0')>0);
+    // (buffered ranges are drawn as `.segment-fill.buffered` widths in the segmented timeline)
+    await page.waitForFunction(()=>[...document.querySelectorAll('.timeline .segment-fill.buffered')].some(fill=>parseFloat(fill.style.width||'0')>0));
     // "Up next" card appears during the credits (position 2 s, credits 1–2.5 s) and can be dismissed.
     const nextCard=page.getByRole('complementary',{name:'Épisode suivant'});
     await nextCard.waitFor();

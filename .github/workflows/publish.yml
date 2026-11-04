@@ -185,6 +185,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: digest-images-${{ matrix.arch }}
+          overwrite: true
           path: digests/
           if-no-files-found: error
           retention-days: 1
@@ -218,6 +219,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: digest-manifests
+          overwrite: true
           path: digests/*.digest
           if-no-files-found: error
           retention-days: 1

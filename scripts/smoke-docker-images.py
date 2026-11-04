@@ -75,7 +75,8 @@ def health(image, role, platform):
     try:
         started = time.monotonic()
         while time.monotonic() - started < 60:
-            result = subprocess.run(["docker", "exec", name, "curl", "--fail", "--silent", "--max-time", "2", endpoint], capture_output=True)
+            # curl's timeout cannot bound a stalled Docker daemon/exec request.
+            result = subprocess.run(["docker", "exec", name, "curl", "--fail", "--silent", "--max-time", "2", endpoint], capture_output=True, timeout=10)
             if result.returncode == 0:
                 return {"passed": True, "elapsedSeconds": round(time.monotonic() - started, 3)}
             time.sleep(1)

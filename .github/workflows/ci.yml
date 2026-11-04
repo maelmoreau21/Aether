@@ -87,6 +87,8 @@ jobs:
         run: python scripts/test-build-ffmpeg.py
       - name: Verify exact image archive identity offline
         run: python scripts/test-ci-image-archive.py
+      - name: Verify disposable Docker health timeout and cleanup
+        run: python scripts/test-smoke-docker-images.py
       - name: Verify multiarchitecture manifest publication gates offline
         run: python scripts/test-docker-multiarch.py
 
@@ -125,8 +127,8 @@ jobs:
       - name: Installer la toolchain Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-          targets: wasm32-unknown-unknown
+          components: ${{ matrix.shard == 'checks' && 'rustfmt, clippy' || '' }}
+          targets: ${{ matrix.shard == 'checks' && 'wasm32-unknown-unknown' || '' }}
 
       - name: Vérifier le formatage (cargo fmt)
         if: matrix.shard == 'checks'
@@ -245,6 +247,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cargo-timings-${{ matrix.shard }}
+          overwrite: true
           path: target/cargo-timings/
           if-no-files-found: ignore
           retention-days: 7
@@ -477,6 +480,7 @@ jobs:
 
   images:
     needs: [calculate-beta]
+    timeout-minutes: 35
     concurrency:
       group: ci-images-${{ github.ref }}-${{ matrix.arch }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -517,9 +521,17 @@ jobs:
           '
           test "$(docker inspect --format '{{.Size}}' media-ci:runtime-node)" -lt 200000000
       - name: Vérifier les trois services et une vraie image AV1 de chapitre
+        # Baseline normally 21–52 s; fail a stalled apt/Docker call instead of
+        # spending 27 minutes until another commit cancels the job.
+        timeout-minutes: 5
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          set -euo pipefail
+          # This host binary only generates the synthetic fixture; the pinned
+          # FFmpeg inside the actual images is verified separately above.
+          if ! command -v ffmpeg >/dev/null || ! ffmpeg -hide_banner -encoders 2>/dev/null | grep -F 'libaom-av1' >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
           python3 scripts/smoke-docker-images.py --arch '${{ matrix.arch }}' --version '${{ needs.calculate-beta.outputs.version }}' --report 'target/docker-smoke-${{ matrix.arch }}/report.json'
       - name: Archiver exactement les images validées pour la publication
         env:
@@ -540,6 +552,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: verified-images-${{ matrix.arch }}
+          overwrite: true
           path: verified-images/
           compression-level: 0
           if-no-files-found: error
@@ -549,6 +562,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: docker-smoke-${{ matrix.arch }}
+          overwrite: true
           path: target/docker-smoke-${{ matrix.arch }}/
           if-no-files-found: warn
 

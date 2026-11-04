@@ -225,7 +225,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.unroute('**/api/v1/media/**');
     report.results.episodeLaunchMs = Date.now() - launchStarted;
     assert.equal(await page.getByRole('combobox',{name:'Chapitres vidéo'}).count(),0);
-    assert.equal(await page.locator('.chapter-tick').count(),2);
+    // Chapter ticks were replaced by contiguous timeline segments (one per chapter).
+    assert.equal(await page.locator('.timeline .track .segment').count(),2);
     await page.getByRole('button',{name:'Chapitre suivant',exact:true}).click();
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>=1);
     report.results.realChapters=true;

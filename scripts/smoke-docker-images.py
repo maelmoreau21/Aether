@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import struct
 import subprocess
 import tempfile
@@ -36,6 +37,18 @@ def jpeg_dimensions(data):
             raise ValueError("Invalid JPEG marker size")
         offset += length
     raise ValueError("JPEG dimensions unavailable")
+
+
+def stage_fixture(source, directory):
+    """Share only a disposable fixture copy with the image's non-root user."""
+    fixture = directory / "av1-fixture.mkv"
+    if source.resolve() != fixture.resolve():
+        shutil.copyfile(source, fixture)
+    # TemporaryDirectory is 0700 on POSIX; its bind-mounted root must be
+    # traversable by UID 10001. Never change permissions on a supplied source.
+    directory.chmod(0o755)
+    fixture.chmod(0o644)
+    return fixture
 
 
 def preview(image, fixture, output, platform):
@@ -95,6 +108,7 @@ def main():
             command(["ffmpeg", "-v", "error", "-nostdin", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=5",
                      "-t", "3", "-c:v", "libaom-av1", "-cpu-used", "8", "-crf", "45", "-an", str(fixture)])
         try:
+            fixture = stage_fixture(fixture, Path(temporary))
             for role, image, binary in [("standalone", args.standalone, "aether"), ("core", args.core, "aether-core"), ("node", args.node, "aether-node")]:
                 inspected = json.loads(command(["docker", "image", "inspect", image]))[0]
                 if inspected["Architecture"] != args.arch:

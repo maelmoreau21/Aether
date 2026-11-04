@@ -50,7 +50,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByRole('tab', {name:'Sources et dossiers', exact:true}).click();
         await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
     await page.getByRole('button', {name:'Enregistrer', exact:true}).click();
-    await page.getByRole('heading', {name:'Séries Navigateur', exact:true}).waitFor();
+    const libraryRow = page.getByRole('row').filter({has:page.getByRole('button',{name:'Gérer Séries Navigateur',exact:true})});
+    await libraryRow.waitFor();
 
     // Grant library access directly on series-user-b in Users section
     if (await page.locator('.mobile-menu-toggle').isVisible() && await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
@@ -70,14 +71,15 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByLabel('Actions Séries Navigateur', {exact:true}).click();
     await page.getByRole('button', {name:'Actualiser la bibliothèque', exact:true}).click();
     await page.getByRole('dialog').getByRole('button', {name:'Actualiser', exact:true}).click();
-    const article = page.locator('article').filter({has: page.getByRole('heading', {name:'Séries Navigateur', exact:true})});
-    await article.getByText(/Terminé/).waitFor({timeout:60000});
+    await libraryRow.getByText(/Terminé/).waitFor({timeout:60000});
     report.results.scan = true;
     await page.screenshot({path:`${out}/admin-scan.png`});
 
     await page.goto(origin+'/app/');
-    await page.locator('.hero-banner h1').waitFor();
-    await page.waitForFunction(()=>{const image=document.querySelector('.backdrop-img');return image?.complete && image.naturalWidth>0;});
+    const featured = page.getByRole('region',{name:'À l’affiche dans votre médiathèque',exact:true});
+    await featured.getByRole('heading',{name:'Browser Series',exact:true}).waitFor();
+    await featured.locator('img.backdrop.on').evaluate(image=>image.decode());
+    assert.ok(await featured.locator('img.backdrop.on').evaluate(image=>image.naturalWidth>0),'Featured series artwork must decode');
     await page.waitForTimeout(550);
     for (const theme of ['light','dark']) {
       await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
@@ -107,9 +109,17 @@ fs.mkdirSync(out, {recursive: true});
     );
     report.results.deferredMediaLoading = true;
 
-    // Verify seasons dropdown and episode list
-    const seasonSelect = page.locator('select[aria-label="Saison"]');
-    await seasonSelect.waitFor();
+    // Choose seasons through the accessible artwork tabs and verify selection.
+    const seasons = page.getByRole('tablist',{name:'Saisons',exact:true});
+    async function selectSeason(number) {
+      const tab = seasons.getByRole('tab',{name:new RegExp(`^Saison ${number}(?:\\s|$)`)});
+      await tab.click();
+      await page.waitForFunction(number=>{
+        const selected=document.querySelector('.season-cards [role="tab"][aria-selected="true"] .season-name');
+        return selected?.textContent===`Saison ${number}`;
+      },number);
+    }
+    await seasons.waitFor();
     assert.equal(await page.locator('.main-nav a[href*="search"]').count(),0);
     assert.equal(await page.locator('main + footer').count(),0);
     assert.equal(await page.getByRole('link',{name:'Rechercher',exact:true}).count(),1);
@@ -147,8 +157,10 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('summary[aria-label="Ajouter à une playlist"]').click();
     report.results.quickFeedbackAndListMenu=true;
     await page.getByText('Synthetic Actor',{exact:true}).waitFor();
-    await page.locator('.season-image').scrollIntoViewIfNeeded();
-    await page.waitForFunction(() => {const img=document.querySelector('.season-image');return img?.complete && img.naturalWidth > 0;});
+    const seasonImage = seasons.getByRole('tab',{selected:true}).locator('img');
+    await seasonImage.scrollIntoViewIfNeeded();
+    await seasonImage.evaluate(image=>image.decode());
+    assert.ok(await seasonImage.evaluate(image=>image.naturalWidth>0),'Selected season artwork must decode');
     await page.locator('.episode-thumb').first().scrollIntoViewIfNeeded();
     await page.waitForFunction(() => [...document.querySelectorAll('.episode-thumb')].some(img => img.complete && img.naturalWidth > 0));
     report.results.localArtwork = true;
@@ -158,16 +170,16 @@ fs.mkdirSync(out, {recursive: true});
         await page.setViewportSize({width,height:900});
         await page.evaluate(()=>window.scrollTo(0,0));
         await page.waitForTimeout(150);
-        assert.ok(await page.getByRole('link',{name:width === 390 ? 'Recherche' : 'Rechercher',exact:true}).isVisible(),`search visible at ${width}`);
+        assert.ok(await page.getByRole('link',{name:'Rechercher',exact:true}).isVisible(),`search visible at ${width}`);
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false,`${theme} ${width} overflow`);
         const back=page.getByRole('link',{name:'Toutes les séries',exact:false});
         assert.equal(await back.count(),0);
         await page.screenshot({path:`${out}/detail-${theme}-${width}.png`,fullPage:true});
       }
     }
-    await seasonSelect.selectOption('2');
+    await selectSeason(2);
     await page.getByRole('button',{name:'Lire Season Two Episode',exact:true}).waitFor();
-    await seasonSelect.selectOption('1');
+    await selectSeason(1);
     const singleVersionRow = page.locator('article.episode').filter({
       has: page.locator('.episode-meta').filter({hasText:/^Épisode 2(?:\s|·|$)/})
     });
@@ -249,7 +261,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForFunction(() => !document.querySelector('dialog#player')?.hasAttribute('open'));
 
     // 6. Navigate to Season 2
-    await seasonSelect.selectOption('2');
+    await selectSeason(2);
     const ep2PlayButton = page.getByRole('button', {name:'Lire Season Two Episode', exact:true});
     await ep2PlayButton.waitFor();
     report.results.seasonNavigation = true;
@@ -340,10 +352,10 @@ fs.mkdirSync(out, {recursive: true});
     }
     report.results.filmPresentation=true;
     await page.goto(seriesDetailUrl);
-    await seasonSelect.waitFor();
+    await seasons.waitFor();
 
     // 9a. Real account switch in SPA (series-admin -> cache filled -> logout -> login series-user-b with real HttpOnly cookies)
-    await seasonSelect.selectOption('1');
+    await selectSeason(1);
     await page.locator('article.episode').filter({has:page.getByRole('heading',{name:'Episode One',exact:true})}).locator('.episode-versions summary').click();
     const ep1Select = page.locator('select[aria-label="Version de Episode One"]');
     await ep1Select.waitFor();
@@ -395,7 +407,7 @@ fs.mkdirSync(out, {recursive: true});
     assert.match(await page.locator('.profile-trigger').textContent(), /series-user-b/);
 
     // Navigate via SPA links to Series -> Browser Series (no full page reload)
-    await page.getByRole('navigation', {name:'Navigation principale',exact:true}).getByRole('button',{name:'Bibliothèques',exact:true}).click();
+    await page.getByRole('banner').getByRole('button',{name:'Bibliothèques',exact:true}).click();
     await page.getByRole('dialog',{name:'Bibliothèques'}).getByRole('link',{name:/Séries Navigateur/}).click();
     await card.waitFor();
     const mediaCallsBeforeDetailB = requestedMediaUrls.length;

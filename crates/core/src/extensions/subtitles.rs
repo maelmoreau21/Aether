@@ -247,9 +247,9 @@ async fn invoke(
     mut input: Value,
 ) -> Result<Value, Error> {
     let id = &package.manifest.id;
-    let _slot = crate::extension_runtime::try_acquire_execution(
+    let _slot = crate::extensions::runtime::try_acquire_execution(
         id,
-        crate::extension_runtime::ExecutionClass::Interactive,
+        crate::extensions::runtime::ExecutionClass::Interactive,
     )
     .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
     let limited: Option<i64> =
@@ -302,8 +302,8 @@ async fn invoke(
         id,
         &ctx.library_id,
         generation,
-        crate::extension_runtime::Invocation {
-            wasm: crate::extension_storage::wasm(&auth.store, package)
+        crate::extensions::runtime::Invocation {
+            wasm: crate::extensions::storage::wasm(&auth.store, package)
                 .await
                 .map_err(storage_error)?,
             input: ExtensionRequest {

@@ -3,7 +3,7 @@
 //! share the existing SQL transaction, backup and PostgreSQL visibility boundary.
 use crate::{
     database::{begin_write_scoped, query, query_as, query_scalar},
-    extension_data::{self, Context},
+    extensions::data::{self as extension_data, Context},
     identity::IdentityStore,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};

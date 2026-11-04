@@ -180,9 +180,9 @@ pub(super) async fn run(
     Json(input): Json<Run>,
 ) -> Result<Json<Value>, Error> {
     let actor = admin(&auth, &headers, true).await?;
-    let _slot = crate::extension_runtime::try_acquire_execution(
+    let _slot = crate::extensions::runtime::try_acquire_execution(
         &id,
-        crate::extension_runtime::ExecutionClass::Interactive,
+        crate::extensions::runtime::ExecutionClass::Interactive,
     )
     .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
     let resource: Option<adapters::WorkContext> =
@@ -268,8 +268,8 @@ pub(super) async fn run(
     }
     payload = metadata_input_with_settings(payload, settings);
     let operation = input.operation.clone();
-    let invocation = crate::extension_runtime::Invocation {
-        wasm: crate::extension_storage::wasm(&auth.store, &package)
+    let invocation = crate::extensions::runtime::Invocation {
+        wasm: crate::extensions::storage::wasm(&auth.store, &package)
             .await
             .map_err(storage_error)?,
         input: ExtensionRequest {
@@ -344,7 +344,7 @@ pub(super) async fn invoke_worker(
     id: &str,
     library: &str,
     generation: &str,
-    invocation: crate::extension_runtime::Invocation,
+    invocation: crate::extensions::runtime::Invocation,
 ) -> Result<Value, Error> {
     invoke_worker_context(
         auth, headers, id, library, generation, invocation, None, None,
@@ -359,7 +359,7 @@ pub(super) async fn invoke_worker_context(
     id: &str,
     library: &str,
     generation: &str,
-    invocation: crate::extension_runtime::Invocation,
+    invocation: crate::extensions::runtime::Invocation,
     background: Option<&crate::task_engine::Job>,
     lease: Option<&run_ownership::Lease>,
 ) -> Result<Value, Error> {
@@ -420,7 +420,7 @@ pub(super) async fn invoke_worker_context(
             .fetch_optional(auth.store.pool())
             .await
             .map_err(db)?;
-    let context = crate::extension_data::Context {
+    let context = crate::extensions::data::Context {
         extension_id: id.to_owned(),
         generation: generation.to_owned(),
         library_id: library.to_owned(),
@@ -526,7 +526,7 @@ pub(super) async fn invoke_worker_context(
                     let request = serde_json::from_value(frame["request"].clone())
                         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_storage_request"))?;
                     serde_json::to_value(
-                        crate::extension_data::execute(&auth.store, &context, request, now())
+                        crate::extensions::data::execute(&auth.store, &context, request, now())
                             .await
                             .map_err(media_extension_sdk::storage::StorageError::from),
                     )
@@ -536,7 +536,7 @@ pub(super) async fn invoke_worker_context(
                     let request = serde_json::from_value(frame["request"].clone())
                         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_object_request"))?;
                     serde_json::to_value(
-                        crate::extension_objects::execute(&auth.store, &context, request, now())
+                        crate::extensions::objects::execute(&auth.store, &context, request, now())
                             .await,
                     )
                     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "storage_failed"))?
@@ -563,7 +563,7 @@ pub(super) async fn invoke_worker_context(
     };
     tokio::pin!(operation);
     let deadline = tokio::time::sleep(Duration::from_secs(
-        crate::extension_runtime::INVOCATION_TIMEOUT_SECS,
+        crate::extensions::runtime::INVOCATION_TIMEOUT_SECS,
     ));
     tokio::pin!(deadline);
     let mut check = tokio::time::interval(Duration::from_millis(30));

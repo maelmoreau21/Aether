@@ -600,7 +600,7 @@ async fn signed_marker_wasm_result_survives_restart() {
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::extension_storage::persist(&store, &package)
+    media_poc::extensions::storage::persist(&store, &package)
         .await
         .unwrap();
     query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture.markers','fixture-publisher',?,1,'marker-generation')").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
@@ -1397,7 +1397,7 @@ async fn real_av1_opus_scan_runs_signed_wasm_automatically_and_persists_after_re
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::extension_storage::persist(&store, &package)
+    media_poc::extensions::storage::persist(&store, &package)
         .await
         .unwrap();
     query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture.metadata','fixture-publisher',?,1,'real-generation')")
@@ -1703,7 +1703,7 @@ async fn signed_synthetic_lyrics_wasm_is_applied_with_provenance() {
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::extension_storage::persist(&store, &package)
+    media_poc::extensions::storage::persist(&store, &package)
         .await
         .unwrap();
     query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture.lyrics','fixture-publisher',?,1,'generation')").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();

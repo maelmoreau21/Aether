@@ -3,7 +3,7 @@ use base64::Engine as _;
 use media_extension_sdk::storage::{StorageOperation, StorageRequest, StorageScope};
 use media_poc::{
     database::query,
-    extension_data::{self, Context},
+    extensions::data::{self as extension_data, Context},
     identity::IdentityStore,
 };
 use serde_json::json;

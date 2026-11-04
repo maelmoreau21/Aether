@@ -59,9 +59,9 @@ async fn features(State(auth):State<AuthState>,headers:HeaderMap)->Result<Json<V
 pub async fn invoke(store:&IdentityStore,cap:&str,operation:&str,input:Value)->Result<Value,Error> {
     if !matches!((cap,operation),("requests","requests.validate"|"requests.plan")|("reports","reports.validate"|"reports.classify")) {return Err(err(StatusCode::BAD_REQUEST,"unsupported_operation"));}
     let (package,generation)=package(store,cap).await?;
-    let _permit=crate::extension_runtime::try_acquire_execution(&package.manifest.id,crate::extension_runtime::ExecutionClass::Interactive)
+    let _permit=crate::extensions::runtime::try_acquire_execution(&package.manifest.id,crate::extensions::runtime::ExecutionClass::Interactive)
         .ok_or_else(||err(StatusCode::CONFLICT,"extension_busy"))?;
-    let invocation=crate::extension_runtime::Invocation::new(crate::extension_storage::wasm(store,&package).await.map_err(|_|err(StatusCode::SERVICE_UNAVAILABLE,"extension_module_missing"))?,ExtensionRequest{api_version:1,operation:operation.into(),input});
+    let invocation=crate::extensions::runtime::Invocation::new(crate::extensions::storage::wasm(store,&package).await.map_err(|_|err(StatusCode::SERVICE_UNAVAILABLE,"extension_module_missing"))?,ExtensionRequest{api_version:1,operation:operation.into(),input});
     let payload=serde_json::to_vec(&invocation).map_err(|_|err(StatusCode::BAD_REQUEST,"invalid_input"))?;
     if payload.len()>400_000 {return Err(err(StatusCode::PAYLOAD_TOO_LARGE,"invalid_input"));}
     let exe=std::env::current_exe().map_err(|_|err(StatusCode::SERVICE_UNAVAILABLE,"worker_unavailable"))?;

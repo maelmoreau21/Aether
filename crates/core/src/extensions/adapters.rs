@@ -551,9 +551,9 @@ pub(super) async fn avatar_operation(
     {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_input"));
     }
-    let _slot = crate::extension_runtime::try_acquire_execution(
+    let _slot = crate::extensions::runtime::try_acquire_execution(
         &id,
-        crate::extension_runtime::ExecutionClass::Interactive,
+        crate::extensions::runtime::ExecutionClass::Interactive,
     )
     .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
     let row: Option<(String, String)> =
@@ -571,8 +571,8 @@ pub(super) async fn avatar_operation(
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
     authorize_operation(&package.manifest, &input.operation)?;
     // Avatar operations receive no library data and no network capability.
-    let invocation = crate::extension_runtime::Invocation::new(
-        crate::extension_storage::wasm(&auth.store, &package)
+    let invocation = crate::extensions::runtime::Invocation::new(
+        crate::extensions::storage::wasm(&auth.store, &package)
             .await
             .map_err(super::storage_error)?,
         ExtensionRequest {
@@ -651,7 +651,7 @@ async fn download_provider_image(
         if addresses.is_empty()
             || addresses
                 .iter()
-                .any(|a| crate::extension_runtime::is_forbidden_ip(a.ip()))
+                .any(|a| crate::extensions::runtime::is_forbidden_ip(a.ip()))
         {
             return Err(err(StatusCode::FORBIDDEN, "image_host_denied"));
         }
@@ -852,9 +852,9 @@ pub(super) async fn import_image(
     if !permitted(&auth, &headers, &id, &library, &generation).await? {
         return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
     }
-    let _slot = crate::extension_runtime::try_acquire_execution(
+    let _slot = crate::extensions::runtime::try_acquire_execution(
         &id,
-        crate::extension_runtime::ExecutionClass::Interactive,
+        crate::extensions::runtime::ExecutionClass::Interactive,
     )
     .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
     import_image_direct(&auth.store, &id, input).await

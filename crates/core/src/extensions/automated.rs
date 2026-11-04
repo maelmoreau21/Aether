@@ -319,8 +319,8 @@ pub(crate) async fn run_automated(
     } else {
         operation
     };
-    let invocation = crate::extension_runtime::Invocation {
-        wasm: crate::extension_storage::wasm(&auth.store, &package)
+    let invocation = crate::extensions::runtime::Invocation {
+        wasm: crate::extensions::storage::wasm(&auth.store, &package)
             .await
             .map_err(storage_error)?,
         input: ExtensionRequest {

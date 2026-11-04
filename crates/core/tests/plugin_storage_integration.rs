@@ -8,7 +8,7 @@ use media_extension_sdk::{Manifest, Package};
 use media_poc::{
     auth::AuthState,
     database::query,
-    extension_storage::{check_health, persist, sync_installed, wasm},
+    extensions::storage::{check_health, persist, sync_installed, wasm},
     identity::IdentityStore,
 };
 use ring::{rand::SystemRandom, signature::Ed25519KeyPair};

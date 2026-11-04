@@ -268,7 +268,7 @@ async fn install_automatic_metadata_fixture(store: &IdentityStore, libraries: &[
     .execute(store.pool())
     .await
     .unwrap();
-    media_poc::extension_storage::persist(store, &package)
+    media_poc::extensions::storage::persist(store, &package)
         .await
         .unwrap();
     media_poc::database::query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('distributed.fixture','distributed-fixture',?,1,'distributed-generation')")

@@ -167,7 +167,7 @@ pub(super) async fn rollback(
     clear_snapshot(&mut tx, &id).await.map_err(db)?;
     audit(&mut tx, &actor.user.id, &id, "package.rolled_back").await?;
     tx.commit().await.map_err(db)?;
-    if let Err(error) = crate::extension_storage::persist_upgrade(&auth.store, &package).await {
+    if let Err(error) = crate::extensions::storage::persist_upgrade(&auth.store, &package).await {
         eprintln!("Plugin '{id}' cache synchronization pending: {error}");
     }
     Ok(Json(
@@ -205,7 +205,7 @@ pub(super) async fn verify_candidate(package: &Package) -> Result<(), Error> {
     let mut child = command
         .spawn()
         .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
-    let invocation = crate::extension_runtime::Invocation::new(
+    let invocation = crate::extensions::runtime::Invocation::new(
         package.wasm.clone(),
         ExtensionRequest {
             api_version: 1,

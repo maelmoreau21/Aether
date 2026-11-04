@@ -5,7 +5,7 @@ use media_extension_sdk::{Manifest, Package};
 use media_poc::{
     backup::restore_database,
     backup_bundle::{create_with_assets, extract},
-    extension_storage::{persist, sync_installed, wasm},
+    extensions::storage::{persist, sync_installed, wasm},
     identity::IdentityStore,
 };
 use ring::{rand::SystemRandom, signature::Ed25519KeyPair};

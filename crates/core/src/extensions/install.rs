@@ -208,7 +208,7 @@ pub(super) async fn upgrade_with_key(
     if package.manifest.storage_migration.is_some() {
         updates::verify_candidate(&package).await?;
     }
-    crate::extension_storage::backup_package(&auth.store, &installed)
+    crate::extensions::storage::backup_package(&auth.store, &installed)
         .await
         .map_err(storage_error)?;
     let bytes = serde_json::to_string(&package)
@@ -233,7 +233,7 @@ pub(super) async fn upgrade_with_key(
     }
     audit(&mut tx, &actor.user.id, &id, "package.upgraded").await?;
     tx.commit().await.map_err(db)?;
-    if let Err(error) = crate::extension_storage::persist_upgrade(&auth.store, &package).await {
+    if let Err(error) = crate::extensions::storage::persist_upgrade(&auth.store, &package).await {
         eprintln!("Plugin '{id}' cache synchronization pending: {error}");
     }
     Ok((StatusCode::CREATED, Json(json!({"id":id}))))
@@ -296,7 +296,7 @@ pub(super) async fn install_with_key(
         &format!("installed:{}:{}", package.manifest.version, package.sha256),
     )
     .await?;
-    crate::extension_storage::persist(&auth.store, &package)
+    crate::extensions::storage::persist(&auth.store, &package)
         .await
         .map_err(storage_error)?;
     tx.commit().await.map_err(db)?;
@@ -331,7 +331,7 @@ pub async fn install_internal_with_key(
         media_contracts::protocol::unix_now(),
     )
     .await;
-    crate::extension_storage::persist(store, &package).await?;
+    crate::extensions::storage::persist(store, &package).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -415,7 +415,7 @@ pub(super) async fn uninstall(
         }
     }
     updates::clear_snapshot(&mut tx, &id).await.map_err(db)?;
-    crate::extension_data_lifecycle::uninstall(&mut tx, &id, input.delete_data)
+    crate::extensions::data_lifecycle::uninstall(&mut tx, &id, input.delete_data)
         .await
         .map_err(db)?;
     query("DELETE FROM extensions WHERE id=?")
@@ -442,7 +442,7 @@ pub(super) async fn uninstall(
     )
     .await?;
     tx.commit().await.map_err(db)?;
-    crate::extension_storage::remove(&auth.store, &id)
+    crate::extensions::storage::remove(&auth.store, &id)
         .await
         .map_err(storage_error)?;
     Ok(StatusCode::NO_CONTENT)

@@ -100,7 +100,7 @@ fn generic_abi_does_not_require_a_metadata_payload() {
     ))
     .unwrap();
     let response =
-        media_poc::extension_runtime::execute(media_poc::extension_runtime::Invocation::new(
+        media_poc::extensions::runtime::execute(media_poc::extensions::runtime::Invocation::new(
             STANDARD.encode(wasm),
             ExtensionRequest {
                 api_version: 1,
@@ -114,7 +114,7 @@ fn generic_abi_does_not_require_a_metadata_payload() {
 
 #[test]
 fn sandbox_bounds_recursion_separately_from_value_stack_bytes() {
-    use media_poc::extension_runtime::{Invocation, execute};
+    use media_poc::extensions::runtime::{Invocation, execute};
     let wasm = |depth: u32| {
         wat::parse_str(format!(
             r#"(module
@@ -139,7 +139,7 @@ fn sandbox_bounds_recursion_separately_from_value_stack_bytes() {
 
 #[test]
 fn sandbox_denies_imports_cpu_memory_invalid_pointers_and_output() {
-    use media_poc::extension_runtime::{Invocation, execute};
+    use media_poc::extensions::runtime::{Invocation, execute};
     let run = |wasm: Vec<u8>| execute(Invocation::new(STANDARD.encode(wasm), input()));
     assert_eq!(
         run(good_module()).unwrap().result["title"],
@@ -1001,8 +1001,8 @@ fn real_rust_sdk_module_executes() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/wasm32-unknown-unknown/release/media_extension_sdk_fixture.wasm");
     let bytes = std::fs::read(path).unwrap();
-    let result = media_poc::extension_runtime::execute(
-        media_poc::extension_runtime::Invocation::new(STANDARD.encode(bytes), input()),
+    let result = media_poc::extensions::runtime::execute(
+        media_poc::extensions::runtime::Invocation::new(STANDARD.encode(bytes), input()),
     )
     .unwrap();
     assert_eq!(result.result["title"], "Original");
@@ -1084,7 +1084,7 @@ async fn browser_extension_installs_and_executes_real_rust_module() {
 
 #[test]
 fn http_broker_security_enforces_allowed_imports_and_allowlist() {
-    use media_poc::extension_runtime::{Invocation, execute};
+    use media_poc::extensions::runtime::{Invocation, execute};
 
     // 1. Module with unauthorized imports is rejected immediately
     let bad_import_module = wat::parse_str(
@@ -1131,7 +1131,7 @@ fn http_broker_security_enforces_allowed_imports_and_allowlist() {
 #[test]
 fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
     use media_extension_sdk::HostHttpRequest;
-    use media_poc::extension_runtime::{HostState, execute_host_http};
+    use media_poc::extensions::runtime::{HostState, execute_host_http};
     use wasmi::StoreLimitsBuilder;
 
     let limits = StoreLimitsBuilder::new().build();
@@ -1216,7 +1216,7 @@ fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
 #[test]
 #[ignore = "requires MEDIA_TEST_EXTENSION_WASM pointing to an explicitly built external extension"]
 fn external_extension_wasm_manifest_uses_generic_runtime() {
-    use media_poc::extension_runtime::{Invocation, execute};
+    use media_poc::extensions::runtime::{Invocation, execute};
     let path =
         std::env::var_os("MEDIA_TEST_EXTENSION_WASM").expect("external test artifact required");
     let bytes = std::fs::read(path).unwrap();
@@ -1796,7 +1796,7 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
     let file = root.join("fixture.package.json");
     std::fs::write(&file, serde_json::to_vec(&package).unwrap()).unwrap();
     assert!(
-        media_poc::extension_files::import(&store, &root)
+        media_poc::extensions::files::import(&store, &root)
             .await
             .is_err()
     );
@@ -1809,7 +1809,7 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
     )
     .unwrap();
     assert_eq!(
-        media_poc::extension_files::import(&store, &root)
+        media_poc::extensions::files::import(&store, &root)
             .await
             .unwrap(),
         1
@@ -1833,7 +1833,7 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
         .await
         .unwrap();
     assert_eq!(
-        media_poc::extension_files::import(&store, &root)
+        media_poc::extensions::files::import(&store, &root)
             .await
             .unwrap(),
         0
@@ -1850,7 +1850,7 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
         .await
         .unwrap();
     assert!(
-        media_poc::extension_files::import(&store, &root)
+        media_poc::extensions::files::import(&store, &root)
             .await
             .is_err()
     );
@@ -1862,7 +1862,7 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
     tampered["sha256"] = json!("0".repeat(64));
     std::fs::write(file, serde_json::to_vec(&tampered).unwrap()).unwrap();
     assert!(
-        media_poc::extension_files::import(&store, &root)
+        media_poc::extensions::files::import(&store, &root)
             .await
             .is_err()
     );
@@ -1872,8 +1872,8 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
 async fn persistent_storage_synthetic_guest_survives_worker_restart_and_database_reopen() {
     use media_extension_sdk::storage::{StorageOperation, StorageRequest, StorageScope};
     use media_poc::{
-        extension_data,
-        extension_runtime::{Invocation, read_frame, write_frame},
+        extensions::data as extension_data,
+        extensions::runtime::{Invocation, read_frame, write_frame},
     };
     use std::process::{Command, Stdio};
     let temp = tempfile::tempdir().unwrap();

@@ -679,7 +679,6 @@ type TestHttpResponses = std::collections::VecDeque<(String, Vec<u8>)>;
 thread_local! {static TEST_HTTP_SEQUENCE: std::cell::RefCell<Option<TestHttpResponses>> = const { std::cell::RefCell::new(None) };}
 
 #[cfg(test)]
-#[path = "extension_provider_budget_tests.rs"]
 mod provider_budget_tests;
 
 #[cfg(test)]
@@ -688,7 +687,7 @@ mod storage_frames {
     #[test]
     fn metadata_guest_handles_normal_sized_search_response() {
         let package: media_extension_sdk::Package =
-            serde_json::from_str(include_str!("../embedded_plugins/tmdb-0.1.1.package.json"))
+            serde_json::from_str(include_str!("../../embedded_plugins/tmdb-0.1.1.package.json"))
                 .unwrap();
         let items: Vec<_>=(1..=20).map(|id|serde_json::json!({"id":id,"title":format!("Synthetic film {id}"),"overview":"Synthetic plot. ".repeat(80),"release_date":"2024-01-01","poster_path":"/synthetic.jpg"})).collect();
         TEST_HTTP_BODY.with(|v| {

@@ -1,5 +1,5 @@
 fn main() {
-    use media_poc::extension_runtime::{execute_brokered, read_frame, write_frame};
+    use media_poc::extensions::runtime::{execute_brokered, read_frame, write_frame};
     // Release the initial input lock before guest host-calls read broker replies.
     let invocation = {
         let input = std::io::stdin();

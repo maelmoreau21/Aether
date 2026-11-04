@@ -201,7 +201,7 @@ pub(super) async fn list(
             rollback_version,
         });
     }
-    let storage = crate::extension_storage::check_health(&auth.store).await;
+    let storage = crate::extensions::storage::check_health(&auth.store).await;
     Ok(Json(
         json!({"apiVersion":1,"extensions":installed,"storage":storage}),
     ))
@@ -210,9 +210,9 @@ pub(super) async fn list(
 pub(super) async fn storage_health(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-) -> Result<Json<crate::extension_storage::PluginStorageHealth>, Error> {
+) -> Result<Json<crate::extensions::storage::PluginStorageHealth>, Error> {
     admin(&auth, &headers, false).await?;
     Ok(Json(
-        crate::extension_storage::check_health(&auth.store).await,
+        crate::extensions::storage::check_health(&auth.store).await,
     ))
 }

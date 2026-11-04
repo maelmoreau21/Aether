@@ -244,7 +244,7 @@ ciblé du décodage de manifeste, de la contention et des allocations.
 ### Refonte de base concurrente constatée le26octobre
 
 Après les tests, le schéma neuf a été consolidé dans
-`crates/core/schema.sql` pour les deux moteurs ; les tables privées et objets
+`crates/core/migrations/schema.sql` pour les deux moteurs ; les tables privées et objets
 y sont présentes. Les fichiers moteur KV/objets, runtime et contrat SDK ont les
 mêmes SHA-256 que les preuves, mais `extensions.rs` et d'autres composants ont
 changé. Les résultats attestent l'instantané enregistré, pas l'ensemble de

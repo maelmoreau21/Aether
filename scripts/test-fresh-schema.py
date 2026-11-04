@@ -5,7 +5,7 @@ import sqlite3
 import unittest
 
 
-SCHEMA = Path(__file__).resolve().parents[1] / "crates/core/schema.sql"
+SCHEMA = Path(__file__).resolve().parents[1] / "crates/core/migrations/schema.sql"
 START = "-- AETHER_SCHEMA_SQLITE_BEGIN"
 END = "-- AETHER_SCHEMA_SQLITE_END"
 

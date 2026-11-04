@@ -173,7 +173,7 @@ pub async fn begin_write_serialized(
 /// Install the one current schema on an empty database. Existing databases are
 /// never rewritten here; incompatible older schemas fail explicitly.
 pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sqlx::Error> {
-    const SOURCE: &str = include_str!("../schema.sql");
+    const SOURCE: &str = include_str!("../migrations/schema.sql");
     const SQLITE_START: &str = "-- AETHER_SCHEMA_SQLITE_BEGIN";
     const SQLITE_END: &str = "-- AETHER_SCHEMA_SQLITE_END";
     const POSTGRES_START: &str = "-- AETHER_SCHEMA_POSTGRES_BEGIN";
@@ -380,28 +380,28 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
     } else {
         sqlx::raw_sql(section).execute(&mut *tx).await?;
     }
-    sqlx::raw_sql(include_str!("extension_update_schema.sql"))
+    sqlx::raw_sql(include_str!("../migrations/extension_update.sql"))
         .execute(&mut *tx)
         .await?;
-    sqlx::raw_sql(include_str!("extension_run_schema.sql"))
+    sqlx::raw_sql(include_str!("../migrations/extension_run.sql"))
         .execute(&mut *tx)
         .await?;
-    sqlx::raw_sql(include_str!("subtitle_schema.sql"))
+    sqlx::raw_sql(include_str!("../migrations/subtitle.sql"))
         .execute(&mut *tx)
         .await?;
-    sqlx::raw_sql(include_str!("recommendation_schema.sql"))
+    sqlx::raw_sql(include_str!("../migrations/recommendation.sql"))
         .execute(&mut *tx)
         .await?;
-    sqlx::raw_sql(include_str!("notification_schema.sql"))
+    sqlx::raw_sql(include_str!("../migrations/notification.sql"))
         .execute(&mut *tx)
         .await?;
-    sqlx::raw_sql(include_str!("statistics_schema.sql"))
+    sqlx::raw_sql(include_str!("../migrations/statistics.sql"))
         .execute(&mut *tx)
         .await?;
-    sqlx::raw_sql(include_str!("acquisition_schema.sql"))
+    sqlx::raw_sql(include_str!("../migrations/acquisition.sql"))
         .execute(&mut *tx)
         .await?;
-    sqlx::raw_sql(include_str!("reports_schema.sql"))
+    sqlx::raw_sql(include_str!("../migrations/reports.sql"))
         .execute(&mut *tx)
         .await?;
     tx.commit().await

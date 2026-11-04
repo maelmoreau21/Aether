@@ -17,7 +17,7 @@ try {
         Start-Sleep -Milliseconds 500
     }
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL did not become ready.' }
-    $source = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot '../crates/core/schema.sql'))
+    $source = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot '../crates/core/migrations/schema.sql'))
     $startMarker = '-- AETHER_SCHEMA_POSTGRES_BEGIN'
     $endMarker = '-- AETHER_SCHEMA_POSTGRES_END'
     $start = $source.IndexOf($startMarker) + $startMarker.Length

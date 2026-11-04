@@ -17,6 +17,30 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 4 novembre 2026 — Assainissement du dépôt et de `crates/core`
+
+Branche `chore/core-restructure`, partie de `feat/requests-and-reports` (WIP commité d'abord).
+- Git : `crates/node/data`, `crates/core/data`, ainsi que les PNG/JSONL de
+  `docs/evidence/2026-10-15`, sont ignorés et retirés de l'index (copies locales gardées,
+  historique non réécrit). Les fichiers de suivi IA passent dans `.ai/`.
+- SQL : `schema.sql` et les `*_schema.sql` sont dans `crates/core/migrations/` (pas des
+  migrations sqlx : schéma courant et scripts idempotents de `initialize_fresh_schema`).
+- Extensions : plus aucun `extension_*.rs` à la racine de `src/`. Les modules publics sont
+  devenus `extensions::{runtime,storage,data,objects,files,data_lifecycle}`.
+- Tests unitaires : convention `module/tests.rs`, plus de `#[path]` (ils dépendent d'éléments
+  privés, donc pas de déplacement vers `tests/`). Filtre CI : `product::tests::…`.
+- Expériences lecteur (mse, shaka, bench, audio-seek-policy) : dans `crates/core/experiments/`,
+  toujours servies et testées. La page OIDC est dans `src/oidc/complete.html`.
+- Binaire unique `src/bin/aether-core.rs` (`default-run`) ; `src/main.rs` supprimé. Les fixtures
+  ne sont chargées que si `MEDIA_FIXTURE_DIR` est défini.
+- Vérifié : `cargo check` et `cargo clippy --all-targets --all-features` passent
+  (avertissements clippy seulement dans le WIP acquisition/reports), `cargo test --test p0
+  --features fixture-bench` 11/11, `node --test scripts/audio-seek-policy.test.cjs` 10/10.
+  `scripts/test-fresh-schema.py` échoue (6 planifications pour 5 attendues), comme avant le
+  déplacement ; le WIP en est la cause, pas le déplacement.
+- Non vérifié : suite `cargo test` complète (disque C: plein, le linker échoue avec LNK1318),
+  build Docker, tests navigateur `--ignored`, PostgreSQL.
+
 ## 4 novembre 2026 — Correctifs visuels de la refonte
 
 - Recherche : la règle globale des champs (spécificité 0,3,1) écrasait les styles

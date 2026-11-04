@@ -1,0 +1,24 @@
+//! Local authentication. Session secrets never enter the database or application logs.
+//!
+//! Module layout:
+//! - `touch`: coalesced, batched session activity writes.
+//! - `state`: `AuthState`, identity types and session / CSRF / origin checks.
+//! - `config`: environment-driven authentication configuration.
+//! - `util`: token, cookie, hashing and client-key helpers.
+//! - `http`: REST router and handlers.
+
+mod config;
+mod http;
+mod state;
+mod touch;
+mod util;
+
+#[cfg(test)]
+mod tests;
+
+pub use config::{is_http_bootstrap_disabled, is_local_login_enabled};
+pub use http::{authenticate, router};
+pub use state::{AuthConfigError, AuthState, AuthUser, Authenticated};
+pub use touch::SessionTouchStats;
+pub use util::extract_client_key;
+pub(crate) use util::{ABSOLUTE_SECONDS, IDLE_SECONDS, device_label, hash, random_token};

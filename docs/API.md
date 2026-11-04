@@ -526,3 +526,9 @@ Le contrat natif `/api/v1/playback/sessions`, les vues administrateur et
 personnelles `/api/v1/{admin,account}/statistics`, la conservation et les règles
 de calcul sont documentés dans [Statistiques](STATISTICS.md). La collecte est
 désactivée par défaut ; elle n'altère pas les API de progression ou de feedback.
+# Applications facultatives : demandes et signalements
+
+Les routes `/api/v1/requests`, `/api/v1/reports`,
+`/api/v1/admin/acquisition/*` et `/api/v1/admin/imports/*` sont conditionnées aux
+extensions officielles activées, avec session, CSRF pour les mutations et droits
+vivants. [Contrat détaillé](REQUESTS_AND_REPORTS.md#connexions-et-api).

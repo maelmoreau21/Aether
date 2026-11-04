@@ -122,6 +122,8 @@ fn message(event: &Event) -> (&'static str, String) {
         "scan.completed" => "Scan termine",
         "task.failed" => "Tache en echec",
         "content.added" => "Nouveau contenu disponible",
+        kind if kind.starts_with("request.") => "Demande mise a jour",
+        kind if kind.starts_with("report.") => "Signalement mis a jour",
         _ => "Tache terminee",
     };
     (
@@ -129,7 +131,11 @@ fn message(event: &Event) -> (&'static str, String) {
         format!(
             "{title}. Evenement : {}. {} : {}.",
             event.id,
-            if event.kind == "content.added" {
+            if event.kind.starts_with("request.") {
+                "Demande"
+            } else if event.kind.starts_with("report.") {
+                "Signalement"
+            } else if event.kind == "content.added" {
                 "Oeuvre"
             } else {
                 "Tache"

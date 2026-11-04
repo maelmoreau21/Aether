@@ -204,6 +204,11 @@ pub async fn descriptor_for_user(
 
     let row = active_row;
     let asset_id = effective_asset_id.as_str();
+    let report_tracks: Vec<(String, i64)> =
+        query_as("SELECT id,stream_index FROM inventory_tracks WHERE asset_id=?")
+            .bind(asset_id)
+            .fetch_all(store.pool())
+            .await?;
     let probe = decode(row.get("probe_json"))?;
     let library_id: String = row.get("library_id");
     let node_id: String = row.get("node_id");
@@ -255,6 +260,19 @@ pub async fn descriptor_for_user(
         "mime": row.get::<String,_>("mime"),
         "tracks": probe.streams
     });
+    let original_audio: Vec<_> = probe
+        .streams
+        .iter()
+        .filter(|track| track.codec_type.as_deref() == Some("audio"))
+        .collect();
+    if original_audio.len() == 1 {
+        source_obj["reportTrackId"] = json!(
+            report_tracks
+                .iter()
+                .find(|(_, index)| *index == i64::from(original_audio[0].index))
+                .map(|(id, _)| id)
+        );
+    }
     if let Some((direct_url, expires_at)) = direct_info {
         source_obj["directUrl"] = json!(direct_url);
         source_obj["tokenExpiresAt"] = json!(expires_at);
@@ -302,6 +320,7 @@ pub async fn descriptor_for_user(
             sources.push(json!({
                 "id": format!("{asset_id}-internal-{}", track.index),
                 "audioTrackId": format!("internal-{}", track.index), "language": language,
+                "reportTrackId": report_tracks.iter().find(|(_,index)|*index==i64::from(track.index)).map(|(id,_)|id),
                 "url": format!("/api/v1/assets/{asset_id}/prepared/video"),
                 "externalAudioUrl": format!("/api/v1/assets/{asset_id}/prepared/audio-{}", track.index),
                 "audioSegmentUrl": format!("/api/v1/assets/{asset_id}/prepared/audio-{}-chunk-", track.index),
@@ -373,6 +392,7 @@ pub async fn descriptor_for_user(
                 .and_then(Value::as_i64)
                 == Some(1);
             subtitles.push(json!({ "id": format!("internal-{}", track.index), "language": language,
+                "reportTrackId":report_tracks.iter().find(|(_,index)|*index==i64::from(track.index)).map(|(id,_)|id),
                 "label": format!("{}{} · intégrés (texte)", language.to_uppercase(), if forced { " forcés" } else { "" }),
                 "forced": forced, "sourceFormat": track.codec_name,
                 "url": format!("/api/v1/assets/{asset_id}/prepared/subtitle-{}", track.index),
@@ -384,6 +404,7 @@ pub async fn descriptor_for_user(
         // External audio is authorized through Core; the existing video can remain direct.
         source["id"] = json!(format!("{asset_id}-audio-{index}"));
         source["audioTrackId"] = json!(format!("external-{index}"));
+        source["reportTrackId"] = json!(audio_operational_id(asset_id, track));
         source["language"] = json!(track.language);
         source["externalAudioUrl"] = json!(format!(
             "/api/v1/assets/{asset_id}/audio/{}",
@@ -661,12 +682,69 @@ fn subtitle_descriptors(asset_id: &str, text: Option<&str>) -> Result<Vec<Value>
         .map(|(index, track)| {
             json!({
                 "id": format!("external-{index}"), "language": track.language, "label": track.label,
+                "reportTrackId":subtitle_report_id(asset_id,track),
                 "forced": track.forced, "sdh": track.sdh, "sourceFormat": track.source_format,
                 "url": format!("/api/v1/assets/{asset_id}/subtitles/{index}"),
                 "assUrl": track.ass.as_ref().map(|_| format!("/api/v1/assets/{asset_id}/subtitles/{index}?format=ass"))
             })
         })
         .collect())
+}
+
+fn subtitle_report_id(asset: &str, track: &media_contracts::inventory::ExternalSubtitle) -> String {
+    // Content and metadata identify the exact subtitle without exposing its text or a path.
+    let identity = serde_json::to_vec(track).unwrap_or_default();
+    let hash = media_contracts::protocol::sha256_hex(&identity);
+    format!("subtitle-{asset}-{}", &hash[..32])
+}
+
+pub(crate) async fn report_track_allowed(
+    store: &IdentityStore,
+    asset: &str,
+    kind: &str,
+    reference: &str,
+) -> Result<bool, sqlx::Error> {
+    let internal: Option<String> =
+        query_scalar("SELECT metadata_json FROM inventory_tracks WHERE id=? AND asset_id=?")
+            .bind(reference)
+            .bind(asset)
+            .fetch_optional(store.pool())
+            .await?;
+    if let Some(raw) = internal {
+        let track: crate::media::Track =
+            serde_json::from_str(&raw).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+        return Ok(
+            track.codec_type.as_deref() == Some(if kind == "audio" { "audio" } else { "subtitle" })
+        );
+    }
+    if kind == "audio" {
+        let raw: Option<String> =
+            query_scalar("SELECT audios_json FROM inventory_audio WHERE asset_id=?")
+                .bind(asset)
+                .fetch_optional(store.pool())
+                .await?;
+        let tracks: Vec<media_contracts::inventory::ExternalAudio> =
+            serde_json::from_str(raw.as_deref().unwrap_or("[]"))
+                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+        return Ok(tracks
+            .iter()
+            .any(|track| audio_operational_id(asset, track) == reference));
+    }
+    if let Some(id) = reference.strip_prefix("downloaded-") {
+        let count:i64=query_scalar("SELECT COUNT(*) FROM subtitle_downloads d JOIN inventory_assets a ON a.id=d.asset_id WHERE d.id=? AND d.asset_id=? AND d.status='completed' AND d.fingerprint=CAST(a.size AS TEXT)||':'||a.modified_ns").bind(id).bind(asset).fetch_one(store.pool()).await?;
+        return Ok(count == 1);
+    }
+    let raw: Option<String> =
+        query_scalar("SELECT subtitles_json FROM inventory_subtitles WHERE asset_id=?")
+            .bind(asset)
+            .fetch_optional(store.pool())
+            .await?;
+    let tracks: Vec<media_contracts::inventory::ExternalSubtitle> =
+        serde_json::from_str(raw.as_deref().unwrap_or("[]"))
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+    Ok(tracks
+        .iter()
+        .any(|track| subtitle_report_id(asset, track) == reference))
 }
 
 // Probe output is external data: chapter ordering and timestamps cannot be

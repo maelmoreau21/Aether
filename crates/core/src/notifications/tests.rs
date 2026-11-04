@@ -75,6 +75,146 @@ fn configuration_rejects_ssrf_injection_and_redacts_secrets() {
 }
 
 type Captures = Arc<Mutex<Vec<(HeaderMap, String)>>>;
+
+#[tokio::test]
+async fn application_events_are_opt_in_owned_revocable_and_imports_are_silent() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use media_extension_sdk::{Manifest, Package};
+    use ring::{
+        rand::SystemRandom,
+        signature::{Ed25519KeyPair, KeyPair},
+    };
+    use sha2::{Digest, Sha256};
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("applications-notify.sqlite"))
+        .await
+        .unwrap();
+    fixture(&store, "test").await;
+    for id in ["owner", "other"] {
+        query("INSERT INTO users(id,role) VALUES(?,'user')")
+            .bind(id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+        query("INSERT INTO library_permissions(library_id,user_id) VALUES('allowed-library',?)")
+            .bind(id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+        query("INSERT INTO notification_preferences(user_id,enabled) VALUES(?,1)")
+            .bind(id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+    let wasm=wat::parse_str("(module (memory (export \"memory\") 1) (func (export \"media_alloc\") (param i32) (result i32) i32.const 0) (func (export \"media_run\") (param i32 i32) (result i64) i64.const 0))").unwrap();
+    for cap in ["requests", "reports"] {
+        let bytes = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
+        let key = Ed25519KeyPair::from_pkcs8(bytes.as_ref()).unwrap();
+        let mut package = Package {
+            manifest: Manifest {
+                api_version: 1,
+                id: format!("media-{cap}"),
+                name: cap.into(),
+                version: "0.1.0".into(),
+                description: "Notification contract fixture".into(),
+                author: "Test".into(),
+                license: "MIT".into(),
+                repository: "https://example.invalid/test".into(),
+                permissions: vec![cap.into()],
+                ..Default::default()
+            },
+            publisher_id: "test".into(),
+            wasm: STANDARD.encode(&wasm),
+            sha256: format!("{:x}", Sha256::digest(&wasm)),
+            signature: String::new(),
+        };
+        package.signature = STANDARD.encode(key.sign(&package.signing_bytes().unwrap()).as_ref());
+        crate::extensions::install_internal_with_key(
+            &store,
+            package,
+            &STANDARD.encode(key.public_key().as_ref()),
+        )
+        .await
+        .unwrap();
+    }
+    let at = now();
+    query("INSERT INTO media_requests(id,user_id,library_id,kind,title,external_id,external_provider,input_json,status,created_at,updated_at) VALUES('request','owner','allowed-library','film','Private title','1','tmdb','{}','pending',?,?)").bind(at).bind(at).execute(store.pool()).await.unwrap();
+    query("INSERT INTO acquisition_events(id,request_id,status,created_at) VALUES('request-event','request','pending',?)").bind(at).execute(store.pool()).await.unwrap();
+    query("INSERT INTO media_reports(id,user_id,library_id,category,description,status,created_at,updated_at) VALUES('report','owner','allowed-library','audio','Private description','open',?,?)").bind(at).bind(at).execute(store.pool()).await.unwrap();
+    query("INSERT INTO media_reports(id,user_id,category,description,status,source_key,created_at,updated_at) VALUES('imported','owner','other','Imported private description','open','source:report:1',?,?)").bind(at).bind(at).execute(store.pool()).await.unwrap();
+    for (id, report) in [("report-event", "report"), ("imported-event", "imported")] {
+        query("INSERT INTO media_report_events(id,report_id,kind,status,created_at) VALUES(?,?,'report.created','open',?)").bind(id).bind(report).bind(at).execute(store.pool()).await.unwrap();
+    }
+    let event = Event {
+        id: "report-event".into(),
+        kind: "report.created".into(),
+        task_id: "report".into(),
+        library_id: Some("allowed-library".into()),
+        occurred_at: at,
+    };
+    let mut channel = Channel {
+        id: "channel".into(),
+        name: "test".into(),
+        recipient_id: "owner".into(),
+        kind: "webhook".into(),
+        enabled: 1,
+        config_json: "{}".into(),
+        generation: "1".into(),
+    };
+    assert!(!recipient_allowed(&store, &channel, &event).await.unwrap());
+    for user in ["owner", "other", "test"] {
+        for kind in ["requests", "reports"] {
+            query("INSERT INTO application_notification_preferences(user_id,kind,enabled,since_at) VALUES(?,?,1,?)").bind(user).bind(kind).bind(at).execute(store.pool()).await.unwrap();
+        }
+    }
+    assert!(recipient_allowed(&store, &channel, &event).await.unwrap());
+    channel.recipient_id = "other".into();
+    assert!(!recipient_allowed(&store, &channel, &event).await.unwrap());
+    channel.recipient_id = "test".into();
+    assert!(recipient_allowed(&store, &channel, &event).await.unwrap());
+    let request_event = Event {
+        id: "request-event".into(),
+        kind: "request.pending".into(),
+        task_id: "request".into(),
+        library_id: Some("allowed-library".into()),
+        occurred_at: at,
+    };
+    assert!(
+        recipient_allowed(&store, &channel, &request_event)
+            .await
+            .unwrap()
+    );
+    application_notifications::collect(&store, at)
+        .await
+        .unwrap();
+    application_notifications::collect(&store, at)
+        .await
+        .unwrap();
+    let count: i64 = query_scalar("SELECT COUNT(*) FROM notification_events")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+    let payload = serde_json::to_value(&event).unwrap();
+    assert_eq!(payload["reportId"], "report");
+    assert!(!payload.to_string().contains("Private"));
+    query("UPDATE extensions SET enabled=0 WHERE id='media-reports'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert!(!recipient_allowed(&store, &channel, &event).await.unwrap());
+    query("UPDATE extensions SET enabled=1 WHERE id='media-reports'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    channel.recipient_id = "owner".into();
+    query("DELETE FROM library_permissions WHERE user_id='owner'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert!(!recipient_allowed(&store, &channel, &event).await.unwrap());
+}
 async fn receiver() -> (
     String,
     Captures,

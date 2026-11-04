@@ -352,8 +352,12 @@ async fn start(
             current.errors,
         )
     };
-    query("UPDATE application_imports SET status='running',phase=?,page_offset=?,processed=?,errors=?,mappings_json=?,lease_token=NULL,lease_until=0,last_error=NULL,updated_at=? WHERE id=?")
-        .bind(phase).bind(offset).bind(processed).bind(errors).bind(json!(mappings).to_string()).bind(now()).bind(&id).execute(&mut *tx).await.map_err(db)?;
+    let mut preview = preview;
+    if reset {
+        preview["failures"] = json!([]);
+    }
+    query("UPDATE application_imports SET status='running',phase=?,page_offset=?,processed=?,errors=?,mappings_json=?,preview_json=?,lease_token=NULL,lease_until=0,last_error=NULL,updated_at=? WHERE id=?")
+        .bind(phase).bind(offset).bind(processed).bind(errors).bind(json!(mappings).to_string()).bind(preview.to_string()).bind(now()).bind(&id).execute(&mut *tx).await.map_err(db)?;
     crate::database::commit(tx).await.map_err(db)?;
     Ok(Json(record(&auth.store, &id).await?.public()))
 }
@@ -384,8 +388,11 @@ async fn run(
         query("UPDATE application_imports SET status='running',last_error=NULL,updated_at=? WHERE id=? AND status='paused' AND lease_until<=?")
             .bind(now()).bind(&id).bind(now()).execute(auth.store.pool()).await.map_err(db)?;
     } else if state.status == "failed" {
-        query("UPDATE application_imports SET status='running',phase='requests',page_offset=0,processed=0,errors=0,last_error=NULL,updated_at=? WHERE id=? AND status='failed' AND lease_until<=?")
-            .bind(now()).bind(&id).bind(now()).execute(auth.store.pool()).await.map_err(db)?;
+        let mut preview: Value = serde_json::from_str(&state.preview_json)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_import_state"))?;
+        preview["failures"] = json!([]);
+        query("UPDATE application_imports SET status='running',phase='requests',page_offset=0,processed=0,errors=0,last_error=NULL,preview_json=?,updated_at=? WHERE id=? AND status='failed' AND lease_until<=?")
+            .bind(preview.to_string()).bind(now()).bind(&id).bind(now()).execute(auth.store.pool()).await.map_err(db)?;
     }
     process(&auth.store, &id).await?;
     Ok(Json(record(&auth.store, &id).await?.public()))
@@ -454,7 +461,7 @@ async fn process(store: &IdentityStore, id: &str) -> Result<(), Error> {
         } else {
             "failed"
         };
-        query("UPDATE application_imports SET status=?,lease_token=NULL,lease_until=0,last_error=?,updated_at=? WHERE id=? AND lease_token=?")
+        query("UPDATE application_imports SET status=CASE WHEN status='paused' THEN status ELSE ? END,lease_token=NULL,lease_until=0,last_error=?,updated_at=? WHERE id=? AND lease_token=?")
             .bind(status).bind(code).bind(now()).bind(id).bind(&token).execute(store.pool()).await.map_err(db)?;
     }
     result
@@ -489,13 +496,46 @@ async fn process_claimed(store: &IdentityStore, state: &Import, token: &str) -> 
         return Err(err(StatusCode::BAD_GATEWAY, "invalid_import_source_page"));
     }
     let source = source_id(&connection);
-    for value in entries {
+    for summary in entries {
         let current = record(store, &state.id).await?;
         if current.status != "running"
             || current.lease_token.as_deref() != Some(token)
             || current.lease_until <= now()
         {
             break;
+        }
+        // The source's paginated issue query joins comments but not their authors.
+        // The detail endpoint explicitly joins comments.user, preserving attribution.
+        let detail;
+        let value = if state.phase == "reports" {
+            let source_report = source_identifier(&summary["id"])
+                .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_source_report_id"))?;
+            query("UPDATE application_imports SET lease_until=? WHERE id=? AND lease_token=? AND status='running' AND lease_until>?")
+                .bind(now()+90).bind(&state.id).bind(token).bind(now()).execute(store.pool()).await.map_err(db)?;
+            detail = transport::request(
+                &connection,
+                "GET",
+                &format!("api/v1/issue/{source_report}"),
+                &[],
+                None,
+            )
+            .await?;
+            if source_identifier(&detail["id"]).as_deref() != Some(source_report.as_str()) {
+                return Err(err(StatusCode::BAD_GATEWAY, "invalid_import_source_report"));
+            }
+            &detail
+        } else {
+            summary
+        };
+        let current = record(store, &state.id).await?;
+        if current.status != "running"
+            || current.lease_token.as_deref() != Some(token)
+            || current.lease_until <= now()
+        {
+            break;
+        }
+        if !applications::enabled(store, &state.phase).await? {
+            return Err(err(StatusCode::SERVICE_UNAVAILABLE, "extension_disabled"));
         }
         let owner = if state.phase == "requests" {
             &value["requestedBy"]["id"]
@@ -580,4 +620,284 @@ pub async fn tick(store: &IdentityStore) -> Result<(), Error> {
         process(store, &id).await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, extract::Request, http::Method};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use tokio::sync::{Notify, RwLock};
+
+    #[derive(Clone)]
+    struct SourceState {
+        detail: Arc<RwLock<Value>>,
+        writes: Arc<AtomicUsize>,
+        detail_reads: Arc<AtomicUsize>,
+        hold: Option<(Arc<Notify>, Arc<Notify>)>,
+    }
+    struct Source {
+        url: String,
+        state: SourceState,
+        task: tokio::task::JoinHandle<()>,
+    }
+    impl Drop for Source {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+    async fn source(hold: bool) -> Source {
+        async fn respond(
+            State(state): State<SourceState>,
+            request: Request<Body>,
+        ) -> Result<Json<Value>, StatusCode> {
+            if request.method() != Method::GET {
+                state.writes.fetch_add(1, Ordering::SeqCst);
+                return Err(StatusCode::METHOD_NOT_ALLOWED);
+            }
+            if request
+                .headers()
+                .get("x-api-key")
+                .and_then(|v| v.to_str().ok())
+                != Some("source-secret")
+            {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+            let value = match request.uri().path() {
+                "/api/v1/request" => json!({"pageInfo":{"results":0},"results":[]}),
+                "/api/v1/issue" => {
+                    json!({"pageInfo":{"results":1},"results":[{"id":7,"issueType":2,"status":1,"createdBy":{"id":3},"comments":[{"id":9,"message":"Audio absent"}]}]})
+                }
+                "/api/v1/issue/7" => {
+                    state.detail_reads.fetch_add(1, Ordering::SeqCst);
+                    if let Some((entered, release)) = &state.hold {
+                        entered.notify_one();
+                        release.notified().await;
+                    }
+                    state.detail.read().await.clone()
+                }
+                "/api/v1/user" => {
+                    json!({"pageInfo":{"results":1},"results":[{"id":3,"displayName":"Ancien compte","password":"never-import-user-secret"}]})
+                }
+                "/api/v1/settings/radarr" => {
+                    json!([{"id":1,"name":"Cinéma","apiKey":"never-import-radarr-secret","isDefault":true}])
+                }
+                "/api/v1/settings/sonarr" => json!([]),
+                _ => return Err(StatusCode::NOT_FOUND),
+            };
+            Ok(Json(value))
+        }
+        let state = SourceState {
+            detail: Arc::new(RwLock::new(
+                json!({"id":7,"issueType":2,"status":1,"problemSeason":2,"problemEpisode":3,"createdBy":{"id":3,"displayName":"Ancien compte"},"media":{"tmdbId":123,"mediaType":"tv"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","comments":[{"id":9,"message":"Audio absent","createdAt":"2026-01-01T00:00:00Z","user":{"id":3,"displayName":"Auteur du commentaire"}}]}),
+            )),
+            writes: Arc::new(AtomicUsize::new(0)),
+            detail_reads: Arc::new(AtomicUsize::new(0)),
+            hold: hold.then(|| (Arc::new(Notify::new()), Arc::new(Notify::new()))),
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let app = Router::new().fallback(respond).with_state(state.clone());
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        Source { url, state, task }
+    }
+    async fn fixture() -> (tempfile::TempDir, IdentityStore, AuthState, HeaderMap) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&dir.path().join("imports.sqlite"))
+            .await
+            .unwrap();
+        query("INSERT INTO users(id,role) VALUES('import-admin','administrator'),('mapped-owner','user')").execute(store.pool()).await.unwrap();
+        let raw = "a".repeat(64);
+        query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,'import-admin',?,?,?)")
+            .bind(format!("{:x}",Sha256::digest(raw.as_bytes()))).bind(now()).bind(now()).bind(now()+3600).execute(store.pool()).await.unwrap();
+        let package = media_extension_sdk::Package {
+            manifest: media_extension_sdk::Manifest {
+                id: "media-reports".into(),
+                permissions: vec!["reports".into()],
+                ..Default::default()
+            },
+            publisher_id: "test".into(),
+            wasm: String::new(),
+            sha256: String::new(),
+            signature: String::new(),
+        };
+        query("INSERT INTO extension_publishers(id,public_key,active) VALUES('import-test','synthetic',1)").execute(store.pool()).await.unwrap();
+        query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation,all_libraries) VALUES('media-reports','import-test',?,1,'first',1)").bind(json!(package).to_string()).execute(store.pool()).await.unwrap();
+        let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("cookie", format!("media_session={raw}").parse().unwrap());
+        headers.insert("origin", "http://127.0.0.1:3000".parse().unwrap());
+        headers.insert(
+            "x-csrf-token",
+            format!("{:x}", Sha256::digest(format!("csrf:{raw}")))
+                .parse()
+                .unwrap(),
+        );
+        (dir, store, auth, headers)
+    }
+    async fn prepared(auth: &AuthState, headers: &HeaderMap, source: &Source) -> String {
+        let (_, Json(preview)) = preview(
+            State(auth.clone()),
+            headers.clone(),
+            Json(PreviewInput {
+                base_url: source.url.clone(),
+                api_key: "source-secret".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        let serialized = preview.to_string();
+        for secret in [
+            "source-secret",
+            "never-import-radarr-secret",
+            "never-import-user-secret",
+        ] {
+            assert!(!serialized.contains(secret));
+        }
+        assert_eq!(preview["servers"][0]["id"], "radarr:1");
+        let id = preview["id"].as_str().unwrap().to_owned();
+        let _ = start(
+            State(auth.clone()),
+            headers.clone(),
+            Path(id.clone()),
+            Json(Mappings {
+                user_mappings: BTreeMap::from([("3".into(), "mapped-owner".into())]),
+                server_mappings: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap();
+        id
+    }
+    #[tokio::test]
+    async fn read_only_import_preserves_comment_authors_and_native_workflow_across_deltas() {
+        let source = source(false).await;
+        let (_dir, store, auth, headers) = fixture().await;
+        let mut no_csrf = headers.clone();
+        no_csrf.remove("x-csrf-token");
+        assert_eq!(
+            administrator(&auth, &no_csrf, true).await.err().unwrap().0,
+            StatusCode::FORBIDDEN
+        );
+        let id = prepared(&auth, &headers, &source).await;
+        process(&store, &id).await.unwrap();
+        process(&store, &id).await.unwrap();
+        assert_eq!(record(&store, &id).await.unwrap().status, "completed");
+        let report: (String, Option<String>, String, String) =
+            query_as("SELECT id,user_id,status,context_json FROM media_reports")
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(report.1.as_deref(), Some("mapped-owner"));
+        assert_eq!(report.2, "open");
+        let context: Value = serde_json::from_str(&report.3).unwrap();
+        assert_eq!(context["source"]["season"], 2);
+        assert_eq!(context["source"]["episode"], 3);
+        let comment: (Option<String>, String) =
+            query_as("SELECT user_id,author_label FROM media_report_comments")
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(comment.0.as_deref(), Some("mapped-owner"));
+        assert_eq!(comment.1, "Auteur du commentaire");
+        query("UPDATE media_reports SET status='in_progress' WHERE id=?")
+            .bind(&report.0)
+            .execute(store.pool())
+            .await
+            .unwrap();
+        query("INSERT INTO media_report_events(id,report_id,kind,status,created_at) VALUES('native-event',?,'report.status','in_progress',?)").bind(&report.0).bind(now()).execute(store.pool()).await.unwrap();
+        {
+            let mut detail = source.state.detail.write().await;
+            detail["status"] = json!(2);
+            detail["updatedAt"] = json!("2030-01-01T00:00:00Z");
+            detail["comments"][0]["message"] = json!("Commentaire corrigé dans la source");
+        }
+        let new_id = prepared(&auth, &headers, &source).await;
+        process(&store, &new_id).await.unwrap();
+        process(&store, &new_id).await.unwrap();
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM media_reports")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM media_report_comments")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            query_scalar::<_, String>("SELECT status FROM media_reports")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            "in_progress"
+        );
+        assert_eq!(
+            query_scalar::<_, String>("SELECT message FROM media_report_comments")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            "Commentaire corrigé dans la source"
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM acquisition_jobs")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM notification_events")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(source.state.writes.load(Ordering::SeqCst), 0);
+        assert_eq!(source.state.detail_reads.load(Ordering::SeqCst), 2);
+    }
+    #[tokio::test]
+    async fn pause_during_source_read_does_not_import_or_advance_the_page() {
+        let source = source(true).await;
+        let (_dir, store, auth, headers) = fixture().await;
+        let id = prepared(&auth, &headers, &source).await;
+        process(&store, &id).await.unwrap();
+        let worker_store = store.clone();
+        let worker_id = id.clone();
+        let task = tokio::spawn(async move { process(&worker_store, &worker_id).await });
+        let (entered, release) = source.state.hold.as_ref().unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+            .await
+            .unwrap();
+        let _ = pause(State(auth.clone()), headers.clone(), Path(id.clone()))
+            .await
+            .unwrap();
+        release.notify_one();
+        task.await.unwrap().unwrap();
+        let paused = record(&store, &id).await.unwrap();
+        assert_eq!(paused.status, "paused");
+        assert_eq!(paused.page_offset, 0);
+        assert_eq!(paused.lease_until, 0);
+        tick(&store).await.unwrap();
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM media_reports")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(source.state.detail_reads.load(Ordering::SeqCst), 1);
+        assert_eq!(source.state.writes.load(Ordering::SeqCst), 0);
+    }
 }

@@ -126,15 +126,24 @@ impl Drop for Scheduler {
 }
 impl Scheduler {
     pub fn start(auth: AuthState, root: PathBuf, jobs: Arc<ScanJobs>) -> Self {
-        let application_auth=auth.clone();
-        let application_jobs=jobs.clone();
-        let applications=tokio::spawn(async move {
-            let mut interval=tokio::time::interval(Duration::from_secs(15));
+        let application_auth = auth.clone();
+        let application_jobs = jobs.clone();
+        let applications = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(15));
             loop {
                 interval.tick().await;
-                if application_jobs.is_cancelled(){break;}
-                if crate::acquisition::tick(&application_auth.store).await.is_err(){eprintln!("Acquisition pass failed; retrying on next tick");}
-                if crate::imports::tick(&application_auth.store).await.is_err(){eprintln!("Application import pass failed; retrying on next tick");}
+                if application_jobs.is_cancelled() {
+                    break;
+                }
+                if crate::acquisition::tick(&application_auth.store)
+                    .await
+                    .is_err()
+                {
+                    eprintln!("Acquisition pass failed; retrying on next tick");
+                }
+                if crate::imports::tick(&application_auth.store).await.is_err() {
+                    eprintln!("Application import pass failed; retrying on next tick");
+                }
             }
         });
         let notification_auth = auth.clone();

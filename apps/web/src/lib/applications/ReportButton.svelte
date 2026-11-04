@@ -6,6 +6,8 @@
     workId?: string; trackId?: string; assetId?: string; title?: string; positionSeconds?: number; context?: ReportContext | (() => ReportContext);
   } = $props();
   let dialog: HTMLDialogElement;
+  const componentId = $props.id();
+  const titleId = `${componentId}-report-title`;
   let opener: HTMLElement | null = null;
   let category = $state('other');
   let description = $state('');
@@ -38,13 +40,13 @@
 {#if $features.reports && (workId || trackId)}
   <button type="button" class="report-trigger" onclick={open} title="Signaler un problème"><Icon name="alert" size={16} /><span>Signaler</span></button>
 {/if}
-<dialog bind:this={dialog} class="report-dialog" aria-labelledby="report-title" onclose={() => opener?.focus()}>
-  <header><div><p>Signaler un problème</p><h2 id="report-title">{captured.title}</h2></div><button type="button" aria-label="Fermer le signalement" onclick={() => dialog.close()}><Icon name="close" /></button></header>
+<dialog bind:this={dialog} class="report-dialog" aria-labelledby={titleId} onclose={() => opener?.focus()}>
+  <header><div><p>Signaler un problème</p><h2 id={titleId}>{captured.title}</h2></div><button type="button" aria-label="Fermer le signalement" onclick={() => dialog.close()}><Icon name="close" /></button></header>
   {#if message}<p class="success" role="status">{message}</p><button type="button" onclick={() => dialog.close()}>Fermer</button>
   {:else}
     <form onsubmit={submit}>
       <label>Type de problème<select bind:value={category}>{#each Object.entries(categoryLabels) as [value, label] (value)}<option {value}>{label}</option>{/each}</select></label>
-      <label>Description<textarea bind:value={description} maxlength="8000" required rows="5" placeholder="Que se passe-t-il ? Quel résultat attendiez-vous ?"></textarea></label>
+      <label>Description<textarea bind:value={description} minlength="3" maxlength="8000" required rows="5" placeholder="Que se passe-t-il ? Quel résultat attendiez-vous ?"></textarea></label>
       <div class="positions"><label>Début (secondes, facultatif)<input type="number" bind:value={position} min="0" step="0.1" /></label><label>Fin (secondes, facultatif)<input type="number" bind:value={end} min={position ?? 0} step="0.1" /></label></div>
       {#if captured.context.engine || captured.context.audioTrackId || captured.context.subtitleTrackId || captured.context.errorCode}
         <details><summary>Contexte joint au signalement</summary><dl>{#each Object.entries(captured.context).filter(([, value]) => value) as [key, value] (key)}<dt>{key === 'engine' ? 'Lecture' : key === 'audioTrackId' ? 'Piste audio' : key === 'subtitleTrackId' ? 'Sous-titres' : 'Code d’erreur'}</dt><dd>{value}</dd>{/each}</dl></details>

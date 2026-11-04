@@ -1,12 +1,10 @@
 //! Local Core: persistent authentication and isolated synthetic media inventory.
 pub mod account;
-pub mod applications;
 pub mod acquisition;
-pub mod reports;
-pub mod imports;
 pub mod admin_backups;
 pub mod admin_users;
 pub mod api_keys;
+pub mod applications;
 pub mod auth;
 pub mod automation;
 pub mod automation_execution;
@@ -17,8 +15,10 @@ pub mod backup_bundle;
 pub mod database;
 pub mod extensions;
 pub mod groups;
+pub mod imports;
 pub mod oidc;
 pub mod postgres_backup;
+pub mod reports;
 pub mod scheduler;
 pub mod server_settings;
 pub mod system_memory;
@@ -73,8 +73,14 @@ fn media_routes(inventory: node::Inventory) -> Router {
         .route("/api/v1/catalog", get(catalog::list))
         .route("/api/v1/catalog/{id}", get(catalog::detail))
         .route("/api/v1/demo/subtitles/{name}", get(node::demo_subtitle))
-        .route("/mse", get(|| async { Html(include_str!("../experiments/mse.html")) }))
-        .route("/shaka", get(|| async { Html(include_str!("../experiments/shaka.html")) }))
+        .route(
+            "/mse",
+            get(|| async { Html(include_str!("../experiments/mse.html")) }),
+        )
+        .route(
+            "/shaka",
+            get(|| async { Html(include_str!("../experiments/shaka.html")) }),
+        )
         .route(
             "/audio-seek-policy.js",
             get(|| async {
@@ -117,9 +123,15 @@ fn media_routes(inventory: node::Inventory) -> Router {
             get(node::content).head(node::content),
         );
     if is_bench {
-        router = router.route("/", get(|| async { Html(include_str!("../experiments/bench.html")) }));
+        router = router.route(
+            "/",
+            get(|| async { Html(include_str!("../experiments/bench.html")) }),
+        );
     } else {
-        router = router.route("/bench", get(|| async { Html(include_str!("../experiments/bench.html")) }));
+        router = router.route(
+            "/bench",
+            get(|| async { Html(include_str!("../experiments/bench.html")) }),
+        );
     }
     router.with_state(Arc::new(inventory))
 }
@@ -731,8 +743,6 @@ mod tests {
     }
 }
 
-
 pub mod task_engine;
 mod task_execution;
 pub mod timeline_markers;
-

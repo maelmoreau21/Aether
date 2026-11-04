@@ -10,10 +10,10 @@ CREATE TABLE IF NOT EXISTS acquisition_servers (
 );
 CREATE TABLE IF NOT EXISTS media_requests (
  id TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id) ON DELETE SET NULL, server_id TEXT REFERENCES acquisition_servers(id),
- library_id TEXT NOT NULL REFERENCES libraries(id), kind TEXT NOT NULL, title TEXT NOT NULL, external_id TEXT NOT NULL, external_provider TEXT NOT NULL,
+ library_id TEXT REFERENCES libraries(id), kind TEXT NOT NULL, title TEXT NOT NULL, external_id TEXT NOT NULL, external_provider TEXT NOT NULL,
  input_json TEXT NOT NULL, status TEXT NOT NULL, error_code TEXT, remote_id TEXT, work_id TEXT,
  created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, imported BIGINT NOT NULL DEFAULT 0 CHECK(imported IN (0,1)),
- source_key TEXT UNIQUE, author_label TEXT, source_status TEXT
+ source_key TEXT UNIQUE, author_label TEXT, source_status TEXT, source_remote_id TEXT
 );
 CREATE INDEX IF NOT EXISTS media_requests_owner ON media_requests(user_id,created_at);
 CREATE INDEX IF NOT EXISTS media_requests_identity ON media_requests(server_id,kind,external_id,status);

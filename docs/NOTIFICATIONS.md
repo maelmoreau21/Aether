@@ -1,5 +1,10 @@
 # Notifications — premier socle durable
 
+Les applications facultatives ajoutent les abonnements `requests` et `reports`,
+désactivés par défaut, et les événements `request.*` / `report.*`. L'audience est
+limitée à l'auteur et aux administrateurs autorisés ; les imports sont silencieux.
+Voir [Demandes et Signalements](REQUESTS_AND_REPORTS.md#notifications-et-validation).
+
 Le Core réconcilie les faits terminaux de `durable_tasks` et les ajouts durables
 de `inventory_works` vers une file de
 notifications persistante. Les adaptateurs disponibles sont email SMTP TLS,

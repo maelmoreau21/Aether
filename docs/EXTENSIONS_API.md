@@ -1,5 +1,10 @@
 # Extensions API v1 — premier parcours local
 
+Les capacités signées `requests` et `reports` raccordent les applications
+facultatives Demandes et Signalements à des écrans natifs. Elles n'accordent
+aucun accès réseau arbitraire au Wasm. Contrats et limites :
+[Demandes et Signalements](REQUESTS_AND_REPORTS.md).
+
 > Stockage privé du 25 octobre : [contrat KV/objets v1](EXTENSION_STORAGE.md).
 > `storage.private` est une capacité signée reconnue ; imports hôtes versionnés,
 > SQLite/PostgreSQL et conservation explicite remplacent les exclusions de

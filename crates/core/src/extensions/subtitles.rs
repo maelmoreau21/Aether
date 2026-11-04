@@ -568,6 +568,7 @@ pub(crate) async fn descriptors(
             let mut v: Value =
                 serde_json::from_str(&text).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
             v["id"] = json!(format!("downloaded-{id}"));
+            v["reportTrackId"] = json!(format!("downloaded-{id}"));
             v["sourceFormat"] = json!("vtt");
             v["url"] = json!(format!("/api/v1/assets/{asset}/subtitles/downloaded-{id}"));
             Ok(v)

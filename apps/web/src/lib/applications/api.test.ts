@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { session } from '../auth/session';
-import { applicationRequest, features, loadFeatures, parseSelection, reportPayload } from './api';
+import { applicationRequest, errorMessage, features, loadFeatures, parseSelection, reportPayload, requestPayload } from './api';
 
 afterEach(() => { session.set(null); vi.unstubAllGlobals(); });
 describe('demandes et signalements', () => {
+  it('submits only admission fields, preserving the searched server and explicit scope', () => {
+    expect(requestPayload({ kind: 'series', title: 'Synthetic', externalId: '7', externalProvider: 'tvdb', serverId: 'sonarr-2', year: 2026, summary: 'Discovery-only metadata' }, { seasons: [2], monitorFuture: false })).toEqual({ kind: 'series', title: 'Synthetic', externalId: '7', externalProvider: 'tvdb', serverId: 'sonarr-2', seasons: [2], episodes: [], albumIds: [], monitorFuture: false });
+    expect(errorMessage('track_not_supported')).toContain('Lidarr');
+  });
   it('validates explicit season/episode selections without silently turning empty entries into specials', () => {
     expect(parseSelection('1, 2,1', '1:3, 2x1, 1:3')).toEqual({ seasons: [1, 2], episodes: [{ season: 1, episode: 3 }, { season: 2, episode: 1 }] });
     for (const invalid of ['1,,2', '-1', '1.5', '1001']) expect(() => parseSelection(invalid, '')).toThrow();
@@ -36,7 +40,7 @@ describe('demandes et signalements', () => {
     const loading = loadFeatures(true);
     session.set(null);
     finish(new Response(JSON.stringify({ requests: true, reports: true })));
-    await loading;
+    await expect(loading).rejects.toThrow('Votre session a changé');
     expect(get(features)).toEqual({ requests: false, reports: false });
   });
 });

@@ -169,10 +169,6 @@ impl TrickplayManager {
             .unwrap_or_else(|e| e.into_inner()) = Some(counter);
     }
 
-    pub fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-
     pub fn cache_root(&self) -> &Path {
         &self.cache_root
     }

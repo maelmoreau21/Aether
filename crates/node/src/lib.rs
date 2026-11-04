@@ -54,37 +54,15 @@ use media_contracts::{
     errors::NodeErrorCode,
     ids::NodeId,
     inventory::{CachedFile, InventoryBatch, ReadGrant, ReadTarget, ScanReport},
-    media::{LocalImage, ValidatedImage},
+    media::LocalImage,
 };
-use std::{
-    collections::HashMap,
-    io,
-    path::{Path, PathBuf},
-    sync::atomic::AtomicBool,
-};
+use std::{collections::HashMap, io, path::Path, sync::atomic::AtomicBool};
 
 /// In-process local Media Node service implementing the Core ↔ Node boundary for Milestone J1/P2.
 #[derive(Debug, Clone, Default)]
 pub struct LocalNode;
 
 impl LocalNode {
-    /// Validate that `root` is a confined, existing directory inside `allowed_root`
-    /// without parent traversal or symlink/reparse-point escapes.
-    pub async fn validate_root(&self, root: &Path, allowed_root: &Path) -> io::Result<PathBuf> {
-        validate_library_root(root, allowed_root).await
-    }
-
-    /// Execute a read-only library scan with optional probe and poster caches.
-    pub async fn scan_library(
-        &self,
-        root: &Path,
-        cache: &HashMap<String, CachedFile>,
-        image_cache: &HashMap<String, LocalImage>,
-        cancel: &AtomicBool,
-    ) -> io::Result<ScanReport> {
-        scanner::scan_with_images(root, cache, image_cache, cancel).await
-    }
-
     /// Execute a bounded batch-streaming read-only library scan with optional probe and poster caches.
     #[allow(clippy::too_many_arguments)]
     pub async fn scan_library_streaming<F, Fut>(
@@ -123,18 +101,6 @@ impl LocalNode {
     /// Open a confined media file handle relative to `root`.
     pub async fn open_media(&self, root: &Path, relative: &Path) -> io::Result<OpenedFile> {
         OpenedFile::open_in_root(root, relative).await
-    }
-
-    /// Open and validate a confined poster image relative to `root`, returning both
-    /// the validated image metadata and the same `OpenedFile` handle for streaming.
-    pub async fn open_validated_image(
-        &self,
-        root: &Path,
-        relative: &Path,
-    ) -> io::Result<(ValidatedImage, OpenedFile)> {
-        let opened = OpenedFile::open_in_root(root, relative).await?;
-        let validated = images::validate_opened(&opened).await?;
-        Ok((validated, opened))
     }
 
     /// Execute an authorized `ReadGrant` issued by Core for the local standalone Node.

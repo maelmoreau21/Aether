@@ -27,7 +27,6 @@ target "common" {
   args = {
     GIT_BRANCH = GIT_BRANCH
     MEDIA_VERSION = MEDIA_VERSION
-    GIT_COMMIT = GIT_COMMIT
     CARGO_BUILD_JOBS = "2"
   }
   labels = {

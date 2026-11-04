@@ -78,10 +78,8 @@ COPY crates/core/experiments/ ./crates/core/experiments/
 # Version changes must not invalidate the dependency compilation layer above.
 ARG GIT_BRANCH=develop
 ARG MEDIA_VERSION=""
-ARG GIT_COMMIT="unknown"
 ENV GIT_BRANCH=${GIT_BRANCH}
 ENV MEDIA_VERSION=${MEDIA_VERSION}
-ENV GIT_COMMIT=${GIT_COMMIT}
 
 # Clean dummy binary/deps artifacts, recompile actual release binaries, and strip symbols
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

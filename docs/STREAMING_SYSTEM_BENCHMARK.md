@@ -115,7 +115,7 @@ Commande cible du futur launcher, après compilation sérialisée autorisée par
 l'agent principal (aucune compilation lancée pour ce protocole) :
 
 ```powershell
-node scripts/streaming-system-benchmark.cjs --core target/release/media-poc.exe --node target/release/aether-node.exe --fixture tests/fixtures/generated/dual-opus/dual-opus-long.mp4 --sessions 1,4 --rounds 20 --out target/streaming-system-baseline
+node scripts/streaming-system-benchmark.cjs --core target/release/aether-core.exe --node target/release/aether-node.exe --fixture tests/fixtures/generated/dual-opus/dual-opus-long.mp4 --sessions 1,4 --rounds 20 --out target/streaming-system-baseline
 ```
 
 Le launcher est `scripts/streaming-system-benchmark.cjs`, son observation DOM

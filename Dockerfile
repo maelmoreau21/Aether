@@ -43,7 +43,6 @@ RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/s
     echo 'pub fn dummy() {}' > crates/node/src/lib.rs && \
     echo 'fn main() {}' > crates/node/src/bin/aether-node.rs && \
     echo 'pub fn dummy() {}' > crates/core/src/lib.rs && \
-    echo 'fn main() {}' > crates/core/src/main.rs && \
     echo 'fn main() {}' > crates/core/src/bin/aether-core.rs && \
     echo 'fn main() {}' > crates/core/src/bootstrap.rs && \
     echo 'fn main() {}' > crates/core/src/bin/backup.rs && \
@@ -57,7 +56,6 @@ RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/s
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo build --release --locked \
-        --bin media-poc \
         --bin aether-core \
         --bin aether-node \
         --bin media-bootstrap \
@@ -84,7 +82,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
           crates/node/src/lib.rs \
           crates/node/src/bin/aether-node.rs \
           crates/core/src/lib.rs \
-          crates/core/src/main.rs \
           crates/core/src/bin/aether-core.rs \
           crates/core/src/bootstrap.rs \
           crates/core/src/bin/backup.rs \
@@ -101,7 +98,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
           target/release/deps/*media_backup* \
           target/release/deps/*media_restore* \
           target/release/deps/*media_recover* \
-          target/release/media-poc \
           target/release/aether-core \
           target/release/aether-node \
           target/release/media-bootstrap \
@@ -109,7 +105,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
           target/release/media-restore \
           target/release/media-recover && \
     cargo build --release --locked \
-        --bin media-poc \
         --bin aether-core \
         --bin aether-node \
         --bin media-bootstrap \
@@ -119,7 +114,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         --bin media-extension-worker \
         --bin media-extension-pack && \
     strip --strip-all \
-        target/release/media-poc \
         target/release/aether-core \
         target/release/aether-node \
         target/release/media-bootstrap \
@@ -288,7 +282,7 @@ COPY --from=rust-builder --chmod=0755 /build/target/release/media-restore /usr/l
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-recover /usr/local/bin/media-recover
 # The production standalone server is the same Core with its local Node.
 # Keep historical command names without shipping a second full Core executable.
-# The fixture-bench media-poc binary remains available in source builds only.
+# media-poc is only a compatibility alias: source builds run aether-core (default-run).
 RUN ln -s /usr/local/bin/aether-core /usr/local/bin/media-poc \
     && ln -s /usr/local/bin/aether-core /usr/local/bin/aether
 

@@ -33,7 +33,7 @@ fn adversarial_bind_addr_invalid_formats_reject_immediately() {
         "invalid-ip-string",
     ];
 
-    let binary = env!("CARGO_BIN_EXE_media-poc");
+    let binary = env!("CARGO_BIN_EXE_aether-core");
 
     for input in invalid_inputs {
         let output = Command::new(binary)

@@ -21,7 +21,7 @@ async fn http(port: u16, method: &str, path: &str, extra: &str, body: &str) -> S
 }
 
 async fn start(root: &Path, db: &Path, port: u16) -> tokio::process::Child {
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_media-poc"))
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_aether-core"))
         .current_dir(root)
         .env("MEDIA_DB_PATH", db)
         .env("MEDIA_PORT", port.to_string())

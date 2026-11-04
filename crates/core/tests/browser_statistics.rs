@@ -109,7 +109,7 @@ async fn browser_statistics_video_music_and_restart() {
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     for restart in [false, true] {
-        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_media-poc"))
+        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_aether-core"))
             .current_dir(&root)
             .env("MEDIA_DB_PATH", &db)
             .env("MEDIA_DB_ENGINE", "sqlite")

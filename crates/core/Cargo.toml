@@ -4,7 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
-default-run = "media-poc"
+default-run = "aether-core"
 
 [dependencies]
 quick-xml = "=0.42.0"

@@ -203,8 +203,12 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
-cargo run -p media-poc
+MEDIA_FIXTURE_DIR=tests/fixtures/generated cargo run -p media-poc
 ```
+
+Le binaire lancé est `aether-core` (`default-run`). Sans `MEDIA_LIBRARY_ROOT` ni
+`MEDIA_FIXTURE_DIR`, il démarre avec une bibliothèque vide, comme l'image Docker ;
+les fixtures synthétiques ne sont plus chargées implicitement.
 
 Le script de génération conserve les arguments détaillés réellement utilisés
 dans `generation.json` : encodage synthétique unique, trois remux `-c copy`,

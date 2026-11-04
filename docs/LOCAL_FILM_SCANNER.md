@@ -57,7 +57,7 @@ Exemple PowerShell, après bootstrap local sécurisé décrit dans LOCAL_ADMIN.m
 ```powershell
 $env:MEDIA_LIBRARY_ROOT = 'D:\Medias\Films'
 $env:MEDIA_DB_PATH = 'C:\MediaData\core.sqlite3'
-cargo run --locked --bin media-poc
+cargo run --locked --bin aether-core
 ```
 
 Le mode historique `MEDIA_FIXTURE_DIR` reste disponible pour les expériences et

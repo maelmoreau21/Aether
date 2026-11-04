@@ -54,7 +54,7 @@ crates/core/                  package actuel conservé pendant la transition
   src/db/{mod,identity,catalog,inventory,jobs}.rs
   src/playback.rs              résolution autorisée et descripteurs publics
   src/fixture_bench/           expériences et associations synthétiques
-  src/main.rs                 hôte standalone : Core + LocalNode + statiques
+  src/bin/aether-core.rs      hôte unique : Core + LocalNode + statiques
   src/bootstrap.rs            bootstrap utilisant la même base
   src/bin/media-core.rs        hôte Core seul, au jalon distant
 apps/web/                     inchangé par cet audit

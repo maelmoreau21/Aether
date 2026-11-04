@@ -686,9 +686,10 @@ mod storage_frames {
     use super::*;
     #[test]
     fn metadata_guest_handles_normal_sized_search_response() {
-        let package: media_extension_sdk::Package =
-            serde_json::from_str(include_str!("../../embedded_plugins/tmdb-0.1.1.package.json"))
-                .unwrap();
+        let package: media_extension_sdk::Package = serde_json::from_str(include_str!(
+            "../../embedded_plugins/tmdb-0.1.1.package.json"
+        ))
+        .unwrap();
         let items: Vec<_>=(1..=20).map(|id|serde_json::json!({"id":id,"title":format!("Synthetic film {id}"),"overview":"Synthetic plot. ".repeat(80),"release_date":"2024-01-01","poster_path":"/synthetic.jpg"})).collect();
         TEST_HTTP_BODY.with(|v| {
             *v.borrow_mut() =

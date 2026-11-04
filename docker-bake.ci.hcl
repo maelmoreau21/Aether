@@ -1,3 +1,7 @@
+variable "GIT_COMMIT" {
+  default = "unknown"
+}
+
 variable "GIT_BRANCH" {
   default = "develop"
 }
@@ -23,7 +27,13 @@ target "common" {
   args = {
     GIT_BRANCH = GIT_BRANCH
     MEDIA_VERSION = MEDIA_VERSION
+    GIT_COMMIT = GIT_COMMIT
     CARGO_BUILD_JOBS = "2"
+  }
+  labels = {
+    "org.opencontainers.image.source" = "https://github.com/maelmoreau21/Aether"
+    "org.opencontainers.image.revision" = GIT_COMMIT
+    "org.opencontainers.image.version" = MEDIA_VERSION
   }
   cache-from = ["type=gha,scope=publish-images-${TARGET_ARCH}", "type=gha,scope=ci-images-${TARGET_ARCH}"]
 }

@@ -4,25 +4,72 @@ import argparse
 import json
 import subprocess
 
-# Approximate seconds measured on GitHub run 40945793905 (ubuntu-latest).
+# libtest seconds measured on GitHub run 41903062442 (ubuntu-latest).
 # Weights affect scheduling only: discovery remains authoritative and unknown
 # targets default to one second. Refresh after a representative CI run.
 TARGET_SECONDS = {
-    "account": 38, "artwork_variants": 14, "catalog_performance": 7,
-    "concurrency_writes_during_publication": 8, "distributed_multi_node": 16,
-    "identity": 35, "nfo_flow": 13, "permissions": 12, "postgres": 21,
-    "scan_diagnostics": 6, "scheduler": 16, "series_responsiveness": 47,
-    "task_engine_http": 6, "internal_transport": 15, "admin_access": 39,
-    "admin_users": 46, "auth_under_sqlite_lock": 44, "backup_restore": 35,
-    "catalog_responsiveness": 49, "extension_storage_lifecycle": 2, "extensions": 51,
-    "global_catalogue_consolidation": 104, "node_enrollment_and_relay": 10,
-    "plugin_storage_integration": 8, "preferences": 5, "scanner_flow": 27,
-    "series_flow": 30, "settings_avatars": 18, "task_operations": 3,
-    "admin_backups": 4, "adversarial_challenge": 9, "automation_flow": 21,
-    "challenger_security_challenge": 23, "core_restart": 10,
-    "healthcheck_resilience": 4, "multi_node_scale_and_failover": 20,
-    "posters_flow": 6, "scanner_performance": 155, "series_performance": 15,
-    "static_web": 8, "version_and_nodes": 4,
+    "account": 28,
+    "admin_access": 38,
+    "admin_backups": 4,
+    "admin_postgres": 1,
+    "admin_users": 45,
+    "adversarial_challenge": 9,
+    "applications": 9,
+    "artwork_variants": 14,
+    "auth_under_sqlite_lock": 41,
+    "automation_flow": 29,
+    "backup_bundle": 1,
+    "backup_restore": 33,
+    "browser_admin": 1,
+    "browser_auth": 1,
+    "browser_nfo": 1,
+    "browser_posters": 1,
+    "browser_scanner": 1,
+    "browser_series": 1,
+    "browser_statistics": 1,
+    "catalog": 1,
+    "catalog_performance": 8,
+    "catalog_responsiveness": 41,
+    "challenger_security_challenge": 31,
+    "chapter_images_remote": 9,
+    "concurrency_writes_during_publication": 11,
+    "contracts_test": 1,
+    "core_restart": 11,
+    "distributed_multi_node": 17,
+    "distributed_tasks": 2,
+    "distributed_tasks_scale": 1,
+    "extension_data_bench": 1,
+    "extension_storage_lifecycle": 3,
+    "extensions": 118,
+    "full_backup_restore_e2e": 2,
+    "global_catalogue_consolidation": 98,
+    "healthcheck_resilience": 6,
+    "identity": 36,
+    "internal_transport": 16,
+    "multi_core_extension_runs": 1,
+    "multi_node_scale_and_failover": 20,
+    "nfo_flow": 10,
+    "node_enrollment_and_relay": 10,
+    "p0": 2,
+    "permissions": 9,
+    "plugin_storage_integration": 5,
+    "posters_flow": 5,
+    "postgres": 28,
+    "preferences": 5,
+    "preparation_admission": 1,
+    "scan_diagnostics": 5,
+    "scanner_flow": 15,
+    "scanner_performance": 105,
+    "scheduler": 13,
+    "series_flow": 17,
+    "series_performance": 20,
+    "series_responsiveness": 47,
+    "settings_avatars": 15,
+    "static_web": 11,
+    "syncplay_websocket": 13,
+    "task_engine_http": 6,
+    "task_operations": 2,
+    "version_and_nodes": 5,
 }
 
 
@@ -71,7 +118,7 @@ def main():
                       "estimate_scope": "historical scheduling weights, not a time guarantee"}), flush=True)
     if args.list or not selected:
         return
-    command = ["cargo", "test", "--locked", "--workspace", "--all-features"]
+    command = ["cargo", "test", "--locked", "--workspace", "--all-features", "--timings"]
     for target in selected:
         command.extend(["--test", target])
     command.extend(["--", "--test-threads=1"])

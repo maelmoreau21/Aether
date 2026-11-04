@@ -1,7 +1,7 @@
 # ==============================================================================
 # Stage 1: SvelteKit Frontend Web Builder
 # ==============================================================================
-FROM node:22-bookworm-slim AS web-builder
+FROM node:24-bookworm-slim AS web-builder
 
 WORKDIR /app/apps/web
 
@@ -62,17 +62,26 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         --bin media-backup \
         --bin media-restore \
         --bin media-recover \
-        --bin media-extension-worker \
-        --bin media-extension-pack
+        --bin media-extension-worker
 
-# Copy actual workspace crates (shared contracts, node, and core with migrations)
-COPY crates/ ./crates/
+# Production inputs only: changing integration tests must not recompile releases.
+# Include all embedded SQL, plugins and the served player experiments.
+COPY crates/shared/src/ ./crates/shared/src/
+COPY crates/shared/build.rs ./crates/shared/build.rs
+COPY crates/node/src/ ./crates/node/src/
+COPY crates/core/src/ ./crates/core/src/
+COPY crates/core/build.rs ./crates/core/build.rs
+COPY crates/core/migrations/ ./crates/core/migrations/
+COPY crates/core/embedded_plugins/ ./crates/core/embedded_plugins/
+COPY crates/core/experiments/ ./crates/core/experiments/
 
 # Version changes must not invalidate the dependency compilation layer above.
 ARG GIT_BRANCH=develop
 ARG MEDIA_VERSION=""
+ARG GIT_COMMIT="unknown"
 ENV GIT_BRANCH=${GIT_BRANCH}
 ENV MEDIA_VERSION=${MEDIA_VERSION}
+ENV GIT_COMMIT=${GIT_COMMIT}
 
 # Clean dummy binary/deps artifacts, recompile actual release binaries, and strip symbols
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -111,8 +120,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         --bin media-backup \
         --bin media-restore \
         --bin media-recover \
-        --bin media-extension-worker \
-        --bin media-extension-pack && \
+        --bin media-extension-worker && \
     strip --strip-all \
         target/release/aether-core \
         target/release/aether-node \
@@ -120,8 +128,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         target/release/media-backup \
         target/release/media-restore \
         target/release/media-recover \
-        target/release/media-extension-worker \
-        target/release/media-extension-pack
+        target/release/media-extension-worker
 
 # FFmpeg/ffprobe 9.0.2: same verified source as CI, packet-copy runtime profile.
 FROM debian:bookworm-slim AS probe-runtime

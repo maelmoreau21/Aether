@@ -33,10 +33,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-publish:
+  publish-verified:
     # Strict : Jamais de publication sur pull_request.
-    # Uniquement push direct / workflow_dispatch sur main ou develop, ou workflow_call validé.
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || inputs.is_release)
+    # Only trusted main/develop events; all validation is a caller dependency.
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -99,25 +99,27 @@ jobs:
             type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' && inputs.is_release }}
             type=sha,format=long
 
-      # One solve shares Rust/Web/FFmpeg stages across all three published images.
-      - uses: docker/bake-action@v6
-        id: build
+      - uses: actions/download-artifact@v4
         with:
-          source: .
-          files: |
-            docker-bake.ci.hcl
-            cwd://${{ steps.meta-standalone.outputs.bake-file }}
-            cwd://${{ steps.meta-core.outputs.bake-file }}
-            cwd://${{ steps.meta-node.outputs.bake-file }}
-          # Validate every native image locally before any registry write.
-          push: false
-          load: true
-          set: |
-            runtime.cache-to=type=gha,mode=max,scope=publish-images-${{ matrix.arch }}
+          name: verified-images-${{ matrix.arch }}
+          path: verified-images
+      - name: Charger les images natives vérifiées, sans build
         env:
-          GIT_BRANCH: ${{ github.ref_name }}
-          MEDIA_VERSION: ${{ inputs.version }}
+          OWNER: ${{ github.repository_owner }}
+          EXPECTED_SOURCE: ${{ github.server_url }}/${{ github.repository }}
+          EXPECTED_REVISION: ${{ github.sha }}
+          EXPECTED_VERSION: ${{ inputs.version }}
           TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-image-archive.py load --directory verified-images \
+            --revision "$EXPECTED_REVISION" --arch "$TARGET_ARCH" \
+            --version "$EXPECTED_VERSION" --source "$EXPECTED_SOURCE"
+          for pair in aether:runtime aether-core:runtime-core aether-node:runtime-node; do
+            image=${pair%:*}
+            target=${pair#*:}
+            docker tag "media-ci:$target" "ghcr.io/${OWNER,,}/$image:sha-${EXPECTED_REVISION}-${TARGET_ARCH}"
+          done
 
       - name: Vérifier les trois images (provenance, version et runtime Node)
         env:
@@ -151,21 +153,6 @@ jobs:
             fi
           done
 
-      - name: Vérifier les services et l’extraction AV1 avant tout push
-        env:
-          OWNER: ${{ github.repository_owner }}
-          REVISION: ${{ github.sha }}
-          TARGET_ARCH: ${{ matrix.arch }}
-          EXPECTED_VERSION: ${{ inputs.version }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
-          python3 scripts/smoke-docker-images.py --arch "$TARGET_ARCH" --version "$EXPECTED_VERSION" \
-            --standalone "ghcr.io/${OWNER,,}/aether:sha-${REVISION}-${TARGET_ARCH}" \
-            --core "ghcr.io/${OWNER,,}/aether-core:sha-${REVISION}-${TARGET_ARCH}" \
-            --node "ghcr.io/${OWNER,,}/aether-node:sha-${REVISION}-${TARGET_ARCH}" \
-            --report "target/docker-publish-smoke-${TARGET_ARCH}/report.json"
-
       - name: Pousser uniquement les références immuables de l’architecture vérifiée
         if: inputs.push
         env:
@@ -188,8 +175,9 @@ jobs:
               aether-core) metadata=$METADATA_CORE ;;
               aether-node) metadata=$METADATA_NODE ;;
             esac
-            jq --arg digest "$digest" --arg arch "$TARGET_ARCH" --arg revision "$REVISION" --arg image "$image" \
-              '{image:$image,architecture:$arch,revision:$revision,digest:$digest,tags:.tags}' <<< "$metadata" > "digests/$TARGET_ARCH/$image.json"
+            image_id=$(docker inspect --format '{{.Id}}' "$target_ref")
+            jq --arg image_id "$image_id" --arg digest "$digest" --arg arch "$TARGET_ARCH" --arg revision "$REVISION" --arg image "$image" \
+              '{image:$image,architecture:$arch,revision:$revision,digest:$digest,image_id:$image_id,tags:.tags}' <<< "$metadata" > "digests/$TARGET_ARCH/$image.json"
           done
 
       - name: Sauvegarder les digests en artifact
@@ -201,17 +189,9 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Conserver les vérifications locales
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-publish-smoke-${{ matrix.arch }}
-          path: target/docker-publish-smoke-${{ matrix.arch }}/
-          if-no-files-found: warn
-
   publish-manifests:
     name: Publier les manifests après les deux validations natives
-    needs: [build-and-publish]
+    needs: [publish-verified]
     if: inputs.push && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -234,3 +214,10 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           REVISION: ${{ github.sha }}
         run: python3 scripts/publish-multiarch-manifests.py --directory digests --owner "$OWNER" --revision "$REVISION" --publish
+      - name: Conserver les digests des manifests pour la release
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-manifests
+          path: digests/*.digest
+          if-no-files-found: error
+          retention-days: 1

@@ -103,9 +103,21 @@ jobs:
           path: changelog.md
           retention-days: 1
 
+  validate:
+    name: Validation complète
+    needs: [calculate-and-tag]
+    uses: ./.github/workflows/ci.yml
+    # Reusable CI declares guarded tag/publication jobs; its actual validation
+    # jobs explicitly retain contents:read. The main event cannot allocate a beta.
+    permissions:
+      contents: write
+      packages: write
+    with:
+      version: ${{ needs.calculate-and-tag.outputs.version }}
+
   publish-docker:
     name: Publication Docker GHCR (${{ needs.calculate-and-tag.outputs.version }})
-    needs: [calculate-and-tag]
+    needs: [calculate-and-tag, validate]
     if: needs.calculate-and-tag.outputs.has_release == 'true'
     permissions:
       contents: read

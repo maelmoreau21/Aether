@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("multiarch", Path(__file__).with_name("publish-multiarch-manifests.py"))
 multiarch = importlib.util.module_from_spec(spec)
@@ -19,7 +20,7 @@ class MultiArchitectureTests(unittest.TestCase):
             for image in multiarch.IMAGES:
                 repository = "ghcr.io/fixture/" + image
                 (target / f"{image}.json").write_text(json.dumps({"image": image, "architecture": arch, "revision": REVISION,
-                    "digest": "sha256:" + ("1" if arch == "amd64" else "2") * 64,
+                    "image_id": "sha256:" + "3" * 64, "digest": "sha256:" + ("1" if arch == "amd64" else "2") * 64,
                     "tags": [f"{repository}:develop-{arch}", f"{repository}:sha-{REVISION}-{arch}"]}), encoding="utf-8")
 
     def test_plan_requires_two_verified_architectures_for_each_image(self):
@@ -58,6 +59,30 @@ class MultiArchitectureTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             with self.assertRaises(ValueError):
                 multiarch.plan(directory, "fixture", REVISION)
+
+    def test_registry_config_substitution_blocks_promotion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.fixtures(directory)
+            planned = multiarch.plan(directory, "fixture", REVISION)
+            with patch.object(multiarch.subprocess, "check_output", return_value=b'{"config":{"digest":"sha256:wrong"}}'):
+                with self.assertRaises(ValueError):
+                    multiarch.validate_remote(planned)
+            raw = json.dumps({"config": {"digest": "sha256:" + "3" * 64}}).encode()
+            with patch.object(multiarch.subprocess, "check_output", return_value=raw) as fetch:
+                multiarch.validate_remote(planned)
+                self.assertEqual(fetch.call_count, 6)
+
+    def test_index_rejects_wrong_digest_extra_platform_or_duplicate_architecture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.fixtures(directory)
+            image = multiarch.plan(directory, "fixture", REVISION)[0]
+            entries = [{"platform": {"os": "linux", "architecture": entry["architecture"]},
+                        "digest": entry["reference"].split("@")[1]} for entry in image["references"]]
+            multiarch.validate_index({"manifests": entries}, image)
+            for invalid in [entries[:1], entries + entries[:1], [entries[0], entries[0]],
+                            [entries[0], {**entries[1], "digest": "sha256:wrong"}]]:
+                with self.assertRaises(ValueError):
+                    multiarch.validate_index({"manifests": invalid}, image)
 
 
 if __name__ == "__main__":

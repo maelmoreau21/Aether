@@ -38,9 +38,31 @@ def plan(directory, owner, revision):
             if common_tags is not None and common_tags != tags:
                 raise ValueError("Architectures disagree on final tags")
             common_tags = tags
-            refs.append(repository + "@" + entry["digest"])
+            if not re.fullmatch(r"sha256:[0-9a-f]{64}", entry.get("image_id", "")):
+                raise ValueError("Verified native image ID missing")
+            refs.append({"reference": repository + "@" + entry["digest"],
+                         "architecture": architecture, "image_id": entry["image_id"]})
         output.append({"image": image, "tags": common_tags, "references": refs})
     return output
+
+
+def validate_remote(planned):
+    # Inspect every immutable registry manifest before writing any final tag.
+    # Its config digest must be the exact config ID tested on the native runner.
+    for image in planned:
+        for entry in image["references"]:
+            raw = subprocess.check_output(["docker", "buildx", "imagetools", "inspect", "--raw", entry["reference"]])
+            manifest = json.loads(raw)
+            if manifest.get("config", {}).get("digest") != entry["image_id"]:
+                raise ValueError("Registry config differs from verified native image")
+
+
+def validate_index(manifest, image):
+    actual = {(item.get("platform", {}).get("os"), item.get("platform", {}).get("architecture"), item.get("digest"))
+              for item in manifest.get("manifests", [])}
+    expected = {("linux", entry["architecture"], entry["reference"].split("@")[1]) for entry in image["references"]}
+    if actual != expected or len(manifest["manifests"]) != 2:
+        raise ValueError("Index must contain exactly the two verified native digests")
 
 
 def main():
@@ -55,15 +77,25 @@ def main():
     print(json.dumps(planned, indent=2))
     if not args.publish:
         return
+    validate_remote(planned)
+    # Preflight the complete set of index descriptors before any public tag moves.
+    for image in planned:
+        refs = [entry["reference"] for entry in image["references"]]
+        raw = subprocess.check_output(["docker", "buildx", "imagetools", "create", "--dry-run", *refs])
+        validate_index(json.loads(raw), image)
     for image in planned:
         command = ["docker", "buildx", "imagetools", "create"]
         for tag in image["tags"]:
             command += ["--tag", tag]
-        subprocess.run(command + image["references"], check=True)
+        subprocess.run(command + [entry["reference"] for entry in image["references"]], check=True)
         raw = subprocess.check_output(["docker", "buildx", "imagetools", "inspect", "--raw", image["tags"][0]])
-        platforms = {(entry.get("platform", {}).get("os"), entry.get("platform", {}).get("architecture")) for entry in json.loads(raw)["manifests"]}
-        if not {("linux", architecture) for architecture in ARCHITECTURES}.issubset(platforms):
-            raise RuntimeError("Published index is missing a validated architecture")
+        validate_index(json.loads(raw), image)
+        descriptor = subprocess.check_output(["docker", "buildx", "imagetools", "inspect", image["tags"][0],
+                                              "--format", "{{json .Manifest}}"], text=True)
+        digest = json.loads(descriptor)["digest"]
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+            raise ValueError("Invalid published index digest")
+        (args.directory / (image["image"] + ".digest")).write_text(digest + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

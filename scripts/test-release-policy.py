@@ -159,7 +159,7 @@ class AetherReleasePolicyTests(unittest.TestCase):
         self.assertTrue(release_workflow.exists())
 
         ci_content = ci_workflow.read_text(encoding="utf-8")
-        self.assertIn("needs: [workflows, rust, security-audit, frontend, browser, images]", ci_content)
+        self.assertIn("needs: [workflows, rust, security-audit, frontend, browser, images, calculate-beta]", ci_content)
 
         rel_content = release_workflow.read_text(encoding="utf-8")
         self.assertIn("needs: [calculate-and-tag, publish-docker]", rel_content)
@@ -225,34 +225,25 @@ class AetherReleasePolicyTests(unittest.TestCase):
         # Git tags are pushed, which point to the exact commit
         self.assertIn('git push origin "$TAG"', content)
 
-    def test_bake_uses_checked_out_source_in_ci_and_publication(self):
-        # Bake v6 defaults to a remote Git definition even after checkout.
-        # A deleted PR merge ref must not be fetched a second time by BuildKit.
+    def test_only_validation_builds_and_promotion_loads_the_verified_images(self):
         root = Path(__file__).resolve().parent.parent
-        for name in ("ci.yml", "publish.yml"):
-            with self.subTest(workflow=name):
-                content = (root / ".github" / "workflows" / name).read_text(encoding="utf-8")
-                matches = list(re.finditer(
-                    r"^(?P<indent> +)- uses: docker/bake-action@v6\s*$", content, re.MULTILINE
-                ))
-                self.assertEqual(len(matches), 1)
-                action = matches[0]
-                indent = len(action.group("indent"))
-                tail = content[action.end():]
-                next_step = re.search(rf"^ {{0,{indent}}}- ", tail, re.MULTILINE)
-                block = tail[:next_step.start()] if next_step else tail
-                self.assertRegex(block, r"(?m)^ +source: \.\s*$")
-                checkout = content[:action.start()].rfind("uses: actions/checkout@v4")
-                self.assertGreaterEqual(checkout, 0)
-                checkout_tail = content[checkout:action.start()]
-                next_step = re.search(rf"^ {{{indent}}}- ", checkout_tail, re.MULTILINE)
-                checkout_block = checkout_tail[:next_step.start()] if next_step else checkout_tail
-                self.assertIn("ref: ${{ github.sha }}", checkout_block)
-                self.assertIn("docker-bake.ci.hcl", block)
+        ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         publish = (root / ".github/workflows/publish.yml").read_text(encoding="utf-8")
+        release_wf = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertEqual(ci.count("uses: docker/bake-action@v6"), 1)
+        self.assertRegex(ci, r"(?m)^ +source: \.\s*$")
+        self.assertIn("ref: ${{ github.sha }}", ci)
+        self.assertIn("docker-bake.ci.hcl", ci)
+        self.assertNotIn("docker/bake-action", publish)
+        self.assertNotRegex(publish, r"docker (build|buildx bake)")
+        self.assertIn("ci-image-archive.py load", publish)
+        self.assertIn("name: verified-images-${{ matrix.arch }}", ci)
+        self.assertIn("name: verified-images-${{ matrix.arch }}", publish)
         self.assertIn("github.event_name != 'pull_request'", publish)
-        for metadata in ("meta-standalone", "meta-core", "meta-node"):
-            self.assertIn("cwd://${{ steps." + metadata + ".outputs.bake-file }}", publish)
+        self.assertIn("needs: [calculate-beta, publish]", ci)
+        self.assertIn("needs: [calculate-and-tag, validate]", release_wf)
+        self.assertIn("uses: ./.github/workflows/ci.yml", release_wf)
+        self.assertNotIn("packages: write", ci.split("  images:")[1].split("  tag-beta:")[0])
 
 if __name__ == "__main__":
     unittest.main()

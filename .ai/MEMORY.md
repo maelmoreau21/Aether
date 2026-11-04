@@ -128,3 +128,7 @@ Chapitres : HEAD inverse corrigé, scénario TCP direct/inverse sans repli réus
   Mesures catalogue ponctuelles sans gain revendiqué. Audit, organisation,
   commandes, problèmes reportés et limites : [modules backend](../docs/BACKEND_MODULES.md).
   Aucun push, publication, déploiement ou validation NAS/PostgreSQL/Linux ici.
+
+## 4 novembre 2026 — Optimisation CI, branche perf/ci-build-once
+
+Audit develop `743cc61` et trois runs réussis : 20 min 44 s à 21 min 57 s, 72–80 minutes cumulées de runners. Version calculée avant build ; images natives smoke-testées transférées en archives SHA-256/IDs/labels, puis promotion sans recompiler après toutes les gates. Release main appelle la CI complète ; tag bêta après publication. Nettoyage disque conditionnel, poids des 62 cibles actualisés ; profils production conservés, COPY Docker ciblés et CLI packaging non livré retiré du build. Contrats locaux release/archives/manifests/partitions réussis ; CI distante et transfert réel à confirmer avant conclusion. Détails et preuves : [optimisation CI](../docs/CI_PERFORMANCE_2026_11_04.md). Aucune fusion, publication expérimentale ni protection de branche modifiée.

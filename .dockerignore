@@ -58,6 +58,10 @@ docs/evidence/
 # 5. Database Files & Runtime State
 # ------------------------------------------------------------------------------
 data/
+**/data/
+**/.bootstrap_token
+**/graphify-out/
+**/__pycache__/
 **/secrets/backup.key
 *.sqlite3*
 *.sqlite*

@@ -1,5 +1,6 @@
 """Validate both verified architectures before explicitly publishing any final tag."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -48,12 +49,14 @@ def plan(directory, owner, revision):
 
 def validate_remote(planned):
     # Inspect every immutable registry manifest before writing any final tag.
-    # Its config digest must be the exact config ID tested on the native runner.
+    # Classic Docker IDs identify the config; containerd image-store IDs can
+    # identify the manifest. Bind to the exact tested bytes in either store.
     for image in planned:
         for entry in image["references"]:
             raw = subprocess.check_output(["docker", "buildx", "imagetools", "inspect", "--raw", entry["reference"]])
             manifest = json.loads(raw)
-            if manifest.get("config", {}).get("digest") != entry["image_id"]:
+            identities = {manifest.get("config", {}).get("digest"), "sha256:" + hashlib.sha256(raw).hexdigest()}
+            if entry["image_id"] not in identities:
                 raise ValueError("Registry config differs from verified native image")
 
 

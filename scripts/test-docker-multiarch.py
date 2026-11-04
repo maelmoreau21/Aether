@@ -1,5 +1,6 @@
 """Offline publication-gate contracts; no registry writes or real credentials."""
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -71,6 +72,12 @@ class MultiArchitectureTests(unittest.TestCase):
             with patch.object(multiarch.subprocess, "check_output", return_value=raw) as fetch:
                 multiarch.validate_remote(planned)
                 self.assertEqual(fetch.call_count, 6)
+            # Docker with the containerd image store reports manifest IDs.
+            for image in planned:
+                for entry in image["references"]:
+                    entry["image_id"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+            with patch.object(multiarch.subprocess, "check_output", return_value=raw):
+                multiarch.validate_remote(planned)
 
     def test_index_rejects_wrong_digest_extra_platform_or_duplicate_architecture(self):
         with tempfile.TemporaryDirectory() as directory:

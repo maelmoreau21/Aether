@@ -67,7 +67,7 @@ Deux partitions donneraient une charge de tests estimée de 521/521 s ; quatre, 
 2. Les trois images passent les contrôles existants : non-root, santé, version, vraie extraction AV1 de chapitre, FFmpeg 9.0.2, taille Node. Les checks de lecture AV1/Opus/Range et multi-Node restent dans la CI complète.
 3. `docker save` regroupe les trois tags en partageant leurs couches ; gzip niveau 1 puis artifact sans recompression, rétention un jour. Le manifeste lie SHA-256 de l'archive, SHA du commit, architecture, source, version et IDs des images du rapport natif. Le cycle save/load est exercé aussi sur les PR ; aucun secret de registre ne leur est accordé.
 4. Après succès de toutes les gates, chaque runner de publication télécharge uniquement l'archive de son architecture depuis le même run, vérifie son identité, la charge et compare les IDs/labels. Il ne contient plus de commande de build.
-5. Les tags techniques `sha-<commit>-<arch>` sont poussés seulement à ce stade. Les manifests distants doivent pointer vers les configs exactes testées.
+5. Les tags techniques `sha-<commit>-<arch>` sont poussés seulement à ce stade. Les manifests distants doivent correspondre aux IDs exacts testés (digest de config avec le stockage classique, digest du manifest avec containerd).
 6. Les six références sont prévalidées avant tout tag final ; chaque index doit contenir exactement AMD64+ARM64 avec leurs digests attendus. Les tags develop/latest/version/série sont mis à jour par index complet. Les digests des index sont archivés pour le changelog de release.
 
 Un registre ne fournit pas de transaction globale sur tous les tags et dépôts : chaque tag final référence un index complet avec les deux architectures, mais une panne entre deux tags peut laisser des alias à des générations différentes. Aucune architecture unique n'est publiée comme tag final. Les publications sont sérialisées ; les mises à jour de PR annulent leurs validations obsolètes. Les pushes de confiance sont sérialisés depuis l'allocation de version ; leur temps d'attente de file doit être mesuré séparément.
@@ -84,6 +84,8 @@ Les builds dev/test omettent déjà les symboles mais gardent assertions et over
 
 ## Validation et mesures après changement
 
+Essai supplémentaire réellement exécuté : registre Docker 3 jetable lié à `127.0.0.1`, six références synthétiques, cycle archive/load et trois index multiarchitecture produits par le vrai script de promotion, puis digests des index relus. Aucun accès en écriture à GHCR. Cet essai a révélé que Docker 29/containerd peut utiliser le digest du manifest comme ID local ; la vérification accepte désormais uniquement l'un des deux identifiants immuables (config ou bytes exacts du manifest), avec contrat de régression. Les fixtures synthétiques ne constituent aucune preuve d'exécution ARM64 du serveur Aether ni une mesure du transfert des vraies images.
+
 Vérifications locales initiales : Actionlint 1.7.12, contrats release (15), archives (3), manifests (6), partitions (4), plans Bake AMD64/ARM64 et couverture Cargo. Aucun résultat de publication du nouveau parcours n'est encore disponible. Le tableau sera complété avec les vrais résultats PR ; un run PR sans publication ne sera pas comparé comme un CI/CD complet.
 
 Collecte reproductible :
@@ -94,3 +96,5 @@ python scripts/ci-integration-shard.py --index 0 --count 3 --list
 ```
 
 Comparer les commits et les cas séparément : cold complet ; warm sans changement ; changement Rust sans dépendances ; changement frontend ; changement Cargo.lock/npm lockfile. Le premier build après modification du Dockerfile peut être froid au niveau des dépendances. L'absence de mesures pour un cas reste explicite. La détection de changements pour sauter des jobs est différée : aucune économie supplémentaire n'est revendiquée et la CI complète reste systématique avant publication. Les retours frontend et formatage restent indépendants des builds Docker ; Clippy/unitaires ne sont plus précédés d'un nettoyage inconditionnel.
+
+PR de revue : [#36](https://github.com/maelmoreau21/Aether/pull/36), créée en brouillon. Premier run PR : [41911338866](https://github.com/maelmoreau21/Aether/actions/runs/41911338866). Résultat en attente au moment de cette entrée.

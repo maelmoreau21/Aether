@@ -89,7 +89,10 @@ async fn static_web_serves_assets_and_applies_security_headers() {
         .unwrap();
     assert!(csp.contains("default-src 'none'"));
     assert!(csp.contains("script-src 'self'"));
-    assert!(csp.contains("font-src 'self';"), "self-hosted fonts must load without data: URIs");
+    assert!(
+        csp.contains("font-src 'self';"),
+        "self-hosted fonts must load without data: URIs"
+    );
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8(body.to_vec()).unwrap();
     assert!(body_str.contains("Aether Test Index"));

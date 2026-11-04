@@ -154,7 +154,11 @@ jobs:
 
       - name: Exécuter les tests unitaires (cargo test --lib --bins)
         if: matrix.shard == 'checks'
-        run: cargo test --locked --workspace --all-features --lib --bins
+        # Les tests unitaires d'extensions lancent le vrai worker isolé, situé à
+        # côté de target/debug/deps ; `--lib --bins` ne le produit pas seul.
+        run: |
+          cargo build --locked -p media-poc --all-features --bin media-extension-worker
+          cargo test --locked --workspace --all-features --lib --bins
 
       - name: Vérifier l'ABI du SDK avec un module Rust de test
         if: matrix.shard == 'checks'

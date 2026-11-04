@@ -34,7 +34,7 @@ const server = createServer(async (req, res) => {
   try {
     const body = await readFile(file);
     const type = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.webmanifest': 'application/manifest+json', '.png': 'image/png' }[extname(file)] ?? 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; worker-src 'self'; manifest-src 'self'; img-src 'self'; media-src 'self' blob:; connect-src 'self'; style-src 'self'" });
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; worker-src 'self'; manifest-src 'self'; font-src 'self'; img-src 'self'; media-src 'self' blob:; connect-src 'self'; style-src 'self'" });
     res.end(body);
   } catch { res.writeHead(404); res.end(); }
 });

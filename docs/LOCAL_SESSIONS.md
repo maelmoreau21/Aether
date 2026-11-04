@@ -121,7 +121,7 @@ Les sessions expirées sont nettoyées à la connexion suivante, sans tâche de 
 Pas d'interface de révocation globale ou de récupération de compte dans ce jalon.
 
 Référence de conception : [OWASP Session Management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
-Les preuves locales et commandes exécutées sont consignées dans `MEMORY.md`.
+Les preuves locales et commandes exécutées sont consignées dans `.ai/MEMORY.md`.
 
 ## Rejouer les vérifications
 

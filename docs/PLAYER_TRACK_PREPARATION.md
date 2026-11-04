@@ -261,7 +261,7 @@ identifiant. L'accueil utilise `added-desc`. Aucune date inventée par migration
 
 ## Validation
 
-Commandes et résultats effectivement exécutés dans MEMORY.md ; preuves Chrome
+Commandes et résultats effectivement exécutés dans .ai/MEMORY.md ; preuves Chrome
 sous `evidence/2026-10-18/player-finalization/` et essais longs séparés sous
 `player-long/`. Un fichier de 90 minutes et une minute observée ne constituent
 pas une preuve de lecture continue de 90 minutes ni une mesure de fuite RSS.

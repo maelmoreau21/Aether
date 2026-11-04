@@ -91,7 +91,7 @@ Les erreurs de droits ne sont jamais remplacées par une réponse de cache médi
 
 ## Vérifications
 
-Les résultats définitifs et limites d’environnement sont consignés dans `MEMORY.md`.
+Les résultats définitifs et limites d’environnement sont consignés dans `.ai/MEMORY.md`.
 Les tests du lot sont `product_tests`, `account`, `distributed_multi_node`,
 `node_enrollment_and_relay`, `cache_dirs`, `browser_series`, les tests Web et
 `apps/web/scripts/test-pwa.mjs`. Les scénarios multi-Node locaux ne sont pas une

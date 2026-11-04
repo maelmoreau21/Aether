@@ -111,6 +111,6 @@ Le dépôt Aether-Plugins conserve désormais `storageMigration` lors de la
 projection du manifeste avant signature ; un test de contrat vérifie ce point.
 Son modèle `templates/persistent-storage` répond à `lifecycle.verify` sans
 incrémenter le compteur privé, et documente la déclaration de compatibilité.
-Les résultats réellement exécutés sont consignés dans `MEMORY.md` ; le schéma
+Les résultats réellement exécutés sont consignés dans `.ai/MEMORY.md` ; le schéma
 PostgreSQL aligné ne constitue pas une preuve d'exécution du nouveau rollback
 sur PostgreSQL ni sur NAS.

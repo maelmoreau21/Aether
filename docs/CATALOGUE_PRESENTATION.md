@@ -35,7 +35,7 @@ La migration 0029 ajoute `work_feedback`, les rôles d'images et le stockage tem
 
 ## Vérification
 
-Voir les tests `series_flow`, `nfo_flow`, `media-node nfo::` et le scénario navigateur `browser_series` / `scripts/browser-series.cjs`. Les fixtures sont synthétiques ; ces résultats ne constituent pas un scan du NAS ou un déploiement sur aether.dfmag.fr. Les preuves exécutées pour ce jalon sont consignées dans MEMORY.md.
+Voir les tests `series_flow`, `nfo_flow`, `media-node nfo::` et le scénario navigateur `browser_series` / `scripts/browser-series.cjs`. Les fixtures sont synthétiques ; ces résultats ne constituent pas un scan du NAS ou un déploiement sur aether.dfmag.fr. Les preuves exécutées pour ce jalon sont consignées dans .ai/MEMORY.md.
 
 ## Réactivité des fiches et du lecteur — 20 octobre 2026
 

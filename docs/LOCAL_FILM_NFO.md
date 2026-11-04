@@ -87,7 +87,7 @@ Les tests utilisent exclusivement des copies synthétiques jetables. Les mutatio
 de NFO sont réalisées explicitement par les tests pour simuler l'opérateur ; les
 octets sont comparés avant/après chaque scan. Le test navigateur dédié réalise
 un vrai redémarrage du Core et conserve ses preuves dans `evidence/2026-10-16/nfo/`.
-Résultats réellement exécutés : MEMORY.md et TEST_PLAN.md.
+Résultats réellement exécutés : .ai/MEMORY.md et TEST_PLAN.md.
 
 Séries/épisodes, affiches, sous-titres externes, métadonnées en ligne, multi-Node,
 PostgreSQL, Docker/Synology et refonte UI restent hors de ce jalon.

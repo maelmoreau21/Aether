@@ -89,5 +89,5 @@ npm audit
 ## 4. Documentation
 
 - Toute modification de contrat d'API doit être reflétée dans [`docs/API.md`](docs/API.md).
-- Tout nouveau test ou jalon doit être documenté avec ses preuves d'exécution dans [`MEMORY.md`](MEMORY.md) et [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md).
+- Tout nouveau test ou jalon doit être documenté avec ses preuves d'exécution dans [`.ai/MEMORY.md`](.ai/MEMORY.md) et [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md).
 - Consultez [`ARCHITECTURE.md`](ARCHITECTURE.md) et [`AGENTS.md`](AGENTS.md) pour les détails exhaustifs de conception.

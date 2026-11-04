@@ -49,7 +49,7 @@ existantes de modification des listes personnelles ne permettent pas de modifier
 ces collections. Les réglages de partage des playlists ne leur accordent aucun
 accès public.
 
-Validation locale ciblée et limites : voir le bilan du lot dans MEMORY.md. Les
+Validation locale ciblée et limites : voir le bilan du lot dans .ai/MEMORY.md. Les
 vérifications SQLite et fournisseur simulé ne prouvent pas PostgreSQL, NAS,
 précision acoustique d'Intro Skipper ni les services externes réels. La dépendance
 SDK Git du dépôt Aether-Plugins a été alignée le 3 novembre sur le commit Core

@@ -328,7 +328,7 @@ Pas de délégation simultanée des mêmes fichiers avec l'IA packaging.
 
 Inspection des sources, manifests, six migrations et tests présents ;
 `cargo metadata --locked --no-deps --format-version 1` exécuté avec succès.
-Résultats de la suite Rust et vérification du diff consignés dans `MEMORY.md`
+Résultats de la suite Rust et vérification du diff consignés dans `.ai/MEMORY.md`
 avec cette décision : fmt et Clippy strict réussis, suite Rust 50 réussis / 5
 ignorés (quatre navigateurs et un helper subprocess), `git diff --check` réussi.
 Deux éléments non suivis (`.agents/`, `ORIGINAL_REQUEST.md`) sont apparus pendant

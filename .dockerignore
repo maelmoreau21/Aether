@@ -11,7 +11,7 @@
 .github/
 .agents/
 .gemini/
-ORIGINAL_REQUEST.md
+.ai/
 
 # ------------------------------------------------------------------------------
 # 2. Rust Build Artifacts & Cargo Caches

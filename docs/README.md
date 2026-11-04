@@ -8,7 +8,7 @@ Point d'entrée thématique de `docs/`. Rappel : **les documents sont des exigen
 | --- | --- |
 | [`../AGENTS.md`](../AGENTS.md) | Règles de contribution et ordre des priorités |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Composants et frontières |
-| [`../MEMORY.md`](../MEMORY.md) | État courant et décisions (anciennes entrées : [`archive/MEMORY_2026-11-03.md`](archive/MEMORY_2026-11-03.md)) |
+| [`../.ai/MEMORY.md`](../.ai/MEMORY.md) | État courant et décisions (anciennes entrées : [`archive/MEMORY_2026-11-03.md`](archive/MEMORY_2026-11-03.md)) |
 | [`SPECIFICATION.md`](SPECIFICATION.md) | Exigences et périmètre |
 | [`MEDIA_FORMATS.md`](MEDIA_FORMATS.md) | Modèle des pistes et formats |
 | [`STREAMING_COMPATIBILITY.md`](STREAMING_COMPATIBILITY.md) | Preuves de lecture observées |
@@ -22,8 +22,8 @@ Point d'entrée thématique de `docs/`. Rappel : **les documents sont des exigen
 - [`../README.md`](../README.md) : présentation, installation rapide, fonctionnalités.
 - [`INSTALLATION_LOCALE.md`](INSTALLATION_LOCALE.md) : installer Aether sur un PC Windows.
 - [`LOCAL_ADMIN.md`](LOCAL_ADMIN.md) : SQLite et premier administrateur local.
-- [`../DEV_STATE.md`](../DEV_STATE.md) : journal d'état de développement.
-- [`../ORIGINAL_REQUEST.md`](../ORIGINAL_REQUEST.md) et [`../PROMPT_DEMARRAGE_IA.md`](../PROMPT_DEMARRAGE_IA.md) : demande initiale et premier développement confié à l'IA.
+- [`../.ai/DEV_STATE.md`](../.ai/DEV_STATE.md) : journal d'état de développement.
+- [`../.ai/ORIGINAL_REQUEST.md`](../.ai/ORIGINAL_REQUEST.md) et [`../.ai/PROMPT_DEMARRAGE_IA.md`](../.ai/PROMPT_DEMARRAGE_IA.md) : demande initiale et premier développement confié à l'IA.
 - [`PRODUCT_FEATURES.md`](PRODUCT_FEATURES.md) et [`PRODUCT_BACKLOG.md`](PRODUCT_BACKLOG.md) : fonctions produit et demandes suivies.
 - [`JELLYFIN_FUNCTIONAL_GAPS.md`](JELLYFIN_FUNCTIONAL_GAPS.md) : comparaison fonctionnelle Jellyfin / Aether.
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md) et [`../CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) : contribution et conduite.
@@ -91,7 +91,7 @@ Rapports datés, missions et expériences terminées, conservés pour l'historiq
 
 | Dossier | Contenu |
 | --- | --- |
-| [`archive/`](archive/) | Anciennes entrées de [`MEMORY.md`](archive/MEMORY_2026-11-03.md) |
+| [`archive/`](archive/) | Anciennes entrées de [`.ai/MEMORY.md`](archive/MEMORY_2026-11-03.md) |
 | `archive/missions/` | Missions datées du 3 novembre 2026 (`MISSION_*`) et mission streaming 3.2 |
 | `archive/audits/` | Audits ponctuels : couverture backlog, sortie P1, extensions, lecteur |
 | `archive/ci/` | Bilans CI/Docker datés (lot A01, trois P0, multi-arch, résultats Docker P2) |

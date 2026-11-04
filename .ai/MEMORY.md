@@ -4,13 +4,13 @@ Le code et les tests actuels font foi. Cette mémoire est un index de décisions
 preuves historiques, pas une garantie de comportement ni de déploiement actuel.
 Consulter les documents du domaine et les sources avant toute modification.
 
-- Architecture et frontières : [ARCHITECTURE.md](ARCHITECTURE.md).
-- Sécurité : [docs/SECURITY.md](docs/SECURITY.md).
-- Lecture et résultats observés : [docs/STREAMING_COMPATIBILITY.md](docs/STREAMING_COMPATIBILITY.md).
-- Déploiement : [docs/DEPLOYMENT_DOCKER.md](docs/DEPLOYMENT_DOCKER.md).
-- Extensions : [docs/PLUGIN_UPDATE_LIFECYCLE.md](docs/PLUGIN_UPDATE_LIFECYCLE.md).
+- Architecture et frontières : [ARCHITECTURE.md](../ARCHITECTURE.md).
+- Sécurité : [docs/SECURITY.md](../docs/SECURITY.md).
+- Lecture et résultats observés : [docs/STREAMING_COMPATIBILITY.md](../docs/STREAMING_COMPATIBILITY.md).
+- Déploiement : [docs/DEPLOYMENT_DOCKER.md](../docs/DEPLOYMENT_DOCKER.md).
+- Extensions : [docs/PLUGIN_UPDATE_LIFECYCLE.md](../docs/PLUGIN_UPDATE_LIFECYCLE.md).
 - Historique complet jusqu’au 3 novembre 2026, y compris les travaux locaux :
-  [archive de la mémoire](docs/archive/MEMORY_2026-11-03.md). Les entrées y
+  [archive de la mémoire](../docs/archive/MEMORY_2026-11-03.md). Les entrées y
   sont datées mais pas strictement chronologiques ; rechercher par sujet et date.
 
 Les futures entrées restent courtes : périmètre, décision, vérifications réellement
@@ -102,5 +102,5 @@ Chapitres : HEAD inverse corrigé, scénario TCP direct/inverse sans repli réus
   et tests ciblés passent : 13 unitaires Core, 12 Node ; intégrations après lots
   inventaire/Nodes/serveur : 18/6/7. TLS réel reste ignoré faute de certificats.
   Mesures catalogue ponctuelles sans gain revendiqué. Audit, organisation,
-  commandes, problèmes reportés et limites : [modules backend](docs/BACKEND_MODULES.md).
+  commandes, problèmes reportés et limites : [modules backend](../docs/BACKEND_MODULES.md).
   Aucun push, publication, déploiement ou validation NAS/PostgreSQL/Linux ici.

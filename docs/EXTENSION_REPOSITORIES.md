@@ -152,7 +152,7 @@ couvre les politiques URL/IP et le parcours HTTP de gestion, confiance,
 empreinte altérée, installation désactivée, actualisation et retrait sans perte
 de module. Le transport HTTPS de ce test est injecté uniquement sous `cfg(test)` ;
 aucune exception réseau locale n’est compilée dans le serveur de production.
-Les résultats effectivement exécutés sont consignés dans MEMORY.md par le jalon
+Les résultats effectivement exécutés sont consignés dans .ai/MEMORY.md par le jalon
 principal ; les tests seuls ne prouvent pas un dépôt ou fournisseur public réel.
 
 Après compilation du Web, un parcours Chrome dédié est disponible :

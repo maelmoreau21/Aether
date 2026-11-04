@@ -64,7 +64,7 @@ conserve maintenant la langue choisie à la réouverture.
 Edge : MEDIA_BROWSER_CHANNEL=msedge, MEDIA_BROWSER_EXECUTABLE selon TEST_PLAN.
 Firefox : MEDIA_BROWSER_CHANNEL=firefox, MEDIA_TEST_SPEED=1 ; scénario UX dédié
 scripts/browser-immersive-firefox.cjs avec geckodriver existant et vraies touches
-W3C WebDriver. Les résultats finaux sont consignés dans MEMORY.md et les preuves.
+W3C WebDriver. Les résultats finaux sont consignés dans .ai/MEMORY.md et les preuves.
 
 ## Limites conservées
 

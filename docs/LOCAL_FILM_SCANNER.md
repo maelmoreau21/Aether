@@ -104,4 +104,4 @@ sandbox de parseur hostile ni une limite de RSS globale.
 Séries, NFO, illustrations, sous-titres externes, métadonnées en ligne, OIDC,
 multi-Node, ordonnanceur et déploiement réel restent différés.
 
-Les commandes et résultats exécutés sont consignés dans MEMORY.md et TEST_PLAN.md.
+Les commandes et résultats exécutés sont consignés dans .ai/MEMORY.md et TEST_PLAN.md.

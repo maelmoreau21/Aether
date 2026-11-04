@@ -19,7 +19,7 @@ Le système d'extensions à dépôts/catalogue et permissions accordées par adm
 
 ## Vérification
 
-Commandes et résultats effectivement exécutés consignés dans MEMORY.md et docs/TEST_PLAN.md. `apps/web/scripts/test-admin-ui.mjs` est un test d'interface avec API simulée ; `cargo test -p media-poc --test browser_admin -- --ignored` exerce le vrai Core avec SQLite sur un dossier temporaire et sans média personnel. `scripts/test-admin-postgres.ps1` vise uniquement un PostgreSQL18 jetable pour sauvegarde complète et restauration réelle.
+Commandes et résultats effectivement exécutés consignés dans .ai/MEMORY.md et docs/TEST_PLAN.md. `apps/web/scripts/test-admin-ui.mjs` est un test d'interface avec API simulée ; `cargo test -p media-poc --test browser_admin -- --ignored` exerce le vrai Core avec SQLite sur un dossier temporaire et sans média personnel. `scripts/test-admin-postgres.ps1` vise uniquement un PostgreSQL18 jetable pour sauvegarde complète et restauration réelle.
 
 ## Présentation et thèmes — 19 octobre 2026
 

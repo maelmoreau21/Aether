@@ -1,6 +1,6 @@
 > Moteur de tâches à Core unique (25 octobre 2026) : file SQLite/PostgreSQL persistante, décisions Core, exécution confinée dans les Media Nodes appairés et dans le Node standalone, leases/tentatives et priorité à la lecture. Les travaux distribués n’exigent pas plusieurs Core ni un broker externe. Contrat réel et limites : [DISTRIBUTED_TASKS.md](docs/DISTRIBUTED_TASKS.md).
 
-> PostgreSQL 18 optionnel en cours de validation : moteur explicite, migrations indépendantes et premier contrat HTTP commun réussi sur SQLite et PostgreSQL. Voir [PostgreSQL](docs/POSTGRESQL.md) et MEMORY.md ; P2 reste ouvert.
+> PostgreSQL 18 optionnel en cours de validation : moteur explicite, migrations indépendantes et premier contrat HTTP commun réussi sur SQLite et PostgreSQL. Voir [PostgreSQL](docs/POSTGRESQL.md) et .ai/MEMORY.md ; P2 reste ouvert.
 
 > CI/GHCR (18 octobre 2026) : validation YAML réparée localement, publication
 > réutilisable conditionnée à tous les contrôles et aux trois builds Docker.
@@ -255,9 +255,8 @@ Pour N Core plus tard : PostgreSQL partagé, sessions et révocations accessible
 /
 ├── AGENTS.md
 ├── ARCHITECTURE.md
-├── MEMORY.md
+├── .ai/                       # MEMORY, DEV_STATE, ORIGINAL_REQUEST, PROMPT_DEMARRAGE_IA
 ├── README.md
-├── PROMPT_DEMARRAGE_IA.md
 ├── Cargo.toml                 # après initialisation effective
 ├── apps/web/                  # SvelteKit, frontend indépendant
 ├── crates/
@@ -354,7 +353,7 @@ Le module identity du Core persiste les comptes avec SQLx/SQLite, applique les
 migrations embarquées et fournit un bootstrap CLI local. La séparation compte /
 credential local prépare les futurs liens OIDC par issuer+subject et sessions
 par user_id ; ces mécanismes ne sont pas implémentés. Aucun nouvel endpoint.
-Voir docs/LOCAL_ADMIN.md et MEMORY.md pour preuves et limites.
+Voir docs/LOCAL_ADMIN.md et .ai/MEMORY.md pour preuves et limites.
 
 ## Bibliothèques locales P1 — 16 octobre 2026
 

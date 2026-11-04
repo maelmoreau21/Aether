@@ -20,13 +20,13 @@ Ne jamais sacrifier P0 pour une interface spectaculaire, un cluster, un système
 
 ## 2. Lecture obligatoire avant chaque intervention
 
-1. Lire `AGENTS.md`, le point d’entrée `MEMORY.md`, `ARCHITECTURE.md`, `docs/SPECIFICATION.md`, puis la documentation du domaine concerné. Consulter les archives de mémoire seulement si le sujet le nécessite.
+1. Lire `AGENTS.md`, le point d’entrée `.ai/MEMORY.md`, `ARCHITECTURE.md`, `docs/SPECIFICATION.md`, puis la documentation du domaine concerné. Consulter les archives de mémoire seulement si le sujet le nécessite.
 2. Inspecter les fichiers réellement présents, `git status`, le diff, les tests et dépendances. **Les documents sont des exigences, pas des preuves d'implémentation.**
 3. Découper la mission en une étape vérifiable, annoncer les hypothèses, les critères d'acceptation et le périmètre.
 4. Implémenter un **parcours vertical fonctionnel** avant de multiplier les couches ou crates vides.
 5. Exécuter les tests adaptés ; signaler honnêtement les vérifications impossibles, ainsi que les limites navigateur/client.
 6. Terminer par les changements, commandes de tests réellement lancées, résultats, risques restants et prochain petit jalon.
-7. Consigner brièvement dans `MEMORY.md` chaque jalon réel ou changement de décision, avec preuves et limites ; détailler dans le document du domaine et archiver les entrées anciennes. Ne pas déduire une réalisation d’un plan.
+7. Consigner brièvement dans `.ai/MEMORY.md` chaque jalon réel ou changement de décision, avec preuves et limites ; détailler dans le document du domaine et archiver les entrées anciennes. Ne pas déduire une réalisation d’un plan.
 8. Ne pas détruire des données, changer de licence, pousser sur Git, publier d'images ou modifier des médias sans demande explicite.
 
 ## 3. Règles produit non négociables
@@ -105,13 +105,13 @@ Les versions de dépendances doivent être contrôlées au moment de coder ; ne 
 - Ne **pas** écrire tous les dossiers/crates vides du diagramme. Créer chaque module seulement lorsqu'un parcours le requiert.
 - Ne pas remplacer Rust/SvelteKit, introduire FFmpeg en dépendance permanente, inventer un format propriétaire brut, créer un cluster ou un système de plugin sans validation technique et besoin explicite.
 - En cas de blocage codec/navigateur, documenter le résultat et proposer le plus petit compromis démontré : Direct Play si compatible, remux sans réencodage, préparation hors lecture, ou échec explicite.
-- Le premier développement demandé à l'IA est décrit dans **`PROMPT_DEMARRAGE_IA.md`**. Il ne faut pas commencer par tout le projet à la fois.
+- Le premier développement demandé à l'IA est décrit dans **`.ai/PROMPT_DEMARRAGE_IA.md`**. Il ne faut pas commencer par tout le projet à la fois.
 
 ## 11. Sources de vérité
 
 - `AGENTS.md` : règles de contribution.
 - `ARCHITECTURE.md` : composants et frontières.
-- `MEMORY.md` : état et décisions.
+- `.ai/MEMORY.md` : état et décisions.
 - `docs/SPECIFICATION.md` : exigences et périmètre.
 - `docs/MEDIA_FORMATS.md` : modèle des pistes et formats.
 - `docs/STREAMING_COMPATIBILITY.md` : **preuves** de lecture observées.

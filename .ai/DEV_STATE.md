@@ -133,8 +133,8 @@ des fournisseurs. Les médias restent en lecture seule.
 95 tests Rust (10 contrats/42 Node/43 Core), 6 tests d'intégration,
 70 tests Web, check 0/0, lint et build réussis. Deux scénarios admin Chrome avec
 vrai Core/SQLite et le scénario PWA avec API fixture passent. Captures inspectées.
-Contrat, reste de la demande et limites : [réglages](docs/LIBRARY_OPTIONS.md).
-Preuves : [validation](docs/evidence/2026-10-21/library-options/README.md).
+Contrat, reste de la demande et limites : [réglages](../docs/LIBRARY_OPTIONS.md).
+Preuves : [validation](../docs/evidence/2026-10-21/library-options/README.md).
 
 Multi-racines, priorités fournisseurs, écritures dans les médias, quotas réseau/écrans,
 trickplay/intros, surveillance temps réel et sous-titres automatiques restent ouverts.
@@ -159,8 +159,8 @@ sessions) réussis. `cargo fmt --all -- --check` et
 `cargo clippy --locked --workspace --all-targets -j 1 -- -D warnings` réussis.
 
 Preuves, commandes et limites :
-[evidence du lot](docs/evidence/2026-10-21/usability/README.md),
-[mesure des miniatures](docs/evidence/2026-10-21/image-preview-release.md).
+[evidence du lot](../docs/evidence/2026-10-21/usability/README.md),
+[mesure des miniatures](../docs/evidence/2026-10-21/image-preview-release.md).
 Le catalogue navigateur utilise un vrai Core/SQLite avec documents HTTPS
 substitués seulement dans le binaire de test. Aucun compte fournisseur réel,
 PostgreSQL réel, NAS ou comparaison Jellyfin vérifié dans ce lot.

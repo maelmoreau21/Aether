@@ -28,7 +28,7 @@ scanner réel. Voir [LIBRARIES_AND_SCANNER.md](LIBRARIES_AND_SCANNER.md).
 
 
 Document créé le 15 octobre 2026 : absent dans le dépôt initial.
-Les règles `AGENTS.md`, `ARCHITECTURE.md` et `PROMPT_DEMARRAGE_IA.md` priment.
+Les règles `AGENTS.md`, `ARCHITECTURE.md` et `.ai/PROMPT_DEMARRAGE_IA.md` priment.
 
 Parcours livré : générer des fichiers synthétiques AV1/Opus, inspecter leurs
 pistes au démarrage, les servir en lecture seule avec une API versionnée,

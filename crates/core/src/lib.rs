@@ -73,14 +73,14 @@ fn media_routes(inventory: node::Inventory) -> Router {
         .route("/api/v1/catalog", get(catalog::list))
         .route("/api/v1/catalog/{id}", get(catalog::detail))
         .route("/api/v1/demo/subtitles/{name}", get(node::demo_subtitle))
-        .route("/mse", get(|| async { Html(include_str!("mse.html")) }))
-        .route("/shaka", get(|| async { Html(include_str!("shaka.html")) }))
+        .route("/mse", get(|| async { Html(include_str!("../experiments/mse.html")) }))
+        .route("/shaka", get(|| async { Html(include_str!("../experiments/shaka.html")) }))
         .route(
             "/audio-seek-policy.js",
             get(|| async {
                 (
                     [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("audio-seek-policy.js"),
+                    include_str!("../experiments/audio-seek-policy.js"),
                 )
             }),
         )
@@ -89,7 +89,7 @@ fn media_routes(inventory: node::Inventory) -> Router {
             get(|| async {
                 (
                     [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("shaka.js"),
+                    include_str!("../experiments/shaka.js"),
                 )
             }),
         )
@@ -99,7 +99,7 @@ fn media_routes(inventory: node::Inventory) -> Router {
             get(|| async {
                 (
                     [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("mse.js"),
+                    include_str!("../experiments/mse.js"),
                 )
             }),
         )
@@ -117,9 +117,9 @@ fn media_routes(inventory: node::Inventory) -> Router {
             get(node::content).head(node::content),
         );
     if is_bench {
-        router = router.route("/", get(|| async { Html(include_str!("bench.html")) }));
+        router = router.route("/", get(|| async { Html(include_str!("../experiments/bench.html")) }));
     } else {
-        router = router.route("/bench", get(|| async { Html(include_str!("bench.html")) }));
+        router = router.route("/bench", get(|| async { Html(include_str!("../experiments/bench.html")) }));
     }
     router.with_state(Arc::new(inventory))
 }
@@ -683,7 +683,7 @@ pub fn local_security_with_store(
         }))
         .layer(SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::if_not_present(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
-        .route("/bench.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("bench.js")) }))
+        .route("/bench.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("../experiments/bench.js")) }))
 }
 
 pub fn error(status: StatusCode, code: &'static str) -> Response {

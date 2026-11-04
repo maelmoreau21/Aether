@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {createAudioSeekPolicy}=require('../crates/core/src/audio-seek-policy.js');
+const {createAudioSeekPolicy}=require('../crates/core/experiments/audio-seek-policy.js');
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
 class VideoMock extends EventTarget {

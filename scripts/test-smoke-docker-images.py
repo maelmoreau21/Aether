@@ -11,6 +11,14 @@ spec.loader.exec_module(smoke)
 
 
 class HealthTimeoutTests(unittest.TestCase):
+    def test_cached_fixture_must_still_contain_real_av1(self):
+        smoke.validate_fixture_probe({"streams": [{"codec_type": "video", "codec_name": "av1"},
+                                                  {"codec_type": "audio", "codec_name": "opus"}]})
+        for streams in [[], [{"codec_type": "audio", "codec_name": "opus"}],
+                        [{"codec_type": "video", "codec_name": "h264"}]]:
+            with self.subTest(streams=streams), self.assertRaises(ValueError):
+                smoke.validate_fixture_probe({"streams": streams})
+
     def test_daemon_exec_timeout_propagates_and_cleanup_remains_bounded(self):
         calls = []
 

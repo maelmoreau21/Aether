@@ -51,6 +51,22 @@ def stage_fixture(source, directory):
     return fixture
 
 
+def validate_fixture_probe(probe):
+    video = [stream for stream in probe.get("streams", []) if stream.get("codec_type") == "video"]
+    if not video or any(stream.get("codec_name") != "av1" for stream in video):
+        raise ValueError("Docker preview fixture must contain actual AV1 video")
+
+
+def probe_fixture(image, fixture, platform):
+    data = command(["docker", "run", "--rm", "--network", "none", "--platform", platform,
+                    "--mount", f"type=bind,source={fixture.parent.resolve()},target=/fixtures,readonly",
+                    "--entrypoint", "ffprobe", image, "-v", "error", "-show_streams", "-of", "json",
+                    f"/fixtures/{fixture.name}"])
+    probe = json.loads(data)
+    validate_fixture_probe(probe)
+    return [{"type": stream.get("codec_type"), "codec": stream.get("codec_name")} for stream in probe["streams"]]
+
+
 def preview(image, fixture, output, platform):
     args = ["docker", "run", "--rm", "--network", "none", "--platform", platform,
             "--mount", f"type=bind,source={fixture.parent.resolve()},target=/fixtures,readonly",
@@ -130,6 +146,7 @@ def main():
                     result["ffprobe"] = command(["docker", "run", "--rm", "--network", "none", "--platform", platform, "--entrypoint", "ffprobe", image, "-version"]).splitlines()[0]
                     if "9.0.2" not in result["ffmpeg"] or "9.0.2" not in result["ffprobe"]:
                         raise ValueError("Embedded FFmpeg version mismatch")
+                    result["fixtureStreams"] = probe_fixture(image, fixture, platform)
                     result["chapterPreview"] = preview(image, fixture, args.report.parent / f"{role}-{args.arch}.jpg", platform)
                 if role == "node" and inspected["Size"] >= 200_000_000:
                     raise ValueError("Node image exceeds existing 200 MB gate")

@@ -296,10 +296,12 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     scheduler::run_due(&auth, &root, &jobs, due - 1)
         .await
         .unwrap();
-    let count: i64 = media_poc::database::query_scalar("SELECT COUNT(*) FROM durable_tasks")
-        .fetch_one(store.pool())
-        .await
-        .unwrap();
+    let count: i64 = media_poc::database::query_scalar(
+        "SELECT COUNT(*) FROM durable_tasks WHERE category='scan'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
     assert_eq!(count, 0);
     media_poc::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES('films','running',0,0)").execute(store.pool()).await.unwrap();
     scheduler::run_due(&auth, &root, &jobs, due).await.unwrap();
@@ -317,7 +319,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     scheduler::run_due(&auth, &root, &jobs, due).await.unwrap();
     assert_eq!(
         media_poc::database::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM durable_tasks WHERE status IN ('queued','running','completed','error')"
+            "SELECT COUNT(*) FROM durable_tasks WHERE category='scan' AND status IN ('queued','running','completed','error')"
         )
         .fetch_one(store.pool())
         .await

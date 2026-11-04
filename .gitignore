@@ -13,6 +13,8 @@
 /apps/web/product-build.log
 
 /data/
+/crates/node/data/
+/crates/core/data/
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
@@ -39,3 +41,7 @@
 # Graphify local code graph (regenerable)
 graphify-out/
 **/graphify-out/
+
+# Heavy browser captures and raw logs of the 2026-10-15 experiments (kept locally)
+/docs/evidence/2026-10-15/**/*.png
+/docs/evidence/2026-10-15/**/*.jsonl

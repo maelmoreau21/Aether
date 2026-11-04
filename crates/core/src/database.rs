@@ -398,6 +398,12 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
     sqlx::raw_sql(include_str!("statistics_schema.sql"))
         .execute(&mut *tx)
         .await?;
+    sqlx::raw_sql(include_str!("acquisition_schema.sql"))
+        .execute(&mut *tx)
+        .await?;
+    sqlx::raw_sql(include_str!("reports_schema.sql"))
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await
 }
 

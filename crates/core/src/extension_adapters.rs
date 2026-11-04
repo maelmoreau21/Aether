@@ -21,6 +21,8 @@ pub(super) fn authorize_operation(manifest: &Manifest, operation: &str) -> Resul
         "metadata.images" => "images",
         "subtitles.search" | "subtitles.download" => "subtitles",
         "avatars.list" | "avatars.generate" => "avatars",
+        "requests.validate" | "requests.plan" => "requests",
+        "reports.validate" | "reports.classify" => "reports",
         "intro.detect"
         | "markers.detect"
         | "intro.match_fingerprints"

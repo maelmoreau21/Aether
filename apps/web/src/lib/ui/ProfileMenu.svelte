@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { features } from '../applications/api';
   import { resolve } from '$app/paths';
   import Icon from './Icon.svelte';
   import ProfileAvatar from './ProfileAvatar.svelte';
@@ -43,7 +44,7 @@
     }
   }
 
-  function navigate(event: MouseEvent, destination: 'settings/' | 'statistics/' | 'admin/libraries/#overview') {
+  function navigate(event: MouseEvent, destination: 'settings/' | 'statistics/' | 'admin/libraries/#overview' | 'requests/' | 'reports/' | 'requests/admin/') {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     panel.hidePopover();
@@ -86,6 +87,9 @@
     </div>
 
     <nav aria-label="Menu profil">
+      {#if $features.requests}<a class="profile-entry" href={resolve('requests/')} onclick={(event) => navigate(event, 'requests/')}><Icon name="download" size={17} /><span>Demandes</span><Icon name="chevron" size={13} /></a>{/if}
+      {#if $features.reports}<a class="profile-entry" href={resolve('reports/')} onclick={(event) => navigate(event, 'reports/')}><Icon name="alert" size={17} /><span>Signalements</span><Icon name="chevron" size={13} /></a>{/if}
+      {#if ($features.requests || $features.reports) && $session?.user.role === 'administrator'}<a class="profile-entry" href={resolve('requests/admin/')} onclick={(event) => navigate(event, 'requests/admin/')}><Icon name="server" size={17} /><span>Demandes et imports</span><Icon name="chevron" size={13} /></a>{/if}
       <a class="profile-entry" href={resolve('statistics/')} onclick={(event) => navigate(event, 'statistics/')}>
         <Icon name="clock" size={17} /><span>Mes statistiques</span><Icon name="chevron" size={13} />
       </a>

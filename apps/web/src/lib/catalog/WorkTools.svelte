@@ -1,5 +1,6 @@
 <script lang="ts">
   import ImageManager from './ImageManager.svelte';
+  import ReportButton from '../applications/ReportButton.svelte';
   import IdentifyModal from './IdentifyModal.svelte';
   import SubtitleDownloads from './SubtitleDownloads.svelte';
   import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
@@ -219,6 +220,7 @@
 
 <!-- Actions bar (Add to playlist + Three dots menu) -->
 <div class="work-tools-container">
+  <ReportButton workId={work.id} title={work.title} />
   <!-- Quick Playlist Dropdown -->
   <details
     class="list-picker"

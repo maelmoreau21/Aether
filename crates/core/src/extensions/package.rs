@@ -37,6 +37,8 @@ pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'st
                 "storage.private",
                 "playback.markers",
                 "subtitles",
+                "requests",
+                "reports",
             ]
             .contains(&p.as_str())
         })

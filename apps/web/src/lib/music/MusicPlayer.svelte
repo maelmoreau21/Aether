@@ -7,6 +7,7 @@
   import {PlaybackCollector} from '../statistics/collector';
   import Icon from '../ui/Icon.svelte';
   import MusicArtwork from './MusicArtwork.svelte';
+  import ReportButton from '../applications/ReportButton.svelte';
   let audio:HTMLAudioElement;let position=$state(0);let duration=$state(0);let paused=$state(true);let error=$state('');let panel=$state<'queue'|'lyrics'|null>(null);let lyrics=$state<LyricLine[]>([]);let lyricsLoading=$state(false);let volume=$state(1);
   const current=$derived($musicQueue.tracks[$musicQueue.index]);
   let collector:PlaybackCollector|undefined;
@@ -70,7 +71,7 @@
   <section class="music-player" aria-label="Lecteur musique" bind:this={playerElement}>
     <div class="bar"><button class="now" aria-label={`À suivre (${$musicQueue.tracks.length})`} aria-haspopup="dialog" onclick={()=>panel='queue'}><span class="art"><MusicArtwork src={current.coverUrl} label={current.album||current.title} /></span><span class="now-copy"><strong>{current.title}</strong><small>À suivre · {current.artist||'Artiste inconnu'}</small></span></button>
       <div class="transport">{@render controls()}</div>
-      <div class="extras"><button aria-haspopup="dialog" onclick={()=>panel='lyrics'}>Paroles</button><label class="volume"><Icon name="volume" size={18} /><input aria-label="Volume musique" type="range" min="0" max="1" step="0.01" value={volume} oninput={event=>{volume=Number(event.currentTarget.value);audio.volume=volume;}} /></label><button onclick={clearMusic} aria-label="Arrêter et vider la file"><Icon name="close" size={20} /></button></div>
+      <div class="extras"><ReportButton trackId={current.id} title={current.title} positionSeconds={position} context={{ engine: 'direct', audioTrackId: current.id }} /><button aria-haspopup="dialog" onclick={()=>panel='lyrics'}>Paroles</button><label class="volume"><Icon name="volume" size={18} /><input aria-label="Volume musique" type="range" min="0" max="1" step="0.01" value={volume} oninput={event=>{volume=Number(event.currentTarget.value);audio.volume=volume;}} /></label><button onclick={clearMusic} aria-label="Arrêter et vider la file"><Icon name="close" size={20} /></button></div>
     </div>
     {#if error}<p class="playback-error" role="alert">{error}</p>{/if}
     <dialog class="music-dialog" bind:this={panelDialog} aria-labelledby="music-panel-title" oncancel={()=>panel=null} onclose={()=>panel=null}>

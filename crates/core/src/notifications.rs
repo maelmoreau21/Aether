@@ -95,6 +95,8 @@ struct Preferences {
     scans: bool,
     tasks: bool,
     content: bool,
+    requests: bool,
+    reports: bool,
 }
 #[derive(Clone, sqlx::FromRow)]
 struct Event {
@@ -107,7 +109,7 @@ struct Event {
 impl Serialize for Event {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut value = json!({"id":self.id,"kind":self.kind,"libraryId":self.library_id,"occurredAt":self.occurred_at});
-        value[if self.kind == "content.added" {
+        value[if self.kind.starts_with("request.") {"requestId"} else if self.kind.starts_with("report.") {"reportId"} else if self.kind == "content.added" {
             "workId"
         } else {
             "taskId"
@@ -298,6 +300,7 @@ async fn preferences(
     ))
 }
 async fn load_preferences(store: &IdentityStore, user: &str) -> Result<Preferences, sqlx::Error> {
+    let applications:Vec<(String,i64)>=query_as("SELECT kind,enabled FROM application_notification_preferences WHERE user_id=?").bind(user).fetch_all(store.pool()).await?;
     let row: Option<(i64, i64, i64)> =
         query_as("SELECT enabled,scans,tasks FROM notification_preferences WHERE user_id=?")
             .bind(user)
@@ -314,6 +317,8 @@ async fn load_preferences(store: &IdentityStore, user: &str) -> Result<Preferenc
             scans: s == 1,
             tasks: t == 1,
             content: content == Some(1),
+            requests: applications.iter().any(|(kind,enabled)|kind=="requests"&&*enabled==1),
+            reports: applications.iter().any(|(kind,enabled)|kind=="reports"&&*enabled==1),
         })
         .unwrap_or_default())
 }
@@ -333,6 +338,10 @@ async fn save_preferences(
     query("INSERT INTO notification_preferences(user_id,enabled,scans,tasks) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,scans=excluded.scans,tasks=excluded.tasks")
         .bind(&actor.user.id).bind(i64::from(input.enabled)).bind(i64::from(input.scans)).bind(i64::from(input.tasks)).execute(&mut *tx).await.map_err(db)?;
     // Starting/restarting a subscription never sends the old catalogue as new content.
+    for (kind,subscribed) in [("requests",input.requests),("reports",input.reports)] {
+        query("INSERT INTO application_notification_preferences(user_id,kind,enabled,since_at) VALUES(?,?,?,?) ON CONFLICT(user_id,kind) DO UPDATE SET enabled=excluded.enabled,since_at=CASE WHEN application_notification_preferences.enabled=1 AND excluded.enabled=1 THEN application_notification_preferences.since_at ELSE excluded.since_at END")
+            .bind(&actor.user.id).bind(kind).bind(i64::from(input.enabled&&subscribed)).bind(now()).execute(&mut *tx).await.map_err(db)?;
+    }
     query("INSERT INTO notification_content_preferences(user_id,enabled,since_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,since_at=CASE WHEN notification_content_preferences.enabled=1 AND excluded.enabled=1 THEN notification_content_preferences.since_at ELSE excluded.since_at END")
         .bind(&actor.user.id).bind(i64::from(input.enabled && input.content)).bind(now()).execute(&mut *tx).await.map_err(db)?;
     if !input.enabled {
@@ -375,7 +384,9 @@ async fn recipient_allowed(
     if !prefs.enabled {
         return Ok(false);
     }
-    if event.kind != "scan.completed" && event.kind != "content.added" {
+    let application=application_notifications::kind(&event.kind);
+    if let Some(cap)=application && !application_notifications::allowed(store,channel,event,&role,cap).await? {return Ok(false);}
+    if event.kind != "scan.completed" && event.kind != "content.added" && application.is_none() {
         return Ok(role == "administrator" && prefs.tasks);
     }
     if event.kind == "scan.completed" && !prefs.scans {
@@ -458,12 +469,16 @@ pub(crate) async fn collect(store: &IdentityStore, timestamp: i64) -> Result<(),
         };
         enqueue(store, timestamp, &event, 0, "added").await?;
     }
+    application_notifications::collect(store,timestamp).await?;
     query("DELETE FROM notification_events WHERE occurred_at<?")
         .bind(timestamp - RETENTION)
         .execute(store.pool())
         .await?;
     Ok(())
 }
+
+#[path="application_notifications.rs"]
+mod application_notifications;
 
 async fn enqueue(
     store: &IdentityStore,

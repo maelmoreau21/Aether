@@ -1,5 +1,9 @@
 //! Local Core: persistent authentication and isolated synthetic media inventory.
 pub mod account;
+pub mod applications;
+pub mod acquisition;
+pub mod reports;
+pub mod imports;
 pub mod admin_backups;
 pub mod admin_users;
 pub mod api_keys;
@@ -243,6 +247,10 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(notifications::router(auth.clone()))
             .merge(preferences::router(auth.clone()))
             .merge(account::router(auth.clone()))
+            .merge(applications::router(auth.clone()))
+            .merge(acquisition::router(auth.clone()))
+            .merge(reports::router(auth.clone()))
+            .merge(imports::router(auth.clone()))
             .merge(music::router(auth.clone()))
             .merge(parties::router(auth.clone()))
             .merge(playlists::router(auth.clone()))

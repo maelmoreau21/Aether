@@ -1,11 +1,13 @@
 <script lang="ts">
   import { session } from '../auth/session';
+  import { features, loadFeatures } from '../applications/api';
   type Config = { destination:string; smtpHost:string; smtpPort:number; sender:string; recipient:string; username:string; hasSecret?:boolean };
   type Channel = { id:string; name:string; recipientId:string; kind:string; enabled:boolean; config:Config };
   type History = { id:string; eventId:string; channelId:string; status:string; attempt:number; errorCode?:string; occurredAt:number };
   const emptyConfig = ():Config => ({destination:'',smtpHost:'',smtpPort:465,sender:'',recipient:'',username:''});
   const admin=$derived($session?.user.role==='administrator');
   let enabled=$state(false),scans=$state(false),tasks=$state(false),content=$state(false),loaded=$state(false),busy=$state(false),error=$state(''),notice=$state('');
+  let requests=$state(false),reports=$state(false);
   let channels=$state<Channel[]>([]),history=$state<History[]>([]),users=$state<{id:string;role:string;name?:string}[]>([]);
   let editId=$state(''),name=$state(''),recipientId=$state(''),kind=$state('webhook'),channelEnabled=$state(false),config=$state<Config>(emptyConfig()),secret=$state('');
   async function request<T>(path:string,method='GET',body?:unknown,signal?:AbortSignal):Promise<T> {
@@ -16,8 +18,9 @@
   $effect(()=>{
     const id=$session?.user.id,controller=new AbortController();loaded=false;
     if(!id)return;
-    void request<{enabled:boolean;scans:boolean;tasks:boolean;content?:boolean}>('/api/v1/account/notifications','GET',undefined,controller.signal).then(value=>{
-      if(controller.signal.aborted)return;enabled=value.enabled;scans=value.scans;tasks=value.tasks;content=value.content??false;loaded=true;
+    void loadFeatures().catch(()=>{});
+    void request<{enabled:boolean;scans:boolean;tasks:boolean;content?:boolean;requests?:boolean;reports?:boolean}>('/api/v1/account/notifications','GET',undefined,controller.signal).then(value=>{
+      if(controller.signal.aborted)return;enabled=value.enabled;scans=value.scans;tasks=value.tasks;content=value.content??false;requests=value.requests??false;reports=value.reports??false;loaded=true;
     }).catch(()=>{if(!controller.signal.aborted)error='Préférences de notification indisponibles.';});
     if(admin)void loadAdmin(controller.signal);
     return ()=>controller.abort();
@@ -31,7 +34,7 @@
   }
   async function savePreferences(event:SubmitEvent){
     event.preventDefault();busy=true;error='';notice='';
-    try{await request('/api/v1/account/notifications','PUT',{enabled,scans,tasks:admin&&tasks,content});notice='Préférences enregistrées.';}catch(cause){error=cause instanceof Error?cause.message:'Erreur';}finally{busy=false;}
+    try{await request('/api/v1/account/notifications','PUT',{enabled,scans,tasks:admin&&tasks,content,requests,reports});notice='Préférences enregistrées.';}catch(cause){error=cause instanceof Error?cause.message:'Erreur';}finally{busy=false;}
   }
   function edit(channel?:Channel){editId=channel?.id??'';name=channel?.name??'';recipientId=channel?.recipientId??$session?.user.id??'';kind=channel?.kind??'webhook';channelEnabled=channel?.enabled??false;config=channel?{...channel.config}:emptyConfig();secret='';}
   async function saveChannel(event:SubmitEvent){
@@ -53,6 +56,8 @@
     <label class="check"><input type="checkbox" bind:checked={enabled} /> Recevoir les notifications sur mes destinations configurées</label>
     <label class="check"><input type="checkbox" bind:checked={scans} /> Scans terminés de mes bibliothèques autorisées</label>
     <label class="check"><input type="checkbox" bind:checked={content} /> Nouveaux films, séries et épisodes autorisés après activation</label>
+    {#if $features.requests}<label class="check"><input type="checkbox" bind:checked={requests} /> Suivi de mes demandes de contenus</label>{/if}
+    {#if $features.reports}<label class="check"><input type="checkbox" bind:checked={reports} /> Réponses et changements d’état de mes signalements</label>{/if}
     {#if admin}<label class="check"><input type="checkbox" bind:checked={tasks} /> Tâches terminées ou en échec (administration)</label>{/if}
     <button>Enregistrer mes préférences</button>
   </fieldset></form>

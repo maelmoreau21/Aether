@@ -170,3 +170,25 @@ description. Les événements d'import sont exclus.
 Les tests ciblent permissions/CSRF, reprise et idempotence, serveurs simulés,
 correspondances d'inventaire, import et interface. Ils ne prouvent pas à eux seuls
 le comportement d'une installation réelle de Radarr/Sonarr/Lidarr ou d'un NAS.
+
+### Vérifications locales du 4 novembre 2026
+
+- Core : 14 tests `acquisition::` réussis, dont brokers, reprise après réponse
+  perdue, inventaire courant et preuve de single. Deux tests d'import et un test
+  d'audience/notifications réussis dans le même binaire de tests compilé.
+- Signalements : quatre contrats HTTP réussis ; exécution répétée avec les vrais
+  modules Wasm des extensions, signés par une clé de test temporaire. Les tests
+  utilisant le worker partagent un verrou de test, car son admission est commune
+  au processus même lorsque les bases SQLite sont indépendantes.
+- `cargo clippy -p media-poc --locked --lib -- -D warnings`, `cargo fmt --all --
+  --check` et `git diff --check` réussis.
+- Web : Svelte sans erreur/avertissement, ESLint ciblé, cinq tests des helpers,
+  build statique et `scripts/test-applications-ui.mjs` réussis. Chrome utilise des
+  API simulées ; le scénario couvre configuration de destination physique,
+  demande/sélection, reprise d'historique, signalement, migration et format mobile.
+- Extensions : six tests natifs Demandes réussis, Clippy ciblé et compilation
+  Wasm. Les deux modules passent les vérifications d'import/export et le smoke
+  ABI ; tailles brutes de 155 887 et 125 663 octets sous le plafond du Core.
+
+Pas de suite globale relancée, de fournisseur réel, de PostgreSQL réel, de
+déploiement NAS ou de téléchargement réel validé dans ce lot.

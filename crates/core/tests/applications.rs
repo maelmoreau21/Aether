@@ -150,6 +150,7 @@ async fn body(response: Response) -> Value {
 }
 #[tokio::test]
 async fn optional_features_require_active_signed_publisher_and_authentication() {
+    let _worker = WORKER_TEST.lock().await;
     let f = fixture().await;
     assert_eq!(
         send(
@@ -322,6 +323,7 @@ async fn reports_are_resource_owned_csrf_protected_persistent_and_reopenable() {
 }
 #[tokio::test]
 async fn report_context_is_bounded_and_cannot_reference_another_resource() {
+    let _worker = WORKER_TEST.lock().await;
     let f = fixture().await;
     install(&f.store, "reports").await;
     for input in [

@@ -30,8 +30,8 @@ push, publication ni relance CI. Les deux branches locales `develop` égalent
 Ces corrections et les autres modifications locales existaient avant cette
 mission. Elles ne sont ni attribuées à ce nouvel audit, ni présumées intégrées,
 publiées ou déployées. Voir les bilans
-[P0](CI_P0_REPAIRS_2026_11_03.md), [Docker](CI_DOCKER_A01_2026_11_03.md) et
-[SDK](../../Aether-Plugins/docs/SDK_COLLECTION_CI_2026_11_03.md).
+[P0](../ci/CI_P0_REPAIRS_2026_11_03.md), [Docker](../ci/CI_DOCKER_A01_2026_11_03.md) et
+[SDK](../../../../Aether-Plugins/docs/SDK_COLLECTION_CI_2026_11_03.md).
 
 ## Contrôles essentiels rejoués pendant cet audit
 

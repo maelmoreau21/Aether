@@ -62,7 +62,7 @@ Pas de suite Rust générale revendiquée.
 
 ## Audit de l'historique
 
-Les constats initiaux du 21 octobre dans `PLAYER_PLAYBACK_AUDIT.md` ne décrivent
+Les constats initiaux du 21 octobre dans `docs/archive/audits/PLAYER_PLAYBACK_AUDIT.md` ne décrivent
 plus tous le code actuel : commutation transactionnelle avec ancienne piste
 conservée, sélection explicite de langue, surveillance du buffering audio et
 limites du cache avaient déjà été corrigées. Le 22 octobre, le parcours MP4
@@ -74,7 +74,7 @@ annulation des seeks remplacés et diagnostics des erreurs 503 existaient.
 
 `STREAMING_SYSTEM_BENCHMARK.md` conserve des échecs à quatre sessions dans
 la matrice debug historique. Le smoke Release ultérieur décrit dans
-`STREAMING_MISSION_3_2.md`/`MEMORY.md` avait réussi à quatre sessions,
+`docs/archive/missions/STREAMING_MISSION_3_2.md`/`MEMORY.md` avait réussi à quatre sessions,
 avec des latences très supérieures aux objectifs. Aucun de ces résultats
 historiques n'est remplacé par les petits bancs synthétiques de ce jalon.
 

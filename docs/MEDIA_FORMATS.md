@@ -62,7 +62,7 @@ ne transforme pas tous les flux détectés en choix de lecture natifs.
 Les migrations additives 0014 existent dans les deux moteurs SQL ; la 0015
 ajoute la progression par utilisateur et Work. Pas de transfert de base ni de
 réidentification des œuvres existantes. Contrat, limites, raw et validations :
-[P3/P4](P3_P4_FEATURES.md).
+[P3/P4](archive/milestones/P3_P4_FEATURES.md).
 
 NFO Films : métadonnées éditoriales séparées du probe, candidates par asset et
 sélection/provenance au niveau Work, sans réidentification ni fusion par ID NFO.
@@ -93,7 +93,7 @@ initial_padding et init codec ; le PCM canal par canal est vérifié séparémen
 MKV SubRip puis conversion texte explicite en MP4 mov_text, AV1/Opus copiés.
 Un flux décodé six canaux ne prouve pas sa restitution physique. Zéro piste
 texte native exposée sur les clients testés : ne pas confondre piste de fichier,
-TextTrack/cue et rendu. Voir `P0C_REPRESENTATIVE_MEDIA.md`.
+TextTrack/cue et rendu. Voir `docs/archive/player-experiments/P0C_REPRESENTATIVE_MEDIA.md`.
 
 Le banc conserve un tableau de pistes, jamais un champ vidéo/audio unique.
 Chaque piste garde son `index` de flux, type, codec, timebase, tags et tous les
@@ -115,7 +115,7 @@ leur commutation interne reste non validée : `audioTracks` absent
 sur Chrome/Edge/Firefox testés avec réglages par défaut. Le sélecteur du banc
 ne fabrique pas des pistes sélectionnables à partir du probe. P0C valide
 séparément des remux mono-audio FR/EN, changement d'URL et position restaurée
-(voir `P0C_AUDIO_SWITCHING.md`). Plusieurs vidéos et sous-titres
+(voir `docs/archive/player-experiments/P0C_AUDIO_SWITCHING.md`). Plusieurs vidéos et sous-titres
 peuvent être représentés dans le tableau, mais ne sont pas encore testés.
 
 Le modèle futur conserve les distinctions de l'architecture : Work → Edition →
@@ -136,7 +136,7 @@ un vrai MPD SegmentList, sans modifier les paquets ni les timestamps. FR5.1/EN2
 et FRforced sont détectés/sélectionnés par Shaka5.2.13 sur les trois navigateurs,
 choix manuels conservés après seek. Cela ne rend pas accessibles les pistes
 intégrées par l'API HTML5 native. Nombre de canaux conservé par piste ; mono/7.1
-et restitution physique multicanal restent NT. Voir P0C_SHAKA_EXPERIMENT.md.
+et restitution physique multicanal restent NT. Voir docs/archive/player-experiments/P0C_SHAKA_EXPERIMENT.md.
 
 
 État des médias indépendants, manifeste d’association versionné et limites raw :

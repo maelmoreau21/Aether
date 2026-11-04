@@ -58,7 +58,7 @@ permissions communes et expose le catalogue issu des bibliothèques locales.
 OIDC et le transport multi-Node disposent de contrats et de parcours ciblés ;
 leurs limites de déploiement restent documentées dans les preuves associées.
 Voir `docs/LOCAL_SESSIONS.md`, `docs/OIDC.md` et
-`docs/P2_DOCKER_VALIDATION.md`.
+`docs/archive/ci/P2_DOCKER_VALIDATION.md`.
 
 > **Architecture cible et décisions historiques.** Les sections datées décrivent leur jalon, pas nécessairement l’état courant. Vérifier le code, les tests et les preuves de compatibilité avant de conclure qu’une fonction est disponible.
 
@@ -300,7 +300,7 @@ Voir `docs/DEVELOPMENT_PLAN.md`. **La première réalisation** est un banc d'ess
 Le banc Rust sert aussi un MPD fixe et un bundle Shaka5.2.13 préparés hors
 lecture. Les flux AV1/Opus sont les copies identiques du témoin MSE conservé.
 La comparaison reste un outil P0, sans nouvelle couche produit ni dépendance
-FFmpeg de lecture. Voir docs/P0C_SHAKA_EXPERIMENT.md pour mesures et limites.
+FFmpeg de lecture. Voir docs/archive/player-experiments/P0C_SHAKA_EXPERIMENT.md pour mesures et limites.
 
 ## État P1 autorisé (15 octobre 2026)
 
@@ -312,7 +312,7 @@ crates/shared/src/brand.rs, repli Web config/brand.ts puis configuration Core.
 Préparation FR/EN hors lecture ; streaming réutilise le Node interne P0.
 Pas encore de Core produit avec comptes/SQLite/bibliothèques. Les expériences
 Shaka/MSE sont conservées séparément et ne sont pas chargées par l'application.
-Voir docs/P1_WEB_INTEGRATION.md ; les comparaisons P0 sont suspendues.
+Voir docs/archive/milestones/P1_WEB_INTEGRATION.md ; les comparaisons P0 sont suspendues.
 
 ### Direction visuelle P1 v1
 
@@ -340,7 +340,7 @@ composants de catalogue séparés de l'API et du moteur Player existant. Le buil
 externalise le bootstrap de chaque page pour les accès directs sous CSP.
 Pas de SQLite, scanner ou comptes ajouté : les bibliothèques personnelles
 restent bloquées avant bootstrap, sessions et autorisation backend.
-Périmètre vérifié et prochaine étape : docs/CATALOGUE_P1.md.
+Périmètre vérifié et prochaine étape : docs/archive/milestones/CATALOGUE_P1.md.
 
 Validation locale : 15 tests Rust, check Web 0/0, lint, 8 tests Vitest et build
 réussis ; parcours catalogue et non-régression lecteur sous Chrome headless
@@ -374,4 +374,4 @@ son autorisation au Core ; le média reste envoyé par le Node au navigateur.
 L'indisponibilité Core refuse les nouvelles requêtes directes. La communication
 interne sortante partage un connecteur HTTPS vérifié et une politique explicite
 d'autorités/réseau ; la terminaison TLS peut être assurée par un proxy de confiance.
-Contrat, limites et preuves : [P2 Docker](docs/P2_DOCKER_VALIDATION.md).
+Contrat, limites et preuves : [P2 Docker](docs/archive/ci/P2_DOCKER_VALIDATION.md).

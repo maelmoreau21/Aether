@@ -72,20 +72,20 @@ Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur
 
 OpenSubtitles manuel, TVDB optionnel, images de vrais chapitres à la demande,
 recommandations locales et socle de notifications sont raccordés. Preuves et
-limites : docs/MISSION_FEATURES_2026_11_03.md, docs/MISSION_CORE_VALIDATION_2026_11_03.md
-et docs/MISSION_WEB_VALIDATION_2026_11_03.md. Seize tests Core ciblés et deux
+limites : docs/archive/missions/MISSION_FEATURES_2026_11_03.md, docs/archive/missions/MISSION_CORE_VALIDATION_2026_11_03.md
+et docs/archive/missions/MISSION_WEB_VALIDATION_2026_11_03.md. Seize tests Core ciblés et deux
 contrats PostgreSQL ont réussi, ainsi que le lecteur Chrome avec dérivé après
 redémarrage. Deux vrais Core/PostgreSQL : panne d'une écriture Wasm bloquée,
 zéro effet de la tentative tuée puis un effet après relance explicite vérifiés.
 Multi-Core toujours expérimental ; routage Node et fencing global ouverts.
 Fournisseurs réels, matériel ARM et NAS non attestés. Builds Docker suivis dans
-docs/DOCKER_MULTIARCH_2026_11_03.md. Aucun push, publication ni déploiement ici.
+docs/archive/ci/DOCKER_MULTIARCH_2026_11_03.md. Aucun push, publication ni déploiement ici.
 La refonte visuelle concurrente est préservée et n'appartient pas à ce lot.
 - Halo étendu à tout le reste du Web (4 novembre) : sections internes de l'administration (utilisateurs, groupes, contrôle parental, clés API, OIDC, Media Nodes, extensions, tâches, sauvegardes, vue d'ensemble, bibliothèques, sélecteur de dossiers, options, images, fournisseurs, avatars, paramètres serveur), outils et fenêtres des fiches (outils, identification, images, sous-titres, téléchargement, statut vu, note, distribution, chapitres, épisodes, playlists), menu profil, connexion, listes, téléchargements, réglages du compte, squelettes, Watch Party (fenêtre et panneau sur la vidéo). Styles réécrits avec les jetons ; balisage modifié seulement pour des classes, des icônes à la place d'emoji décoratifs et le libellé « Gestion du média · admin ». Check, lint, 246 tests et build réussis ; aucun essai visuel en navigateur.
 
 ## 4 novembre 2026 — Notifications contenu et budget TVDB
 
-Notifications nouveau contenu avec opt-in, droits et parental : six tests locaux et un contrat PostgreSQL 18 passent. Le vrai module TVDB optimisé passe recherche/détails/images sous limites Wasmi Core sur fixtures (1/1, 9,98 s). Preuves : docs/MISSION_CORE_VALIDATION_2026_11_03.md et Aether-Plugins/docs/TVDB_2026_11_03.md. Aucun service externe validé ni publié ; trois images AMD64 smoke réussis, reprise ARM64 sous émulation en cours. Travail visuel concurrent conservé, multi-Core expérimental.
+Notifications nouveau contenu avec opt-in, droits et parental : six tests locaux et un contrat PostgreSQL 18 passent. Le vrai module TVDB optimisé passe recherche/détails/images sous limites Wasmi Core sur fixtures (1/1, 9,98 s). Preuves : docs/archive/missions/MISSION_CORE_VALIDATION_2026_11_03.md et Aether-Plugins/docs/TVDB_2026_11_03.md. Aucun service externe validé ni publié ; trois images AMD64 smoke réussis, reprise ARM64 sous émulation en cours. Travail visuel concurrent conservé, multi-Core expérimental.
 
 - Compléments Halo (4 novembre) : accueil avec sélecteur d'œuvre à l'affiche (3 vignettes 16:9), teinte d'ambiance calculée côté client depuis l'image (canvas 16×9, sans teinte si échec) et mosaïque « Pour ce soir » (affichée après « Reprendre » ; pas une section enregistrée, car `crates/core/src/preferences.rs` n'accepte que 5 sections connues — à étendre si on veut la rendre masquable). Administration : recherche de réglage dans la barre latérale (`searchAdmin`, testée) et bibliothèques en tableau. Lecteur : réglages en panneau latéral à onglets sur ordinateur. Musique : file d'attente et paroles en panneau latéral. CSP : les attributs `style` en ligne sont bloqués ; les couleurs du dégradé du logo passent par le CSS des composants. Check, lint, 257 tests et build réussis ; aucun essai visuel.
 - Correction (même jour) : `tonight` est maintenant une section d'accueil enregistrable et masquable. Le Core l'accepte (`crates/core/src/preferences.rs`, 6 sections au plus), test `crates/core/tests/preferences.rs` étendu et réussi, `docs/PREFERENCES.md` à jour. Les listes déjà enregistrées ne l'affichent qu'après réactivation dans Compte › Apparence et accueil.

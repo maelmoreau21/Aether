@@ -110,7 +110,7 @@ Les tests ciblés sont dans `subtitle_tests.rs`, `provider_download.rs`,
 `subtitle-download-api.test.ts`, `browser-subtitle-downloads.cjs` et les scripts
 Wasm du dépôt des plugins. Ils distinguent contrats hors ligne, vrai worker
 Wasm signé, persistance SQLite, API synthétiques du navigateur et lecture réelle.
-Voir la [matrice de mission](MISSION_FEATURES_2026_11_03.md) pour les résultats
+Voir la [matrice de mission](archive/missions/MISSION_FEATURES_2026_11_03.md) pour les résultats
 effectivement exécutés ; la seule présence des tests ne clôture pas la couverture.
 
 Le 3 novembre, le parcours HTTP avec worker Wasm signé et réouverture SQLite

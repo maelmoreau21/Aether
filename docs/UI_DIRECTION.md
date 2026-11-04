@@ -104,7 +104,7 @@ titre, année/note disponible, progression et états utiles. Replis d’images n
 Les règles de langue, variantes manuelles et rotation restent dans selectArtwork.
 
 Audit, décisions, protocole navigateur, limites et prochains jalons :
-[Refonte UX 2026-10-28](UX_REDESIGN_2026_10_28.md).
+[Refonte UX 2026-10-28](archive/ux/UX_REDESIGN_2026_10_28.md).
 Ce jalon ne constitue pas la refonte complète des fiches ou de l’administration.
 
 ## Jalon fiches du 29 octobre 2026
@@ -118,7 +118,7 @@ reviennent au texte ou à une surface neutre.
 Un seul select de saison pilote les épisodes. Les lignes desktop et cartes
 mobile gardent les vignettes 16:9, une lecture visible et les commandes avancées
 repliables. Pagination et callbacks existants conservés. Méthode, preuves et
-limites : [Fiches UX 2026-10-29](UX_DETAILS_2026_10_29.md).
+limites : [Fiches UX 2026-10-29](archive/ux/UX_DETAILS_2026_10_29.md).
 
 ## Jalon administration du 29 octobre 2026
 
@@ -130,7 +130,7 @@ navigation est rendue à la fois ; focus et défilement sont rétablis après s�
 La vue d’ensemble affiche d’abord serveur, Nodes, lecteurs et indexations, sur
 deux colonnes sur téléphone. Les erreurs de diagnostic restent visibles et les
 informations techniques secondaires restent disponibles. Méthode et limites :
-[Administration UX 2026-10-29](UX_ADMIN_2026_10_29.md).
+[Administration UX 2026-10-29](archive/ux/UX_ADMIN_2026_10_29.md).
 
 ## Jalon bibliothèques du 29 octobre 2026
 
@@ -139,7 +139,7 @@ images, Indexation, Accès et Avancé. Rail desktop, sélecteur mobile/tablette 
 paysage bas, contenu défilant et actions fixes. Les groupes techniques sont
 repliables ; la validation révèle le champ invalide avant de lui donner le focus.
 Un dossier doit être explicitement ajouté avant enregistrement. Réglages et
-contrats conservés ; détails et limites : [Bibliothèques UX](UX_LIBRARIES_2026_10_29.md).
+contrats conservés ; détails et limites : [Bibliothèques UX](archive/ux/UX_LIBRARIES_2026_10_29.md).
 
 ## Jalon tâches du 29 octobre 2026
 
@@ -148,7 +148,7 @@ repliables. Filtres par état limités explicitement à la page chargée ; type,
 bibliothèque, état et actions avant les détails techniques. Les erreurs d’action
 survivent aux actualisations automatiques. Aucun état d’arrêt ou de reprise
 n’est inventé ; garde du lease et contrats conservés. Preuves et limites :
-[Tâches UX](UX_TASKS_2026_10_29.md).
+[Tâches UX](archive/ux/UX_TASKS_2026_10_29.md).
 
 ## Jalon musique du 29 octobre 2026
 
@@ -157,4 +157,4 @@ Pochettes carrées, initiales d’artistes faute de portrait, replis d’images 
 La portée des regroupements par page est explicite. Lecture principale visible,
 file/playlist/format en actions secondaires. Barre mobile compacte au-dessus de
 la navigation, file et paroles dans un dialogue natif avec transport fixe et
-options de lecture. État/contrats conservés ; [preuves et limites musique](UX_MUSIC_2026_10_29.md).
+options de lecture. État/contrats conservés ; [preuves et limites musique](archive/ux/UX_MUSIC_2026_10_29.md).

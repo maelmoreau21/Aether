@@ -14,6 +14,7 @@
     inspectedAudioTracks
   } from '../player/track-labels';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
+  import { metadataFormFromWork, metadataPayloadFromForm } from './work-metadata';
 
   let {
     work,
@@ -63,13 +64,14 @@
   let merges = $state<{ id: string; groupId: string; origin: string }[]>([]);
 
   $effect(() => {
-    title = work.title;
-    plot = (work.plot ?? work.description ?? '').replace(/^Média local indexé$/i, '');
-    year = work.year ?? undefined;
-    genres = (work.genres ?? []).join(', ');
-    tags = (work.tags ?? []).join(', ');
-    ids = JSON.stringify(work.externalIds ?? {}, null, 2);
-    age = work.minimumAge ?? undefined;
+    const form = metadataFormFromWork(work);
+    title = form.title;
+    plot = form.plot;
+    year = form.year;
+    genres = form.genres;
+    tags = form.tags;
+    ids = form.ids;
+    age = form.age;
   });
 
   const isAdmin = $derived($session?.user.role === 'administrator');
@@ -129,22 +131,12 @@
 
   async function saveMetadata(event: SubmitEvent) {
     event.preventDefault();
-    let externalIds;
-    try {
-      externalIds = JSON.parse(ids);
-    } catch {
+    const payload = metadataPayloadFromForm({ title, plot, year, genres, tags, ids, age });
+    if (!payload) {
       error = 'Les identifiants doivent être un objet JSON valide.';
       return;
     }
-    const success = await mutate(`/api/v1/admin/works/${work.id}/metadata`, 'PUT', {
-      title,
-      plot,
-      year: year ?? null,
-      genres: genres.split(',').map(s => s.trim()).filter(Boolean),
-      tags: tags.split(',').map(s => s.trim()).filter(Boolean),
-      externalIds,
-      minimumAge: age ?? null
-    });
+    const success = await mutate(`/api/v1/admin/works/${work.id}/metadata`, 'PUT', payload);
     if (success) {
       window.location.reload();
     }

@@ -115,7 +115,7 @@ par ligne ; les nombres ne sont pas comparables à des quantiles de charge) :
 Le démarrage Chrome de ce dernier essai est **plus lent que la référence** ; aucun
 gain de démarrage n'est revendiqué. La correction vise la fiabilité et ne dispense
 pas de mesures répétées et isolées pour P1. Rapports complets :
-[preuves P0](evidence/2026-10-22/player-performance-p0/).
+[preuves P0](../../evidence/2026-10-22/player-performance-p0).
 
 `switchReadyMs` mesure seulement la fin de `selectAudio`, pas le premier son ni le
 silence maximal. La première entrée resélectionne la piste courante : son quasi-zéro

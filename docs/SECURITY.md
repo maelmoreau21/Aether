@@ -162,7 +162,7 @@ ni lignes de commande ni chemins de processus : PID/date/CPU/working set seuleme
 Host/Origin/Fetch-Site et loopback que P0 ; aucune bibliothèque réelle ni auth.
 Sources identifiées côté serveur, quatre fichiers mono-audio AV1/Opus, contrôle
 codecs/langues/profil au démarrage, pas d'entrée de chemin depuis le navigateur.
-Préparation hors serveur dans p1, quota documenté dans P1_WEB_INTEGRATION.md.
+Préparation hors serveur dans p1, quota documenté dans docs/archive/milestones/P1_WEB_INTEGRATION.md.
 Le bootstrap Web est externalisé pour script-src self ; seul le style fixe de
 svelte-announcer est autorisé par hash (style-src-attr unsafe-hashes SHA256),
 aucun unsafe-inline général. Aucune récupération audio automatique activée.
@@ -188,7 +188,7 @@ L'initialisation d'une instance neuve peut s'effectuer de deux manières exclusi
 ## P2 — transport et révocation, 17 octobre 2026
 
 Le contrat courant remplace les mentions historiques « Node futur » pour les
-chemins réalisés : [P2 Docker](P2_DOCKER_VALIDATION.md). TLS vérifié pour chaque
+chemins réalisés : [P2 Docker](archive/ci/P2_DOCKER_VALIDATION.md). TLS vérifié pour chaque
 URL HTTPS ; HTTP interne uniquement en loopback ou vers une autorité explicitement
 autorisée dans un réseau déclaré fiable. Les URL publiques porteuses de capacités
 refusent HTTP hors loopback. Aucun suivi de redirection ; DNS contrôlé puis

@@ -4,10 +4,23 @@
   import {musicQueue,nextMusic,removeMusic,shuffleMusic,clearMusic} from './queue';
   import {parseLyrics,type LyricLine} from './lyrics';
   import {onSessionGenerationChange} from '../auth/session';
+  import {PlaybackCollector} from '../statistics/collector';
   import Icon from '../ui/Icon.svelte';
   import MusicArtwork from './MusicArtwork.svelte';
   let audio:HTMLAudioElement;let position=$state(0);let duration=$state(0);let paused=$state(true);let error=$state('');let panel=$state<'queue'|'lyrics'|null>(null);let lyrics=$state<LyricLine[]>([]);let lyricsLoading=$state(false);let volume=$state(1);
   const current=$derived($musicQueue.tracks[$musicQueue.index]);
+  let collector:PlaybackCollector|undefined;
+  function beginStatistics(track=current){
+    collector?.stop();
+    collector=track?new PlaybackCollector(audio,{mediaId:track.id,music:true,info:()=>({method:'direct',audio:{id:track.id,language:'und',codec:track.codec}})}):undefined;
+  }
+  function musicSeek(value:number){const from=audio.currentTime;audio.currentTime=value;collector?.seek(value,from);position=audio.currentTime;}
+  function musicEnded(){
+    collector?.stop(true);collector=undefined;
+    if($musicQueue.repeat==='one'||($musicQueue.repeat==='all'&&$musicQueue.tracks.length===1)){audio.currentTime=0;beginStatistics();void audio.play().catch(()=>{error='Reprise du titre impossible.';musicQueue.update(q=>({...q,playing:false}));});}
+    else nextMusic(true);
+  }
+  function skipMusic(){collector?.stop(false,'next');collector=undefined;nextMusic();}
   let panelDialog=$state<HTMLDialogElement>();
   let playerElement=$state<HTMLElement>();
   $effect(()=>{if(!current){panel=null;return;}if(panel)panelDialog?.showModal();else panelDialog?.close();});
@@ -17,16 +30,17 @@
   $effect(()=>{const line=activeLine;if(panel==='lyrics'&&line>=0)lyricsBox?.querySelector(`[data-line="${line}"]`)?.scrollIntoView({block:'nearest',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});});
   function time(value:number){return Number.isFinite(value)?`${Math.floor(value/60)}:${String(Math.floor(value%60)).padStart(2,'0')}`:'0:00';}
   function toggle(){musicQueue.update(q=>({...q,playing:!q.playing}));}
-  function previous(){if(audio.currentTime>3){audio.currentTime=0;return;}musicQueue.update(q=>({...q,index:Math.max(0,q.index-1),playing:true}));}
+  function previous(){if(audio.currentTime>3){musicSeek(0);return;}collector?.stop(false,'previous');collector=undefined;musicQueue.update(q=>({...q,index:Math.max(0,q.index-1),playing:true}));}
   onMount(()=>{
     let loaded='';let epoch=0;let pending:AbortController|undefined;let starting=false;let priorTracks:unknown;let priorIndex=-1;
     const unsubscribe=musicQueue.subscribe(q=>{
       const track=q.tracks[q.index];
       document.body.classList.toggle('music-playing',!!track);
-      if(!track){epoch++;loaded='';pending?.abort();audio.pause();audio.removeAttribute('src');audio.load();lyrics=[];return;}
+      if(!track){collector?.stop();collector=undefined;epoch++;loaded='';pending?.abort();audio.pause();audio.removeAttribute('src');audio.load();lyrics=[];return;}
       const changed=track.id!==loaded||(q.tracks===priorTracks&&q.index!==priorIndex);
       priorTracks=q.tracks;priorIndex=q.index;
       if(changed){
+        beginStatistics(track);
         const generation=++epoch;loaded=track.id;error='';position=0;duration=track.duration??0;lyrics=[];
         pending?.abort();const controller=new AbortController();pending=controller;lyricsLoading=true;
         const timeout=setTimeout(()=>controller.abort(),8000);
@@ -36,20 +50,21 @@
         audio.src=`/api/v1/music/tracks/${encodeURIComponent(track.id)}/content`;audio.load();
         if('mediaSession' in navigator){navigator.mediaSession.metadata=new MediaMetadata({title:track.title,artist:track.artist,album:track.album});}
       }
+      if(q.playing&&audio.ended&&!collector)beginStatistics(track);
       if(q.playing&&audio.paused&&!starting){const generation=epoch;starting=true;void audio.play().catch(()=>{if(epoch===generation){error='Lecture indisponible : vérifiez le format, la connexion et vos droits.';musicQueue.update(q=>({...q,playing:false}));}}).finally(()=>{starting=false;if(epoch!==generation&&get(musicQueue).playing){void audio.play().catch(()=>{});}});}
       else if(!q.playing)audio.pause();
     });
     const logout=onSessionGenerationChange(()=>clearMusic());
     const videoPlay=(event:Event)=>{if(event.target instanceof HTMLVideoElement)musicQueue.update(q=>({...q,playing:false}));};
     document.addEventListener('play',videoPlay,true);
-    if('mediaSession' in navigator){for(const [action,handler] of Object.entries({play:()=>musicQueue.update(q=>({...q,playing:true})),pause:()=>musicQueue.update(q=>({...q,playing:false})),nexttrack:()=>nextMusic(),previoustrack:previous,seekto:(details:MediaSessionActionDetails)=>{if(details.seekTime!==undefined)audio.currentTime=details.seekTime;}})){try{navigator.mediaSession.setActionHandler(action as MediaSessionAction,handler);}catch{/* Optional platform controls. */}}}
-    return()=>{unsubscribe();logout();pending?.abort();epoch++;audio.pause();audio.removeAttribute('src');audio.load();document.body.classList.remove('music-playing');document.removeEventListener('play',videoPlay,true);if('mediaSession' in navigator){navigator.mediaSession.metadata=null;for(const action of ['play','pause','nexttrack','previoustrack','seekto'] as MediaSessionAction[])navigator.mediaSession.setActionHandler(action,null);}};
+    if('mediaSession' in navigator){for(const [action,handler] of Object.entries({play:()=>musicQueue.update(q=>({...q,playing:true})),pause:()=>musicQueue.update(q=>({...q,playing:false})),nexttrack:skipMusic,previoustrack:previous,seekto:(details:MediaSessionActionDetails)=>{if(details.seekTime!==undefined)musicSeek(details.seekTime);}})){try{navigator.mediaSession.setActionHandler(action as MediaSessionAction,handler);}catch{/* Optional platform controls. */}}}
+    return()=>{collector?.stop();unsubscribe();logout();pending?.abort();epoch++;audio.pause();audio.removeAttribute('src');audio.load();document.body.classList.remove('music-playing');document.removeEventListener('play',videoPlay,true);if('mediaSession' in navigator){navigator.mediaSession.metadata=null;for(const action of ['play','pause','nexttrack','previoustrack','seekto'] as MediaSessionAction[])navigator.mediaSession.setActionHandler(action,null);}};
   });
 </script>
-<audio bind:this={audio} ontimeupdate={()=>position=audio.currentTime} ondurationchange={()=>duration=Number.isFinite(audio.duration)?audio.duration:0} onplay={()=>{if(!$musicQueue.playing){audio.pause();return;}paused=false;document.querySelectorAll('video').forEach(video=>video.pause());}} onpause={()=>paused=true} onended={()=>{if($musicQueue.repeat==='one'){audio.currentTime=0;void audio.play().catch(()=>{error='Reprise du titre impossible.';musicQueue.update(q=>({...q,playing:false}));});}else nextMusic(true);}} onerror={()=>{if(current){error='Lecture indisponible : format non décodable, réseau interrompu ou accès retiré.';musicQueue.update(q=>({...q,playing:false}));}}}></audio>
+<audio bind:this={audio} ontimeupdate={()=>position=audio.currentTime} ondurationchange={()=>duration=Number.isFinite(audio.duration)?audio.duration:0} onplay={()=>{if(!$musicQueue.playing){audio.pause();return;}paused=false;document.querySelectorAll('video').forEach(video=>video.pause());}} onpause={()=>paused=true} onended={musicEnded} onerror={()=>{if(current){error='Lecture indisponible : format non décodable, réseau interrompu ou accès retiré.';musicQueue.update(q=>({...q,playing:false}));}}}></audio>
 {#snippet controls()}
-  <div class="buttons"><button onclick={previous} aria-label="Piste précédente"><Icon name="chapter-prev" size={20} /></button><button class="play" onclick={toggle} aria-label={paused?'Lire la musique':'Mettre la musique en pause'}><Icon name={paused?'play':'pause'} size={20} /></button><button onclick={()=>nextMusic()} aria-label="Piste suivante"><Icon name="chapter-next" size={20} /></button></div>
-  <label class="timeline"><span>{time(position)}</span><input aria-label="Position dans le titre" aria-valuetext={`${time(position)} sur ${time(duration)}`} type="range" min="0" max={duration||1} step="0.1" value={position} oninput={event=>{audio.currentTime=Number(event.currentTarget.value);position=audio.currentTime;}} /><span>{time(duration)}</span></label>
+  <div class="buttons"><button onclick={previous} aria-label="Piste précédente"><Icon name="chapter-prev" size={20} /></button><button class="play" onclick={toggle} aria-label={paused?'Lire la musique':'Mettre la musique en pause'}><Icon name={paused?'play':'pause'} size={20} /></button><button onclick={skipMusic} aria-label="Piste suivante"><Icon name="chapter-next" size={20} /></button></div>
+  <label class="timeline"><span>{time(position)}</span><input aria-label="Position dans le titre" aria-valuetext={`${time(position)} sur ${time(duration)}`} type="range" min="0" max={duration||1} step="0.1" value={position} oninput={event=>musicSeek(Number(event.currentTarget.value))} /><span>{time(duration)}</span></label>
 {/snippet}
 {#if current}
   <section class="music-player" aria-label="Lecteur musique" bind:this={playerElement}>

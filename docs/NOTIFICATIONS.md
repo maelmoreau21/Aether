@@ -121,7 +121,7 @@ contenu retiré, opt-out, réouverture et payload minimal sur un récepteur loca
 Le filtre notifications a passé **6/6** tests locaux (un test PostgreSQL ignoré
 par ce filtre), puis le contrat PostgreSQL enrichi a passé **1/1** sur une base
 jetable PostgreSQL 18. Les commandes, durées et limites sont consignées dans le
-[rapport Core](MISSION_CORE_VALIDATION_2026_11_03.md). Le nouveau contrôle Web
+[rapport Core](archive/missions/MISSION_CORE_VALIDATION_2026_11_03.md). Le nouveau contrôle Web
 a également été exercé dans Chrome avec API synthétique, séparément des tests
 de persistance Core.
 

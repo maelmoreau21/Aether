@@ -1,8 +1,8 @@
 # Refonte UX — fiches film et série, 29 octobre 2026
 
 > **Document historique.** Ce rapport décrit un jalon vérifié le 29 octobre 2026.
-> Les règles UX durables sont dans [UI_DIRECTION.md](UI_DIRECTION.md) ; les
-> résultats plus récents sont dans [MISSION_WEB_VALIDATION_2026_11_03.md](MISSION_WEB_VALIDATION_2026_11_03.md).
+> Les règles UX durables sont dans [UI_DIRECTION.md](../../UI_DIRECTION.md) ; les
+> résultats plus récents sont dans [MISSION_WEB_VALIDATION_2026_11_03.md](../missions/MISSION_WEB_VALIDATION_2026_11_03.md).
 
 ## Changements du jalon
 

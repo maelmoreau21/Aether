@@ -157,14 +157,14 @@ TVDB optimisé (248 968 octets) via `extension_runtime::execute`, avec les limit
 Wasmi de production. Recherche de 20 résultats renseignés, détails/traduction et
 images : **1/1 en 9,98 s**. Réponses ordonnées synthétiques, aucun réseau, aucune
 installation signée ni application Core/HTTP prétendue. Le détail et la commande
-sont dans [le rapport TVDB](../../Aether-Plugins/docs/TVDB_2026_11_03.md).
+sont dans [le rapport TVDB](../../../../Aether-Plugins/docs/TVDB_2026_11_03.md).
 
 `chapter_images_remote` démarre Core et Node sur deux ports TCP du même processus
 de test : scan réel, extraction AV1 FFmpeg 9.0.2, lien signé direct puis canal
 inverse imposé sans repli, GET/HEAD et Range : **1/1 en 13,66 s**. Le correctif
 réutilise l'encodage HEAD des autres dérivés. Le premier essai forcé a expiré au
 login en 27,93 s, sans atteindre ce chemin ; il est conservé et ne constitue pas
-une reproduction du défaut HEAD. [Le rapport chapitres](CHAPTER_IMAGES.md) décrit
+une reproduction du défaut HEAD. [Le rapport chapitres](../../CHAPTER_IMAGES.md) décrit
 le harnais corrigé, les limites et les journaux. Pas de preuve de deux machines
 ou de NAS. Aucun nouveau test global du lecteur n'était nécessaire pour ce
 correctif de transport d'image.

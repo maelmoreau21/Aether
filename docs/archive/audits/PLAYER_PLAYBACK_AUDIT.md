@@ -166,7 +166,7 @@ cargo test --locked -p media-poc --test browser_scanner -j 1 -- --ignored --noca
 - Chrome 155.0.8059.85, Windows 10.0.26300, headless : HTTP 404 audio et mauvaise
   langue de l'original reproduits avec le vrai code du lecteur transpilé, vrai
   décodage média et serveur HTTP isolé. Le serveur de test n'est pas une preuve
-  Core/RBAC. Résultats : [browser-audit.json](evidence/2026-10-21/player-audit/browser-audit.json).
+  Core/RBAC. Résultats : [browser-audit.json](../../evidence/2026-10-21/player-audit/browser-audit.json).
 - Test Node de copie de paquets : réussi MKV/MP4, vidéo et deux audios Opus.
 - Test Node d'admission : réussi MKV/MP4, refus concurrent et réussite sérielle,
   piste FR extraite conservant six canaux. Le premier essai du nouveau test
@@ -176,7 +176,7 @@ cargo test --locked -p media-poc --test browser_scanner -j 1 -- --ignored --noca
   MKV après redémarrage réel du Core. Quatre sélections FR/EN par conteneur avec
   signaux PCM distincts ; seek/pause, offsets, sous-titres, progression et plein
   écran passent. Ce succès court ne supprime pas la course d'admission reproduite
-  séparément. Résultats dans [browser](evidence/2026-10-21/player-audit/browser/),
+  séparément. Résultats dans [browser](../../evidence/2026-10-21/player-audit/browser),
   à distinguer du serveur isolé ci-dessus.
 - `cargo fmt --check` et `git diff --check` : réussis.
 - Clippy strict ciblé sur le nouveau test Node : réussi.

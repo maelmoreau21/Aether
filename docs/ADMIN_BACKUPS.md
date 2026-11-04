@@ -31,7 +31,7 @@ peut appartenir à l'UID 10001 alors que le Compose impose un autre utilisateur.
 Le propriétaire du volume de sauvegardes doit correspondre à l'UID/GID effectif
 du Core, avec permissions 0700. Le Core ne change pas automatiquement le
 propriétaire du volume. Diagnostic réel et correction ciblée du 2 novembre :
-[sauvegarde NAS](BACKUP_NAS_FIX_2026_11_02.md).
+[sauvegarde NAS](archive/fixes/BACKUP_NAS_FIX_2026_11_02.md).
 
 ## Récupération et vérifications
 

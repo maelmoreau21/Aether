@@ -16,7 +16,7 @@ et invocation du vrai module TMDb Wasm via broker HTTP déterministe hors ligne.
 **72 tests natifs workspace réussis**, Clippy strict, format et build Wasm
 réussis ; **9 modules valides** sous 262 144 octets, smoke ABI et scénarios
 metadata Wasm réussis. Plus gros module : IMDb 237 886 octets ; TMDb 231 012.
-[Fichiers, commandes et limites du lot SDK](../../Aether-Plugins/docs/SDK_COLLECTION_CI_2026_11_03.md).
+[Fichiers, commandes et limites du lot SDK](../../../../Aether-Plugins/docs/SDK_COLLECTION_CI_2026_11_03.md).
 
 PR proposée : `fix(plugins): align the pinned SDK with the collection contract`.
 Les autres changements préexistants des fournisseurs/stockage ne sont pas
@@ -27,16 +27,16 @@ attribués à cette correction ; les tests portent sur le worktree courant.
 L'échec a été reproduit exactement à l'ancienne ligne 255 du scanner : attente
 de `ASS Hello, world` dans `video.textTracks`, après décodage vidéo et observation
 des fréquences FR/EN. Or le chemin ASS utilise désormais libass/JASSUB et un
-canvas. [Échec de référence](evidence/2026-11-03/p0-ci/baseline-failure.json).
+canvas. [Échec de référence](../../evidence/2026-11-03/p0-ci/baseline-failure.json).
 
 Le renderer de production a aussi dessiné du texte stylé et appliqué le décalage
 sur une vidéo AV1 en pause sous la même CSP, puis supprimé son canvas :
-[preuve indépendante](evidence/2026-11-03/p0-ci/renderer.json).
+[preuve indépendante](../../evidence/2026-11-03/p0-ci/renderer.json).
 
 L'inspection des captures a révélé un vrai défaut supplémentaire : l'ancien SRT
 français pouvait rester visible sous l'ASS sur une image en pause. Les éléments
 étaient retirés sans désactivation préalable de leur TextTrack.
-[Capture avant correction](evidence/2026-11-03/p0-ci/before-native-caption-cleanup.png).
+[Capture avant correction](../../evidence/2026-11-03/p0-ci/before-native-caption-cleanup.png).
 
 Changements :
 
@@ -78,10 +78,10 @@ en lecture seule. Vidéo décodée, fréquences FR/EN, PCM externe non nul (pic 
 sync/seek en pause, pixels ASS/décalages/Off, repli WebVTT, SRT forcés, préférences,
 progression et repli vidéo réussis ; zéro erreur CSP dans les deux phases.
 
-[MP4](evidence/2026-11-03/p0-ci/report.json),
-[MKV après redémarrage](evidence/2026-11-03/p0-ci/report-restart.json),
-[synthèse](evidence/2026-11-03/p0-ci/summary.json),
-[ASS final sans texte français résiduel](evidence/2026-11-03/p0-ci/ass-rendered.png).
+[MP4](../../evidence/2026-11-03/p0-ci/report.json),
+[MKV après redémarrage](../../evidence/2026-11-03/p0-ci/report-restart.json),
+[synthèse](../../evidence/2026-11-03/p0-ci/summary.json),
+[ASS final sans texte français résiduel](../../evidence/2026-11-03/p0-ci/ass-rendered.png).
 
 PR proposée : `fix(player): clear paused native captions and verify ASS rendering`.
 Risque principal : retrait des anciennes pistes pendant les changements, couvert
@@ -104,7 +104,7 @@ docker buildx bake -f docker-bake.ci.hcl --load --set '*.cache-to=' --set '*.cac
 Smoke sans réseau : versions et utilisateur non-root des trois images validés.
 Node : ffmpeg/ffprobe 9.0.2 exécutés, pas de `libav*.so` partagée, **177 356 775
 octets**, sous le seuil CI de 200 000 000. Standalone : 343 370 975 octets ;
-Core : 300 796 170. [Images finales et historique BuildKit](evidence/2026-11-03/p0-ci/current-images.json).
+Core : 300 796 170. [Images finales et historique BuildKit](../../evidence/2026-11-03/p0-ci/current-images.json).
 
 Reconstruction finale ≈16,7 s avec caches Rust/dépendances chauds et frontend
 rebâti. Le précédent build de 13 min 26 s compilait les dépendances : conditions

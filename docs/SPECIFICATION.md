@@ -54,7 +54,7 @@ Première intégration verticale Rust/SvelteKit sur localhost, fixtures seulemen
 HTML5 natif derrière interface Player légère, sources et pistes exposées par Core.
 Pause/lecture/seek/volume/vitesse, FR/EN avec position conservée, WebVTT/off,
 erreurs explicites. Aucun nouveau moteur, auth/catalogue réel ou DB anticipé.
-Décision et preuves : P1_WEB_INTEGRATION.md. La suite est le bootstrap admin local
+Décision et preuves : docs/archive/milestones/P1_WEB_INTEGRATION.md. La suite est le bootstrap admin local
 sécurisé, puis les bibliothèques ro autorisées.
 
 ## Premier jalon catalogue P1 autorisé (15 octobre 2026)
@@ -70,7 +70,7 @@ Ne pas afficher d'année, d'affiche réelle, d'historique, de récence ou de
 recommandation inventée. Les états indisponibles sont expliqués. Ce parcours
 ne clôture pas P1 autonome : bootstrap local, sessions/RBAC et SQLite restent
 prérequis avant tout dossier personnel en lecture seule. Aucun nouvel essai
-codec ou remplacement de lecteur n'est inclus. Voir CATALOGUE_P1.md.
+codec ou remplacement de lecteur n'est inclus. Voir docs/archive/milestones/CATALOGUE_P1.md.
 
 Ce jalon de fixtures a été vérifié localement : 15 tests Rust, check Web 0/0,
 lint, 8 tests Vitest, build et parcours navigateur Chrome headless catalogue /

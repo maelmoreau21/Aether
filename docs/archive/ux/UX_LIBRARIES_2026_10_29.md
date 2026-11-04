@@ -2,7 +2,7 @@
 
 > **Document historique.** Ce rapport conserve les décisions et preuves du jalon
 > bibliothèques du 29 octobre 2026. Les règles partagées sont dans
-> [UI_DIRECTION.md](UI_DIRECTION.md) ; ne pas utiliser la section de suite comme
+> [UI_DIRECTION.md](../../UI_DIRECTION.md) ; ne pas utiliser la section de suite comme
 > feuille de route actuelle.
 
 ## Diagnostic et arbitrages

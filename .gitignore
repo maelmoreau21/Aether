@@ -35,3 +35,7 @@
 
 # Local browser UX captures and synthetic media
 /output/playwright/
+
+# Graphify local code graph (regenerable)
+graphify-out/
+**/graphify-out/

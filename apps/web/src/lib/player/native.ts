@@ -11,6 +11,17 @@ class VideoSeekTimeoutError extends Error {}
 
 // Bounded source replacement; failures and recovery remain visible to the UI.
 export class NativePlayer implements Player {
+  playbackInfo(): import('../statistics/collector').PlaybackInfo {
+    const source = this.source;
+    const audios = source?.tracks?.filter(t => t.codec_type === 'audio') ?? [];
+    const index = source?.audioTrackId.match(/^internal-(\d+)$/)?.[1];
+    const track = index === undefined ? (audios.length === 1 ? audios[0] : undefined) : audios.find(t => t.index === Number(index));
+    return {
+      mediaId: this.media?.id,
+      method: !source ? 'unknown' : this.externalAudio ? 'separate_audio' : this.progressiveVideo ? 'remux' : this.video.currentSrc?.includes('/prepared/video') ? 'prepared' : source.prepare ? 'remux' : 'direct',
+      audio: source ? { id: source.audioTrackId, language: source.audioTrackId === 'internal-default' && audios.length > 1 ? 'und' : source.language || 'und', codec: track?.codec_name ?? '' } : undefined
+    };
+  }
   private media?: Media;
   private source?: Source;
   private externalAudio?: ExternalAudio;

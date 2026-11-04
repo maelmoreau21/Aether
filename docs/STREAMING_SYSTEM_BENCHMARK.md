@@ -196,7 +196,7 @@ Aucun déploiement ni push effectué. Les processus Rust/FFmpeg de test sont arr
 ## Suite Mission 3.2
 
 Le protocole Release4/8/16, l'oracle PCM brut distinct du PCM aligné et les
-scénarios de panne sont décrits dans [STREAMING_MISSION_3_2.md](STREAMING_MISSION_3_2.md).
+scénarios de panne sont décrits dans [STREAMING_MISSION_3_2.md](archive/missions/STREAMING_MISSION_3_2.md).
 Ces nouvelles vérifications ne remplacent ni les échecs ni les limites des lots
 historiques ci-dessus. Les exports audio exacts destinés au POC de concurrence
 sont des entrées de diagnostic, pas des mesures froides.

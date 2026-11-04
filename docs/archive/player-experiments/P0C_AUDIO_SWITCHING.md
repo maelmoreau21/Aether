@@ -70,7 +70,7 @@ commutation sans interruption n'est faite.
 Les résultats numériques observés et les rapports sont référencés dans
 `STREAMING_COMPATIBILITY.md`. L'écoute humaine reste à effectuer selon
 `MANUAL_BROWSER_CHECKS.md`. Le jalon 10 bits/5.1/sous-titres a ensuite été
-exécuté séparément : `P0C_REPRESENTATIVE_MEDIA.md`. Ne pas attribuer à ces
+exécuté séparément : `docs/archive/player-experiments/P0C_REPRESENTATIVE_MEDIA.md`. Ne pas attribuer à ces
 nouveaux dérivés les mesures de changement de source 8 bits de ce document.
 
 Références consultées : [copie des flux FFmpeg](https://ffmpeg.org/ffmpeg.html#Streamcopy),

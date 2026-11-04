@@ -16,6 +16,7 @@
   import { DEFAULT_NAME } from '../../../lib/config/brand';
 
   import AdminOverview from '../../../lib/admin/AdminOverview.svelte';
+  import Statistics from '../../../lib/statistics/Statistics.svelte';
   import { defaultLibraryOptions } from '../../../lib/admin/types';
   import AdminLibraries from '../../../lib/admin/AdminLibraries.svelte';
   import AdminNodes from '../../../lib/admin/AdminNodes.svelte';
@@ -414,6 +415,7 @@
           <AdminSettings section={currentHash} />
 
           <!-- Section 1: Dashboard Overview -->
+          <div hidden={currentHash !== '#statistics-section'}><Statistics administrator active={currentHash === '#statistics-section'} /></div>
           <div hidden={currentHash !== "#overview"}>
           <AdminOverview active={currentHash === "#overview"}
             {coreHealth}

@@ -86,8 +86,8 @@ par défaut ; `MEDIA_REPORT_DIR` permet de choisir un autre dossier.
 ## Résultats exécutés
 
 - Windows 10.0.26300, Chrome 155.0.8059.85 et Edge 155.0.4283.62, headless :
-  scénario dual-5.1 réussi. Rapports [Chrome](evidence/2026-10-22/dual-opus/chrome.json)
-  et [Edge](evidence/2026-10-22/dual-opus/edge.json). Cinq choix FR/EN/FR/EN/FR,
+  scénario dual-5.1 réussi. Rapports [Chrome](../../evidence/2026-10-22/dual-opus/chrome.json)
+  et [Edge](../../evidence/2026-10-22/dual-opus/edge.json). Cinq choix FR/EN/FR/EN/FR,
   un chargement vidéo par séance, PCM distinct, seek/pause/reprise et échec réel
   du chargement Ogg HTTP 404 avec conservation de l'ancien audio. Les écarts
   d'horloges mesurés ponctuellement figurent dans les rapports, sans garantie
@@ -97,8 +97,8 @@ par défaut ; `MEDIA_REPORT_DIR` permet de choisir un autre dossier.
   FR restaurées à la réouverture sans faux avis, sous-titres/progression et
   redémarrage réel du Core. Fixtures historiques FR 5.1/EN stéréo dans ce
   parcours, distinctes du nouveau MP4 à deux 5.1 :
-  [MP4](evidence/2026-10-22/dual-opus/core-mp4.json),
-  [MKV après redémarrage](evidence/2026-10-22/dual-opus/core-mkv.json).
+  [MP4](../../evidence/2026-10-22/dual-opus/core-mp4.json),
+  [MKV après redémarrage](../../evidence/2026-10-22/dual-opus/core-mkv.json).
 - Rust packaging : nouveau test dual-5.1 exécuté avec `--ignored`, réussi ;
   deux tests existants réussis, dont copie 7.1 MKV/MP4. Paquets SHA-256 identiques
   par piste, vidéo toujours AV1 10 bits 1080p et six canaux par audio.

@@ -26,7 +26,7 @@ Les paquets TMDb et IMDb 0.1.1 signés sont embarqués dans le Core. Le démarra
 conserve désormais l'activation et le périmètre choisis par l'administrateur pour
 les extensions déjà installées. Les autres sources, paramètres et paquets locaux
 se trouvent dans le dépôt voisin :
-[rapport plugins](../../Aether-Plugins/docs/METADATA_REPAIR_2026_11_02.md).
+[rapport plugins](../../../../Aether-Plugins/docs/METADATA_REPAIR_2026_11_02.md).
 
 ## Mise à jour des plugins : limite conservée
 
@@ -36,7 +36,7 @@ du catalogue, qui applique les mêmes contrôles que la route d'upgrade.
 Un refus conserve la version et ses paramètres.
 
 La bascule des versions existantes reste **refusée par le Core** : voir
-[le contrat de mise à jour](PLUGIN_UPDATE_LIFECYCLE.md). Les nouveaux paquets
+[le contrat de mise à jour](../../PLUGIN_UPDATE_LIFECYCLE.md). Les nouveaux paquets
 embarqué/local ne remplacent donc pas automatiquement une installation existante.
 Ni la désinstallation ni un remplacement SQL ne constituent une migration sûre.
 Le catalogue public signé reste à sa version publiée ; aucune release n'a été
@@ -51,7 +51,7 @@ Sources locales examinées dans `C:/Users/Mael/Downloads/Jellyfin` :
 - Client `PlaybackCore.js` : commandes programmées et notifications du lecteur.
 - `WaitingGroupState.cs` : attente de chargement distincte de la pause demandée.
 
-Les changements SyncPlay et ses contrats sont décrits dans [SYNCPLAY.md](SYNCPLAY.md).
+Les changements SyncPlay et ses contrats sont décrits dans [SYNCPLAY.md](../../SYNCPLAY.md).
 
 ## Vérifications et portée
 

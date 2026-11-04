@@ -6,6 +6,7 @@
   import Icon from '../ui/Icon.svelte';
   import { modalFocus } from './modal-focus';
   import { locale, t } from '../i18n';
+  import { activityLabel as formatActivity, filterAndSortUsers, groupMembershipUpdates, userMutationErrorMessage } from './user-list';
 
   interface Props {
     users: Account[];
@@ -56,11 +57,7 @@
   let sortAsc = $state(true);
 
   function activityLabel(timestamp: number | null | undefined) {
-    if (timestamp == null) return 'Jamais';
-    return new Date(timestamp * 1000).toLocaleString($locale === 'en' ? 'en-GB' : 'fr-FR', {
-      dateStyle: 'short',
-      timeStyle: 'short'
-    });
+    return formatActivity(timestamp, $locale);
   }
 
   async function refresh() {
@@ -98,46 +95,26 @@
     });
     if (!response.ok) {
       const code = (await response.json().catch(() => ({}))).error;
-      const errors: Record<string, string> = {
-        login_exists: 'Cet identifiant existe déjà.',
-        self_protection: 'Vous ne pouvez pas désactiver ou rétrograder votre propre compte.',
-        last_administrator: 'Le dernier administrateur actif doit être conservé.',
-        invalid_password: 'Le mot de passe doit contenir de 15 à 128 caractères sans caractère de contrôle.',
-        local_credentials_required: 'Ce compte est géré par le fournisseur SSO.',
-        invalid_login: 'Identifiant : 3 à 64 caractères minuscules, chiffres, points, tirets ou underscores.',
-        invalid_display_name: 'Nom : 128 caractères maximum, sans caractère de contrôle.'
-      };
-      throw new Error(errors[code] ?? 'Opération refusée ou serveur indisponible.');
+      throw new Error(userMutationErrorMessage(code));
     }
   }
 
   async function syncUserGroups(userId: string, targetGroupIds: string[]) {
     if (!$session) return;
-    const updatePromises: Promise<unknown>[] = [];
-    for (const group of groups) {
-      if (group.isDefault) continue;
-      const isMember = group.userIds.includes(userId);
-      const shouldBeMember = targetGroupIds.includes(group.id);
-      if (isMember !== shouldBeMember) {
-        const nextUserIds = shouldBeMember
-          ? [...group.userIds, userId]
-          : group.userIds.filter(id => id !== userId);
-        updatePromises.push(
-          fetch(`/api/v1/admin/groups/${encodeURIComponent(group.id)}`, {
-            method: 'PUT',
-            credentials: 'same-origin',
-            cache: 'no-store',
-            headers: { 'content-type': 'application/json', 'x-csrf-token': $session.csrfToken },
-            body: JSON.stringify({
-              name: group.name,
-              isDefault: group.isDefault,
-              userIds: nextUserIds,
-              libraryIds: group.libraryIds
-            })
-          })
-        );
-      }
-    }
+    const updatePromises = groupMembershipUpdates(groups, userId, targetGroupIds).map(({ group, userIds }) =>
+      fetch(`/api/v1/admin/groups/${encodeURIComponent(group.id)}`, {
+        method: 'PUT',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': $session.csrfToken },
+        body: JSON.stringify({
+          name: group.name,
+          isDefault: group.isDefault,
+          userIds,
+          libraryIds: group.libraryIds
+        })
+      })
+    );
     await Promise.all(updatePromises);
   }
 
@@ -214,29 +191,9 @@
     }
   }
 
-  const filteredUsers = $derived.by(() => {
-    return allUsers.filter(user => {
-      const q = search.trim().toLowerCase();
-      const matchSearch = !q || [user.login, user.displayName ?? '', user.id].some(v => v.toLowerCase().includes(q));
-      const matchRole = roleFilter === 'all' || user.role === roleFilter;
-      const matchStatus = statusFilter === 'all' || (statusFilter === 'disabled' ? user.disabledAt != null : user.disabledAt == null);
-      return matchSearch && matchRole && matchStatus;
-    }).sort((a, b) => {
-      let cmp = 0;
-      if (sortField === 'name') {
-        cmp = (a.displayName || a.login).localeCompare(b.displayName || b.login);
-      } else if (sortField === 'role') {
-        cmp = a.role.localeCompare(b.role);
-      } else if (sortField === 'status') {
-        const sA = a.disabledAt != null ? 1 : 0;
-        const sB = b.disabledAt != null ? 1 : 0;
-        cmp = sA - sB;
-      } else if (sortField === 'lastSeen') {
-        cmp = (a.lastSeenAt ?? 0) - (b.lastSeenAt ?? 0);
-      }
-      return sortAsc ? cmp : -cmp;
-    });
-  });
+  const filteredUsers = $derived(
+    filterAndSortUsers(allUsers, { search, roleFilter, statusFilter, sortField, sortAsc })
+  );
 
   const allSelected = $derived(filteredUsers.length > 0 && filteredUsers.every(u => selectedUserIds.includes(u.id)));
 

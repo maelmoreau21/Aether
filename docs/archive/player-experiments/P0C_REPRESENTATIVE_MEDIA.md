@@ -82,4 +82,4 @@ mesures en une preuve physique. Chiffres par navigateur dans la matrice.
 
 Preuves : `docs/evidence/2026-10-15/representative/` ; commandes dans
 `TEST_PLAN.md`. Comparaison distincte proposée sans moteur choisi :
-`PLAYER_COMPARISON_EXPERIMENT.md`.
+`docs/archive/player-experiments/PLAYER_COMPARISON_EXPERIMENT.md`.

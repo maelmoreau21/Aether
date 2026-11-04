@@ -5,7 +5,7 @@
 Le nouveau parcours local ajoute les pistes Opus internes préparées, les sous-titres
 intégrés textuels, le repli texte ASS/SSA, les offsets signés et la date d'ajout
 persistante. Les limites historiques ci-dessous sont remplacées uniquement pour
-ces parcours : [contrat et limites actuels](PLAYER_TRACK_PREPARATION.md).
+ces parcours : [contrat et limites actuels](../../PLAYER_TRACK_PREPARATION.md).
 
 ## Parcours implémenté
 

@@ -3,17 +3,15 @@
   import Icon from '../ui/Icon.svelte';
   import { session } from '../auth/session';
   import type { ControlMode, PartySummary, UserInvitePayload } from './types';
+  import {
+    acceptPartyInvite, createParty, fetchActiveParties, fetchPartyInvites, initials, joinParty,
+    searchCatalogWorks, searchEligibleUsers, type CatalogWorkOption
+  } from './party-api';
 
   interface SelectedInvitee {
     id?: string;
     username: string;
     displayName: string;
-  }
-
-  interface CatalogWorkOption {
-    id: string;
-    title: string;
-    year?: number | null;
   }
 
   let {
@@ -77,18 +75,8 @@
     }
     isSearchingUsers = true;
     try {
-      const cleanQ = q.trim().replace(/^@/, '');
-      const mediaParam = selectedMediaId ? `&media_id=${encodeURIComponent(selectedMediaId)}` : '';
-      const res = await fetch(
-        `/api/v1/parties/eligible-users?q=${encodeURIComponent(cleanQ)}${mediaParam}`,
-        { credentials: 'same-origin' }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        userSearchResults = data.users ?? [];
-      }
-    } catch {
-      // Ignored
+      const users = await searchEligibleUsers(q, selectedMediaId);
+      if (users) userSearchResults = users;
     } finally {
       isSearchingUsers = false;
     }
@@ -133,41 +121,21 @@
   async function searchCatalogMedia(q: string) {
     isSearchingMedia = true;
     try {
-      const url = `/api/v1/catalog?${new URLSearchParams({ q: q.trim(), limit: '6' })}`;
-      const res = await fetch(url, { credentials: 'same-origin' });
-      if (res.ok) {
-        const data = await res.json();
-        mediaSearchResults = (data.items ?? []).map((w: CatalogWorkOption) => ({
-          id: w.id,
-          title: w.title,
-          year: w.year
-        }));
-      }
-    } catch {
-      // Ignored
+      const works = await searchCatalogWorks(q);
+      if (works) mediaSearchResults = works;
     } finally {
       isSearchingMedia = false;
     }
   }
 
   async function loadParties() {
-    try {
-      const res = await fetch('/api/v1/parties', { credentials: 'same-origin' });
-      if (res.ok) {
-        const data = await res.json();
-        activeParties = data.parties ?? [];
-      }
-    } catch {}
+    const parties = await fetchActiveParties();
+    if (parties) activeParties = parties;
   }
 
   async function loadInvites() {
-    try {
-      const res = await fetch('/api/v1/parties/invites', { credentials: 'same-origin' });
-      if (res.ok) {
-        const data = await res.json();
-        userInvites = data.invites ?? [];
-      }
-    } catch {}
+    const invites = await fetchPartyInvites();
+    if (invites) userInvites = invites;
   }
 
   async function handleCreateParty() {
@@ -182,33 +150,17 @@
       const userIds = invitees.map((i) => i.id).filter((id): id is string => Boolean(id));
       const usernames = invitees.filter((i) => !i.id).map((i) => i.username);
 
-      const res = await fetch('/api/v1/parties', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-csrf-token': $session?.csrfToken ?? ''
-        },
-        body: JSON.stringify({
+      const party = await createParty(
+        {
           name: partyName.trim(),
           mediaId: selectedMediaId,
           controlMode,
           waitForBuffering,
           inviteUserIds: userIds.length > 0 ? userIds : undefined,
           inviteUsernames: usernames.length > 0 ? usernames : undefined
-        })
-      });
-
-      if (!res.ok) {
-        let msg = 'Impossible de créer la séance.';
-        try {
-          const body = await res.json();
-          if (body.error) msg = body.error;
-        } catch {}
-        throw new Error(msg);
-      }
-
-      const party = await res.json();
+        },
+        $session?.csrfToken ?? ''
+      );
       onJoinParty(party.id, selectedMediaId);
       onClose();
     } catch (e) {
@@ -222,24 +174,9 @@
     loading = true;
     error = null;
     try {
-      const res = await fetch(`/api/v1/parties/invites/${encodeURIComponent(token)}/accept`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-          'x-csrf-token': $session?.csrfToken ?? ''
-        }
-      });
-      if (res.ok) {
-        onJoinParty(pId, mId);
-        onClose();
-      } else {
-        let msg = "L'invitation a expiré ou est invalide.";
-        try {
-          const body = await res.json();
-          if (body.error) msg = body.error;
-        } catch {}
-        throw new Error(msg);
-      }
+      await acceptPartyInvite(token, $session?.csrfToken ?? '');
+      onJoinParty(pId, mId);
+      onClose();
     } catch (e) {
       error = e instanceof Error ? e.message : 'Erreur lors de l’acceptation';
     } finally {
@@ -251,24 +188,9 @@
     loading = true;
     error = null;
     try {
-      const res = await fetch(`/api/v1/parties/${encodeURIComponent(pId)}/join`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-          'x-csrf-token': $session?.csrfToken ?? ''
-        }
-      });
-      if (res.ok) {
-        onJoinParty(pId, mId);
-        onClose();
-      } else {
-        let msg = 'Impossible de rejoindre cette séance.';
-        try {
-          const body = await res.json();
-          if (body.error) msg = body.error;
-        } catch {}
-        throw new Error(msg);
-      }
+      await joinParty(pId, $session?.csrfToken ?? '');
+      onJoinParty(pId, mId);
+      onClose();
     } catch (e) {
       error = e instanceof Error ? e.message : 'Erreur lors de l’accès';
     } finally {
@@ -467,7 +389,7 @@
                 {#each userSearchResults as u (u.id)}
                   <button type="button" class="dropdown-row" onclick={() => addInvitee(u)}>
                     <div class="user-avatar-small">
-                      {u.displayName.slice(0, 2).toUpperCase()}
+                      {initials(u.displayName)}
                     </div>
                     <div class="user-meta">
                       <span class="row-title">{u.displayName}</span>
@@ -483,7 +405,7 @@
               <div class="invitees-chips-list">
                 {#each invitees as inv (inv.username)}
                   <div class="invitee-chip">
-                    <span class="chip-avatar">{inv.displayName.slice(0, 1).toUpperCase()}</span>
+                    <span class="chip-avatar">{initials(inv.displayName, 1)}</span>
                     <span class="chip-label">@{inv.username}</span>
                     <button
                       type="button"

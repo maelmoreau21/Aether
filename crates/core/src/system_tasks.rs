@@ -422,6 +422,13 @@ async fn execute_inner(
         "update-extensions" => task_update_extensions(state).await,
         "optimize-database" => task_optimize_database(state).await,
         "clean-sessions" => task_clean_sessions(state).await,
+        "clean-statistics" => crate::statistics::maintain(&state.auth.store)
+            .await
+            .map(|count| TaskReport {
+                summary: format!("{count} expired statistics event(s) removed"),
+                failures: Vec::new(),
+            })
+            .map_err(|e| TaskFailure::database("statistics", e)),
         "clean-activity-log" => task_clean_activity_log(state, job).await,
         "clean-cache" => task_clean_cache(state).await,
         "clean-playlists" => task_clean_playlists(state).await,
@@ -795,11 +802,12 @@ mod tests {
                 .fetch_all(&state.auth.store.pool)
                 .await
                 .unwrap();
-        assert_eq!(tasks.len(), 6);
+        assert_eq!(tasks.len(), 7);
         for id in [
             "update-extensions",
             "optimize-database",
             "clean-sessions",
+            "clean-statistics",
             "clean-activity-log",
             "clean-cache",
             "clean-playlists",

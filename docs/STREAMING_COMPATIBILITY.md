@@ -20,7 +20,7 @@ synthétique 1080p AV1 Main 10 bits, deux Opus 5.1 FR/EN, lecture décodée et
 FR/EN/FR répété sans rechargement vidéo. Plein écran, position, pause/seek/reprise,
 échec audio et réouverture vérifiés. La sonde `codecs="av01"` incomplète rejetait
 à tort les sources préparées ; correction et commandes dans
-[AV1_OPUS_AUDIO_FIX.md](AV1_OPUS_AUDIO_FIX.md).
+[AV1_OPUS_AUDIO_FIX.md](archive/fixes/AV1_OPUS_AUDIO_FIX.md).
 Le parcours Core/SQLite/Chrome MP4/MKV et les préférences serveur passent aussi.
 Pas de preuve sur le fichier Avatar ni la sortie physique 5.1 ou le NAS.
 
@@ -168,9 +168,9 @@ a échoué avant l'essai MP4 : `readyState` prêt avant le traitement de l'évé
 activant le menu. Le harnais attend désormais aussi le contrôle activé ; la
 série finale ci-dessus a ensuite réussi.
 
-[Méthode et comparaison détaillées](P0C_AUDIO_SWITCHING.md).
+[Méthode et comparaison détaillées](archive/player-experiments/P0C_AUDIO_SWITCHING.md).
 Le [plan initial 10 bits/5.1](NEXT_MEDIA_TESTS.md) a ensuite donné lieu au
-[jalon représentatif distinct](P0C_REPRESENTATIVE_MEDIA.md). **P0C complet reste ouvert** : sélection
+[jalon représentatif distinct](archive/player-experiments/P0C_REPRESENTATIVE_MEDIA.md). **P0C complet reste ouvert** : sélection
 interne, sous-titres, autres profils, moteurs et écoute humaine. Ce résultat
 valide le compromis du changement de source par remux préparé seulement.
 
@@ -248,9 +248,9 @@ Preuves : [préparation](evidence/2026-10-15/representative/preparation.json),
 [Firefox](evidence/2026-10-15/representative/firefox.json),
 [résumé et contrôle après seek](evidence/2026-10-15/representative/summary.json).
 [Vérification des textes/horodatages](evidence/2026-10-15/representative/subtitle-verification.json).
-[Méthode détaillée](P0C_REPRESENTATIVE_MEDIA.md).
+[Méthode détaillée](archive/player-experiments/P0C_REPRESENTATIVE_MEDIA.md).
 
-La [comparaison MSE/Video.js/Shaka](PLAYER_COMPARISON_EXPERIMENT.md) est une
+La [comparaison MSE/Video.js/Shaka](archive/player-experiments/PLAYER_COMPARISON_EXPERIMENT.md) est une
 expérience séparée dont la première étape MSE est décrite ci-dessous, sans moteur choisi. **P0C reste ouvert**
 pour sélection interne, sous-titres et preuves physiques.
 
@@ -275,7 +275,7 @@ Video.js10 et Shaka : **NT**. CPU/RSS, mono/7.1, sortie physique5.1,
 10bits physique, endurance, EOS et dérive A/V : NT. Le nombre de canaux reste
 propre à chaque piste, sans imposer du5.1. Choix définitif ouvert.
 
-[Protocole, échecs, comparaison et recommandation](P0C_MSE_EXPERIMENT.md).
+[Protocole, échecs, comparaison et recommandation](archive/player-experiments/P0C_MSE_EXPERIMENT.md).
 [Préparation](evidence/2026-10-15/mse/preparation.json),
 [Chrome](evidence/2026-10-15/mse/chrome.json),
 [Edge](evidence/2026-10-15/mse/msedge.json),
@@ -301,7 +301,7 @@ Les36 marqueurs respectent±200ms, indicateur média non physique. CPU/RAM Rust
 et arbre navigateur mesurés séparément, instrumentation coûteuse explicitée.
 Choix provisoire : poursuivre Shaka et comparer safeMargin ; garder MSE comme
 témoin. Video.js NT, aucun lecteur définitif ni ajoutP1.
-[Protocole, chiffres, ressources et limites](P0C_SHAKA_EXPERIMENT.md).
+[Protocole, chiffres, ressources et limites](archive/player-experiments/P0C_SHAKA_EXPERIMENT.md).
 
 ## P0C — safeMargin terminé (2026-10-15)
 
@@ -327,7 +327,7 @@ indicateur média non physique ; polling maximal168ms limite les conclusions.
 navigateur :4/6 réussies ; ShakaChrome échoue sur progression vidéo aprèsseek,
 MSEFirefox timeout PCM FR. Ces échecs sont conservés, causes non résolues.
 Pas de lecteur définitif ni ajout Video.js/SvelteKit.
-[Protocole, chiffres, échecs et prochaines vérifications](P0C_SAFE_MARGIN_EXPERIMENT.md).
+[Protocole, chiffres, échecs et prochaines vérifications](archive/player-experiments/P0C_SAFE_MARGIN_EXPERIMENT.md).
 Preuves : docs/evidence/2026-10-15/safe-margin/.
 
 ## Vérification courte de la resélection audio (2026-10-15)
@@ -417,7 +417,7 @@ pas le couple mono440/880 ancien. Aucun média/packaging réencodé ou modifié 
 hash37 originaux avant/après chaque série complète. Tests antérieurs conservés.
 Rust fmt/clippy strict/9 tests intégration passent. Tests Node politique/statistiques
 passent ; CI ajoutée mais pas exécutée à distance. Précisions et preuves :
-docs/P0C_AUDIO_SEEK_RECOVERY.md et docs/evidence/2026-10-15/audio-seek-policy/.
+docs/archive/player-experiments/P0C_AUDIO_SEEK_RECOVERY.md et docs/evidence/2026-10-15/audio-seek-policy/.
 
 Prochain jalon P0 seulement : isoler blocages vidéo, refaire Firefox fonctionnel,
 puis répétitions séquentielles et seeks avant/arrière dans une même présentation.

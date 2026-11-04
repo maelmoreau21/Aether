@@ -76,7 +76,7 @@ Les tests unitaires de classement sont dans `recommendations.rs` ; le contrat
 HTTP avec compte, CSRF, autorisations, historique et réouverture de SQLite est
 dans `recommendation_tests.rs`. Leur présence ne prouve pas une exécution :
 les commandes et résultats effectivement obtenus sont consignés dans la
-[matrice de mission](MISSION_FEATURES_2026_11_03.md). Les mêmes tables SQL sont
+[matrice de mission](archive/missions/MISSION_FEATURES_2026_11_03.md). Les mêmes tables SQL sont
 installées de façon additive en SQLite/PostgreSQL ; le parcours PostgreSQL réel
 reste à qualifier séparément s'il n'a pas été exécuté pour ce lot.
 

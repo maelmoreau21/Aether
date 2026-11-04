@@ -8,6 +8,7 @@
   import { preferredSubtitle, type SubtitlePreference } from './subtitle-preference';
   import { subtitleStyleToCss, type SubtitleStyle } from './subtitle-style';
   import { ProgressTracker } from './progress';
+  import { PlaybackCollector, type EventKind, type Origin } from '../statistics/collector';
   import { PlaybackPresence } from './presence';
   import { session, getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
@@ -37,6 +38,25 @@
   let controls = $state<PlayerControls>();
   let engine: Player | undefined;
   let progressTracker: ProgressTracker | undefined;
+  let collector: PlaybackCollector | undefined;
+  let collectorWork = '';
+  function collect(media: Media) {
+    const identity = media.workId ?? media.id;
+    if (collector && collectorWork === identity) { collector.suspend(); return; }
+    collector?.stop(); collector = undefined; collectorWork = identity;
+    if (!media.synthetic) collector = new PlaybackCollector(video, { mediaId: media.id, music: false,
+      state: () => engine?.state(), origin: () => syncClient ? 'sync' : 'manual', info: () => engine?.playbackInfo?.() });
+  }
+  function trackSubtitle(id: string | null, origin: Origin) {
+    const track = active?.subtitles.find(item => item.id === id);
+    collector?.track('subtitle', { id: track?.id ?? 'off', language: track?.language ?? 'off', codec: track?.sourceFormat ?? '' }, origin);
+  }
+  function measuredSeek(position: number, kind: EventKind = 'seek', origin: Origin = 'manual') {
+    if (!engine) return;
+    const before = engine.state().position;
+    engine.seek(position);
+    collector?.seek(position, before, kind, origin);
+  }
   let presence: PlaybackPresence | undefined;
   let opened = $state(false);
   let active = $state<Media | undefined>();
@@ -99,12 +119,15 @@
       && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs()) {
       const correction = syncClient.evaluateDrift(playback.position);
       if (correction.action === 'rate') {
+        const changed = Math.abs(snapshot.speed - correction.playbackRate) > .001;
         engine.setSpeed(correction.playbackRate);
+        if (changed) collector?.event('speed_change', { origin: 'sync' });
       } else if (correction.action === 'seek') {
-        engine.seek(correction.targetPosition);
+        measuredSeek(correction.targetPosition, 'seek', 'sync');
         engine.setSpeed(1.0);
       } else if (video.playbackRate !== 1.0) {
         engine.setSpeed(1.0);
+        collector?.event('speed_change', { origin: 'sync' });
       }
     }
   }
@@ -154,7 +177,7 @@
     if (prefs.autoSkipIntro && active?.intro && !hasAutoSkippedIntro) {
       if (pos >= active.intro.start && pos < active.intro.end - 1.0) {
         hasAutoSkippedIntro = true;
-        engine?.seek(active.intro.end);
+        measuredSeek(active.intro.end, 'skip_intro', 'automatic');
         notice = "Introduction sautée automatiquement";
       }
     }
@@ -162,7 +185,7 @@
       if (pos >= active.credits.start && pos < active.credits.end - 1.0) {
         hasAutoSkippedCredits = true;
         if (active.credits.end < dur - 10) {
-          engine?.seek(active.credits.end);
+          measuredSeek(active.credits.end, 'skip_credits', 'automatic');
           notice = "Générique sauté automatiquement";
         }
       }
@@ -212,6 +235,7 @@
   }
   function fail(message: string) {
     if (!opened) return;
+    collector?.event('error', { errorCode: 'playback' });
     engine?.pause();
     void tryAutomaticFailover().then(recovered => {
       if (!recovered && opened) {
@@ -234,6 +258,7 @@
   async function prepare(media: Media, restore?: PlaybackState, failoverNotice?: string) {
     const current = generation;
     if (!engine) return;
+    collect(media);
     triedMediaIds.add(media.id);
     if (media.requestedId) triedMediaIds.add(media.requestedId);
     if (media.failoverFrom) triedMediaIds.add(media.failoverFrom);
@@ -265,11 +290,13 @@
       const autoFailoverMsg = failoverNotice || (media.failoverFrom ? 'Basculement automatique sur un nœud disponible.' : '');
       notice = autoFailoverMsg || preferenceNotice;
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
+      collector?.source(engine.playbackInfo?.(), media.id);
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
       // Embedded subtitle extraction can take substantially longer than the
       // first video/audio data. Start it now but do not hold playback for it.
       const subtitleLoading = engine.selectSubtitle(usableSubtitle);
+      void subtitleLoading.then(() => { if (current === generation) trackSubtitle(usableSubtitle, 'automatic'); }).catch(() => {});
       subtitle = usableSubtitle;
       void subtitleLoading.catch(error => {
         if (current === generation && subtitle === usableSubtitle) {
@@ -389,6 +416,7 @@
   }
   export function close() {
     if (!opened) return;
+    collector?.stop(); collector = undefined; collectorWork = '';
     if (syncClient) {
       syncClient.leave();
       syncClient = null;
@@ -415,6 +443,7 @@
   export function changeMedia(media: Media, requireOpen = false) {
     if (!opened) { if (!requireOpen) open(media); return; }
     if (!engine || busy) return;
+    collector?.stop(); collector = undefined; collectorWork = '';
     manualAudio = undefined; manualSubtitle = undefined;
     triedMediaIds.clear();
     failoverInProgress = false;
@@ -447,8 +476,12 @@
       // Received commands apply locally even in host_only mode. Never send a
       // command back through the user-control path (which caused seek loops).
       if (!engine || busy) return;
+      if (state === 'playing' && video.ended && active && !collector) collect(active);
+      const before = engine.state().position;
       client.setReady(true);
-      void applyPartyPlayback(engine, state, position).catch(cause => {
+      void applyPartyPlayback(engine, state, position).then(() => {
+        if (engine && Math.abs(engine.state().position - before) > 1) collector?.seek(engine.state().position, before, 'seek', 'sync');
+      }).catch(cause => {
         notice = cause instanceof Error ? cause.message : 'Lecture collective indisponible.';
       });
     };
@@ -483,6 +516,7 @@
       wake();
       return;
     }
+    if (video.ended && active && !collector) collect(active);
     if (syncClient) {
       if (paused) syncClient.play(playback.position);
       else syncClient.pause(playback.position);
@@ -492,7 +526,7 @@
   }
   function volume(value: number) { engine?.setVolume(value); if (value > 0) previousVolume = value; sync(); wake(); }
   function mute() { volume(playback.volume === 0 ? previousVolume || 1 : 0); }
-  function seek(value: number) {
+  function seek(value: number, kind: EventKind = 'seek') {
     if (syncClient && !syncClient.canControl) {
       notice = 'Contrôles réservés à l’organisateur';
       wake();
@@ -502,7 +536,7 @@
       syncClient.seek(value);
       return;
     }
-    if (!busy) { engine?.seek(value); sync(); wake(); }
+    if (!busy) { measuredSeek(value, kind); sync(); wake(); }
   }
   function selectAudio(id: string) {
     const current = generation;
@@ -510,6 +544,8 @@
     void action(async player => { await player.selectAudio(id);
       if (current !== generation || !opened || accountGeneration !== getSessionGeneration()) return;
       audio = id; notice = '';
+      const info = player.playbackInfo?.();
+      if (info?.audio) collector?.track('audio', info.audio, 'manual');
       const language = audioLanguage(active?.sources.find(source => source.audioTrackId === id)?.language ?? 'und');
       if (language && language !== 'und') preferredLanguage = language;
       manualAudio = { mediaId: active?.id ?? '', trackId: id, ...(language && language !== 'und' ? { language } : {}) };
@@ -524,6 +560,7 @@
     await player.selectSubtitle(id);
     if (current !== generation || !opened || accountGeneration !== getSessionGeneration()) return;
     subtitle = id;
+    trackSubtitle(id, 'manual');
     const track = active?.subtitles.find(track => track.id === id);
     subtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
     manualSubtitle = subtitlePreference;
@@ -571,7 +608,12 @@
     keyboard(event);
   }
   function cancel(event: Event) { event.preventDefault(); if (menu) controls?.closeMenu(); else close(); }
-  function ended() { sync(); if (engine) progressTracker?.save(engine.state(), true, true); if (!syncClient && autoplayNext && onNext) onNext(); }
+  function ended() {
+    collector?.stop(true); collector = undefined; collectorWork = '';
+    sync(); if (engine) progressTracker?.save(engine.state(), true, true);
+    if (repeat && active && engine && !syncClient) { collect(active); engine.seek(0); void engine.play().catch(cause => fail(String(cause))); return; }
+    if (!syncClient && autoplayNext && onNext) onNext();
+  }
   $effect(() => {
     if (!opened || !statistics) return;
     const update = () => {
@@ -605,7 +647,7 @@
       bind:this={video}
       playsinline
       preload="auto"
-      loop={repeat}
+      loop={false}
       style:object-fit={aspectRatio}
       style:--sub-color={activeSubtitleCss.color}
       style:--sub-size={activeSubtitleCss.fontSize}
@@ -677,7 +719,7 @@
       {skipBackSeconds} {skipForwardSeconds}
       {aspectRatio} onAspectRatio={r => aspectRatio = r} {repeat} onRepeat={r => repeat = r} onStats={() => { statistics = true; wake(); }}
       onPlay={togglePlayback} onVolume={volume} onMute={mute} onSeek={seek} onAudio={selectAudio} onSubtitle={selectSubtitle} onSource={selectSource}
-      onSpeed={speed => action(player => player.setSpeed(speed))} onFullscreen={toggleFullscreen} onWake={wake}
+      onSpeed={speed => action(player => { player.setSpeed(speed); collector?.event('speed_change'); })} onFullscreen={toggleFullscreen} onWake={wake}
       buffered={bufferedUntil} hideCreditsSkip={showNextCard} />{/if}
     {#if showNextCard}
       <aside class="next-card" class:raised={visible} aria-label="Épisode suivant">
@@ -696,7 +738,7 @@
             <button type="button" class="next-play" onclick={() => onNext?.()}><Icon name="play" size={16} /><span>Lire maintenant</span></button>
             {#if postCreditsScene && active?.credits}
               {@const creditsEnd = active.credits.end}
-              <button type="button" class="next-secondary" onclick={() => { seek(creditsEnd); wake(); }}>Passer le générique</button>
+              <button type="button" class="next-secondary" onclick={() => { seek(creditsEnd, 'skip_credits'); wake(); }}>Passer le générique</button>
             {/if}
           </div>
         </div>

@@ -3,6 +3,7 @@
   import Icon from '../ui/Icon.svelte';
   import type { SyncPartyClient } from './sync-client.svelte';
   import type { ControlMode } from './types';
+  import { initials, partyInviteUrl } from './party-api';
 
   let {
     client,
@@ -72,7 +73,7 @@
 
   function copyInviteLink() {
     if (typeof window === 'undefined' || !client.party) return;
-    const url = `${window.location.origin}/parties?id=${encodeURIComponent(client.party.id)}`;
+    const url = partyInviteUrl(window.location.origin, client.party.id);
     if (navigator?.clipboard) {
       void navigator.clipboard.writeText(url);
     }
@@ -150,7 +151,7 @@
           {#each client.members as member (member.userId)}
             <div class="member-pill" class:is-ready={member.isReady} class:is-host={member.role === 'host'}>
               <div class="member-avatar">
-                {member.displayName.slice(0, 2).toUpperCase()}
+                {initials(member.displayName)}
               </div>
               <div class="member-info">
                 <span class="member-name">{member.displayName}</span>
@@ -382,7 +383,7 @@
             {#each client.members as m (m.userId)}
               <div class="member-card" class:offline={!m.isOnline}>
                 <div class="card-avatar">
-                  {m.displayName.slice(0, 2).toUpperCase()}
+                  {initials(m.displayName)}
                 </div>
                 <div class="card-details">
                   <div class="name-line">

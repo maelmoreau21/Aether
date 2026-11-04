@@ -1500,13 +1500,13 @@ Motif recherché : `platforms`. Extrait statique ; ne constitue pas une exécuti
 Motif recherché : `api/v1`. Extrait statique ; ne constitue pas une exécution.
 
 ```text
-1: > Moteur de tâches (25 octobre 2026) : API administrateur persistante `GET/POST /api/v1/admin/tasks/jobs`, détail `GET /api/v1/admin/tasks/jobs/{id}` et contrôles `POST /api/v1/admin/tasks/jobs/{id}/{pause|resume|cancel}`. Session administrateur et CSRF pour les mutations ; catégories scan/analyze/prepare/image et cibles inventoriées. Contrat, limites et validation : [tâches distribuées](DISTRIBUTED_TASKS.md).
+1: > Moteur de tâches (25 octobre 2026) : API administrateur persistante `GET/POST /api/v1/admin/tasks/jobs`, détail `GET /api/v1/admin/tasks/jobs/{id}` et contrôles `POST /api/v1/admin/tasks/jobs/{id}/{pause|resume|cancel}`. Session administrateur et CSRF pour les mutations ; catégories scan/analyze/prepare/image et cibles inventoriées. Contrat, limites et validation : [tâches distribuées](../../DISTRIBUTED_TASKS.md).
 2: 
-3: > Bibliothèques avec plusieurs dossiers/nœuds : [contrat du 22 octobre](LIBRARY_FOLDERS.md).
-4: > Navigation par bibliothèque et images multiples : [contrat du 21 octobre](RESPONSIVENESS_AND_ARTWORK.md).
+3: > Bibliothèques avec plusieurs dossiers/nœuds : [contrat du 22 octobre](../../LIBRARY_FOLDERS.md).
+4: > Navigation par bibliothèque et images multiples : [contrat du 21 octobre](../../RESPONSIVENESS_AND_ARTWORK.md).
 5: 
-6: > Administration du 19 octobre 2026 : comptes [ADMIN_USERS.md](ADMIN_USERS.md),
-7: > groupes et clés API [ADMIN_ACCESS.md](ADMIN_ACCESS.md), planifications
+6: > Administration du 19 octobre 2026 : comptes [ADMIN_USERS.md](../../ADMIN_USERS.md),
+7: > groupes et clés API [ADMIN_ACCESS.md](../../ADMIN_ACCESS.md), planifications
 ```
 
 ## F15 — crates/extension-sdk/src/lib.rs:7

@@ -10,7 +10,7 @@ Firefox 155.0.1 ; headless, profils neufs, aucune préférence codec/autoplay
 expérimentale. Playwright 1.62.1 / geckodriver 0.37.1.
 
 Shaka **5.2.13**, fixé depuis npm, archive vérifiée SHA512 et bundle SHA256
-consignés dans [la provenance](evidence/2026-10-15/shaka/shaka-provenance.json).
+consignés dans [la provenance](../../evidence/2026-10-15/shaka/shaka-provenance.json).
 Apache-2.0 et LICENSE conservés dans les fixtures ignorées par Git ; licence du
 projet inchangée. Les sources de cette version ont été consultées pour
 `attach`, `load`, `getAudioTracks`, `selectAudioTrack(track, safeMargin)`,
@@ -59,7 +59,7 @@ FFT ~170,7 ms à 48 kHz. Polling visé 10 ms, maximum réel jusqu'à 101 ms.
 
 La fenêtre RMS a été corrigée pendant la mise au point : passer un tableau
 1024 à un analyser de taille8192 tronquait le début de sa fenêtre, introduisant
-un biais d'environ149 ms. Le [parcours préliminaire](evidence/2026-10-15/shaka/preliminary-old-rms-window.json)
+un biais d'environ149 ms. Le [parcours préliminaire](../../evidence/2026-10-15/shaka/preliminary-old-rms-window.json)
 est conservé, **exclu des statistiques finales**. Les anciennes latences du
 jalon MSE précédent ne sont donc pas comparées directement aux nouvelles.
 
@@ -105,7 +105,7 @@ effectuées par API ; contrôle Chrome supplémentaire effectué.
 
 Pas d'erreur de décodage dans les six parcours finaux. Le diagnostic Chrome
 avec un MPD absent renvoie réellement404 et Shaka1001/category1 :
-[preuve](evidence/2026-10-15/shaka/ui-error-chrome.json). Ce chargement diagnostic
+[preuve](../../evidence/2026-10-15/shaka/ui-error-chrome.json). Ce chargement diagnostic
 appelle directement l'API et ne valide pas l'affichage d'erreur du bouton.
 Les **9 tests Rust** passent, dont nouvelles routes DASH/Range exact/MIME,
 whitelist et refus cross-site. `cargo fmt --check`, clippy avec `-D warnings`,
@@ -156,11 +156,11 @@ facultatives : supprimer MEDIA_SAMPLE_RESOURCES pour un parcours sans sampler.
 produit les statistiques. `node scripts/player-comparison-stats.test.cjs`
 vérifie notamment le cumul CPU lors de disparition/réutilisation des PID.
 
-[Rapports, ressources brutes, captures, MPD et packaging](evidence/2026-10-15/shaka/).
+[Rapports, ressources brutes, captures, MPD et packaging](../../evidence/2026-10-15/shaka).
 
 ## Mesures finales
 
-Les tableaux ci-dessous sont issus du [résumé JSON](evidence/2026-10-15/shaka/summary.json).
+Les tableaux ci-dessous sont issus du [résumé JSON](../../evidence/2026-10-15/shaka/summary.json).
 P95 par rang supérieur ; n=12 en lecture/après seek par couple moteur/navigateur,
 donc **P95=max avec cet effectif**. Statistiques descriptives, pas une estimation
 robuste du comportement rare en production.

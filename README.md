@@ -219,6 +219,8 @@ Les tests multimédias et navigateur nécessitent parfois la génération préal
 
 ## 📚 Documentation
 
+L'**index thématique complet** de la documentation (démarrer, architecture, média, sécurité, administration, extensions, player, tests, archives) se trouve dans [`docs/README.md`](docs/README.md).
+
 | Sujet | Document |
 | --- | --- |
 | Installation Docker | [Guide Docker](docs/DEPLOYMENT_DOCKER.md) |

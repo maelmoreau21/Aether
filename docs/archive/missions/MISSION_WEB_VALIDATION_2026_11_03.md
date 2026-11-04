@@ -3,7 +3,7 @@
 Validation sur le worktree courant, après le commit `525b61f`, avec les changements
 visuels concurrents conservés. Aucun composant de présentation n'a été réécrit
 pour ce lot. Le nouveau harnais est
-[`scripts/browser-mission-features.cjs`](../scripts/browser-mission-features.cjs).
+[`scripts/browser-mission-features.cjs`](../../../scripts/browser-mission-features.cjs).
 
 ## Résultats réellement obtenus
 

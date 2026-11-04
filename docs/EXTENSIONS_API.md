@@ -20,7 +20,7 @@ la confiance explicite et l’activation séparée du parcours local ci-dessous.
 Contrat indépendant du protocole interne Node, implémenté par le Core existant.
 Ce sous-ensemble permet une extension de propositions de métadonnées, installée
 sans recompiler le serveur. Il ne livre pas les quinze sections de la plateforme.
-Voir `EXTENSIONS_AUDIT.md` pour les écarts et `extensions-v1.openapi.json` pour le
+Voir `docs/archive/audits/EXTENSIONS_AUDIT.md` pour les écarts et `extensions-v1.openapi.json` pour le
 contrat HTTP. SQLite reste le défaut; migrations PostgreSQL équivalentes.
 
 ## Paquet et identité

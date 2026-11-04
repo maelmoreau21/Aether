@@ -146,6 +146,6 @@ Remove-Item Env:MEDIA_BROWSER_EXECUTABLE
 Adapter les chemins aux installations présentes ; aucune installation navigateur
 automatique. Pour Chrome, supprimer MEDIA_BROWSER_EXECUTABLE hérité avant test.
 Versions réellement utilisées : Playwright 1.62.1 et geckodriver 0.37.1.
-Voir [rapports et captures](evidence/2026-10-15/mse/).
-Pour l'écoute physique : suivre [la procédure matérielle](MANUAL_BROWSER_CHECKS.md),
+Voir [rapports et captures](../../evidence/2026-10-15/mse).
+Pour l'écoute physique : suivre [la procédure matérielle](../../MANUAL_BROWSER_CHECKS.md),
 puis répéter EN/FR en lecture/pause/après seek sur `/mse` ; résultats humains NT.

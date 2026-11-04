@@ -39,7 +39,7 @@
   Core est traité explicitement dans le harnais ; vérification Rust ciblée réussie.
 - Contrats et preuves : `docs/NOTIFICATIONS.md`, `docs/RECOMMENDATIONS.md`,
   `docs/OPENSUBTITLES.md`, `docs/CHAPTER_IMAGES.md` et
-  `docs/MISSION_CORE_VALIDATION_2026_11_03.md`.
+  `docs/archive/missions/MISSION_CORE_VALIDATION_2026_11_03.md`.
 - Le multi-Core reste expérimental : canaux/propriété Nodes, dispatch,
   fencing de tous les effets, mutations d'extensions, fichiers partagés et
   OIDC derrière répartiteur restent ouverts. Le nouveau lease protège la
@@ -106,7 +106,7 @@ Les notes ci-dessous sont historiques et ne remplacent pas cet état courant.
   copie de paquets AV1/Opus, huit canaux et leases du cache réussis. Chrome/Core/
   SQLite : MP4 puis MKV après redémarrage, VF/VO/PCM/seek/pause/progression/sous-titres
   réussis (33,09 s). Compose validés par config seulement. Fmt/diff/Clippy stricts.
-- Rapport et commandes : `docs/PLAYER_PLAYBACK_AUDIT.md`. NAS/4K réel, autres
+- Rapport et commandes : `docs/archive/audits/PLAYER_PLAYBACK_AUDIT.md`. NAS/4K réel, autres
   navigateurs, longue durée et restitution matérielle multicanal restent à vérifier.
 
 ## 21 octobre 2026 — Navigation par bibliothèque, éditeur d’images et réactivité

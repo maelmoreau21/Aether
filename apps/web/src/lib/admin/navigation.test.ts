@@ -15,10 +15,10 @@ describe('administration task navigation', () => {
 });
 
 describe('administration grouping', () => {
-  it('keeps every historical section reachable behind one of the eleven entries', async () => {
+  it('keeps every historical section and native statistics reachable', async () => {
     const { adminEntries, adminEntryFor } = await import('./navigation');
-    expect(adminEntries).toHaveLength(11);
-    for (const hash of ['#overview', '#general-section', '#network-section', '#libraries-section', '#artwork-section', '#trickplay-section', '#nodes-section', '#avatars-section', '#users-section', '#groups-section', '#api-keys-section', '#tasks-section', '#backups-section', '#extensions-section']) {
+    expect(adminEntries).toHaveLength(12);
+    for (const hash of ['#overview', '#statistics-section', '#general-section', '#network-section', '#libraries-section', '#artwork-section', '#trickplay-section', '#nodes-section', '#avatars-section', '#users-section', '#groups-section', '#api-keys-section', '#tasks-section', '#backups-section', '#extensions-section']) {
       expect(parseAdminHash(hash).section).toBe(hash);
       expect(adminEntryFor(hash)).toBeDefined();
     }

@@ -77,7 +77,7 @@ Preuves : `evidence/2026-10-15/catalogue/report.json`, et sous-dossiers
 ne mesure pas un catalogue réel de 72 médias. Aucun nouveau résultat
 Edge/Firefox/Safari ni nouvelle expérience P0 n'est revendiqué.
 
-Les commandes de build/serveur restent celles de `P1_WEB_INTEGRATION.md`.
+Les commandes de build/serveur restent celles de `docs/archive/milestones/P1_WEB_INTEGRATION.md`.
 Les résultats sont locaux, sans CI distante, preuve NAS, catalogue personnel,
 charge, films longs ou client mobile physique. La pagination seule ne démontre
 pas une capacité de catalogue ou de lectures simultanées.

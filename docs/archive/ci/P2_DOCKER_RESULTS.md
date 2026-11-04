@@ -2,7 +2,7 @@
 
 **Résultat : les deux modes passent sur des conteneurs Linux réels.** 86 contrôles du banc final réussis, médias synthétiques uniquement, volumes jetables supprimés après réussite. Aucun commit, push, publication d’image ou accès au NAS.
 
-Preuves brutes : [avant](evidence/2026-10-17/p2-hardening/before.json), [après](evidence/2026-10-17/p2-hardening/after.json), [Chrome distribué](evidence/2026-10-17/p2-hardening/browser-distributed/browser.json), [Chrome standalone](evidence/2026-10-17/p2-hardening/browser-standalone/browser.json). Les IDs des images finales figurent dans le rapport après.
+Preuves brutes : [avant](../../evidence/2026-10-17/p2-hardening/before.json), [après](../../evidence/2026-10-17/p2-hardening/after.json), [Chrome distribué](../../evidence/2026-10-17/p2-hardening/browser-distributed/browser.json), [Chrome standalone](../../evidence/2026-10-17/p2-hardening/browser-standalone/browser.json). Les IDs des images finales figurent dans le rapport après.
 
 ## Vérifications réellement exécutées
 
@@ -19,12 +19,12 @@ Preuves brutes : [avant](evidence/2026-10-17/p2-hardening/before.json), [après]
 
 Qualité : `cargo fmt --check` et Clippy workspace/all-features/all-targets avec `-D warnings` passent. `cargo test --locked --workspace --all-features` : **124 réussis, 0 échec, 7 ignorés**. Le test TLS explicite est ensuite exécuté : **4/4 réussis**. Les cinq anciens tests navigateur Rust restent ignorés ; ils ne sont pas présentés comme exécutés. Le helper bootstrap ignoré est exercé par son test parent. Web : check 0 erreur/avertissement, lint, **33/33 tests**, build statique réussi dans Docker.
 
-Logs : [Rust](evidence/2026-10-17/p2-hardening/rust-tests.log), [Clippy](evidence/2026-10-17/p2-hardening/clippy.log), [HTTPS](evidence/2026-10-17/p2-hardening/https-tests.log), [Web](evidence/2026-10-17/p2-hardening/web-checks.log).
+Logs : [Rust](../../evidence/2026-10-17/p2-hardening/rust-tests.log), [Clippy](../../evidence/2026-10-17/p2-hardening/clippy.log), [HTTPS](../../evidence/2026-10-17/p2-hardening/https-tests.log), [Web](../../evidence/2026-10-17/p2-hardening/web-checks.log).
 
 La même pile et les mêmes IDs d’images ont également passé une seconde fois les
 86 contrôles avec recherche des mots de passe, secrets d’appairage, cookies et
 CSRF émis, et queries de lecture, dans **stdout et stderr** :
-[répétition et audit des journaux](evidence/2026-10-17/p2-hardening/after-log-audit.json).
+[répétition et audit des journaux](../../evidence/2026-10-17/p2-hardening/after-log-audit.json).
 Les tableaux gardent les mesures de la première passe finale, sans sélectionner
 la meilleure valeur entre les deux essais. Deux captures des lecteurs ont aussi
 été inspectées visuellement (film distribué, épisode standalone).
@@ -52,7 +52,7 @@ Octets Docker non compressés, Mo décimaux. Référence standalone : image exis
 
 Le gain Node est réel : environ **275 Mo / 35,5 %**. Les plus gros paquets initiaux sont LLVM (114 610 Kio), ICU (36 170 Kio), flite (27 554 Kio), MFX (27 346 Kio), Mesa DRI (25 254 Kio), Z3 (22 767 Kio). Le runtime copie `ffprobe` et toute sa fermeture de bibliothèques liées ; les pilotes/données non nécessaires au probe sont omis. Bibliothèques liées conservées même lorsqu’elles restent volumineuses. Notices de copyright et licences conservées.
 
-Le binaire `ffprobe` et la liste de démuxeurs ont exactement les mêmes SHA-256 avant/après : [comparaison](evidence/2026-10-17/p2-hardening/probe-comparison.json). Version 5.1.9 Debian, scans AV1+Opus MKV et MP4 réellement passés. Ce jalon ne teste pas le décodage matériel ou tous les codecs possibles. Inventaire des composants de construction dans `/usr/share/media-probe/source-stage-packages.tsv` ; mise à jour des bibliothèques copiées par reconstruction d’image. Aucun gain de taille standalone annoncé.
+Le binaire `ffprobe` et la liste de démuxeurs ont exactement les mêmes SHA-256 avant/après : [comparaison](../../evidence/2026-10-17/p2-hardening/probe-comparison.json). Version 5.1.9 Debian, scans AV1+Opus MKV et MP4 réellement passés. Ce jalon ne teste pas le décodage matériel ou tous les codecs possibles. Inventaire des composants de construction dans `/usr/share/media-probe/source-stage-packages.tsv` ; mise à jour des bibliothèques copiées par reconstruction d’image. Aucun gain de taille standalone annoncé.
 
 ## Scans et latences
 
@@ -115,4 +115,4 @@ Le proxy TLS du banc ne reçoit que les communications internes Core/Nodes. Ses 
 - Linux x86_64 Docker/WSL2 seulement ; pas de preuve ARM64, de longue vidéo, de montée en concurrence, de FFmpeg matériel ou d’écoute audio humaine.
 - Essais intermédiaires corrigés : ancien standalone sans Séries, attentes fixes du bootstrap, noms de champs historiques, assertion logout 200 au lieu de 204. Une compilation Windows simultanée à un exécutable de test a échoué avec accès refusé ; la suite sérialisée a ensuite passé. Les problèmes de placement de tests/lecture partielle relevés par Clippy ont été corrigés.
 
-Prochain petit jalon : exécuter le [guide Synology](DEPLOYMENT_SYNOLOGY.md) sur les machines cibles **après autorisation**, avec certificats et médias de test, sans OIDC ni P3. Le [contrat et les commandes reproductibles](P2_DOCKER_VALIDATION.md) restent la référence technique.
+Prochain petit jalon : exécuter le [guide Synology](../../DEPLOYMENT_SYNOLOGY.md) sur les machines cibles **après autorisation**, avec certificats et médias de test, sans OIDC ni P3. Le [contrat et les commandes reproductibles](P2_DOCKER_VALIDATION.md) restent la référence technique.

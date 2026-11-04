@@ -16,7 +16,7 @@ politique de release vérifie la définition locale et le checkout du SHA dans
 les deux workflows ; il échoue sur les sources antérieures au correctif.
 La validation d'un plan local ne remplace pas les événements GitHub ou une
 construction d'image. Résultats et limites du lot :
-[CI_DOCKER_A01_2026_11_03.md](CI_DOCKER_A01_2026_11_03.md).
+[CI_DOCKER_A01_2026_11_03.md](archive/ci/CI_DOCKER_A01_2026_11_03.md).
 
 ## Préférences mémorisées du scénario scanner — 2 novembre 2026
 
@@ -469,7 +469,7 @@ Actionlint 1.7.12 passe via binaire Windows et via le conteneur Linux utilisé
 par la CI. Les deux `docker compose config --quiet` passent avec secret
 d'appairage jetable ; aucun fichier de configuration contenant un secret réel
 n'a été affiché. Trois images reconstruites ; matrice ffprobe finale 8/8.
-Les commandes Docker/TLS détaillées restent dans [P2 Docker](P2_DOCKER_VALIDATION.md),
+Les commandes Docker/TLS détaillées restent dans [P2 Docker](archive/ci/P2_DOCKER_VALIDATION.md),
 avec les variables `MEDIA_TEST_NODE_IMAGE`, `MEDIA_TEST_CORE_IMAGE` et
 `MEDIA_TEST_STANDALONE_IMAGE` permettant de cibler les tags locaux
 `aether-node:p2-final-qa`, `aether-core:p2-final-qa`, `aether:p2-final-qa`

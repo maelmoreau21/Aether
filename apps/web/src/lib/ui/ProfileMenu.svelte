@@ -43,7 +43,7 @@
     }
   }
 
-  function navigate(event: MouseEvent, destination: 'settings/' | 'admin/libraries/#overview') {
+  function navigate(event: MouseEvent, destination: 'settings/' | 'statistics/' | 'admin/libraries/#overview') {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     panel.hidePopover();
@@ -86,6 +86,9 @@
     </div>
 
     <nav aria-label="Menu profil">
+      <a class="profile-entry" href={resolve('statistics/')} onclick={(event) => navigate(event, 'statistics/')}>
+        <Icon name="clock" size={17} /><span>Mes statistiques</span><Icon name="chevron" size={13} />
+      </a>
       <a class="profile-entry" href={resolve('settings/')} onclick={(event) => navigate(event, 'settings/')}>
         <Icon name="profile" size={17} />
         <span>{$t('profile_settings')}</span>

@@ -17,7 +17,8 @@ const serverTabs: AdminDestination[] = [
 
 export const adminNavigation: { label: string; englishLabel: string; links: AdminEntry[] }[] = [
   { label: 'Serveur', englishLabel: 'Server', links: [
-    { hash: '#overview', label: 'Vue d’ensemble', key: 'admin_nav_overview', icon: 'server' }
+    { hash: '#overview', label: 'Vue d’ensemble', key: 'admin_nav_overview', icon: 'server' },
+    { hash: '#statistics-section', label: 'Statistiques', englishLabel: 'Statistics', icon: 'clock' }
   ] },
   { label: 'Médiathèque', englishLabel: 'Media library', links: [
     { hash: '#libraries-section', label: 'Bibliothèques', key: 'admin_nav_libraries', icon: 'film' },
@@ -56,6 +57,7 @@ export function adminDestinationLabel(link: AdminDestination, translate: (key: L
  * from the section components. Used only by the sidebar settings search.
  */
 export const adminSearchKeywords: Record<string, readonly string[]> = {
+  '#statistics-section': ['Statistiques', 'Collecte', 'Conservation', 'Historique de lecture', 'Audio et sous-titres', 'Temps consommé', 'Exporter en CSV', 'Sessions', 'Musique'],
   '#overview': ['Tableau de bord', 'Qui regarde quoi ?', 'Lecteurs ouverts', 'Indexations en cours', 'Actualiser l’activité', 'Informations techniques', 'Version serveur', 'Versions des nœuds', 'Erreurs des derniers scans'],
   '#libraries-section': ['Ajouter une bibliothèque', 'Actualiser toutes les bibliothèques', 'Scanner la bibliothèque', 'Renommer une bibliothèque', 'Modifier les images', 'Rechercher les métadonnées manquantes', 'Planifier l’actualisation', 'Sources et dossiers', 'Bibliothèque active', 'Dossiers ou motifs à exclure', 'Indexation', 'Actualisation rapide', 'Tout réanalyser', 'Images locales', 'Images des fournisseurs', 'Rotation des affiches', 'Utiliser les fichiers NFO locaux', 'Sous-titres intégrés', 'Fournisseurs et enrichissement', 'Détection d’intro', 'Images des chapitres', 'Téléchargement des sous-titres', 'Surveiller les modifications', 'Ajouter automatiquement aux collections'],
   '#nodes-section': ['Ajouter un Media Node', 'Jeton d’appairage', 'Jeton d’invitation', 'Jeton d’amorçage statique', 'Appairage direct entrant', 'Configuration Docker Compose', 'URL interne du Node', 'URL publique de streaming direct', 'Reconnecter', 'Renouveler le secret', 'Révoquer un Media Node', 'Dossiers multimédias'],

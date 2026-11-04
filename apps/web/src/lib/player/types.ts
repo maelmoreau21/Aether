@@ -55,6 +55,7 @@ export interface Media {
 }
 export interface PlaybackState { position: number; duration: number; paused: boolean; volume: number; speed: number }
 export interface Player {
+  playbackInfo?(): import('../statistics/collector').PlaybackInfo;
   setStatusListener?(listener:(message:string)=>void):void;
   load(media: Media, initialAudioTrackId?: string, initialPosition?: number | Promise<number>): Promise<void>;
   play(): Promise<void>;

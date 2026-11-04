@@ -51,6 +51,7 @@ pub mod progress;
 mod provider_download;
 pub mod recommendations;
 pub mod scans;
+pub mod statistics;
 pub mod trickplay;
 pub mod user_media_policy;
 
@@ -236,6 +237,7 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(libraries::router(auth.clone(), root.clone()))
             .merge(nodes::router(auth.clone(), replay_window))
             .merge(progress::router(auth.clone()))
+            .merge(statistics::router(auth.clone()))
             .merge(feedback::router(auth.clone()))
             .merge(recommendations::router(auth.clone()))
             .merge(notifications::router(auth.clone()))

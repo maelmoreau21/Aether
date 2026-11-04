@@ -88,7 +88,7 @@ une piste/ langue incompatible empêche le démarrage. Pas de scan à la demande
 La page garde les quatre sources initiales dans son menu et propose un choix
 FR/EN par remux pour MKV/MP4 préparés. L'URL change réellement ; elle restaure
 la position et l'état lecture/pause. Cela ne constitue pas une sélection
-interne dans le conteneur. Contrat expérimental détaillé dans `P0C_AUDIO_SWITCHING.md`.
+interne dans le conteneur. Contrat expérimental détaillé dans `docs/archive/player-experiments/P0C_AUDIO_SWITCHING.md`.
 
 `playback_status=unverified-on-client` signifie que le serveur ne conclut jamais
 à la compatibilité depuis le probe. Les résultats observés sont consignés dans
@@ -142,7 +142,7 @@ API indique une demande, pas la preuve du signal ; celle-ci dépend du testPCM.
 
 ### Expérience de récupération après seek
 
-GET /audio-seek-policy.js sert uniquement le contrôleur fixe du banc Shaka (JavaScript, même protection Host/Origin/CSP que le banc ; origine étrangère403). Aucun chemin fourni par le client. Option désactivée par défaut dans /shaka. État idle/recovering/error, erreur terminale sans boucle ; rechargement de la présentation après erreur. Le statut de récupération API ne prouve pas le signal audio. Voir P0C_AUDIO_SEEK_RECOVERY.md.
+GET /audio-seek-policy.js sert uniquement le contrôleur fixe du banc Shaka (JavaScript, même protection Host/Origin/CSP que le banc ; origine étrangère403). Aucun chemin fourni par le client. Option désactivée par défaut dans /shaka. État idle/recovering/error, erreur terminale sans boucle ; rechargement de la présentation après erreur. Le statut de récupération API ne prouve pas le signal audio. Voir docs/archive/player-experiments/P0C_AUDIO_SEEK_RECOVERY.md.
 
 ## P1 local — contrat ajouté
 
@@ -157,7 +157,7 @@ Les URLs de contenu démo réutilisent GET/HEAD /api/v1/assets/{id}/content, Ran
 GET/HEAD /api/v1/demo/subtitles/{name} : fr-full.vtt/fr-forced.vtt/en-full.vtt,
 text/vtt UTF8, autres noms404. Ressource préparée absente404. POST405, origine
 tierce403. Ce contrat localhost sans authentification ne permet aucune bibliothèque
-réelle. Voir P1_WEB_INTEGRATION.md pour tests et limites.
+réelle. Voir docs/archive/milestones/P1_WEB_INTEGRATION.md pour tests et limites.
 
 ## P1 — Catalogue de fixtures (15 octobre 2026)
 
@@ -190,7 +190,7 @@ autorisée, scan ou création de bibliothèque n'est ajouté.
 `fixture-film` associe explicitement MKV et MP4 ; `fixture-series` regroupe une
 saison et `fixture-episode-1` réutilisant la même mire. Ces IDs sont fixes,
 pas issus d'une base, d'une fusion de titres ou d'un fournisseur de métadonnées.
-Voir `CATALOGUE_P1.md` pour les parcours, tests et prérequis de sécurité.
+Voir `docs/archive/milestones/CATALOGUE_P1.md` pour les parcours, tests et prérequis de sécurité.
 
 Validation locale : suite Rust 15 tests réussis ; parcours du catalogue sous
 Chrome 155.0.8059.40 Windows headless, états vides injectés, 503/réessai, fiche
@@ -254,7 +254,7 @@ Les réponses d'appairage, rotation et autres réponses de contrôle incluent
 n'est pas acceptée. Les clients internes ne suivent pas les redirections.
 Les capacités de lecture publique exigent HTTPS, sauf pour les origines loopback
 des tests locaux. Les URL historiques non conformes retombent sur le relais.
-Voir [le contrat détaillé et les commandes](P2_DOCKER_VALIDATION.md).
+Voir [le contrat détaillé et les commandes](archive/ci/P2_DOCKER_VALIDATION.md).
 # Extension pistes externes et progression — 18 octobre 2026
 
 - `GET /api/v1/media/{asset}` ajoute `workId`, les `subtitles` externes
@@ -278,7 +278,7 @@ Voir [le contrat détaillé et les commandes](P2_DOCKER_VALIDATION.md).
   Succès `200` avec nouvel état/révision ; conflit `409`, entrée invalide `422`,
   ressource interdite `403`. L'utilisateur est issu de la session, jamais du JSON.
 
-Contrat et limites : [P3/P4](P3_P4_FEATURES.md).
+Contrat et limites : [P3/P4](archive/milestones/P3_P4_FEATURES.md).
 
 
 ## Flux progressifs — 24 octobre 2026
@@ -519,3 +519,10 @@ L'envoi multipart `POST /api/v1/admin/avatar-packs/upload` accepte soit `name`
 pour créer une collection, soit `packId` pour ajouter à une collection native
 existante, avec les champs `images`. Les deux champs sont exclusifs ; une
 collection est limitée à 500 images. Session administrateur et CSRF requis.
+
+## Statistiques de lecture facultatives
+
+Le contrat natif `/api/v1/playback/sessions`, les vues administrateur et
+personnelles `/api/v1/{admin,account}/statistics`, la conservation et les règles
+de calcul sont documentés dans [Statistiques](STATISTICS.md). La collecte est
+désactivée par défaut ; elle n'altère pas les API de progression ou de feedback.

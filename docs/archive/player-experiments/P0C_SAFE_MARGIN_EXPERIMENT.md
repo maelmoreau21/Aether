@@ -81,7 +81,7 @@ node scripts/browser-safe-margin.cjs
 ```
 
 Rejouer avec channel=msedge/firefox et leur chemin MEDIA_BROWSER_EXECUTABLE
-documenté dans P0C_MSE_EXPERIMENT.md ; un dossier neuf est obligatoire.
+documenté dans docs/archive/player-experiments/P0C_MSE_EXPERIMENT.md ; un dossier neuf est obligatoire.
 Les variables MEDIA_SAFE_ACTIVE_ROUNDS, MEDIA_SAFE_OTHER_ROUNDS et
 MEDIA_SAFE_MARGINS permettent un pilote explicite ; valeurs finales par défaut
 10/2 et 0,0.5,1,2,4. Ne pas confondre pilote et matrice complète.
@@ -113,9 +113,9 @@ inclassable dans ces336 observations. Les84 probes à marge0 correspondent
 garantie sur une session longue. Les420 snapshots après500ms de lecture
 confirment le signal demandé avant ce seek.
 
-[Résumé complet et par sens](evidence/2026-10-15/safe-margin/summary.json),
-[signaux après observation](evidence/2026-10-15/safe-margin/post-observation-signals.json),
-[preuves brutes et régressions](evidence/2026-10-15/safe-margin/).
+[Résumé complet et par sens](../../evidence/2026-10-15/safe-margin/summary.json),
+[signaux après observation](../../evidence/2026-10-15/safe-margin/post-observation-signals.json),
+[preuves brutes et régressions](../../evidence/2026-10-15/safe-margin).
 
 Dans les JSONL, passed désigne l’aboutissement de la commutation et du marqueur,
 avec invariants de source/pause. Le probe arrière a son propre statut :
@@ -332,4 +332,4 @@ Seul le script expérimental a changé ; syntaxeJS vérifiée, suite Rust non
 relancée car aucun code Rust/serveur modifié. Tests précédents non effacés.
 
 
-Suite : voir P0C_AUDIO_SEEK_RECOVERY.md. Politique opt-in intégrée, mais interruptions et échecs persistants ; récupération non fiable et désactivée par défaut. Les conclusions antérieures ponctuelles ne constituent pas une validation du contrôleur.
+Suite : voir docs/archive/player-experiments/P0C_AUDIO_SEEK_RECOVERY.md. Politique opt-in intégrée, mais interruptions et échecs persistants ; récupération non fiable et désactivée par défaut. Les conclusions antérieures ponctuelles ne constituent pas une validation du contrôleur.

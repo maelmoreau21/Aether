@@ -15,7 +15,7 @@ Redemarrer puis verifier l'identite et l'ecriture en tant qu'utilisateur normal
 dans /data, /data/plugins, /data/preparation-cache et /backups. Si un refus reste
 present apres alignement, examiner les ACL DSM des volumes concernes.
 
-> Mise à jour sécurité P2 du 17 octobre : lire [le contrat et les preuves](P2_DOCKER_VALIDATION.md).
+> Mise à jour sécurité P2 du 17 octobre : lire [le contrat et les preuves](archive/ci/P2_DOCKER_VALIDATION.md).
 > Les anciennes affirmations de sécurité distribuée ne prouvent pas HTTPS entre machines.
 
 # Déploiement d'Aether sur Synology DS1522+ (Standalone & Distribué P2)
@@ -53,7 +53,7 @@ sudo chmod 0750 /volume1/docker/aether/data /volume1/docker/aether/backups
 
 ### 2.2 Construction et lancement
 
-Copiez le dépôt sur le NAS (ex. `/volume1/docker/aether/src`), créez votre fichier `.env` à partir de [`.env.example`](file:///c:/Users/Mael/Documents/GitHub/Aether/.env.example) :
+Copiez le dépôt sur le NAS (ex. `/volume1/docker/aether/src`), créez votre fichier `.env` à partir de [`.env.example`](../.env.example) :
 
 ```dotenv
 MEDIA_PUBLIC_URL=https://media.votre-domaine.lan

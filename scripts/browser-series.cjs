@@ -439,8 +439,8 @@ fs.mkdirSync(out, {recursive: true});
     assert.match(await page.locator('.profile-trigger').textContent(), /series-user-b/);
 
     // Navigate via SPA links to Series -> Browser Series (no full page reload)
-    await page.getByRole('banner').getByRole('button',{name:'Bibliothèques',exact:true}).click();
-    await page.getByRole('dialog',{name:'Bibliothèques'}).getByRole('link',{name:/Séries Navigateur/}).click();
+    // The library dialog was replaced by per-kind links in the main navigation; a single series library opens directly.
+    await page.getByRole('navigation',{name:'Navigation principale',exact:true}).getByRole('link',{name:'Séries',exact:true}).click();
     await card.waitFor();
     const mediaCallsBeforeDetailB = requestedMediaUrls.length;
     await card.click();

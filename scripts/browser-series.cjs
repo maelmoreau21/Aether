@@ -441,6 +441,7 @@ fs.mkdirSync(out, {recursive: true});
     // Navigate via SPA links to Series -> Browser Series (no full page reload)
     // The library dialog was replaced by per-kind links in the main navigation; a single series library opens directly.
     await page.getByRole('navigation',{name:'Navigation principale',exact:true}).getByRole('link',{name:'Séries',exact:true}).click();
+    await page.waitForURL('**/app/series/**');
     await card.waitFor();
     const mediaCallsBeforeDetailB = requestedMediaUrls.length;
     await card.click();

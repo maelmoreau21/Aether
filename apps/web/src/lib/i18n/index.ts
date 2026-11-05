@@ -303,7 +303,7 @@ const translations = {
     accessible_libraries: 'Bibliothèques accessibles',
     add_to_playlist: 'Ajouter à une playlist',
     no_playlists: 'Aucune playlist existante.',
-    new_playlist: 'Nom de la liste',
+    new_playlist: 'Nouvelle liste',
     more_actions: 'Plus d’actions et informations',
     media_options: 'Options et informations du média',
     watch_party: 'Séance Watch Party',

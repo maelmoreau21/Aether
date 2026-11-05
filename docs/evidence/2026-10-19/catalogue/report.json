@@ -1,5 +1,5 @@
 {
-  "browser": "156.0.8078.48",
+  "browser": "156.0.8078.80",
   "os": "10.0.26300",
   "headless": true,
   "results": {
@@ -14,9 +14,10 @@
     },
     "decodedVideoFrames": 7,
     "episode1Playback": true,
-    "episodeLaunchMs": 948,
+    "episodeLaunchMs": 1253,
     "realChapters": true,
     "seekAndPause": true,
+    "upNextCard": true,
     "simplePlaybackControls": {
       "monoVersionSelectorHidden": true,
       "monoAudioHidden": true,
@@ -34,9 +35,7 @@
     "filmPresentation": true,
     "accountSwitchCacheIsolation": true,
     "delayedLogoutDoesNotWipeNewLoginCookie": true,
-    "concurrentLoginsSequencedCorrectly": true,
-    "personalPasswordAndDeviceRevocation": true,
-    "cspErrors": []
+    "concurrentLoginsSequencedCorrectly": true
   },
-  "passed": true
+  "failure": "page.waitForURL: Timeout 30000ms exceeded.\n=========================== logs ===========================\nwaiting for navigation to \"**/app/login/**\" until \"load\"\n============================================================\n    at C:\\Users\\Mael\\Documents\\GitHub\\Aether\\Aether\\scripts\\browser-series.cjs:677:106"
 }

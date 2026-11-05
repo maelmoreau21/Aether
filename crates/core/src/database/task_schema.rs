@@ -33,11 +33,15 @@ pub(super) async fn allow_trickplay(
             .and_then(|(_, rest)| rest.split_once("\n);"))
             .map(|(columns, _)| format!("CREATE TABLE durable_tasks_trickplay ({columns}\n);"))
             .ok_or_else(|| sqlx::Error::Protocol("Missing current task schema".into()))?;
-        sqlx::raw_sql(sqlx::AssertSqlSafe(&*table)).execute(&mut **tx).await?;
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*table))
+            .execute(&mut **tx)
+            .await?;
         sqlx::raw_sql("INSERT INTO durable_tasks_trickplay SELECT * FROM durable_tasks; DROP TABLE durable_tasks; ALTER TABLE durable_tasks_trickplay RENAME TO durable_tasks;")
             .execute(&mut **tx).await?;
         for definition in definitions {
-            sqlx::raw_sql(sqlx::AssertSqlSafe(&*definition)).execute(&mut **tx).await?;
+            sqlx::raw_sql(sqlx::AssertSqlSafe(&*definition))
+                .execute(&mut **tx)
+                .await?;
         }
         // No media/catalogue tables are rewritten. Dependencies, automation links
         // and their FK targets keep the same table name and original task IDs.

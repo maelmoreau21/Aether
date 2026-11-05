@@ -125,7 +125,7 @@ async fn admin_account_lifecycle_authorization_and_revocation() {
         .find(|user| user["id"] == user_id)
         .unwrap();
     assert!(viewer["lastSeenAt"].is_null());
-    assert_eq!(viewer["hasAvatar"], false);
+    assert_eq!(viewer["hasAvatar"], true);
     let avatar_path = format!("/api/v1/admin/users/{user_id}/avatar");
     assert_eq!(
         request(&app, &avatar_path, "GET", "", "", json!(null))
@@ -133,21 +133,18 @@ async fn admin_account_lifecycle_authorization_and_revocation() {
             .status(),
         StatusCode::UNAUTHORIZED
     );
-    assert_eq!(
-        request(&app, &avatar_path, "GET", &cookie, "", json!(null))
-            .await
-            .status(),
-        StatusCode::NOT_FOUND
-    );
+    let initial_avatar = request(&app, &avatar_path, "GET", &cookie, "", json!(null)).await;
+    assert_eq!(initial_avatar.status(), StatusCode::OK);
+    assert_eq!(initial_avatar.headers()["content-type"], "image/svg+xml");
     let avatar_data = vec![137u8, 80, 78, 71];
     let asset = store
         .assets()
         .put_bytes(&avatar_data, "image/png")
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?)")
-        .bind(&user_id)
+    media_poc::database::query("UPDATE user_avatars SET sha256=? WHERE user_id=?")
         .bind(&asset.sha256)
+        .bind(&user_id)
         .execute(store.pool())
         .await
         .unwrap();

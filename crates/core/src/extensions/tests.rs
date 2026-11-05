@@ -214,7 +214,7 @@ fn worker_receives_only_the_selected_extensions_configuration() {
 }
 
 #[tokio::test]
-async fn test_bootstrap_essential_plugins_installs_tmdb_and_imdb_enabled() {
+async fn explicit_plugin_installation_and_choices_survive_reopening() {
     let root = tempfile::tempdir().unwrap();
     let store = crate::identity::IdentityStore::open(&root.path().join("core.sqlite3"))
         .await
@@ -225,7 +225,18 @@ async fn test_bootstrap_essential_plugins_installs_tmdb_and_imdb_enabled() {
         .unwrap();
     assert_eq!(initial_count, 0);
 
-    bootstrap_essential_plugins(&store).await;
+    for bytes in [
+        include_str!("../../embedded_plugins/tmdb-0.1.1.package.json"),
+        include_str!("../../embedded_plugins/imdb-0.1.1.package.json"),
+    ] {
+        install_internal_with_key(
+            &store,
+            serde_json::from_str(bytes).unwrap(),
+            include_str!("../../embedded_plugins/publisher-public.txt").trim(),
+        )
+        .await
+        .unwrap();
+    }
 
     let tmdb_row: Option<(i64, i64)> =
         crate::database::query_as("SELECT enabled, all_libraries FROM extensions WHERE id='tmdb'")
@@ -249,7 +260,10 @@ async fn test_bootstrap_essential_plugins_installs_tmdb_and_imdb_enabled() {
         .execute(store.pool())
         .await
         .unwrap();
-    bootstrap_essential_plugins(&store).await;
+    drop(store);
+    let store = crate::identity::IdentityStore::open(&root.path().join("core.sqlite3"))
+        .await
+        .unwrap();
     let choices: Vec<(String, i64, i64)> =
         query_as("SELECT id, enabled, all_libraries FROM extensions ORDER BY id")
             .fetch_all(store.pool())

@@ -160,7 +160,11 @@ async fn enqueue_spec(
             category,
             "scan" | "analyze" | "prepare" | "image" | "trickplay"
         )
-        || !matches!(width, 160 | 240 | 320 | 640 | 1280)
+        || if category == "trickplay" {
+            !(160..=1920).contains(&width)
+        } else {
+            !matches!(width, 160 | 240 | 320 | 640 | 1280)
+        }
         || target.len() > 128
         || component.len() > 64
         || (category == "scan" && (!target.is_empty() || !component.is_empty() || width != 640))

@@ -154,6 +154,13 @@ pub struct NodeCommandEnvelope {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrickplayTaskOptions {
+    pub interval_ms: u64,
+    pub quality: u8,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NodeTaskRequest {
     pub run_id: String,
     pub node_id: NodeId,
@@ -162,6 +169,8 @@ pub struct NodeTaskRequest {
     pub target_id: String,
     pub component: Option<String>,
     pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trickplay: Option<TrickplayTaskOptions>,
     pub core_base_url: String,
 }
 

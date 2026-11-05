@@ -110,6 +110,16 @@ impl AuthState {
         }
         let secure = scheme == "https";
         let origin = origin.trim_end_matches('/').to_owned();
+        if let Err(error) = crate::avatars::defaults::initialize(&store).await {
+            // A full/unavailable asset volume must not prevent recovery login.
+            // The marker is committed with the images, so a later start retries.
+            eprintln!("Default avatar gallery initialization failed: {error}");
+        }
+        if let Err(error) = crate::avatars::defaults::assign_missing(&store).await {
+            // The read endpoint still serves an in-memory local fallback, even
+            // if the asset volume cannot currently persist an assignment.
+            eprintln!("Mandatory avatar assignment failed: {error}");
+        }
         let dummy_hash = tokio::task::spawn_blocking(|| {
             let memory_kib = crate::identity::argon2_memory_cost_kib();
             let params =

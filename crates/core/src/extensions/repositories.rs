@@ -212,6 +212,36 @@ fn checked_url(raw: &str, maximum: usize) -> Result<url::Url, Error> {
 fn safe_url(raw: &str) -> Result<url::Url, Error> {
     checked_url(raw, 2048)
 }
+/// Accept the public GitHub pages administrators copy from their browser, while
+/// storing the actual JSON endpoint. Package and redirect URL rules are unchanged.
+fn catalogue_url(raw: &str) -> Result<url::Url, Error> {
+    let url = safe_url(raw)?;
+    if url.host_str() != Some("github.com") || url.query().is_some() {
+        return Ok(url);
+    }
+    let segments: Vec<_> = url.path().trim_matches('/').split('/').collect();
+    let (owner, repository, branch, path) = match segments.as_slice() {
+        [owner, repository] => (
+            *owner,
+            *repository,
+            "main",
+            "repository/manifest.json".into(),
+        ),
+        [owner, repository, "tree", branch] => (
+            *owner,
+            *repository,
+            *branch,
+            "repository/manifest.json".into(),
+        ),
+        [owner, repository, "blob", branch, path @ ..] if !path.is_empty() => {
+            (*owner, *repository, *branch, path.join("/"))
+        }
+        _ => return Ok(url),
+    };
+    safe_url(&format!(
+        "https://raw.githubusercontent.com/{owner}/{repository}/{branch}/{path}"
+    ))
+}
 /// GitHub serves release assets through a redirect to its content hosts. Any
 /// other cross-host redirect is refused; every hop is validated again.
 fn redirect_allowed(from: &url::Url, to: &url::Url) -> bool {
@@ -818,7 +848,7 @@ async fn add(
 ) -> Result<(StatusCode, Json<Value>), Error> {
     admin(&auth, &headers, true).await?;
     let name = input.name.trim();
-    let url = safe_url(input.url.trim())?.to_string();
+    let url = catalogue_url(input.url.trim())?.to_string();
     if name.is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_repository_name"));
     }
@@ -1155,6 +1185,36 @@ mod tests {
     }
     async fn body(response: Response) -> Value {
         serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+    }
+
+    #[test]
+    fn github_catalogue_links_keep_the_selected_branch() {
+        for (page, endpoint) in [
+            (
+                "https://github.com/owner/plugins",
+                "https://raw.githubusercontent.com/owner/plugins/main/repository/manifest.json",
+            ),
+            (
+                "https://github.com/owner/plugins/tree/develop",
+                "https://raw.githubusercontent.com/owner/plugins/develop/repository/manifest.json",
+            ),
+            (
+                "https://github.com/owner/plugins/blob/develop/repository/manifest.json",
+                "https://raw.githubusercontent.com/owner/plugins/develop/repository/manifest.json",
+            ),
+            (
+                "https://raw.githubusercontent.com/owner/plugins/develop/repository/manifest.json",
+                "https://raw.githubusercontent.com/owner/plugins/develop/repository/manifest.json",
+            ),
+            (
+                "https://catalogue.example.com/custom.json",
+                "https://catalogue.example.com/custom.json",
+            ),
+        ] {
+            assert_eq!(catalogue_url(page).unwrap().as_str(), endpoint);
+        }
+        assert!(catalogue_url("http://github.com/owner/plugins/tree/develop").is_err());
+        assert!(catalogue_url("https://user:secret@github.com/owner/plugins").is_err());
     }
 
     #[test]

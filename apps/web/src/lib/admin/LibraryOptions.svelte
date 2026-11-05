@@ -1,89 +1,91 @@
 <script lang="ts">
   import type { LibraryOptions } from './types';
+  import { recommendedLibraryOptions } from './types';
   import AdvancedLibraryOptions from './AdvancedLibraryOptions.svelte';
-  import { t } from '../i18n';
-  let { options = $bindable(), kind, section = 'metadata' }: { options: LibraryOptions; kind: string; section?: 'metadata' | 'indexing' | 'advanced' } = $props();
-  const images = [
-    ['fetchPoster', 'Affiche', 'Portrait · fiche et catalogue'],
-    ['fetchBackdrop', 'Fond', 'Paysage · arrière-plan'],
-    ['fetchLogo', 'Logo transparent', 'Identité visuelle du titre'],
-    ['fetchThumb', 'Miniature', 'Aperçu du média'],
-    ['fetchBanner', 'Bannière', 'Illustration panoramique'],
-    ['fetchDisc', 'Disque', 'Illustration du disque']
-  ] as const;
+  let { options = $bindable(), kind, excludedPatterns = $bindable('') }: { options: LibraryOptions; kind: string; excludedPatterns?: string } = $props();
+  const languages = [{ value: 'fr', label: 'Français' }, { value: 'fr-CA', label: 'Français (Canada)' }, { value: 'en', label: 'Anglais' }, { value: 'de', label: 'Allemand' }, { value: 'es', label: 'Espagnol' }, { value: 'it', label: 'Italien' }, { value: 'pt', label: 'Portugais' }, { value: 'ja', label: 'Japonais' }, { value: 'ko', label: 'Coréen' }, { value: 'zh', label: 'Chinois' }];
+  const images = [['fetchPoster', 'Affiches'], ['fetchBackdrop', 'Fonds'], ['fetchLogo', 'Logos'], ['fetchThumb', 'Miniatures'], ['fetchBanner', 'Bannières'], ['fetchDisc', 'Disques']] as const;
+  let presetApplied = $state(false);
+  let customLanguage = $state(false);
 </script>
 
 <div class="library-options">
-  {#if section === 'metadata'}
-    <section class="option-section" aria-labelledby="metadata-options-heading">
-      <h3 id="metadata-options-heading">{$t('metadata_language_section')}</h3>
-      <p>{$t('library_options_intro')}</p>
-      <div class="language-grid">
-        <div><label for="library-metadata-language">{$t('preferred_language')}</label><input id="library-metadata-language" bind:value={options.preferredMetadataLanguage} required minlength="2" maxlength="35" placeholder="fr" aria-describedby="language-hint" /><p id="language-hint" class="hint">{$t('language_code_hint')}</p></div>
-        <div><label for="library-metadata-country">{$t('classification_country')}</label><input id="library-metadata-country" bind:value={options.metadataCountryCode} required pattern={'[A-Z]{2}'} maxlength="2" placeholder="FR" aria-describedby="country-hint" /><p id="country-hint" class="hint">{$t('country_code_hint')}</p></div>
-      </div>
-      {#if kind !== 'music'}<label class="toggle-row"><input type="checkbox" bind:checked={options.readLocalNfo} aria-label={$t('local_nfo')} /><span><strong>{$t('local_nfo')}</strong><small>{$t('local_nfo_hint')}</small></span></label>
-      {:else}<p>{$t('music_embedded_tags')}</p>{/if}
-    </section>
-    {#if kind !== 'music'}
-      <section class="option-section" aria-labelledby="local-images-heading"><h3 id="local-images-heading">{$t('local_images')}</h3><p>{$t('local_images_note')}</p>
-        <div class="image-grid">{#each images as [key, label, description] (key)}<label class="image-option"><input type="checkbox" bind:checked={options[key]} aria-label={label} /><span><strong>{label}</strong><small>{description}</small></span></label>{/each}</div>
-      </section>
-      <section class="option-section" aria-labelledby="image-quality-heading">
-        <h3 id="image-quality-heading">{$t('provider_images')}</h3>
-        <p>{$t('provider_images_note')}</p>
-        <label class="toggle-row"><input type="checkbox" bind:checked={options.artworkDeduplicate} /><span><strong>{$t('deduplicate_artwork')}</strong><small>{$t('deduplicate_artwork_hint')}</small></span></label>
-        {#if options.artworkDeduplicate}<div><label for="artwork-similarity">{$t('similarity_tolerance')}</label><input id="artwork-similarity" type="number" min="0" max="16" step="1" required bind:value={options.artworkSimilarity} /><p class="hint">{$t('artwork_size_note')}</p></div>{/if}
-        <div class="language-grid"><div><label for="artwork-min-width">{$t('poster_min_width')}</label><input id="artwork-min-width" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterWidth} /></div><div><label for="artwork-min-height">{$t('poster_min_height')}</label><input id="artwork-min-height" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterHeight} /></div></div>
-        <p class="hint">{$t('artwork_size_note')}</p>
-      </section>
-      <section class="option-section" aria-labelledby="artwork-rotation-heading"><h3 id="artwork-rotation-heading">{$t('artwork_rotation_section')}</h3>
-        <p>{$t('artwork_rotation_note_library')}</p>
-      </section>
+  <header><h3>Réglages de la bibliothèque</h3><p>Les nouvelles bibliothèques sont préconfigurées. Vous pouvez conserver ces choix ou les adapter.</p></header>
+  <div class="essentials">
+    <label for="library-metadata-language">Langue des métadonnées</label>
+    {#if customLanguage}
+      <input id="library-metadata-language" bind:value={options.preferredMetadataLanguage} required minlength="2" maxlength="35" placeholder="fr-CA" />
+      <button type="button" class="language-back" onclick={() => customLanguage = false}>Choisir dans la liste</button>
+    {:else}
+      <select id="library-metadata-language" value={options.preferredMetadataLanguage} onchange={event => { if (event.currentTarget.value === '_custom') customLanguage = true; else options.preferredMetadataLanguage = event.currentTarget.value; }}>
+        {#if !languages.some(language => language.value === options.preferredMetadataLanguage)}<option value={options.preferredMetadataLanguage}>{options.preferredMetadataLanguage}</option>{/if}
+        {#each languages as language (language.value)}<option value={language.value}>{language.label}</option>{/each}
+        <option value="_custom">Autre langue…</option>
+      </select>
     {/if}
-  {:else if section === 'indexing'}
+    <label class="toggle-row"><span><strong>Suivre les changements des dossiers</strong><small>Les nouveaux médias sont analysés automatiquement.</small></span><input type="checkbox" role="switch" bind:checked={options.realtimeMonitoring} /></label>
     {#if kind !== 'music'}
-      <section class="option-section" aria-labelledby="local-scan-options-heading"><h3 id="local-scan-options-heading">{$t('import_playback')}</h3>
-        <label class="toggle-row"><input type="checkbox" bind:checked={options.preferEmbeddedTitles} aria-label={$t('prefer_embedded_titles')} /><span><strong>{$t('prefer_embedded_titles')}</strong><small>{$t('prefer_embedded_titles_hint')}</small></span></label>
-        <label for="embedded-subtitles">{$t('embedded_subtitles')}</label><select id="embedded-subtitles" bind:value={options.embeddedSubtitlePolicy}><option value="allow_all">{$t('all_embedded_subtitles')}</option><option value="allow_text">{$t('text_subtitles_only')}</option><option value="block_all">{$t('no_embedded_subtitles')}</option></select>
-        <p class="hint">{$t('embedded_subtitles_note')}</p>
-      </section>
-      <section class="option-section" aria-labelledby="local-refresh-heading"><h3 id="local-refresh-heading">{$t('local_refresh')}</h3>
-        <label for="library-metadata-refresh">{$t('reread_local_metadata')}</label><select id="library-metadata-refresh" bind:value={options.automaticRefreshIntervalDays}><option value={0}>{$t('never_automatically')}</option><option value={30}>{$t('every_days', { count: 30 })}</option><option value={60}>{$t('every_days', { count: 60 })}</option><option value={90}>{$t('every_days', { count: 90 })}</option></select>
-        <p class="hint">{$t('local_refresh_note')}</p>
-      </section>
-    {:else}<p>{$t('music_tags_note')}</p>{/if}
-  {:else}
+      <label class="toggle-row"><span><strong>Aperçus dans la barre de lecture</strong><small>Miniatures trickplay pour retrouver une scène.</small></span><input type="checkbox" role="switch" bind:checked={options.trickplayEnabled} /></label>
+    {/if}
+  </div>
+  <details class="custom-settings">
+    <summary>Personnaliser les réglages</summary>
+    <div class="preset-row"><p>Appliquer les réglages recommandés à cette bibliothèque.</p><button type="button" onclick={() => { options = recommendedLibraryOptions(options); presetApplied = true; }}>Appliquer les réglages recommandés</button></div>
+    {#if presetApplied}<p role="status">Réglages recommandés appliqués. Enregistrez la bibliothèque pour les conserver.</p>{/if}
+    <details class="option-section"><summary>Métadonnées et images</summary>
+      <label for="library-metadata-country">Pays des classifications</label><input id="library-metadata-country" bind:value={options.metadataCountryCode} required pattern={'[A-Z]{2}'} maxlength="2" placeholder="FR" />
+      {#if kind !== 'music'}
+        <label class="check"><input type="checkbox" bind:checked={options.readLocalNfo} /> Lire les fichiers NFO locaux</label>
+        <h4>Illustrations à récupérer</h4><div class="image-grid">{#each images as [key, label] (key)}<label class="check"><input type="checkbox" bind:checked={options[key]} />{label}</label>{/each}</div>
+        <label class="check"><input type="checkbox" bind:checked={options.artworkDeduplicate} /> Éviter les images en double</label>
+        {#if options.artworkDeduplicate}<label for="artwork-similarity">Tolérance aux différences</label><input id="artwork-similarity" type="number" min="0" max="16" step="1" required bind:value={options.artworkSimilarity} />{/if}
+        <div class="grid"><div><label for="artwork-min-width">Largeur minimale des affiches</label><input id="artwork-min-width" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterWidth} /></div><div><label for="artwork-min-height">Hauteur minimale des affiches</label><input id="artwork-min-height" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterHeight} /></div></div>
+        <p>Une valeur de 0 conserve toutes les tailles disponibles.</p>
+      {:else}<p>Les informations intégrées aux fichiers musicaux sont lues pendant l’analyse.</p>{/if}
+    </details>
+    <details class="option-section"><summary>Analyse des fichiers</summary>
+      <label for="library-excluded">Dossiers ou motifs à exclure</label><input id="library-excluded" bind:value={excludedPatterns} placeholder="bonus, trailers" autocomplete="off" />
+      <p>Les dossiers système, .nomedia et .ignore sont déjà pris en compte.</p>
+      {#if kind !== 'music'}
+        <label class="check"><input type="checkbox" bind:checked={options.preferEmbeddedTitles} /> Préférer les titres intégrés aux fichiers</label>
+        <label for="embedded-subtitles">Sous-titres intégrés</label><select id="embedded-subtitles" bind:value={options.embeddedSubtitlePolicy}><option value="allow_all">Tous les sous-titres</option><option value="allow_text">Sous-titres texte uniquement</option><option value="block_all">Aucun sous-titre intégré</option></select>
+        <label for="library-metadata-refresh">Relire les métadonnées locales</label><select id="library-metadata-refresh" bind:value={options.automaticRefreshIntervalDays}><option value={0}>Lors des analyses uniquement</option><option value={30}>Tous les 30 jours</option><option value={60}>Tous les 60 jours</option><option value={90}>Tous les 90 jours</option></select>
+      {/if}
+    </details>
     <AdvancedLibraryOptions bind:options {kind} />
-  {/if}
+  </details>
 </div>
 
 <style>
-  .library-options { display: grid; gap: 28px; min-width: 0; font-family: var(--font); color: var(--tx); }
-  .option-section { min-width: 0; }
-  .option-section + .option-section { padding-top: 24px; border-top: 1px solid var(--color-line-subtle); }
-  h3 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
-  p, .hint { font-size: 14px; line-height: 1.6; color: var(--mu); }
-  .hint { margin: 8px 0 0; font-size: 13px; }
-  .language-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
-  label { display: block; margin: 20px 0 8px; font-size: 14px; font-weight: 700; line-height: 1.5; color: var(--tx); }
-  input:not([type='checkbox']), select { width: 100%; min-width: 0; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid var(--color-line-subtle); border-radius: var(--r-sm); background-color: var(--color-surface); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  .library-options { min-width: 0; color: var(--tx); font-family: var(--font); }
+  h3 { margin: 0; font-size: 20px; font-weight: 800; }
+  h4 { margin: 20px 0 8px; font-size: 14px; }
+  p { margin: 8px 0 16px; color: var(--mu); font-size: 14px; line-height: 1.6; }
+  .essentials { margin-top: 24px; }
+  label { display: block; margin: 20px 0 8px; font-size: 14px; font-weight: 600; }
+  input:not([type='checkbox']), select { width: 100%; min-width: 0; min-height: 46px; padding: 10px 14px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font: inherit; }
   select { padding-right: 40px; }
-  input:not([type='checkbox']):hover, select:hover:not(:disabled) { background-color: var(--color-surface-hover); border-color: var(--color-line); }
-  input:not([type='checkbox']):focus, select:focus, select:focus-visible { outline: none; border-color: var(--ac); background-color: var(--color-surface); }
-  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--ac); }
-  .toggle-row { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; margin: 8px 0 0; padding-block: 12px; font-weight: 400; cursor: pointer; }
-  strong { font-size: 15px; font-weight: 700; }
-  small { display: block; margin-top: 4px; font-size: 13px; font-weight: 500; line-height: 1.5; color: var(--mu); }
-  .image-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
-  .image-option { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; margin: 0; padding: 14px; border: 1px solid var(--color-line-subtle); border-radius: var(--r-sm); background: var(--color-surface); font-weight: 400; cursor: pointer; transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease; }
-  .image-option:hover { background: var(--color-surface-hover); }
-  .image-option:has(input:checked) { border-color: var(--ac); }
-  .image-option:has(input:focus-visible) { outline: 2px solid var(--ac); outline-offset: 3px; }
-  @media (max-width: 640px) {
-    .language-grid, .image-grid { grid-template-columns: minmax(0, 1fr); }
-    .language-grid { gap: 0; }
-    input:not([type='checkbox']), select { font-size: 16px; }
-  }
-  @media (prefers-reduced-motion: reduce) { input, select, .image-option { transition: none; } }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--ac); }
+  .toggle-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; min-height: 64px; margin: 0; padding: 16px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .toggle-row strong { font-size: 14px; font-weight: 600; }
+  small { display: block; margin-top: 4px; color: var(--mu); font-size: 13px; line-height: 1.5; font-weight: 400; }
+  .toggle-row input { appearance: none; position: relative; width: 42px; height: 24px; border-radius: var(--r-pill); background: var(--line-2); cursor: pointer; }
+  .toggle-row input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: var(--r-pill); background: var(--tx); }
+  .toggle-row input:checked { background: var(--ac); }
+  .toggle-row input:checked::after { transform: translateX(18px); background: var(--on-ac); }
+  .custom-settings { margin-top: 24px; border-top: 1px solid var(--line); }
+  .option-section { border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+  summary { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 12px 0; cursor: pointer; list-style: none; font-size: 14px; font-weight: 600; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: '+'; margin-left: auto; color: var(--mu); font-size: 20px; }
+  details[open] > summary::after { content: '−'; }
+  .custom-settings > summary { color: var(--mu); }
+  .preset-row { padding: 4px 0 20px; }
+  button { min-height: 44px; padding: 10px 16px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: transparent; color: var(--tx); font: inherit; font-size: 13px; cursor: pointer; }
+  button:hover { background: var(--pn); }
+  .language-back { margin-top: 8px; }
+  .grid, .image-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
+  .check { display: flex; align-items: center; gap: 12px; min-height: 44px; margin: 4px 0; font-weight: 400; cursor: pointer; }
+  :is(input, select, button, summary):focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  @media (max-width: 640px) { .grid { grid-template-columns: minmax(0, 1fr); } input:not([type='checkbox']), select { font-size: 16px; } }
 </style>

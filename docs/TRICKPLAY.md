@@ -107,24 +107,45 @@ Le cache Trickplay est administré par le `TrickplayManager` du Media Node :
 
 ## 5. Configuration & Paramètres d'Administration
 
-### Réglages globaux du serveur (Core `server_settings`)
-Les administrateurs peuvent configurer le comportement global de Trickplay depuis le panneau d'administration Web (`/admin/server-settings`) ou via l'API REST `/api/v1/server/presentation` :
+### Configuration unique par bibliothèque
 
-| Champ API / JSON | Type | Défaut | Description |
-| :--- | :--- | :--- | :--- |
-| `trickplayEnabled` | bool | `true` | Active ou désactive totalement le service de prévisualisation |
-| `trickplayAutoGenerate` | bool | `false` | Lance automatiquement la génération en arrière-plan lors de l'inventaire |
-| `trickplayQuality` | u8 (1–31) | `7` | Qualité JPEG FFmpeg (`-q:v`, 1 = quasi sans perte, 31 = très compressé) |
-| `trickplayWidth` | u16 (160–1920) | `320` | Largeur en pixels de chaque vignette |
-| `trickplayIntervalSeconds` | u16 (1–60) | `10` | Intervalle temporel en secondes entre deux vignettes |
-| `trickplayMaxCacheMb` | u32 (128–1048576) | `5120` | Quota maximal du cache en Mo (ex. 5120 Mo = 5 Go) |
+L'activation, la préparation après scan et le profil se règlent dans
+Administration → Bibliothèques → modifier → Prévisualisations. Le panneau global
+« Métadonnées et images » ne contient plus une deuxième configuration Trickplay.
+Les anciens champs `trickplay*` de `server_settings` restent lisibles pour la
+compatibilité des sauvegardes et clients ; ils ne pilotent plus le service.
+Le quota réel est une limite du Media Node, via les variables de son déploiement.
 
-### Options par bibliothèque (`LibraryOptions`)
-Chaque bibliothèque peut surcharger ces réglages pour adapter la génération à son type de contenu (films 4K vs épisodes courts) :
-- `trickplayEnabled`: booléen d'activation au niveau de la bibliothèque.
-- `trickplayIntervalSeconds`: intervalle dédié (ex. 5s pour les animations courtes, 10s pour les longs métrages).
-- `trickplayWidth`: largeur des vignettes (ex. 240 ou 320 px).
-- `trickplayQuality`: qualité de compression JPEG (1–31).
+| Option de bibliothèque | Défaut | Comportement |
+| :--- | :--- | :--- |
+| `trickplayEnabled` | `true` | Cache natif puis repli Jellyfin en lecture seule |
+| `trickplayDuringScan` | `true` | Préparation après publication d'un scan |
+| `trickplayWidth` | `320` | Largeur 160–1920 pixels |
+| `trickplayIntervalSeconds` | `10` | Intervalle 1–60 secondes |
+| `trickplayQuality` | `7` | Compression 1–31, 1 étant la meilleure qualité |
+| `trickplaySaveToMedia` | `false` | Aucune écriture à côté des médias |
+| `chapterImagesEnabled` | `true` | Chapitres réels, images à la demande |
+| `chapterImagesDuringScan` | `false` | Pas de préparation systématique des chapitres |
+
+Ces défauts s'appliquent aux nouvelles bibliothèques et aux champs absents des
+anciens JSON. Les valeurs explicites, notamment `false`, restent conservées ;
+aucune migration ne réactive une bibliothèque déjà configurée.
+
+Le scan enregistre atomiquement des tâches durables de priorité 1 dans la file
+existante. L'empreinte inclut l'asset, sa taille/date et le profil. Les probes
+réutilisés sont inclus : activer ou modifier un profil prépare donc aussi les
+fichiers existants au prochain scan. La comparaison par lots de 128 clés indexées
+évite tâches dupliquées et réécritures lors des scans inchangés. La limite globale
+de 100 000 tâches en attente reste appliquée ; le reste peut être préparé lors d'un
+prochain scan ou à la demande. La désactivation est revérifiée avant dispatch ;
+une réactivation reprend le même travail annulé pour cette raison. Les annulations
+administratives et les échecs gardent leur contrat de reprise explicite.
+
+Local et distant transmettent le même profil. Les manifests et planches distantes
+conservent durée/profil sur HTTP signé et canal sortant signé. Le Node partage son
+unique worker entre préparation durable et demandes du lecteur, et respecte
+`MEDIA_TRICKPLAY_GENERATE`. Le moteur de tâches cède à une lecture active. FFmpeg
+crée des images dans le cache séparé ; aucun encodage vidéo n'est imposé à la lecture.
 
 ### Variables d'environnement Docker
 
@@ -134,7 +155,6 @@ Chaque bibliothèque peut surcharger ces réglages pour adapter la génération 
 | `MEDIA_TRICKPLAY_MAX_CACHE_MB` | Media Node | `5120` | Quota maximum du cache disque par nœud en Mo |
 | `MEDIA_TRICKPLAY_GENERATE` | Media Node | `true` | Autorise ou interdit l'appel FFmpeg sur ce nœud |
 | `MEDIA_TRICKPLAY_FFMPEG` | Media Node | `/usr/bin/ffmpeg` | Chemin d'accès au binaire FFmpeg |
-| `MEDIA_TRICKPLAY_INTERVAL_MS`| Media Node | `10000` | Intervalle par défaut en millisecondes |
 
 ---
 

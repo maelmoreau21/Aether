@@ -28,10 +28,8 @@
   const editorSections = [
     { id: 'general', label: 'Général' },
     { id: 'sources', label: 'Sources et dossiers' },
-    { id: 'metadata', label: 'Métadonnées et images' },
-    { id: 'indexing', label: 'Indexation' },
-    { id: 'access', label: 'Accès' },
-    { id: 'advanced', label: 'Avancé' }
+    { id: 'metadata', label: 'Réglages' },
+    { id: 'access', label: 'Accès' }
   ] as const;
   type EditorSection = typeof editorSections[number]['id'];
   let activeSection = $state<EditorSection>('general');
@@ -192,14 +190,8 @@
           <label for="library-root">{$t('folder')}</label><div class="folder-input-row"><input id="library-root" type="text" bind:value={root} placeholder="ex: /media/films ou C:\Films" autocomplete="off" spellcheck="false" /><button type="button" class="browse-btn" onclick={() => showPathPicker = true}><Icon name="search" size={16} />{$t('browse')}</button></div>
           <button type="button" class="add-folder-btn" disabled={folders.length >= 32 || !root.trim() || folders.some(folder => folder.nodeId === nodeId && folder.root === root.trim())} onclick={() => { if (root.trim()) { folders = [...folders, { nodeId, root: root.trim() }]; root = ''; formError = ''; } }}><span aria-hidden="true">+</span> {$t('add_folder')}</button>
         </div>
-        <div id="library-panel-metadata" role="tabpanel" aria-labelledby="library-tab-metadata" data-editor-panel="metadata" hidden={activeSection !== 'metadata'} tabindex="0"><LibraryOptionsForm bind:options {kind} section="metadata" /></div>
-        <div id="library-panel-indexing" role="tabpanel" aria-labelledby="library-tab-indexing" data-editor-panel="indexing" hidden={activeSection !== 'indexing'} tabindex="0">
-          <h3>{$t('indexing')}</h3><p class="panel-description">{$t('indexing_note')}</p>
-          <label for="library-excluded">Dossiers ou motifs à exclure</label><input id="library-excluded" bind:value={excludedPatterns} placeholder="ex: bonus, trailers, #recycle" autocomplete="off" /><p class="field-hint">Séparez les motifs par des virgules. Les dossiers système (#recycle, @eaDir, dossiers cachés), .nomedia et .ignore sont déjà exclus automatiquement.</p>
-          <LibraryOptionsForm bind:options {kind} section="indexing" />
-        </div>
+        <div id="library-panel-metadata" role="tabpanel" aria-labelledby="library-tab-metadata" data-editor-panel="metadata" hidden={activeSection !== 'metadata'} tabindex="0"><LibraryOptionsForm bind:options bind:excludedPatterns {kind} /></div>
         <div id="library-panel-access" role="tabpanel" aria-labelledby="library-tab-access" data-editor-panel="access" hidden={activeSection !== 'access'} tabindex="0"><h3>Accès à la bibliothèque</h3><p>Les autorisations se gèrent dans les rubriques <strong>Utilisateurs</strong> et <strong>Groupes</strong> de l’administration.</p><p>Ce formulaire configure les sources et l’import. Ajouter un dossier n’accorde aucun droit supplémentaire à un compte.</p><p>Les médias et les fichiers utilisés par Jellyfin restent en lecture seule.</p></div>
-        <div id="library-panel-advanced" role="tabpanel" aria-labelledby="library-tab-advanced" data-editor-panel="advanced" hidden={activeSection !== 'advanced'} tabindex="0"><h3>Options avancées</h3><p class="panel-description">Les indications de chaque groupe distinguent les réglages disponibles des préférences préparées pour de futurs moteurs.</p><LibraryOptionsForm bind:options {kind} section="advanced" /></div>
       </div>
     </div>
     <footer class="editor-actions">

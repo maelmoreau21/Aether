@@ -1196,6 +1196,8 @@ pub async fn publish_staged_scan(
         .await;
     }
 
+    crate::trickplay::queue_scanned_assets(&mut tx, library_id, scan_id, &options).await?;
+
     query("DELETE FROM scan_staging_files WHERE scan_id=?")
         .bind(scan_id)
         .execute(&mut *tx)
@@ -1207,6 +1209,7 @@ pub async fn publish_staged_scan(
         .await?;
 
     tx.commit().await?;
+    crate::task_engine::WAKE.notify_one();
     crate::system_memory::trim_memory();
     Ok(())
 }

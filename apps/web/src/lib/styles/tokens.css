@@ -240,6 +240,90 @@ optgroup {
   padding: 8px 12px;
 }
 
+/* Keep native select semantics, keyboard controls and form validation while
+   letting the picker follow Halo instead of the operating-system palette.
+   Unsupported browsers keep the styled native control above. */
+@supports (appearance: base-select) {
+  select:not([multiple]):not([size]),
+  select:not([multiple])[size='1'],
+  select:not([multiple]):not([size])::picker(select),
+  select:not([multiple])[size='1']::picker(select) {
+    appearance: base-select;
+  }
+
+  select:not([multiple]):not([size]),
+  select:not([multiple])[size='1'] {
+    background-image: none !important;
+    align-items: center;
+    gap: 12px;
+  }
+
+  select::picker-icon {
+    color: var(--mu);
+    margin-inline-start: auto;
+  }
+
+  select::picker(select) {
+    margin-block: 6px;
+    padding: 6px;
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-sm);
+    background: var(--bg-2);
+    color: var(--tx);
+    box-shadow: var(--shadow);
+    font: inherit;
+    min-inline-size: anchor-size(width);
+    max-inline-size: calc(100vw - 24px);
+    max-block-size: min(360px, 60dvh);
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+
+  select:not([multiple]):is(:not([size]), [size='1']) option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-block-size: 44px;
+    padding: 10px 12px;
+    border-radius: var(--r-xs);
+    background: transparent;
+    color: var(--tx);
+    font: inherit;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
+
+  select:not([multiple]):is(:not([size]), [size='1']) option:checked {
+    background: var(--ac-soft);
+    font-weight: 600;
+  }
+
+  select:not([multiple]):is(:not([size]), [size='1']) option:is(:hover, :focus-visible) {
+    background: var(--bg-3);
+    outline: 2px solid var(--ac);
+    outline-offset: -2px;
+  }
+
+  select:not([multiple]):is(:not([size]), [size='1']) option:disabled {
+    color: var(--mu-2);
+    cursor: not-allowed;
+  }
+
+  select option::checkmark {
+    order: 1;
+    margin-inline-start: auto;
+    color: var(--ac);
+  }
+
+  select:not([multiple]):is(:not([size]), [size='1']) optgroup {
+    padding: 6px;
+    background: transparent;
+    color: var(--mu);
+  }
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

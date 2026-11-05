@@ -130,9 +130,13 @@ async fn background_tasks_resolve_only_owned_inventory_targets() {
         target_id: "fixture".into(),
         component: None,
         width: None,
+        trickplay: None,
         core_base_url: String::new(),
     };
     assert!(task_grant(&state, &req).is_ok());
+    req.category = "trickplay".into();
+    assert!(task_grant(&state, &req).is_ok());
+    req.category = "analyze".into();
     req.library_id = media_contracts::ids::LibraryId::new("other");
     assert!(task_grant(&state, &req).is_err());
     req.library_id = media_contracts::ids::LibraryId::new("library");

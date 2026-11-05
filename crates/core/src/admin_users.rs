@@ -221,6 +221,7 @@ async fn create(
         }
     }
     tx.commit().await.map_err(db)?;
+    drop(conn);
     if crate::extensions::collections::assign_new_user(&auth, &id)
         .await
         .is_err()

@@ -13,6 +13,54 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+fn system_role(id: &str) -> Option<&'static str> {
+    match id {
+        "builtin-role-user" => Some("user"),
+        "builtin-role-administrator" => Some("administrator"),
+        _ => None,
+    }
+}
+
+/// Keep custom groups and their grants intact, even if they already use these names.
+pub(crate) async fn initialize_role_groups(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+) -> Result<(), sqlx::Error> {
+    for (id, label) in [
+        ("builtin-role-user", "Utilisateurs"),
+        ("builtin-role-administrator", "Administrateurs"),
+    ] {
+        let exists: i64 = query_scalar("SELECT count(*) FROM user_groups WHERE id=?")
+            .bind(id)
+            .fetch_one(&mut **tx)
+            .await?;
+        if exists != 0 {
+            continue;
+        }
+        let mut suffix = 0;
+        loop {
+            let name = if suffix == 0 {
+                label.to_owned()
+            } else {
+                format!("{label} (système {suffix})")
+            };
+            let used: i64 = query_scalar("SELECT count(*) FROM user_groups WHERE name=?")
+                .bind(&name)
+                .fetch_one(&mut **tx)
+                .await?;
+            if used == 0 {
+                query("INSERT INTO user_groups(id,name,is_default) VALUES(?,?,0)")
+                    .bind(id)
+                    .bind(name)
+                    .execute(&mut **tx)
+                    .await?;
+                break;
+            }
+            suffix += 1;
+        }
+    }
+    Ok(())
+}
+
 pub fn router(auth: AuthState) -> Router {
     Router::new()
         .route("/api/v1/admin/groups", get(list).post(create))
@@ -78,7 +126,7 @@ async fn list(
             .await
             .map_err(database)?;
     let members: Vec<(String, String)> =
-        query_as("SELECT group_id,user_id FROM user_group_members ORDER BY user_id")
+        query_as("SELECT group_id,user_id FROM effective_user_group_members ORDER BY user_id")
             .fetch_all(&mut *tx)
             .await
             .map_err(database)?;
@@ -87,7 +135,7 @@ async fn list(
             .fetch_all(&mut *tx)
             .await
             .map_err(database)?;
-    let values: Vec<_>=rows.into_iter().map(|(id,name,is_default)|json!({"id":id,"name":name,"isDefault":bool::from(is_default),"userIds":members.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"libraryIds":libraries.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>() })).collect();
+    let values: Vec<_>=rows.into_iter().map(|(id,name,is_default)|json!({"id":id,"name":name,"isDefault":bool::from(is_default),"systemRole":system_role(&id),"userIds":members.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"libraryIds":libraries.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>() })).collect();
     tx.commit().await.map_err(database)?;
     Ok(Json(json!({"groups":values})))
 }
@@ -132,6 +180,11 @@ async fn save(
         .await
         .map_err(database)?;
     recheck_administrator(&mut tx, actor).await?;
+    // System group members follow the server role; ignore stale member lists
+    // supplied by clients and reject making either group global.
+    if system_role(id).is_some() && input.is_default {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     for user in &input.user_ids {
         let exists: i64 = query_scalar("SELECT count(*) FROM users WHERE id=?")
             .bind(user)
@@ -191,7 +244,11 @@ async fn save(
             .await
             .map_err(database)?;
     }
-    for user in input.user_ids {
+    for user in input
+        .user_ids
+        .into_iter()
+        .filter(|_| system_role(id).is_none())
+    {
         query(
             "INSERT INTO user_group_members(group_id,user_id) VALUES(?,?) ON CONFLICT DO NOTHING",
         )
@@ -213,6 +270,9 @@ async fn remove(
     Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
     let actor = administrator(&auth, &headers, true).await?;
+    if system_role(&id).is_some() {
+        return Err(StatusCode::CONFLICT);
+    }
     let mut conn = auth.store.pool.acquire().await.map_err(database)?;
     let mut tx = crate::database::begin_write(&mut conn)
         .await

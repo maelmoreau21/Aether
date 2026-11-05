@@ -59,6 +59,8 @@ async fn chapter_images_use_only_real_boundaries_and_live_resource_permissions()
     ] {
         query(statement).execute(store.pool()).await.unwrap();
     }
+    query("UPDATE libraries SET options_json='{\"chapterImagesEnabled\":false}' WHERE id='chapter-library'")
+        .execute(store.pool()).await.unwrap();
     let probe=json!({"format":{"duration":"120"},"chapters":[{"start_time":"60","tags":{"title":"Second"}},{"start_time":"0","tags":{"title":"First"}},{"start_time":"NaN"},{"start_time":"-1"},{"start_time":"120"}]}).to_string();
     query("UPDATE inventory_assets SET probe_json=? WHERE id='chapter-asset'")
         .bind(&probe)

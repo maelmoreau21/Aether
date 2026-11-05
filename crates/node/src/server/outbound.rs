@@ -3,9 +3,9 @@
 use super::control_transport::post_signed_to_core;
 use super::control_transport::send_signed_http_request;
 use super::playback::ActiveStreamGuard;
-use super::playback::chapter_request;
 use super::playback::node_error_response;
 use super::playback::prepare_asset;
+use super::playback::{chapter_request, trickplay_request};
 use super::scans::cancel_scan;
 use super::scans::register_scan;
 use super::scans::run_node_task;
@@ -47,7 +47,6 @@ use media_contracts::protocol::sign_internal_request;
 use media_contracts::protocol::unix_now;
 use std::io;
 use std::path::Path;
-use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -386,26 +385,23 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
             send_stream_uplink_body(&state, core_url, &identity, &req.stream_id, response).await;
         return;
     }
-    if let Some(index_str) = req.target_kind.strip_prefix("trickplay:") {
+    let (preview_target, preview_query) = req
+        .target_kind
+        .split_once('?')
+        .unwrap_or((&req.target_kind, ""));
+    if let Some(index_str) = preview_target.strip_prefix("trickplay:") {
         if let Ok(index) = index_str.parse::<usize>() {
-            let (expected_size, expected_mtime) = {
-                let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
-                inv.assets
-                    .get(&req.target_id)
-                    .map(|a| (a.size, a.modified_ns.clone()))
-                    .unwrap_or((0, String::new()))
-            };
-            let trickplay_req = crate::trickplay::TrickplayRequest {
-                asset_id: req.target_id.clone(),
-                media_root: PathBuf::from(&grant.root_snapshot),
-                relative_path: PathBuf::from(&grant.relative_path),
-                duration: 0.0,
-                size: expected_size,
-                modified_ns: expected_mtime,
-                interval_ms: None,
-                width: None,
-                quality: None,
-                chapter_time: None,
+            let Some(trickplay_req) = trickplay_request(&state, &req.target_id, preview_query)
+            else {
+                let _ = send_stream_uplink_error(
+                    &state,
+                    core_url,
+                    &identity,
+                    &req.stream_id,
+                    StatusCode::NOT_FOUND,
+                )
+                .await;
+                return;
             };
             match state
                 .trickplay
@@ -453,25 +449,17 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
                 }
             }
         }
-    } else if req.target_kind == "trickplay" {
-        let (expected_size, expected_mtime) = {
-            let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
-            inv.assets
-                .get(&req.target_id)
-                .map(|a| (a.size, a.modified_ns.clone()))
-                .unwrap_or((0, String::new()))
-        };
-        let trickplay_req = crate::trickplay::TrickplayRequest {
-            asset_id: req.target_id.clone(),
-            media_root: PathBuf::from(&grant.root_snapshot),
-            relative_path: PathBuf::from(&grant.relative_path),
-            duration: 0.0,
-            size: expected_size,
-            modified_ns: expected_mtime,
-            interval_ms: None,
-            width: None,
-            quality: None,
-            chapter_time: None,
+    } else if preview_target == "trickplay" {
+        let Some(trickplay_req) = trickplay_request(&state, &req.target_id, preview_query) else {
+            let _ = send_stream_uplink_error(
+                &state,
+                core_url,
+                &identity,
+                &req.stream_id,
+                StatusCode::NOT_FOUND,
+            )
+            .await;
+            return;
         };
         let body = if let Some(cached) = state.trickplay.check_native_cache(&trickplay_req).await {
             serde_json::json!({

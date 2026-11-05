@@ -457,6 +457,10 @@ impl IdentityStore {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        drop(connection);
+        if let Err(error) = crate::avatars::defaults::assign_user(self, &id).await {
+            eprintln!("Bootstrap avatar assignment failed: {error}");
+        }
         Ok(id)
     }
 }

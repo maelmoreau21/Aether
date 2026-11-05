@@ -10,9 +10,7 @@
   };
 
   let busy = $state(false), error = $state(''), notice = $state('');
-  let uploadAllowed = $state(false), removeAllowed = $state(false);
   let showModal = $state(false);
-  let fileInput = $state<HTMLInputElement>();
   let dialog = $state<HTMLDialogElement>();
   let galleryButton = $state<HTMLButtonElement>();
 
@@ -102,96 +100,24 @@
   }
 
   $effect(() => {
+    // Session changes invalidate an open selection and every in-flight request.
     const userId = $session?.user.id;
-    uploadAllowed = false;
-    removeAllowed = false;
+    requestGeneration++;
     showModal = false;
     dialog?.close();
     collections = [];
     selectedPack = '';
     allImages = [];
     selectedItem = null;
-    if (!userId) return;
-    const controller = new AbortController();
-
-    void fetch('/api/v1/account/avatar/policy', {
-      credentials: 'same-origin',
-      cache: 'no-store',
-      signal: controller.signal
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error();
-        return r.json();
-      })
-      .then((v) => {
-        if ($session?.user.id === userId) {
-          uploadAllowed = v.uploadAllowed;
-          removeAllowed = v.removeAllowed;
-        }
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) error = 'Impossible de charger les autorisations de l’image de profil.';
-      });
-
-    return () => controller.abort();
+    modalLoading = false;
+    if (!userId) { error = ''; notice = ''; }
   });
 
-  async function update(file?: File) {
-    const current = $session;
-    if (!current || busy) return;
-    error = '';
-    notice = '';
-    if (file && (file.size > 2 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type))) {
-      error = 'Choisissez une image PNG, JPEG ou WebP de 2 Mo maximum.';
-      return;
-    }
-    busy = true;
-    try {
-      const response = await fetch('/api/v1/account/avatar', {
-        method: file ? 'PUT' : 'DELETE',
-        credentials: 'same-origin',
-        signal: AbortSignal.timeout(20000),
-        headers: {
-          'x-csrf-token': current.csrfToken,
-          ...(file ? { 'content-type': file.type } : {})
-        },
-        ...(file ? { body: file } : {})
-      });
-      if (!response.ok)
-        throw new Error(response.status === 413 ? 'Image trop volumineuse.' : 'Image refusée. Vérifiez son format et vos droits.');
-      if ($session?.user.id !== current.user.id) return;
-      avatarRevision.update((value) => value + 1);
-      notice = file ? 'Image de profil enregistrée.' : 'Image de profil supprimée.';
-    } catch (cause) {
-      if ($session?.user.id === current.user.id)
-        error = cause instanceof Error ? cause.message : 'Modification impossible.';
-    } finally {
-      busy = false;
-    }
-  }
 </script>
 
 <div class="avatar-editor">
+  <p>Votre avatar est obligatoire. Choisissez une image dans la galerie du serveur.</p>
   <div class="avatar-actions">
-    {#if uploadAllowed}
-      <input
-        class="file-input"
-        bind:this={fileInput}
-        type="file"
-        accept="image/png,image/jpeg,image/webp"
-        aria-label="Importer une image de profil"
-        disabled={busy}
-        onchange={(event) => {
-          const file = event.currentTarget.files?.[0];
-          if (file) void update(file);
-          event.currentTarget.value = '';
-        }}
-      />
-      <button disabled={busy} onclick={() => fileInput?.click()}>Importer une image</button>
-    {/if}
-    {#if removeAllowed}
-      <button disabled={busy} onclick={() => void update()}>Supprimer l’image de profil</button>
-    {/if}
     <button bind:this={galleryButton} disabled={busy} aria-expanded={showModal} onclick={() => void openModal()}>
       Choisir dans la galerie
     </button>
@@ -266,9 +192,6 @@
 </div>
 
 <style>
-  .file-input {
-    display: none;
-  }
   .avatar-editor {
     margin-bottom: 24px;
     padding-bottom: 24px;
@@ -279,11 +202,6 @@
     flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 12px;
-  }
-  input {
-    max-width: 100%;
-    font: inherit;
-    color: var(--tx);
   }
   p {
     margin: 8px 0 0;

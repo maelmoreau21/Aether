@@ -590,10 +590,10 @@ CREATE TABLE durable_tasks (
     owner TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
     node_id TEXT NOT NULL REFERENCES media_nodes(id),
-    category TEXT NOT NULL DEFAULT 'scan' CHECK(category IN ('scan','analyze','prepare','image','system')),
+    category TEXT NOT NULL DEFAULT 'scan' CHECK(category IN ('scan','analyze','prepare','image','trickplay','system')),
     target_id TEXT NOT NULL DEFAULT '',
     component TEXT NOT NULL DEFAULT '',
-    width BIGINT NOT NULL DEFAULT 640 CHECK(width IN (320,640,1280)),
+    width BIGINT NOT NULL DEFAULT 640 CHECK((category='trickplay' AND width BETWEEN 160 AND 1920) OR width IN (320,640,1280)),
     result_json TEXT NOT NULL DEFAULT '{}',
     refresh_mode TEXT NOT NULL DEFAULT 'incremental' CHECK(refresh_mode IN ('incremental','new_only','missing_metadata','full')),
     status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','paused','completed','cancelled','error')),
@@ -1541,7 +1541,7 @@ CREATE TABLE durable_tasks (
     available_at bigint NOT NULL,
     error text DEFAULT ''::text NOT NULL,
     CONSTRAINT durable_tasks_attempt_check CHECK ((attempt >= 0)),
-    CONSTRAINT durable_tasks_category_check CHECK ((category = ANY (ARRAY['scan'::text, 'analyze'::text, 'prepare'::text, 'image'::text, 'system'::text]))),
+    CONSTRAINT durable_tasks_category_check CHECK ((category = ANY (ARRAY['scan'::text, 'analyze'::text, 'prepare'::text, 'image'::text, 'trickplay'::text, 'system'::text]))),
     CONSTRAINT durable_tasks_failure_count_check CHECK ((failure_count >= 0)),
     CONSTRAINT durable_tasks_max_attempts_check CHECK (((max_attempts >= 1) AND (max_attempts <= 1000000))),
     CONSTRAINT durable_tasks_priority_check CHECK (((priority >= 0) AND (priority <= 1000))),
@@ -1550,7 +1550,7 @@ CREATE TABLE durable_tasks (
     CONSTRAINT durable_tasks_refresh_mode_check CHECK ((refresh_mode = ANY (ARRAY['incremental'::text, 'new_only'::text, 'missing_metadata'::text, 'full'::text]))),
     CONSTRAINT durable_tasks_scope_check CHECK ((((category = 'system'::text) AND (library_id IS NULL) AND (node_id = 'local'::text)) OR ((category <> 'system'::text) AND (library_id IS NOT NULL)))),
     CONSTRAINT durable_tasks_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'paused'::text, 'completed'::text, 'cancelled'::text, 'error'::text]))),
-    CONSTRAINT durable_tasks_width_check CHECK ((width = ANY (ARRAY[(320)::bigint, (640)::bigint, (1280)::bigint])))
+    CONSTRAINT durable_tasks_width_check CHECK (((category = 'trickplay' AND width BETWEEN 160 AND 1920) OR width IN (320,640,1280)))
 );
 
 

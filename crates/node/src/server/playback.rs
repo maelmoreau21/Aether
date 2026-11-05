@@ -374,6 +374,28 @@ pub(super) fn chapter_request(
     })
 }
 
+pub(super) fn trickplay_request(
+    state: &NodeServerState,
+    id: &str,
+    query: &str,
+) -> Option<crate::trickplay::TrickplayRequest> {
+    let (duration, interval, width, quality) = crate::trickplay::parameters(query)?;
+    let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
+    let asset = inv.assets.get(id)?;
+    Some(crate::trickplay::TrickplayRequest {
+        asset_id: id.into(),
+        media_root: PathBuf::from(&asset.root_snapshot),
+        relative_path: PathBuf::from(&asset.relative_path),
+        size: asset.size,
+        modified_ns: asset.modified_ns.clone(),
+        duration,
+        interval_ms: Some(interval),
+        width: Some(width),
+        quality: Some(quality),
+        chapter_time: None,
+    })
+}
+
 pub(super) async fn internal_chapter_image(
     State(state): State<NodeServerState>,
     AxumPath((id, _index)): AxumPath<(String, usize)>,
@@ -415,69 +437,13 @@ pub(super) async fn internal_trickplay_manifest(
             Ok(ok) => ok,
             Err(res) => return res,
         };
-    let grant = {
-        let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
-        inv.grant_for_asset(&identity.node_id, &id)
-    };
-    let Some(grant) = grant else {
+    let Some(trickplay_req) = trickplay_request(&state, &id, req.uri().query().unwrap_or(""))
+    else {
         return sign_stream_response(
             node_error_response(NodeErrorCode::UnknownAsset, false),
             &identity,
             &nonce,
         );
-    };
-
-    let duration: f64 = req
-        .uri()
-        .query()
-        .and_then(|q| {
-            q.split('&')
-                .find(|p| p.starts_with("duration="))
-                .and_then(|p| p.strip_prefix("duration="))
-                .and_then(|v| v.parse::<f64>().ok())
-        })
-        .unwrap_or(0.0);
-
-    let interval_ms = req.uri().query().and_then(|q| {
-        q.split('&')
-            .find(|p| p.starts_with("intervalMs="))
-            .and_then(|p| p.strip_prefix("intervalMs="))
-            .and_then(|v| v.parse::<u64>().ok())
-    });
-
-    let width = req.uri().query().and_then(|q| {
-        q.split('&')
-            .find(|p| p.starts_with("width="))
-            .and_then(|p| p.strip_prefix("width="))
-            .and_then(|v| v.parse::<u32>().ok())
-    });
-
-    let quality = req.uri().query().and_then(|q| {
-        q.split('&')
-            .find(|p| p.starts_with("quality="))
-            .and_then(|p| p.strip_prefix("quality="))
-            .and_then(|v| v.parse::<u8>().ok())
-    });
-
-    let (expected_size, expected_mtime) = {
-        let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
-        inv.assets
-            .get(&id)
-            .map(|a| (a.size, a.modified_ns.clone()))
-            .unwrap_or((0, String::new()))
-    };
-
-    let trickplay_req = crate::trickplay::TrickplayRequest {
-        asset_id: id.clone(),
-        media_root: PathBuf::from(&grant.root_snapshot),
-        relative_path: PathBuf::from(&grant.relative_path),
-        duration,
-        size: expected_size,
-        modified_ns: expected_mtime,
-        interval_ms,
-        width,
-        quality,
-        chapter_time: None,
     };
 
     // 1. Check Aether native cache
@@ -552,37 +518,13 @@ pub(super) async fn internal_trickplay_tile(
             Ok(ok) => ok,
             Err(res) => return res,
         };
-    let grant = {
-        let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
-        inv.grant_for_asset(&identity.node_id, &id)
-    };
-    let Some(grant) = grant else {
+    let Some(trickplay_req) = trickplay_request(&state, &id, req.uri().query().unwrap_or(""))
+    else {
         return sign_stream_response(
             node_error_response(NodeErrorCode::UnknownAsset, false),
             &identity,
             &nonce,
         );
-    };
-
-    let (expected_size, expected_mtime) = {
-        let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
-        inv.assets
-            .get(&id)
-            .map(|a| (a.size, a.modified_ns.clone()))
-            .unwrap_or((0, String::new()))
-    };
-
-    let trickplay_req = crate::trickplay::TrickplayRequest {
-        asset_id: id,
-        media_root: PathBuf::from(&grant.root_snapshot),
-        relative_path: PathBuf::from(&grant.relative_path),
-        duration: 0.0,
-        size: expected_size,
-        modified_ns: expected_mtime,
-        interval_ms: None,
-        width: None,
-        quality: None,
-        chapter_time: None,
     };
 
     match state

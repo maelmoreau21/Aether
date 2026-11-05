@@ -88,7 +88,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .await?;
         eprintln!("{{\"event\":\"local_extensions_imported\",\"count\":{imported}}}");
     }
-    media_poc::extensions::bootstrap_essential_plugins(&database).await;
     match media_poc::extensions::storage::sync_installed(&database).await {
         Ok(count) => {
             eprintln!(

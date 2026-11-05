@@ -59,14 +59,24 @@ export function defaultLibraryOptions(): LibraryOptions {
     fetchPoster: true, fetchBackdrop: true, fetchLogo: true, fetchThumb: true, fetchBanner: true, fetchDisc: true,
     automaticRefreshIntervalDays: 0, preferEmbeddedTitles: false, embeddedSubtitlePolicy: 'allow_all',
     metadataProviders: [], imageProviders: [], similarItemsProviders: [], segmentProviders: [], subtitleProviders: [],
-    onlineRefreshIntervalDays: 0, realtimeMonitoring: false, automaticCollections: false, introDetectionEnabled: false,
+    onlineRefreshIntervalDays: 30, realtimeMonitoring: true, automaticCollections: true, introDetectionEnabled: true,
     saveNfoToMedia: false, saveImagesToMedia: false,
-    trickplayEnabled: true, trickplayDuringScan: false, trickplaySaveToMedia: false, trickplayIntervalSeconds: 10, trickplayWidth: 320, trickplayQuality: 7,
-    chapterImagesEnabled: false, chapterImagesDuringScan: false, chapterImagesSaveToMedia: false,
+    trickplayEnabled: true, trickplayDuringScan: true, trickplaySaveToMedia: false, trickplayIntervalSeconds: 10, trickplayWidth: 320, trickplayQuality: 7,
+    chapterImagesEnabled: true, chapterImagesDuringScan: false, chapterImagesSaveToMedia: false,
     subtitleDownloadEnabled: false, subtitleLanguages: ['fr'], subtitleOnlyMissing: true, subtitleMatchAudio: false,
     subtitleRequireHash: true, saveSubtitlesToMedia: false,
-    posterRotationEnabled: false, artworkDeduplicate: true, artworkSimilarity: 5,
+    posterRotationEnabled: true, artworkDeduplicate: true, artworkSimilarity: 5,
     artworkMinPosterWidth: 0, artworkMinPosterHeight: 0 };
+}
+/** Apply the processing preset without changing language, provider scopes or media paths. */
+export function recommendedLibraryOptions(current: LibraryOptions): LibraryOptions {
+  const defaults = defaultLibraryOptions();
+  const processingKeys = ['realtimeMonitoring', 'automaticCollections', 'introDetectionEnabled',
+    'onlineRefreshIntervalDays', 'trickplayEnabled', 'trickplayDuringScan',
+    'trickplayIntervalSeconds', 'trickplayWidth', 'trickplayQuality', 'chapterImagesEnabled'] as const;
+  const next = { ...current };
+  for (const key of processingKeys) Object.assign(next, { [key]: defaults[key] });
+  return next;
 }
 export interface LibraryFolder { nodeId: string; root: string }
 export interface Library {

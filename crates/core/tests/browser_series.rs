@@ -142,7 +142,6 @@ async fn browser_series_flow_and_playback() {
     let store = IdentityStore::open(&db).await.unwrap();
     // These synthetic fixtures exercise local scanning/playback, not providers.
     // Keep their deliberately synthetic external IDs without resolving real films.
-    media_poc::extensions::bootstrap_essential_plugins(&store).await;
     media_poc::database::query("UPDATE extensions SET enabled=0")
         .execute(store.pool())
         .await

@@ -1628,7 +1628,7 @@ async fn rich_operations_and_account_avatars_use_signed_permissions() {
                 json!({"operation":operation,"apply":true}),
             )
             .await;
-            assert_eq!(status, StatusCode::OK, "{output}");
+            assert_eq!(status, StatusCode::FORBIDDEN, "{output}");
             let sha: String = media_poc::database::query_scalar(
                 "SELECT sha256 FROM user_avatars WHERE user_id=?",
             )
@@ -1637,7 +1637,7 @@ async fn rich_operations_and_account_avatars_use_signed_permissions() {
             .await
             .unwrap();
             let (_, data) = store.assets().read_all(&sha).await.unwrap();
-            assert_eq!(data, svg.as_bytes());
+            assert_ne!(data, svg.as_bytes());
             assert_eq!(
                 call(
                     &app,

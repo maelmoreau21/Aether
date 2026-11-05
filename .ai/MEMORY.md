@@ -17,6 +17,27 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 5 novembre 2026 — Dossiers, extensions, groupes et réglages
+
+- Nouveau dossier de bibliothèque : le sélecteur ouvre la racine du Node (`/`
+  sous Linux), sans proposer sa racine interne temporaire comme chemin média.
+- Extensions : fin de l'installation automatique TMDb/IMDb ; actualisation des
+  dépôts à l'ouverture, choix main/develop conservé après redémarrage. Voir
+  `docs/PLUGIN_UPDATE_LIFECYCLE.md` ; installations existantes conservées.
+- Galerie native initiale : 12 avatars locaux « Orbites », supprimables sans
+  réapparition ; curseur d'attente réservé aux traitements réels. Groupes système
+  Utilisateurs/Administrateurs déterminés par le rôle, comptes existants inclus,
+  sans modifier les groupes personnalisés. Voir `docs/ADMIN_ACCESS.md`.
+- Menus simples habillés en Halo avec repli natif ; paramètres numériques des
+  extensions compatibles avec les décimales (Intro Skipper 0,75). Voir
+  `docs/UI_DIRECTION.md` et `docs/PLUGIN_SETTINGS_AND_COLLECTIONS.md`.
+- Contrôles locaux : check Svelte 0/0, lint, build Web, 18 tests Web ciblés ;
+  Chrome avec APIs simulées à 390/820/1440 px pour menus/décimales et 390/1440
+  pour dossiers, avatars et dépôts. Core groupes 5/5, extensions 3/3, galerie
+  native et collections 3/3 ; contrôle SQL PostgreSQL 18
+  sur base jetable ; fmt et Clippy Core lib/bin sans avertissement. Aucun
+  déploiement, média personnel ou fournisseur réel validé.
+
 ## 5 novembre 2026 — Personnes et portraits
 
 - Distribution et équipe : liens vers une page personne paginée avec films et

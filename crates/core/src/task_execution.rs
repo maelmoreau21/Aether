@@ -47,6 +47,42 @@ pub(crate) async fn dispatch(
     if node != job.node_id || size < 0 {
         return Err(sqlx::Error::Protocol("Task inventory mismatch".into()));
     }
+    let trickplay_options = if job.category == "trickplay" {
+        let encoded: String =
+            crate::database::query_scalar("SELECT options_json FROM libraries WHERE id=?")
+                .bind(&job.library_id)
+                .fetch_one(auth.store.pool())
+                .await?;
+        let options: crate::library_options::LibraryOptions = serde_json::from_str(&encoded)
+            .map_err(|_| sqlx::Error::Protocol("Invalid library trickplay options".into()))?;
+        // The library policy is checked again at dispatch, so disabling a library
+        // feature also stops work already waiting behind a scan or active playback.
+        if !options.trickplay_enabled
+            || (job.owner == "library-trickplay" && !options.trickplay_during_scan)
+        {
+            task_engine::finish(
+                &auth.store,
+                &job.id,
+                job.attempt,
+                &job.node_id,
+                media_contracts::protocol::unix_now(),
+                None,
+            )
+            .await?;
+            query("UPDATE durable_tasks SET status='cancelled',error='library_trickplay_disabled' WHERE id=? AND attempt=? AND status='completed' AND lease_until IS NULL")
+                .bind(&job.id).bind(job.attempt).execute(auth.store.pool()).await?;
+            return Ok(());
+        }
+        Some((
+            options.trickplay_width,
+            media_contracts::protocol::TrickplayTaskOptions {
+                interval_ms: u64::from(options.trickplay_interval_seconds) * 1000,
+                quality: options.trickplay_quality,
+            },
+        ))
+    } else {
+        None
+    };
     if node == "local" {
         crate::local_mounts::validate(Path::new(&snapshot), root)
             .await
@@ -68,7 +104,12 @@ pub(crate) async fn dispatch(
         category: job.category.clone(),
         target_id: job.target_id.clone(),
         component: (!job.component.is_empty()).then(|| job.component.clone()),
-        width: Some(job.width as u32),
+        width: Some(
+            trickplay_options
+                .as_ref()
+                .map_or(job.width as u32, |(width, _)| u32::from(*width)),
+        ),
+        trickplay: trickplay_options.map(|(_, options)| options),
         core_base_url: std::env::var("MEDIA_CORE_INTERNAL_URL")
             .ok()
             .filter(|s| !s.is_empty())
@@ -102,7 +143,7 @@ pub(crate) async fn dispatch(
         } else {
             let outcome=async {
                 let _permit=jobs_task.slots.acquire().await.map_err(|_|"Task worker stopped".to_owned())?;
-                let future=media_node::tasks::run_task_on_grant(&job.category,&grant,request.component.as_deref(),request.width,&jobs_task.preparations,size as u64,&modified);
+                let future=media_node::tasks::run_task_with_trickplay_options(&job.category,&grant,request.component.as_deref(),request.width,&jobs_task.preparations,size as u64,&modified,request.trickplay.as_ref(),None);
                 tokio::pin!(future);
                 let mut interval=tokio::time::interval(std::time::Duration::from_millis(100));
                 loop { tokio::select! {

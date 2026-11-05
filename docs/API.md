@@ -593,6 +593,24 @@ pour créer une collection, soit `packId` pour ajouter à une collection native
 existante, avec les champs `images`. Les deux champs sont exclusifs ; une
 collection est limitée à 500 images. Session administrateur et CSRF requis.
 
+Les avatars de compte sont obligatoires et choisis exclusivement dans la galerie.
+`GET /api/v1/account/avatar/policy` retourne toujours
+`{uploadAllowed:false,removeAllowed:false}`. `PUT` et `DELETE` sur
+`/api/v1/account/avatar` exigent une session et CSRF puis renvoient `403` ; un
+ancien réglage ou une extension ne peut les réautoriser. `GET` et `HEAD` servent
+l'avatar attribué, avec un SVG local de secours si nécessaire. Les anciens
+choix sont conservés. L'application directe d'un avatar généré par extension
+(`apply:true`) renvoie également `403` (`avatar_gallery_required`).
+
+La politique administrateur est fixe :
+`{allowCustom:false,allowGravatar:false,assignOnCreate:true}`. Une tentative de
+réautoriser les images personnelles ou de désactiver l'attribution renvoie `403`.
+Les nouveaux comptes locaux, bootstrap et SSO reçoivent une image ; au démarrage,
+les comptes existants sans avatar sont complétés sans remplacer leurs choix.
+Lorsque toutes les galeries sont vides, les routes de collections exposent
+`native-orbits-fallback`, une galerie virtuelle locale, sans recréer les packs
+supprimés. Retirer un pack ou une image conserve les copies déjà attribuées.
+
 ## Statistiques de lecture facultatives
 
 Le contrat natif `/api/v1/playback/sessions`, les vues administrateur et

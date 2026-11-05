@@ -8,7 +8,6 @@ export interface AdminEntry extends AdminDestination { tabs?: AdminDestination[]
 
 const artworkTabs: AdminDestination[] = [
   { hash: '#artwork-section', label: 'Images', labelKey: 'admin_artwork_tab', icon: 'image' },
-  { hash: '#trickplay-section', label: 'Miniatures Trickplay', labelKey: 'admin_trickplay_tab', icon: 'image' },
   { hash: '#avatars-section', label: 'Avatars', labelKey: 'admin_avatars_tab', icon: 'image' }
 ];
 /** Scheduled tasks first; durable operations and automation stay one click away. */
@@ -58,7 +57,8 @@ export function adminEntryFor(hash: string): AdminEntry | undefined {
   return adminEntries.find(entry => (entry.tabs ?? [entry]).some(link => link.hash === hash));
 }
 export function parseAdminHash(hash: string): { section: string; task: string | null } {
-  const [candidate, query = ''] = hash.split('?', 2);
+  const [requested, query = ''] = hash.split('?', 2);
+  const candidate = requested === '#trickplay-section' ? '#libraries-section' : requested;
   const section = adminSectionHashes.has(candidate) ? candidate : '#overview';
   return { section, task: section === '#tasks-section' ? new URLSearchParams(query).get('task') || null : null };
 }
@@ -73,10 +73,9 @@ export function adminDestinationLabel(link: AdminDestination, translate: (key: L
 export const adminSearchKeywords: Record<string, readonly string[]> = {
   '#statistics-section': ['Statistiques', 'Collecte', 'Conservation', 'Historique de lecture', 'Audio et sous-titres', 'Temps consommé', 'Exporter en CSV', 'Sessions', 'Musique'],
   '#overview': ['Tableau de bord', 'Qui regarde quoi ?', 'Lecteurs ouverts', 'Indexations en cours', 'Actualiser l’activité', 'Informations techniques', 'Version serveur', 'Versions des nœuds', 'Erreurs des derniers scans'],
-  '#libraries-section': ['Ajouter une bibliothèque', 'Actualiser toutes les bibliothèques', 'Scanner la bibliothèque', 'Renommer une bibliothèque', 'Modifier les images', 'Rechercher les métadonnées manquantes', 'Planifier l’actualisation', 'Sources et dossiers', 'Bibliothèque active', 'Dossiers ou motifs à exclure', 'Indexation', 'Actualisation rapide', 'Tout réanalyser', 'Images locales', 'Images des fournisseurs', 'Rotation des affiches', 'Utiliser les fichiers NFO locaux', 'Sous-titres intégrés', 'Fournisseurs et enrichissement', 'Détection d’intro', 'Images des chapitres', 'Téléchargement des sous-titres', 'Surveiller les modifications', 'Ajouter automatiquement aux collections'],
+  '#libraries-section': ['Langue des métadonnées', 'Langue préférée', 'Pays des classifications', 'Ajouter une bibliothèque', 'Actualiser toutes les bibliothèques', 'Scanner la bibliothèque', 'Renommer une bibliothèque', 'Modifier les images', 'Rechercher les métadonnées manquantes', 'Planifier l’actualisation', 'Sources et dossiers', 'Bibliothèque active', 'Dossiers ou motifs à exclure', 'Indexation', 'Actualisation rapide', 'Tout réanalyser', 'Images locales', 'Images des fournisseurs', 'Utiliser les fichiers NFO locaux', 'Sous-titres intégrés', 'Fournisseurs et enrichissement', 'Détection d’intro', 'Images des chapitres', 'Téléchargement des sous-titres', 'Surveiller les modifications', 'Ajouter automatiquement aux collections', 'Trickplay', 'Miniatures de la barre de lecture', 'Génération automatique pendant l’analyse', 'Qualité JPEG', 'Largeur des vignettes', 'Intervalle des miniatures'],
   '#nodes-section': ['Ajouter un Media Node', 'Jeton d’appairage', 'Jeton d’invitation', 'Jeton d’amorçage statique', 'Appairage direct entrant', 'Configuration Docker Compose', 'URL interne du Node', 'URL publique de streaming direct', 'Reconnecter', 'Renouveler le secret', 'Révoquer un Media Node', 'Dossiers multimédias'],
   '#artwork-section': ['Images des médiathèques', 'Collecter les images', 'Langues par ordre de préférence', 'Maximum d’images par œuvre', 'Inclure les images sans langue indiquée', 'Affiches disponibles', 'Variantes enregistrées', 'Gérer les images', 'Œuvres à vérifier'],
-  '#trickplay-section': ['Trickplay', 'Activer le système de miniatures Trickplay', 'Génération automatique pendant l’analyse', 'Qualité JPEG', 'Largeur des vignettes', 'Intervalle des miniatures', 'Quota cache', 'Aperçus de la barre de lecture'],
   '#avatars-section': ['Galerie d’avatars', 'Ajouter les avatars', 'Politique des avatars', 'Collections d’avatars', 'Transférer les collections'],
   '#users-section': ['Créer un utilisateur', 'Mot de passe', 'Rôle', 'Administrateur', 'Désactiver un compte', 'Appartenance aux groupes', 'Bibliothèques accessibles', 'Contrôle parental', 'Restrictions parentales', 'Âge maximal autorisé', 'Tags bloqués', 'Horaires d’accès', 'Téléchargement et synchronisation'],
   '#groups-section': ['Groupes d’utilisateurs', 'Groupe par défaut', 'Membres du groupe', 'Permissions sur les bibliothèques', 'Type d’affectation', 'Propriétés du groupe'],
@@ -89,7 +88,7 @@ export const adminSearchKeywords: Record<string, readonly string[]> = {
   '#requests-section': ['Demandes', 'Valider une demande', 'Acquisition', 'Épingler les demandes'],
   '#acquisition-section': ['Serveurs d’acquisition', 'Radarr', 'Sonarr', 'Lidarr', 'Imports', 'Règles de validation'],
   '#reports-section': ['Signalements', 'Problèmes de lecture', 'Résoudre un signalement', 'Épingler les signalements'],
-  '#general-section': ['Nom du serveur', 'Message d’accueil', 'Texte du bouton de connexion SSO', 'OIDC', 'SSO', 'Identifiants locaux', 'Reprise de lecture', 'Considéré comme vu', 'Durée minimale pour reprendre', 'Langue préférée', 'Pays', 'Métadonnées', 'Empreintes audio', 'Journal des extensions', 'Origines CORS autorisées', 'Partage des playlists'],
+  '#general-section': ['Nom du serveur', 'Message d’accueil', 'Texte du bouton de connexion SSO', 'OIDC', 'SSO', 'Identifiants locaux', 'Reprise de lecture', 'Considéré comme vu', 'Durée minimale pour reprendre', 'Empreintes audio', 'Journal des extensions', 'Origines CORS autorisées', 'Partage des playlists'],
   '#network-section': ['Adresse publique', 'MEDIA_PUBLIC_URL', 'Interface Web', 'API', 'Cookies sécurisés', 'Cookies de session sécurisés (HTTPS)', 'HTTPS']
 };
 

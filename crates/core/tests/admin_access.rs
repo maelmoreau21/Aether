@@ -20,6 +20,218 @@ use tower::ServiceExt;
 use zeroize::Zeroizing;
 const ORIGIN: &str = "http://127.0.0.1:3000";
 const PASSWORD: &str = "integration account strong secret";
+
+#[tokio::test]
+async fn role_groups_cover_all_accounts_follow_role_changes_and_cannot_be_overridden() {
+    let (_dir, store, app, cookie, csrf, user, viewer) = setup().await;
+    let listing = body(
+        req(
+            &app,
+            "/api/v1/admin/groups",
+            "GET",
+            &cookie,
+            "",
+            "",
+            json!(null),
+        )
+        .await,
+    )
+    .await;
+    let groups = listing["groups"].as_array().unwrap();
+    let users = groups.iter().find(|g| g["systemRole"] == "user").unwrap();
+    let admins = groups
+        .iter()
+        .find(|g| g["systemRole"] == "administrator")
+        .unwrap();
+    assert_eq!(users["name"], "Utilisateurs");
+    assert_eq!(admins["name"], "Administrateurs");
+    assert_eq!(users["userIds"], json!([user]));
+    assert_eq!(admins["userIds"].as_array().unwrap().len(), 1);
+    let user_group = users["id"].as_str().unwrap();
+    let admin_group = admins["id"].as_str().unwrap();
+    // Supplying the viewer as an administrator-group member never grants that
+    // membership, role or the group's library access.
+    for (id, name, members, libraries) in [
+        (user_group, "Utilisateurs", json!([]), json!(["first"])),
+        (
+            admin_group,
+            "Administrateurs",
+            json!([user]),
+            json!(["second"]),
+        ),
+    ] {
+        assert_eq!(
+            req(
+                &app,
+                &format!("/api/v1/admin/groups/{id}"),
+                "PUT",
+                &cookie,
+                &csrf,
+                "",
+                json!({"name":name,"userIds":members,"libraryIds":libraries})
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            req(
+                &app,
+                &format!("/api/v1/admin/groups/{id}"),
+                "DELETE",
+                &cookie,
+                &csrf,
+                "",
+                json!(null)
+            )
+            .await
+            .status(),
+            StatusCode::CONFLICT
+        );
+    }
+    assert_eq!(
+        req(
+            &app,
+            "/api/v1/catalog/work-first",
+            "GET",
+            &viewer,
+            "",
+            "",
+            json!(null)
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        req(
+            &app,
+            "/api/v1/catalog/work-second",
+            "GET",
+            &viewer,
+            "",
+            "",
+            json!(null)
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        req(
+            &app,
+            &format!("/api/v1/admin/groups/{admin_group}"),
+            "PUT",
+            &cookie,
+            &csrf,
+            "",
+            json!({"name":"Administrateurs","isDefault":true,"userIds":[],"libraryIds":[]})
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        req(
+            &app,
+            &format!("/api/v1/admin/users/{user}"),
+            "PUT",
+            &cookie,
+            &csrf,
+            "",
+            json!({"role":"administrator","disabled":false})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let memberships: Vec<String> = media_poc::database::query_scalar(
+        "SELECT group_id FROM effective_user_group_members WHERE user_id=? ORDER BY group_id",
+    )
+    .bind(&user)
+    .fetch_all(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(memberships, vec![admin_group.to_owned()]);
+    assert_eq!(
+        req(
+            &app,
+            &format!("/api/v1/admin/users/{user}"),
+            "PUT",
+            &cookie,
+            &csrf,
+            "",
+            json!({"role":"user","disabled":false})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    // OIDC inserts users into the same table without local credentials.
+    query("INSERT INTO users(id,role) VALUES('sso-account','user')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let count: i64 = query_scalar("SELECT count(*) FROM effective_user_group_members WHERE user_id IN (?, 'sso-account') AND group_id=?")
+        .bind(&user).bind(user_group).fetch_one(store.pool()).await.unwrap();
+    assert_eq!(count, 2);
+}
+
+#[tokio::test]
+async fn role_groups_upgrade_preserves_custom_groups_names_and_permissions() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("upgrade.sqlite");
+    let store = IdentityStore::open(&path).await.unwrap();
+    query("DELETE FROM user_groups WHERE id IN ('builtin-role-user','builtin-role-administrator')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("INSERT INTO users(id,role) VALUES('existing','user')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("INSERT INTO user_groups(id,name,is_default) VALUES('custom','Utilisateurs',0)")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("INSERT INTO user_group_members(group_id,user_id) VALUES('custom','existing')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('existing-library','Existing library','films','local','/media',1)")
+        .execute(store.pool()).await.unwrap();
+    query(
+        "INSERT INTO user_group_libraries(group_id,library_id) VALUES('custom','existing-library')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    store.close().await;
+    for _ in 0..2 {
+        let store = IdentityStore::open(&path).await.unwrap();
+        let count: i64 = query_scalar("SELECT count(*) FROM user_groups")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 3);
+        let name: String = query_scalar("SELECT name FROM user_groups WHERE id='custom'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(name, "Utilisateurs");
+        let memberships: i64 = query_scalar(
+            "SELECT count(*) FROM effective_user_group_members WHERE user_id='existing'",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        assert_eq!(memberships, 2);
+        let grants: i64 = query_scalar("SELECT count(*) FROM effective_library_permissions WHERE user_id='existing' AND library_id='existing-library'")
+            .fetch_one(store.pool()).await.unwrap();
+        assert_eq!(grants, 1);
+        store.close().await;
+    }
+}
 async fn req(
     app: &Router,
     path: &str,
@@ -214,8 +426,13 @@ async fn group_membership_grants_live_permissions_without_roles_or_loss_of_direc
     .await;
     assert_eq!(listing.status(), StatusCode::OK);
     let listing = body(listing).await;
-    assert_eq!(listing["groups"][0]["id"], id);
-    assert_eq!(listing["groups"][0]["isDefault"], false);
+    let group = listing["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["id"] == id)
+        .unwrap();
+    assert_eq!(group["isDefault"], false);
     assert_eq!(
         req(
             &app,
@@ -310,7 +527,16 @@ async fn group_membership_grants_live_permissions_without_roles_or_loss_of_direc
     )
     .await;
     assert_eq!(listing.status(), StatusCode::OK);
-    assert_eq!(body(listing).await["groups"][0]["isDefault"], true);
+    let listing = body(listing).await;
+    assert_eq!(
+        listing["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|g| g["id"] == id)
+            .unwrap()["isDefault"],
+        true
+    );
     assert_eq!(
         req(
             &app,

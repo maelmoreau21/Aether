@@ -263,6 +263,13 @@ async fn oidc_sessions_rotation_roles_disabled_email_collision_and_local_regress
         .await
         .unwrap();
     assert_eq!(count, 2);
+    let missing_avatars: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM users u WHERE NOT EXISTS(SELECT 1 FROM user_avatars a WHERE a.user_id=u.id)")
+        .fetch_one(&f.s.auth.store.pool).await.unwrap();
+    assert_eq!(
+        missing_avatars, 0,
+        "bootstrap and SSO accounts must have an avatar"
+    );
+
     assert_eq!(
         finish(&f, &cookie, &state).await.status(),
         StatusCode::UNAUTHORIZED

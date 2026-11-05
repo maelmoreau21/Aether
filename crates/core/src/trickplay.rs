@@ -18,6 +18,90 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use std::path::{Path, PathBuf};
 
+/// Persist preview warm-ups with the inventory publication. They use the existing
+/// Node executor, leases, queue limit and playback preemption, never the scan worker.
+pub(crate) async fn queue_scanned_assets(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    library: &str,
+    scan: &str,
+    options: &LibraryOptions,
+) -> Result<u64, sqlx::Error> {
+    use sha2::{Digest, Sha256};
+    if !options.trickplay_enabled || !options.trickplay_during_scan {
+        return Ok(0);
+    }
+    // Share admission's cross-Core capacity lock only for this final queue step.
+    if tx.as_mut().backend_name() == "PostgreSQL" {
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(crate::task_engine::TASK_ADMISSION_LOCK)
+            .execute(&mut **tx)
+            .await?;
+    }
+    let pending: i64 = crate::database::query_scalar(
+        "SELECT COUNT(*) FROM durable_tasks WHERE status IN ('queued','running','paused')",
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    let capacity = (100_000 - pending).max(0);
+    if capacity == 0 {
+        return Ok(0);
+    }
+    let now = media_contracts::protocol::unix_now();
+    let mut inserted = 0_u64;
+    let mut last_asset = String::new();
+    // Reused probes are included: enabling previews or changing their profile
+    // must also warm existing videos. Compare indexed idempotency keys in batches,
+    // rather than rewriting one task for every file on every monitoring scan.
+    loop {
+        let assets: Vec<(String, i64, String, String)> = crate::database::query_as(
+            "SELECT a.id,a.size,a.modified_ns,l.node_id FROM scan_staging_files f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path JOIN libraries l ON l.id=a.library_id WHERE f.scan_id=? AND a.library_id=? AND a.id>? AND a.available=1 AND l.enabled=1 AND l.kind IN ('films','series') ORDER BY a.id LIMIT 128"
+        ).bind(scan).bind(library).bind(&last_asset).fetch_all(&mut **tx).await?;
+        if assets.is_empty() {
+            break;
+        }
+        last_asset = assets.last().map(|row| row.0.clone()).unwrap_or_default();
+        let candidates: Vec<_> = assets
+            .into_iter()
+            .map(|(asset, size, modified, node)| {
+                let key = format!(
+                    "trickplay:{:x}",
+                    Sha256::digest(format!(
+                        "{asset}:{size}:{modified}:{}:{}:{}",
+                        options.trickplay_width,
+                        options.trickplay_interval_seconds,
+                        options.trickplay_quality
+                    ))
+                );
+                (asset, node, key)
+            })
+            .collect();
+        let placeholders = vec!["?"; candidates.len()].join(",");
+        let statement = format!(
+            "SELECT idempotency_key FROM durable_tasks WHERE owner='library-trickplay' AND error!='library_trickplay_disabled' AND idempotency_key IN ({placeholders})"
+        );
+        let mut lookup =
+            crate::database::query_scalar::<sqlx::Any, String>(sqlx::AssertSqlSafe(statement));
+        for (_, _, key) in &candidates {
+            lookup = lookup.bind(key);
+        }
+        let existing: std::collections::HashSet<String> =
+            lookup.fetch_all(&mut **tx).await?.into_iter().collect();
+        for (asset, node, key) in candidates {
+            if existing.contains(&key) {
+                continue;
+            }
+            inserted += query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,priority,created_at,updated_at,available_at,category,target_id,width) VALUES(?,?,'library-trickplay',?,?,1,?,?,?,'trickplay',?,?) ON CONFLICT(owner,idempotency_key) DO UPDATE SET status='queued',error='',available_at=excluded.available_at,updated_at=excluded.updated_at,finished_at=NULL WHERE durable_tasks.error='library_trickplay_disabled' AND durable_tasks.lease_until IS NULL")
+                .bind(uuid::Uuid::new_v4().to_string()).bind(library).bind(key).bind(node)
+                .bind(now).bind(now).bind(now).bind(asset).bind(i64::from(options.trickplay_width))
+                .execute(&mut **tx).await?.rows_affected();
+            if inserted >= capacity as u64 {
+                return Ok(inserted);
+            }
+        }
+    }
+    Ok(inserted)
+}
+
 struct AssetSource {
     node_id: String,
     relative_path: PathBuf,
@@ -158,14 +242,6 @@ pub async fn chapter_image(
 }
 
 pub async fn manifest(store: &IdentityStore, asset_id: &str, request: Request) -> Response {
-    // Check global admin settings
-    let global_settings = crate::server_settings::load(store)
-        .await
-        .unwrap_or_default();
-    if !global_settings.trickplay_enabled {
-        return crate::error(StatusCode::NOT_FOUND, "trickplay_disabled");
-    }
-
     let source = match resolve_asset_source(store, asset_id).await {
         Ok(Some(source)) => source,
         Ok(None) => return crate::error(StatusCode::NOT_FOUND, "trickplay_unavailable"),
@@ -266,12 +342,22 @@ pub async fn tile(
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
     };
 
+    if !source.options.trickplay_enabled {
+        return crate::error(StatusCode::NOT_FOUND, "trickplay_disabled");
+    }
+
     if source.node_id != "local" {
         let node = match crate::nodes::load_node(store, &source.node_id).await {
             Ok(Some(node)) => node,
             _ => return crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable"),
         };
-        let pq = format!("/internal/v1/node/assets/{asset_id}/trickplay/{index}");
+        let pq = format!(
+            "/internal/v1/node/assets/{asset_id}/trickplay/{index}?duration={}&intervalMs={}&width={}&quality={}",
+            source.duration,
+            u64::from(source.options.trickplay_interval_seconds) * 1000,
+            source.options.trickplay_width,
+            source.options.trickplay_quality
+        );
         return crate::nodes::relay_from_remote_node(store, &node, &pq, request).await;
     }
 
@@ -311,6 +397,8 @@ pub async fn tile(
     }
 }
 
+#[cfg(test)]
+mod background_tests;
 #[cfg(test)]
 mod chapter_tests;
 

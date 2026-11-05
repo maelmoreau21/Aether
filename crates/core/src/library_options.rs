@@ -84,18 +84,18 @@ impl Default for LibraryOptions {
             similar_items_providers: Vec::new(),
             segment_providers: Vec::new(),
             subtitle_providers: Vec::new(),
-            online_refresh_interval_days: 0,
-            realtime_monitoring: false,
-            automatic_collections: false,
+            online_refresh_interval_days: 30,
+            realtime_monitoring: true,
+            automatic_collections: true,
             save_nfo_to_media: false,
             save_images_to_media: false,
-            trickplay_enabled: false,
-            trickplay_during_scan: false,
+            trickplay_enabled: true,
+            trickplay_during_scan: true,
             trickplay_save_to_media: false,
             trickplay_interval_seconds: 10,
             trickplay_width: 320,
             trickplay_quality: 7,
-            chapter_images_enabled: false,
+            chapter_images_enabled: true,
             chapter_images_during_scan: false,
             chapter_images_save_to_media: false,
             subtitle_languages: vec!["fr".into()],
@@ -103,9 +103,9 @@ impl Default for LibraryOptions {
             subtitle_match_audio: false,
             subtitle_require_hash: true,
             save_subtitles_to_media: false,
-            intro_detection_enabled: false,
+            intro_detection_enabled: true,
             subtitle_download_enabled: false,
-            poster_rotation_enabled: false,
+            poster_rotation_enabled: true,
             artwork_deduplicate: true,
             artwork_similarity: 5,
             artwork_min_poster_width: 0,
@@ -191,6 +191,7 @@ impl LibraryOptions {
             && matches!(self.online_refresh_interval_days, 0 | 30 | 60 | 90)
             && (1..=60).contains(&self.trickplay_interval_seconds)
             && (160..=1920).contains(&self.trickplay_width)
+            && (1..=31).contains(&self.trickplay_quality)
             && self.artwork_similarity <= 16
             && self.artwork_min_poster_width <= 4096
             && self.artwork_min_poster_height <= 4096
@@ -268,6 +269,26 @@ fn valid_providers(providers: &[ProviderPreference]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn library_defaults_enable_cached_features_without_media_writes_and_preserve_opt_outs() {
+        let defaults = LibraryOptions::default();
+        assert!(defaults.validate());
+        assert!(defaults.trickplay_enabled && defaults.trickplay_during_scan);
+        assert!(defaults.chapter_images_enabled && !defaults.chapter_images_during_scan);
+        assert!(defaults.realtime_monitoring && defaults.automatic_collections);
+        assert!(defaults.intro_detection_enabled && defaults.poster_rotation_enabled);
+        assert_eq!(defaults.online_refresh_interval_days, 30);
+        assert!(!defaults.save_nfo_to_media && !defaults.save_images_to_media);
+        assert!(!defaults.trickplay_save_to_media && !defaults.chapter_images_save_to_media);
+        assert!(!defaults.save_subtitles_to_media && !defaults.subtitle_download_enabled);
+        let saved = serde_json::json!({"trickplayEnabled":false,"trickplayDuringScan":false,"chapterImagesEnabled":false,"realtimeMonitoring":false,"automaticCollections":false,"introDetectionEnabled":false,"posterRotationEnabled":false,"onlineRefreshIntervalDays":0});
+        let options: LibraryOptions = serde_json::from_value(saved.clone()).unwrap();
+        let encoded = serde_json::to_value(options).unwrap();
+        for (key, value) in saved.as_object().unwrap() {
+            assert_eq!(&encoded[key], value);
+        }
+    }
 
     #[test]
     fn artwork_policy_defaults_and_bounds_are_stable() {
@@ -367,7 +388,7 @@ mod tests {
     fn advanced_options_round_trip_and_old_json_defaults() {
         let old: LibraryOptions = serde_json::from_str(r#"{"readLocalNfo":false}"#).unwrap();
         assert!(!old.read_local_nfo);
-        assert!(!old.trickplay_enabled);
+        assert!(old.trickplay_enabled);
         assert_eq!(old.trickplay_interval_seconds, 10);
         assert_eq!(old.subtitle_languages, ["fr"]);
         assert!(old.validate());
@@ -395,6 +416,8 @@ mod tests {
     #[test]
     fn advanced_options_reject_invalid_limits_duplicates_and_unknown_fields() {
         for value in [
+            serde_json::json!({"trickplayQuality": 0}),
+            serde_json::json!({"trickplayQuality": 32}),
             serde_json::json!({"trickplayWidth": 159}),
             serde_json::json!({"trickplayWidth": 1921}),
             serde_json::json!({"trickplayIntervalSeconds":0}),

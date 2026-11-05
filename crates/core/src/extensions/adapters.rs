@@ -543,6 +543,9 @@ pub(super) async fn avatar_operation(
         .map_err(|s| err(s, "authentication_required"))?;
     auth.require_csrf(&headers, &actor)
         .map_err(|s| err(s, "csrf_required"))?;
+    if input.apply {
+        return Err(err(StatusCode::FORBIDDEN, "avatar_gallery_required"));
+    }
     if !matches!(
         input.operation.as_str(),
         "avatars.list" | "avatars.generate"
@@ -583,28 +586,7 @@ pub(super) async fn avatar_operation(
         },
     );
     let result = invoke_worker(&auth, &headers, &id, "", &generation, invocation).await?;
-    if input.apply {
-        let svg = result["svg"]
-            .as_str()
-            .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
-        let _lock = MUTATIONS.lock().await;
-        if !permitted(&auth, &headers, &id, "", &generation).await? {
-            return Err(err(StatusCode::FORBIDDEN, "extension_revoked"));
-        }
-        let meta = auth
-            .store
-            .assets
-            .put_bytes(svg.as_bytes(), "image/svg+xml")
-            .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?;
-        query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET sha256=excluded.sha256")
-            .bind(&actor.user.id)
-            .bind(&meta.sha256)
-            .execute(auth.store.pool())
-            .await
-            .map_err(db)?;
-    }
-    Ok(Json(json!({"result":result,"applied":input.apply})))
+    Ok(Json(json!({"result":result,"applied":false})))
 }
 
 #[derive(Deserialize)]

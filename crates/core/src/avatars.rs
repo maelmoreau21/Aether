@@ -1,5 +1,5 @@
 //! Account-owned normalized avatars. No client paths, remote URLs or original metadata persisted.
-use crate::image_import::DECODERS;
+pub(crate) mod defaults;
 use crate::{
     auth::AuthState,
     database::{query, query_scalar},
@@ -17,7 +17,6 @@ use image::ImageFormat;
 #[cfg(test)]
 use std::io::Cursor;
 const MAX_UPLOAD: usize = 2 * 1024 * 1024;
-pub(crate) static POLICY_LOCK: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
 pub fn router(auth: AuthState) -> Router {
     Router::new()
@@ -172,17 +171,45 @@ pub(crate) fn content_type(bytes: &[u8]) -> &'static str {
 }
 async fn read(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Response, StatusCode> {
     let user = auth.authenticate(&headers).await?;
+    if let Err(error) = defaults::assign_user(&auth.store, &user.user.id).await {
+        eprintln!("Mandatory avatar assignment failed: {error}");
+    }
     let sha256: Option<String> = query_scalar("SELECT sha256 FROM user_avatars WHERE user_id=?")
-        .bind(user.user.id)
+        .bind(&user.user.id)
         .fetch_optional(&auth.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let sha256 = sha256.ok_or(StatusCode::NOT_FOUND)?;
-    auth.store
-        .assets
-        .response_after_authorization(&sha256, &headers)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    if let Some(sha256) = sha256
+        && let Ok(response) = auth
+            .store
+            .assets
+            .response_after_authorization(&sha256, &headers)
+            .await
+    {
+        return Ok(response);
+    }
+    // The mandatory local avatar also works with an empty gallery or unavailable
+    // asset storage; no account is rendered without a profile image.
+    Ok(fallback_response(defaults::fallback_for_user(
+        &user.user.id,
+    )))
+}
+
+pub(crate) fn fallback_response(bytes: Vec<u8>) -> Response {
+    let mut response = Response::new(axum::body::Body::from(bytes));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("image/svg+xml"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("private, no-store"),
+    );
+    response.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        header::HeaderValue::from_static("nosniff"),
+    );
+    response
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -194,26 +221,16 @@ pub(crate) struct AvatarPolicy {
 impl Default for AvatarPolicy {
     fn default() -> Self {
         Self {
-            allow_custom: true,
+            allow_custom: false,
             allow_gravatar: false,
-            assign_on_create: false,
+            assign_on_create: true,
         }
     }
 }
-pub(crate) async fn load_policy(auth: &AuthState) -> Result<AvatarPolicy, StatusCode> {
-    let row: Option<(i64, i64, i64)> = crate::database::query_as(
-        "SELECT allow_custom,allow_gravatar,assign_on_create FROM avatar_policy WHERE singleton=1",
-    )
-    .fetch_optional(&auth.store.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(row
-        .map(|(custom, gravatar, assign)| AvatarPolicy {
-            allow_custom: custom != 0,
-            allow_gravatar: gravatar != 0,
-            assign_on_create: assign != 0,
-        })
-        .unwrap_or_default())
+pub(crate) async fn load_policy(_auth: &AuthState) -> Result<AvatarPolicy, StatusCode> {
+    // Old persisted policy flags cannot re-enable personal uploads or opt out
+    // of the required gallery avatar.
+    Ok(AvatarPolicy::default())
 }
 async fn admin_policy(
     State(auth): State<AuthState>,
@@ -235,70 +252,29 @@ async fn set_admin_policy(
         return Err(StatusCode::FORBIDDEN);
     }
     auth.require_csrf(&headers, &user)?;
-    let _policy_guard = POLICY_LOCK.write().await;
-    query("INSERT INTO avatar_policy(singleton,allow_custom,allow_gravatar,assign_on_create) VALUES(1,?,?,?) ON CONFLICT(singleton) DO UPDATE SET allow_custom=excluded.allow_custom,allow_gravatar=excluded.allow_gravatar,assign_on_create=excluded.assign_on_create")
-       .bind(i64::from(input.allow_custom)).bind(i64::from(input.allow_gravatar)).bind(i64::from(input.assign_on_create))
+    if input.allow_custom || input.allow_gravatar || !input.assign_on_create {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    query("INSERT INTO avatar_policy(singleton,allow_custom,allow_gravatar,assign_on_create) VALUES(1,0,0,1) ON CONFLICT(singleton) DO UPDATE SET allow_custom=0,allow_gravatar=0,assign_on_create=1")
        .execute(&auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)
-}
-async fn permissions(auth: &AuthState) -> Result<(bool, bool), StatusCode> {
-    Ok((load_policy(auth).await?.allow_custom, true))
 }
 async fn policy(
     State(auth): State<AuthState>,
     headers: HeaderMap,
 ) -> Result<axum::Json<serde_json::Value>, StatusCode> {
     auth.authenticate(&headers).await?;
-    let (upload, remove) = permissions(&auth).await?;
     Ok(axum::Json(
-        serde_json::json!({"uploadAllowed":upload,"removeAllowed":remove}),
+        serde_json::json!({"uploadAllowed":false,"removeAllowed":false}),
     ))
 }
 async fn write(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    bytes: Bytes,
 ) -> Result<StatusCode, StatusCode> {
     let user = auth.authenticate(&headers).await?;
     auth.require_csrf(&headers, &user)?;
-    if !permissions(&auth).await?.0 {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    if bytes.is_empty() {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    }
-    let req_content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_owned();
-    let permit = DECODERS
-        .try_acquire()
-        .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
-    let bytes = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        normalize(bytes, &req_content_type)
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
-    let _policy_guard = POLICY_LOCK.read().await;
-    if !permissions(&auth).await?.0 {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    let mime = content_type(&bytes);
-    let meta = auth
-        .store
-        .assets
-        .put_bytes(&bytes, mime)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET sha256=excluded.sha256")
-        .bind(user.user.id)
-        .bind(&meta.sha256)
-        .execute(&auth.store.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(StatusCode::NO_CONTENT)
+    Err(StatusCode::FORBIDDEN)
 }
 async fn remove(
     State(auth): State<AuthState>,
@@ -306,15 +282,7 @@ async fn remove(
 ) -> Result<StatusCode, StatusCode> {
     let user = auth.authenticate(&headers).await?;
     auth.require_csrf(&headers, &user)?;
-    if !permissions(&auth).await?.1 {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    query("DELETE FROM user_avatars WHERE user_id=?")
-        .bind(user.user.id)
-        .execute(&auth.store.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(StatusCode::NO_CONTENT)
+    Err(StatusCode::FORBIDDEN)
 }
 
 #[cfg(test)]

@@ -8,6 +8,19 @@ L'ajout d'un dossier ne déclenche pas automatiquement un scan.
 
 ## Éditeur et navigation — 25 octobre 2026
 
+Depuis le 5 novembre 2026, le champ d'ajout d'un dossier démarre vide, y compris
+à la modification d'une bibliothèque et après un changement de serveur. Le
+bouton Parcourir ouvre donc `/` sur un Node local Unix (les lecteurs sur Windows),
+sans proposer le dossier temporaire interne du Core. Un chemin saisi manuellement
+reste le point de départ explicite. Les dossiers déjà enregistrés figurent dans
+la liste et ne sont pas recopiés dans le brouillon d'ajout. Aucun dossier n'est
+ajouté ou scanné du seul fait de l'ouverture du sélecteur.
+
+Validation locale du 5 novembre : `scripts/browser-folder-avatar-defaults.cjs`
+réussi sous Chrome à 390/1440 px sur le frontend réel, avec API simulée exposant
+une racine interne temporaire. Création, modification et conservation d'un
+chemin saisi vérifiées ; aucun accès NAS ni Node distant réel validé.
+
 L'éditeur utilise une fenêtre large, adaptée au téléphone, avec les actions
 d'enregistrement accessibles pendant le défilement. Le sélecteur propose
 « Dossier parent » et « Racines / lecteurs ». Une navigation ne réinitialise

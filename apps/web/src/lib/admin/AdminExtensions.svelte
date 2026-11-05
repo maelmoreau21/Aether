@@ -126,27 +126,39 @@
     }
     return null;
   }
-  async function reload() {
+  async function reload(updateRepositories = false) {
     busy = true; error = '';
-    try { await refresh(); }
+    try {
+      await refresh(!updateRepositories);
+      if (updateRepositories) await updateRepositoryCatalogues();
+    }
     catch (e) { error = e instanceof Error ? e.message : $t('extensions_load_failed'); }
     finally { busy = false; }
   }
   async function refreshRepositories() {
     busy = true; error = ''; notice = '';
-    const failures: string[] = [];
     try {
-      for (const repository of repositories) {
-        try { await adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(repository.id)}/refresh`, {method:'POST'}); }
-        catch { failures.push(repository.name); }
-      }
-      await refresh();
-      if (failures.length) error = $t('unreachable_repositories', { repositories: failures.join(', ') });
-      else notice = $t('catalogue_updated_hint');
+      await updateRepositoryCatalogues();
+      if (!error) notice = $t('catalogue_updated_hint');
     } catch (e) { error = e instanceof Error ? e.message : $t('refresh_failed'); }
     finally { busy = false; }
   }
-  async function refresh() {
+  async function updateRepositoryCatalogues() {
+    // A failed source must not hide the cached catalogue or block other sources.
+    const failures: string[] = [];
+    // The Core allows two concurrent catalogue downloads. Leave image loading
+    // until these complete, and keep one unavailable source independent of others.
+    for (let offset = 0; offset < repositories.length; offset += 2) {
+      const batch = repositories.slice(offset, offset + 2);
+      const results = await Promise.allSettled(batch.map(repository =>
+        adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(repository.id)}/refresh`, {method:'POST'})
+      ));
+      failures.push(...batch.filter((_, index) => results[index].status === 'rejected').map(repository => repository.name));
+    }
+    await refresh();
+    if (failures.length) error = $t('unreachable_repositories', { repositories: failures.join(', ') });
+  }
+  async function refresh(loadArtwork = true) {
     const [extensions, sources, available] = await Promise.all([
       adminRequest<{ extensions: Installed[] }>('/api/v1/admin/extensions'),
       adminRequest<{ repositories: Repository[] }>('/api/v1/admin/extensions/repositories'),
@@ -155,7 +167,7 @@
     installed = extensions.extensions.map(extension=>({...extension,manifest:displayManifest(extension.manifest)}));
     await loadFeatures(true).catch(() => {});
     repositories = sources.repositories; catalogue = available.entries.map(entry=>({...entry,manifest:displayManifest(entry.manifest)}));
-    void loadImages();
+    if (loadArtwork) void loadImages();
 
     for (const ext of installed) {
       if (!editingSettings[ext.manifest.id]) {
@@ -171,7 +183,11 @@
     catch (e) { error = e instanceof Error ? e.message : $t('operation_failed'); }
     finally { busy = false; }
   }
-  onMount(() => { void reload(); });
+  onMount(() => { void reload(true); });
+  function chooseOfficialRepository(branch: 'main' | 'develop') {
+    repositoryName = branch === 'develop' ? 'Aether Plugins (develop)' : 'Aether Plugins';
+    repositoryUrl = `https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/${branch}/repository/manifest.json`;
+  }
   function configure(extension: Installed, enabled: boolean) {
     return perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`, {
       method: 'PUT', body: JSON.stringify({ enabled, libraryIds: extension.libraryIds, allLibraries: extension.allLibraries === true || extension.libraryIds.length === 0 })
@@ -343,7 +359,7 @@
 
 <section id="extensions-section" aria-labelledby="extensions-heading">
   {#if !managed || !settingsOpen || tab!=='installed'}
-  <div class="heading page-heading"><h2 id="extensions-heading">{$t('extensions_title')}</h2>{#if tab==='catalogue'}<button aria-label={$t('refresh_repository')} disabled={busy || repositories.length===0} onclick={refreshRepositories}><Icon name="refresh" size={16} /> {$t('refresh')}</button>{:else}<button disabled={busy} onclick={reload}><Icon name="refresh" size={16} /> {$t('refresh')}</button>{/if}</div>
+  <div class="heading page-heading"><h2 id="extensions-heading">{$t('extensions_title')}</h2>{#if tab==='catalogue'}<button aria-label={$t('refresh_repository')} disabled={busy || repositories.length===0} onclick={refreshRepositories}><Icon name="refresh" size={16} /> {$t('refresh')}</button>{:else}<button disabled={busy} onclick={() => void reload(true)}><Icon name="refresh" size={16} /> {$t('refresh')}</button>{/if}</div>
   <p class="page-intro">{$t('extensions_intro')}</p>
   <nav class="extension-tabs" aria-label={$t('extensions_management')}>
     <button aria-label={$t('installed_extensions')} class:active={tab==='installed'} aria-current={tab==='installed' ? 'page' : undefined} onclick={() => tab='installed'}>{$t('installed_extensions')} ({installed.length})</button>
@@ -365,6 +381,7 @@
     <div class="section-title"><h3>{$t('your_repositories')}</h3><button class="primary" aria-expanded={addingRepository} onclick={() => addingRepository=!addingRepository}>{addingRepository ? $t('close') : `+ ${$t('new_repository')}`}</button></div>
     {#if addingRepository}
     <form class="repository-form" onsubmit={addRepository}>
+      <div class="actions"><button type="button" disabled={busy} onclick={() => chooseOfficialRepository('main')}>Aether Plugins · main</button><button type="button" disabled={busy} onclick={() => chooseOfficialRepository('develop')}>Aether Plugins · develop</button></div>
       <label>{$t('repository_name_optional')}<input maxlength="80" bind:value={repositoryName} disabled={busy} /></label>
       <label>{$t('repository_address')}<input type="url" required maxlength="2048" placeholder="https://example.com/manifest.json" bind:value={repositoryUrl} disabled={busy} /></label>
       <button disabled={busy}>{$t('add_repository')}</button>

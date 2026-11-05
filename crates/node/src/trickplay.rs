@@ -134,6 +134,26 @@ impl Default for TrickplayManager {
     }
 }
 
+/// Parameters come only from authenticated Core requests, and remain bounded on
+/// both direct HTTP and outbound-channel transports before looking up a cache.
+pub fn parameters(query: &str) -> Option<(f64, u64, u32, u8)> {
+    let values: HashMap<_, _> = query
+        .split('&')
+        .filter_map(|part| part.split_once('='))
+        .collect();
+    let duration = values.get("duration")?.parse::<f64>().ok()?;
+    let interval = values.get("intervalMs")?.parse::<u64>().ok()?;
+    let width = values.get("width")?.parse::<u32>().ok()?;
+    let quality = values.get("quality")?.parse::<u8>().ok()?;
+    (duration.is_finite()
+        && duration > 0.0
+        && duration <= 86400.0
+        && (1000..=60000).contains(&interval)
+        && (160..=1920).contains(&width)
+        && (1..=31).contains(&quality))
+    .then_some((duration, interval, width, quality))
+}
+
 impl TrickplayManager {
     pub fn new(
         cache_root: PathBuf,
@@ -509,6 +529,21 @@ impl TrickplayManager {
             .await
             .insert(self.ffmpeg_binary.clone(), supported);
         supported
+    }
+
+    /// Durable task work shares the same single worker and operator kill switch
+    /// as previews requested by a player. The Core/Node task runner handles
+    /// cancellation and playback preemption while this future waits or decodes.
+    pub async fn generate_background(
+        &self,
+        request: &TrickplayRequest,
+        key: &str,
+    ) -> Result<(), &'static str> {
+        if !self.enabled {
+            return Err("generation_disabled");
+        }
+        let _permit = self.worker.acquire().await.map_err(|_| "worker_closed")?;
+        self.execute_generation(request, key).await
     }
 
     /// Execute the FFmpeg generation, resuming partial work if present.
@@ -1379,6 +1414,24 @@ mod tests {
         let first = mgr.fingerprint(&chapter);
         chapter.chapter_time = Some(20.0);
         assert_ne!(first, mgr.fingerprint(&chapter));
+    }
+
+    #[test]
+    fn signed_trickplay_parameters_bound_both_transports() {
+        assert_eq!(
+            parameters("duration=120&intervalMs=5000&width=410&quality=12"),
+            Some((120.0, 5000, 410, 12))
+        );
+        for query in [
+            "duration=NaN&intervalMs=5000&width=320&quality=7",
+            "duration=0&intervalMs=5000&width=320&quality=7",
+            "duration=120&intervalMs=0&width=320&quality=7",
+            "duration=120&intervalMs=5000&width=9999&quality=7",
+            "duration=120&intervalMs=5000&width=320&quality=0",
+            "",
+        ] {
+            assert!(parameters(query).is_none(), "{query}");
+        }
     }
 
     #[tokio::test]

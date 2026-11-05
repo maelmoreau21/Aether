@@ -6,6 +6,8 @@
   import { invalidateCatalog } from '../../../lib/catalog/page-cache';
   import { onMount } from 'svelte';
   import { asset } from '$app/paths';
+  import { replaceState } from '$app/navigation';
+  import { page } from '$app/state';
 
   import { session, type AuthUser } from '../../../lib/auth/session';
   import AdminShell from '../../../lib/admin/AdminShell.svelte';
@@ -71,14 +73,6 @@
   let pairToken = $state('');
 
   const administrator = $derived($session?.user.role === 'administrator');
-  const selectedNode = $derived(nodes.find(n => n.id === nodeId));
-  const availableRootsForNode = $derived.by(() => {
-    if (nodeId === 'local') {
-      const localNode = nodes.find(n => n.id === 'local');
-      return [...new Set([...(localNode?.roots ?? []), ...roots])];
-    }
-    return selectedNode?.roots ?? [];
-  });
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(path, {
@@ -108,7 +102,9 @@
     name = '';
     kind = 'films';
     nodeId = 'local';
-    root = roots[0] ?? '';
+    // A new folder is an explicit choice. The Core's empty inventory root is
+    // an internal startup detail, not the starting point of the file picker.
+    root = '';
     folders = [];
     enabled = true;
     excludedPatterns = '';
@@ -117,10 +113,8 @@
   }
 
   function handleNodeChange() {
-    const candidateRoots = availableRootsForNode;
-    if (!root && candidateRoots.length > 0) {
-      root = candidateRoots[0] ?? '';
-    }
+    // A path from another server must not be reused on the newly selected Node.
+    root = '';
   }
 
   function edit(library: Library) {
@@ -128,7 +122,7 @@
     name = library.name;
     kind = library.kind;
     nodeId = library.nodeId;
-    root = library.root;
+    root = '';
     folders = (library.folders ?? [{ nodeId: library.nodeId, root: library.root }]).map(folder => ({ ...folder }));
     enabled = library.enabled;
     excludedPatterns = library.excludedPatterns ?? '';
@@ -239,7 +233,7 @@
       pairPublicUrl = '';
       pairToken = '';
       nodeId = created.id;
-      root = created.roots[0] ?? root;
+      root = '';
       notice = `Media Node « ${created.name} » (${created.id}) appairé avec succès.`;
     } catch (failure) {
       error = failure instanceof Error ? failure.message : 'Appairage du Media Node impossible.';
@@ -345,6 +339,9 @@
   function chooseSection(hash: string) { currentHash = hash; selectedTaskId = null; }
   function syncSection() {
     const selected = parseAdminHash(window.location.hash);
+    if (window.location.hash.split('?', 1)[0] === '#trickplay-section') {
+      replaceState(selected.section, page.state);
+    }
     currentHash = selected.section;
     selectedTaskId = selected.task;
   }

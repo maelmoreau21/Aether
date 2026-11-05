@@ -26,6 +26,7 @@
   let userIds = $state<string[]>([]);
   let libraryIds = $state<string[]>([]);
   let editing = $state<string | null>(null);
+  const systemRole = $derived(groups.find(group => group.id === editing)?.systemRole);
 
   let busy = $state(false);
   let error = $state('');
@@ -75,7 +76,7 @@
           body: JSON.stringify({
             name: name.trim(),
             isDefault,
-            userIds,
+            userIds: systemRole ? [] : userIds,
             libraryIds
           })
         }
@@ -91,7 +92,7 @@
   }
 
   async function remove(group: UserGroup) {
-    if (busy) return;
+    if (busy || group.systemRole) return;
     if (!window.confirm(`Supprimer le groupe « ${group.name} » ? Les comptes utilisateurs seront conservés.`)) return;
     busy = true;
     error = '';
@@ -207,11 +208,15 @@
                 <div class="form-row">
                   <span class="row-label">Type d'affectation</span>
                   <div class="row-field">
+                    {#if systemRole}
+                      <strong>Automatique selon le rôle</strong>
+                    {:else}
                     <label class="dsm-checkbox-label">
                       <input type="checkbox" bind:checked={isDefault} disabled={busy} />
                       <span><strong>Groupe par défaut</strong></span>
                     </label>
-                    <span class="field-hint">Tous les utilisateurs actuels et futurs font automatiquement partie de ce groupe et accèdent à ses bibliothèques.</span>
+                    {/if}
+                    <span class="field-hint">{systemRole ? 'Les membres de ce groupe sont attribués automatiquement selon leur rôle.' : 'Tous les utilisateurs actuels et futurs font automatiquement partie de ce groupe et accèdent à ses bibliothèques.'}</span>
                   </div>
                 </div>
               </div>
@@ -219,7 +224,13 @@
           {:else if activeTab === 'members'}
             <div class="dsm-form-section">
               <h4 class="form-section-title">Membres du groupe</h4>
-              {#if isDefault}
+              {#if systemRole}
+                <div class="dsm-info-box">
+                  <Icon name="info" size={18} />
+                  <span>Les comptes au rôle <strong>{systemRole === 'administrator' ? 'Administrateur' : 'Utilisateur'}</strong> sont membres automatiquement. Modifiez le rôle dans la fiche du compte pour changer cette affectation.</span>
+                </div>
+                <p class="section-desc">{userIds.length} membre(s) : {users.filter(user => userIds.includes(user.id)).map(user => user.displayName || user.login).join(', ') || 'aucun'}</p>
+              {:else if isDefault}
                 <div class="dsm-info-box">
                   <Icon name="info" size={18} />
                   <span>Ce groupe est configuré comme <strong>Groupe par défaut</strong>. Tous les utilisateurs sont membres automatiquement.</span>
@@ -365,7 +376,7 @@
       <button
         type="button"
         class="btn btn-default"
-        disabled={busy || selectedGroupIds.length !== 1}
+        disabled={busy || selectedGroupIds.length !== 1 || !!groups.find(group => group.id === selectedGroupIds[0])?.systemRole}
         onclick={() => {
           const g = groups.find(item => item.id === selectedGroupIds[0]);
           if (g) remove(g);
@@ -435,7 +446,9 @@
               </div>
             </td>
             <td>
-              {#if group.isDefault}
+              {#if group.systemRole}
+                <span class="dsm-pill pill-default">Automatique (rôle)</span>
+              {:else if group.isDefault}
                 <span class="dsm-pill pill-default">Par défaut (automatique)</span>
               {:else}
                 <span class="dsm-pill pill-custom">Personnalisé</span>

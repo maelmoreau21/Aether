@@ -1,5 +1,25 @@
 # Mise à jour et retour arrière des extensions
 
+## Installation volontaire et dépôts — 5 novembre 2026
+
+Le démarrage du Core n'installe plus TMDb ou IMDb. Une désinstallation reste
+effective après redémarrage ; les installations existantes et leurs réglages sont
+conservés. Le dépôt officiel préconfiguré fournit un catalogue, sans installer ni
+activer les extensions qu'il annonce.
+
+À chaque ouverture d'Administration → Extensions, les dépôts sont actualisés
+automatiquement, par lots de deux téléchargements. Un dépôt indisponible produit
+un avertissement et conserve son dernier catalogue ; les autres sont actualisés.
+Le bouton d'actualisation reste disponible.
+
+L'ajout d'un dépôt propose les adresses officielles `main` et `develop`. Les liens
+GitHub racine, `/tree/develop` ou `/blob/develop/repository/manifest.json` sont
+convertis en adresse JSON `raw.githubusercontent.com` en conservant la branche.
+Un dépôt `develop` choisi par l'administrateur n'est plus remplacé par `main`
+au démarrage. Les paquets proposés restent uniquement ceux effectivement publiés
+dans le manifeste de cette branche et soumis aux mêmes contrôles de signature,
+compatibilité et confiance éditeur. Ajouter ce dépôt n'installe aucune extension.
+
 ## Contrat implémenté — 2 novembre 2026
 
 Les routes `POST /api/v1/admin/extensions/{id}/upgrade` et installation avec

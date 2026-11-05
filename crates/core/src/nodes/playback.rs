@@ -175,14 +175,13 @@ pub async fn relay_from_remote_node(
             path_and_query.split("/chapter-images/").nth(1)
         {
             format!("chapter-image:{parameters}")
-        } else if let Some(index) = path_and_query
-            .split("/trickplay/")
-            .nth(1)
-            .and_then(|s| s.split('?').next())
-        {
+        } else if let Some(index) = path_and_query.split("/trickplay/").nth(1) {
             format!("trickplay:{index}")
         } else if path_and_query.ends_with("/trickplay") || path_and_query.contains("/trickplay?") {
-            "trickplay".to_string()
+            path_and_query.split_once('?').map_or_else(
+                || "trickplay".to_string(),
+                |(_, query)| format!("trickplay?{query}"),
+            )
         } else if let Some(ref s) = prepared {
             s.clone()
         } else if is_image {

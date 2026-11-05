@@ -5,7 +5,7 @@
 //! - `package`: signed package validation.
 //! - `router`: HTTP routes and initialisation.
 //! - `admin`: publishers, audit and installed-extension listing.
-//! - `install`: install, upgrade, bootstrap and uninstall flows.
+//! - `install`: explicit install, upgrade and uninstall flows.
 //! - `settings`: effective settings and configuration endpoints.
 //! - `run`: manual runs, worker invocation and run history.
 //! - `automated`: automated (scan/refresh) provider runs.
@@ -74,7 +74,7 @@ use run::*;
 use settings::*;
 
 pub(crate) use automated::run_automated;
-pub use install::{bootstrap_essential_plugins, install_internal_with_key};
+pub use install::install_internal_with_key;
 pub use matching::trusted_music_candidate;
 pub use package::validate_package;
 pub use router::{initialize, router};

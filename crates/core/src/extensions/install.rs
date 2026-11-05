@@ -437,57 +437,6 @@ pub async fn install_internal_with_key(
     Ok(())
 }
 
-pub async fn bootstrap_essential_plugins(store: &crate::identity::IdentityStore) {
-    // The official catalogue is one versioned manifest on `main` whose packages use
-    // absolute release URLs, for every Core channel. Earlier development builds
-    // pointed the seeded entry at `develop`; move only that untouched seed back.
-    // An explicit custom repository or a later administrator override is preserved.
-    let _ = query("UPDATE extension_repositories SET url=?,name='Aether Plugins' WHERE id='community-default' AND name='Aether Plugins (develop)' AND url=?")
-        .bind("https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/main/repository/manifest.json")
-        .bind("https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/develop/repository/manifest.json")
-        .execute(store.pool()).await;
-
-    const PUB_KEY: &str = include_str!("../../embedded_plugins/publisher-public.txt");
-    for (id, bytes) in [
-        (
-            "tmdb",
-            include_str!("../../embedded_plugins/tmdb-0.1.1.package.json"),
-        ),
-        (
-            "imdb",
-            include_str!("../../embedded_plugins/imdb-0.1.1.package.json"),
-        ),
-    ] {
-        let exists: bool =
-            match query_scalar::<sqlx::Any, i64>("SELECT COUNT(*) FROM extensions WHERE id=?")
-                .bind(id)
-                .fetch_one(store.pool())
-                .await
-            {
-                Ok(count) => count > 0_i64,
-                Err(error) => {
-                    eprintln!("Could not check bundled extension {id}: {error}");
-                    continue;
-                }
-            };
-        // Bootstrap defaults only. A restart must preserve the administrator's
-        // activation and library grants, including an intentionally empty scope.
-        if exists {
-            continue;
-        }
-        let package = match serde_json::from_str::<Package>(bytes) {
-            Ok(package) => package,
-            Err(error) => {
-                eprintln!("Invalid bundled extension package {id}: {error}");
-                continue;
-            }
-        };
-        if let Err(error) = install_internal_with_key(store, package, PUB_KEY.trim()).await {
-            eprintln!("Could not install bundled extension {id}: {error}");
-        }
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Removal {

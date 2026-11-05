@@ -201,12 +201,45 @@ pub async fn run_task_on_grant(
     expected_size: u64,
     expected_modified_ns: &str,
 ) -> io::Result<Value> {
+    run_task_with_trickplay_options(
+        category,
+        grant,
+        component,
+        width,
+        preparations,
+        expected_size,
+        expected_modified_ns,
+        None,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_task_with_trickplay_options(
+    category: &str,
+    grant: &ReadGrant,
+    component: Option<&str>,
+    width: Option<u32>,
+    preparations: &Preparations,
+    expected_size: u64,
+    expected_modified_ns: &str,
+    trickplay: Option<&media_contracts::protocol::TrickplayTaskOptions>,
+    manager: Option<&crate::trickplay::TrickplayManager>,
+) -> io::Result<Value> {
     let invalid = || {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid task target or options",
         )
     };
+    if trickplay.is_some_and(|options| {
+        category != "trickplay"
+            || !(1000..=60000).contains(&options.interval_ms)
+            || !(1..=31).contains(&options.quality)
+    }) {
+        return Err(invalid());
+    }
     let root = Path::new(&grant.root_snapshot);
     let relative = Path::new(&grant.relative_path);
     let opened = LocalNode.open_media(root, relative).await?;
@@ -289,7 +322,13 @@ pub async fn run_task_on_grant(
                 })
                 .filter(|v| v.is_finite() && *v > 0.0)
                 .ok_or_else(|| io::Error::other("invalid_duration"))?;
-            let mgr = crate::trickplay::global_manager();
+            let fallback;
+            let mgr = if let Some(manager) = manager {
+                manager
+            } else {
+                fallback = crate::trickplay::global_manager();
+                &fallback
+            };
             let req = crate::trickplay::TrickplayRequest {
                 asset_id: asset_id.as_str().to_owned(),
                 media_root: root.to_path_buf(),
@@ -297,13 +336,13 @@ pub async fn run_task_on_grant(
                 duration,
                 size: opened.size(),
                 modified_ns: opened.modified_ns().to_owned(),
-                interval_ms: None,
+                interval_ms: trickplay.map(|options| options.interval_ms),
                 width,
-                quality: None,
+                quality: trickplay.map(|options| options.quality),
                 chapter_time: None,
             };
             let key = mgr.fingerprint(&req);
-            mgr.execute_generation(&req, &key)
+            mgr.generate_background(&req, &key)
                 .await
                 .map_err(io::Error::other)?;
             let manifest = mgr
@@ -327,6 +366,83 @@ pub async fn run_task_on_grant(
 mod tests {
     use super::*;
     use media_contracts::ids::{AssetId, ImageId, LibraryId, NodeId};
+
+    #[tokio::test]
+    #[ignore = "requires FFmpeg and generated legal representative fixture"]
+    async fn background_trickplay_uses_the_library_profile() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/generated/representative/representative.mp4");
+        let data = tempfile::tempdir().unwrap();
+        let media = data.path().join("media");
+        tokio::fs::create_dir(&media).await.unwrap();
+        tokio::fs::copy(fixture, media.join("video.mp4"))
+            .await
+            .unwrap();
+        let root = tokio::fs::canonicalize(&media).await.unwrap();
+        let original = tokio::fs::read(root.join("video.mp4")).await.unwrap();
+        let opened = LocalNode
+            .open_media(&root, Path::new("video.mp4"))
+            .await
+            .unwrap();
+        let grant = ReadGrant {
+            target: ReadTarget::Asset(AssetId::new("library-profile")),
+            library_id: LibraryId::new("profile"),
+            node_id: NodeId::new("local"),
+            root_snapshot: root.to_string_lossy().into_owned(),
+            relative_path: "video.mp4".into(),
+            mime: "video/mp4".into(),
+        };
+        let manager = crate::trickplay::TrickplayManager::new(
+            data.path().join("cache"),
+            16 * 1024 * 1024,
+            "ffmpeg".into(),
+            true,
+            None,
+        );
+        let profile = media_contracts::protocol::TrickplayTaskOptions {
+            interval_ms: 2000,
+            quality: 12,
+        };
+        let result = run_task_with_trickplay_options(
+            "trickplay",
+            &grant,
+            None,
+            Some(240),
+            &Preparations::default(),
+            opened.size(),
+            opened.modified_ns(),
+            Some(&profile),
+            Some(&manager),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["width"], 240);
+        assert_eq!(result["intervalMs"], 2000);
+        assert!(result["thumbnailCount"].as_u64().unwrap() > 1);
+        let request = crate::trickplay::TrickplayRequest {
+            asset_id: "library-profile".into(),
+            media_root: root.clone(),
+            relative_path: "video.mp4".into(),
+            duration: 12.0,
+            size: opened.size(),
+            modified_ns: opened.modified_ns().into(),
+            interval_ms: Some(2000),
+            width: Some(240),
+            quality: Some(12),
+            chapter_time: None,
+        };
+        let mgr = &manager;
+        assert!(mgr.check_native_cache(&request).await.is_some());
+        let other = crate::trickplay::TrickplayRequest {
+            quality: Some(7),
+            ..request
+        };
+        assert!(mgr.check_native_cache(&other).await.is_none());
+        assert_eq!(
+            tokio::fs::read(root.join("video.mp4")).await.unwrap(),
+            original
+        );
+    }
 
     #[tokio::test]
     async fn confined_av1_opus_asset_produces_bounded_chromaprint() {

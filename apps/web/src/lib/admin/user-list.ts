@@ -15,6 +15,7 @@ export interface UserGroup {
   id: string;
   name: string;
   isDefault?: boolean;
+  systemRole?: 'user' | 'administrator' | null;
   userIds: string[];
   libraryIds: string[];
 }
@@ -88,7 +89,7 @@ export function groupMembershipUpdates(
 ): GroupMembershipUpdate[] {
   const updates: GroupMembershipUpdate[] = [];
   for (const group of groups) {
-    if (group.isDefault) continue;
+    if (group.isDefault || group.systemRole) continue;
     const isMember = group.userIds.includes(userId);
     const shouldBeMember = targetGroupIds.includes(group.id);
     if (isMember !== shouldBeMember) {

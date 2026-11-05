@@ -239,26 +239,13 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
             .is_client_error()
         );
     }
-    assert_eq!(
-        request(
-            &app,
-            "/api/v1/account/avatar",
-            "PUT",
-            &cookie,
-            "",
-            "image/png",
-            picture()
-        )
-        .await
-        .status(),
-        StatusCode::FORBIDDEN
-    );
+    // Gallery-only avatars are mandatory for both administrators and users.
     for (mime, bytes) in [
+        ("image/png", picture()),
         ("image/svg+xml", b"<svg></svg>".to_vec()),
-        ("image/jpeg", picture()),
-        ("image/png", b"broken".to_vec()),
+        ("image/png", vec![0; 2 * 1024 * 1024 + 1]),
     ] {
-        assert!(
+        assert_eq!(
             request(
                 &app,
                 "/api/v1/account/avatar",
@@ -269,37 +256,23 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
                 bytes
             )
             .await
-            .status()
-            .is_client_error()
+            .status(),
+            StatusCode::FORBIDDEN
         );
     }
+    let policy = request(
+        &app,
+        "/api/v1/account/avatar/policy",
+        "GET",
+        &cookie,
+        "",
+        "application/json",
+        vec![],
+    )
+    .await;
     assert_eq!(
-        request(
-            &app,
-            "/api/v1/account/avatar",
-            "PUT",
-            &cookie,
-            &csrf,
-            "image/png",
-            vec![0; 2 * 1024 * 1024 + 1]
-        )
-        .await
-        .status(),
-        StatusCode::PAYLOAD_TOO_LARGE
-    );
-    assert_eq!(
-        request(
-            &app,
-            "/api/v1/account/avatar",
-            "PUT",
-            &cookie,
-            &csrf,
-            "image/png",
-            picture()
-        )
-        .await
-        .status(),
-        StatusCode::NO_CONTENT
+        json_body(policy).await,
+        json!({"uploadAllowed":false,"removeAllowed":false})
     );
     let response = request(
         &app,
@@ -307,23 +280,23 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
         "GET",
         &cookie,
         "",
-        "image/png",
+        "image/svg+xml",
         vec![],
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["cache-control"], "private, no-store");
     assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(response.headers()["content-type"], "image/svg+xml");
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
-    let decoded = image::load_from_memory(&bytes).unwrap();
-    assert_eq!((decoded.width(), decoded.height()), (20, 10));
+    assert!(bytes.starts_with(b"<svg "));
     let head = request(
         &app,
         "/api/v1/account/avatar",
         "HEAD",
         &cookie,
         "",
-        "image/png",
+        "image/svg+xml",
         vec![],
     )
     .await;
@@ -353,76 +326,44 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
         StatusCode::CREATED
     );
     let (other, other_csrf) = login(&app, "viewer").await;
-    assert_eq!(
-        request(
-            &app,
-            "/api/v1/admin/settings",
-            "GET",
-            &other,
-            "",
-            "application/json",
-            vec![]
-        )
-        .await
-        .status(),
-        StatusCode::FORBIDDEN
-    );
-    assert_eq!(
-        request(
-            &app,
-            "/api/v1/admin/network",
-            "GET",
-            &other,
-            "",
-            "application/json",
-            vec![]
-        )
-        .await
-        .status(),
-        StatusCode::FORBIDDEN
-    );
-    assert_eq!(
-        request(
-            &app,
-            "/api/v1/account/avatar",
-            "GET",
-            &other,
-            "",
-            "image/png",
-            vec![]
-        )
-        .await
-        .status(),
-        StatusCode::NOT_FOUND
-    );
-    assert_eq!(
-        request(
-            &app,
-            "/api/v1/account/avatar",
-            "DELETE",
-            &other,
-            &other_csrf,
-            "image/png",
-            vec![]
-        )
-        .await
-        .status(),
-        StatusCode::NO_CONTENT
-    );
-    assert_eq!(
-        request(
-            &app,
-            "/api/v1/account/avatar",
-            "GET",
-            &cookie,
-            "",
-            "image/png",
-            vec![]
-        )
-        .await
-        .status(),
-        StatusCode::OK
-    );
+    for path in ["/api/v1/admin/settings", "/api/v1/admin/network"] {
+        assert_eq!(
+            request(&app, path, "GET", &other, "", "application/json", vec![])
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    for (account, token) in [(&cookie, &csrf), (&other, &other_csrf)] {
+        assert_eq!(
+            request(
+                &app,
+                "/api/v1/account/avatar",
+                "GET",
+                account,
+                "",
+                "image/svg+xml",
+                vec![]
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            request(
+                &app,
+                "/api/v1/account/avatar",
+                "DELETE",
+                account,
+                token,
+                "image/svg+xml",
+                vec![]
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+    }
     store.close().await;
     let reopened = IdentityStore::open(&path).await.unwrap();
     assert_eq!(
@@ -448,12 +389,12 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
             "DELETE",
             &cookie,
             &csrf,
-            "image/png",
+            "image/svg+xml",
             vec![]
         )
         .await
         .status(),
-        StatusCode::NO_CONTENT
+        StatusCode::FORBIDDEN
     );
     assert_eq!(
         request(
@@ -462,12 +403,12 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
             "GET",
             &cookie,
             "",
-            "image/png",
+            "image/svg+xml",
             vec![]
         )
         .await
         .status(),
-        StatusCode::NOT_FOUND
+        StatusCode::OK
     );
     reopened.close().await;
 }

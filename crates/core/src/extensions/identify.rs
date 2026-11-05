@@ -64,9 +64,6 @@ pub(super) async fn search(
     let mut available_providers = Vec::new();
     let mut errors: Vec<Value> = Vec::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(35);
-    let s_settings = crate::server_settings::load(&auth.store)
-        .await
-        .unwrap_or_default();
 
     for (id, stored, generation) in rows {
         let package: Package = serde_json::from_str(&stored)
@@ -101,8 +98,7 @@ pub(super) async fn search(
 
         let known_id = known_metadata_id(&search_input, &id).map(str::to_owned);
         let mut provider_input = search_input.clone();
-        provider_input["language"] = json!(s_settings.preferred_metadata_language);
-        provider_input["country"] = json!(s_settings.metadata_country_code);
+        // The common run path applies the owning library's language and country.
         if let Some(candidate_id) = &known_id {
             provider_input["id"] = json!(candidate_id);
         }

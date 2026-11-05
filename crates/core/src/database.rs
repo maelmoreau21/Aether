@@ -1,6 +1,7 @@
 //! Small shared SQL surface; values always remain bound parameters.
 use sqlx::{Any, AnyConnection, Connection, Database, FromRow, SqlSafeStr};
 use std::fmt::Write as _;
+mod task_schema;
 
 #[cfg(feature = "query-metrics")]
 static STATEMENT_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -380,6 +381,7 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
     } else {
         sqlx::raw_sql(section).execute(&mut *tx).await?;
     }
+    task_schema::allow_trickplay(&mut tx, sqlite, section).await?;
     sqlx::raw_sql(include_str!("../migrations/extension_update.sql"))
         .execute(&mut *tx)
         .await?;
@@ -417,6 +419,13 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
         .execute(&mut *tx)
         .await?;
     sqlx::raw_sql(include_str!("../migrations/artwork_webp.sql"))
+        .execute(&mut *tx)
+        .await?;
+    crate::groups::initialize_role_groups(&mut tx).await?;
+    sqlx::raw_sql(include_str!("../migrations/role_groups.sql"))
+        .execute(&mut *tx)
+        .await?;
+    sqlx::raw_sql(include_str!("../migrations/default_avatars.sql"))
         .execute(&mut *tx)
         .await?;
     tx.commit().await

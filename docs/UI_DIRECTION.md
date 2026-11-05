@@ -1,5 +1,48 @@
 # Cinema Design System — règles durables
 
+## Bibliothèques préconfigurées — 5 novembre 2026
+
+L'éditeur regroupe quatre rubriques : Général, Sources et dossiers, Réglages et
+Accès. Réglages présente uniquement la langue des métadonnées, le suivi des
+dossiers et les aperçus de la barre de lecture. Les paramètres détaillés sont
+repliés dans Personnaliser les réglages : métadonnées/images, analyse, fournisseurs,
+collections/intros, qualité des aperçus et sous-titres manuels. Les préférences
+sans moteur (écriture dans les médias, sous-titres automatiques, fournisseurs
+d'articles similaires) ne sont plus proposées comme réglages utilisables.
+
+Les nouvelles bibliothèques reçoivent le profil défini dans `docs/LIBRARY_OPTIONS.md`.
+Le bouton Appliquer les réglages recommandés permet d'adopter ce profil sur une
+bibliothèque existante ; les langues, restrictions de fournisseurs et choix de
+sous-titres sont conservés. Le formulaire doit être enregistré pour appliquer
+le changement. Les valeurs explicites existantes ne sont pas réinitialisées à
+l'ouverture. La validation ouvre les groupes repliés contenant un champ invalide.
+
+Trickplay et langue/pays des métadonnées ont chacun une configuration dans la
+bibliothèque. Les contrôles globaux correspondants sont retirés. L'ancien lien
+`#trickplay-section` rejoint Bibliothèques, également depuis la recherche admin.
+Les clés des fournisseurs restent dans Extensions et les préférences personnelles
+d'affiches dans les paramètres du compte.
+
+Vérification Chrome avec APIs simulées : dix parcours couvrant clair/sombre à
+390/820/1440 px, création films/séries/musique, conservation du formulaire,
+clavier, validation dans les groupes repliés, erreurs/reprise et format paysage.
+Les liens historiques et les vues initiales simplifiées ont aussi été vérifiés.
+Ces essais ne prouvent ni le NAS ni un fournisseur externe réel.
+
+## Menus déroulants — 5 novembre 2026
+
+Les champs `select` simples utilisent le sélecteur personnalisable natif lorsque
+le navigateur prend en charge `appearance: base-select`. Le menu ouvert reprend
+les fonds, bordures, rayons, typographie et états Halo, avec une coche de sélection,
+des options de 44 px minimum et une hauteur défilante bornée. Le navigateur garde
+la gestion du clavier, du focus et de la validation. Les listes multiples restent
+des listes natives ; les navigateurs sans cette capacité gardent le contrôle
+existant. Référence : [sélecteurs personnalisables](https://developer.chrome.com/blog/a-customizable-select).
+
+Vérifié dans Chrome local, sur APIs simulées : clair/sombre à 390, 820 et 1440 px,
+ouverture, choix au clavier et fermeture avec Échap, sans débordement horizontal.
+Les autres moteurs et les appareils physiques ne sont pas vérifiés ici.
+
 > Ce document est la source de référence pour les règles UX/UI partagées :
 > tokens, thèmes, responsive, images, navigation et accessibilité. Les sections
 > datées ci-dessous résument des décisions intégrées ; leurs rapports détaillés

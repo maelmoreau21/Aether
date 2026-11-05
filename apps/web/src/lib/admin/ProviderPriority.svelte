@@ -11,7 +11,7 @@
 </script>
 <section aria-labelledby={`${id}-heading`}>
   <h4 id={`${id}-heading`}>{label}</h4>
-  <p>Ordre de priorité enregistré pour le futur traitement. Ajouter un identifiant n’installe pas le fournisseur et ne lance aucune requête.</p>
+  <p>Personnalisez les sources autorisées et leur ordre. Les extensions se configurent dans Extensions.</p>
   <ol>
     {#each value as provider, index (index)}
       <li>
@@ -22,7 +22,7 @@
     {/each}
   </ol>
   <datalist id={`${id}-suggestions`}>{#each suggestions as suggestion (suggestion.id)}<option value={suggestion.id}>{suggestion.name}</option>{/each}</datalist>
-  {#if value.length === 0}<p class="empty">Aucun fournisseur sélectionné.</p>{/if}
+  {#if value.length === 0}<p class="empty">Utiliser les fournisseurs activés pour cette bibliothèque.</p>{/if}
   <button type="button" disabled={value.length >= 32} onclick={() => value = [...value, { id: '', enabled: true }]}>Ajouter un fournisseur — {label}</button>
 </section>
 <style>

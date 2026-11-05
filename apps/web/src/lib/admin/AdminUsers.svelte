@@ -12,7 +12,7 @@
     users: Account[];
     libraries: Library[];
     currentUserId?: string;
-    groups?: { id: string; name: string; isDefault?: boolean; userIds: string[]; libraryIds: string[] }[];
+    groups?: { id: string; name: string; isDefault?: boolean; systemRole?: 'user' | 'administrator' | null; userIds: string[]; libraryIds: string[] }[];
     onchanged?: () => void | Promise<void>;
   }
 
@@ -78,7 +78,7 @@
     password = '';
     newPassword = '';
     libraryIds = user ? libraries.filter(l => l.userIds.includes(user.id)).map(l => l.id) : [];
-    assignedGroupIds = user ? groups.filter(g => !g.isDefault && g.userIds.includes(user.id)).map(g => g.id) : [];
+    assignedGroupIds = user ? groups.filter(g => !g.isDefault && !g.systemRole && g.userIds.includes(user.id)).map(g => g.id) : [];
     message = '';
     failed = false;
   }
@@ -356,14 +356,15 @@
                   <tbody>
                     {#each groups as group (group.id)}
                       {@const isDefault = !!group.isDefault}
+                      {@const automatic = isDefault || !!group.systemRole}
                       <tr>
                         <td>
                           <input
                             type="checkbox"
-                            disabled={isDefault}
-                            checked={isDefault || assignedGroupIds.includes(group.id)}
+                            disabled={automatic}
+                            checked={isDefault || (group.systemRole ? group.systemRole === role : assignedGroupIds.includes(group.id))}
                             onchange={(e) => {
-                              if (isDefault) return;
+                              if (automatic) return;
                               if (e.currentTarget.checked) {
                                 assignedGroupIds = [...assignedGroupIds, group.id];
                               } else {
@@ -376,7 +377,9 @@
                           <strong>{group.name}</strong>
                         </td>
                         <td>
-                          {#if isDefault}
+                          {#if group.systemRole}
+                            <span class="dsm-pill pill-default">Automatique (rôle)</span>
+                          {:else if isDefault}
                             <span class="dsm-pill pill-default">Automatique (tous)</span>
                           {:else}
                             <span class="dsm-pill">Personnalisé</span>

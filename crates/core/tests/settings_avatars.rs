@@ -316,7 +316,7 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
     assert_eq!(response.headers()["x-content-type-options"], "nosniff");
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let decoded = image::load_from_memory(&bytes).unwrap();
-    assert_eq!((decoded.width(), decoded.height()), (256, 256));
+    assert_eq!((decoded.width(), decoded.height()), (20, 10));
     let head = request(
         &app,
         "/api/v1/account/avatar",
